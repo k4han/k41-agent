@@ -8,11 +8,11 @@ from agent.graphs.router         import build_router_graph
 
 def setup_all_graphs() -> None:
     """
-    Build và register tất cả graphs.
-    Gọi 1 lần duy nhất khi app khởi động.
+    Build and register all graphs.
+    Call once when app starts.
     """
     build_chat_graph()
     build_coding_graph()
     build_research_graph()
-    build_router_graph()   # Router phải build sau cùng vì nó dùng các graph kia
+    build_router_graph()   # Router must be built last since it uses other graphs
     print("[Registry] All graphs ready.")

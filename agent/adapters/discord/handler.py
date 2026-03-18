@@ -1,7 +1,7 @@
 # agent/adapters/discord/handler.py
 #
-# Cần cài: pip install discord.py
-# Setup: tạo bot tại discord.com/developers, lấy token, điền vào .env
+# Install: pip install discord.py
+# Setup: create bot at discord.com/developers, get token, add to .env
 
 import os
 import logging
@@ -15,10 +15,10 @@ logger = logging.getLogger(__name__)
 class DiscordAdapter(BaseAdapter):
     async def handle(self, message):
         """
-        Handler cho discord message.
+        Handler for discord message.
         message: discord.Message
         """
-        # Bỏ qua tin nhắn của bot
+        # Skip bot messages
         if message.author.bot:
             return
 
@@ -30,7 +30,7 @@ class DiscordAdapter(BaseAdapter):
             workflow=   "chat_agent",
         )
 
-        # Hiển thị typing indicator
+        # Show typing indicator
         async with message.channel.typing():
             response = await run_agent_full(**params)
 
@@ -41,11 +41,11 @@ adapter = DiscordAdapter()
 
 
 def create_discord_client():
-    """Khởi tạo Discord client."""
+    """Initialize Discord client."""
     try:
         import discord
     except ImportError:
-        raise ImportError("Cài đặt: pip install discord.py")
+        raise ImportError("Install: pip install discord.py")
 
     intents         = discord.Intents.default()
     intents.message_content = True
@@ -53,7 +53,7 @@ def create_discord_client():
 
     @client.event
     async def on_ready():
-        logger.info(f"Discord bot đã kết nối: {client.user}")
+        logger.info(f"Discord bot connected: {client.user}")
 
     @client.event
     async def on_message(message):
@@ -63,10 +63,10 @@ def create_discord_client():
 
 
 async def run_discord_bot():
-    """Chạy Discord bot (dùng khi chạy standalone)."""
+    """Run Discord bot (used when running standalone)."""
     token = os.getenv("DISCORD_BOT_TOKEN")
     if not token:
-        raise ValueError("Thiếu DISCORD_BOT_TOKEN trong .env")
+        raise ValueError("Missing DISCORD_BOT_TOKEN in .env")
 
     client = create_discord_client()
     await client.start(token)

@@ -1,5 +1,5 @@
 # agent/core/runner.py
-# Core logic — không biết request đến từ platform nào
+# Core logic — platform agnostic (doesn't know which platform the request comes from)
 
 from typing import AsyncGenerator
 from langchain_core.messages import HumanMessage
@@ -16,8 +16,8 @@ async def run_agent(
     working_dir:  str | None = None,
 ) -> AsyncGenerator[str, None]:
     """
-    Chạy graph và yield từng chunk nội dung.
-    Platform-agnostic: FastAPI, Telegram, Discord đều gọi hàm này.
+    Run graph and yield each content chunk.
+    Platform-agnostic: FastAPI, Telegram, Discord all call this function.
     """
     graph  = GraphRegistry.get(workflow)
     config = make_config(
@@ -34,7 +34,7 @@ async def run_agent(
         messages = event.get("messages", [])
         if messages:
             last = messages[-1]
-            # Chỉ yield message của AI (không yield lại HumanMessage)
+            # Only yield AI message (don't yield back HumanMessage)
             if last.__class__.__name__ == "AIMessage" and last.content:
                 yield str(last.content)
 
@@ -47,8 +47,8 @@ async def run_agent_full(
     working_dir:  str | None = None,
 ) -> str:
     """
-    Chạy graph và trả về toàn bộ response (không stream).
-    Dùng cho Telegram, Discord — những platform không support streaming.
+    Run graph and return full response (not streaming).
+    Used for Telegram, Discord — platforms that don't support streaming.
     """
     chunks = []
     async for chunk in run_agent(

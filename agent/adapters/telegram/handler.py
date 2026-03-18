@@ -1,7 +1,7 @@
 # agent/adapters/telegram/handler.py
 #
-# Dùng aiogram (async-native, hiệu năng cao hơn python-telegram-bot)
-# Cài: pip install aiogram
+# Uses aiogram (async-native, higher performance than python-telegram-bot)
+# Install: pip install aiogram
 
 import os
 import logging
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class TelegramAdapter(BaseAdapter):
     async def handle(self, message) -> None:
         """
-        Handler cho aiogram Message.
+        Handler for aiogram Message.
         message: aiogram.types.Message
         """
         params = self.normalize(
@@ -26,7 +26,7 @@ class TelegramAdapter(BaseAdapter):
             workflow=   "chat_agent",
         )
 
-        # Hiển thị "đang gõ..."
+        # Show typing indicator
         await message.bot.send_chat_action(
             chat_id=message.chat.id,
             action="typing",
@@ -40,38 +40,38 @@ adapter = TelegramAdapter()
 
 
 def create_dispatcher():
-    """Tạo aiogram Dispatcher và đăng ký handlers."""
+    """Create aiogram Dispatcher and register handlers."""
     try:
         from aiogram import Dispatcher
         from aiogram.filters import CommandStart, Command
         from aiogram.types import Message
     except ImportError:
-        raise ImportError("Cài đặt: pip install aiogram")
+        raise ImportError("Install: pip install aiogram")
 
     dp = Dispatcher()
 
     @dp.message(CommandStart())
     async def cmd_start(message: Message):
         await message.answer(
-            "Xin chào! Tôi là AI assistant.\n"
-            "Gõ bất kỳ nội dung để bắt đầu."
+            "Hello! I am an AI assistant.\n"
+            "Type anything to start."
         )
 
     @dp.message(Command("help"))
     async def cmd_help(message: Message):
         await message.answer(
-            "Các lệnh:\n"
-            "/start    - Bắt đầu\n"
-            "/help     - Trợ giúp\n"
+            "Commands:\n"
+            "/start    - Start\n"
+            "/help     - Help\n"
             "/code     - Coding assistant\n"
-            "/research - Nghiên cứu & tổng hợp"
+            "/research - Research & synthesis"
         )
 
     @dp.message(Command("code"))
     async def cmd_code(message: Message):
         text = message.text.removeprefix("/code").strip()
         if not text:
-            await message.answer("Ví dụ: /code liệt kê file trong thư mục")
+            await message.answer("Example: /code list files in directory")
             return
 
         params = adapter.normalize(
@@ -90,7 +90,7 @@ def create_dispatcher():
     async def cmd_research(message: Message):
         text = message.text.removeprefix("/research").strip()
         if not text:
-            await message.answer("Ví dụ: /research ưu nhược điểm microservices")
+            await message.answer("Example: /research pros and cons of microservices")
             return
 
         params = adapter.normalize(
@@ -106,7 +106,7 @@ def create_dispatcher():
 
     @dp.message()
     async def on_message(message: Message):
-        """Handler mặc định — tất cả tin nhắn thường."""
+        """Default handler — all regular messages."""
         if not message.text:
             return
         await adapter.handle(message)
@@ -115,17 +115,17 @@ def create_dispatcher():
 
 
 async def run_telegram_bot() -> None:
-    """Khởi động Telegram bot với aiogram."""
+    """Start Telegram bot with aiogram."""
     try:
         from aiogram import Bot
         from aiogram.client.default import DefaultBotProperties
         from aiogram.enums import ParseMode
     except ImportError:
-        raise ImportError("Cài đặt: pip install aiogram")
+        raise ImportError("Install: pip install aiogram")
 
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
-        raise ValueError("Thiếu TELEGRAM_BOT_TOKEN trong .env")
+        raise ValueError("Missing TELEGRAM_BOT_TOKEN in .env")
 
     bot = Bot(
         token=token,

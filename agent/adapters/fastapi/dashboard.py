@@ -1,5 +1,5 @@
 # agent/adapters/fastapi/dashboard.py
-# Dashboard API — bật/tắt/xem trạng thái các bot
+# Dashboard API — enable/disable/view status of bots
 
 from fastapi import APIRouter, HTTPException
 from agent.services.bot_manager import BotManager
@@ -9,13 +9,13 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 @router.get("/bots")
 async def list_bots():
-    """Xem trạng thái tất cả bots."""
+    """View status of all bots."""
     return {"bots": BotManager.get().status_all()}
 
 
 @router.get("/bots/{name}")
 async def get_bot(name: str):
-    """Xem trạng thái 1 bot cụ thể."""
+    """View status of a specific bot."""
     try:
         return BotManager.get().status(name)
     except KeyError as e:
@@ -24,10 +24,10 @@ async def get_bot(name: str):
 
 @router.post("/bots/{name}/start")
 async def start_bot(name: str):
-    """Bật 1 bot."""
+    """Start a bot."""
     try:
         await BotManager.get().start(name)
-        return {"message": f"'{name}' đang khởi động.", **BotManager.get().status(name)}
+        return {"message": f"'{name}' is starting.", **BotManager.get().status(name)}
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
@@ -36,10 +36,10 @@ async def start_bot(name: str):
 
 @router.post("/bots/{name}/stop")
 async def stop_bot(name: str):
-    """Tắt 1 bot."""
+    """Stop a bot."""
     try:
         await BotManager.get().stop(name)
-        return {"message": f"'{name}' đã dừng.", **BotManager.get().status(name)}
+        return {"message": f"'{name}' stopped.", **BotManager.get().status(name)}
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
@@ -48,13 +48,13 @@ async def stop_bot(name: str):
 
 @router.post("/bots/start-all")
 async def start_all():
-    """Bật tất cả bots."""
+    """Start all bots."""
     await BotManager.get().start_all()
     return {"bots": BotManager.get().status_all()}
 
 
 @router.post("/bots/stop-all")
 async def stop_all():
-    """Tắt tất cả bots."""
+    """Stop all bots."""
     await BotManager.get().stop_all()
     return {"bots": BotManager.get().status_all()}

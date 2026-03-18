@@ -17,18 +17,18 @@ class BotStatus(str, Enum):
 
 
 class BotService:
-    """Đại diện cho 1 bot service (Telegram, Discord,...)."""
+    """Represents a bot service (Telegram, Discord,...)."""
 
     def __init__(self, name: str, runner: Callable[[], Coroutine]):
         self.name    = name
-        self.runner  = runner          # async function để chạy bot
+        self.runner  = runner          # async function to run the bot
         self.status  = BotStatus.STOPPED
         self.error   = None
         self._task: asyncio.Task | None = None
 
     async def start(self):
         if self.status == BotStatus.RUNNING:
-            logger.warning(f"[{self.name}] Đã đang chạy.")
+            logger.warning(f"[{self.name}] Already running.")
             return
 
         self.status = BotStatus.STARTING
@@ -39,7 +39,7 @@ class BotService:
 
     async def stop(self):
         if self.status != BotStatus.RUNNING:
-            logger.warning(f"[{self.name}] Không đang chạy.")
+            logger.warning(f"[{self.name}] Not running.")
             return
 
         self.status = BotStatus.STOPPING
@@ -81,8 +81,8 @@ class BotService:
 
 class BotManager:
     """
-    Quản lý tất cả bot services.
-    Singleton — dùng chung toàn app.
+    Manages all bot services.
+    Singleton — shared across the app.
     """
     _instance: "BotManager | None" = None
     _services: dict[str, BotService] = {}
@@ -121,6 +121,6 @@ class BotManager:
 
     def _get_or_raise(self, name: str) -> BotService:
         if name not in self._services:
-            raise KeyError(f"Service '{name}' chưa được đăng ký. "
+            raise KeyError(f"Service '{name}' not registered. "
                            f"Available: {list(self._services.keys())}")
         return self._services[name]
