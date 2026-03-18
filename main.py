@@ -5,6 +5,7 @@
 import os
 import asyncio
 import logging
+import selectors
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -122,5 +123,12 @@ if __name__ == "__main__":
         loop="asyncio",
     )
     server = uvicorn.Server(config)
-    asyncio.run(server.serve())
+
+    if os.name == "nt":
+        asyncio.run(
+            server.serve(),
+            loop_factory=lambda: asyncio.SelectorEventLoop(selectors.SelectSelector()),
+        )
+    else:
+        asyncio.run(server.serve())
 

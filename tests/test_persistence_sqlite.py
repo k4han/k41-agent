@@ -39,6 +39,8 @@ def setup_persistence(db_path: str, monkeypatch: MonkeyPatch):
     """Fixture to initialize and close persistence for each test."""
     db_url = f"sqlite:///{db_path.as_posix()}"
     monkeypatch.setenv("DATABASE_URL", db_url)
+    # Allow any path for testing
+    monkeypatch.setenv("PERSISTENCE_ALLOW_ANY_PATH", "true")
 
     async def _init():
         await initialize_persistence()
