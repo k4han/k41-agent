@@ -5,6 +5,7 @@ from langchain_core.messages import SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, START, END
 
+from agent.persistence import get_checkpointer
 from agent.registry import GraphRegistry
 from agent.state.base import BaseState
 from agent.providers.llm import get_llm
@@ -19,12 +20,12 @@ vào đúng workflow. Chỉ trả lời bằng đúng 1 trong các giá trị sa
 Yêu cầu người dùng: {user_input}"""
 
 
-def _router_node(state: BaseState, config: RunnableConfig) -> dict:
+async def _router_node(state: BaseState, config: RunnableConfig) -> dict:
     """Phân loại yêu cầu và chuyển sang graph phù hợp."""
     user_input = state["messages"][-1].content
     llm        = get_llm()
 
-    response = llm.invoke([
+    response = await llm.ainvoke([
         SystemMessage(content=ROUTER_SYSTEM.format(user_input=user_input))
     ])
 
@@ -35,7 +36,7 @@ def _router_node(state: BaseState, config: RunnableConfig) -> dict:
 
     # Lấy graph đã đăng ký và chạy tiếp
     target_graph = GraphRegistry.get(workflow)
-    result       = target_graph.invoke(
+    result       = await target_graph.ainvoke(
         {"messages": state["messages"]},
         config=config,
     )
@@ -48,4 +49,7 @@ def build_router_graph() -> None:
     graph.add_edge(START, "router")
     graph.add_edge("router", END)
 
-    GraphRegistry.register("router", graph.compile())
+    GraphRegistry.register(
+        "router",
+        graph.compile(checkpointer=get_checkpointer()),
+    )

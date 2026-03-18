@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from agent.graphs               import setup_all_graphs
+from agent.persistence          import close_persistence, initialize_persistence
 from agent.services.bot_manager import BotManager
 from agent.adapters.fastapi     import router as api_router, dashboard_router
 
@@ -55,6 +56,9 @@ def setup_bots() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    logger.info("Initializing persistence...")
+    await initialize_persistence()
+
     logger.info("Building graphs...")
     setup_all_graphs()
 
@@ -72,6 +76,10 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Stopping all bots...")
     await BotManager.get().stop_all()
+
+    logger.info("Closing persistence...")
+    await close_persistence()
+
     logger.info("App shutdown.")
 
 

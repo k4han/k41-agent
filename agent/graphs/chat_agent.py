@@ -3,6 +3,7 @@
 from langchain_core.messages import AIMessage
 from langgraph.graph import StateGraph, START, END
 
+from agent.persistence import get_checkpointer
 from agent.registry import GraphRegistry
 from agent.state.base import BaseState
 from agent.nodes.llm_node import make_llm_node
@@ -29,4 +30,7 @@ def build_chat_graph() -> None:
     graph.add_conditional_edges("llm", _should_continue, {"tool": "tool", END: END})
     graph.add_edge("tool", "llm")
 
-    GraphRegistry.register("chat_agent", graph.compile())
+    GraphRegistry.register(
+        "chat_agent",
+        graph.compile(checkpointer=get_checkpointer()),
+    )

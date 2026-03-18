@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from agent.graphs import setup_all_graphs
+from agent.persistence import close_persistence, initialize_persistence
 from agent.core.runner import run_agent_full, run_agent
 
 
@@ -84,14 +85,20 @@ async def test_concurrent():
 
 
 async def main():
+    print("Initializing persistence...")
+    await initialize_persistence()
+
     print("Setting up graphs...")
     setup_all_graphs()
 
-    await test_chat()
-    await test_coding()
-    await test_research()
-    await test_stream()
-    await test_concurrent()
+    try:
+        await test_chat()
+        await test_coding()
+        await test_research()
+        await test_stream()
+        await test_concurrent()
+    finally:
+        await close_persistence()
 
     print("\n✅ All tests done.")
 

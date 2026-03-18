@@ -6,10 +6,15 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "aiogram>=3.26.0",
+    "aiosqlite>=0.22.1",
     "dotenv>=0.9.9",
     "fastapi>=0.135.1",
     "langchain-core>=1.2.19",
     "langchain-openai>=1.1.11",
     "langgraph>=1.1.2",
+    "langgraph-checkpoint-sqlite>=2.0.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "sqlalchemy>=2.0.0",
     "uvicorn>=0.42.0",
 ]

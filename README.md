@@ -57,6 +57,17 @@ state["messages"]        → nội dung hội thoại
                            (thay đổi được, được checkpoint)
 ```
 
+### Checkpointer-level persistence
+```
+Graph compile có gắn checkpointer SQLite
+  → state hội thoại được lưu theo thread_id
+  → cùng thread_id sẽ tiếp tục ngữ cảnh sau mỗi request
+  → không tạo message log table riêng ở giai đoạn này
+
+DATABASE_URL mặc định:
+  sqlite:///./agent_state.db
+```
+
 ## Cài đặt
 
 ```bash
@@ -64,6 +75,7 @@ pip install -r requirements.txt
 
 cp .env.example .env
 # Điền OPENAI_API_KEY vào .env
+# Có thể đổi DATABASE_URL nếu muốn lưu file SQLite ở vị trí khác
 ```
 
 ## Chạy
