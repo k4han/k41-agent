@@ -20,7 +20,7 @@ class GraphRegistry:
         if name not in cls._graphs:
             available = list(cls._graphs.keys())
             raise ValueError(
-                f"Graph '{name}' chưa được đăng ký. "
+                f"Graph '{name}' not registered. "
                 f"Available: {available}"
             )
         return cls._graphs[name]

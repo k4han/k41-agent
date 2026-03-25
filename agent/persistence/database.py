@@ -3,6 +3,7 @@ from pathlib import Path
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.engine import URL, make_url
+from sqlalchemy import create_engine as create_sync_engine
 
 
 DEFAULT_DATABASE_URL = "sqlite+aiosqlite:///data/agent_state.db"
@@ -10,6 +11,7 @@ DEFAULT_DATABASE_URL = "sqlite+aiosqlite:///data/agent_state.db"
 # SQLAlchemy async engine for application data (user management, etc.)
 _async_engine = None
 _async_session_maker = None
+_tables_created = False
 
 
 def get_database_url() -> str:
@@ -21,16 +23,17 @@ def _get_parsed_url() -> URL:
     return make_url(get_database_url())
 
 
+def _extract_base_driver(drivername: str) -> str:
+    """Extract base driver name from compound drivername like 'sqlite+aiosqlite'."""
+    if "+" in drivername:
+        return drivername.split("+")[1]
+    return drivername
+
+
 def get_database_type() -> str:
     """Return the database type based on the driver in the URL."""
     parsed = _get_parsed_url()
-    drivername = parsed.drivername
-
-    # Handle both sync and async driver prefixes
-    if "+" in drivername:
-        base_driver = drivername.split("+")[1]
-    else:
-        base_driver = drivername
+    base_driver = _extract_base_driver(parsed.drivername)
 
     # Handle common cases - normalize to base driver name
     if base_driver in ("sqlite", "aiosqlite", "pysqlite"):
@@ -120,39 +123,18 @@ def get_postgres_conn_string() -> str:
             f"Set DATABASE_URL to a postgresql URL, got: {get_database_url()}"
         )
 
-    # Build connection string without the async driver prefix for psycopg
-    # AsyncSqliteSaver expects: postgresql://user:pass@host/db
-    # Not: postgresql+asyncpg://...
-    username = parsed.username or ""
-    password = parsed.password or ""
-    host = parsed.host or "localhost"
-    port = parsed.port or 5432
-    database = parsed.database or "postgres"
-
-    # Build the connection string
-    creds = f"{username}:{password}@" if username else ""
-    port_str = f":{port}" if port else ""
-    conn_string = f"postgresql://{creds}{host}{port_str}/{database}"
-
-    # Add query parameters if any (except driver)
-    if parsed.query:
-        # Filter out driver-related params
-        params = "&".join(
-            f"{k}={v}" for k, v in parsed.query.items()
-            if k not in ("sslmode", "charset")
-        )
-        if params:
-            conn_string += f"?{params}"
-
-    return conn_string
+    # Normalize any async/sync postgres URL to plain postgresql:// while preserving
+    # credentials, host/port, database name, and query parameters (e.g. sslmode).
+    normalized = parsed.set(drivername="postgresql")
+    return normalized.render_as_string(hide_password=False)
 
 
-async def initialize_async_engine() -> "create_async_engine":
+async def initialize_async_engine():
     """
     Initialize and cache a SQLAlchemy async engine for application data.
     Used for user management and other application-specific data.
     """
-    global _async_engine, _async_session_maker
+    global _async_engine, _async_session_maker, _tables_created
     if _async_engine is not None:
         return _async_engine
 
@@ -188,6 +170,11 @@ async def initialize_async_engine() -> "create_async_engine":
         expire_on_commit=False,
     )
 
+    # Create tables only once
+    if not _tables_created:
+        create_tables(database_url)
+        _tables_created = True
+
     return _async_engine
 
 
@@ -212,15 +199,50 @@ def get_async_session_maker():
 async def get_async_session() -> AsyncSession:
     """Create a new async session for database operations."""
     async_session_maker = get_async_session_maker()
-    async with async_session_maker() as session:
-        yield session
+    return async_session_maker()
 
 
 async def close_async_engine() -> None:
     """Dispose async engine used for application data."""
-    global _async_engine, _async_session_maker
+    global _async_engine, _async_session_maker, _tables_created
 
     if _async_engine is not None:
         await _async_engine.dispose()
         _async_engine = None
         _async_session_maker = None
+        _tables_created = False
+
+
+def _normalize_url_to_sync(database_url: str) -> str:
+    """
+    Convert async driver URL to sync driver URL.
+    E.g., postgresql+asyncpg://... -> postgresql+psycopg://...
+    """
+    parsed = make_url(database_url)
+    base_driver = _extract_base_driver(parsed.drivername)
+    sync_map = {
+        "aiosqlite": "sqlite",
+        # Use psycopg (v3) instead of SQLAlchemy's default psycopg2 driver.
+        "asyncpg": "postgresql+psycopg",
+    }
+    sync_driver = sync_map.get(base_driver)
+    if sync_driver is None:
+        raise ValueError(f"Unsupported async driver '{parsed.drivername}'. Cannot convert to sync driver.")
+    normalized = parsed.set(drivername=sync_driver)
+    return normalized.render_as_string(hide_password=False)
+
+
+def create_tables(database_url: str) -> None:
+    """
+    Create all tables defined in models.
+    Uses synchronous engine for table creation (one-time operation).
+    """
+    from agent.persistence.models import Base  # noqa: E402  -- deferred to avoid circular import at module load
+
+    sync_url = _normalize_url_to_sync(database_url)
+
+    engine = create_sync_engine(sync_url, echo=False)
+    try:
+        Base.metadata.create_all(engine)
+    finally:
+        engine.dispose()

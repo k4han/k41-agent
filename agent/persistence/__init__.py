@@ -1,8 +1,6 @@
 from agent.persistence.database import (
     close_async_engine,
-    get_async_engine,
     get_async_session,
-    get_async_session_maker,
     get_database_type,
     get_database_url,
     get_postgres_conn_string,
@@ -10,6 +8,7 @@ from agent.persistence.database import (
     initialize_async_engine,
 )
 from agent.persistence.store import close_checkpointer, get_checkpointer, initialize_checkpointer
+from agent.persistence.models import User, BotSettings, UserPreferences
 
 
 __all__ = [
@@ -24,9 +23,11 @@ __all__ = [
     # SQLAlchemy engine/session
     "initialize_async_engine",
     "close_async_engine",
-    "get_async_engine",
-    "get_async_session_maker",
     "get_async_session",
+    # Models
+    "User",
+    "BotSettings",
+    "UserPreferences",
 ]
 
 
