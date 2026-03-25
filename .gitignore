@@ -12,3 +12,8 @@ wheels/
 data/
 .env
 local-dev/
+
+.tmp_*
+.pytest_cache/
+
+.env

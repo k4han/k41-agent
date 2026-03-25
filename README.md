@@ -1,6 +1,6 @@
 # LangGraph Multi-Platform Agent
 
-Multi-platform AI agent dùng LangGraph, hỗ trợ FastAPI, Telegram, Discord.
+Multi-platform AI agent dùng LangGraph, hỗ trợ FastAPI, Telegram, Discord trong cùng một runtime.
 
 ## Cấu trúc
 
@@ -71,7 +71,7 @@ DATABASE_URL mặc định:
 ## Cài đặt
 
 ```bash
-pip install -r requirements.txt
+uv sync
 
 cp .env.example .env
 # Điền OPENAI_API_KEY vào .env
@@ -80,28 +80,27 @@ cp .env.example .env
 
 ## Chạy
 
-### FastAPI server
+### App duy nhất
 ```bash
-python main.py
-# Server chạy tại http://localhost:8000
+uv run python app.py
+# Nếu ENABLE_WEB=true, server chạy tại http://localhost:8000
+# Nếu ENABLE_WEB=false, app chạy headless và chỉ giữ các background services
 ```
 
-### Telegram bot (standalone)
-```bash
-# Điền TELEGRAM_BOT_TOKEN vào .env
-python run_telegram.py
+### Một số cờ cấu hình runtime
+```env
+ENABLE_WEB=true
+ENABLE_API=true
+ENABLE_DASHBOARD=true
+
+ENABLE_TELEGRAM=true
+ENABLE_DISCORD=false
 ```
 
-### Discord bot (standalone)
-```bash
-# Điền DISCORD_BOT_TOKEN vào .env
-python run_discord.py
-```
-
-### Test local (không cần server)
-```bash
-python test_local.py
-```
+Quy ước hiện tại:
+- `ENABLE_WEB`, `ENABLE_API`, `ENABLE_DASHBOARD`: bật các capability của web host khi app khởi động.
+- `ENABLE_TELEGRAM`, `ENABLE_DISCORD`: nếu `true` thì service sẽ tự khởi động cùng app. Các background service vẫn luôn được đăng ký vào runtime, nên dashboard vẫn có thể start/stop chúng về sau ngay cả khi giá trị này là `false`.
+- Dashboard chỉ thay đổi trạng thái runtime hiện tại. Khi restart app, trạng thái mặc định quay về theo `.env`.
 
 ## API Endpoints
 
@@ -111,6 +110,17 @@ python test_local.py
 | POST   | /api/chat/stream  | Chat với streaming       |
 | GET    | /api/graphs       | Liệt kê graphs           |
 | GET    | /api/health       | Health check             |
+
+## Dashboard Endpoints
+
+| Method | Endpoint                           | Mô tả                         |
+|--------|------------------------------------|-------------------------------|
+| GET    | /dashboard/services                | Liệt kê trạng thái services   |
+| GET    | /dashboard/services/{name}         | Xem trạng thái 1 service      |
+| POST   | /dashboard/services/{name}/start   | Bật 1 service                 |
+| POST   | /dashboard/services/{name}/stop    | Tắt 1 service                 |
+| POST   | /dashboard/services/start-all      | Bật tất cả services           |
+| POST   | /dashboard/services/stop-all       | Tắt tất cả services           |
 
 ### Ví dụ request
 
