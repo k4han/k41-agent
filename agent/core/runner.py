@@ -14,6 +14,7 @@ async def run_agent(
     thread_id:    str,
     service_type: str        = "default",
     working_dir:  str | None = None,
+    max_context_tokens: int  = 50_000,
 ) -> AsyncGenerator[str, None]:
     """
     Run graph and yield each content chunk.
@@ -24,6 +25,7 @@ async def run_agent(
         thread_id=thread_id,
         service_type=service_type,
         working_dir=working_dir,
+        max_context_tokens=max_context_tokens,
     )
 
     async for event in graph.astream(
@@ -45,6 +47,7 @@ async def run_agent_full(
     thread_id:    str,
     service_type: str        = "default",
     working_dir:  str | None = None,
+    max_context_tokens: int  = 50_000,
 ) -> str:
     """
     Run graph and return full response (not streaming).
@@ -57,6 +60,7 @@ async def run_agent_full(
         thread_id=thread_id,
         service_type=service_type,
         working_dir=working_dir,
+        max_context_tokens=max_context_tokens,
     ):
         chunks.append(chunk)
     return chunks[-1] if chunks else ""

@@ -22,6 +22,7 @@ class BaseAdapter(ABC):
         workflow:     str        = "chat_agent",
         service_type: str        = "default",
         working_dir:  str | None = None,
+        max_context_tokens: int  = 50_000,
         channel_id:   str        = "",
     ) -> dict:
         """Chuẩn hóa về dict params cho run_agent / run_agent_full."""
@@ -30,6 +31,7 @@ class BaseAdapter(ABC):
             "user_input":   user_input,
             "service_type": service_type,
             "working_dir":  working_dir,
+            "max_context_tokens": max_context_tokens,
             "thread_id":    SessionManager.make_thread_id(
                                 platform, user_id, channel_id
                             ),

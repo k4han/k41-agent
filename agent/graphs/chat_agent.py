@@ -8,6 +8,7 @@ from agent.registry import GraphRegistry
 from agent.state.base import BaseState
 from agent.nodes.llm_node import make_llm_node
 from agent.nodes.tool_node import make_tool_node
+from agent.nodes.trim_node import make_prepare_context_node
 from agent.tools.chat import get_current_time, echo
 
 
@@ -23,10 +24,12 @@ def build_chat_graph() -> None:
     tools = [get_current_time, echo]
 
     graph = StateGraph(BaseState)
+    graph.add_node("prepare_context", make_prepare_context_node())
     graph.add_node("llm",  make_llm_node(tools))
     graph.add_node("tool", make_tool_node(tools))
 
-    graph.add_edge(START, "llm")
+    graph.add_edge(START, "prepare_context")
+    graph.add_edge("prepare_context", "llm")
     graph.add_conditional_edges("llm", _should_continue, {"tool": "tool", END: END})
     graph.add_edge("tool", "llm")
 

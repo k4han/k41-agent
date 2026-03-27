@@ -8,6 +8,7 @@ from agent.registry import GraphRegistry
 from agent.state.extensions import CodingState
 from agent.nodes.llm_node import make_llm_node
 from agent.nodes.tool_node import make_tool_node
+from agent.nodes.trim_node import make_prepare_context_node
 from agent.tools.common import read_file, write_file, run_bash, list_files
 
 SYSTEM_PROMPTS = {
@@ -41,10 +42,12 @@ def build_coding_graph() -> None:
     tools = [read_file, write_file, run_bash, list_files]
 
     graph = StateGraph(CodingState)
+    graph.add_node("prepare_context", make_prepare_context_node())
     graph.add_node("llm",  make_llm_node(tools, system_prompts=SYSTEM_PROMPTS))
     graph.add_node("tool", make_tool_node(tools))
 
-    graph.add_edge(START, "llm")
+    graph.add_edge(START, "prepare_context")
+    graph.add_edge("prepare_context", "llm")
     graph.add_conditional_edges("llm", _should_continue, {"tool": "tool", END: END})
     graph.add_edge("tool", "llm")
 

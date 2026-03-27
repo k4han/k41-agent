@@ -1,7 +1,12 @@
 {
   "permissions": {
     "allow": [
-      "Bash(uv run:*)"
+      "Bash(uv run:*)",
+      "WebFetch(domain:docs.langchain.com)",
+      "WebSearch",
+      "WebFetch(domain:python.langchain.com)",
+      "WebFetch(domain:api.python.langchain.com)",
+      "WebFetch(domain:github.com)"
     ]
   }
 }

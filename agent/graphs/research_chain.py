@@ -1,6 +1,6 @@
 # agent/graphs/research_chain.py
 
-from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages import SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, START, END
 
@@ -8,13 +8,11 @@ from agent.persistence import get_checkpointer
 from agent.registry import GraphRegistry
 from agent.state.extensions import ResearchState
 from agent.providers.llm import get_llm
+from agent.nodes.trim_node import make_prepare_context_node
 
 
 async def _research_node(state: ResearchState, config: RunnableConfig):
     """Bước 1: Thu thập thông tin theo yêu cầu."""
-    cfg          = config.get("configurable", {})
-    service_type = cfg.get("service_type", "default")
-
     llm = get_llm()
     system = SystemMessage(content=(
         "Bạn là research assistant. "
@@ -37,10 +35,12 @@ async def _summarize_node(state: ResearchState, config: RunnableConfig):
 
 def build_research_graph() -> None:
     graph = StateGraph(ResearchState)
+    graph.add_node("prepare_context", make_prepare_context_node())
     graph.add_node("research",  _research_node)
     graph.add_node("summarize", _summarize_node)
 
-    graph.add_edge(START,      "research")
+    graph.add_edge(START,      "prepare_context")
+    graph.add_edge("prepare_context", "research")
     graph.add_edge("research", "summarize")
     graph.add_edge("summarize", END)
 
