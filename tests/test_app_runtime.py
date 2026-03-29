@@ -2,18 +2,19 @@ import asyncio
 
 import pytest
 
-import app as app_module
-from app import AppRuntime, AppSettings, ServiceSpec
-from agent.services import ServiceStatus
+import agent.bootstrap.runtime as runtime_module
+from agent.bootstrap.runtime import AppRuntime, ChannelSpec
+from agent.bootstrap.settings import AppSettings
+from agent.modules.channels.public import ChannelStatus
 
 
-async def wait_for_status(runtime: AppRuntime, name: str, expected: ServiceStatus) -> None:
+async def wait_for_status(runtime: AppRuntime, name: str, expected: ChannelStatus) -> None:
     for _ in range(50):
-        if runtime.service_manager.status(name)["status"] == expected:
+        if runtime.channel_manager.status(name)["status"] == expected:
             return
         await asyncio.sleep(0.01)
 
-    raise AssertionError(f"Service '{name}' did not reach status '{expected}'.")
+    raise AssertionError(f"Channel '{name}' did not reach status '{expected}'.")
 
 
 def build_settings(service_boot_flags: dict[str, bool]) -> AppSettings:
@@ -35,47 +36,51 @@ def build_runner(started_event: asyncio.Event):
     return runner
 
 
-def test_runtime_registers_all_services_even_when_boot_disabled(monkeypatch: pytest.MonkeyPatch):
+def test_runtime_registers_all_channels_even_when_boot_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+):
     telegram_started = asyncio.Event()
     discord_started = asyncio.Event()
 
     monkeypatch.setattr(
-        app_module,
-        "SERVICE_SPECS",
+        runtime_module,
+        "BUILTIN_CHANNEL_SPECS",
         (
-            ServiceSpec("telegram", lambda: build_runner(telegram_started)),
-            ServiceSpec("discord", lambda: build_runner(discord_started)),
+            ChannelSpec("telegram", lambda: build_runner(telegram_started)),
+            ChannelSpec("discord", lambda: build_runner(discord_started)),
         ),
     )
 
     runtime = AppRuntime(build_settings({"telegram": True, "discord": False}))
-    runtime._register_services()
+    runtime._register_channels()
 
-    assert runtime.service_manager.names() == ["telegram", "discord"]
+    assert runtime.channel_manager.names() == ["telegram", "discord"]
 
 
 @pytest.mark.asyncio
-async def test_runtime_starts_only_services_enabled_for_boot(monkeypatch: pytest.MonkeyPatch):
+async def test_runtime_starts_only_channels_enabled_for_boot(
+    monkeypatch: pytest.MonkeyPatch,
+):
     telegram_started = asyncio.Event()
     discord_started = asyncio.Event()
 
     monkeypatch.setattr(
-        app_module,
-        "SERVICE_SPECS",
+        runtime_module,
+        "BUILTIN_CHANNEL_SPECS",
         (
-            ServiceSpec("telegram", lambda: build_runner(telegram_started)),
-            ServiceSpec("discord", lambda: build_runner(discord_started)),
+            ChannelSpec("telegram", lambda: build_runner(telegram_started)),
+            ChannelSpec("discord", lambda: build_runner(discord_started)),
         ),
     )
 
     runtime = AppRuntime(build_settings({"telegram": True, "discord": False}))
-    runtime._register_services()
-    await runtime._start_enabled_services()
+    runtime._register_channels()
+    await runtime._start_enabled_channels()
 
     await asyncio.wait_for(telegram_started.wait(), timeout=1)
-    await wait_for_status(runtime, "telegram", ServiceStatus.RUNNING)
+    await wait_for_status(runtime, "telegram", ChannelStatus.RUNNING)
 
     assert discord_started.is_set() is False
-    assert runtime.service_manager.status("discord")["status"] == ServiceStatus.STOPPED
+    assert runtime.channel_manager.status("discord")["status"] == ChannelStatus.STOPPED
 
-    await runtime.service_manager.stop_all()
+    await runtime.channel_manager.stop_all()

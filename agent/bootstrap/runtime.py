@@ -1,0 +1,104 @@
+import logging
+
+from agent.bootstrap.settings import AppSettings
+from agent.modules.channels.public import (
+    BUILTIN_CHANNEL_SPECS,
+    ChannelManager,
+    ChannelSpec,
+    register_channels,
+    start_enabled_channels,
+    stop_all_channels,
+)
+from agent.modules.channels.public import BotSettings
+from agent.modules.settings.public import UserPreferences
+from agent.modules.workflows.public import (
+    close_checkpointer,
+    initialize_checkpointer,
+    register_builtin_workflows,
+)
+from agent.modules.skills.public import reload_skills
+from agent.shared.infrastructure.db import Base
+from agent.shared.infrastructure.db.engine import (
+    close_async_engine,
+    initialize_async_engine,
+)
+
+logger = logging.getLogger(__name__)
+
+
+async def initialize_persistence() -> None:
+    """Initialize SQLAlchemy async engine and LangGraph checkpointer."""
+    # Ensure models are loaded so tables are attached to metadata
+    _ = (BotSettings, UserPreferences)
+    await initialize_async_engine(metadata=Base.metadata)
+    await initialize_checkpointer()
+
+
+async def close_persistence() -> None:
+    """Close persistence resources for clean shutdowns."""
+    await close_checkpointer()
+    await close_async_engine()
+
+
+class AppRuntime:
+    """Own shared resources and managed background channels."""
+
+    def __init__(self, settings: AppSettings):
+        self.settings = settings
+        self.channel_manager = ChannelManager()
+        self._channels_registered = False
+        self._persistence_ready = False
+        self._started = False
+
+    async def startup(self) -> None:
+        if self._started:
+            return
+
+        try:
+            if not self._persistence_ready:
+                logger.info("Initializing persistence...")
+                await initialize_persistence()
+                self._persistence_ready = True
+
+            logger.info("Building workflows...")
+            register_builtin_workflows()
+
+            logger.info("Discovering skills...")
+            reload_skills()
+
+            self._register_channels()
+            await self._start_enabled_channels()
+            self._started = True
+            logger.info("Application runtime is ready.")
+        except Exception:
+            logger.exception("Application startup failed.")
+            await self.shutdown()
+            raise
+
+    async def shutdown(self) -> None:
+        if self.channel_manager.names():
+            logger.info("Stopping managed channels...")
+            await stop_all_channels(self.channel_manager)
+
+        if self._persistence_ready:
+            logger.info("Closing persistence...")
+            await close_persistence()
+            self._persistence_ready = False
+
+        self._started = False
+        logger.info("Application runtime stopped.")
+
+    def _register_channels(self) -> None:
+        if self._channels_registered:
+            return
+
+        logger.info("Registering configured channels...")
+        register_channels(self.channel_manager, BUILTIN_CHANNEL_SPECS)
+        self._channels_registered = True
+
+    async def _start_enabled_channels(self) -> None:
+        await start_enabled_channels(
+            self.channel_manager,
+            self.settings.service_boot_flags,
+            BUILTIN_CHANNEL_SPECS,
+        )

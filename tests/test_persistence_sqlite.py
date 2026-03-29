@@ -1,7 +1,7 @@
 import uuid
 
 import pytest
-from pytest import MonkeyPatch
+import pytest_asyncio
 
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END, START, MessagesState, StateGraph
@@ -29,34 +29,16 @@ def _thread_config(thread_id: str):
     return {"configurable": {"thread_id": thread_id}}
 
 
-@pytest.fixture
-def db_path(tmp_path):
-    return tmp_path / "agent_state.db"
-
-
-@pytest.fixture
-def setup_persistence(db_path: str, monkeypatch: MonkeyPatch):
-    """Fixture to initialize and close persistence for each test."""
-    db_url = f"sqlite:///{db_path.as_posix()}"
-    monkeypatch.setenv("DATABASE_URL", db_url)
-    # Allow any path for testing
-    monkeypatch.setenv("PERSISTENCE_ALLOW_ANY_PATH", "true")
-
-    async def _init():
-        await initialize_persistence()
-
+@pytest_asyncio.fixture
+async def setup_persistence(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
     pytest.importorskip("aiosqlite")
-    
-    import asyncio
-    loop = asyncio.new_event_loop()
-    loop.run_until_complete(_init())
-    
-    yield
-    
-    async def _close():
+
+    await initialize_persistence()
+    try:
+        yield
+    finally:
         await close_persistence()
-    loop.run_until_complete(_close())
-    loop.close()
 
 
 @pytest.mark.asyncio

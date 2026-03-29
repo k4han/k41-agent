@@ -6,33 +6,26 @@ Multi-platform AI agent dùng LangGraph, hỗ trợ FastAPI, Telegram, Discord t
 
 ```
 agent/
-├── graphs/           # Graph definitions (build 1 lần, reuse mãi)
-│   ├── __init__.py   # setup_all_graphs()
-│   ├── chat_agent.py
-│   ├── coding_agent.py
-│   ├── research_chain.py
-│   └── router.py     # Tự phân loại workflow
-├── nodes/            # Shared reusable nodes
-│   ├── llm_node.py
-│   └── tool_node.py
-├── state/
-│   ├── base.py       # BaseState (MessagesState)
-│   └── extensions.py # CodingState, ResearchState
-├── tools/
-│   ├── common.py     # read_file, write_file, run_bash, list_files
-│   └── chat.py       # get_current_time, echo
-├── core/
-│   ├── runner.py     # run_agent(), run_agent_full() — platform agnostic
-│   └── session.py    # thread_id management
-├── adapters/
-│   ├── base.py       # BaseAdapter interface
-│   ├── fastapi/      # FastAPI router + schemas
-│   ├── telegram/     # Telegram bot handler
-│   └── discord/      # Discord bot handler
+├── bootstrap/        # App wiring, settings, runtime lifecycle
+├── delivery/
+│   └── http/
+│       ├── api/      # FastAPI API router + schemas
+│       └── dashboard/ # Dashboard HTTP router
+├── shared/
+│   └── infrastructure/
+│       └── db/       # Shared DB primitives (URL, engine, session, metadata)
+├── modules/
+│   ├── agent_runtime/ # Platform-agnostic run facade
+│   ├── channels/     # Telegram/Discord channel management
+│   ├── settings/     # Persisted settings/preferences data access
+│   └── workflows/    # LangGraph graphs, nodes, state, tools, checkpoint store
+├── persistence/      # Compatibility shim for legacy persistence imports
+├── core/             # Thin compatibility shim to agent_runtime
 ├── providers/
 │   └── llm.py        # Cached LLM instances
-├── registry.py       # GraphRegistry
-└── config.py         # make_config()
+├── graphs/           # Compatibility shim to workflows module
+├── registry.py       # Compatibility shim to workflow registry
+└── config.py         # Compatibility shim to workflow run config
 ```
 
 ## Thiết kế cốt lõi
@@ -64,8 +57,13 @@ Graph compile có gắn checkpointer SQLite
   → cùng thread_id sẽ tiếp tục ngữ cảnh sau mỗi request
   → không tạo message log table riêng ở giai đoạn này
 
+Canonical ownership:
+  - shared DB engine/session/helpers: agent/shared/infrastructure/db/
+  - LangGraph checkpoint store: agent/modules/workflows/infrastructure/langgraph/checkpoint/
+  - legacy facade tạm thời: agent/persistence/
+
 DATABASE_URL mặc định:
-  sqlite:///./agent_state.db
+  sqlite+aiosqlite:///data/agent_state.db
 ```
 
 ## Cài đặt
@@ -74,7 +72,8 @@ DATABASE_URL mặc định:
 uv sync
 
 cp .env.example .env
-# Điền OPENAI_API_KEY vào .env
+# Điền LLM_API_KEY vào .env
+# Có thể tiếp tục dùng OPENAI_API_KEY như fallback tương thích ngược
 # Có thể đổi DATABASE_URL nếu muốn lưu file SQLite ở vị trí khác
 ```
 
@@ -84,7 +83,7 @@ cp .env.example .env
 ```bash
 uv run python app.py
 # Nếu ENABLE_WEB=true, server chạy tại http://localhost:8000
-# Nếu ENABLE_WEB=false, app chạy headless và chỉ giữ các background services
+# Nếu ENABLE_WEB=false, app chạy headless và chỉ giữ các background channels
 ```
 
 ### Một số cờ cấu hình runtime
@@ -95,12 +94,20 @@ ENABLE_DASHBOARD=true
 
 ENABLE_TELEGRAM=true
 ENABLE_DISCORD=false
+
+LLM_API_KEY=sk-...
+LLM_BASE_URL=https://api.mistral.ai/v1
+LLM_MODEL=devstral-2512
+LLM_TEMPERATURE=0
 ```
 
 Quy ước hiện tại:
 - `ENABLE_WEB`, `ENABLE_API`, `ENABLE_DASHBOARD`: bật các capability của web host khi app khởi động.
-- `ENABLE_TELEGRAM`, `ENABLE_DISCORD`: nếu `true` thì service sẽ tự khởi động cùng app. Các background service vẫn luôn được đăng ký vào runtime, nên dashboard vẫn có thể start/stop chúng về sau ngay cả khi giá trị này là `false`.
+- `ENABLE_TELEGRAM`, `ENABLE_DISCORD`: nếu `true` thì channel sẽ tự khởi động cùng app. Các background channel vẫn luôn được đăng ký vào runtime, nên dashboard vẫn có thể start/stop chúng về sau ngay cả khi giá trị này là `false`.
 - Dashboard chỉ thay đổi trạng thái runtime hiện tại. Khi restart app, trạng thái mặc định quay về theo `.env`.
+- Alias cũ `/dashboard/bots/*` đã bị loại bỏ. Chỉ dùng `/dashboard/services/*`.
+- LLM client hiện dùng `ChatOpenAI` với endpoint OpenAI-compatible. Mặc định repo trỏ tới Mistral-compatible `base_url` và `model`, nhưng có thể override bằng `LLM_BASE_URL` và `LLM_MODEL`.
+- `LLM_API_KEY` là contract ưu tiên. Nếu chưa migrate env, `OPENAI_API_KEY` vẫn được chấp nhận như fallback.
 
 ## API Endpoints
 
@@ -163,16 +170,16 @@ curl -X POST http://localhost:8000/api/chat/stream \
 
 ## Thêm platform mới (Slack, Zalo,...)
 
-1. Tạo `agent/adapters/slack/handler.py`
-2. Kế thừa `BaseAdapter`, implement `handle()`
-3. Gọi `normalize()` + `run_agent_full()`
-4. **Không cần** động vào `core/`, `graphs/`, hay `registry.py`
+1. Tạo `agent/modules/channels/infrastructure/slack/handler.py`
+2. Gọi `build_run_params()` + `run_agent_full()` từ `agent.modules.agent_runtime.public`
+3. Thêm `ChannelSpec` mới vào `agent/modules/channels/infrastructure/service_specs.py`
+4. **Không cần** động vào `delivery/http` hay `modules/workflows`
 
 ## Thêm workflow mới
 
-1. Tạo `agent/graphs/new_agent.py` → build + `GraphRegistry.register()`
-2. Import vào `agent/graphs/__init__.py` → thêm vào `setup_all_graphs()`
-3. **Không cần** động vào adapters hay core
+1. Tạo graph mới trong `agent/modules/workflows/infrastructure/langgraph/graphs/`
+2. Đăng ký trong `agent/modules/workflows/application/register_builtin_workflows.py`
+3. **Không cần** động vào `delivery/http` hay `modules/channels`
 
 ## Workflows
 

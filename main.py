@@ -1,4 +1,4 @@
-from app import app, run
+from agent.bootstrap.app import app, run
 
 __all__ = ["app", "run"]
 

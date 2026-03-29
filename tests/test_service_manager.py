@@ -2,13 +2,13 @@ import asyncio
 
 import pytest
 
-from agent.services import ServiceManager, ServiceStatus
+from agent.modules.channels.public import ChannelManager, ChannelStatus
 
 
 async def wait_for_status(
-    manager: ServiceManager,
+    manager: ChannelManager,
     name: str,
-    expected: ServiceStatus,
+    expected: ChannelStatus,
     attempts: int = 50,
 ) -> None:
     for _ in range(attempts):
@@ -16,12 +16,12 @@ async def wait_for_status(
             return
         await asyncio.sleep(0.01)
 
-    raise AssertionError(f"Service '{name}' did not reach status '{expected}'.")
+    raise AssertionError(f"Channel '{name}' did not reach status '{expected}'.")
 
 
 @pytest.mark.asyncio
-async def test_service_manager_tracks_running_and_stopped_status():
-    manager = ServiceManager()
+async def test_channel_manager_tracks_running_and_stopped_status():
+    manager = ChannelManager()
     started = asyncio.Event()
 
     async def runner():
@@ -32,18 +32,18 @@ async def test_service_manager_tracks_running_and_stopped_status():
 
     await manager.start("telegram")
     await asyncio.wait_for(started.wait(), timeout=1)
-    await wait_for_status(manager, "telegram", ServiceStatus.RUNNING)
+    await wait_for_status(manager, "telegram", ChannelStatus.RUNNING)
 
-    assert manager.status("telegram")["status"] == ServiceStatus.RUNNING
+    assert manager.status("telegram")["status"] == ChannelStatus.RUNNING
 
     await manager.stop("telegram")
 
-    assert manager.status("telegram")["status"] == ServiceStatus.STOPPED
+    assert manager.status("telegram")["status"] == ChannelStatus.STOPPED
 
 
 @pytest.mark.asyncio
-async def test_service_manager_start_is_idempotent_while_active():
-    manager = ServiceManager()
+async def test_channel_manager_start_is_idempotent_while_active():
+    manager = ChannelManager()
     started = asyncio.Event()
     calls = 0
 
@@ -59,7 +59,7 @@ async def test_service_manager_start_is_idempotent_while_active():
     await manager.start("telegram")
 
     await asyncio.wait_for(started.wait(), timeout=1)
-    await wait_for_status(manager, "telegram", ServiceStatus.RUNNING)
+    await wait_for_status(manager, "telegram", ChannelStatus.RUNNING)
 
     assert calls == 1
 
@@ -67,8 +67,8 @@ async def test_service_manager_start_is_idempotent_while_active():
 
 
 @pytest.mark.asyncio
-async def test_service_manager_stop_recovers_from_error_state():
-    manager = ServiceManager()
+async def test_channel_manager_stop_recovers_from_error_state():
+    manager = ChannelManager()
 
     async def runner():
         raise RuntimeError("boom")
@@ -76,14 +76,14 @@ async def test_service_manager_stop_recovers_from_error_state():
     manager.register("discord", runner)
 
     await manager.start("discord")
-    await wait_for_status(manager, "discord", ServiceStatus.ERROR)
+    await wait_for_status(manager, "discord", ChannelStatus.ERROR)
 
     status = manager.status("discord")
-    assert status["status"] == ServiceStatus.ERROR
+    assert status["status"] == ChannelStatus.ERROR
     assert status["error"] == "boom"
 
     await manager.stop("discord")
 
     status = manager.status("discord")
-    assert status["status"] == ServiceStatus.STOPPED
+    assert status["status"] == ChannelStatus.STOPPED
     assert status["error"] == "boom"

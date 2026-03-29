@@ -1,6 +1,8 @@
 from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage
 
-from agent.nodes.trim_node import make_prepare_context_node
+from agent.modules.workflows.infrastructure.langgraph.nodes.trim import (
+    make_prepare_context_node,
+)
 
 
 def _apply_removals(messages, updates):

@@ -21,3 +21,7 @@ dependencies = [
     "sqlalchemy>=2.0.0",
     "uvicorn>=0.42.0",
 ]
+
+[tool.pytest.ini_options]
+addopts = "-p no:cacheprovider"
+cache_dir = ".tmp_pytest/cache"

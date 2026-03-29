@@ -1,6 +1,6 @@
 from pytest import MonkeyPatch
 
-from app import AppSettings
+from agent.bootstrap.settings import AppSettings
 
 
 def test_app_settings_load_enable_flags_from_env(monkeypatch: MonkeyPatch):
