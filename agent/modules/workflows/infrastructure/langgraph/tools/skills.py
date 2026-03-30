@@ -1,13 +1,13 @@
 from langchain_core.tools import tool
 
-from agent.modules.skills.public import get_skill
+from agent.modules.skills.public import get_skill_content_xml
 
 @tool
 def skill(name: str):
     """
     LLM có thể gọi tool này để sử dụng các skill đã được đăng ký trong hệ thống.
     """
-    skill = get_skill(name)
-    if not skill:
+    content_xml = get_skill_content_xml(name)
+    if content_xml is None:
         return "[error] skill not found"
-    return skill.body
+    return content_xml

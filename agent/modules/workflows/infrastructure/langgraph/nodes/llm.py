@@ -5,6 +5,26 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 
 from agent.modules.providers.public import get_chat_model
+from agent.modules.skills.public import get_skills_catalog_xml
+
+
+SKILLS_DISCLOSURE_PROMPT = (
+    "The following skills provide specialized instructions for specific tasks.\n"
+    "When a task matches a skill description, call the skill tool with the skill "
+    "name to load full instructions before proceeding."
+)
+
+
+def _has_skill_tool(tools: list[BaseTool]) -> bool:
+    return any(getattr(tool, "name", "") == "skill" for tool in tools)
+
+
+def _build_skills_prompt_section() -> str:
+    catalog_xml = get_skills_catalog_xml().strip()
+    if catalog_xml == "<available_skills/>":
+        return ""
+
+    return f"\n\n{SKILLS_DISCLOSURE_PROMPT}\n{catalog_xml}"
 
 
 @lru_cache(maxsize=32)
@@ -27,6 +47,7 @@ def make_llm_node(
                     template can use {working_dir}
     """
     llm = get_chat_model(model=model).bind_tools(tools)
+    include_skills_catalog = _has_skill_tool(tools)
 
     default_prompts = {
         "default": "You are a helpful AI assistant.",
@@ -44,6 +65,8 @@ def make_llm_node(
 
         prompt_template = prompts.get(service_type, prompts["default"])
         system_prompt = prompt_template.format(working_dir=working_dir)
+        if include_skills_catalog:
+            system_prompt = f"{system_prompt}{_build_skills_prompt_section()}"
 
         messages: list[BaseMessage] = [
             SystemMessage(content=system_prompt),

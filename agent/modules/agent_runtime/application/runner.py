@@ -70,6 +70,55 @@ async def run_agent(
                 yield str(last.content)
 
 
+async def run_agent_stream(
+    workflow: str,
+    user_input: str,
+    thread_id: str,
+    service_type: str = "default",
+    working_dir: str | None = None,
+    max_context_tokens: int = 50_000,
+) -> AsyncGenerator[dict[str, Any], None]:
+    """Run a workflow graph and stream UI events (tool calls and text chunks)."""
+
+    graph = get_workflow_graph(workflow)
+    config = make_run_config(
+        thread_id=thread_id,
+        service_type=service_type,
+        working_dir=working_dir,
+        max_context_tokens=max_context_tokens,
+    )
+
+    seen_ids = set()
+
+    async for event in graph.astream(
+        {"messages": [HumanMessage(content=user_input)]},
+        config=config,
+        stream_mode="values",
+    ):
+        messages = event.get("messages", [])
+        if not messages:
+            continue
+            
+        last = messages[-1]
+        if last.id in seen_ids:
+            continue
+        seen_ids.add(last.id)
+
+        if last.__class__.__name__ == "AIMessage":
+            tool_calls = getattr(last, "tool_calls", None)
+            if tool_calls:
+                for tc in tool_calls:
+                    yield {
+                        "type": "tool_call",
+                        "name": tc.get("name"),
+                        "args": tc.get("args")
+                    }
+            if last.content and not tool_calls:
+                yield {
+                    "type": "final",
+                    "content": str(last.content)
+                }
+
 async def run_agent_full(
     workflow: str,
     user_input: str,
