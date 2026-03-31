@@ -7,6 +7,7 @@ from agent.modules.workflows.infrastructure.langgraph.compiled_registry import (
     GraphRegistry,
 )
 from agent.modules.workflows.infrastructure.langgraph.run_config import (
+    make_context as make_run_context,
     make_config as make_run_config,
 )
 from agent.modules.workflows.infrastructure.langgraph.checkpoint.store import (
@@ -38,6 +39,7 @@ __all__ = [
     "get_workflow_graph",
     "initialize_checkpointer",
     "list_registered_workflows",
+    "make_run_context",
     "make_run_config",
     "register_builtin_workflows",
     "close_checkpointer",

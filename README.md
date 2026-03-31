@@ -32,19 +32,22 @@ agent/
 
 ### 1 graph — nhiều service khác nhau
 ```
-Cùng workflow (chat/coding/research)
+Cùng workflow (react/research)
   → 1 graph instance
-  → Khác nhau qua config (working_dir, service_type)
+  → Khác nhau qua context (working_dir, service_type)
   → Chạy đồng thời, độc lập nhau ✅
 
 Khác workflow (nodes/edges khác nhau)
   → Graph riêng, build 1 lần, lưu registry ✅
 ```
 
-### Config vs State
+### Config vs Context vs State
 ```
-config["configurable"]   → working_dir, service_type, thread_id
-                           (bất biến trong run, không checkpoint)
+config["configurable"]   → thread_id
+                           (khóa checkpoint thread)
+
+context                   → working_dir, service_type, max_context_tokens
+                           (run-scoped runtime knobs, không checkpoint)
 
 state["messages"]        → nội dung hội thoại
                            (thay đổi được, được checkpoint)
@@ -138,17 +141,17 @@ curl -X POST http://localhost:8000/api/chat \
   -d '{
     "message": "Xin chào!",
     "user_id": "user_123",
-    "workflow": "chat_agent",
+    "workflow": "react_agent",
     "service_type": "default"
   }'
 
-# Coding agent với working_dir
+# React agent với service_type backend + working_dir
 curl -X POST http://localhost:8000/api/chat \
   -H "Content-Type: application/json" \
   -d '{
     "message": "Liệt kê các file trong thư mục",
     "user_id": "dev_456",
-    "workflow": "coding_agent",
+    "workflow": "react_agent",
     "service_type": "backend",
     "working_dir": "/home/myproject"
   }'
@@ -185,7 +188,6 @@ curl -X POST http://localhost:8000/api/chat/stream \
 
 | Workflow         | Mô tả                              | Tools                              |
 |------------------|------------------------------------|------------------------------------|
-| `chat_agent`     | Hỏi đáp thông thường               | get_current_time, echo             |
-| `coding_agent`   | Đọc/ghi file, chạy bash            | read_file, write_file, run_bash, list_files |
+| `react_agent`    | Hỏi đáp + coding + file/bash + skills | get_current_time, echo, skill, read_file, write_file, run_bash, list_files |
 | `research_chain` | Nghiên cứu, tổng hợp (2 bước)      | (LLM only)                         |
 | `router`         | Tự phân loại → chuyển đúng workflow | (LLM classifier)                   |

@@ -1,16 +1,16 @@
 # AGENTS.md
 
 ## Communication
-- Mọi trao đổi với người dùng và trong quy trình cộng tác (issue, PR, review, giải thích) sử dụng tiếng Việt.
-- Mã nguồn và các thành phần kỹ thuật trong codebase phải dùng tiếng Anh, bao gồm: tên biến, tên hàm, tên class, tên file, docstring và comment trong code.
-- Ưu tiên diễn đạt rõ ràng, súc tích, tập trung vào vấn đề kỹ thuật.
+- **Always communicate with users in Vietnamese** — this includes all explanations, questions, summaries, and PR/issue/review comments.
+- Never use English in responses directed at the user unless quoting code or technical identifiers.
 
-## Commit message
-- **Bắt buộc viết commit message bằng tiếng Anh**.
-- Nên tuân theo Conventional Commits.
+## Codebase language
+- All code must be in English: variable names, function names, class names, file names, docstrings, and inline comments.
+- No Vietnamese text anywhere inside the source code.
 
-## Environment & dependency
-- Dự án **sử dụng `uv`** để quản lý Python và dependencies.
+## Environment & dependencies
+- This project uses **`uv`** to manage Python versions and dependencies.
+- Do not use `pip`, `poetry`, or `conda` directly.
 
-## State persistence
-- Ưu tiên bám theo style và pattern đang có sẵn trong codebase.
+## Code style
+- Follow the existing patterns and conventions already present in the codebase.

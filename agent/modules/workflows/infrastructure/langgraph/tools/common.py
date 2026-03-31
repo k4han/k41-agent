@@ -1,18 +1,25 @@
 import os
 import subprocess
-from typing import Annotated
 
-from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import InjectedToolArg, tool
+from langchain_core.tools import tool
+from langgraph.prebuilt import ToolRuntime
+
+from agent.modules.workflows.infrastructure.langgraph.run_config import (
+    get_context_value,
+)
+
+
+def _get_working_dir(runtime: ToolRuntime) -> str:
+    return get_context_value(runtime.context, "working_dir", ".")
 
 
 @tool
 def read_file(
     file_path: str,
-    config: Annotated[RunnableConfig, InjectedToolArg],
+    runtime: ToolRuntime,
 ) -> str:
     """Read file content in working directory."""
-    working_dir = config["configurable"].get("working_dir", ".")
+    working_dir = _get_working_dir(runtime)
     full_path = os.path.join(working_dir, file_path)
     try:
         with open(full_path, "r", encoding="utf-8") as f:
@@ -27,10 +34,10 @@ def read_file(
 def write_file(
     file_path: str,
     content: str,
-    config: Annotated[RunnableConfig, InjectedToolArg],
+    runtime: ToolRuntime,
 ) -> str:
     """Write content to file in working directory."""
-    working_dir = config["configurable"].get("working_dir", ".")
+    working_dir = _get_working_dir(runtime)
     full_path = os.path.join(working_dir, file_path)
     try:
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
@@ -44,10 +51,10 @@ def write_file(
 @tool
 def run_bash(
     command: str,
-    config: Annotated[RunnableConfig, InjectedToolArg],
+    runtime: ToolRuntime,
 ) -> str:
     """Run bash command in working directory."""
-    working_dir = config["configurable"].get("working_dir", ".")
+    working_dir = _get_working_dir(runtime)
     try:
         result = subprocess.run(
             command,
@@ -68,11 +75,11 @@ def run_bash(
 
 @tool
 def list_files(
-    config: Annotated[RunnableConfig, InjectedToolArg],
+    runtime: ToolRuntime,
     sub_dir: str = "",
 ) -> str:
     """List files in working directory."""
-    working_dir = config["configurable"].get("working_dir", ".")
+    working_dir = _get_working_dir(runtime)
     target = os.path.join(working_dir, sub_dir) if sub_dir else working_dir
     try:
         files = []

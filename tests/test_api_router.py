@@ -9,7 +9,7 @@ router_module = importlib.import_module("agent.delivery.http.api.router")
 
 def test_chat_sync_returns_response_payload(monkeypatch):
     built_params = {
-        "workflow": "coding_agent",
+        "workflow": "react_agent",
         "user_input": "List files",
         "service_type": "backend",
         "working_dir": "D:/workspace/sample",
@@ -22,7 +22,7 @@ def test_chat_sync_returns_response_payload(monkeypatch):
             "platform": "api",
             "user_id": "alice",
             "user_input": "List files",
-            "workflow": "coding_agent",
+            "workflow": "react_agent",
             "service_type": "backend",
             "working_dir": "D:/workspace/sample",
         }
@@ -44,7 +44,7 @@ def test_chat_sync_returns_response_payload(monkeypatch):
         json={
             "message": "List files",
             "user_id": "alice",
-            "workflow": "coding_agent",
+            "workflow": "react_agent",
             "service_type": "backend",
             "working_dir": "D:/workspace/sample",
         },
@@ -54,7 +54,7 @@ def test_chat_sync_returns_response_payload(monkeypatch):
     assert response.json() == {
         "response": "stubbed-response",
         "thread_id": "api_alice",
-        "workflow": "coding_agent",
+        "workflow": "react_agent",
     }
 
 
@@ -62,7 +62,7 @@ def test_graph_endpoints_reflect_registered_workflows(monkeypatch):
     monkeypatch.setattr(
         router_module,
         "list_registered_workflows",
-        lambda: ["chat_agent", "coding_agent", "router"],
+        lambda: ["react_agent", "research_chain", "router"],
     )
 
     app = FastAPI()
@@ -73,12 +73,12 @@ def test_graph_endpoints_reflect_registered_workflows(monkeypatch):
     graphs_response = client.get("/api/graphs")
     assert graphs_response.status_code == 200
     assert graphs_response.json() == {
-        "graphs": ["chat_agent", "coding_agent", "router"],
+        "graphs": ["react_agent", "research_chain", "router"],
     }
 
     health_response = client.get("/api/health")
     assert health_response.status_code == 200
     assert health_response.json() == {
         "status": "ok",
-        "graphs": ["chat_agent", "coding_agent", "router"],
+        "graphs": ["react_agent", "research_chain", "router"],
     }

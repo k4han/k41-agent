@@ -2,7 +2,12 @@ from collections.abc import Callable
 
 from langchain_core.messages import BaseMessage, RemoveMessage
 from langchain_core.messages.utils import count_tokens_approximately, trim_messages
-from langchain_core.runnables import RunnableConfig
+from langgraph.runtime import Runtime
+
+from agent.modules.workflows.infrastructure.langgraph.run_config import (
+    WorkflowContext,
+    get_context_value,
+)
 
 
 def _safe_positive_int(value, default_value: int) -> int:
@@ -22,14 +27,17 @@ def make_prepare_context_node(
     Defaults to 50,000 tokens and keeps the latest valid window.
     """
 
-    def prepare_context_node(state, config: RunnableConfig):
+    def prepare_context_node(state, runtime: Runtime[WorkflowContext]):
         messages: list[BaseMessage] = state.get("messages", [])
         if not messages:
             return {}
 
-        cfg = config.get("configurable", {})
+        max_context_value = get_context_value(
+            runtime.context, "max_context_tokens", None
+        )
+
         max_context_tokens = _safe_positive_int(
-            cfg.get("max_context_tokens"),
+            max_context_value,
             default_max_context_tokens,
         )
         counter = token_counter or count_tokens_approximately

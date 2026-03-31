@@ -1,11 +1,15 @@
 from functools import lru_cache
 
 from langchain_core.messages import BaseMessage, SystemMessage
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
+from langgraph.runtime import Runtime
 
 from agent.modules.providers.public import get_chat_model
 from agent.modules.skills.public import get_skills_catalog_xml
+from agent.modules.workflows.infrastructure.langgraph.run_config import (
+    WorkflowContext,
+    get_context_value,
+)
 
 
 SKILLS_DISCLOSURE_PROMPT = (
@@ -19,6 +23,7 @@ def _has_skill_tool(tools: list[BaseTool]) -> bool:
     return any(getattr(tool, "name", "") == "skill" for tool in tools)
 
 
+@lru_cache(maxsize=2)
 def _build_skills_prompt_section() -> str:
     catalog_xml = get_skills_catalog_xml().strip()
     if catalog_xml == "<available_skills/>":
@@ -58,10 +63,9 @@ def make_llm_node(
 
     prompts = {**default_prompts, **(system_prompts or {})}
 
-    def llm_node(state, config: RunnableConfig):
-        cfg = config.get("configurable", {})
-        service_type = cfg.get("service_type", "default")
-        working_dir = cfg.get("working_dir", ".")
+    def llm_node(state, runtime: Runtime[WorkflowContext]):
+        service_type = get_context_value(runtime.context, "service_type", "default")
+        working_dir = get_context_value(runtime.context, "working_dir", ".")
 
         prompt_template = prompts.get(service_type, prompts["default"])
         system_prompt = prompt_template.format(working_dir=working_dir)

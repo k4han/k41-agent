@@ -53,12 +53,12 @@ def test_make_llm_node_injects_skills_catalog_when_skill_tool_exists(monkeypatch
 
     result = node(
         {"messages": [HumanMessage(content="help me")]},
-        {
-            "configurable": {
+        SimpleNamespace(
+            context={
                 "service_type": "backend",
                 "working_dir": "D:/repo",
             }
-        },
+        ),
     )
 
     assert result["messages"][0].content == "ok"
@@ -95,12 +95,12 @@ def test_make_llm_node_skips_skills_catalog_when_catalog_is_empty(monkeypatch):
 
     node(
         {"messages": [HumanMessage(content="help me")]},
-        {
-            "configurable": {
+        SimpleNamespace(
+            context={
                 "service_type": "backend",
                 "working_dir": "D:/repo",
             }
-        },
+        ),
     )
 
     system_message = captured["messages"][0]
@@ -128,7 +128,7 @@ def test_make_llm_node_skips_catalog_when_skill_tool_not_registered(monkeypatch)
 
     node(
         {"messages": [HumanMessage(content="hello")]},
-        {"configurable": {"service_type": "default", "working_dir": "."}},
+        SimpleNamespace(context={"service_type": "default", "working_dir": "."}),
     )
 
     system_message = captured["messages"][0]

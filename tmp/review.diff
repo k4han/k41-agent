@@ -1,0 +1,705 @@
+diff --git a/.env.example b/.env.example
+index d4d65c6..5f7ac52 100644
+--- a/.env.example
++++ b/.env.example
+@@ -22,7 +22,7 @@ PORT=8000
+ ENABLE_WEB=true
+ ENABLE_DASHBOARD=true
+ ENABLE_API=true
+-DEFAULT_WORKFLOW=chat_agent
++DEFAULT_WORKFLOW=react_agent
+ DEFAULT_SERVICE_TYPE=default
+ RECURSION_LIMIT=100
+ 
+diff --git a/AGENTS.md b/AGENTS.md
+index b6286a9..e5e0291 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -1,16 +1,16 @@
+ # AGENTS.md
+ 
+ ## Communication
+-- Mọi trao đổi với người dùng và trong quy trình cộng tác (issue, PR, review, giải thích) sử dụng tiếng Việt.
+-- Mã nguồn và các thành phần kỹ thuật trong codebase phải dùng tiếng Anh, bao gồm: tên biến, tên hàm, tên class, tên file, docstring và comment trong code.
+-- Ưu tiên diễn đạt rõ ràng, súc tích, tập trung vào vấn đề kỹ thuật.
++- **Always communicate with users in Vietnamese** — this includes all explanations, questions, summaries, and PR/issue/review comments.
++- Never use English in responses directed at the user unless quoting code or technical identifiers.
+ 
+-## Commit message
+-- **Bắt buộc viết commit message bằng tiếng Anh**.
+-- Nên tuân theo Conventional Commits.
++## Codebase language
++- All code must be in English: variable names, function names, class names, file names, docstrings, and inline comments.
++- No Vietnamese text anywhere inside the source code.
+ 
+-## Environment & dependency
+-- Dự án **sử dụng `uv`** để quản lý Python và dependencies.
++## Environment & dependencies
++- This project uses **`uv`** to manage Python versions and dependencies.
++- Do not use `pip`, `poetry`, or `conda` directly.
+ 
+-## State persistence
+-- Ưu tiên bám theo style và pattern đang có sẵn trong codebase.
+\ No newline at end of file
++## Code style
++- Follow the existing patterns and conventions already present in the codebase.
+\ No newline at end of file
+diff --git a/README.md b/README.md
+index 870747f..3ff1725 100644
+--- a/README.md
++++ b/README.md
+@@ -32,19 +32,22 @@ agent/
+ 
+ ### 1 graph — nhiều service khác nhau
+ ```
+-Cùng workflow (chat/coding/research)
++Cùng workflow (react/research)
+   → 1 graph instance
+-  → Khác nhau qua config (working_dir, service_type)
++  → Khác nhau qua context (working_dir, service_type)
+   → Chạy đồng thời, độc lập nhau ✅
+ 
+ Khác workflow (nodes/edges khác nhau)
+   → Graph riêng, build 1 lần, lưu registry ✅
+ ```
+ 
+-### Config vs State
++### Config vs Context vs State
+ ```
+-config["configurable"]   → working_dir, service_type, thread_id
+-                           (bất biến trong run, không checkpoint)
++config["configurable"]   → thread_id
++                           (khóa checkpoint thread)
++
++context                   → working_dir, service_type, max_context_tokens
++                           (run-scoped runtime knobs, không checkpoint)
+ 
+ state["messages"]        → nội dung hội thoại
+                            (thay đổi được, được checkpoint)
+@@ -138,17 +141,17 @@ curl -X POST http://localhost:8000/api/chat \
+   -d '{
+     "message": "Xin chào!",
+     "user_id": "user_123",
+-    "workflow": "chat_agent",
++    "workflow": "react_agent",
+     "service_type": "default"
+   }'
+ 
+-# Coding agent với working_dir
++# React agent với service_type backend + working_dir
+ curl -X POST http://localhost:8000/api/chat \
+   -H "Content-Type: application/json" \
+   -d '{
+     "message": "Liệt kê các file trong thư mục",
+     "user_id": "dev_456",
+-    "workflow": "coding_agent",
++    "workflow": "react_agent",
+     "service_type": "backend",
+     "working_dir": "/home/myproject"
+   }'
+@@ -185,7 +188,6 @@ curl -X POST http://localhost:8000/api/chat/stream \
+ 
+ | Workflow         | Mô tả                              | Tools                              |
+ |------------------|------------------------------------|------------------------------------|
+-| `chat_agent`     | Hỏi đáp thông thường               | get_current_time, echo             |
+-| `coding_agent`   | Đọc/ghi file, chạy bash            | read_file, write_file, run_bash, list_files |
++| `react_agent`    | Hỏi đáp + coding + file/bash + skills | get_current_time, echo, skill, read_file, write_file, run_bash, list_files |
+ | `research_chain` | Nghiên cứu, tổng hợp (2 bước)      | (LLM only)                         |
+ | `router`         | Tự phân loại → chuyển đúng workflow | (LLM classifier)                   |
+diff --git a/agent/delivery/http/api/schemas.py b/agent/delivery/http/api/schemas.py
+index 0997b93..0eca4f3 100644
+--- a/agent/delivery/http/api/schemas.py
++++ b/agent/delivery/http/api/schemas.py
+@@ -6,7 +6,7 @@ from pydantic import BaseModel
+ class ChatRequest(BaseModel):
+     message: str
+     user_id: str = "anonymous"
+-    workflow: str = "chat_agent"
++    workflow: str = "react_agent"
+     service_type: str = "default"
+     working_dir: Optional[str] = None
+ 
+diff --git a/agent/modules/agent_runtime/application/runner.py b/agent/modules/agent_runtime/application/runner.py
+index 2e67c7b..b2fe6f0 100644
+--- a/agent/modules/agent_runtime/application/runner.py
++++ b/agent/modules/agent_runtime/application/runner.py
+@@ -3,7 +3,11 @@ from typing import Any, AsyncGenerator
+ from langchain_core.messages import HumanMessage
+ 
+ from agent.modules.agent_runtime.application.session import SessionManager
+-from agent.modules.workflows.public import get_workflow_graph, make_run_config
++from agent.modules.workflows.public import (
++    get_workflow_graph,
++    make_run_config,
++    make_run_context,
++)
+ 
+ 
+ def build_run_params(
+@@ -11,7 +15,7 @@ def build_run_params(
+     platform: str,
+     user_id: str,
+     user_input: str,
+-    workflow: str = "chat_agent",
++    workflow: str = "react_agent",
+     service_type: str = "default",
+     working_dir: str | None = None,
+     max_context_tokens: int = 50_000,
+@@ -51,8 +55,8 @@ async def run_agent(
+     """Run a workflow graph and stream assistant chunks."""
+ 
+     graph = get_workflow_graph(workflow)
+-    config = make_run_config(
+-        thread_id=thread_id,
++    config = make_run_config(thread_id=thread_id)
++    context = make_run_context(
+         service_type=service_type,
+         working_dir=working_dir,
+         max_context_tokens=max_context_tokens,
+@@ -61,6 +65,7 @@ async def run_agent(
+     async for event in graph.astream(
+         {"messages": [HumanMessage(content=user_input)]},
+         config=config,
++        context=context,
+         stream_mode="values",
+     ):
+         messages = event.get("messages", [])
+@@ -81,8 +86,8 @@ async def run_agent_stream(
+     """Run a workflow graph and stream UI events (tool calls and text chunks)."""
+ 
+     graph = get_workflow_graph(workflow)
+-    config = make_run_config(
+-        thread_id=thread_id,
++    config = make_run_config(thread_id=thread_id)
++    context = make_run_context(
+         service_type=service_type,
+         working_dir=working_dir,
+         max_context_tokens=max_context_tokens,
+@@ -93,6 +98,7 @@ async def run_agent_stream(
+     async for event in graph.astream(
+         {"messages": [HumanMessage(content=user_input)]},
+         config=config,
++        context=context,
+         stream_mode="values",
+     ):
+         messages = event.get("messages", [])
+diff --git a/agent/modules/channels/infrastructure/discord/handler.py b/agent/modules/channels/infrastructure/discord/handler.py
+index 33b18aa..326873c 100644
+--- a/agent/modules/channels/infrastructure/discord/handler.py
++++ b/agent/modules/channels/infrastructure/discord/handler.py
+@@ -17,7 +17,7 @@ async def handle_message(message) -> None:
+         user_id=str(message.author.id),
+         user_input=message.content,
+         channel_id=str(message.channel.id),
+-        workflow="chat_agent",
++        workflow="react_agent",
+     )
+ 
+     async with message.channel.typing():
+diff --git a/agent/modules/channels/infrastructure/telegram/handler.py b/agent/modules/channels/infrastructure/telegram/handler.py
+index d0f194b..c4e70b3 100644
+--- a/agent/modules/channels/infrastructure/telegram/handler.py
++++ b/agent/modules/channels/infrastructure/telegram/handler.py
+@@ -81,7 +81,7 @@ async def handle_message(message) -> None:
+         user_id=str(message.from_user.id),
+         user_input=message.text,
+         channel_id=str(message.chat.id),
+-        workflow="chat_agent",
++        workflow="react_agent",
+         working_dir=r"C:\Users\kh4n\kaka-agent-v2"
+     )
+ 
+@@ -139,7 +139,7 @@ def create_dispatcher():
+             user_id=str(message.from_user.id),
+             user_input=text,
+             channel_id=str(message.chat.id),
+-            workflow="coding_agent",
++            workflow="react_agent",
+             service_type="backend",
+         )
+         await handle_streaming_response(message, params)
+diff --git a/agent/modules/workflows/application/register_builtin_workflows.py b/agent/modules/workflows/application/register_builtin_workflows.py
+index 2d0d3ae..82abc98 100644
+--- a/agent/modules/workflows/application/register_builtin_workflows.py
++++ b/agent/modules/workflows/application/register_builtin_workflows.py
+@@ -1,14 +1,12 @@
+ from agent.modules.workflows.infrastructure.langgraph.graphs import (
+-    build_chat_graph,
+-    build_coding_graph,
++    build_react_graph,
+     build_research_graph,
+     build_router_graph,
+ )
+ 
+ 
+ def register_builtin_workflows() -> None:
+-    build_chat_graph()
+-    build_coding_graph()
++    build_react_graph()
+     build_research_graph()
+     build_router_graph()
+     print("[Registry] All graphs ready.")
+diff --git a/agent/modules/workflows/infrastructure/langgraph/graphs/__init__.py b/agent/modules/workflows/infrastructure/langgraph/graphs/__init__.py
+index d365fda..efbe7a9 100644
+--- a/agent/modules/workflows/infrastructure/langgraph/graphs/__init__.py
++++ b/agent/modules/workflows/infrastructure/langgraph/graphs/__init__.py
+@@ -1,6 +1,5 @@
+-from agent.modules.workflows.infrastructure.langgraph.graphs.chat import build_chat_graph
+-from agent.modules.workflows.infrastructure.langgraph.graphs.coding import (
+-    build_coding_graph,
++from agent.modules.workflows.infrastructure.langgraph.graphs.react_agent import (
++    build_react_graph,
+ )
+ from agent.modules.workflows.infrastructure.langgraph.graphs.research import (
+     build_research_graph,
+@@ -10,8 +9,7 @@ from agent.modules.workflows.infrastructure.langgraph.graphs.router import (
+ )
+ 
+ __all__ = [
+-    "build_chat_graph",
+-    "build_coding_graph",
++    "build_react_graph",
+     "build_research_graph",
+     "build_router_graph",
+ ]
+diff --git a/agent/modules/workflows/infrastructure/langgraph/graphs/router.py b/agent/modules/workflows/infrastructure/langgraph/graphs/router.py
+index 72a572d..244794b 100644
+--- a/agent/modules/workflows/infrastructure/langgraph/graphs/router.py
++++ b/agent/modules/workflows/infrastructure/langgraph/graphs/router.py
+@@ -1,6 +1,7 @@
+ from langchain_core.messages import SystemMessage
+ from langchain_core.runnables import RunnableConfig
+ from langgraph.graph import END, START, StateGraph
++from langgraph.runtime import Runtime
+ 
+ from agent.modules.workflows.infrastructure.langgraph.checkpoint import (
+     get_checkpointer,
+@@ -8,19 +9,25 @@ from agent.modules.workflows.infrastructure.langgraph.checkpoint import (
+ from agent.modules.workflows.infrastructure.langgraph.compiled_registry import (
+     GraphRegistry,
+ )
++from agent.modules.workflows.infrastructure.langgraph.run_config import (
++    WorkflowContext,
++)
+ from agent.modules.workflows.infrastructure.langgraph.state.base import BaseState
+ from agent.modules.providers.public import get_chat_model
+ 
+ ROUTER_SYSTEM = """You are a router agent. Your task is to classify user requests
+ into the correct workflow. Respond with exactly one of the following values (no explanation):
+-- chat_agent      : general Q&A, knowledge questions
+-- coding_agent    : writing code, reading/writing files, running bash commands
++- react_agent     : general Q&A, coding, files, shell, and skill-assisted tasks
+ - research_chain  : research, information synthesis, analysis
+ 
+ User request: {user_input}"""
+ 
+ 
+-async def _router_node(state: BaseState, config: RunnableConfig) -> dict:
++async def _router_node(
++    state: BaseState,
++    config: RunnableConfig,
++    runtime: Runtime[WorkflowContext],
++) -> dict:
+     """Classify request and route to appropriate graph."""
+     user_input = state["messages"][-1].content
+     llm = get_chat_model()
+@@ -30,20 +37,21 @@ async def _router_node(state: BaseState, config: RunnableConfig) -> dict:
+     ])
+ 
+     workflow = response.content.strip().lower()
+-    valid = {"chat_agent", "coding_agent", "research_chain"}
++    valid = {"react_agent", "research_chain"}
+     if workflow not in valid:
+-        workflow = "chat_agent"
++        workflow = "react_agent"
+ 
+     target_graph = GraphRegistry.get(workflow)
+     result = await target_graph.ainvoke(
+         {"messages": state["messages"]},
+         config=config,
++        context=runtime.context,
+     )
+     return {"messages": result["messages"]}
+ 
+ 
+ def build_router_graph() -> None:
+-    graph = StateGraph(BaseState)
++    graph = StateGraph(BaseState, context_schema=WorkflowContext)
+     graph.add_node("router", _router_node)
+     graph.add_edge(START, "router")
+     graph.add_edge("router", END)
+diff --git a/agent/modules/workflows/infrastructure/langgraph/nodes/llm.py b/agent/modules/workflows/infrastructure/langgraph/nodes/llm.py
+index a8c8d64..f9e1ffa 100644
+--- a/agent/modules/workflows/infrastructure/langgraph/nodes/llm.py
++++ b/agent/modules/workflows/infrastructure/langgraph/nodes/llm.py
+@@ -1,11 +1,14 @@
+ from functools import lru_cache
+ 
+ from langchain_core.messages import BaseMessage, SystemMessage
+-from langchain_core.runnables import RunnableConfig
+ from langchain_core.tools import BaseTool
++from langgraph.runtime import Runtime
+ 
+ from agent.modules.providers.public import get_chat_model
+ from agent.modules.skills.public import get_skills_catalog_xml
++from agent.modules.workflows.infrastructure.langgraph.run_config import (
++    WorkflowContext,
++)
+ 
+ 
+ SKILLS_DISCLOSURE_PROMPT = (
+@@ -58,10 +61,14 @@ def make_llm_node(
+ 
+     prompts = {**default_prompts, **(system_prompts or {})}
+ 
+-    def llm_node(state, config: RunnableConfig):
+-        cfg = config.get("configurable", {})
+-        service_type = cfg.get("service_type", "default")
+-        working_dir = cfg.get("working_dir", ".")
++    def llm_node(state, runtime: Runtime[WorkflowContext]):
++        raw_context = runtime.context or {}
++        if isinstance(raw_context, dict):
++            service_type = raw_context.get("service_type", "default")
++            working_dir = raw_context.get("working_dir", ".")
++        else:
++            service_type = getattr(raw_context, "service_type", "default")
++            working_dir = getattr(raw_context, "working_dir", ".")
+ 
+         prompt_template = prompts.get(service_type, prompts["default"])
+         system_prompt = prompt_template.format(working_dir=working_dir)
+diff --git a/agent/modules/workflows/infrastructure/langgraph/nodes/trim.py b/agent/modules/workflows/infrastructure/langgraph/nodes/trim.py
+index b3f7dc4..e2fcaa1 100644
+--- a/agent/modules/workflows/infrastructure/langgraph/nodes/trim.py
++++ b/agent/modules/workflows/infrastructure/langgraph/nodes/trim.py
+@@ -2,7 +2,11 @@ from collections.abc import Callable
+ 
+ from langchain_core.messages import BaseMessage, RemoveMessage
+ from langchain_core.messages.utils import count_tokens_approximately, trim_messages
+-from langchain_core.runnables import RunnableConfig
++from langgraph.runtime import Runtime
++
++from agent.modules.workflows.infrastructure.langgraph.run_config import (
++    WorkflowContext,
++)
+ 
+ 
+ def _safe_positive_int(value, default_value: int) -> int:
+@@ -22,14 +26,19 @@ def make_prepare_context_node(
+     Defaults to 50,000 tokens and keeps the latest valid window.
+     """
+ 
+-    def prepare_context_node(state, config: RunnableConfig):
++    def prepare_context_node(state, runtime: Runtime[WorkflowContext]):
+         messages: list[BaseMessage] = state.get("messages", [])
+         if not messages:
+             return {}
+ 
+-        cfg = config.get("configurable", {})
++        raw_context = runtime.context or {}
++        if isinstance(raw_context, dict):
++            max_context_value = raw_context.get("max_context_tokens")
++        else:
++            max_context_value = getattr(raw_context, "max_context_tokens", None)
++
+         max_context_tokens = _safe_positive_int(
+-            cfg.get("max_context_tokens"),
++            max_context_value,
+             default_max_context_tokens,
+         )
+         counter = token_counter or count_tokens_approximately
+diff --git a/agent/modules/workflows/infrastructure/langgraph/run_config.py b/agent/modules/workflows/infrastructure/langgraph/run_config.py
+index 8256bde..bc3d702 100644
+--- a/agent/modules/workflows/infrastructure/langgraph/run_config.py
++++ b/agent/modules/workflows/infrastructure/langgraph/run_config.py
+@@ -1,25 +1,41 @@
+ import os
+ 
+ from langchain_core.runnables import RunnableConfig
++from typing_extensions import TypedDict
+ 
+ 
+-def make_config(
+-    thread_id: str,
++DEFAULT_MAX_CONTEXT_TOKENS = 50_000
++
++
++class WorkflowContext(TypedDict):
++    """Run-scoped context passed via LangGraph context_schema."""
++
++    service_type: str
++    working_dir: str
++    max_context_tokens: int
++
++
++def make_context(
+     service_type: str = "default",
+     working_dir: str | None = None,
+-    max_context_tokens: int = 50_000,
++    max_context_tokens: int = DEFAULT_MAX_CONTEXT_TOKENS,
++) -> WorkflowContext:
++    """Create a runtime context payload for a graph run."""
++    return {
++        "service_type": service_type,
++        "working_dir": working_dir or os.getcwd(),
++        "max_context_tokens": max_context_tokens,
++    }
++
++
++def make_config(
++    thread_id: str,
+     recursion_limit: int = 100,
+ ) -> RunnableConfig:
+-    """
+-    Tạo config chuẩn cho mỗi request.
+-    working_dir và service_type đi qua configurable — không vào State.
+-    """
++    """Create runnable config used by checkpointing and recursion control."""
+     return {
+         "configurable": {
+             "thread_id": thread_id,
+-            "service_type": service_type,
+-            "working_dir": working_dir or os.getcwd(),
+-            "max_context_tokens": max_context_tokens,
+         },
+         "recursion_limit": recursion_limit,
+     }
+diff --git a/agent/modules/workflows/infrastructure/langgraph/tools/common.py b/agent/modules/workflows/infrastructure/langgraph/tools/common.py
+index ab1ffe7..22418bc 100644
+--- a/agent/modules/workflows/infrastructure/langgraph/tools/common.py
++++ b/agent/modules/workflows/infrastructure/langgraph/tools/common.py
+@@ -1,18 +1,24 @@
+ import os
+ import subprocess
+-from typing import Annotated
+ 
+-from langchain_core.runnables import RunnableConfig
+-from langchain_core.tools import InjectedToolArg, tool
++from langchain_core.tools import tool
++from langgraph.prebuilt import ToolRuntime
++
++
++def _get_working_dir(runtime: ToolRuntime) -> str:
++    raw_context = runtime.context or {}
++    if isinstance(raw_context, dict):
++        return raw_context.get("working_dir", ".")
++    return getattr(raw_context, "working_dir", ".")
+ 
+ 
+ @tool
+ def read_file(
+     file_path: str,
+-    config: Annotated[RunnableConfig, InjectedToolArg],
++    runtime: ToolRuntime,
+ ) -> str:
+     """Read file content in working directory."""
+-    working_dir = config["configurable"].get("working_dir", ".")
++    working_dir = _get_working_dir(runtime)
+     full_path = os.path.join(working_dir, file_path)
+     try:
+         with open(full_path, "r", encoding="utf-8") as f:
+@@ -27,10 +33,10 @@ def read_file(
+ def write_file(
+     file_path: str,
+     content: str,
+-    config: Annotated[RunnableConfig, InjectedToolArg],
++    runtime: ToolRuntime,
+ ) -> str:
+     """Write content to file in working directory."""
+-    working_dir = config["configurable"].get("working_dir", ".")
++    working_dir = _get_working_dir(runtime)
+     full_path = os.path.join(working_dir, file_path)
+     try:
+         os.makedirs(os.path.dirname(full_path), exist_ok=True)
+@@ -44,10 +50,10 @@ def write_file(
+ @tool
+ def run_bash(
+     command: str,
+-    config: Annotated[RunnableConfig, InjectedToolArg],
++    runtime: ToolRuntime,
+ ) -> str:
+     """Run bash command in working directory."""
+-    working_dir = config["configurable"].get("working_dir", ".")
++    working_dir = _get_working_dir(runtime)
+     try:
+         result = subprocess.run(
+             command,
+@@ -68,11 +74,11 @@ def run_bash(
+ 
+ @tool
+ def list_files(
+-    config: Annotated[RunnableConfig, InjectedToolArg],
++    runtime: ToolRuntime,
+     sub_dir: str = "",
+ ) -> str:
+     """List files in working directory."""
+-    working_dir = config["configurable"].get("working_dir", ".")
++    working_dir = _get_working_dir(runtime)
+     target = os.path.join(working_dir, sub_dir) if sub_dir else working_dir
+     try:
+         files = []
+diff --git a/agent/modules/workflows/public.py b/agent/modules/workflows/public.py
+index 1ca6cc8..c28d41a 100644
+--- a/agent/modules/workflows/public.py
++++ b/agent/modules/workflows/public.py
+@@ -7,6 +7,7 @@ from agent.modules.workflows.infrastructure.langgraph.compiled_registry import (
+     GraphRegistry,
+ )
+ from agent.modules.workflows.infrastructure.langgraph.run_config import (
++    make_context as make_run_context,
+     make_config as make_run_config,
+ )
+ from agent.modules.workflows.infrastructure.langgraph.checkpoint.store import (
+@@ -38,6 +39,7 @@ __all__ = [
+     "get_workflow_graph",
+     "initialize_checkpointer",
+     "list_registered_workflows",
++    "make_run_context",
+     "make_run_config",
+     "register_builtin_workflows",
+     "close_checkpointer",
+diff --git a/tests/test_api_router.py b/tests/test_api_router.py
+index 4261964..dedce4e 100644
+--- a/tests/test_api_router.py
++++ b/tests/test_api_router.py
+@@ -9,7 +9,7 @@ router_module = importlib.import_module("agent.delivery.http.api.router")
+ 
+ def test_chat_sync_returns_response_payload(monkeypatch):
+     built_params = {
+-        "workflow": "coding_agent",
++        "workflow": "react_agent",
+         "user_input": "List files",
+         "service_type": "backend",
+         "working_dir": "D:/workspace/sample",
+@@ -22,7 +22,7 @@ def test_chat_sync_returns_response_payload(monkeypatch):
+             "platform": "api",
+             "user_id": "alice",
+             "user_input": "List files",
+-            "workflow": "coding_agent",
++            "workflow": "react_agent",
+             "service_type": "backend",
+             "working_dir": "D:/workspace/sample",
+         }
+@@ -44,7 +44,7 @@ def test_chat_sync_returns_response_payload(monkeypatch):
+         json={
+             "message": "List files",
+             "user_id": "alice",
+-            "workflow": "coding_agent",
++            "workflow": "react_agent",
+             "service_type": "backend",
+             "working_dir": "D:/workspace/sample",
+         },
+@@ -54,7 +54,7 @@ def test_chat_sync_returns_response_payload(monkeypatch):
+     assert response.json() == {
+         "response": "stubbed-response",
+         "thread_id": "api_alice",
+-        "workflow": "coding_agent",
++        "workflow": "react_agent",
+     }
+ 
+ 
+@@ -62,7 +62,7 @@ def test_graph_endpoints_reflect_registered_workflows(monkeypatch):
+     monkeypatch.setattr(
+         router_module,
+         "list_registered_workflows",
+-        lambda: ["chat_agent", "coding_agent", "router"],
++        lambda: ["react_agent", "research_chain", "router"],
+     )
+ 
+     app = FastAPI()
+@@ -73,12 +73,12 @@ def test_graph_endpoints_reflect_registered_workflows(monkeypatch):
+     graphs_response = client.get("/api/graphs")
+     assert graphs_response.status_code == 200
+     assert graphs_response.json() == {
+-        "graphs": ["chat_agent", "coding_agent", "router"],
++        "graphs": ["react_agent", "research_chain", "router"],
+     }
+ 
+     health_response = client.get("/api/health")
+     assert health_response.status_code == 200
+     assert health_response.json() == {
+         "status": "ok",
+-        "graphs": ["chat_agent", "coding_agent", "router"],
++        "graphs": ["react_agent", "research_chain", "router"],
+     }
+diff --git a/tests/test_trim_node.py b/tests/test_trim_node.py
+index 16cf024..c685169 100644
+--- a/tests/test_trim_node.py
++++ b/tests/test_trim_node.py
+@@ -1,3 +1,5 @@
++from types import SimpleNamespace
++
+ from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage
+ 
+ from agent.modules.workflows.infrastructure.langgraph.nodes.trim import (
+@@ -25,7 +27,7 @@ def test_prepare_context_trims_to_token_budget():
+ 
+     result = node(
+         {"messages": messages},
+-        {"configurable": {"max_context_tokens": 21}},
++        SimpleNamespace(context={"max_context_tokens": 21}),
+     )
+ 
+     updates = result["messages"]
+@@ -50,7 +52,7 @@ def test_prepare_context_removes_non_human_prefix_when_needed():
+ 
+     result = node(
+         {"messages": messages},
+-        {"configurable": {"max_context_tokens": 10}},
++        SimpleNamespace(context={"max_context_tokens": 10}),
+     )
+ 
+     updates = result["messages"]
+@@ -72,7 +74,7 @@ def test_prepare_context_noop_when_window_is_already_valid():
+ 
+     result = node(
+         {"messages": messages},
+-        {"configurable": {"max_context_tokens": 10}},
++        SimpleNamespace(context={"max_context_tokens": 10}),
+     )
+ 
+     assert result == {}
+diff --git a/tests/test_workflow_llm_node_skills.py b/tests/test_workflow_llm_node_skills.py
+index 865e0ab..21abf66 100644
+--- a/tests/test_workflow_llm_node_skills.py
++++ b/tests/test_workflow_llm_node_skills.py
+@@ -53,12 +53,12 @@ def test_make_llm_node_injects_skills_catalog_when_skill_tool_exists(monkeypatch
+ 
+     result = node(
+         {"messages": [HumanMessage(content="help me")]},
+-        {
+-            "configurable": {
++        SimpleNamespace(
++            context={
+                 "service_type": "backend",
+                 "working_dir": "D:/repo",
+             }
+-        },
++        ),
+     )
+ 
+     assert result["messages"][0].content == "ok"
+@@ -95,12 +95,12 @@ def test_make_llm_node_skips_skills_catalog_when_catalog_is_empty(monkeypatch):
+ 
+     node(
+         {"messages": [HumanMessage(content="help me")]},
+-        {
+-            "configurable": {
++        SimpleNamespace(
++            context={
+                 "service_type": "backend",
+                 "working_dir": "D:/repo",
+             }
+-        },
++        ),
+     )
+ 
+     system_message = captured["messages"][0]
+@@ -128,7 +128,7 @@ def test_make_llm_node_skips_catalog_when_skill_tool_not_registered(monkeypatch)
+ 
+     node(
+         {"messages": [HumanMessage(content="hello")]},
+-        {"configurable": {"service_type": "default", "working_dir": "."}},
++        SimpleNamespace(context={"service_type": "default", "working_dir": "."}),
+     )
+ 
+     system_message = captured["messages"][0]

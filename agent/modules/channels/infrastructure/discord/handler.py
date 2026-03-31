@@ -17,7 +17,7 @@ async def handle_message(message) -> None:
         user_id=str(message.author.id),
         user_input=message.content,
         channel_id=str(message.channel.id),
-        workflow="chat_agent",
+        workflow="react_agent",
     )
 
     async with message.channel.typing():

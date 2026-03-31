@@ -3,7 +3,11 @@ from typing import Any, AsyncGenerator
 from langchain_core.messages import HumanMessage
 
 from agent.modules.agent_runtime.application.session import SessionManager
-from agent.modules.workflows.public import get_workflow_graph, make_run_config
+from agent.modules.workflows.public import (
+    get_workflow_graph,
+    make_run_config,
+    make_run_context,
+)
 
 
 def build_run_params(
@@ -11,7 +15,7 @@ def build_run_params(
     platform: str,
     user_id: str,
     user_input: str,
-    workflow: str = "chat_agent",
+    workflow: str = "react_agent",
     service_type: str = "default",
     working_dir: str | None = None,
     max_context_tokens: int = 50_000,
@@ -51,8 +55,8 @@ async def run_agent(
     """Run a workflow graph and stream assistant chunks."""
 
     graph = get_workflow_graph(workflow)
-    config = make_run_config(
-        thread_id=thread_id,
+    config = make_run_config(thread_id=thread_id)
+    context = make_run_context(
         service_type=service_type,
         working_dir=working_dir,
         max_context_tokens=max_context_tokens,
@@ -61,6 +65,7 @@ async def run_agent(
     async for event in graph.astream(
         {"messages": [HumanMessage(content=user_input)]},
         config=config,
+        context=context,
         stream_mode="values",
     ):
         messages = event.get("messages", [])
@@ -81,8 +86,8 @@ async def run_agent_stream(
     """Run a workflow graph and stream UI events (tool calls and text chunks)."""
 
     graph = get_workflow_graph(workflow)
-    config = make_run_config(
-        thread_id=thread_id,
+    config = make_run_config(thread_id=thread_id)
+    context = make_run_context(
         service_type=service_type,
         working_dir=working_dir,
         max_context_tokens=max_context_tokens,
@@ -93,6 +98,7 @@ async def run_agent_stream(
     async for event in graph.astream(
         {"messages": [HumanMessage(content=user_input)]},
         config=config,
+        context=context,
         stream_mode="values",
     ):
         messages = event.get("messages", [])

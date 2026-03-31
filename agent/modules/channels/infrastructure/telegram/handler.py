@@ -81,7 +81,7 @@ async def handle_message(message) -> None:
         user_id=str(message.from_user.id),
         user_input=message.text,
         channel_id=str(message.chat.id),
-        workflow="chat_agent",
+        workflow="react_agent",
         working_dir=r"C:\Users\kh4n\kaka-agent-v2"
     )
 
@@ -139,7 +139,7 @@ def create_dispatcher():
             user_id=str(message.from_user.id),
             user_input=text,
             channel_id=str(message.chat.id),
-            workflow="coding_agent",
+            workflow="react_agent",
             service_type="backend",
         )
         await handle_streaming_response(message, params)

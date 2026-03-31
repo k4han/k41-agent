@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage
 
 from agent.modules.workflows.infrastructure.langgraph.nodes.trim import (
@@ -25,7 +27,7 @@ def test_prepare_context_trims_to_token_budget():
 
     result = node(
         {"messages": messages},
-        {"configurable": {"max_context_tokens": 21}},
+        SimpleNamespace(context={"max_context_tokens": 21}),
     )
 
     updates = result["messages"]
@@ -50,7 +52,7 @@ def test_prepare_context_removes_non_human_prefix_when_needed():
 
     result = node(
         {"messages": messages},
-        {"configurable": {"max_context_tokens": 10}},
+        SimpleNamespace(context={"max_context_tokens": 10}),
     )
 
     updates = result["messages"]
@@ -72,7 +74,7 @@ def test_prepare_context_noop_when_window_is_already_valid():
 
     result = node(
         {"messages": messages},
-        {"configurable": {"max_context_tokens": 10}},
+        SimpleNamespace(context={"max_context_tokens": 10}),
     )
 
     assert result == {}

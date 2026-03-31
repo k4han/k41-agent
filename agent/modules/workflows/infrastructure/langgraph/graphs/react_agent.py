@@ -12,45 +12,56 @@ from agent.modules.workflows.infrastructure.langgraph.nodes.tool import make_too
 from agent.modules.workflows.infrastructure.langgraph.nodes.trim import (
     make_prepare_context_node,
 )
-from agent.modules.workflows.infrastructure.langgraph.state.extensions import CodingState
+from agent.modules.workflows.infrastructure.langgraph.run_config import (
+    WorkflowContext,
+)
+from agent.modules.workflows.infrastructure.langgraph.state.base import BaseState
+from agent.modules.workflows.infrastructure.langgraph.tools.chat import (
+    echo,
+    get_current_time,
+)
 from agent.modules.workflows.infrastructure.langgraph.tools.common import (
     list_files,
     read_file,
     run_bash,
     write_file,
 )
+from agent.modules.workflows.infrastructure.langgraph.tools.skills import (
+    skill,
+)
 
 SYSTEM_PROMPTS = {
-    "default": "Bạn là coding assistant.\nWorking directory: {working_dir}",
+    "default": "You are a helpful AI assistant.\nWorking directory: {working_dir}",
     "backend": (
-        "Bạn là Python/backend engineer assistant.\n"
+        "You are a Python/backend engineer assistant.\n"
         "Working directory: {working_dir}\n"
-        "Chỉ thao tác file trong thư mục này. Ưu tiên viết code pythonic, có type hints."
+        "Focus on Pythonic implementations, type hints, and maintainable code."
     ),
     "frontend": (
-        "Bạn là React/TypeScript frontend engineer assistant.\n"
+        "You are a React/TypeScript frontend engineer assistant.\n"
         "Working directory: {working_dir}\n"
-        "Ưu tiên functional components, hooks, và best practices."
+        "Prefer functional components, hooks, and modern frontend best practices."
     ),
     "devops": (
-        "Bạn là DevOps engineer assistant.\n"
+        "You are a DevOps engineer assistant.\n"
         "Working directory: {working_dir}\n"
-        "Hỗ trợ Docker, CI/CD, shell scripting."
+        "Help with Docker, CI/CD, shell automation, and deployment operations."
     ),
 }
 
 
-def _should_continue(state: CodingState) -> str:
+def _should_continue(state: BaseState) -> str:
+    """Continue the loop if the last model message contains tool calls."""
     last: AIMessage = state["messages"][-1]
     if hasattr(last, "tool_calls") and last.tool_calls:
         return "tool"
     return END
 
 
-def build_coding_graph() -> None:
-    tools = [read_file, write_file, run_bash, list_files]
+def build_react_graph() -> None:
+    tools = [get_current_time, echo, skill, read_file, write_file, run_bash, list_files]
 
-    graph = StateGraph(CodingState)
+    graph = StateGraph(BaseState, context_schema=WorkflowContext)
     graph.add_node("prepare_context", make_prepare_context_node())
     graph.add_node("llm", make_llm_node(tools, system_prompts=SYSTEM_PROMPTS))
     graph.add_node("tool", make_tool_node(tools))
@@ -61,6 +72,6 @@ def build_coding_graph() -> None:
     graph.add_edge("tool", "llm")
 
     GraphRegistry.register(
-        "coding_agent",
+        "react_agent",
         graph.compile(checkpointer=get_checkpointer()),
     )
