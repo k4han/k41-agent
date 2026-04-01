@@ -12,16 +12,12 @@ from agent.modules.workflows.infrastructure.langgraph.compiled_registry import (
     GraphRegistry,
 )
 from agent.modules.workflows.infrastructure.langgraph.nodes.llm import llm_node
-from agent.modules.workflows.infrastructure.langgraph.nodes.tool import make_tool_node
+from agent.modules.workflows.infrastructure.langgraph.nodes.tool import tool_node
 from agent.modules.workflows.infrastructure.langgraph.nodes.trim import (
     make_prepare_context_node,
 )
 from agent.modules.workflows.infrastructure.langgraph.run_config import WorkflowContext
 from agent.modules.workflows.infrastructure.langgraph.state.base import BaseState
-from agent.modules.workflows.infrastructure.langgraph.tools.registry import (
-    get_tool_by_name,
-    get_default_tools,
-)
 
 
 def _should_continue(state: BaseState) -> str:
@@ -45,12 +41,10 @@ def build_react_graph(
     if checkpointer is None:
         checkpointer = get_checkpointer()
 
-    tools = get_default_tools()
-
     graph = StateGraph(BaseState, context_schema=WorkflowContext)
     graph.add_node("prepare_context", make_prepare_context_node())
     graph.add_node("llm", llm_node)
-    graph.add_node("tool", make_tool_node(tools))
+    graph.add_node("tool", tool_node)
 
     graph.add_edge(START, "prepare_context")
     graph.add_edge("prepare_context", "llm")
@@ -65,5 +59,4 @@ def build_react_graph(
         ),
     )
 
-
-__all__ = ["build_react_graph", "get_tool_by_name", "get_default_tools"]
+__all__ = ["build_react_graph"]

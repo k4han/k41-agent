@@ -9,6 +9,10 @@ from langchain_core.messages import BaseMessage, SystemMessage
 
 from agent.modules.providers.public import get_chat_model
 from agent.modules.skills.public import get_skills_catalog_xml
+from agent.modules.workflows.infrastructure.langgraph.tools.registry import (
+    get_default_tools,
+    resolve_tools,
+)
 
 if TYPE_CHECKING:
     from langgraph.runtime import Runtime
@@ -58,32 +62,13 @@ def _build_skills_prompt_section() -> str:
 
 
 @lru_cache(maxsize=32)
-def _resolve_tools(tool_names_key: tuple[str, ...], caller_agent_name: str):
-    """Resolve tool list from allowed tool names and caller agent name."""
-    from agent.modules.workflows.infrastructure.langgraph.tools.call_agent import (
-        make_call_agent_tool,
-    )
-    from agent.modules.workflows.infrastructure.langgraph.tools.registry import (
-        get_tool_by_name,
-    )
-
-    tools = []
-    for name in tool_names_key:
-        if name == "call_agent":
-            tools.append(make_call_agent_tool(caller_agent_name))
-        else:
-            tool = get_tool_by_name(name)
-            if tool:
-                tools.append(tool)
-    return tools
+def _resolve_tools(tool_names_key: tuple[str, ...]):
+    return resolve_tools(tool_names_key)
 
 
 @lru_cache(maxsize=1)
 def _get_default_tools():
-    from agent.modules.workflows.infrastructure.langgraph.tools.registry import (
-        get_default_tools as _gdt,
-    )
-    return _gdt()
+    return get_default_tools()
 
 
 def llm_node(state, runtime: "Runtime[WorkflowContext]"):
@@ -122,7 +107,7 @@ def llm_node(state, runtime: "Runtime[WorkflowContext]"):
     if tool_names is None:
         tools = _get_default_tools()
     else:
-        tools = _resolve_tools(tuple(tool_names), agent_name)
+        tools = _resolve_tools(tuple(tool_names))
 
     # Build system prompt
     system_prompt = system_prompt_template

@@ -1,5 +1,16 @@
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph.prebuilt import ToolNode
+from langgraph.runtime import Runtime
+
+from agent.modules.workflows.infrastructure.langgraph.run_config import (
+    WorkflowContext,
+    get_context_value,
+)
+from agent.modules.workflows.infrastructure.langgraph.tools.registry import (
+    get_default_tools,
+    resolve_tools,
+)
 
 
 def make_tool_node(tools: list[BaseTool]) -> ToolNode:
@@ -9,3 +20,18 @@ def make_tool_node(tools: list[BaseTool]) -> ToolNode:
     Config (working_dir, ...) được truyền qua RunnableConfig/InjectedToolArg.
     """
     return ToolNode(tools)
+
+
+async def tool_node(
+    state,
+    config: RunnableConfig,
+    runtime: Runtime[WorkflowContext],
+):
+    """Resolve the executable tool set at runtime to match llm_node bindings."""
+    allowed_tool_names = get_context_value(runtime.context, "allowed_tool_names", None)
+    tools = (
+        get_default_tools()
+        if allowed_tool_names is None
+        else resolve_tools(allowed_tool_names)
+    )
+    return await ToolNode(tools).ainvoke(state, config=config)
