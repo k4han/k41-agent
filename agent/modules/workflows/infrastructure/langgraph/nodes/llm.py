@@ -1,15 +1,20 @@
+"""Dynamic LLM node — resolves model, system prompt, and tools from agent config at runtime."""
+
+from __future__ import annotations
+
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
 from langchain_core.messages import BaseMessage, SystemMessage
-from langchain_core.tools import BaseTool
-from langgraph.runtime import Runtime
 
 from agent.modules.providers.public import get_chat_model
 from agent.modules.skills.public import get_skills_catalog_xml
-from agent.modules.workflows.infrastructure.langgraph.run_config import (
-    WorkflowContext,
-    get_context_value,
-)
+
+if TYPE_CHECKING:
+    from langgraph.runtime import Runtime
+    from agent.modules.workflows.infrastructure.langgraph.run_config import (
+        WorkflowContext,
+    )
 
 
 SKILLS_DISCLOSURE_PROMPT = (
@@ -18,9 +23,30 @@ SKILLS_DISCLOSURE_PROMPT = (
     "name to load full instructions before proceeding."
 )
 
+DEFAULT_MODEL = "devstral-2512"
 
-def _has_skill_tool(tools: list[BaseTool]) -> bool:
-    return any(getattr(tool, "name", "") == "skill" for tool in tools)
+SYSTEM_PROMPTS: dict[str, str] = {
+    "default": "You are a helpful AI assistant.\nWorking directory: {working_dir}",
+    "backend": (
+        "You are a Python/backend engineer assistant.\n"
+        "Working directory: {working_dir}\n"
+        "Focus on Pythonic implementations, type hints, and maintainable code."
+    ),
+    "frontend": (
+        "You are a React/TypeScript frontend engineer assistant.\n"
+        "Working directory: {working_dir}\n"
+        "Prefer functional components, hooks, and modern frontend best practices."
+    ),
+    "devops": (
+        "You are a DevOps engineer assistant.\n"
+        "Working directory: {working_dir}\n"
+        "Help with Docker, CI/CD, shell automation, and deployment operations."
+    ),
+}
+
+
+def _get_context_value(ctx: dict, key: str, default):
+    return ctx.get(key, default) if isinstance(ctx, dict) else default
 
 
 @lru_cache(maxsize=2)
@@ -28,56 +54,97 @@ def _build_skills_prompt_section() -> str:
     catalog_xml = get_skills_catalog_xml().strip()
     if catalog_xml == "<available_skills/>":
         return ""
-
     return f"\n\n{SKILLS_DISCLOSURE_PROMPT}\n{catalog_xml}"
 
 
 @lru_cache(maxsize=32)
-def _get_bound_llm(tool_names_key: tuple[str, ...], model: str):
-    """
-    Cache LLM with bound tools. Tool names used as cache key.
-    Don't cache by working_dir since working_dir is only used at runtime in tools.
-    """
-    return None
+def _resolve_tools(tool_names_key: tuple[str, ...], caller_agent_name: str):
+    """Resolve tool list from allowed tool names and caller agent name."""
+    from agent.modules.workflows.infrastructure.langgraph.tools.call_agent import (
+        make_call_agent_tool,
+    )
+    from agent.modules.workflows.infrastructure.langgraph.tools.registry import (
+        get_tool_by_name,
+    )
+
+    tools = []
+    for name in tool_names_key:
+        if name == "call_agent":
+            tools.append(make_call_agent_tool(caller_agent_name))
+        else:
+            tool = get_tool_by_name(name)
+            if tool:
+                tools.append(tool)
+    return tools
 
 
-def make_llm_node(
-    tools: list[BaseTool],
-    model: str = "devstral-2512",
-    system_prompts: dict[str, str] | None = None,
-):
-    """
-    Factory to create llm_node with a fixed set of tools.
-    system_prompts: dict mapping service_type → prompt template
-                    template can use {working_dir}
-    """
+@lru_cache(maxsize=1)
+def _get_default_tools():
+    from agent.modules.workflows.infrastructure.langgraph.tools.registry import (
+        get_default_tools as _gdt,
+    )
+    return _gdt()
+
+
+def llm_node(state, runtime: "Runtime[WorkflowContext]"):
+    """Dynamic node: reads agent_name from context, resolves full config at runtime."""
+    from agent.modules.agents.public import get_catalog_service
+
+    ctx = runtime.context
+    agent_name = _get_context_value(ctx, "agent_name", "default")
+    working_dir = _get_context_value(ctx, "working_dir", "")
+
+    # Load agent config from catalog
+    catalog = get_catalog_service()
+    config = catalog.get_agent(agent_name)
+
+    # Fallback to default agent if not found
+    if config is None:
+        config = catalog.get_agent("default")
+
+    # Extract config values with fallbacks
+    if config:
+        model = config.model or DEFAULT_MODEL
+        system_prompt_template = config.system_prompt or SYSTEM_PROMPTS["default"]
+        tool_names = config.tools if config.tools else None
+    else:
+        # Ultimate fallback (should not happen with builtin default)
+        model = DEFAULT_MODEL
+        system_prompt_template = SYSTEM_PROMPTS["default"]
+        tool_names = None
+
+    # Override tools if specified in context (for sub-agent calls)
+    ctx_tool_names = _get_context_value(ctx, "allowed_tool_names", None)
+    if ctx_tool_names is not None:
+        tool_names = ctx_tool_names
+
+    # Resolve tools
+    if tool_names is None:
+        tools = _get_default_tools()
+    else:
+        tools = _resolve_tools(tuple(tool_names), agent_name)
+
+    # Build system prompt
+    system_prompt = system_prompt_template
+    if working_dir and "{working_dir}" in system_prompt:
+        system_prompt = system_prompt.format(working_dir=working_dir)
+
+    # Inject skills catalog
+    if tools and any(getattr(t, "name", "") == "skill" for t in tools):
+        system_prompt = f"{system_prompt}{_build_skills_prompt_section()}"
+
+    messages: list[BaseMessage] = [
+        SystemMessage(content=system_prompt),
+        *state["messages"],
+    ]
+
     llm = get_chat_model(model=model).bind_tools(tools)
-    include_skills_catalog = _has_skill_tool(tools)
+    response = llm.invoke(messages)
+    return {"messages": [response]}
 
-    default_prompts = {
-        "default": "You are a helpful AI assistant.",
-        "backend": "You are a Python/backend engineer assistant.\nWorking directory: {working_dir}",
-        "frontend": "You are a React/frontend engineer assistant.\nWorking directory: {working_dir}",
-        "devops": "You are a DevOps engineer assistant.\nWorking directory: {working_dir}",
-    }
 
-    prompts = {**default_prompts, **(system_prompts or {})}
-
-    def llm_node(state, runtime: Runtime[WorkflowContext]):
-        service_type = get_context_value(runtime.context, "service_type", "default")
-        working_dir = get_context_value(runtime.context, "working_dir", ".")
-
-        prompt_template = prompts.get(service_type, prompts["default"])
-        system_prompt = prompt_template.format(working_dir=working_dir)
-        if include_skills_catalog:
-            system_prompt = f"{system_prompt}{_build_skills_prompt_section()}"
-
-        messages: list[BaseMessage] = [
-            SystemMessage(content=system_prompt),
-            *state["messages"],
-        ]
-
-        response = llm.invoke(messages)
-        return {"messages": [response]}
-
+# Compatibility alias for code that still calls make_llm_node().
+# The new design resolves config at runtime, so this just returns llm_node.
+def make_llm_node(tools=None, model=None, **_kwargs):
+    """Deprecated. Use llm_node directly — config is resolved at runtime."""
     return llm_node
