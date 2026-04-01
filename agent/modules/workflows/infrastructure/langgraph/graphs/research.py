@@ -53,4 +53,5 @@ def build_research_graph() -> None:
     GraphRegistry.register(
         "research_chain",
         graph.compile(checkpointer=get_checkpointer()),
+        description="research, information synthesis, and multi-step analysis",
     )

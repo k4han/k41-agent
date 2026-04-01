@@ -60,6 +60,9 @@ def build_react_graph(
     GraphRegistry.register(
         graph_name,
         graph.compile(checkpointer=checkpointer),
+        description=(
+            "general Q&A, coding, files, shell, and skill-assisted tasks"
+        ),
     )
 
 

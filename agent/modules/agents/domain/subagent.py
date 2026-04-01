@@ -13,7 +13,7 @@ class AgentConfig(BaseModel):
     name: str
     display_name: str = ""
     description: str = ""
-    graph_type: str  # react_agent, research_chain, router
+    graph_type: str  # Registered workflow name
     service_type: str = "default"
     model: str = ""
     tools: list[str] = Field(default_factory=list)

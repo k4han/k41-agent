@@ -22,7 +22,7 @@ def parse_agent_file(path: str | Path) -> AgentConfig | None:
     Expected format:
         ---
         name: my_agent
-        graph_type: react_agent  # optional, defaults to react_agent
+        graph_type: react_agent  # optional, defaults to the registered react_agent workflow
         ...
         ---
         System prompt body here...

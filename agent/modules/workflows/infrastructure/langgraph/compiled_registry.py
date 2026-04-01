@@ -8,10 +8,24 @@ class GraphRegistry:
     """
 
     _graphs: dict[str, CompiledStateGraph] = {}
+    _descriptions: dict[str, str] = {}
+    _routeable: set[str] = set()
 
     @classmethod
-    def register(cls, name: str, graph: CompiledStateGraph) -> None:
+    def register(
+        cls,
+        name: str,
+        graph: CompiledStateGraph,
+        *,
+        description: str = "",
+        routeable: bool = True,
+    ) -> None:
         cls._graphs[name] = graph
+        cls._descriptions[name] = description.strip()
+        if routeable:
+            cls._routeable.add(name)
+        else:
+            cls._routeable.discard(name)
         print(f"[Registry] Registered graph: '{name}'")
 
     @classmethod
@@ -31,3 +45,11 @@ class GraphRegistry:
     @classmethod
     def is_registered(cls, name: str) -> bool:
         return name in cls._graphs
+
+    @classmethod
+    def routeable_workflows(cls) -> dict[str, str]:
+        return {
+            name: cls._descriptions.get(name, "")
+            for name in cls._graphs
+            if name in cls._routeable
+        }
