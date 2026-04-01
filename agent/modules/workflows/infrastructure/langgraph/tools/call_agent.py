@@ -50,15 +50,20 @@ def make_call_agent_tool(agent_name: str) -> BaseTool:
         except ValueError:
             return f"[error] graph type '{target_config.graph_type}' not registered."
 
+        from agent.modules.workflows.infrastructure.langgraph.run_config import (
+            DEFAULT_WORKING_DIR,
+        )
+
         # Build context from target agent config
         context = make_run_context(
             service_type=target_config.service_type,
-            working_dir=".",
+            working_dir=DEFAULT_WORKING_DIR,
             max_context_tokens=target_config.max_context_tokens,
             agent_name=sub_agent,
             allowed_tool_names=target_config.tools if target_config.tools else None,
         )
         import uuid
+
         config = make_run_config(thread_id=f"sub_{sub_agent}_{uuid.uuid4().hex[:8]}")
 
         try:

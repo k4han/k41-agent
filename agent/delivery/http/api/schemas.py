@@ -6,9 +6,10 @@ from pydantic import BaseModel
 class ChatRequest(BaseModel):
     message: str
     user_id: str = "anonymous"
-    workflow: str = "react_agent"
+    workflow: Optional[str] = None
     service_type: str = "default"
     working_dir: Optional[str] = None
+    agent_name: Optional[str] = None
 
 
 class ChatResponse(BaseModel):

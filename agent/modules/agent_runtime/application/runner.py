@@ -16,47 +16,35 @@ def build_run_params(
     user_id: str,
     user_input: str,
     workflow: str | None = None,
-    service_type: str = "default",
+    service_type: str | None = None,
     working_dir: str | None = None,
-    max_context_tokens: int = 50_000,
+    max_context_tokens: int | None = None,
     channel_id: str = "",
-    agent_name: str | None = None,
+    agent_name: str = "default",
 ) -> dict[str, Any]:
-    """Build run parameters, resolving workflow from agent config when provided.
+    """Build run parameters for agent execution.
 
-    Resolution priority:
-    1. `agent_name` (if provided) -> load config from catalog and derive workflow.
-    2. explicit `workflow`.
-    3. fallback to "react_agent".
+    All config is loaded from agent_name, with optional overrides.
+
+    Args:
+        platform: Platform identifier (telegram, discord, api, etc.)
+        user_id: User identifier
+        user_input: User message
+        workflow: Override agent's graph_type if needed
+        service_type: Override agent's service_type if needed
+        working_dir: Working directory for tools
+        max_context_tokens: Override agent's max_context_tokens if needed
+        channel_id: Channel identifier (for multi-channel platforms)
+        agent_name: Agent to use (loads config from catalog)
     """
-    resolved_workflow = workflow
-    resolved_service_type = service_type
-    resolved_max_context_tokens = max_context_tokens
-    resolved_agent_name = "default"
-
-    if agent_name:
-        from agent.modules.agents.public import get_catalog_service
-
-        catalog = get_catalog_service()
-        agent_config = catalog.get_agent(agent_name)
-        if agent_config is None:
-            raise ValueError(f"Agent '{agent_name}' not found in catalog")
-
-        resolved_agent_name = agent_config.name
-        resolved_workflow = agent_config.graph_type
-        resolved_service_type = agent_config.service_type
-        resolved_max_context_tokens = agent_config.max_context_tokens
-    elif not resolved_workflow:
-        resolved_workflow = "react_agent"
-
     return {
-        "workflow": resolved_workflow,
         "user_input": user_input,
-        "service_type": resolved_service_type,
-        "working_dir": working_dir,
-        "max_context_tokens": resolved_max_context_tokens,
         "thread_id": SessionManager.make_thread_id(platform, user_id, channel_id),
-        "agent_name": resolved_agent_name if agent_name else "default",
+        "agent_name": agent_name,
+        "workflow": workflow,
+        "service_type": service_type,
+        "working_dir": working_dir,
+        "max_context_tokens": max_context_tokens,
     }
 
 
@@ -74,35 +62,52 @@ async def clear_agent_session(
 
 
 async def run_agent(
-    workflow: str,
     user_input: str,
     thread_id: str,
-    service_type: str = "default",
-    working_dir: str | None = None,
-    max_context_tokens: int = 50_000,
     agent_name: str = "default",
+    *,
+    workflow: str | None = None,
+    service_type: str | None = None,
+    working_dir: str | None = None,
+    max_context_tokens: int | None = None,
+    allowed_tool_names: list[str] | None = None,
 ) -> AsyncGenerator[str, None]:
-    """Run a workflow graph and stream assistant chunks."""
+    """Run a workflow graph and stream assistant chunks.
 
-    graph = get_workflow_graph(workflow)
+    Loads full config from agent_name, allows selective overrides.
+
+    Args:
+        user_input: User message
+        thread_id: Session thread ID
+        agent_name: Agent to use (loads config from catalog)
+        workflow: Override agent's graph_type if needed
+        service_type: Override agent's service_type if needed
+        working_dir: Working directory for tools
+        max_context_tokens: Override agent's max_context_tokens if needed
+        allowed_tool_names: Override agent's tools if needed
+    """
+    from agent.modules.agents.public import get_catalog_service
+
+    catalog = get_catalog_service()
+    agent_config = catalog.get_agent(agent_name)
+    if agent_config is None:
+        raise ValueError(f"Agent '{agent_name}' not found in catalog")
+
+    # Resolve: explicit params > agent config
+    resolved_workflow = workflow or agent_config.graph_type
+    resolved_service_type = service_type or agent_config.service_type
+    resolved_max_tokens = max_context_tokens or agent_config.max_context_tokens
+    resolved_tools = allowed_tool_names if allowed_tool_names is not None else agent_config.tools
+
+    graph = get_workflow_graph(resolved_workflow)
     config = make_run_config(thread_id=thread_id)
 
-    # Resolve allowed_tool_names from agent config
-    allowed_tool_names = None
-    if agent_name:
-        from agent.modules.agents.public import get_catalog_service
-
-        catalog = get_catalog_service()
-        agent_config = catalog.get_agent(agent_name)
-        if agent_config:
-            allowed_tool_names = agent_config.tools or None
-
     context = make_run_context(
-        service_type=service_type,
+        service_type=resolved_service_type,
         working_dir=working_dir,
-        max_context_tokens=max_context_tokens,
+        max_context_tokens=resolved_max_tokens,
         agent_name=agent_name,
-        allowed_tool_names=allowed_tool_names,
+        allowed_tool_names=resolved_tools or None,
     )
 
     async for event in graph.astream(
@@ -119,34 +124,52 @@ async def run_agent(
 
 
 async def run_agent_stream(
-    workflow: str,
     user_input: str,
     thread_id: str,
-    service_type: str = "default",
-    working_dir: str | None = None,
-    max_context_tokens: int = 50_000,
     agent_name: str = "default",
+    *,
+    workflow: str | None = None,
+    service_type: str | None = None,
+    working_dir: str | None = None,
+    max_context_tokens: int | None = None,
+    allowed_tool_names: list[str] | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
-    """Run a workflow graph and stream UI events (tool calls and text chunks)."""
+    """Run a workflow graph and stream UI events (tool calls and text chunks).
 
-    graph = get_workflow_graph(workflow)
+    Loads full config from agent_name, allows selective overrides.
+
+    Args:
+        user_input: User message
+        thread_id: Session thread ID
+        agent_name: Agent to use (loads config from catalog)
+        workflow: Override agent's graph_type if needed
+        service_type: Override agent's service_type if needed
+        working_dir: Working directory for tools
+        max_context_tokens: Override agent's max_context_tokens if needed
+        allowed_tool_names: Override agent's tools if needed
+    """
+    from agent.modules.agents.public import get_catalog_service
+
+    catalog = get_catalog_service()
+    agent_config = catalog.get_agent(agent_name)
+    if agent_config is None:
+        raise ValueError(f"Agent '{agent_name}' not found in catalog")
+
+    # Resolve: explicit params > agent config
+    resolved_workflow = workflow or agent_config.graph_type
+    resolved_service_type = service_type or agent_config.service_type
+    resolved_max_tokens = max_context_tokens or agent_config.max_context_tokens
+    resolved_tools = allowed_tool_names if allowed_tool_names is not None else agent_config.tools
+
+    graph = get_workflow_graph(resolved_workflow)
     config = make_run_config(thread_id=thread_id)
 
-    allowed_tool_names = None
-    if agent_name:
-        from agent.modules.agents.public import get_catalog_service
-
-        catalog = get_catalog_service()
-        agent_config = catalog.get_agent(agent_name)
-        if agent_config:
-            allowed_tool_names = agent_config.tools or None
-
     context = make_run_context(
-        service_type=service_type,
+        service_type=resolved_service_type,
         working_dir=working_dir,
-        max_context_tokens=max_context_tokens,
+        max_context_tokens=resolved_max_tokens,
         agent_name=agent_name,
-        allowed_tool_names=allowed_tool_names,
+        allowed_tool_names=resolved_tools or None,
     )
 
     seen_ids = set()
@@ -160,7 +183,7 @@ async def run_agent_stream(
         messages = event.get("messages", [])
         if not messages:
             continue
-            
+
         last = messages[-1]
         if last.id in seen_ids:
             continue
@@ -182,25 +205,40 @@ async def run_agent_stream(
                 }
 
 async def run_agent_full(
-    workflow: str,
     user_input: str,
     thread_id: str,
-    service_type: str = "default",
-    working_dir: str | None = None,
-    max_context_tokens: int = 50_000,
     agent_name: str = "default",
+    *,
+    workflow: str | None = None,
+    service_type: str | None = None,
+    working_dir: str | None = None,
+    max_context_tokens: int | None = None,
+    allowed_tool_names: list[str] | None = None,
 ) -> str:
-    """Run a workflow graph and return the final assistant response."""
+    """Run a workflow graph and return the final assistant response.
 
+    Loads full config from agent_name, allows selective overrides.
+
+    Args:
+        user_input: User message
+        thread_id: Session thread ID
+        agent_name: Agent to use (loads config from catalog)
+        workflow: Override agent's graph_type if needed
+        service_type: Override agent's service_type if needed
+        working_dir: Working directory for tools
+        max_context_tokens: Override agent's max_context_tokens if needed
+        allowed_tool_names: Override agent's tools if needed
+    """
     chunks = []
     async for chunk in run_agent(
-        workflow=workflow,
         user_input=user_input,
         thread_id=thread_id,
+        agent_name=agent_name,
+        workflow=workflow,
         service_type=service_type,
         working_dir=working_dir,
         max_context_tokens=max_context_tokens,
-        agent_name=agent_name,
+        allowed_tool_names=allowed_tool_names,
     ):
         chunks.append(chunk)
     return chunks[-1] if chunks else ""

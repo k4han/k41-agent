@@ -20,6 +20,7 @@ def _request_to_run_params(request: ChatRequest) -> dict[str, object]:
         workflow=request.workflow,
         service_type=request.service_type,
         working_dir=request.working_dir,
+        agent_name=request.agent_name or "default",
     )
 
 

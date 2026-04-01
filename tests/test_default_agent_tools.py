@@ -13,6 +13,7 @@ def load_agents():
 def test_default_agent_tools_loaded():
     """Verify that default agent's tools are loaded from config."""
     from agent.modules.agent_runtime.application.runner import build_run_params
+    from agent.modules.agents.public import get_catalog_service
 
     # Build params with agent_name="default"
     params = build_run_params(
@@ -25,8 +26,12 @@ def test_default_agent_tools_loaded():
     # Should have agent_name set
     assert params["agent_name"] == "default"
 
-    # Workflow should be resolved from agent config
-    assert params["workflow"] == "react_agent"
+    # Workflow is not resolved in build_run_params anymore
+    # It's resolved in run_agent functions from agent config
+    catalog = get_catalog_service()
+    default_config = catalog.get_agent("default")
+    assert default_config is not None
+    assert default_config.graph_type == "react_agent"
 
 
 def test_default_agent_config_exists():
