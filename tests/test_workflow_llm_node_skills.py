@@ -20,13 +20,29 @@ class _FakeChatModel:
 
 def _fake_chat_model_factory(captured: dict):
     def _factory(model: str):
+        captured["model"] = model
         return _FakeChatModel(captured)
 
     return _factory
 
 
-def test_make_llm_node_injects_skills_catalog_when_skill_tool_exists(monkeypatch):
+def test_llm_node_uses_prompt_builder_output_for_system_message(monkeypatch):
     captured: dict = {}
+    builder_calls: dict = {}
+
+    class _FakeCatalog:
+        def get_agent(self, name: str):
+            assert name == "builder-agent"
+            return SimpleNamespace(
+                model="model-x",
+                system_prompt="Agent prompt: {working_dir}",
+                tools=["skill", "read_file"],
+            )
+
+    def _fake_builder(**kwargs):
+        builder_calls.update(kwargs)
+        return "Prompt built elsewhere"
+
     monkeypatch.setattr(
         llm_node_module,
         "get_chat_model",
@@ -34,28 +50,24 @@ def test_make_llm_node_injects_skills_catalog_when_skill_tool_exists(monkeypatch
     )
     monkeypatch.setattr(
         llm_node_module,
-        "get_skills_catalog_xml",
-        lambda: (
-            "<available_skills><skill><name>sql-assistant</name>"
-            "</skill></available_skills>"
-        ),
+        "build_llm_system_prompt",
+        _fake_builder,
+    )
+    monkeypatch.setattr(
+        llm_node_module,
+        "_resolve_tools",
+        lambda names: [SimpleNamespace(name=name) for name in names],
+    )
+    monkeypatch.setattr(
+        "agent.modules.agents.public.get_catalog_service",
+        lambda: _FakeCatalog(),
     )
 
-    node = llm_node_module.make_llm_node(
-        tools=[SimpleNamespace(name="skill")],
-        system_prompts={
-            "backend": (
-                "Custom backend assistant.\n"
-                "Working directory: {working_dir}"
-            )
-        },
-    )
-
-    result = node(
+    result = llm_node_module.llm_node(
         {"messages": [HumanMessage(content="help me")]},
         SimpleNamespace(
             context={
-                "service_type": "backend",
+                "agent_name": "builder-agent",
                 "working_dir": "D:/repo",
             }
         ),
@@ -64,14 +76,32 @@ def test_make_llm_node_injects_skills_catalog_when_skill_tool_exists(monkeypatch
     assert result["messages"][0].content == "ok"
     system_message = captured["messages"][0]
     assert isinstance(system_message, SystemMessage)
-    assert "Custom backend assistant." in system_message.content
-    assert "D:/repo" in system_message.content
-    assert "<available_skills>" in system_message.content
-    assert "call the skill tool" in system_message.content
+    assert system_message.content == "Prompt built elsewhere"
+    assert captured["model"] == "model-x"
+    assert [tool.name for tool in captured["tools"]] == ["skill", "read_file"]
+    assert builder_calls["system_prompt_template"] == "Agent prompt: {working_dir}"
+    assert builder_calls["working_dir"] == "D:/repo"
+    assert builder_calls["agent_name"] == "builder-agent"
+    assert [tool.name for tool in builder_calls["tools"]] == ["skill", "read_file"]
 
 
-def test_make_llm_node_skips_skills_catalog_when_catalog_is_empty(monkeypatch):
+def test_llm_node_prefers_runtime_allowed_tool_names_before_building_prompt(monkeypatch):
     captured: dict = {}
+    builder_calls: dict = {}
+
+    class _FakeCatalog:
+        def get_agent(self, name: str):
+            assert name == "override-agent"
+            return SimpleNamespace(
+                model="model-y",
+                system_prompt="Override prompt",
+                tools=["read_file"],
+            )
+
+    def _fake_builder(**kwargs):
+        builder_calls.update(kwargs)
+        return "Prompt with overridden tools"
+
     monkeypatch.setattr(
         llm_node_module,
         "get_chat_model",
@@ -79,58 +109,29 @@ def test_make_llm_node_skips_skills_catalog_when_catalog_is_empty(monkeypatch):
     )
     monkeypatch.setattr(
         llm_node_module,
-        "get_skills_catalog_xml",
-        lambda: "<available_skills/>",
+        "build_llm_system_prompt",
+        _fake_builder,
+    )
+    monkeypatch.setattr(
+        llm_node_module,
+        "_resolve_tools",
+        lambda names: [SimpleNamespace(name=name) for name in names],
+    )
+    monkeypatch.setattr(
+        "agent.modules.agents.public.get_catalog_service",
+        lambda: _FakeCatalog(),
     )
 
-    node = llm_node_module.make_llm_node(
-        tools=[SimpleNamespace(name="skill")],
-        system_prompts={
-            "backend": (
-                "Custom backend assistant.\n"
-                "Working directory: {working_dir}"
-            )
-        },
-    )
-
-    node(
-        {"messages": [HumanMessage(content="help me")]},
+    llm_node_module.llm_node(
+        {"messages": [HumanMessage(content="hello")]},
         SimpleNamespace(
             context={
-                "service_type": "backend",
+                "agent_name": "override-agent",
                 "working_dir": "D:/repo",
+                "allowed_tool_names": ["call_agent", "skill"],
             }
         ),
     )
 
-    system_message = captured["messages"][0]
-    assert isinstance(system_message, SystemMessage)
-    assert "<available_skills" not in system_message.content
-    assert "call the skill tool" not in system_message.content
-
-
-def test_make_llm_node_skips_catalog_when_skill_tool_not_registered(monkeypatch):
-    captured: dict = {}
-    monkeypatch.setattr(
-        llm_node_module,
-        "get_chat_model",
-        _fake_chat_model_factory(captured),
-    )
-    monkeypatch.setattr(
-        llm_node_module,
-        "get_skills_catalog_xml",
-        lambda: "<available_skills><skill><name>x</name></skill></available_skills>",
-    )
-
-    node = llm_node_module.make_llm_node(
-        tools=[SimpleNamespace(name="echo")],
-    )
-
-    node(
-        {"messages": [HumanMessage(content="hello")]},
-        SimpleNamespace(context={"service_type": "default", "working_dir": "."}),
-    )
-
-    system_message = captured["messages"][0]
-    assert isinstance(system_message, SystemMessage)
-    assert "<available_skills" not in system_message.content
+    assert [tool.name for tool in captured["tools"]] == ["call_agent", "skill"]
+    assert [tool.name for tool in builder_calls["tools"]] == ["call_agent", "skill"]

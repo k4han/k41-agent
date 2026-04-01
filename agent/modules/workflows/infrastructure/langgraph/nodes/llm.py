@@ -8,7 +8,9 @@ from typing import TYPE_CHECKING
 from langchain_core.messages import BaseMessage, SystemMessage
 
 from agent.modules.providers.public import get_chat_model
-from agent.modules.skills.public import get_skills_catalog_xml
+from agent.modules.workflows.infrastructure.langgraph.prompt_builders import (
+    build_llm_system_prompt,
+)
 from agent.modules.workflows.infrastructure.langgraph.tools.registry import (
     get_default_tools,
     resolve_tools,
@@ -19,25 +21,6 @@ if TYPE_CHECKING:
     from agent.modules.workflows.infrastructure.langgraph.run_config import (
         WorkflowContext,
     )
-
-
-SKILLS_DISCLOSURE_PROMPT = (
-    "The following skills provide specialized instructions for specific tasks.\n"
-    "When a task matches a skill description, call the skill tool with the skill "
-    "name to load full instructions before proceeding."
-)
-
-SUB_AGENT_DISCLOSURE_PROMPT = (
-    "The call_agent tool can delegate work to the following specialized "
-    "sub-agents.\n"
-    "Use the exact sub_agent name when delegating:"
-)
-
-SUB_AGENT_EMPTY_PROMPT = (
-    "The call_agent tool is available, but this agent has no callable "
-    "sub-agents configured.\n"
-    "Do not call call_agent unless a callable sub-agent is listed."
-)
 
 DEFAULT_MODEL = "devstral-2512"
 
@@ -63,36 +46,6 @@ SYSTEM_PROMPTS: dict[str, str] = {
 
 def _get_context_value(ctx: dict, key: str, default):
     return ctx.get(key, default) if isinstance(ctx, dict) else default
-
-
-@lru_cache(maxsize=2)
-def _build_skills_prompt_section() -> str:
-    catalog_xml = get_skills_catalog_xml().strip()
-    if catalog_xml == "<available_skills/>":
-        return ""
-    return f"\n\n{SKILLS_DISCLOSURE_PROMPT}\n{catalog_xml}"
-
-
-def _build_sub_agents_prompt_section(agent_name: str, catalog) -> str:
-    get_callable_agents = getattr(catalog, "get_callable_agents", None)
-    if not callable(get_callable_agents):
-        return ""
-
-    callable_agents = list(get_callable_agents(agent_name) or [])
-    if not callable_agents:
-        return f"\n\n{SUB_AGENT_EMPTY_PROMPT}"
-
-    lines = [SUB_AGENT_DISCLOSURE_PROMPT]
-    for sub_agent_name in callable_agents:
-        sub_agent_config = catalog.get_agent(sub_agent_name)
-        description = ""
-        if sub_agent_config is not None:
-            description = str(getattr(sub_agent_config, "description", "") or "").strip()
-        if not description:
-            description = "No description provided."
-        lines.append(f"- {sub_agent_name}: {description}")
-    section = "\n".join(lines)
-    return f"\n\n{section}"
 
 
 @lru_cache(maxsize=32)
@@ -143,19 +96,13 @@ def llm_node(state, runtime: "Runtime[WorkflowContext]"):
     else:
         tools = _resolve_tools(tuple(tool_names))
 
-    # Build system prompt
-    system_prompt = system_prompt_template
-    if working_dir and "{working_dir}" in system_prompt:
-        system_prompt = system_prompt.format(working_dir=working_dir)
-
-    if tools and any(getattr(t, "name", "") == "call_agent" for t in tools):
-        system_prompt = (
-            f"{system_prompt}{_build_sub_agents_prompt_section(agent_name, catalog)}"
-        )
-
-    # Inject skills catalog
-    if tools and any(getattr(t, "name", "") == "skill" for t in tools):
-        system_prompt = f"{system_prompt}{_build_skills_prompt_section()}"
+    system_prompt = build_llm_system_prompt(
+        system_prompt_template=system_prompt_template,
+        working_dir=working_dir,
+        agent_name=agent_name,
+        tools=tools,
+        catalog=catalog,
+    )
 
     messages: list[BaseMessage] = [
         SystemMessage(content=system_prompt),

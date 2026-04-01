@@ -1,192 +1,167 @@
 from types import SimpleNamespace
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-
-import agent.modules.workflows.infrastructure.langgraph.nodes.llm as llm_node_module
+import agent.modules.workflows.infrastructure.langgraph.prompt_builders as prompt_builders
 
 
-class _FakeChatModel:
-    def __init__(self, captured: dict):
-        self._captured = captured
+class _FakeCatalog:
+    def __init__(self, callable_agents=None, configs=None):
+        self._callable_agents = list(callable_agents or [])
+        self._configs = configs or {}
 
-    def bind_tools(self, tools):
-        self._captured["tools"] = tools
-        return self
+    def get_callable_agents(self, for_agent_name: str):
+        self.requested_agent_name = for_agent_name
+        return list(self._callable_agents)
 
-    def invoke(self, messages):
-        self._captured["messages"] = messages
-        return AIMessage(content="ok")
-
-
-def _fake_chat_model_factory(captured: dict):
-    def _factory(model: str):
-        captured["model"] = model
-        return _FakeChatModel(captured)
-
-    return _factory
+    def get_agent(self, name: str):
+        return self._configs.get(name)
 
 
-def test_llm_node_injects_callable_subagents_into_system_prompt(monkeypatch):
-    captured: dict = {}
-    configs = {
-        "orchestrator": SimpleNamespace(
-            model="devstral-2512",
-            system_prompt="You are an orchestrator.\nWorking directory: {working_dir}",
-            tools=["call_agent", "read_file"],
-            description="",
-        ),
-        "research": SimpleNamespace(
-            description="Research specialist for in-depth information gathering",
-        ),
-        "backend": SimpleNamespace(
-            description="Python/backend engineer assistant",
-        ),
-    }
-
-    class _FakeCatalog:
-        def get_agent(self, name: str):
-            return configs.get(name)
-
-        def get_callable_agents(self, for_agent_name: str):
-            assert for_agent_name == "orchestrator"
-            return ["research", "backend"]
-
-    monkeypatch.setattr(
-        llm_node_module,
-        "get_chat_model",
-        _fake_chat_model_factory(captured),
-    )
-    monkeypatch.setattr(
-        llm_node_module,
-        "_resolve_tools",
-        lambda names: [SimpleNamespace(name=name) for name in names],
-    )
-    monkeypatch.setattr(
-        "agent.modules.agents.public.get_catalog_service",
-        lambda: _FakeCatalog(),
+def test_build_llm_system_prompt_formats_working_dir_without_extra_sections():
+    prompt = prompt_builders.build_llm_system_prompt(
+        system_prompt_template="Base prompt\nWorking directory: {working_dir}",
+        working_dir="D:/repo",
+        agent_name="default",
+        tools=[SimpleNamespace(name="read_file")],
+        catalog=_FakeCatalog(),
     )
 
-    result = llm_node_module.llm_node(
-        {"messages": [HumanMessage(content="delegate this task")]},
-        SimpleNamespace(
-            context={
-                "agent_name": "orchestrator",
-                "working_dir": "D:/repo",
-            }
+    assert prompt == "Base prompt\nWorking directory: D:/repo"
+
+
+def test_build_llm_system_prompt_injects_skills_section_when_skill_tool_exists(monkeypatch):
+    monkeypatch.setattr(
+        prompt_builders,
+        "get_skills_catalog_xml",
+        lambda: (
+            "<available_skills><skill><name>sql-assistant</name>"
+            "</skill></available_skills>"
         ),
     )
 
-    assert result["messages"][0].content == "ok"
-    system_message = captured["messages"][0]
-    assert isinstance(system_message, SystemMessage)
-    assert "You are an orchestrator." in system_message.content
-    assert "D:/repo" in system_message.content
-    assert llm_node_module.SUB_AGENT_DISCLOSURE_PROMPT in system_message.content
-    assert (
-        "- research: Research specialist for in-depth information gathering"
-        in system_message.content
+    prompt = prompt_builders.build_llm_system_prompt(
+        system_prompt_template="Base prompt",
+        working_dir="",
+        agent_name="default",
+        tools=[SimpleNamespace(name="skill")],
+        catalog=_FakeCatalog(),
     )
-    assert "- backend: Python/backend engineer assistant" in system_message.content
+
+    assert prompt_builders.SKILLS_DISCLOSURE_PROMPT in prompt
+    assert "<available_skills>" in prompt
 
 
-def test_llm_node_injects_empty_subagent_notice_when_none_are_callable(monkeypatch):
-    captured: dict = {}
-    configs = {
-        "solo": SimpleNamespace(
-            model="devstral-2512",
-            system_prompt="You are a solo agent.\nWorking directory: {working_dir}",
-            tools=["call_agent"],
-            description="",
-        ),
-    }
-
-    class _FakeCatalog:
-        def get_agent(self, name: str):
-            return configs.get(name)
-
-        def get_callable_agents(self, for_agent_name: str):
-            assert for_agent_name == "solo"
-            return []
-
+def test_build_llm_system_prompt_skips_skills_section_when_catalog_is_empty(monkeypatch):
     monkeypatch.setattr(
-        llm_node_module,
-        "get_chat_model",
-        _fake_chat_model_factory(captured),
-    )
-    monkeypatch.setattr(
-        llm_node_module,
-        "_resolve_tools",
-        lambda names: [SimpleNamespace(name=name) for name in names],
-    )
-    monkeypatch.setattr(
-        "agent.modules.agents.public.get_catalog_service",
-        lambda: _FakeCatalog(),
+        prompt_builders,
+        "get_skills_catalog_xml",
+        lambda: "<available_skills/>",
     )
 
-    llm_node_module.llm_node(
-        {"messages": [HumanMessage(content="work alone")]},
-        SimpleNamespace(
-            context={
-                "agent_name": "solo",
-                "working_dir": "D:/repo",
-            }
+    prompt = prompt_builders.build_llm_system_prompt(
+        system_prompt_template="Base prompt",
+        working_dir="",
+        agent_name="default",
+        tools=[SimpleNamespace(name="skill")],
+        catalog=_FakeCatalog(),
+    )
+
+    assert prompt == "Base prompt"
+
+
+def test_build_llm_system_prompt_injects_callable_subagents_with_descriptions():
+    prompt = prompt_builders.build_llm_system_prompt(
+        system_prompt_template="Base prompt",
+        working_dir="",
+        agent_name="orchestrator",
+        tools=[SimpleNamespace(name="call_agent")],
+        catalog=_FakeCatalog(
+            callable_agents=["research", "backend"],
+            configs={
+                "research": SimpleNamespace(
+                    description="Research specialist for in-depth information gathering",
+                ),
+                "backend": SimpleNamespace(
+                    description="Python/backend engineer assistant",
+                ),
+            },
         ),
     )
 
-    system_message = captured["messages"][0]
-    assert isinstance(system_message, SystemMessage)
-    assert llm_node_module.SUB_AGENT_EMPTY_PROMPT in system_message.content
+    assert prompt_builders.SUB_AGENT_DISCLOSURE_PROMPT in prompt
+    assert "- research: Research specialist for in-depth information gathering" in prompt
+    assert "- backend: Python/backend engineer assistant" in prompt
 
 
-def test_llm_node_skips_subagent_section_when_call_agent_tool_is_not_bound(monkeypatch):
-    captured: dict = {}
-    configs = {
-        "writer": SimpleNamespace(
-            model="devstral-2512",
-            system_prompt="You are a writer.\nWorking directory: {working_dir}",
-            tools=["read_file"],
-            description="",
-        ),
-        "research": SimpleNamespace(
-            description="Research specialist for in-depth information gathering",
-        ),
-    }
-
-    class _FakeCatalog:
-        def get_agent(self, name: str):
-            return configs.get(name)
-
-        def get_callable_agents(self, for_agent_name: str):
-            assert for_agent_name == "writer"
-            return ["research"]
-
-    monkeypatch.setattr(
-        llm_node_module,
-        "get_chat_model",
-        _fake_chat_model_factory(captured),
-    )
-    monkeypatch.setattr(
-        llm_node_module,
-        "_resolve_tools",
-        lambda names: [SimpleNamespace(name=name) for name in names],
-    )
-    monkeypatch.setattr(
-        "agent.modules.agents.public.get_catalog_service",
-        lambda: _FakeCatalog(),
-    )
-
-    llm_node_module.llm_node(
-        {"messages": [HumanMessage(content="write this")]},
-        SimpleNamespace(
-            context={
-                "agent_name": "writer",
-                "working_dir": "D:/repo",
-            }
+def test_build_llm_system_prompt_uses_fallback_for_missing_subagent_description():
+    prompt = prompt_builders.build_llm_system_prompt(
+        system_prompt_template="Base prompt",
+        working_dir="",
+        agent_name="orchestrator",
+        tools=[SimpleNamespace(name="call_agent")],
+        catalog=_FakeCatalog(
+            callable_agents=["mystery-agent"],
+            configs={"mystery-agent": SimpleNamespace(description="")},
         ),
     )
 
-    system_message = captured["messages"][0]
-    assert isinstance(system_message, SystemMessage)
-    assert llm_node_module.SUB_AGENT_DISCLOSURE_PROMPT not in system_message.content
-    assert llm_node_module.SUB_AGENT_EMPTY_PROMPT not in system_message.content
-    assert "- research:" not in system_message.content
+    assert "- mystery-agent: No description provided." in prompt
+
+
+def test_build_llm_system_prompt_injects_empty_subagent_notice_when_none_are_callable():
+    prompt = prompt_builders.build_llm_system_prompt(
+        system_prompt_template="Base prompt",
+        working_dir="",
+        agent_name="solo",
+        tools=[SimpleNamespace(name="call_agent")],
+        catalog=_FakeCatalog(callable_agents=[]),
+    )
+
+    assert prompt_builders.SUB_AGENT_EMPTY_PROMPT in prompt
+
+
+def test_build_llm_system_prompt_skips_subagent_section_when_call_agent_tool_is_not_bound():
+    prompt = prompt_builders.build_llm_system_prompt(
+        system_prompt_template="Base prompt",
+        working_dir="",
+        agent_name="writer",
+        tools=[SimpleNamespace(name="read_file")],
+        catalog=_FakeCatalog(
+            callable_agents=["research"],
+            configs={
+                "research": SimpleNamespace(
+                    description="Research specialist for in-depth information gathering",
+                )
+            },
+        ),
+    )
+
+    assert prompt_builders.SUB_AGENT_DISCLOSURE_PROMPT not in prompt
+    assert prompt_builders.SUB_AGENT_EMPTY_PROMPT not in prompt
+    assert "- research:" not in prompt
+
+
+def test_build_llm_system_prompt_appends_subagents_before_skills(monkeypatch):
+    monkeypatch.setattr(
+        prompt_builders,
+        "get_skills_catalog_xml",
+        lambda: "<available_skills><skill><name>x</name></skill></available_skills>",
+    )
+
+    prompt = prompt_builders.build_llm_system_prompt(
+        system_prompt_template="Base prompt",
+        working_dir="",
+        agent_name="orchestrator",
+        tools=[SimpleNamespace(name="call_agent"), SimpleNamespace(name="skill")],
+        catalog=_FakeCatalog(
+            callable_agents=["research"],
+            configs={
+                "research": SimpleNamespace(
+                    description="Research specialist for in-depth information gathering",
+                )
+            },
+        ),
+    )
+
+    assert prompt.index(prompt_builders.SUB_AGENT_DISCLOSURE_PROMPT) < prompt.index(
+        prompt_builders.SKILLS_DISCLOSURE_PROMPT
+    )
