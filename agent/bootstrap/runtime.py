@@ -1,6 +1,6 @@
 import logging
 
-from agent.bootstrap.settings import AppSettings
+from agent.bootstrap.settings import BootstrapConfig
 from agent.modules.channels.public import (
     BUILTIN_CHANNEL_SPECS,
     ChannelManager,
@@ -9,15 +9,14 @@ from agent.modules.channels.public import (
     start_enabled_channels,
     stop_all_channels,
 )
-from agent.modules.channels.public import BotSettings
-from agent.modules.settings.public import UserPreferences
+from agent.modules.settings.public import RuntimeSettings
 from agent.modules.workflows.public import (
     close_checkpointer,
     initialize_checkpointer,
     register_builtin_workflows,
 )
 from agent.modules.skills.public import reload_skills
-from agent.shared.infrastructure.db import Base
+from agent.shared.infrastructure.db import Base, load_orm_models
 from agent.shared.infrastructure.db.engine import (
     close_async_engine,
     initialize_async_engine,
@@ -28,8 +27,7 @@ logger = logging.getLogger(__name__)
 
 async def initialize_persistence() -> None:
     """Initialize SQLAlchemy async engine and LangGraph checkpointer."""
-    # Ensure models are loaded so tables are attached to metadata
-    _ = (BotSettings, UserPreferences)
+    load_orm_models()
     await initialize_async_engine(metadata=Base.metadata)
     await initialize_checkpointer()
 
@@ -43,8 +41,13 @@ async def close_persistence() -> None:
 class AppRuntime:
     """Own shared resources and managed background channels."""
 
-    def __init__(self, settings: AppSettings):
-        self.settings = settings
+    def __init__(
+        self,
+        bootstrap_config: BootstrapConfig,
+        runtime_settings: RuntimeSettings,
+    ):
+        self.bootstrap_config = bootstrap_config
+        self.runtime_settings = runtime_settings
         self.channel_manager = ChannelManager()
         self._channels_registered = False
         self._persistence_ready = False
@@ -99,6 +102,6 @@ class AppRuntime:
     async def _start_enabled_channels(self) -> None:
         await start_enabled_channels(
             self.channel_manager,
-            self.settings.service_boot_flags,
+            self.runtime_settings.channel_enabled,
             BUILTIN_CHANNEL_SPECS,
         )

@@ -1,4 +1,4 @@
-"""Tests for the settings module — SettingsService, repositories, and public API."""
+"""Tests for the runtime settings module."""
 
 from __future__ import annotations
 
@@ -8,9 +8,10 @@ from pathlib import Path
 import pytest
 from pytest import MonkeyPatch
 
-from agent.modules.settings.application.settings_service import SettingsService
+from agent.modules.settings.application.settings_service import RuntimeSettingsService
 from agent.modules.settings.domain.settings_value import (
-    AppSettingsData,
+    KNOWN_RUNTIME_KEYS,
+    RuntimeSettings,
     SettingsSource,
     SettingsValue,
 )
@@ -52,11 +53,9 @@ class TestDefaultSettingsRepository:
         repo = DefaultSettingsRepository()
         all_settings = repo.get_all()
 
-        assert "host" in all_settings
-        assert "port" in all_settings
-        assert "enable_web" in all_settings
         assert "channels.telegram.enabled" in all_settings
         assert "channels.discord.enabled" in all_settings
+        assert set(all_settings) == KNOWN_RUNTIME_KEYS
 
     def test_all_values_have_default_source(self) -> None:
         repo = DefaultSettingsRepository()
@@ -65,9 +64,9 @@ class TestDefaultSettingsRepository:
 
     def test_get_existing_key(self) -> None:
         repo = DefaultSettingsRepository()
-        val = repo.get("host")
+        val = repo.get("channels.telegram.enabled")
         assert val is not None
-        assert val.value == "0.0.0.0"
+        assert val.value is True
 
     def test_get_missing_key(self) -> None:
         repo = DefaultSettingsRepository()
@@ -80,26 +79,6 @@ class TestDefaultSettingsRepository:
 
 
 class TestEnvSettingsRepository:
-    def test_reads_host_and_port(self, monkeypatch: MonkeyPatch) -> None:
-        monkeypatch.setenv("HOST", "localhost")
-        monkeypatch.setenv("PORT", "9000")
-
-        repo = EnvSettingsRepository()
-        all_settings = repo.get_all()
-
-        assert all_settings["host"].value == "localhost"
-        assert all_settings["port"].value == 9000
-
-    def test_reads_enable_flags(self, monkeypatch: MonkeyPatch) -> None:
-        monkeypatch.setenv("ENABLE_WEB", "false")
-        monkeypatch.setenv("ENABLE_API", "true")
-
-        repo = EnvSettingsRepository()
-        all_settings = repo.get_all()
-
-        assert all_settings["enable_web"].value is False
-        assert all_settings["enable_api"].value is True
-
     def test_reads_channel_flags(self, monkeypatch: MonkeyPatch) -> None:
         monkeypatch.setenv("ENABLE_TELEGRAM", "0")
         monkeypatch.setenv("ENABLE_DISCORD", "yes")
@@ -111,11 +90,6 @@ class TestEnvSettingsRepository:
         assert all_settings["channels.discord.enabled"].value is True
 
     def test_missing_env_vars_not_in_results(self, monkeypatch: MonkeyPatch) -> None:
-        monkeypatch.delenv("HOST", raising=False)
-        monkeypatch.delenv("PORT", raising=False)
-        monkeypatch.delenv("ENABLE_WEB", raising=False)
-        monkeypatch.delenv("ENABLE_API", raising=False)
-        monkeypatch.delenv("ENABLE_DASHBOARD", raising=False)
         monkeypatch.delenv("ENABLE_TELEGRAM", raising=False)
         monkeypatch.delenv("ENABLE_DISCORD", raising=False)
 
@@ -123,10 +97,21 @@ class TestEnvSettingsRepository:
         assert repo.get_all() == {}
 
     def test_all_values_have_env_source(self, monkeypatch: MonkeyPatch) -> None:
-        monkeypatch.setenv("HOST", "0.0.0.0")
+        monkeypatch.setenv("ENABLE_TELEGRAM", "1")
         repo = EnvSettingsRepository()
         for sv in repo.get_all().values():
             assert sv.source == SettingsSource.ENV_OVERRIDE
+
+    def test_ignores_bootstrap_env_vars(self, monkeypatch: MonkeyPatch) -> None:
+        monkeypatch.setenv("HOST", "localhost")
+        monkeypatch.setenv("PORT", "9000")
+        monkeypatch.setenv("ENABLE_WEB", "false")
+        monkeypatch.delenv("ENABLE_TELEGRAM", raising=False)
+        monkeypatch.delenv("ENABLE_DISCORD", raising=False)
+
+        repo = EnvSettingsRepository()
+
+        assert repo.get_all() == {}
 
 
 # =====================================================================
@@ -161,7 +146,6 @@ class TestConfigFileRepository:
         all_settings = repo.get_all()
 
         assert all_settings["host"].value == "127.0.0.1"
-        assert all_settings["host"].source == SettingsSource.CONFIG_FILE
         assert all_settings["port"].value == 3000
 
     def test_reads_nested_values(self, tmp_path: Path) -> None:
@@ -193,168 +177,181 @@ class TestConfigFileRepository:
         )
 
         cfg = tmp_path / "config.yml"
-        cfg.write_text("host: first\n", encoding="utf-8")
+        cfg.write_text("channels:\n  telegram:\n    enabled: true\n", encoding="utf-8")
 
         repo = ConfigFileRepository(path=cfg)
-        assert repo.get("host").value == "first"
+        assert repo.get("channels.telegram.enabled").value is True
 
-        cfg.write_text("host: second\n", encoding="utf-8")
+        cfg.write_text("channels:\n  telegram:\n    enabled: false\n", encoding="utf-8")
         repo.reload()
-        assert repo.get("host").value == "second"
+        assert repo.get("channels.telegram.enabled").value is False
+
+    def test_filters_bootstrap_keys(self, tmp_path: Path) -> None:
+        from agent.modules.settings.infrastructure.config_file_repository import (
+            ConfigFileRepository,
+        )
+
+        cfg = tmp_path / "config.yml"
+        cfg.write_text(
+            textwrap.dedent("""\
+            host: 127.0.0.1
+            channels:
+              telegram:
+                enabled: false
+            """),
+            encoding="utf-8",
+        )
+
+        repo = ConfigFileRepository(path=cfg)
+        all_settings = repo.get_all()
+
+        assert "host" in all_settings
+        assert all_settings["channels.telegram.enabled"].value is False
 
 
 # =====================================================================
-# SettingsService — precedence merge
+# RuntimeSettingsService — precedence merge
 # =====================================================================
 
 
-class TestSettingsService:
+class TestRuntimeSettingsService:
     def test_higher_precedence_wins(self) -> None:
         low = StubRepository({
-            "host": _sv("host", "default-host", SettingsSource.DEFAULT),
-            "port": _sv("port", 8000, SettingsSource.DEFAULT),
+            "channels.telegram.enabled": _sv(
+                "channels.telegram.enabled",
+                True,
+                SettingsSource.DEFAULT,
+            ),
         })
         high = StubRepository({
-            "host": _sv("host", "env-host", SettingsSource.ENV_OVERRIDE),
+            "channels.telegram.enabled": _sv(
+                "channels.telegram.enabled",
+                False,
+                SettingsSource.ENV_OVERRIDE,
+            ),
         })
 
-        service = SettingsService(repositories=[low, high])
+        service = RuntimeSettingsService(repositories=[low, high])
 
-        assert service.get_effective("host").value == "env-host"
-        assert service.get_effective("host").source == SettingsSource.ENV_OVERRIDE
-        assert service.get_effective("port").value == 8000
+        assert service.get_effective("channels.telegram.enabled").value is False
+        assert service.get_effective("channels.telegram.enabled").source == SettingsSource.ENV_OVERRIDE
 
     def test_list_all_merges(self) -> None:
         low = StubRepository({
-            "a": _sv("a", 1, SettingsSource.DEFAULT),
-            "b": _sv("b", 2, SettingsSource.DEFAULT),
+            "channels.telegram.enabled": _sv(
+                "channels.telegram.enabled",
+                True,
+                SettingsSource.DEFAULT,
+            ),
         })
         high = StubRepository({
-            "b": _sv("b", 20, SettingsSource.CONFIG_FILE),
-            "c": _sv("c", 30, SettingsSource.CONFIG_FILE),
+            "channels.discord.enabled": _sv(
+                "channels.discord.enabled",
+                False,
+                SettingsSource.CONFIG_FILE,
+            ),
         })
 
-        service = SettingsService(repositories=[low, high])
+        service = RuntimeSettingsService(repositories=[low, high])
         merged = service.list_all()
 
-        assert merged["a"].value == 1
-        assert merged["b"].value == 20
-        assert merged["c"].value == 30
+        assert merged["channels.telegram.enabled"].value is True
+        assert merged["channels.discord.enabled"].value is False
 
-    def test_get_app_settings_uses_merged_values(self) -> None:
+    def test_get_runtime_settings_uses_merged_values(self) -> None:
         defaults = StubRepository({
-            "host": _sv("host", "0.0.0.0", SettingsSource.DEFAULT),
-            "port": _sv("port", 8000, SettingsSource.DEFAULT),
-            "enable_web": _sv("enable_web", True, SettingsSource.DEFAULT),
-            "enable_api": _sv("enable_api", True, SettingsSource.DEFAULT),
-            "enable_dashboard": _sv("enable_dashboard", True, SettingsSource.DEFAULT),
             "channels.telegram.enabled": _sv("channels.telegram.enabled", True, SettingsSource.DEFAULT),
             "channels.discord.enabled": _sv("channels.discord.enabled", True, SettingsSource.DEFAULT),
         })
         env = StubRepository({
-            "port": _sv("port", 3000, SettingsSource.ENV_OVERRIDE),
-            "enable_api": _sv("enable_api", False, SettingsSource.ENV_OVERRIDE),
             "channels.discord.enabled": _sv("channels.discord.enabled", False, SettingsSource.ENV_OVERRIDE),
         })
 
-        service = SettingsService(repositories=[defaults, env])
-        app_settings = service.get_app_settings()
+        service = RuntimeSettingsService(repositories=[defaults, env])
+        runtime_settings = service.get_runtime_settings()
 
-        assert app_settings.host == "0.0.0.0"
-        assert app_settings.port == 3000
-        assert app_settings.enable_web is True
-        assert app_settings.enable_api is False
-        assert app_settings.service_boot_flags["telegram"] is True
-        assert app_settings.service_boot_flags["discord"] is False
+        assert runtime_settings == RuntimeSettings(
+            channel_enabled={
+                "telegram": True,
+                "discord": False,
+            }
+        )
 
     def test_get_effective_missing_key_returns_none(self) -> None:
-        service = SettingsService(repositories=[])
+        service = RuntimeSettingsService(repositories=[])
         assert service.get_effective("nonexistent") is None
 
     def test_get_settings_overview_format(self) -> None:
         repo = StubRepository({
-            "host": _sv("host", "localhost", SettingsSource.CONFIG_FILE),
+            "channels.telegram.enabled": _sv(
+                "channels.telegram.enabled",
+                False,
+                SettingsSource.CONFIG_FILE,
+            ),
         })
-        service = SettingsService(repositories=[repo])
+        service = RuntimeSettingsService(repositories=[repo])
         overview = service.get_settings_overview()
 
-        assert "host" in overview
-        assert overview["host"]["value"] == "localhost"
-        assert overview["host"]["source"] == "config_file"
+        assert "channels.telegram.enabled" in overview
+        assert overview["channels.telegram.enabled"]["value"] is False
+        assert overview["channels.telegram.enabled"]["source"] == "config_file"
 
     def test_get_settings_sources_format(self) -> None:
         low = StubRepository({
-            "host": _sv("host", "default", SettingsSource.DEFAULT),
+            "channels.telegram.enabled": _sv(
+                "channels.telegram.enabled",
+                True,
+                SettingsSource.DEFAULT,
+            ),
         })
         high = StubRepository({
-            "host": _sv("host", "env", SettingsSource.ENV_OVERRIDE),
+            "channels.telegram.enabled": _sv(
+                "channels.telegram.enabled",
+                False,
+                SettingsSource.ENV_OVERRIDE,
+            ),
         })
-        service = SettingsService(repositories=[low, high])
+        service = RuntimeSettingsService(repositories=[low, high])
         sources = service.get_settings_sources()
 
-        assert "host" in sources
-        assert len(sources["host"]) == 2
-        assert sources["host"][0]["source"] == "default"
-        assert sources["host"][1]["source"] == "env_override"
+        assert "channels.telegram.enabled" in sources
+        assert len(sources["channels.telegram.enabled"]) == 2
+        assert sources["channels.telegram.enabled"][0]["source"] == "default"
+        assert sources["channels.telegram.enabled"][1]["source"] == "env_override"
 
 
 # =====================================================================
-# Public API (module-level)
+# Public API
 # =====================================================================
 
 
 class TestPublicAPI:
-    def test_get_app_settings_returns_data(self, monkeypatch: MonkeyPatch) -> None:
-        # Clear env to get predictable defaults
-        for var in ("HOST", "PORT", "ENABLE_WEB", "ENABLE_API", "ENABLE_DASHBOARD",
-                     "ENABLE_TELEGRAM", "ENABLE_DISCORD"):
-            monkeypatch.delenv(var, raising=False)
-
-        # Reset singleton
-        import agent.modules.settings.public as pub
-        monkeypatch.setattr(pub, "_settings_service", None)
-
-        data = pub.get_app_settings()
-        assert isinstance(data, AppSettingsData)
-        assert data.host == "0.0.0.0"
-        assert data.port == 8000
-
-    def test_get_settings_overview_returns_dict(self, monkeypatch: MonkeyPatch) -> None:
-        import agent.modules.settings.public as pub
-        monkeypatch.setattr(pub, "_settings_service", None)
-
-        overview = pub.get_settings_overview()
-        assert isinstance(overview, dict)
-        assert "host" in overview
-
-    def test_bootstrap_app_settings_delegates(self, monkeypatch: MonkeyPatch) -> None:
-        """AppSettings.from_env() should delegate to settings module."""
-        for var in ("HOST", "PORT", "ENABLE_WEB", "ENABLE_API", "ENABLE_DASHBOARD",
-                     "ENABLE_TELEGRAM", "ENABLE_DISCORD"):
+    def test_create_runtime_settings_service_returns_runtime_service(
+        self,
+        monkeypatch: MonkeyPatch,
+    ) -> None:
+        for var in ("ENABLE_TELEGRAM", "ENABLE_DISCORD"):
             monkeypatch.delenv(var, raising=False)
 
         import agent.modules.settings.public as pub
-        monkeypatch.setattr(pub, "_settings_service", None)
+        import agent.modules.settings.infrastructure.config_file_repository as cfg_repo
 
-        from agent.bootstrap.settings import AppSettings
-        settings = AppSettings.from_env()
+        monkeypatch.setattr(
+            cfg_repo,
+            "DEFAULT_CONFIG_PATH",
+            Path("__missing_runtime_settings_config__.yml"),
+        )
 
-        assert settings.host == "0.0.0.0"
-        assert settings.port == 8000
-        assert settings.enable_web is True
+        service = pub.create_runtime_settings_service()
+        runtime_settings = service.get_runtime_settings()
 
-    def test_env_override_propagates_through_bootstrap(self, monkeypatch: MonkeyPatch) -> None:
-        monkeypatch.setenv("PORT", "9999")
-        monkeypatch.setenv("ENABLE_API", "false")
-
-        import agent.modules.settings.public as pub
-        monkeypatch.setattr(pub, "_settings_service", None)
-
-        from agent.bootstrap.settings import AppSettings
-        settings = AppSettings.from_env()
-
-        assert settings.port == 9999
-        assert settings.enable_api is False
+        assert isinstance(service, RuntimeSettingsService)
+        assert runtime_settings == RuntimeSettings(
+            channel_enabled={
+                "telegram": True,
+                "discord": True,
+            }
+        )
 
 
 # =====================================================================
@@ -372,3 +369,13 @@ class TestImportBoundary:
         source = inspect.getsource(mod)
 
         assert "agent.modules.settings.infrastructure" not in source
+
+    def test_bootstrap_settings_does_not_import_runtime_settings_module(self) -> None:
+        import importlib
+        import inspect
+
+        bootstrap_settings = importlib.import_module("agent.bootstrap.settings")
+
+        source = inspect.getsource(bootstrap_settings)
+
+        assert "agent.modules.settings" not in source

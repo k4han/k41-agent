@@ -10,6 +10,7 @@ from agent.shared.infrastructure.db.engine import (
     get_sqlite_conn_string,
     initialize_async_engine,
 )
+from agent.shared.infrastructure.db.models import load_orm_models
 from agent.shared.infrastructure.db.session import (
     get_async_session,
     get_async_session_maker,
@@ -29,5 +30,6 @@ __all__ = [
     "get_postgres_conn_string",
     "get_sqlite_conn_string",
     "initialize_async_engine",
+    "load_orm_models",
     "utcnow",
 ]

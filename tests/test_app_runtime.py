@@ -4,8 +4,9 @@ import pytest
 
 import agent.bootstrap.runtime as runtime_module
 from agent.bootstrap.runtime import AppRuntime, ChannelSpec
-from agent.bootstrap.settings import AppSettings
+from agent.bootstrap.settings import BootstrapConfig
 from agent.modules.channels.public import ChannelStatus
+from agent.modules.settings.domain.settings_value import RuntimeSettings
 
 
 async def wait_for_status(runtime: AppRuntime, name: str, expected: ChannelStatus) -> None:
@@ -17,14 +18,24 @@ async def wait_for_status(runtime: AppRuntime, name: str, expected: ChannelStatu
     raise AssertionError(f"Channel '{name}' did not reach status '{expected}'.")
 
 
-def build_settings(service_boot_flags: dict[str, bool]) -> AppSettings:
-    return AppSettings(
+def build_bootstrap_config() -> BootstrapConfig:
+    return BootstrapConfig(
         host="0.0.0.0",
         port=8000,
         enable_web=True,
         enable_api=True,
         enable_dashboard=True,
-        service_boot_flags=service_boot_flags,
+    )
+
+
+def build_runtime_settings(channel_enabled: dict[str, bool]) -> RuntimeSettings:
+    return RuntimeSettings(channel_enabled=channel_enabled)
+
+
+def build_runtime(channel_enabled: dict[str, bool]) -> AppRuntime:
+    return AppRuntime(
+        build_bootstrap_config(),
+        build_runtime_settings(channel_enabled),
     )
 
 
@@ -51,7 +62,7 @@ def test_runtime_registers_all_channels_even_when_boot_disabled(
         ),
     )
 
-    runtime = AppRuntime(build_settings({"telegram": True, "discord": False}))
+    runtime = build_runtime({"telegram": True, "discord": False})
     runtime._register_channels()
 
     assert runtime.channel_manager.names() == ["telegram", "discord"]
@@ -73,7 +84,7 @@ async def test_runtime_starts_only_channels_enabled_for_boot(
         ),
     )
 
-    runtime = AppRuntime(build_settings({"telegram": True, "discord": False}))
+    runtime = build_runtime({"telegram": True, "discord": False})
     runtime._register_channels()
     await runtime._start_enabled_channels()
 

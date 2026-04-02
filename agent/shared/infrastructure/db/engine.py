@@ -8,7 +8,16 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from agent.shared.infrastructure.db.base import Base
 
-DEFAULT_DATABASE_URL = "sqlite+aiosqlite:///data/agent_state.db"
+
+def _get_default_db_path() -> str:
+    """Get default database path in user's home directory."""
+    home = Path.home()
+    db_path = home / ".kaka-agent" / "data" / "agent_state.db"
+    # Use forward slashes for SQLite URL even on Windows
+    return f"sqlite+aiosqlite:///{db_path.as_posix()}"
+
+
+DEFAULT_DATABASE_URL = _get_default_db_path()
 
 _async_engine: AsyncEngine | None = None
 _async_session_maker: async_sessionmaker[AsyncSession] | None = None
@@ -67,6 +76,7 @@ def get_sqlite_conn_string() -> str:
         return str(resolved_path)
 
     cwd = Path.cwd().resolve()
+    home = Path.home().resolve()
     is_allowed = False
     try:
         resolved_path.relative_to(cwd)
@@ -77,7 +87,12 @@ def get_sqlite_conn_string() -> str:
             resolved_path.relative_to(data_dir)
             is_allowed = True
         except ValueError:
-            pass
+            try:
+                kaka_dir = home / ".kaka-agent"
+                resolved_path.relative_to(kaka_dir)
+                is_allowed = True
+            except ValueError:
+                pass
 
     if not is_allowed and resolved_path.is_absolute():
         safe_prefixes = ["/var/data", "/opt", "/home"]
@@ -90,8 +105,8 @@ def get_sqlite_conn_string() -> str:
             "Set PERSISTENCE_ALLOW_ANY_PATH=true to bypass this check (not recommended for production)."
         )
 
-    if resolved_path.parent and resolved_path.parent != cwd:
-        resolved_path.parent.mkdir(parents=True, exist_ok=True)
+    # Ensure parent directory exists
+    resolved_path.parent.mkdir(parents=True, exist_ok=True)
 
     return str(resolved_path)
 
@@ -187,10 +202,17 @@ def _normalize_url_to_sync(database_url: str) -> str:
     """Convert async driver URL to a sync driver URL for create_all()."""
     parsed = make_url(database_url)
     base_driver = _extract_base_driver(parsed.drivername)
+
+    # Map async drivers to sync drivers
     sync_map = {
         "aiosqlite": "sqlite",
         "asyncpg": "postgresql+psycopg",
     }
+
+    # If already a sync driver, return as-is
+    if base_driver in ("sqlite", "postgresql", "psycopg", "psycopg2"):
+        return database_url
+
     sync_driver = sync_map.get(base_driver)
     if sync_driver is None:
         raise ValueError(f"Unsupported async driver '{parsed.drivername}'. Cannot convert to sync driver.")
@@ -202,6 +224,12 @@ def create_tables(database_url: str, metadata: MetaData | None = None) -> None:
     """Create tables for the provided metadata using a sync engine."""
     target_metadata = metadata if metadata is not None else Base.metadata
     sync_url = _normalize_url_to_sync(database_url)
+
+    # Ensure parent directory exists for SQLite databases
+    parsed = make_url(database_url)
+    if "sqlite" in parsed.drivername and parsed.database and parsed.database != ":memory:":
+        db_path = Path(parsed.database)
+        db_path.parent.mkdir(parents=True, exist_ok=True)
 
     engine = create_sync_engine(sync_url, echo=False)
     try:

@@ -10,7 +10,7 @@ from agent.modules.channels.public import (
     stop_all_channels,
     stop_channel,
 )
-from agent.modules.settings.public import SettingsService
+from agent.modules.settings.public import KNOWN_RUNTIME_KEYS, RuntimeSettingsService
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -25,7 +25,7 @@ def _get_channel_manager(request: Request) -> ChannelManager:
     return channel_manager
 
 
-def _get_settings_service(request: Request) -> SettingsService:
+def _get_settings_service(request: Request) -> RuntimeSettingsService:
     service = getattr(request.app.state, "settings_service", None)
     if service is None:
         raise HTTPException(status_code=503, detail="Settings service is not available.")
@@ -117,12 +117,17 @@ class UpdateSettingBody(BaseModel):
 
 @router.put("/settings/{key:path}")
 async def update_setting(key: str, body: UpdateSettingBody, request: Request):
-    """Update a desired-state setting (placeholder — DB writer not wired yet)."""
+    """Validate a runtime setting update request before persistence is added."""
     _get_settings_service(request)  # ensure available
-    # TODO: wire SettingsWriter (DB) once async init is in place
-    return {
-        "message": f"Setting '{key}' update acknowledged.",
-        "key": key,
-        "value": body.value,
-        "note": "DB persistence not yet wired — runtime-only for now.",
-    }
+    if key not in KNOWN_RUNTIME_KEYS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported runtime setting: '{key}'.",
+        )
+
+    raise HTTPException(
+        status_code=501,
+        detail=(
+            f"Runtime setting '{key}' is valid but persistence is not implemented yet."
+        ),
+    )

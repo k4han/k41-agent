@@ -1,13 +1,18 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "kaka-agent-v2"
-version = "0.1.0"
+version = "0.1.1"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.13,<3.14"
 dependencies = [
     "aiogram>=3.26.0",
     "aiosqlite>=0.22.1",
     "asyncpg>=0.31.0",
+    "click>=8.0.0",
     "dotenv>=0.9.9",
     "fastapi>=0.135.1",
     "langchain-core>=1.2.19",
@@ -21,6 +26,13 @@ dependencies = [
     "sqlalchemy>=2.0.0",
     "uvicorn>=0.42.0",
 ]
+
+[project.scripts]
+kaka = "agent.bootstrap.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["agent*"]
+exclude = ["tests*", "tmp*", "data*"]
 
 [tool.pytest.ini_options]
 addopts = "-p no:cacheprovider"

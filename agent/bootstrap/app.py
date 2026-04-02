@@ -10,10 +10,10 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from agent.bootstrap.runtime import AppRuntime
-from agent.bootstrap.settings import AppSettings
+from agent.bootstrap.settings import BootstrapConfig, load_bootstrap_config
 from agent.delivery.http import api_router, dashboard_router
 from agent.modules.channels.public import list_channel_statuses
-from agent.modules.settings.public import get_service as get_settings_service
+from agent.modules.settings.public import create_runtime_settings_service
 
 load_dotenv()
 logging.basicConfig(
@@ -23,9 +23,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def create_app(settings: AppSettings | None = None) -> FastAPI:
-    settings = settings or AppSettings.from_env()
-    runtime = AppRuntime(settings)
+def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:
+    bootstrap_config = bootstrap_config or load_bootstrap_config()
+    runtime_settings_service = create_runtime_settings_service()
+    runtime_settings = runtime_settings_service.get_runtime_settings()
+    runtime = AppRuntime(bootstrap_config, runtime_settings)
 
     @asynccontextmanager
     async def lifespan(fastapi_app: FastAPI):
@@ -44,8 +46,9 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
 
     fastapi_app.state.runtime = runtime
     fastapi_app.state.channel_manager = runtime.channel_manager
-    fastapi_app.state.settings = settings
-    fastapi_app.state.settings_service = get_settings_service()
+    fastapi_app.state.bootstrap_config = bootstrap_config
+    fastapi_app.state.runtime_settings = runtime_settings
+    fastapi_app.state.settings_service = runtime_settings_service
 
     fastapi_app.add_middleware(
         CORSMiddleware,
@@ -54,15 +57,15 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
-    if settings.enable_api:
+    if bootstrap_config.enable_api:
         fastapi_app.include_router(api_router)
 
-    if settings.enable_dashboard:
+    if bootstrap_config.enable_dashboard:
         fastapi_app.include_router(dashboard_router)
 
     @fastapi_app.get("/health")
     async def health(request: Request):
-        current_settings: AppSettings = request.app.state.settings
+        current_settings: BootstrapConfig = request.app.state.bootstrap_config
         channel_manager = request.app.state.channel_manager
         return {
             "status": "ok",
@@ -77,7 +80,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     return fastapi_app
 
 
-settings = AppSettings.from_env()
+settings = load_bootstrap_config()
 app = create_app(settings)
 
 

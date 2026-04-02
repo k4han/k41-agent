@@ -1,4 +1,4 @@
-"""Domain entities for the settings module."""
+"""Domain entities for runtime settings."""
 
 from __future__ import annotations
 
@@ -28,15 +28,10 @@ class SettingsValue:
 
 
 @dataclass(frozen=True, slots=True)
-class AppSettingsData:
-    """Consolidated application settings produced by merging all sources."""
+class RuntimeSettings:
+    """Consolidated runtime settings produced by merging all sources."""
 
-    host: str = "0.0.0.0"
-    port: int = 8000
-    enable_web: bool = True
-    enable_api: bool = True
-    enable_dashboard: bool = True
-    service_boot_flags: dict[str, bool] = field(default_factory=lambda: {
+    channel_enabled: dict[str, bool] = field(default_factory=lambda: {
         "telegram": True,
         "discord": True,
     })
@@ -44,19 +39,14 @@ class AppSettingsData:
 
 # --- key constants ---------------------------------------------------
 
-KNOWN_KEYS: set[str] = {
-    "host",
-    "port",
-    "enable_web",
-    "enable_api",
-    "enable_dashboard",
+KNOWN_RUNTIME_KEYS: set[str] = {
     "channels.telegram.enabled",
     "channels.discord.enabled",
 }
 
 __all__ = [
-    "AppSettingsData",
-    "KNOWN_KEYS",
+    "KNOWN_RUNTIME_KEYS",
+    "RuntimeSettings",
     "SettingsSource",
     "SettingsValue",
 ]

@@ -1,39 +1,53 @@
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
-from agent.modules.settings.public import get_app_settings as _get_module_settings
+from agent.shared.infrastructure.config_file import DEFAULT_CONFIG_PATH, coerce_bool, load_flat_config_file
 
 
 def parse_bool_env(name: str, default: bool) -> bool:
     value = os.getenv(name)
     if value is None:
         return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
+    return coerce_bool(value)
 
 
 @dataclass(frozen=True, slots=True)
-class AppSettings:
+class BootstrapConfig:
     host: str
     port: int
     enable_web: bool
     enable_api: bool
     enable_dashboard: bool
-    service_boot_flags: dict[str, bool]
 
-    @classmethod
-    def from_env(cls) -> "AppSettings":
-        """Build settings by delegating to the settings module.
 
-        The settings module merges defaults, config file, and env vars.
-        This method converts the module's ``AppSettingsData`` into the
-        bootstrap ``AppSettings`` dataclass for backward compatibility.
-        """
-        data = _get_module_settings()
-        return cls(
-            host=data.host,
-            port=data.port,
-            enable_web=data.enable_web,
-            enable_api=data.enable_api,
-            enable_dashboard=data.enable_dashboard,
-            service_boot_flags=dict(data.service_boot_flags),
-        )
+def load_bootstrap_config(path: Path | None = None) -> BootstrapConfig:
+    """Build bootstrap config from defaults, config file, and env vars."""
+    flat_config = load_flat_config_file(path or DEFAULT_CONFIG_PATH)
+
+    default_config = BootstrapConfig(
+        host="0.0.0.0",
+        port=8000,
+        enable_web=True,
+        enable_api=True,
+        enable_dashboard=True,
+    )
+
+    host = str(flat_config.get("host", default_config.host))
+    port = int(flat_config.get("port", default_config.port))
+    enable_web = coerce_bool(flat_config.get("enable_web", default_config.enable_web))
+    enable_api = coerce_bool(flat_config.get("enable_api", default_config.enable_api))
+    enable_dashboard = coerce_bool(
+        flat_config.get("enable_dashboard", default_config.enable_dashboard)
+    )
+
+    return BootstrapConfig(
+        host=os.getenv("HOST", host),
+        port=int(os.getenv("PORT", str(port))),
+        enable_web=parse_bool_env("ENABLE_WEB", enable_web),
+        enable_api=parse_bool_env("ENABLE_API", enable_api),
+        enable_dashboard=parse_bool_env("ENABLE_DASHBOARD", enable_dashboard),
+    )
+
+
+__all__ = ["BootstrapConfig", "DEFAULT_CONFIG_PATH", "load_bootstrap_config", "parse_bool_env"]
