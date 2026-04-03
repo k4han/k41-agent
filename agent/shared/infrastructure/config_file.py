@@ -6,7 +6,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_CONFIG_PATH = Path.home() / ".kaka-agent" / "config.yml"
+DEFAULT_CONFIG_PATH = Path.home() / ".kaka-agent" / "config.yaml"
 
 
 def flatten_config_mapping(data: dict[str, Any], prefix: str = "") -> dict[str, Any]:

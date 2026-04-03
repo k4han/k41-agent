@@ -1,11 +1,16 @@
-import os
 from pathlib import Path
 
 from sqlalchemy import MetaData
 from sqlalchemy import create_engine as create_sync_engine
 from sqlalchemy.engine import URL, make_url
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
+from agent.shared.config import get_config_service
 from agent.shared.infrastructure.db.base import Base
 
 
@@ -22,11 +27,48 @@ DEFAULT_DATABASE_URL = _get_default_db_path()
 _async_engine: AsyncEngine | None = None
 _async_session_maker: async_sessionmaker[AsyncSession] | None = None
 _tables_created = False
+_cached_database_url: str | None = None
 
 
 def get_database_url() -> str:
-    """Return configured database URL, defaulting to local SQLite file."""
-    return os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
+    """Return effective database URL based on policy.
+
+    Policy:
+    - If database.url is empty, use internal SQLite path in ~/.kaka-agent/data/
+    - If database.url is set, only PostgreSQL URLs are allowed
+    """
+    global _cached_database_url
+    if _cached_database_url is not None:
+        return _cached_database_url
+
+    config = get_config_service()
+    config_url = config.get_str("database.url", "").strip()
+
+    if not config_url:
+        _cached_database_url = DEFAULT_DATABASE_URL
+        return _cached_database_url
+
+    try:
+        parsed = make_url(config_url)
+    except Exception as exc:
+        raise ValueError(f"Invalid database.url: {config_url}") from exc
+
+    base_driver = _extract_base_driver(parsed.drivername)
+    if base_driver in ("postgresql", "asyncpg", "psycopg2", "psycopg"):
+        _cached_database_url = config_url
+        return _cached_database_url
+
+    if base_driver in ("sqlite", "aiosqlite", "pysqlite"):
+        raise ValueError(
+            "Custom SQLite URL is not allowed in 'database.url'. "
+            "Leave 'database.url' empty to use internal SQLite, "
+            "or set a PostgreSQL URL."
+        )
+
+    raise ValueError(
+        f"Unsupported database driver: {base_driver}. "
+        "Use internal SQLite (empty 'database.url') or PostgreSQL URL."
+    )
 
 
 def _get_parsed_url() -> URL:
@@ -49,7 +91,9 @@ def get_database_type() -> str:
         return "sqlite"
     if base_driver in ("postgresql", "asyncpg", "psycopg2", "psycopg"):
         return "postgres"
-    raise ValueError(f"Unsupported database driver: {base_driver}. Use sqlite or postgresql.")
+    raise ValueError(
+        f"Unsupported database driver: {base_driver}. Use sqlite or postgresql."
+    )
 
 
 def get_sqlite_conn_string() -> str:
@@ -58,52 +102,19 @@ def get_sqlite_conn_string() -> str:
     if parsed.drivername != "sqlite" and "sqlite" not in parsed.drivername:
         raise ValueError(
             "SQLite checkpointer requires a sqlite URL. "
-            f"Set DATABASE_URL to a sqlite URL, got: {get_database_url()}"
+            "Leave 'database.url' empty to use internal SQLite. "
+            f"Current database URL: {get_database_url()}"
         )
 
     database = parsed.database
     if not database or database == ":memory:":
-        return database
+        return ":memory:"
 
     db_path = Path(database)
     try:
         resolved_path = db_path.resolve()
     except (OSError, ValueError) as exc:
         raise ValueError(f"Invalid database path: {database}") from exc
-
-    allow_any_path = os.getenv("PERSISTENCE_ALLOW_ANY_PATH", "false").lower() == "true"
-    if allow_any_path:
-        return str(resolved_path)
-
-    cwd = Path.cwd().resolve()
-    home = Path.home().resolve()
-    is_allowed = False
-    try:
-        resolved_path.relative_to(cwd)
-        is_allowed = True
-    except ValueError:
-        try:
-            data_dir = cwd / "data"
-            resolved_path.relative_to(data_dir)
-            is_allowed = True
-        except ValueError:
-            try:
-                kaka_dir = home / ".kaka-agent"
-                resolved_path.relative_to(kaka_dir)
-                is_allowed = True
-            except ValueError:
-                pass
-
-    if not is_allowed and resolved_path.is_absolute():
-        safe_prefixes = ["/var/data", "/opt", "/home"]
-        is_allowed = any(str(resolved_path).startswith(prefix) for prefix in safe_prefixes)
-
-    if not is_allowed:
-        raise ValueError(
-            f"Database path '{database}' escapes allowed directories. "
-            "Please use a path within the current directory or './data/' subdirectory. "
-            "Set PERSISTENCE_ALLOW_ANY_PATH=true to bypass this check (not recommended for production)."
-        )
 
     # Ensure parent directory exists
     resolved_path.parent.mkdir(parents=True, exist_ok=True)
@@ -118,7 +129,8 @@ def get_postgres_conn_string() -> str:
     if "postgresql" not in parsed.drivername:
         raise ValueError(
             "PostgreSQL checkpointer requires a postgresql URL. "
-            f"Set DATABASE_URL to a postgresql URL, got: {get_database_url()}"
+            "Set 'database.url' in ~/.kaka-agent/config.yaml. "
+            f"Current database URL: {get_database_url()}"
         )
 
     normalized = parsed.set(drivername="postgresql")
@@ -145,7 +157,9 @@ async def initialize_async_engine(metadata: MetaData | None = None) -> AsyncEngi
         )
     elif db_type == "postgres":
         if not ("+" in database_url and "asyncpg" in database_url):
-            database_url = database_url.replace("postgresql://", "postgresql+asyncpg://")
+            database_url = database_url.replace(
+                "postgresql://", "postgresql+asyncpg://"
+            )
         _async_engine = create_async_engine(
             database_url,
             pool_size=10,
@@ -189,13 +203,14 @@ def _get_async_session_maker() -> async_sessionmaker[AsyncSession]:
 
 async def close_async_engine() -> None:
     """Dispose the async engine and clear cached session state."""
-    global _async_engine, _async_session_maker, _tables_created
+    global _async_engine, _async_session_maker, _tables_created, _cached_database_url
 
     if _async_engine is not None:
         await _async_engine.dispose()
         _async_engine = None
         _async_session_maker = None
         _tables_created = False
+        _cached_database_url = None
 
 
 def _normalize_url_to_sync(database_url: str) -> str:
@@ -215,7 +230,9 @@ def _normalize_url_to_sync(database_url: str) -> str:
 
     sync_driver = sync_map.get(base_driver)
     if sync_driver is None:
-        raise ValueError(f"Unsupported async driver '{parsed.drivername}'. Cannot convert to sync driver.")
+        raise ValueError(
+            f"Unsupported async driver '{parsed.drivername}'. Cannot convert to sync driver."
+        )
     normalized = parsed.set(drivername=sync_driver)
     return normalized.render_as_string(hide_password=False)
 
@@ -227,7 +244,11 @@ def create_tables(database_url: str, metadata: MetaData | None = None) -> None:
 
     # Ensure parent directory exists for SQLite databases
     parsed = make_url(database_url)
-    if "sqlite" in parsed.drivername and parsed.database and parsed.database != ":memory:":
+    if (
+        "sqlite" in parsed.drivername
+        and parsed.database
+        and parsed.database != ":memory:"
+    ):
         db_path = Path(parsed.database)
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
