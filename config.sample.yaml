@@ -1,0 +1,49 @@
+# Kaka Agent Configuration
+# Copy this file to ~/.kaka-agent/config.yaml and customize
+
+# Server configuration
+host: "0.0.0.0"
+port: 8000
+
+# Feature flags
+enable_web: true
+enable_api: true
+enable_dashboard: true
+
+# Database configuration (optional)
+# By default, SQLite is used at ~/.kaka-agent/data/agent_state.db
+# Only configure this if you want to use PostgreSQL
+# database:
+#   url: "postgresql+asyncpg://user:password@localhost:5432/kaka_agent"
+
+# LLM Provider configuration
+llm:
+  # API key for LLM provider (REQUIRED)
+  api_key: "your-api-key-here"
+
+  # Base URL for OpenAI-compatible API
+  base_url: "https://api.mistral.ai/v1"
+
+  # Default model to use
+  model: "devstral-2512"
+
+  # Temperature for model responses (optional)
+  # temperature: 0.0
+
+  # Alternative: Use OpenAI
+  # base_url: "https://api.openai.com/v1"
+  # model: "gpt-4"
+
+# Channel integrations (optional - uncomment to enable)
+# channels:
+#   telegram:
+#     # Telegram Bot Token from @BotFather
+#     bot_token: "your-telegram-bot-token-here"
+#
+#   discord:
+#     # Discord Bot Token from Discord Developer Portal
+#     bot_token: "your-discord-bot-token-here"
+
+# Security (optional)
+# persistence:
+#   allow_any_path: false  # Set to true to allow database outside ~/.kaka-agent/
