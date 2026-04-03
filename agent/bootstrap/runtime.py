@@ -9,7 +9,7 @@ from agent.modules.channels.public import (
     start_enabled_channels,
     stop_all_channels,
 )
-from agent.modules.settings.public import RuntimeSettings
+from agent.shared.config import RuntimeSettings
 from agent.modules.workflows.public import (
     close_checkpointer,
     initialize_checkpointer,

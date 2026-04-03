@@ -2,7 +2,8 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import text
 
-from agent.persistence.models import get_persistence_metadata
+from agent.shared.infrastructure.db.base import Base
+from agent.shared.infrastructure.db.models import load_orm_models
 from agent.shared.infrastructure.db.engine import (
     close_async_engine,
     get_async_engine,
@@ -26,11 +27,15 @@ def test_canonical_get_database_type_postgres_variants(monkeypatch: pytest.Monke
     monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/app")
     assert get_database_type() == "postgres"
 
-    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost:5432/app")
+    monkeypatch.setenv(
+        "DATABASE_URL", "postgresql+asyncpg://user:pass@localhost:5432/app"
+    )
     assert get_database_type() == "postgres"
 
 
-def test_canonical_get_postgres_conn_string_preserves_query_params(monkeypatch: pytest.MonkeyPatch):
+def test_canonical_get_postgres_conn_string_preserves_query_params(
+    monkeypatch: pytest.MonkeyPatch,
+):
     monkeypatch.setenv(
         "DATABASE_URL",
         "postgresql+asyncpg://user:pass@db.example.com:5432/appdb?sslmode=require&application_name=kaka",
@@ -54,7 +59,8 @@ async def shared_db(monkeypatch: pytest.MonkeyPatch, tmp_path):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.resolve().as_posix()}")
     monkeypatch.setenv("PERSISTENCE_ALLOW_ANY_PATH", "true")
 
-    await initialize_async_engine(metadata=get_persistence_metadata())
+    load_orm_models()
+    await initialize_async_engine(metadata=Base.metadata)
     try:
         yield
     finally:

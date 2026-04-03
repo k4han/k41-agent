@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from agent.shared.config.constants import DEFAULT_CONFIG
+from agent.shared.config.models import SettingsSource, SettingsValue, build_settings_values
+
 
 class DefaultConfigSource:
     """Hardcoded default configuration values.
@@ -12,26 +15,7 @@ class DefaultConfigSource:
 
     def __init__(self) -> None:
         self._priority = 0  # Lowest priority
-        self._defaults: dict[str, Any] = {
-            # Server configuration
-            "host": "0.0.0.0",
-            "port": 8000,
-            "enable_web": True,
-            "enable_api": True,
-            "enable_dashboard": True,
-            # Database: Empty by default, will use SQLite if not set
-            # Users only need to set this for PostgreSQL
-            "database.url": "",
-            # LLM provider configuration
-            "llm.base_url": "https://api.mistral.ai/v1",
-            "llm.model": "devstral-2512",
-            "llm.temperature": 0.0,
-            # Channel integrations
-            "channels.telegram.enabled": True,
-            "channels.discord.enabled": True,
-            # Security
-            "persistence.allow_any_path": False,
-        }
+        self._defaults: dict[str, Any] = dict(DEFAULT_CONFIG)
 
     def get(self, key: str) -> Any | None:
         """Get a default config value by key."""
@@ -39,7 +23,22 @@ class DefaultConfigSource:
 
     def get_all(self) -> dict[str, Any]:
         """Get all default config values."""
-        return dict(self._defaults)
+        return self._defaults
+
+    def get_settings_value(self, key: str) -> SettingsValue | None:
+        """Get a default config value as SettingsValue."""
+        val = self._defaults.get(key)
+        if val is None:
+            return None
+        return SettingsValue(key=key, value=val, source=SettingsSource.DEFAULT)
+
+    def get_all_settings_values(self, keys: set[str] | None = None) -> dict[str, SettingsValue]:
+        """Get all default config values as SettingsValue objects.
+
+        Args:
+            keys: Optional set of keys to filter. If None, returns all keys.
+        """
+        return build_settings_values(self._defaults, SettingsSource.DEFAULT, keys)
 
     def reload(self) -> None:
         """No-op for defaults (they never change)."""

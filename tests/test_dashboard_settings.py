@@ -4,15 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from agent.modules.settings.application.settings_service import RuntimeSettingsService
-from agent.modules.settings.infrastructure.default_repository import (
-    DefaultSettingsRepository,
-)
+from agent.shared.config import ConfigService
+from agent.shared.config.default_source import DefaultConfigSource
 
 
 @pytest.fixture()
 def dashboard_client(monkeypatch: pytest.MonkeyPatch):
-    """Create a TestClient with settings_service wired up."""
+    """Create a TestClient with config_service wired up."""
     for var in ("ENABLE_TELEGRAM", "ENABLE_DISCORD"):
         monkeypatch.delenv(var, raising=False)
 
@@ -24,9 +22,9 @@ def dashboard_client(monkeypatch: pytest.MonkeyPatch):
     app = FastAPI()
     app.include_router(router)
 
-    # Wire up settings_service
-    settings_service = RuntimeSettingsService(repositories=[DefaultSettingsRepository()])
-    app.state.settings_service = settings_service
+    # Wire up config_service
+    config_service = ConfigService(sources=[DefaultConfigSource()])
+    app.state.config_service = config_service
 
     return TestClient(app)
 

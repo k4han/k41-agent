@@ -10,7 +10,7 @@ from agent.modules.channels.public import (
     stop_all_channels,
     stop_channel,
 )
-from agent.modules.settings.public import KNOWN_RUNTIME_KEYS, RuntimeSettingsService
+from agent.shared.config import KNOWN_RUNTIME_KEYS, ConfigService
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -25,10 +25,10 @@ def _get_channel_manager(request: Request) -> ChannelManager:
     return channel_manager
 
 
-def _get_settings_service(request: Request) -> RuntimeSettingsService:
-    service = getattr(request.app.state, "settings_service", None)
+def _get_config_service(request: Request) -> ConfigService:
+    service = getattr(request.app.state, "config_service", None)
     if service is None:
-        raise HTTPException(status_code=503, detail="Settings service is not available.")
+        raise HTTPException(status_code=503, detail="Config service is not available.")
     return service
 
 
@@ -100,14 +100,14 @@ async def stop_all_services(request: Request):
 @router.get("/settings")
 async def get_settings(request: Request):
     """Return all effective settings with their source."""
-    service = _get_settings_service(request)
+    service = _get_config_service(request)
     return {"settings": service.get_settings_overview()}
 
 
 @router.get("/settings/sources")
 async def get_settings_sources(request: Request):
     """Return all values from all sources, grouped by key."""
-    service = _get_settings_service(request)
+    service = _get_config_service(request)
     return {"sources": service.get_settings_sources()}
 
 
@@ -118,7 +118,7 @@ class UpdateSettingBody(BaseModel):
 @router.put("/settings/{key:path}")
 async def update_setting(key: str, body: UpdateSettingBody, request: Request):
     """Validate a runtime setting update request before persistence is added."""
-    _get_settings_service(request)  # ensure available
+    _get_config_service(request)  # ensure available
     if key not in KNOWN_RUNTIME_KEYS:
         raise HTTPException(
             status_code=400,

@@ -6,7 +6,7 @@ import agent.bootstrap.runtime as runtime_module
 from agent.bootstrap.runtime import AppRuntime, ChannelSpec
 from agent.bootstrap.settings import BootstrapConfig
 from agent.modules.channels.public import ChannelStatus
-from agent.modules.settings.domain.settings_value import RuntimeSettings
+from agent.shared.config import RuntimeSettings
 
 
 async def wait_for_status(runtime: AppRuntime, name: str, expected: ChannelStatus) -> None:

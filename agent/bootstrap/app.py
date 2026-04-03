@@ -12,7 +12,7 @@ from agent.bootstrap.runtime import AppRuntime
 from agent.bootstrap.settings import BootstrapConfig, load_bootstrap_config
 from agent.delivery.http import api_router, dashboard_router
 from agent.modules.channels.public import list_channel_statuses
-from agent.modules.settings.public import create_runtime_settings_service
+from agent.shared.config import get_config_service
 
 logging.basicConfig(
     level=logging.INFO,
@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 
 def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:
     bootstrap_config = bootstrap_config or load_bootstrap_config()
-    runtime_settings_service = create_runtime_settings_service()
-    runtime_settings = runtime_settings_service.get_runtime_settings()
+    config_service = get_config_service()
+    runtime_settings = config_service.get_runtime_settings()
     runtime = AppRuntime(bootstrap_config, runtime_settings)
 
     @asynccontextmanager
@@ -46,7 +46,7 @@ def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:
     fastapi_app.state.channel_manager = runtime.channel_manager
     fastapi_app.state.bootstrap_config = bootstrap_config
     fastapi_app.state.runtime_settings = runtime_settings
-    fastapi_app.state.settings_service = runtime_settings_service
+    fastapi_app.state.config_service = config_service
 
     fastapi_app.add_middleware(
         CORSMiddleware,

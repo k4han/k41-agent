@@ -1,18 +1,34 @@
+"""Unified configuration service merging ConfigService and RuntimeSettingsService.
+
+This service provides both:
+1. Simple config access (get, get_str, get_int, get_bool, etc.)
+2. Advanced settings tracking (get_effective, list_all_by_source, etc.)
+
+Precedence (low → high):
+    DEFAULT (priority 0) → CONFIG_FILE (priority 100) → DATABASE (priority 200) → ENV_OVERRIDE (priority 300)
+"""
+
 from __future__ import annotations
 
 import logging
 from pathlib import Path
 from typing import Any
 
+from agent.shared.config.constants import KNOWN_RUNTIME_KEYS, get_channel_enabled_key
+from agent.shared.config.models import RuntimeSettings, SettingsSource, SettingsValue
+from agent.shared.infrastructure.config_file import coerce_bool
+
 logger = logging.getLogger(__name__)
 
 
 class ConfigService:
-    """Central configuration service with multi-source support.
+    """Unified configuration service with multi-source support.
 
     This service merges configuration from multiple sources (defaults, YAML file,
     database, etc.) with a defined precedence order. Higher priority sources
     override lower priority ones.
+
+    Supports both simple config access and advanced settings tracking.
     """
 
     def __init__(self, sources: list[Any]) -> None:
@@ -23,6 +39,8 @@ class ConfigService:
         """
         # Sort sources by priority (lowest first, so highest wins in merge)
         self._sources = sorted(sources, key=lambda s: s.priority)
+
+    # --- Simple config API (backward compatible with old ConfigService) ---
 
     def get(self, key: str, default: Any = None) -> Any:
         """Get config value with precedence resolution.
@@ -84,11 +102,7 @@ class ConfigService:
             Boolean value
         """
         value = self.get(key, default)
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, str):
-            return value.strip().lower() in {"1", "true", "yes", "on"}
-        return bool(value)
+        return coerce_bool(value) if value is not None else default
 
     def get_dict(self, key: str, default: dict | None = None) -> dict:
         """Get dict config value.
@@ -120,11 +134,6 @@ class ConfigService:
             return Path(value.replace("~", str(Path.home())))
         return Path(value)
 
-    def reload(self) -> None:
-        """Reload all sources (clears caches)."""
-        for source in self._sources:
-            source.reload()
-
     def get_all(self) -> dict[str, Any]:
         """Get all effective config values (merged from all sources).
 
@@ -135,6 +144,77 @@ class ConfigService:
         for source in self._sources:
             result.update(source.get_all())
         return result
+
+    def reload(self) -> None:
+        """Reload all sources (clears caches)."""
+        for source in self._sources:
+            source.reload()
+
+    # --- Advanced settings API (from RuntimeSettingsService) ---
+
+    def get_effective(self, key: str) -> SettingsValue | None:
+        """Return the effective value for *key* after precedence merge.
+
+        This tracks which source the value came from.
+        """
+        result: SettingsValue | None = None
+        for source in self._sources:
+            val = source.get_settings_value(key)
+            if val is not None:
+                result = val
+        return result
+
+    def list_all(self) -> dict[str, SettingsValue]:
+        """Return all effective settings keyed by canonical name.
+
+        Only returns known runtime keys with source tracking.
+        """
+        merged: dict[str, SettingsValue] = {}
+        for key in KNOWN_RUNTIME_KEYS:
+            for source in self._sources:
+                val = source.get_settings_value(key)
+                if val is not None:
+                    merged[key] = val
+
+        return merged
+
+    def list_all_by_source(self) -> dict[str, list[SettingsValue]]:
+        """Return every value from every source, grouped by key.
+
+        Useful for the dashboard to show where each value comes from.
+        """
+        by_key: dict[str, list[SettingsValue]] = {}
+        for key in KNOWN_RUNTIME_KEYS:
+            for source in self._sources:
+                val = source.get_settings_value(key)
+                if val is not None:
+                    by_key.setdefault(key, []).append(val)
+        return by_key
+
+    def get_runtime_settings(self) -> RuntimeSettings:
+        """Build a consolidated ``RuntimeSettings`` from merged sources."""
+        merged = self.list_all()
+        defaults = RuntimeSettings()
+        channel_enabled = dict(defaults.channel_enabled)
+        for channel_name in channel_enabled:
+            canon = get_channel_enabled_key(channel_name)
+            sv = merged.get(canon)
+            if sv is not None:
+                channel_enabled[channel_name] = coerce_bool(sv.value)
+        return RuntimeSettings(channel_enabled=channel_enabled)
+
+    def get_settings_overview(self) -> dict[str, dict[str, object]]:
+        """Dashboard-friendly overview: effective value + source for each key."""
+        merged = self.list_all()
+        return {key: sv.to_dict() for key, sv in sorted(merged.items())}
+
+    def get_settings_sources(self) -> dict[str, list[dict[str, object]]]:
+        """Dashboard-friendly: all sources for each key."""
+        by_key = self.list_all_by_source()
+        return {
+            key: [sv.to_dict() for sv in vals]
+            for key, vals in sorted(by_key.items())
+        }
 
 
 # Singleton instances

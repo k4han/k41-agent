@@ -15,11 +15,17 @@ from agent.shared.infrastructure.db.session import (
     get_async_session,
     get_async_session_maker,
 )
+from agent.shared.infrastructure.db.user_preferences import UserPreferences
+from agent.shared.infrastructure.db.user_preferences_repository import (
+    UserPreferencesRepository,
+)
 
 __all__ = [
     "Base",
     "BaseModel",
     "DEFAULT_DATABASE_URL",
+    "UserPreferences",
+    "UserPreferencesRepository",
     "close_async_engine",
     "create_tables",
     "get_async_engine",

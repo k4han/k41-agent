@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
+from agent.shared.config.models import SettingsValue
+
 
 class ConfigSource(Protocol):
     """Protocol for configuration sources.
@@ -27,6 +29,28 @@ class ConfigSource(Protocol):
 
         Returns:
             Dictionary of all config key-value pairs
+        """
+        ...
+
+    def get_settings_value(self, key: str) -> SettingsValue | None:
+        """Get a config value as SettingsValue with source tracking.
+
+        Args:
+            key: Config key in dot notation
+
+        Returns:
+            SettingsValue or None if not found
+        """
+        ...
+
+    def get_all_settings_values(self, keys: set[str] | None = None) -> dict[str, SettingsValue]:
+        """Get config values as SettingsValue objects with source tracking.
+
+        Args:
+            keys: Optional set of keys to filter. If None, returns all keys.
+
+        Returns:
+            Dictionary of key to SettingsValue mappings
         """
         ...
 

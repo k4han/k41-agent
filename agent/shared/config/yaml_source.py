@@ -4,7 +4,16 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from agent.shared.config.models import (
+    SettingsSource,
+    SettingsValue,
+    build_settings_values,
+)
+from agent.shared.infrastructure.config_file import flatten_config_mapping
+
 logger = logging.getLogger(__name__)
+
+_MISSING = object()
 
 DEFAULT_CONFIG_PATH = Path.home() / ".kaka-agent" / "config.yaml"
 
@@ -30,6 +39,25 @@ class YamlConfigSource:
         """Get all config values from YAML file."""
         return self._load()
 
+    def get_settings_value(self, key: str) -> SettingsValue | None:
+        """Get a config value as SettingsValue."""
+        data = self._load()
+        val = data.get(key, _MISSING)
+        if val is _MISSING:
+            return None
+        return SettingsValue(key=key, value=val, source=SettingsSource.CONFIG_FILE)
+
+    def get_all_settings_values(
+        self, keys: set[str] | None = None
+    ) -> dict[str, SettingsValue]:
+        """Get all config values as SettingsValue objects.
+
+        Args:
+            keys: Optional set of keys to filter. If None, returns all keys.
+        """
+        data = self._load()
+        return build_settings_values(data, SettingsSource.CONFIG_FILE, keys)
+
     def reload(self) -> None:
         """Clear cache and reload from file."""
         self._cache = None
@@ -50,39 +78,28 @@ class YamlConfigSource:
             raw = self._path.read_text(encoding="utf-8")
             data = yaml.safe_load(raw)
             if not isinstance(data, dict):
-                logger.warning("Config file %s does not contain a mapping — ignoring.", self._path)
+                logger.warning(
+                    "Config file %s does not contain a mapping — ignoring.", self._path
+                )
                 self._cache = {}
                 return self._cache
 
-            self._cache = self._flatten(data)
+            self._cache = flatten_config_mapping(data)
             return self._cache
         except FileNotFoundError:
             logger.debug("Config file not found: %s — using empty config.", self._path)
             self._cache = {}
             return self._cache
         except ImportError:
-            logger.warning("PyYAML is not installed — skipping config file %s.", self._path)
+            logger.warning(
+                "PyYAML is not installed — skipping config file %s.", self._path
+            )
             self._cache = {}
             return self._cache
         except Exception:
             logger.exception("Failed to read config file %s.", self._path)
             self._cache = {}
             return self._cache
-
-    def _flatten(self, data: dict[str, Any], prefix: str = "") -> dict[str, Any]:
-        """Flatten nested dict to dot-notation keys.
-
-        Example:
-            {"llm": {"api_key": "sk-123"}} -> {"llm.api_key": "sk-123"}
-        """
-        result: dict[str, Any] = {}
-        for key, value in data.items():
-            full_key = f"{prefix}.{key}" if prefix else key
-            if isinstance(value, dict):
-                result.update(self._flatten(value, full_key))
-            else:
-                result[full_key] = value
-        return result
 
 
 __all__ = ["DEFAULT_CONFIG_PATH", "YamlConfigSource"]
