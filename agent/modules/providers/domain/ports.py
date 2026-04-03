@@ -12,7 +12,7 @@ class ChatModelFactory(Protocol):
     """Factory protocol for creating chat model instances."""
 
     def create(
-        self, provider_config: ProviderConfig, model_config: ModelConfig
+        self, provider_config: ProviderConfig, model_config: ModelConfig, api_key: str
     ) -> BaseChatModel: ...
 
 

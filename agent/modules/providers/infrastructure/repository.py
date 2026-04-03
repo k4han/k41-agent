@@ -1,20 +1,23 @@
-"""Environment-based provider repository.
+"""Provider repository with config service support.
 
-Reads provider configuration from environment variables,
-maintaining backward compatibility with LLM_API_KEY, LLM_MODEL, etc.
+Reads provider configuration from the centralized config service.
 """
 
 import os
 
 from agent.modules.providers.domain.provider import ProviderConfig, ProviderType
+from agent.shared.config import get_config_service
+from agent.shared.infrastructure.validation import is_placeholder_value
 
 
 DEFAULT_MODEL = "devstral-2512"
 DEFAULT_BASE_URL = "https://api.mistral.ai/v1"
+# Env var name used internally for LangChain compatibility
+_LANGCHAIN_API_KEY_ENV_VAR = "_KAKA_LLM_API_KEY"
 
 
 class EnvProviderRepository:
-    """Resolve provider configs from environment variables."""
+    """Resolve provider configs from config service."""
 
     def __init__(self) -> None:
         self._providers: dict[str, ProviderConfig] | None = None
@@ -23,13 +26,24 @@ class EnvProviderRepository:
         if self._providers is not None:
             return self._providers
 
-        base_url = os.getenv("LLM_BASE_URL") or DEFAULT_BASE_URL
-        default_model = os.getenv("LLM_MODEL") or DEFAULT_MODEL
+        config = get_config_service()
 
-        # Determine API key env var name
-        api_key_env_var = "LLM_API_KEY"
-        if not os.getenv("LLM_API_KEY") and os.getenv("OPENAI_API_KEY"):
-            api_key_env_var = "OPENAI_API_KEY"
+        base_url = config.get_str("llm.base_url", DEFAULT_BASE_URL)
+        default_model = config.get_str("llm.model", DEFAULT_MODEL)
+
+        # Get API key from config
+        api_key = config.get_str("llm.api_key", "")
+
+        # Validate API key
+        if is_placeholder_value(api_key):
+            raise RuntimeError(
+                "LLM API key not configured. "
+                "Please set 'llm.api_key' in ~/.kaka-agent/config.yaml"
+            )
+
+        # Store API key in environment variable for LangChain compatibility
+        os.environ[_LANGCHAIN_API_KEY_ENV_VAR] = api_key
+        api_key_env_var = _LANGCHAIN_API_KEY_ENV_VAR
 
         default_provider = ProviderConfig(
             name="default",

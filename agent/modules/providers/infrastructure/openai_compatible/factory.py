@@ -3,8 +3,6 @@
 Covers OpenAI native, Mistral, and any OpenAI-compatible API.
 """
 
-import os
-
 from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 
@@ -16,10 +14,8 @@ class OpenAICompatibleFactory:
     """Create ChatOpenAI client from provider + model config."""
 
     def create(
-        self, provider_config: ProviderConfig, model_config: ModelConfig
+        self, provider_config: ProviderConfig, model_config: ModelConfig, api_key: str
     ) -> BaseChatModel:
-        api_key = os.getenv(provider_config.api_key_env_var, "")
-
         return ChatOpenAI(
             model=model_config.model_name,
             base_url=provider_config.base_url,
