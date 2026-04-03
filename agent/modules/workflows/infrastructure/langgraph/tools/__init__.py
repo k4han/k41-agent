@@ -1,6 +1,5 @@
 from agent.modules.workflows.infrastructure.langgraph.tools.call_agent import (
     call_agent,
-    make_call_agent_tool,
 )
 from agent.modules.workflows.infrastructure.langgraph.tools.chat import echo, get_current_time
 from agent.modules.workflows.infrastructure.langgraph.tools.common import (
@@ -25,7 +24,6 @@ __all__ = [
     "get_default_tools",
     "get_tool_by_name",
     "list_files",
-    "make_call_agent_tool",
     "read_file",
     "resolve_tools",
     "run_bash",

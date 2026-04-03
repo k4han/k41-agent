@@ -112,10 +112,3 @@ def llm_node(state, runtime: "Runtime[WorkflowContext]"):
     llm = get_chat_model(model=model).bind_tools(tools)
     response = llm.invoke(messages)
     return {"messages": [response]}
-
-
-# Compatibility alias for code that still calls make_llm_node().
-# The new design resolves config at runtime, so this just returns llm_node.
-def make_llm_node(tools=None, model=None, **_kwargs):
-    """Deprecated. Use llm_node directly — config is resolved at runtime."""
-    return llm_node

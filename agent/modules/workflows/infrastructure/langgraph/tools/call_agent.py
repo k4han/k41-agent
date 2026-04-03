@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import uuid
 
-from langchain_core.tools import BaseTool, tool
+from langchain_core.tools import tool
 from langgraph.prebuilt import ToolRuntime
 
 from agent.modules.workflows.infrastructure.langgraph.run_config import (
@@ -96,11 +96,3 @@ async def call_agent(
             task,
         )
         return f"[error] sub-agent '{sub_agent}' failed: {e}"
-
-
-def make_call_agent_tool(_agent_name: str) -> BaseTool:
-    """Deprecated compatibility wrapper.
-
-    call_agent now reads the caller agent from ToolRuntime instead of a closure.
-    """
-    return call_agent

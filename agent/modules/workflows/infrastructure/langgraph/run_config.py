@@ -46,7 +46,10 @@ def make_context(
 
     if allowed_tool_names is None:
         allowed_tool_names = get_default_tool_names()
-    resolved_dir = working_dir or os.getenv("WORKING_DIR") or DEFAULT_WORKING_DIR
+
+    # Allow working_dir override, otherwise use default
+    resolved_dir = working_dir or DEFAULT_WORKING_DIR
+
     return {
         "service_type": service_type,
         "working_dir": resolved_dir,
