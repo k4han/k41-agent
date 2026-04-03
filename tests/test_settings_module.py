@@ -5,9 +5,6 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
-import pytest
-from pytest import MonkeyPatch
-
 from agent.modules.settings.application.settings_service import RuntimeSettingsService
 from agent.modules.settings.domain.settings_value import (
     KNOWN_RUNTIME_KEYS,
@@ -18,7 +15,6 @@ from agent.modules.settings.domain.settings_value import (
 from agent.modules.settings.infrastructure.default_repository import (
     DefaultSettingsRepository,
 )
-from agent.modules.settings.infrastructure.env_repository import EnvSettingsRepository
 
 
 # =====================================================================
@@ -71,47 +67,6 @@ class TestDefaultSettingsRepository:
     def test_get_missing_key(self) -> None:
         repo = DefaultSettingsRepository()
         assert repo.get("nonexistent") is None
-
-
-# =====================================================================
-# EnvSettingsRepository
-# =====================================================================
-
-
-class TestEnvSettingsRepository:
-    def test_reads_channel_flags(self, monkeypatch: MonkeyPatch) -> None:
-        monkeypatch.setenv("ENABLE_TELEGRAM", "0")
-        monkeypatch.setenv("ENABLE_DISCORD", "yes")
-
-        repo = EnvSettingsRepository()
-        all_settings = repo.get_all()
-
-        assert all_settings["channels.telegram.enabled"].value is False
-        assert all_settings["channels.discord.enabled"].value is True
-
-    def test_missing_env_vars_not_in_results(self, monkeypatch: MonkeyPatch) -> None:
-        monkeypatch.delenv("ENABLE_TELEGRAM", raising=False)
-        monkeypatch.delenv("ENABLE_DISCORD", raising=False)
-
-        repo = EnvSettingsRepository()
-        assert repo.get_all() == {}
-
-    def test_all_values_have_env_source(self, monkeypatch: MonkeyPatch) -> None:
-        monkeypatch.setenv("ENABLE_TELEGRAM", "1")
-        repo = EnvSettingsRepository()
-        for sv in repo.get_all().values():
-            assert sv.source == SettingsSource.ENV_OVERRIDE
-
-    def test_ignores_bootstrap_env_vars(self, monkeypatch: MonkeyPatch) -> None:
-        monkeypatch.setenv("HOST", "localhost")
-        monkeypatch.setenv("PORT", "9000")
-        monkeypatch.setenv("ENABLE_WEB", "false")
-        monkeypatch.delenv("ENABLE_TELEGRAM", raising=False)
-        monkeypatch.delenv("ENABLE_DISCORD", raising=False)
-
-        repo = EnvSettingsRepository()
-
-        assert repo.get_all() == {}
 
 
 # =====================================================================

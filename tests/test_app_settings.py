@@ -1,40 +1,24 @@
 from __future__ import annotations
 
 import textwrap
+from pathlib import Path
 
 from pytest import MonkeyPatch
 
 from agent.bootstrap.settings import BootstrapConfig, load_bootstrap_config
 
 
-def test_load_bootstrap_config_reads_env_overrides(monkeypatch: MonkeyPatch, tmp_path):
-    monkeypatch.setenv("HOST", "127.0.0.1")
-    monkeypatch.setenv("PORT", "9000")
-    monkeypatch.setenv("ENABLE_WEB", "true")
-    monkeypatch.setenv("ENABLE_API", "false")
-    monkeypatch.setenv("ENABLE_DASHBOARD", "true")
-    monkeypatch.setenv("ENABLE_TELEGRAM", "false")
-    monkeypatch.setenv("ENABLE_DISCORD", "false")
+def test_load_bootstrap_config_reads_config_file(monkeypatch: MonkeyPatch, tmp_path):
+    """Test that load_bootstrap_config reads from ConfigService."""
+    # Reset singleton
+    import agent.shared.config.service as service_module
+    import agent.shared.config.yaml_source as yaml_module
+    monkeypatch.setattr(service_module, "_config_service", None)
 
-    config = load_bootstrap_config(path=tmp_path / "missing.yml")
-
-    assert config == BootstrapConfig(
-        host="127.0.0.1",
-        port=9000,
-        enable_web=True,
-        enable_api=False,
-        enable_dashboard=True,
-    )
-
-
-def test_load_bootstrap_config_reads_file_and_ignores_runtime_keys(
-    monkeypatch: MonkeyPatch,
-    tmp_path,
-):
-    for var in ("HOST", "PORT", "ENABLE_WEB", "ENABLE_API", "ENABLE_DASHBOARD"):
-        monkeypatch.delenv(var, raising=False)
-
-    config_path = tmp_path / "config.yml"
+    # Create test config
+    kaka_dir = tmp_path / ".kaka-agent"
+    kaka_dir.mkdir()
+    config_path = kaka_dir / "config.yaml"
     config_path.write_text(
         textwrap.dedent("""\
         host: 127.0.0.1
@@ -42,14 +26,14 @@ def test_load_bootstrap_config_reads_file_and_ignores_runtime_keys(
         enable_web: false
         enable_api: true
         enable_dashboard: false
-        channels:
-          telegram:
-            enabled: false
         """),
         encoding="utf-8",
     )
 
-    config = load_bootstrap_config(path=config_path)
+    # Mock DEFAULT_CONFIG_PATH
+    monkeypatch.setattr(yaml_module, "DEFAULT_CONFIG_PATH", config_path)
+
+    config = load_bootstrap_config()
 
     assert config == BootstrapConfig(
         host="127.0.0.1",
@@ -61,10 +45,16 @@ def test_load_bootstrap_config_reads_file_and_ignores_runtime_keys(
 
 
 def test_load_bootstrap_config_uses_defaults(monkeypatch: MonkeyPatch, tmp_path):
-    for var in ("HOST", "PORT", "ENABLE_WEB", "ENABLE_API", "ENABLE_DASHBOARD"):
-        monkeypatch.delenv(var, raising=False)
+    """Test that load_bootstrap_config uses defaults when no config exists."""
+    # Reset singleton
+    import agent.shared.config.service as service_module
+    import agent.shared.config.yaml_source as yaml_module
+    monkeypatch.setattr(service_module, "_config_service", None)
 
-    config = load_bootstrap_config(path=tmp_path / "missing.yml")
+    # Point to non-existent config
+    monkeypatch.setattr(yaml_module, "DEFAULT_CONFIG_PATH", tmp_path / "nonexistent.yaml")
+
+    config = load_bootstrap_config()
 
     assert config == BootstrapConfig(
         host="0.0.0.0",
