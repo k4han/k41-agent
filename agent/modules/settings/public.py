@@ -18,7 +18,6 @@ from agent.modules.settings.infrastructure.config_file_repository import (
 from agent.modules.settings.infrastructure.default_repository import (
     DefaultSettingsRepository,
 )
-from agent.modules.settings.infrastructure.env_repository import EnvSettingsRepository
 from agent.modules.settings.infrastructure.models import UserPreferences
 
 def create_runtime_settings_service() -> RuntimeSettingsService:
@@ -27,7 +26,6 @@ def create_runtime_settings_service() -> RuntimeSettingsService:
         repositories=[
             DefaultSettingsRepository(),
             ConfigFileRepository(),
-            EnvSettingsRepository(),
         ]
     )
 
