@@ -63,8 +63,7 @@ Can use {working_dir} placeholder.
 
 Agents được load từ:
 1. `~/.kaka-agent/agents/` (primary)
-2. `~/.kaka-agent/subagents/` (legacy)
-3. Custom directory qua `KAKA_AGENTS_DIR` env var
+2. `~/.kaka-agent/subagents/` (legacy compatibility path)
 
 Builtin default agent luôn available ngay cả khi không có MD files.
 

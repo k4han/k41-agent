@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 
 from agent.modules.agents.domain.subagent import AgentConfig
@@ -12,8 +11,8 @@ from agent.modules.agents.infrastructure.parser import parse_agent_file
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_AGENTS_DIR = os.path.expanduser("~/.kaka-agent/agents")
-LEGACY_SUBAGENTS_DIR = os.path.expanduser("~/.kaka-agent/subagents")
+DEFAULT_AGENTS_DIR = str(Path.home() / ".kaka-agent" / "agents")
+LEGACY_SUBAGENTS_DIR = str(Path.home() / ".kaka-agent" / "subagents")
 
 
 def _get_builtin_default_agent() -> AgentConfig:
@@ -87,11 +86,10 @@ class FilesystemAgentRepository:
 
         self._cache = agents
         count = len(agents)
+        scan_dirs = ", ".join(str(p) for p in self._scan_dirs())
         if count:
-            scan_dirs = ", ".join(str(p) for p in self._scan_dirs())
             logger.info("Loaded %d agent(s) from %s", count, scan_dirs)
         else:
-            scan_dirs = ", ".join(str(p) for p in self._scan_dirs())
             logger.debug("No agent files found in %s", scan_dirs)
         return agents
 
@@ -113,8 +111,9 @@ _repository: FilesystemAgentRepository | None = None
 def get_repository() -> FilesystemAgentRepository:
     global _repository
     if _repository is None:
-        env_dir = os.getenv("KAKA_AGENTS_DIR")
-        _repository = FilesystemAgentRepository(env_dir if env_dir else None)
+        # Singleton repository always uses default scan directories.
+        # For one-off custom scans, call load_agents_from_dir(dir_path).
+        _repository = FilesystemAgentRepository(None)
     return _repository
 
 
