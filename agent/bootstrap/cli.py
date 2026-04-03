@@ -1,4 +1,5 @@
 import logging
+import shutil
 import sys
 from pathlib import Path
 
@@ -52,14 +53,39 @@ def init():
         click.echo(f"[ERROR] Database initialization failed: {e}")
         sys.exit(1)
 
-    # Create sample config if not exists
+    # Create config from sample if not exists
     config_file = kaka_dir / "config.yaml"
     if not config_file.exists():
-        sample_config = """# Kaka Agent Configuration
-# See documentation for available options
+        # Read sample config from package
+        try:
+            # Try to find config.sample.yaml in project root
+            project_root = Path(__file__).parent.parent.parent
+            sample_file = project_root / "config.sample.yaml"
+
+            if sample_file.exists():
+                shutil.copy(sample_file, config_file)
+                click.echo(f"[OK] Created config from sample at {config_file}")
+                click.echo("[IMPORTANT] Please edit config.yaml and set your API key!")
+            else:
+                # Fallback: create minimal config
+                minimal_config = """# Kaka Agent Configuration
+# Please set your LLM API key below
+
+llm:
+  api_key: "your-api-key-here"
+  base_url: "https://api.mistral.ai/v1"
+  model: "devstral-2512"
 """
-        config_file.write_text(sample_config)
-        click.echo(f"[OK] Created sample config at {config_file}")
+                config_file.write_text(minimal_config)
+                click.echo(f"[OK] Created minimal config at {config_file}")
+                click.echo("[IMPORTANT] Please edit config.yaml and set your API key!")
+        except (OSError, IOError) as e:
+            click.echo(f"[WARNING] Could not copy sample config: {e}")
+            click.echo(f"[OK] Please create {config_file} manually")
+        except Exception as e:
+            logger.exception("Unexpected error during config creation")
+            click.echo(f"[WARNING] Unexpected error: {e}")
+            click.echo(f"[OK] Please create {config_file} manually")
     else:
         click.echo(f"[OK] Config already exists at {config_file}")
 

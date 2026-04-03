@@ -1,15 +1,13 @@
-import os
 from dataclasses import dataclass
-from pathlib import Path
 
-from agent.shared.infrastructure.config_file import DEFAULT_CONFIG_PATH, coerce_bool, load_flat_config_file
+from agent.shared.config import get_config_service
 
 
-def parse_bool_env(name: str, default: bool) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return coerce_bool(value)
+CONFIG_KEY_HOST = "host"
+CONFIG_KEY_PORT = "port"
+CONFIG_KEY_ENABLE_WEB = "enable_web"
+CONFIG_KEY_ENABLE_API = "enable_api"
+CONFIG_KEY_ENABLE_DASHBOARD = "enable_dashboard"
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,33 +19,17 @@ class BootstrapConfig:
     enable_dashboard: bool
 
 
-def load_bootstrap_config(path: Path | None = None) -> BootstrapConfig:
-    """Build bootstrap config from defaults, config file, and env vars."""
-    flat_config = load_flat_config_file(path or DEFAULT_CONFIG_PATH)
-
-    default_config = BootstrapConfig(
-        host="0.0.0.0",
-        port=8000,
-        enable_web=True,
-        enable_api=True,
-        enable_dashboard=True,
-    )
-
-    host = str(flat_config.get("host", default_config.host))
-    port = int(flat_config.get("port", default_config.port))
-    enable_web = coerce_bool(flat_config.get("enable_web", default_config.enable_web))
-    enable_api = coerce_bool(flat_config.get("enable_api", default_config.enable_api))
-    enable_dashboard = coerce_bool(
-        flat_config.get("enable_dashboard", default_config.enable_dashboard)
-    )
+def load_bootstrap_config() -> BootstrapConfig:
+    """Build bootstrap config from config service."""
+    config = get_config_service()
 
     return BootstrapConfig(
-        host=os.getenv("HOST", host),
-        port=int(os.getenv("PORT", str(port))),
-        enable_web=parse_bool_env("ENABLE_WEB", enable_web),
-        enable_api=parse_bool_env("ENABLE_API", enable_api),
-        enable_dashboard=parse_bool_env("ENABLE_DASHBOARD", enable_dashboard),
+        host=config.get_str(CONFIG_KEY_HOST, "0.0.0.0"),
+        port=config.get_int(CONFIG_KEY_PORT, 8000),
+        enable_web=config.get_bool(CONFIG_KEY_ENABLE_WEB, True),
+        enable_api=config.get_bool(CONFIG_KEY_ENABLE_API, True),
+        enable_dashboard=config.get_bool(CONFIG_KEY_ENABLE_DASHBOARD, True),
     )
 
 
-__all__ = ["BootstrapConfig", "DEFAULT_CONFIG_PATH", "load_bootstrap_config", "parse_bool_env"]
+__all__ = ["BootstrapConfig", "load_bootstrap_config"]

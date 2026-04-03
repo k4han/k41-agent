@@ -5,7 +5,6 @@ import selectors
 from contextlib import asynccontextmanager
 
 import uvicorn
-from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -15,7 +14,6 @@ from agent.delivery.http import api_router, dashboard_router
 from agent.modules.channels.public import list_channel_statuses
 from agent.modules.settings.public import create_runtime_settings_service
 
-load_dotenv()
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
@@ -108,14 +106,17 @@ async def main() -> None:
 
 
 def run() -> None:
-    if os.name == "nt":
-        asyncio.run(
-            main(),
-            loop_factory=lambda: asyncio.SelectorEventLoop(selectors.SelectSelector()),
-        )
-        return
+    try:
+        if os.name == "nt":
+            asyncio.run(
+                main(),
+                loop_factory=lambda: asyncio.SelectorEventLoop(selectors.SelectSelector()),
+            )
+            return
 
-    asyncio.run(main())
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Shutdown requested by user.")
 
 
 __all__ = ["app", "create_app", "main", "run", "settings"]
