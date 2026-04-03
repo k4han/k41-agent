@@ -30,7 +30,7 @@ class ManagedChannel:
     async def start(self) -> None:
         async with self._lock:
             if self.status in (ChannelStatus.STARTING, ChannelStatus.RUNNING):
-                logger.warning("[%s] Already active with status=%s.", self.name, self.status)
+                logger.info("[%s] Already active with status=%s.", self.name, self.status)
                 return
 
             self.status = ChannelStatus.STARTING
@@ -41,7 +41,7 @@ class ManagedChannel:
     async def stop(self) -> None:
         async with self._lock:
             if self.status in (ChannelStatus.STOPPED, ChannelStatus.STOPPING):
-                logger.warning("[%s] Already inactive with status=%s.", self.name, self.status)
+                logger.info("[%s] Already inactive with status=%s.", self.name, self.status)
                 return
 
             self.status = ChannelStatus.STOPPING

@@ -1,32 +1,23 @@
+import asyncio
+import contextlib
 import logging
-import os
 
 from agent.modules.agent_runtime.public import build_run_params, clear_agent_session
+from agent.modules.agents.public import resolve_catalog_agent_name
+from agent.modules.channels.infrastructure.telegram.formatter import (
+    format_telegram_message,
+    chunk_telegram_message,
+)
+from agent.modules.workflows.infrastructure.langgraph.run_config import DEFAULT_WORKING_DIR
+from agent.shared.config import get_config_service
+from agent.shared.infrastructure.validation import is_placeholder_value
 
 logger = logging.getLogger(__name__)
-
-
-def _resolve_catalog_agent_name(*candidates: str | None) -> str | None:
-    """Return the first existing agent name from candidates, else None."""
-    from agent.modules.agents.public import get_catalog_service
-
-    catalog = get_catalog_service()
-    for candidate in candidates:
-        name = (candidate or "").strip()
-        if not name:
-            continue
-        if catalog.get_agent(name) is not None:
-            return name
-    return None
 
 
 async def handle_streaming_response(message, params) -> None:
     """Handle agent execution and stream UI updates for tool calls to telegram."""
     from agent.modules.agent_runtime.public import run_agent_stream
-    from agent.modules.channels.infrastructure.telegram.formatter import (
-        format_telegram_message,
-        chunk_telegram_message,
-    )
     from aiogram.enums import ParseMode
 
     status_text = "⏳ đang xử lí..."
@@ -95,30 +86,6 @@ async def handle_streaming_response(message, params) -> None:
                     logger.error(f"Complete failure to send message chunk: {e2}")
 
 
-async def handle_message(message) -> None:
-    """Handle a default aiogram message."""
-
-    default_agent_name = _resolve_catalog_agent_name(
-        os.getenv("KAKA_TELEGRAM_DEFAULT_AGENT"),
-        "default",
-    )
-
-    from agent.modules.workflows.infrastructure.langgraph.run_config import (
-        DEFAULT_WORKING_DIR,
-    )
-
-    params = build_run_params(
-        platform="telegram",
-        user_id=str(message.from_user.id),
-        user_input=message.text,
-        channel_id=str(message.chat.id),
-        working_dir=DEFAULT_WORKING_DIR,
-        agent_name=default_agent_name,
-    )
-
-    await handle_streaming_response(message, params)
-
-
 def create_dispatcher():
     """Create an aiogram dispatcher and register handlers."""
 
@@ -132,6 +99,23 @@ def create_dispatcher():
     dp = Dispatcher()
 
     from agent.modules.agents.public import get_catalog_service
+
+    # Cache config service once at dispatcher creation
+    config = get_config_service()
+    default_agent_name = resolve_catalog_agent_name(
+        config.get_str("channels.telegram.default_agent", ""),
+        "default",
+    )
+    code_agent_name = resolve_catalog_agent_name(
+        config.get_str("channels.telegram.code_agent", ""),
+        "code-agent",
+        "coder",
+    )
+    research_agent_name = resolve_catalog_agent_name(
+        config.get_str("channels.telegram.research_agent", ""),
+        "research-agent",
+        "researcher",
+    )
 
     @dp.message(CommandStart())
     async def cmd_start(message: Message):
@@ -164,12 +148,6 @@ def create_dispatcher():
             await message.answer("Example: /code list files in directory")
             return
 
-        code_agent_name = _resolve_catalog_agent_name(
-            os.getenv("KAKA_TELEGRAM_CODE_AGENT"),
-            "code-agent",
-            "coder",
-        )
-
         params = build_run_params(
             platform="telegram",
             user_id=str(message.from_user.id),
@@ -186,12 +164,6 @@ def create_dispatcher():
         if not text:
             await message.answer("Example: /research pros and cons of microservices")
             return
-
-        research_agent_name = _resolve_catalog_agent_name(
-            os.getenv("KAKA_TELEGRAM_RESEARCH_AGENT"),
-            "research-agent",
-            "researcher",
-        )
 
         params = build_run_params(
             platform="telegram",
@@ -276,7 +248,17 @@ def create_dispatcher():
     async def on_message(message: Message):
         if not message.text:
             return
-        await handle_message(message)
+
+        params = build_run_params(
+            platform="telegram",
+            user_id=str(message.from_user.id),
+            user_input=message.text,
+            channel_id=str(message.chat.id),
+            working_dir=DEFAULT_WORKING_DIR,
+            agent_name=default_agent_name,
+        )
+
+        await handle_streaming_response(message, params)
 
     return dp
 
@@ -291,9 +273,14 @@ async def run_telegram_bot() -> None:
     except ImportError as exc:
         raise ImportError("Install: pip install aiogram") from exc
 
-    token = os.getenv("TELEGRAM_BOT_TOKEN")
-    if not token:
-        raise ValueError("Missing TELEGRAM_BOT_TOKEN in .env")
+    config = get_config_service()
+    token = config.get_str("channels.telegram.bot_token", "")
+
+    if is_placeholder_value(token):
+        raise ValueError(
+            "Telegram bot token not configured. "
+            "Set 'channels.telegram.bot_token' in ~/.kaka-agent/config.yaml"
+        )
 
     bot = Bot(
         token=token,
@@ -302,4 +289,12 @@ async def run_telegram_bot() -> None:
     dp = create_dispatcher()
 
     logger.info("Telegram bot starting...")
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot, close_bot_session=False)
+    except asyncio.CancelledError:
+        logger.info("Telegram polling cancelled.")
+        raise
+    finally:
+        # Keep shutdown deterministic when channel task is cancelled.
+        with contextlib.suppress(Exception):
+            await bot.session.close()

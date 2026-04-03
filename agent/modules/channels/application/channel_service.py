@@ -1,11 +1,12 @@
 import logging
-import os
 
 from agent.modules.channels.application.channel_manager import ChannelManager
 from agent.modules.channels.infrastructure.service_specs import (
     BUILTIN_CHANNEL_SPECS,
     ChannelSpec,
 )
+from agent.shared.config import get_config_service
+from agent.shared.infrastructure.validation import is_placeholder_value
 
 logger = logging.getLogger(__name__)
 
@@ -37,17 +38,30 @@ async def start_enabled_channels(
         specs = BUILTIN_CHANNEL_SPECS
     channels_to_start: list[str] = []
 
+    config = get_config_service()
+
     for spec in specs:
         if not boot_flags.get(spec.name, True):
             logger.info("Channel starts disabled by config: %s", spec.name)
             continue
 
-        missing_env = [env_name for env_name in spec.required_env if not os.getenv(env_name)]
-        if missing_env:
+        # Check if required config keys are present
+        missing_keys = []
+        for env_name in spec.required_env:
+            config_key = _ENV_TO_CONFIG_MAP.get(env_name)
+            if not config_key:
+                logger.warning("Unknown env var '%s' for channel '%s'", env_name, spec.name)
+                continue
+
+            value = config.get_str(config_key, "")
+            if is_placeholder_value(value):
+                missing_keys.append(config_key)
+
+        if missing_keys:
             logger.warning(
-                "Channel '%s' is configured to start but required env vars are missing: %s",
+                "Channel '%s' is configured to start but required config keys are missing: %s",
                 spec.name,
-                ", ".join(missing_env),
+                ", ".join(missing_keys),
             )
             continue
 
@@ -62,6 +76,12 @@ async def start_enabled_channels(
         ", ".join(channels_to_start),
     )
     await channel_manager.start_many(channels_to_start)
+
+
+_ENV_TO_CONFIG_MAP = {
+    "TELEGRAM_BOT_TOKEN": "channels.telegram.bot_token",
+    "DISCORD_BOT_TOKEN": "channels.discord.bot_token",
+}
 
 
 async def start_channel(channel_manager: ChannelManager, name: str) -> dict[str, str | None]:
