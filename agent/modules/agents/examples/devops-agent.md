@@ -2,7 +2,6 @@
 name: "devops"
 description: "DevOps engineer assistant"
 graph_type: "react_agent"
-service_type: "devops"
 model: "devstral-2512"
 tools:
   - "list_files"

@@ -4,10 +4,8 @@ from langchain_core.messages import BaseMessage, RemoveMessage
 from langchain_core.messages.utils import count_tokens_approximately, trim_messages
 from langgraph.runtime import Runtime
 
-from agent.modules.workflows.infrastructure.langgraph.run_config import (
-    WorkflowContext,
-    get_context_value,
-)
+from agent.modules.tools.infrastructure.runtime.context import get_context_value
+from agent.modules.workflows.infrastructure.langgraph.run_config import WorkflowContext
 
 
 def _safe_positive_int(value, default_value: int) -> int:

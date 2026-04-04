@@ -7,6 +7,7 @@ from agent.modules.workflows.infrastructure.langgraph.compiled_registry import (
     GraphRegistry,
 )
 from agent.modules.workflows.infrastructure.langgraph.run_config import (
+    DEFAULT_WORKING_DIR,
     make_context as make_run_context,
     make_config as make_run_config,
 )
@@ -35,6 +36,7 @@ async def delete_workflow_thread(thread_id: str) -> None:
 
 
 __all__ = [
+    "DEFAULT_WORKING_DIR",
     "delete_workflow_thread",
     "get_workflow_graph",
     "initialize_checkpointer",

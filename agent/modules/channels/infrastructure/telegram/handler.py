@@ -153,7 +153,6 @@ def create_dispatcher():
             user_id=str(message.from_user.id),
             user_input=text,
             channel_id=str(message.chat.id),
-            service_type="backend",
             agent_name=code_agent_name,
         )
         await handle_streaming_response(message, params)

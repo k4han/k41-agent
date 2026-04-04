@@ -4,12 +4,11 @@ import pytest
 from langchain_core.messages import AIMessage
 
 import agent.modules.workflows.infrastructure.langgraph.nodes.tool as tool_node_module
-from agent.modules.workflows.infrastructure.langgraph.tools.call_agent import (
+from agent.modules.tools.infrastructure.langchain.agent_tools.call_agent import (
     call_agent,
 )
-from agent.modules.workflows.infrastructure.langgraph.tools.registry import (
-    get_default_tool_names,
-)
+from agent.modules.workflows.public import DEFAULT_WORKING_DIR
+from agent.modules.tools.public import get_default_tool_names
 
 
 @pytest.mark.asyncio
@@ -82,6 +81,67 @@ async def test_call_agent_inherits_parent_runtime_context(monkeypatch):
     assert captured["config"]["configurable"]["thread_id"].startswith(
         "parent-thread:sub:child-agent:"
     )
+
+
+@pytest.mark.asyncio
+async def test_call_agent_uses_canonical_default_working_dir(monkeypatch):
+    captured: dict = {}
+
+    class _FakeCatalog:
+        def validate_call(self, caller_name: str, target_name: str) -> bool:
+            return True
+
+        def get_agent(self, name: str):
+            if name != "child-agent":
+                return None
+            return SimpleNamespace(
+                graph_type="react_agent",
+                service_type="backend",
+                max_context_tokens=1234,
+                tools=["echo"],
+            )
+
+    class _FakeGraph:
+        async def ainvoke(self, payload, *, config, context):
+            captured["context"] = context
+            return {"messages": [AIMessage(content="ok")]}
+
+    monkeypatch.setattr(
+        "agent.modules.agents.public.get_catalog_service",
+        lambda: _FakeCatalog(),
+    )
+    monkeypatch.setattr(
+        "agent.modules.workflows.public.get_workflow_graph",
+        lambda name: _FakeGraph(),
+    )
+    monkeypatch.setattr(
+        "agent.modules.workflows.public.make_run_context",
+        lambda **kwargs: kwargs,
+    )
+    monkeypatch.setattr(
+        "agent.modules.workflows.public.make_run_config",
+        lambda **kwargs: {"configurable": {"thread_id": kwargs["thread_id"]}},
+    )
+
+    runtime = SimpleNamespace(
+        context={
+            "agent_name": "parent-agent",
+        },
+        config={
+            "configurable": {
+                "thread_id": "parent-thread",
+            }
+        },
+    )
+
+    result = await call_agent.coroutine(
+        task="delegate this",
+        sub_agent="child-agent",
+        runtime=runtime,
+    )
+
+    assert result == "ok"
+    assert captured["context"]["working_dir"] == DEFAULT_WORKING_DIR
 
 
 @pytest.mark.asyncio

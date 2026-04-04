@@ -2,7 +2,6 @@
 name: "research-agent"
 description: "Used to research more in depth questions"
 graph_type: "react_agent"
-service_type: "default"
 model: "claude-sonnet-4-5-20250929"
 tools:
   - "websearch"

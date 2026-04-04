@@ -14,7 +14,6 @@ class AgentConfig(BaseModel):
     display_name: str = ""
     description: str = ""
     graph_type: str  # Registered workflow name
-    service_type: str = "default"
     model: str = ""
     tools: list[str] = Field(default_factory=list)
     sub_agents: Optional[list[str]] = None  # None = leaf (no call_agent), list = allowed targets

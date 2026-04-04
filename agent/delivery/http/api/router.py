@@ -18,7 +18,6 @@ def _request_to_run_params(request: ChatRequest) -> dict[str, object]:
         user_id=request.user_id,
         user_input=request.message,
         workflow=request.workflow,
-        service_type=request.service_type,
         working_dir=request.working_dir,
         agent_name=request.agent_name or "default",
     )

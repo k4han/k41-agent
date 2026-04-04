@@ -2,7 +2,6 @@
 name: "default"
 description: "Default general-purpose assistant"
 graph_type: "react_agent"
-service_type: "default"
 model: "devstral-2512"
 tools:
   - "list_files"

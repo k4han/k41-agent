@@ -2,7 +2,6 @@
 name: "frontend"
 description: "React/TypeScript frontend engineer assistant"
 graph_type: "react_agent"
-service_type: "frontend"
 model: "devstral-2512"
 tools:
   - "list_files"

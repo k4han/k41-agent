@@ -8,16 +8,12 @@ import uuid
 from langchain_core.tools import tool
 from langgraph.prebuilt import ToolRuntime
 
-from agent.modules.workflows.infrastructure.langgraph.run_config import (
-    DEFAULT_WORKING_DIR,
-    WorkflowContext,
-    get_context_value,
-)
+from agent.modules.tools.infrastructure.runtime.context import get_context_value
 
 logger = logging.getLogger(__name__)
 
 
-def _make_subagent_thread_id(runtime: ToolRuntime[WorkflowContext], sub_agent: str) -> str:
+def _make_subagent_thread_id(runtime: ToolRuntime, sub_agent: str) -> str:
     configurable = runtime.config.get("configurable", {})
     parent_thread_id = ""
     if isinstance(configurable, dict):
@@ -32,13 +28,14 @@ def _make_subagent_thread_id(runtime: ToolRuntime[WorkflowContext], sub_agent: s
 async def call_agent(
     task: str,
     sub_agent: str,
-    runtime: ToolRuntime[WorkflowContext],
+    runtime: ToolRuntime,
 ) -> str:
     """Invoke a sub-agent to handle a specific task."""
     from langchain_core.messages import HumanMessage
 
     from agent.modules.agents.public import get_catalog_service
     from agent.modules.workflows.public import (
+        DEFAULT_WORKING_DIR,
         get_workflow_graph,
         make_run_config,
         make_run_context,
@@ -66,7 +63,6 @@ async def call_agent(
         return f"[error] graph type '{target_config.graph_type}' not registered."
 
     context = make_run_context(
-        service_type=target_config.service_type,
         working_dir=inherited_working_dir,
         max_context_tokens=target_config.max_context_tokens,
         agent_name=sub_agent,

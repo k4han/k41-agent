@@ -27,7 +27,6 @@ Agent được định nghĩa trong file `.md` với cấu trúc:
 name: "agent-name"
 description: "Agent description"
 graph_type: "react_agent"  # workflow template to use
-service_type: "default"
 model: "claude-sonnet-4-5-20250929"
 tools:
   - "tool1"
@@ -49,7 +48,6 @@ Can use {working_dir} placeholder.
 - **name** (required): Unique identifier cho agent
 - **description**: Mô tả ngắn gọn về agent
 - **graph_type**: Workflow template (default: `react_agent`)
-- **service_type**: Service type (default: `default`)
 - **model**: Model ID (default: `devstral-2512`)
 - **tools**: Danh sách tools agent có thể sử dụng (empty = all default tools)
 - **sub_agents**: 

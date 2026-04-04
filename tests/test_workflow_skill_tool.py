@@ -1,4 +1,4 @@
-import agent.modules.workflows.infrastructure.langgraph.tools.skills as skills_tool_module
+import agent.modules.tools.infrastructure.langchain.skill_tools.skill as skills_tool_module
 
 
 def test_skill_tool_returns_structured_content(monkeypatch):

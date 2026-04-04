@@ -70,7 +70,6 @@ def parse_agent_file(path: str | Path) -> AgentConfig | None:
     # Optional fields with defaults
     display_name = str(data.get("display_name", ""))
     description = str(data.get("description", ""))
-    service_type = str(data.get("service_type", "default"))
     model = str(data.get("model", "")).strip()
     max_context_tokens = int(data.get("max_context_tokens", 50_000))
 
@@ -100,7 +99,6 @@ def parse_agent_file(path: str | Path) -> AgentConfig | None:
             display_name=display_name,
             description=description,
             graph_type=graph_type,
-            service_type=service_type,
             model=model,
             tools=tools,
             sub_agents=sub_agents,

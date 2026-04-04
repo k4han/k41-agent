@@ -16,7 +16,6 @@ def build_run_params(
     user_id: str,
     user_input: str,
     workflow: str | None = None,
-    service_type: str | None = None,
     working_dir: str | None = None,
     max_context_tokens: int | None = None,
     channel_id: str = "",
@@ -31,7 +30,6 @@ def build_run_params(
         user_id: User identifier
         user_input: User message
         workflow: Override agent's graph_type if needed
-        service_type: Override agent's service_type if needed
         working_dir: Working directory for tools
         max_context_tokens: Override agent's max_context_tokens if needed
         channel_id: Channel identifier (for multi-channel platforms)
@@ -42,7 +40,6 @@ def build_run_params(
         "thread_id": SessionManager.make_thread_id(platform, user_id, channel_id),
         "agent_name": agent_name,
         "workflow": workflow,
-        "service_type": service_type,
         "working_dir": working_dir,
         "max_context_tokens": max_context_tokens,
     }
@@ -67,7 +64,6 @@ async def run_agent(
     agent_name: str = "default",
     *,
     workflow: str | None = None,
-    service_type: str | None = None,
     working_dir: str | None = None,
     max_context_tokens: int | None = None,
     allowed_tool_names: list[str] | None = None,
@@ -81,7 +77,6 @@ async def run_agent(
         thread_id: Session thread ID
         agent_name: Agent to use (loads config from catalog)
         workflow: Override agent's graph_type if needed
-        service_type: Override agent's service_type if needed
         working_dir: Working directory for tools
         max_context_tokens: Override agent's max_context_tokens if needed
         allowed_tool_names: Override agent's tools if needed
@@ -95,7 +90,6 @@ async def run_agent(
 
     # Resolve: explicit params > agent config
     resolved_workflow = workflow or agent_config.graph_type
-    resolved_service_type = service_type or agent_config.service_type
     resolved_max_tokens = max_context_tokens or agent_config.max_context_tokens
     resolved_tools = allowed_tool_names if allowed_tool_names is not None else agent_config.tools
 
@@ -103,7 +97,6 @@ async def run_agent(
     config = make_run_config(thread_id=thread_id)
 
     context = make_run_context(
-        service_type=resolved_service_type,
         working_dir=working_dir,
         max_context_tokens=resolved_max_tokens,
         agent_name=agent_name,
@@ -129,7 +122,6 @@ async def run_agent_stream(
     agent_name: str = "default",
     *,
     workflow: str | None = None,
-    service_type: str | None = None,
     working_dir: str | None = None,
     max_context_tokens: int | None = None,
     allowed_tool_names: list[str] | None = None,
@@ -143,7 +135,6 @@ async def run_agent_stream(
         thread_id: Session thread ID
         agent_name: Agent to use (loads config from catalog)
         workflow: Override agent's graph_type if needed
-        service_type: Override agent's service_type if needed
         working_dir: Working directory for tools
         max_context_tokens: Override agent's max_context_tokens if needed
         allowed_tool_names: Override agent's tools if needed
@@ -157,7 +148,6 @@ async def run_agent_stream(
 
     # Resolve: explicit params > agent config
     resolved_workflow = workflow or agent_config.graph_type
-    resolved_service_type = service_type or agent_config.service_type
     resolved_max_tokens = max_context_tokens or agent_config.max_context_tokens
     resolved_tools = allowed_tool_names if allowed_tool_names is not None else agent_config.tools
 
@@ -165,7 +155,6 @@ async def run_agent_stream(
     config = make_run_config(thread_id=thread_id)
 
     context = make_run_context(
-        service_type=resolved_service_type,
         working_dir=working_dir,
         max_context_tokens=resolved_max_tokens,
         agent_name=agent_name,
@@ -210,7 +199,6 @@ async def run_agent_full(
     agent_name: str = "default",
     *,
     workflow: str | None = None,
-    service_type: str | None = None,
     working_dir: str | None = None,
     max_context_tokens: int | None = None,
     allowed_tool_names: list[str] | None = None,
@@ -224,7 +212,6 @@ async def run_agent_full(
         thread_id: Session thread ID
         agent_name: Agent to use (loads config from catalog)
         workflow: Override agent's graph_type if needed
-        service_type: Override agent's service_type if needed
         working_dir: Working directory for tools
         max_context_tokens: Override agent's max_context_tokens if needed
         allowed_tool_names: Override agent's tools if needed
@@ -235,7 +222,6 @@ async def run_agent_full(
         thread_id=thread_id,
         agent_name=agent_name,
         workflow=workflow,
-        service_type=service_type,
         working_dir=working_dir,
         max_context_tokens=max_context_tokens,
         allowed_tool_names=allowed_tool_names,
