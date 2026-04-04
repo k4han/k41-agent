@@ -145,6 +145,65 @@ async def test_call_agent_uses_canonical_default_working_dir(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_call_agent_omits_context_for_graph_without_context_schema(monkeypatch):
+    captured: dict = {}
+
+    class _FakeCatalog:
+        def validate_call(self, caller_name: str, target_name: str) -> bool:
+            return True
+
+        def get_agent(self, name: str):
+            if name != "child-agent":
+                return None
+            return SimpleNamespace(
+                graph_type="research_chain",
+                service_type="backend",
+                max_context_tokens=1234,
+                tools=["echo"],
+            )
+
+    class _FakeGraph:
+        context_schema = None
+
+        async def ainvoke(self, payload, *, config, **kwargs):
+            captured["payload"] = payload
+            captured["config"] = config
+            captured["kwargs"] = kwargs
+            return {"messages": [AIMessage(content="ok")]}
+
+    monkeypatch.setattr(
+        "agent.modules.agents.public.get_catalog_service",
+        lambda: _FakeCatalog(),
+    )
+    monkeypatch.setattr(
+        "agent.modules.workflows.public.get_workflow_graph",
+        lambda name: _FakeGraph(),
+    )
+    monkeypatch.setattr(
+        "agent.modules.workflows.public.make_run_context",
+        lambda **kwargs: kwargs,
+    )
+    monkeypatch.setattr(
+        "agent.modules.workflows.public.make_run_config",
+        lambda **kwargs: {"configurable": {"thread_id": kwargs["thread_id"]}},
+    )
+
+    runtime = SimpleNamespace(
+        context={"agent_name": "parent-agent", "working_dir": "D:/repo"},
+        config={"configurable": {"thread_id": "parent-thread"}},
+    )
+
+    result = await call_agent.coroutine(
+        task="delegate this",
+        sub_agent="child-agent",
+        runtime=runtime,
+    )
+
+    assert result == "ok"
+    assert "context" not in captured["kwargs"]
+
+
+@pytest.mark.asyncio
 async def test_tool_node_resolves_runtime_allowed_tools(monkeypatch):
     captured: dict = {}
 

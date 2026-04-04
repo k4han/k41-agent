@@ -11,6 +11,7 @@ from agent.modules.workflows.infrastructure.langgraph.compiled_registry import (
 from agent.modules.workflows.infrastructure.langgraph.nodes.trim import (
     make_prepare_context_node,
 )
+from agent.modules.workflows.infrastructure.langgraph.run_config import WorkflowContext
 from agent.modules.workflows.infrastructure.langgraph.state.extensions import (
     ResearchState,
 )
@@ -40,7 +41,7 @@ async def _summarize_node(state: ResearchState, config: RunnableConfig):
 
 
 def build_research_graph() -> None:
-    graph = StateGraph(ResearchState)
+    graph = StateGraph(ResearchState, context_schema=WorkflowContext)
     graph.add_node("prepare_context", make_prepare_context_node())
     graph.add_node("research", _research_node)
     graph.add_node("summarize", _summarize_node)

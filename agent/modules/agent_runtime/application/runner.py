@@ -58,6 +58,13 @@ async def clear_agent_session(
     await delete_workflow_thread(thread_id)
 
 
+def _graph_accepts_context(graph: Any) -> bool:
+    context_schema = getattr(graph, "context_schema", Ellipsis)
+    if context_schema is Ellipsis:
+        return True
+    return context_schema is not None
+
+
 async def run_agent(
     user_input: str,
     thread_id: str,
@@ -103,11 +110,16 @@ async def run_agent(
         allowed_tool_names=resolved_tools or None,
     )
 
+    stream_kwargs: dict[str, Any] = {
+        "config": config,
+        "stream_mode": "values",
+    }
+    if _graph_accepts_context(graph):
+        stream_kwargs["context"] = context
+
     async for event in graph.astream(
         {"messages": [HumanMessage(content=user_input)]},
-        config=config,
-        context=context,
-        stream_mode="values",
+        **stream_kwargs,
     ):
         messages = event.get("messages", [])
         if messages:
@@ -163,11 +175,16 @@ async def run_agent_stream(
 
     seen_ids = set()
 
+    stream_kwargs: dict[str, Any] = {
+        "config": config,
+        "stream_mode": "values",
+    }
+    if _graph_accepts_context(graph):
+        stream_kwargs["context"] = context
+
     async for event in graph.astream(
         {"messages": [HumanMessage(content=user_input)]},
-        config=config,
-        context=context,
-        stream_mode="values",
+        **stream_kwargs,
     ):
         messages = event.get("messages", [])
         if not messages:

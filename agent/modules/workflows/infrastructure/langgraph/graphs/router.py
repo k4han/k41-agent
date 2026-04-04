@@ -62,6 +62,13 @@ def _default_workflow(workflows: dict[str, str]) -> str:
     return next(iter(workflows))
 
 
+def _graph_accepts_context(graph: object) -> bool:
+    context_schema = getattr(graph, "context_schema", Ellipsis)
+    if context_schema is Ellipsis:
+        return True
+    return context_schema is not None
+
+
 async def _router_node(
     state: BaseState,
     config: RunnableConfig,
@@ -81,10 +88,13 @@ async def _router_node(
         workflow = _default_workflow(workflows)
 
     target_graph = GraphRegistry.get(workflow)
+    invoke_kwargs = {"config": config}
+    if _graph_accepts_context(target_graph):
+        invoke_kwargs["context"] = runtime.context
+
     result = await target_graph.ainvoke(
         {"messages": state["messages"]},
-        config=config,
-        context=runtime.context,
+        **invoke_kwargs,
     )
     return {"messages": result["messages"]}
 

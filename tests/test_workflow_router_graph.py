@@ -35,6 +35,24 @@ class _FakeGraph:
         return {"messages": [AIMessage(content=self.result_text)]}
 
 
+class _FakeGraphNoContext:
+    context_schema = None
+
+    def __init__(self, result_text: str):
+        self.result_text = result_text
+        self.calls: list[dict[str, object]] = []
+
+    async def ainvoke(self, state, *, config, **kwargs):
+        self.calls.append(
+            {
+                "state": state,
+                "config": config,
+                "kwargs": kwargs,
+            }
+        )
+        return {"messages": [AIMessage(content=self.result_text)]}
+
+
 @pytest.fixture
 def isolated_registry(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(GraphRegistry, "_graphs", {})
@@ -89,6 +107,47 @@ async def test_router_node_routes_to_dynamically_registered_workflow(
     assert "planner_chain" in system_prompt
     assert "task decomposition and execution planning" in system_prompt
     assert "- router:" not in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_router_node_omits_context_for_graph_without_context_schema(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_registry,
+):
+    target_graph = _FakeGraphNoContext("planned-result")
+
+    GraphRegistry.register(
+        "react_agent",
+        _FakeGraph("fallback-result"),
+        description="general work",
+    )
+    GraphRegistry.register(
+        "planner_chain",
+        target_graph,
+        description="task decomposition and execution planning",
+    )
+    GraphRegistry.register(
+        "router",
+        _FakeGraph("router-result"),
+        description="internal router",
+        routeable=False,
+    )
+
+    monkeypatch.setattr(
+        router_module,
+        "get_chat_model",
+        lambda: _FakeChatModel("planner_chain", {}),
+    )
+
+    state = {"messages": [HumanMessage(content="Plan this implementation work")]}
+    config = {"configurable": {"thread_id": "thread-1"}}
+    runtime = SimpleNamespace(context={"service_type": "default"})
+
+    result = await router_module._router_node(state, config, runtime)
+
+    assert result["messages"][0].content == "planned-result"
+    assert len(target_graph.calls) == 1
+    assert "context" not in target_graph.calls[0]["kwargs"]
 
 
 def test_routeable_workflows_excludes_internal_graphs(isolated_registry):

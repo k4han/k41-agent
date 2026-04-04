@@ -37,7 +37,8 @@ async def handle_streaming_response(message, params) -> None:
             # Ensure args is a dict/string and truncate if too long
             arg_str = str(args) if args else ""
             if len(arg_str) > 50:
-                arg_str = arg_str[:47] + "..."
+                # arg_str = arg_str[:47] + "..."
+                pass
 
             tools_called.append(f"{tool_name}({arg_str})")
 

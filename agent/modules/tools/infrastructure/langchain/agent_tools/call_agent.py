@@ -5,8 +5,9 @@ from __future__ import annotations
 import logging
 import uuid
 
-from langchain_core.tools import tool
+from langchain_core.tools import InjectedToolArg, tool
 from langgraph.prebuilt import ToolRuntime
+from typing import Annotated
 
 from agent.modules.tools.infrastructure.runtime.context import get_context_value
 
@@ -24,11 +25,18 @@ def _make_subagent_thread_id(runtime: ToolRuntime, sub_agent: str) -> str:
     return f"sub_{sub_agent}_{suffix}"
 
 
+def _graph_accepts_context(graph: object) -> bool:
+    context_schema = getattr(graph, "context_schema", Ellipsis)
+    if context_schema is Ellipsis:
+        return True
+    return context_schema is not None
+
+
 @tool
 async def call_agent(
     task: str,
     sub_agent: str,
-    runtime: ToolRuntime,
+    runtime: Annotated[ToolRuntime, InjectedToolArg],
 ) -> str:
     """Invoke a sub-agent to handle a specific task."""
     from langchain_core.messages import HumanMessage
@@ -72,11 +80,16 @@ async def call_agent(
         thread_id=_make_subagent_thread_id(runtime, sub_agent),
     )
 
+    invoke_kwargs = {
+        "config": config,
+    }
+    if _graph_accepts_context(graph):
+        invoke_kwargs["context"] = context
+
     try:
         result = await graph.ainvoke(
             {"messages": [HumanMessage(content=task)]},
-            config=config,
-            context=context,
+            **invoke_kwargs,
         )
         messages = result.get("messages", [])
         for msg in reversed(messages):
