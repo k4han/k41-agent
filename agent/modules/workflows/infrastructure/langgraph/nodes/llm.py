@@ -11,37 +11,13 @@ from agent.modules.providers.public import get_chat_model
 from agent.modules.workflows.infrastructure.langgraph.prompt_builders import (
     build_llm_system_prompt,
 )
-from agent.modules.workflows.infrastructure.langgraph.tools.registry import (
-    get_default_tools,
-    resolve_tools,
-)
+from agent.modules.tools.public import get_default_tools, resolve_tools
 
 if TYPE_CHECKING:
     from langgraph.runtime import Runtime
     from agent.modules.workflows.infrastructure.langgraph.run_config import (
         WorkflowContext,
     )
-
-DEFAULT_MODEL = "devstral-2512"
-
-SYSTEM_PROMPTS: dict[str, str] = {
-    "default": "You are a helpful AI assistant.\nWorking directory: {working_dir}",
-    "backend": (
-        "You are a Python/backend engineer assistant.\n"
-        "Working directory: {working_dir}\n"
-        "Focus on Pythonic implementations, type hints, and maintainable code."
-    ),
-    "frontend": (
-        "You are a React/TypeScript frontend engineer assistant.\n"
-        "Working directory: {working_dir}\n"
-        "Prefer functional components, hooks, and modern frontend best practices."
-    ),
-    "devops": (
-        "You are a DevOps engineer assistant.\n"
-        "Working directory: {working_dir}\n"
-        "Help with Docker, CI/CD, shell automation, and deployment operations."
-    ),
-}
 
 
 def _get_context_value(ctx: dict, key: str, default):
@@ -70,20 +46,15 @@ def llm_node(state, runtime: "Runtime[WorkflowContext]"):
     catalog = get_catalog_service()
     config = catalog.get_agent(agent_name)
 
-    # Fallback to default agent if not found
+    # Fallback to "default" agent if the requested agent is not found.
+    # The builtin default is always guaranteed to exist after catalog.load().
     if config is None:
         config = catalog.get_agent("default")
 
-    # Extract config values with fallbacks
-    if config:
-        model = config.model or DEFAULT_MODEL
-        system_prompt_template = config.system_prompt or SYSTEM_PROMPTS["default"]
-        tool_names = config.tools if config.tools else None
-    else:
-        # Ultimate fallback (should not happen with builtin default)
-        model = DEFAULT_MODEL
-        system_prompt_template = SYSTEM_PROMPTS["default"]
-        tool_names = None
+    # config is guaranteed non-None at this point (builtin default always present).
+    model = config.model
+    system_prompt_template = config.system_prompt
+    tool_names = config.tools if config.tools else None
 
     # Override tools if specified in context (for sub-agent calls)
     ctx_tool_names = _get_context_value(ctx, "allowed_tool_names", None)
@@ -112,3 +83,4 @@ def llm_node(state, runtime: "Runtime[WorkflowContext]"):
     llm = get_chat_model(model=model).bind_tools(tools)
     response = llm.invoke(messages)
     return {"messages": [response]}
+

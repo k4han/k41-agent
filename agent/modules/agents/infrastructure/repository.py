@@ -14,20 +14,31 @@ logger = logging.getLogger(__name__)
 DEFAULT_AGENTS_DIR = str(Path.home() / ".kaka-agent" / "agents")
 LEGACY_SUBAGENTS_DIR = str(Path.home() / ".kaka-agent" / "subagents")
 
+# Directory containing agents shipped with the package (bundled defaults).
+_BUILTIN_DIR = Path(__file__).parent / "_builtin"
 
-def _get_builtin_default_agent() -> AgentConfig:
-    """Return built-in default agent config as fallback."""
-    return AgentConfig(
-        name="default",
-        display_name="Default Assistant",
-        description="General-purpose AI assistant",
-        graph_type="react_agent",
-        service_type="default",
-        model="devstral-2512",
-        tools=[],  # Empty = use all default tools
-        max_context_tokens=50_000,
-        system_prompt="You are a helpful AI assistant.\nWorking directory: {working_dir}",
-    )
+
+def _load_builtin_agents() -> dict[str, AgentConfig]:
+    """Load all agent MD files from the bundled _builtin directory.
+
+    Returns a dict keyed by agent name. On parse failure the file is skipped
+    and a warning is logged. If the builtin directory does not exist, an empty
+    dict is returned and a debug message is logged.
+    """
+    if not _BUILTIN_DIR.is_dir():
+        logger.debug("Builtin agents directory %s not found — skipping.", _BUILTIN_DIR)
+        return {}
+
+    agents: dict[str, AgentConfig] = {}
+    for md_path in sorted(_BUILTIN_DIR.glob("*.md")):
+        if not md_path.is_file():
+            continue
+        config = parse_agent_file(md_path)
+        if config is None:
+            continue
+        agents[config.name] = config
+        logger.debug("Loaded builtin agent '%s' from %s", config.name, md_path)
+    return agents
 
 
 class FilesystemAgentRepository:
@@ -53,10 +64,20 @@ class FilesystemAgentRepository:
         return [default_dir, legacy_dir]
 
     def load(self) -> dict[str, AgentConfig]:
-        """Scan directory, parse all *.md, cache and return dict by name."""
-        agents: dict[str, AgentConfig] = {}
-        loaded_from: dict[str, Path] = {}
+        """Scan directories and return all agents, with user agents overriding builtins.
 
+        Load order (later entries override earlier ones on name collision):
+        1. Bundled agents from the package _builtin directory.
+        2. User-defined agents from ~/.kaka-agent/agents (and legacy subagents dir).
+
+        This means a user can shadow any builtin agent (including "default") by
+        creating a file with the same ``name`` field in their agents directory.
+        """
+        # 1. Start with bundled agents.
+        agents: dict[str, AgentConfig] = _load_builtin_agents()
+        loaded_from: dict[str, Path] = {}  # tracks user-dir file paths for dup warnings
+
+        # 2. Load user-defined agents — they override builtins of the same name.
         for scan_dir in self._scan_dirs():
             if not scan_dir.is_dir():
                 logger.debug("Agents directory %s does not exist, skipping.", scan_dir)
@@ -68,7 +89,7 @@ class FilesystemAgentRepository:
                 config = parse_agent_file(md_path)
                 if config is None:
                     continue
-                if config.name in agents:
+                if config.name in loaded_from:
                     logger.warning(
                         "Duplicate agent name '%s' in %s (already loaded from %s) — skipping duplicate.",
                         config.name,
@@ -76,19 +97,20 @@ class FilesystemAgentRepository:
                         loaded_from[config.name],
                     )
                     continue
+                if config.name in agents:
+                    logger.info(
+                        "User agent '%s' (%s) overrides builtin.",
+                        config.name,
+                        md_path,
+                    )
                 agents[config.name] = config
                 loaded_from[config.name] = md_path
-
-        # Ensure default agent always exists
-        if "default" not in agents:
-            agents["default"] = _get_builtin_default_agent()
-            logger.debug("Using built-in default agent (no default.md found)")
 
         self._cache = agents
         count = len(agents)
         scan_dirs = ", ".join(str(p) for p in self._scan_dirs())
         if count:
-            logger.info("Loaded %d agent(s) from %s", count, scan_dirs)
+            logger.info("Loaded %d agent(s) total (%s + builtins)", count, scan_dirs)
         else:
             logger.debug("No agent files found in %s", scan_dirs)
         return agents

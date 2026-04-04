@@ -61,11 +61,17 @@ Can use {working_dir} placeholder.
 
 ## Agent Discovery
 
-Agents được load từ:
-1. `~/.kaka-agent/agents/` (primary)
-2. `~/.kaka-agent/subagents/` (legacy compatibility path)
+Agents được load theo thứ tự ưu tiên (sau ghi đè trước):
 
-Builtin default agent luôn available ngay cả khi không có MD files.
+1. **Builtin agents** — `agent/modules/agents/infrastructure/_builtin/*.md` (bundled cùng package)
+2. **User agents** — `~/.kaka-agent/agents/*.md` (primary)
+3. **Legacy agents** — `~/.kaka-agent/subagents/*.md` (compatibility path)
+
+**Override rule**: Nếu user tạo agent có cùng `name` với builtin (ví dụ `name: "default"`),
+phiên bản của user sẽ được ưu tiên và ghi đè hoàn toàn builtin. Log sẽ ghi:
+```
+INFO  User agent 'default' (/path/to/default.md) overrides builtin.
+```
 
 ## Usage
 
@@ -139,12 +145,14 @@ Xem `agent/modules/agents/examples/` cho các agent mẫu:
 ```
 agent/modules/agents/
 ├── domain/
-│   └── subagent.py          # AgentConfig model
+│   └── subagent.py                # AgentConfig model
 ├── infrastructure/
-│   ├── parser.py            # MD file parser
-│   └── repository.py        # Filesystem scanning & caching
+│   ├── _builtin/
+│   │   └── default.md             # Bundled default agent (loaded first)
+│   ├── parser.py                  # MD file parser
+│   └── repository.py              # Filesystem scanning & caching
 ├── application/
-│   └── service.py           # Business logic & validation
-├── examples/                # Sample agent definitions
-└── public.py                # Public API
+│   └── service.py                 # Business logic & validation
+├── examples/                      # Sample agent definitions (không load tự động)
+└── public.py                      # Public API
 ```
