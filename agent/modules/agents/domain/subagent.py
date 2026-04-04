@@ -18,4 +18,6 @@ class AgentConfig(BaseModel):
     tools: list[str] = Field(default_factory=list)
     sub_agents: Optional[list[str]] = None  # None = leaf (no call_agent), list = allowed targets
     max_context_tokens: int = 50_000
+    routing_hints: str = ""
+    capabilities: list[str] = Field(default_factory=list)
     system_prompt: str = ""  # Markdown body content (after frontmatter)

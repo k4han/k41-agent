@@ -20,10 +20,6 @@ if TYPE_CHECKING:
     )
 
 
-def _get_context_value(ctx: dict, key: str, default):
-    return ctx.get(key, default) if isinstance(ctx, dict) else default
-
-
 @lru_cache(maxsize=32)
 def _resolve_tools(tool_names_key: tuple[str, ...]):
     return resolve_tools(tool_names_key)
@@ -34,13 +30,13 @@ def _get_default_tools():
     return get_default_tools()
 
 
-def llm_node(state, runtime: "Runtime[WorkflowContext]"):
+def llm_node(state, runtime: Runtime[WorkflowContext]):
     """Dynamic node: reads agent_name from context, resolves full config at runtime."""
     from agent.modules.agents.public import get_catalog_service
 
     ctx = runtime.context
-    agent_name = _get_context_value(ctx, "agent_name", "default")
-    working_dir = _get_context_value(ctx, "working_dir", "")
+    agent_name = ctx.get_agent_name()
+    working_dir = ctx.get_working_dir()
 
     # Load agent config from catalog
     catalog = get_catalog_service()
@@ -57,7 +53,7 @@ def llm_node(state, runtime: "Runtime[WorkflowContext]"):
     tool_names = config.tools if config.tools else None
 
     # Override tools if specified in context (for sub-agent calls)
-    ctx_tool_names = _get_context_value(ctx, "allowed_tool_names", None)
+    ctx_tool_names = ctx.get_allowed_tool_names()
     if ctx_tool_names is not None:
         tool_names = ctx_tool_names
 

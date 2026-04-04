@@ -4,9 +4,15 @@ from __future__ import annotations
 
 import logging
 import re
+import yaml
 from pathlib import Path
 
 from agent.modules.agents.domain.subagent import AgentConfig
+from agent.shared.infrastructure.parsing import parse_string_or_list
+from agent.modules.workflows.infrastructure.langgraph.constants import (
+    ROUTER_GRAPH_TYPE,
+    REACT_AGENT_GRAPH_TYPE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +49,6 @@ def parse_agent_file(path: str | Path) -> AgentConfig | None:
     body = match.group(2).strip()
 
     try:
-        import yaml
-
         data = yaml.safe_load(yaml_block)
     except Exception as e:
         logger.warning("Agent file %s has unparseable YAML: %s — skipping.", filepath, e)
@@ -58,40 +62,35 @@ def parse_agent_file(path: str | Path) -> AgentConfig | None:
     name = data.get("name")
     # graph_type is optional for agent-name-first flows.
     # Accept legacy alias `workflow` and default to react_agent.
-    graph_type = data.get("graph_type") or data.get("workflow") or "react_agent"
+    graph_type = data.get("graph_type") or data.get("workflow") or REACT_AGENT_GRAPH_TYPE
 
     if not name:
         logger.warning("Agent file %s missing 'name' — skipping.", filepath)
         return None
 
     name = str(name).strip()
-    graph_type = str(graph_type).strip() or "react_agent"
+    graph_type = str(graph_type).strip() or REACT_AGENT_GRAPH_TYPE
 
     # Optional fields with defaults
     display_name = str(data.get("display_name", ""))
     description = str(data.get("description", ""))
     model = str(data.get("model", "")).strip()
     max_context_tokens = int(data.get("max_context_tokens", 50_000))
+    routing_hints = str(data.get("routing_hints", ""))
 
-    # tools: can be list of strings
-    raw_tools = data.get("tools", [])
-    if isinstance(raw_tools, str):
-        tools = [t.strip() for t in raw_tools.split(",") if t.strip()]
-    elif isinstance(raw_tools, list):
-        tools = [str(t) for t in raw_tools]
-    else:
-        tools = []
+    capabilities = parse_string_or_list(data.get("capabilities", []))
+    tools = parse_string_or_list(data.get("tools", []))
 
     # sub_agents: None means leaf (cannot call anyone), list means can call those
     raw_sub = data.get("sub_agents")
     if raw_sub is None:
         sub_agents = None
-    elif isinstance(raw_sub, str):
-        sub_agents = [s.strip() for s in raw_sub.split(",") if s.strip()] or []
-    elif isinstance(raw_sub, list):
-        sub_agents = [str(s) for s in raw_sub]
     else:
-        sub_agents = []
+        sub_agents = parse_string_or_list(raw_sub) or []
+
+    # Validate router agent template at parse time
+    if graph_type == ROUTER_GRAPH_TYPE and body:
+        _validate_router_template(body, name)
 
     try:
         return AgentConfig(
@@ -103,11 +102,26 @@ def parse_agent_file(path: str | Path) -> AgentConfig | None:
             tools=tools,
             sub_agents=sub_agents,
             max_context_tokens=max_context_tokens,
+            routing_hints=routing_hints,
+            capabilities=capabilities,
             system_prompt=body,
         )
     except Exception as e:
         logger.warning("Failed to validate AgentConfig for %s: %s — skipping.", filepath, e)
         return None
+
+
+def _validate_router_template(template: str, agent_name: str) -> None:
+    """Validate router agent template has required placeholders."""
+    required_placeholders = ["{agent_options}", "{user_input}"]
+    missing = [p for p in required_placeholders if p not in template]
+    if missing:
+        joined = ", ".join(missing)
+        logger.warning(
+            "Router agent '%s' system_prompt is missing required placeholders: %s",
+            agent_name,
+            joined,
+        )
 
 
 __all__ = ["parse_agent_file"]

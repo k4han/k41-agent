@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import inspect
+from contextlib import asynccontextmanager
 
+import aiosqlite
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 from agent.shared.infrastructure.db.engine import (
     get_database_type,
@@ -22,6 +25,26 @@ _checkpointer: BaseCheckpointSaver | None = None
 _checkpointer_cm = None
 
 
+def _create_serializer() -> JsonPlusSerializer:
+    """Create a serializer with allowed custom types."""
+    return JsonPlusSerializer(
+        allowed_msgpack_modules=[
+            ("agent.modules.agents.domain.subagent", "AgentConfig"),
+        ]
+    )
+
+
+@asynccontextmanager
+async def _create_sqlite_saver(conn_string: str, serde: JsonPlusSerializer):
+    """Create AsyncSqliteSaver with custom serializer."""
+    conn = await aiosqlite.connect(conn_string)
+    try:
+        checkpointer = AsyncSqliteSaver(conn, serde=serde)
+        yield checkpointer
+    finally:
+        await conn.close()
+
+
 async def initialize_checkpointer() -> BaseCheckpointSaver:
     """Create and cache a checkpointer based on database type."""
     global _checkpointer, _checkpointer_cm
@@ -29,16 +52,21 @@ async def initialize_checkpointer() -> BaseCheckpointSaver:
     if _checkpointer is not None:
         return _checkpointer
 
+    serde = _create_serializer()
     db_type = get_database_type()
     if db_type == "sqlite":
-        _checkpointer_cm = AsyncSqliteSaver.from_conn_string(get_sqlite_conn_string())
+        _checkpointer_cm = _create_sqlite_saver(
+            get_sqlite_conn_string(), serde=serde
+        )
     elif db_type == "postgres":
         if not HAS_POSTGRES:
             raise ImportError(
                 "PostgreSQL checkpointer not available. "
                 "Install langgraph-checkpoint-postgres: pip install langgraph-checkpoint-postgres"
             )
-        _checkpointer_cm = AsyncPostgresSaver.from_conn_string(get_postgres_conn_string())
+        _checkpointer_cm = AsyncPostgresSaver.from_conn_string(
+            get_postgres_conn_string(), serde=serde
+        )
     else:
         raise ValueError(f"Unsupported database type: {db_type}")
 

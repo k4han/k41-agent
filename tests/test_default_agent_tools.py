@@ -76,16 +76,15 @@ async def test_default_agent_context_includes_tools():
     if default_config:
         # Create context with default agent
         context = make_run_context(
-            service_type=default_config.service_type,
             working_dir=".",
             max_context_tokens=default_config.max_context_tokens,
             agent_name="default",
             allowed_tool_names=default_config.tools if default_config.tools else None,
         )
 
-        assert context["agent_name"] == "default"
+        assert context.agent_name == "default"
 
         # If tools are specified, they should be in context
         if default_config.tools:
-            assert context["allowed_tool_names"] == default_config.tools
-            print(f"Context tools: {context['allowed_tool_names']}")
+            assert context.allowed_tool_names == default_config.tools
+            print(f"Context tools: {context.allowed_tool_names}")

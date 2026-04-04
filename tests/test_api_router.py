@@ -66,7 +66,6 @@ def test_chat_sync_prefers_agent_name_over_workflow(monkeypatch):
         "thread_id": "api_bob",
         "agent_name": "research-agent",
         "workflow": "react_agent",
-        "service_type": "default",
         "working_dir": None,
         "max_context_tokens": None,
     }
@@ -77,7 +76,6 @@ def test_chat_sync_prefers_agent_name_over_workflow(monkeypatch):
             "user_id": "bob",
             "user_input": "Deep research",
             "workflow": "react_agent",
-            "service_type": "default",
             "working_dir": None,
             "agent_name": "research-agent",
         }

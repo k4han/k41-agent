@@ -1,20 +1,36 @@
-import os
+from dataclasses import dataclass
 from pathlib import Path
 
 from langchain_core.runnables import RunnableConfig
-from typing_extensions import TypedDict
 
 DEFAULT_MAX_CONTEXT_TOKENS = 50_000
 DEFAULT_WORKING_DIR = str(Path.home() / "kaka-agent")
 
 
-class WorkflowContext(TypedDict):
+@dataclass
+class WorkflowContext:
     """Run-scoped context passed via LangGraph context_schema."""
 
     working_dir: str
     max_context_tokens: int
     agent_name: str
     allowed_tool_names: list[str]
+
+    def get_agent_name(self) -> str:
+        """Get agent name from context."""
+        return self.agent_name
+
+    def get_working_dir(self) -> str:
+        """Get working directory from context."""
+        return self.working_dir
+
+    def get_allowed_tool_names(self) -> list[str]:
+        """Get allowed tool names from context."""
+        return self.allowed_tool_names
+
+    def get_max_context_tokens(self) -> int:
+        """Get max context tokens from context."""
+        return self.max_context_tokens
 
 
 def make_context(
@@ -32,12 +48,12 @@ def make_context(
     # Allow working_dir override, otherwise use default
     resolved_dir = working_dir or DEFAULT_WORKING_DIR
 
-    return {
-        "working_dir": resolved_dir,
-        "max_context_tokens": max_context_tokens,
-        "agent_name": agent_name,
-        "allowed_tool_names": allowed_tool_names,
-    }
+    return WorkflowContext(
+        working_dir=resolved_dir,
+        max_context_tokens=max_context_tokens,
+        agent_name=agent_name,
+        allowed_tool_names=allowed_tool_names,
+    )
 
 
 def make_config(

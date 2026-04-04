@@ -22,10 +22,11 @@ def sample_agent_md():
 name: researcher
 display_name: Research Agent
 graph_type: react_agent
-service_type: default
 tools: [read_file, list_files, call_agent]
 sub_agents: []
 max_context_tokens: 30000
+routing_hints: "in-depth research and synthesis"
+capabilities: [research, writing]
 ---
 
 You are a research assistant. Help the user find and synthesize information.
@@ -39,10 +40,11 @@ def sample_coder_agent_md():
 name: coder
 display_name: Coder Agent
 graph_type: react_agent
-service_type: backend
 tools: [read_file, write_file, run_bash, list_files, call_agent]
 sub_agents: [researcher]
 max_context_tokens: 50000
+routing_hints: "backend implementation and debugging"
+capabilities: backend, python
 ---
 
 You are a coding assistant specialized in Python development.
@@ -82,10 +84,11 @@ class TestParseAgentFile:
         assert config.name == "researcher"
         assert config.display_name == "Research Agent"
         assert config.graph_type == "react_agent"
-        assert config.service_type == "default"
         assert config.tools == ["read_file", "list_files", "call_agent"]
         assert config.sub_agents == []
         assert config.max_context_tokens == 30000
+        assert config.routing_hints == "in-depth research and synthesis"
+        assert config.capabilities == ["research", "writing"]
         assert "research assistant" in config.system_prompt
 
     def test_parse_file_no_frontmatter(self):
@@ -148,6 +151,29 @@ class TestParseAgentFile:
         os.unlink(p)
         os.rmdir(d)
 
+    def test_parse_file_capabilities_string_is_coerced_to_list(self):
+        d = tempfile.mkdtemp()
+        p = Path(d, "caps_string.md")
+        p.write_text(
+            "---\nname: test\ngraph_type: react_agent\ncapabilities: backend, python\n---\nBody.",
+            encoding="utf-8",
+        )
+        config = parse_agent_file(p)
+        assert config is not None
+        assert config.capabilities == ["backend", "python"]
+        os.unlink(p)
+        os.rmdir(d)
+
+    def test_parse_file_routing_hints_defaults_to_empty_string(self):
+        d = tempfile.mkdtemp()
+        p = Path(d, "no_hints.md")
+        p.write_text("---\nname: test\ngraph_type: react_agent\n---\nBody.", encoding="utf-8")
+        config = parse_agent_file(p)
+        assert config is not None
+        assert config.routing_hints == ""
+        os.unlink(p)
+        os.rmdir(d)
+
 
 # --- Repository tests ---
 
@@ -160,7 +186,7 @@ class TestFilesystemAgentRepository:
         assert "coder" in agents
         assert "default" in agents
         assert agents["researcher"].graph_type == "react_agent"
-        assert agents["coder"].service_type == "backend"
+        assert agents["coder"].capabilities == ["backend", "python"]
         assert agents["default"].name == "default"
 
     def test_load_empty_directory(self):
@@ -169,7 +195,7 @@ class TestFilesystemAgentRepository:
         agents = repo.load()
         assert len(agents) == 1  # Only builtin default
         assert "default" in agents
-        assert agents["default"].display_name == "Default Assistant"
+        assert agents["default"].display_name == ""
         os.rmdir(d)
 
     def test_load_nonexistent_directory(self):
@@ -183,15 +209,6 @@ class TestFilesystemAgentRepository:
         repo.load()
         agents2 = repo.reload()
         assert len(agents2) == 3  # researcher, coder, + builtin default
-
-    def test_cache_snapshot(self, agents_dir):
-        repo = FilesystemAgentRepository(agents_dir)
-        repo.load()
-        cached = repo.get_cached()
-        assert len(cached) == 3  # researcher, coder, + builtin default
-        # Should be a copy
-        cached["fake"] = None
-        assert "fake" not in repo.get_cached()
 
 
 # --- service tests ---

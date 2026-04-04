@@ -31,6 +31,10 @@ model: "claude-sonnet-4-5-20250929"
 tools:
   - "tool1"
   - "tool2"
+routing_hints: "best for architecture design and refactors"
+capabilities:
+  - "backend"
+  - "python"
 sub_agents:  # Optional: list of agents this agent can call
   - "sub-agent-1"
   - "sub-agent-2"
@@ -50,6 +54,8 @@ Can use {working_dir} placeholder.
 - **graph_type**: Workflow template (default: `react_agent`)
 - **model**: Model ID (default: `devstral-2512`)
 - **tools**: Danh sách tools agent có thể sử dụng (empty = all default tools)
+- **routing_hints**: Gợi ý ngắn để router hiểu intent/domain phù hợp với agent
+- **capabilities**: Danh sách nhãn năng lực để router so khớp yêu cầu người dùng
 - **sub_agents**: 
   - `null` (không có field): leaf agent, không thể call sub-agents
   - `[]` (empty list): có thể call sub-agents nhưng chưa config
@@ -129,6 +135,28 @@ Rules:
 - Self-calls bị block
 - Validation xảy ra tại runtime
 
+### Router opt-in via card
+
+Để bật router theo card, tạo một agent orchestrator với:
+- `graph_type: "router"`
+- `sub_agents` chứa danh sách agent mục tiêu được phép route đến
+- `system_prompt` có placeholder bắt buộc: `{agent_options}` và `{user_input}`
+
+Router sẽ chỉ chọn trong danh sách `sub_agents` của orchestrator đó.
+
+Ví dụ router system prompt:
+
+```text
+You are a routing orchestrator.
+Candidates:
+{agent_options}
+
+User request:
+{user_input}
+
+Return only the selected agent name.
+```
+
 ## Examples
 
 Xem `agent/modules/agents/examples/` cho các agent mẫu:
@@ -137,6 +165,7 @@ Xem `agent/modules/agents/examples/` cho các agent mẫu:
 - `backend-agent.md`: Python/backend engineer
 - `frontend-agent.md`: React/TypeScript engineer
 - `devops-agent.md`: DevOps engineer
+- `router-orchestrator-agent.md`: Router orchestrator (opt-in with `graph_type: router`)
 
 ## Module Structure
 

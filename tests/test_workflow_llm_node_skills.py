@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 import agent.modules.workflows.infrastructure.langgraph.nodes.llm as llm_node_module
+from agent.modules.workflows.infrastructure.langgraph.run_config import WorkflowContext
 
 
 class _FakeChatModel:
@@ -66,10 +67,12 @@ def test_llm_node_uses_prompt_builder_output_for_system_message(monkeypatch):
     result = llm_node_module.llm_node(
         {"messages": [HumanMessage(content="help me")]},
         SimpleNamespace(
-            context={
-                "agent_name": "builder-agent",
-                "working_dir": "D:/repo",
-            }
+            context=WorkflowContext(
+                agent_name="builder-agent",
+                working_dir="D:/repo",
+                max_context_tokens=50000,
+                allowed_tool_names=["skill", "read_file"],
+            )
         ),
     )
 
@@ -125,11 +128,12 @@ def test_llm_node_prefers_runtime_allowed_tool_names_before_building_prompt(monk
     llm_node_module.llm_node(
         {"messages": [HumanMessage(content="hello")]},
         SimpleNamespace(
-            context={
-                "agent_name": "override-agent",
-                "working_dir": "D:/repo",
-                "allowed_tool_names": ["call_agent", "skill"],
-            }
+            context=WorkflowContext(
+                agent_name="override-agent",
+                working_dir="D:/repo",
+                max_context_tokens=50000,
+                allowed_tool_names=["call_agent", "skill"],
+            )
         ),
     )
 

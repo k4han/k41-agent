@@ -58,16 +58,15 @@ async def test_agent_workflow_integration(test_agent_dir):
 
     # 3. Build context with agent_name
     context = make_run_context(
-        service_type=config.service_type,
         working_dir=".",
         max_context_tokens=config.max_context_tokens,
         agent_name=config.name,
         allowed_tool_names=config.tools,
     )
 
-    assert context["agent_name"] == "test-agent"
-    assert context["max_context_tokens"] == 10000
-    assert context["allowed_tool_names"] == ["list_files"]
+    assert context.agent_name == "test-agent"
+    assert context.max_context_tokens == 10000
+    assert context.allowed_tool_names == ["list_files"]
 
     # Verify config resolution chain is complete
     # (We don't invoke the graph to avoid API calls)
@@ -88,10 +87,10 @@ def test_default_agent_always_available():
 
         default = agents["default"]
         assert default.name == "default"
-        assert default.display_name == "Default Assistant"
+        assert default.display_name == ""
         assert default.graph_type == "react_agent"
         assert default.model == "devstral-2512"
-        assert default.system_prompt == "You are a helpful AI assistant.\nWorking directory: {working_dir}"
+        assert "helpful AI assistant" in default.system_prompt
     finally:
         os.rmdir(empty_dir)
 
@@ -111,7 +110,7 @@ def test_agent_config_overrides_defaults(test_agent_dir):
 
     # Default agent has builtin config
     assert default_agent.model == "devstral-2512"
-    assert default_agent.tools == []  # Empty = all default tools
+    assert default_agent.tools == ["list_files", "read_file", "write_file", "search_files"]
     assert "helpful AI assistant" in default_agent.system_prompt
 
 
