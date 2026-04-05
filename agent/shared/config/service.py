@@ -215,8 +215,17 @@ class ConfigService:
             key: [sv.to_dict() for sv in vals]
             for key, vals in sorted(by_key.items())
         }
-
-
+    def update_setting(self, key: str, value: Any) -> None:
+        """Update a specific config setting. Currently updates the yaml file directly.
+        
+        Args:
+            key: Config key to update
+            value: New value to set
+        """
+        for source in self._sources:
+            if hasattr(source, "update_setting"):
+                source.update_setting(key, value)
+        self.reload()
 # Singleton instances
 _config_service: ConfigService | None = None
 _config_sources: list | None = None

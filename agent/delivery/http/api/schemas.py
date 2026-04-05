@@ -15,3 +15,8 @@ class ChatResponse(BaseModel):
     response: str
     thread_id: str
     workflow: str
+
+
+class PairingCodeResponse(BaseModel):
+    user_id: str
+    pairing_code: str
