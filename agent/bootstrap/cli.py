@@ -1,14 +1,34 @@
 import logging
 import shutil
 import sys
+import asyncio
+from functools import wraps
 from pathlib import Path
 
 import click
 
 from agent.bootstrap.app import run as run_server
-from agent.shared.infrastructure.db import Base, create_tables, get_database_url, load_orm_models
+from agent.shared.infrastructure.db import Base, create_tables, get_database_url, load_orm_models, initialize_async_engine
+from agent.modules.users.application.pairing_handler import get_user_service
 
 logger = logging.getLogger(__name__)
+
+
+def _setup_database() -> None:
+    """Setup database models for CLI commands."""
+    load_orm_models()
+
+
+def with_async_db(func):
+    """Decorator for CLI commands that need async DB access."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        async def _run():
+            _setup_database()
+            await initialize_async_engine(metadata=Base.metadata)
+            return await func(*args, **kwargs)
+        asyncio.run(_run())
+    return wrapper
 
 
 @click.group()
@@ -100,6 +120,33 @@ def serve():
     run_server()
 
 
+@cli.command("pair-code")
+@with_async_db
+async def pair_code() -> None:
+    """Generate a new pairing code for a root user."""
+    user_service = get_user_service()
+    code, user_id = await user_service.create_pairing_root_user_and_code()
+    click.echo(f"[OK] Root user ready (ID: {user_id})")
+    click.echo(f"[OK] Pairing code: {code} (expires in 24 hours)")
+
+
+@cli.command("reset-password")
+@click.argument("new_pass")
+@with_async_db
+async def reset_password(new_pass: str) -> None:
+    """Reset the admin user password."""
+    user_service = get_user_service()
+    user = await user_service.get_admin_user()
+    if not user:
+        click.echo("[ERROR] Admin user not found. Run pair-code or start the server first.")
+        sys.exit(1)
+
+    success = await user_service.update_admin_password(new_pass)
+    if success:
+        click.echo(f"[OK] Admin password reset to: {new_pass}")
+    else:
+        click.echo("[ERROR] Failed to reset password.")
+
 def main():
     """Entry point for CLI."""
     # Default to serve if no command given
@@ -113,4 +160,4 @@ if __name__ == "__main__":
     main()
 
 
-__all__ = ["cli", "main"]
+__all__ = ["cli", "main", "reset_password"]

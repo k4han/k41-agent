@@ -41,7 +41,11 @@
       "Bash(python -m pytest tests/test_settings_module.py -v)",
       "Bash(python -m pytest tests/test_module_repositories.py -v -k \"not settings\")",
       "Bash(python -m pytest tests/test_module_repositories.py -v)",
-      "Bash(xargs wc:*)"
+      "Bash(xargs wc:*)",
+      "Bash(git commit:*)",
+      "Bash(python -m pytest tests/test_dashboard_settings.py tests/test_settings_module.py -v --tb=short)",
+      "Bash(python -m pytest tests/test_dashboard_settings.py -v --tb=short)",
+      "Bash(python -m pytest tests/test_dashboard_settings.py::TestDashboardSettingsEndpoints::test_get_settings -v --tb=long)"
     ]
   }
 }

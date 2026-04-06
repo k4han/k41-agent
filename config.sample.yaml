@@ -30,6 +30,15 @@ llm:
   # Temperature for model responses (optional)
   # temperature: 0.0
 
+# Security Configuration
+security:
+  # Secret key used for JWT token signing.
+  # If left empty or missing, the app will auto-generate a secure random string on first run and save it point here.
+  # IMPORTANT: Keep this secret safe in production.
+  # You can generate one manually with: `openssl rand -hex 32` or `python -c "import secrets; print(secrets.token_hex(32))"`
+  jwt_secret: ""
+  # temperature: 0.0
+
   # Alternative: Use OpenAI
   # base_url: "https://api.openai.com/v1"
   # model: "gpt-4"

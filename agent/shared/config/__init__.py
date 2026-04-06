@@ -1,4 +1,4 @@
-from agent.shared.config.constants import DEFAULT_CONFIG, KNOWN_RUNTIME_KEYS, get_channel_enabled_key
+from agent.shared.config.constants import DEFAULT_CONFIG, RUNTIME_KEY_PATTERNS, is_runtime_key, KNOWN_RUNTIME_KEYS, get_channel_enabled_key
 from agent.shared.config.default_source import DefaultConfigSource
 from agent.shared.config.models import (
     RuntimeSettings,
@@ -27,6 +27,8 @@ __all__ = [
     # Constants
     "DEFAULT_CONFIG",
     "DEFAULT_CONFIG_PATH",
+    "RUNTIME_KEY_PATTERNS",
+    "is_runtime_key",
     "KNOWN_RUNTIME_KEYS",
     "get_channel_enabled_key",
 ]

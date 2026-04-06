@@ -7,6 +7,7 @@ class User(BaseModel):
     __tablename__ = "users"
 
     is_active = Column(Boolean, default=True, nullable=False)
+    password_hash = Column(String(255), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
 

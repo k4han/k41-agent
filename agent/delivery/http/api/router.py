@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.responses import StreamingResponse
 
+from agent.modules.users.application.auth import get_current_admin
 from agent.delivery.http.api.schemas import ChatRequest, ChatResponse, PairingCodeResponse
 from agent.modules.agent_runtime.public import (
     build_run_params,
@@ -12,8 +13,7 @@ from agent.modules.users.domain.constants import Platform
 from agent.modules.workflows.public import list_registered_workflows
 from agent.shared.config import get_config_service
 
-router = APIRouter(prefix="/api", tags=["agent"])
-
+router = APIRouter(prefix="/api", tags=["agent"], dependencies=[Depends(get_current_admin)])
 
 def _request_to_run_params(request: ChatRequest) -> dict[str, object]:
     return build_run_params(
@@ -61,23 +61,8 @@ async def list_graphs():
 async def health():
     return {"status": "ok", "graphs": list_registered_workflows()}
 
-
-async def verify_admin_key(x_admin_api_key: str = Header(..., alias="X-Admin-Api-Key")):
-    key = get_config_service().get_str("admin.api_key")
-    if not key:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Admin API key not configured",
-        )
-    if x_admin_api_key != key:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid admin API key",
-        )
-
-
 @router.post("/users/pairing-code", response_model=PairingCodeResponse)
-async def generate_pairing_code(_: str = Depends(verify_admin_key)):
+async def generate_pairing_code():
     user_service = get_user_service()
     pairing_code, user_id = await user_service.create_pairing_root_user_and_code()
     return PairingCodeResponse(user_id=str(user_id), pairing_code=pairing_code)

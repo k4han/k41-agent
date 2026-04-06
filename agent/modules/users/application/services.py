@@ -1,11 +1,14 @@
 from datetime import timedelta, timezone
+import logging
 import secrets
 from sqlalchemy import select, update
+import bcrypt
 
 from agent.shared.infrastructure.db.session import get_async_session
 from agent.shared.infrastructure.db.base import utcnow
 from agent.modules.users.infrastructure.models import UserIdentity, PairingCode, User
 
+logger = logging.getLogger(__name__)
 
 class UserService:
     async def get_or_create_identity(self, platform: str, external_id: str) -> UserIdentity:
@@ -126,4 +129,75 @@ class UserService:
                 await session.rollback()
                 raise
 
+    async def list_paired_identities(self) -> list[UserIdentity]:
+        """List all identities that are paired with users."""
+        session = await get_async_session()
+        async with session:
+            try:
+                stmt = select(UserIdentity).where(UserIdentity.user_id.isnot(None))
+                result = await session.execute(stmt)
+                return list(result.scalars().all())
+            except Exception:
+                logger.exception("Failed to list paired identities")
+                return []
 
+    async def unpair_identity(self, identity_id: int) -> tuple[str, str] | None:
+        """Unpair an identity, clear cache and session. Returns (platform, external_id) if successful."""
+        session = await get_async_session()
+        async with session:
+            try:
+                stmt = select(UserIdentity).where(UserIdentity.id == identity_id)
+                result = await session.execute(stmt)
+                identity = result.scalar_one_or_none()
+                if not identity:
+                    return None
+
+                platform = identity.platform
+                external_id = identity.external_id
+                identity.user_id = None
+                await session.commit()
+
+                # Clear authentication cache
+                from agent.modules.users.application.pairing_handler import make_auth_cache_key
+                from agent.shared.infrastructure.cache import get_cache
+                get_cache().delete(make_auth_cache_key(platform, external_id))
+
+                # Clear agent session
+                try:
+                    from agent.modules.agent_runtime.public import clear_agent_session
+                    await clear_agent_session(platform=platform, user_id=external_id)
+                except Exception as e:
+                    logger.warning(f"Failed to clear agent session for {platform}:{external_id}: {e}")
+
+                return (platform, external_id)
+            except Exception:
+                await session.rollback()
+                raise
+
+
+    async def get_admin_user(self) -> User | None:
+        session = await get_async_session()
+        async with session:
+            stmt = select(User).where(User.is_active == True).order_by(User.id)
+            result = await session.execute(stmt)
+            return result.scalars().first()
+
+    def get_password_hash(self, password: str) -> str:
+        return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+    def verify_password(self, plain_password: str, hashed_password: str) -> bool:
+        return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+
+    async def update_admin_password(self, password: str) -> bool:
+        session = await get_async_session()
+        async with session:
+            stmt = select(User).where(User.is_active == True).order_by(User.id)
+            result = await session.execute(stmt)
+            user = result.scalars().first()
+
+            if not user:
+                return False
+
+            user.password_hash = self.get_password_hash(password)
+            await session.commit()
+            return True

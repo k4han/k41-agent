@@ -21,6 +21,29 @@ def flatten_config_mapping(data: dict[str, Any], prefix: str = "") -> dict[str, 
     return items
 
 
+def unflatten_config_mapping(flat_data: dict[str, Any]) -> dict[str, Any]:
+    """Unflatten dot-separated keys into nested mapping."""
+    result: dict[str, Any] = {}
+    for key, value in flat_data.items():
+        keys = key.split(".")
+        current = result
+        for k in keys[:-1]:
+            if k not in current or not isinstance(current[k], dict):
+                current[k] = {}
+            current = current[k]
+        current[keys[-1]] = value
+    return result
+
+
+def merge_nested_dicts(target: dict[str, Any], source: dict[str, Any]) -> None:
+    """Recursively merge source dict into target dict."""
+    for k, v in source.items():
+        if k in target and isinstance(target[k], dict) and isinstance(v, dict):
+            merge_nested_dicts(target[k], v)
+        else:
+            target[k] = v
+
+
 def coerce_bool(value: object) -> bool:
     """Coerce a value to boolean."""
     if isinstance(value, bool):
@@ -54,4 +77,4 @@ def load_flat_config_file(path: Path | None = None) -> dict[str, Any]:
         return {}
 
 
-__all__ = ["DEFAULT_CONFIG_PATH", "coerce_bool", "flatten_config_mapping", "load_flat_config_file"]
+__all__ = ["DEFAULT_CONFIG_PATH", "coerce_bool", "flatten_config_mapping", "unflatten_config_mapping", "merge_nested_dicts", "load_flat_config_file"]

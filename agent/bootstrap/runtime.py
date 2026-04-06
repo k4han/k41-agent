@@ -32,6 +32,7 @@ async def initialize_persistence() -> None:
     await initialize_checkpointer()
 
 
+
 async def close_persistence() -> None:
     """Close persistence resources for clean shutdowns."""
     await close_checkpointer()
@@ -105,3 +106,4 @@ class AppRuntime:
             self.runtime_settings.channel_enabled,
             BUILTIN_CHANNEL_SPECS,
         )
+

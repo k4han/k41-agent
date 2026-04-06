@@ -14,7 +14,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from agent.shared.config.constants import KNOWN_RUNTIME_KEYS, get_channel_enabled_key
+from agent.shared.config.constants import RUNTIME_KEY_PATTERNS, is_runtime_key, KNOWN_RUNTIME_KEYS, get_channel_enabled_key
 from agent.shared.config.models import RuntimeSettings, SettingsSource, SettingsValue
 from agent.shared.infrastructure.config_file import coerce_bool
 

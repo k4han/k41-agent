@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Connected Clients</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f3f4f6;
+            color: #1f2937;
+        }
+
+        .sidebar {
+            width: 250px;
+            height: 100vh;
+            background: #111827;
+            color: white;
+            position: fixed;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar h2 {
+            margin: 0;
+            padding: 20px;
+            font-size: 1.25rem;
+            font-weight: 600;
+            border-bottom: 1px solid #374151;
+        }
+
+        .nav {
+            display: flex;
+            flex-direction: column;
+            padding: 10px 0;
+        }
+
+        .nav a {
+            color: #d1d5db;
+            text-decoration: none;
+            padding: 10px 20px;
+            font-size: 1rem;
+        }
+
+        .nav a:hover,
+        .nav a.active {
+            background: #374151;
+            color: white;
+        }
+
+        .main-content {
+            margin-left: 250px;
+            padding: 20px;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #e5e7eb;
+            padding-bottom: 12px;
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+            margin: 0;
+        }
+
+        .card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+
+        .card-header {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .table th,
+        .table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .table th {
+            background-color: #f9fafb;
+            font-weight: 600;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            background-color: #d1fae5;
+            color: #065f46;
+            text-transform: capitalize;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 8px 16px;
+            background: #2563eb;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 600;
+        }
+
+        .btn:hover {
+            background: #1d4ed8;
+        }
+
+        .code-display {
+            font-family: monospace;
+            font-size: 1.5rem;
+            letter-spacing: 2px;
+            font-weight: bold;
+            padding: 16px;
+            background: #f3f4f6;
+            border-radius: 8px;
+            text-align: center;
+            margin-top: 16px;
+            display: none;
+            border: 1px dashed #d1d5db;
+        }
+
+        .empty-state {
+            padding: 20px;
+            text-align: center;
+            color: #6b7280;
+            font-size: 0.95rem;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="sidebar">
+        <h2>Kaka Dashboard</h2>
+        <div class="nav">
+            <a href="/">Overview</a>
+            <a href="/channels" class="active">Pair Channels</a>
+            <a href="/config">Configuration</a>
+            <hr style="border-color: #374151; width: 100%; margin: 10px 0;">
+            <a href="/change-password">Đổi mật khẩu</a>
+            <a href="/logout" style="color: #ef4444;">Đăng xuất</a>
+        </div>
+    </div>
+    <div class="main-content">
+        <div class="header">
+            <h1>Connected Services & Pairing</h1>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <span>Generate Pairing Code</span>
+                <button class="btn" onclick="generateCode()" id="btn-create">Create Code</button>
+            </div>
+            <p style="color: #4b5563; font-size: 0.9rem; margin-bottom: 0;">Create a pairing code to authenticate a new
+                Telegram or Discord client. Tell the user to copy the code and text the bot:
+                <code>/pair &lt;CODE&gt;</code>
+            </p>
+            <div id="code-result" class="code-display"></div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <span>Currently Paired Clients</span>
+            </div>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Platform</th>
+                        <th>External UID</th>
+                        <th>Internal User ID</th>
+                        <th>Paired At</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for identity in identities %}
+                    <tr>
+                        <td><span class="badge">{{ identity.platform }}</span></td>
+                        <td>{{ identity.external_id }}</td>
+                        <td>UID #{{ identity.user_id }}</td>
+                        <td>{{ identity.updated_at.strftime('%Y-%m-%d %H:%M') if identity.updated_at else 'Unknown' }}
+                        </td>
+                        <td>
+                            <button class="btn" style="background:#dc2626; padding: 4px 8px; font-size: 0.75rem;"
+                                onclick="unpairIdentity('{{ identity.id }}')">Unpair</button>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="5">
+                            <div class="empty-state">No external services or clients have been paired yet.</div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        async function generateCode() {
+            const btn = document.getElementById('btn-create');
+            btn.innerText = "Generating...";
+            btn.disabled = true;
+
+            try {
+                const res = await fetch("/dashboard/channels/pair", { method: "POST" });
+                if (res.ok) {
+                    const data = await res.json();
+                    const codeDisplay = document.getElementById("code-result");
+                    codeDisplay.innerText = data.code;
+                    codeDisplay.style.display = "block";
+                } else {
+                    alert("Failed to generate pairing code.");
+                }
+            } catch (err) {
+                console.error(err);
+                alert("Error calling pairing API.");
+            } finally {
+                btn.innerText = "Create Code";
+                btn.disabled = false;
+            }
+        }
+
+        async function unpairIdentity(identityId) {
+            if (!confirm("Are you sure you want to unpair this client?")) return;
+
+            try {
+                const res = await fetch(`/dashboard/channels/identities/${identityId}`, { method: "DELETE" });
+                if (res.ok) {
+                    window.location.reload();
+                } else {
+                    const error = await res.json();
+                    alert("Failed to unpair: " + (error.detail || "Unknown error"));
+                }
+            } catch (err) {
+                console.error(err);
+                alert("Error calling unpair API.");
+            }
+        }
+    </script>
+</body>
+
+</html>

@@ -9,7 +9,7 @@ from agent.shared.config.models import (
     SettingsValue,
     build_settings_values,
 )
-from agent.shared.infrastructure.config_file import flatten_config_mapping
+from agent.shared.infrastructure.config_file import flatten_config_mapping, unflatten_config_mapping, merge_nested_dicts
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,22 @@ class YamlConfigSource:
         """
         data = self._load()
         return build_settings_values(data, SettingsSource.CONFIG_FILE, keys)
+    def update_setting(self, key: str, value: Any) -> None:
+        import yaml
 
+        try:
+            raw = self._path.read_text(encoding="utf-8")
+            data = yaml.safe_load(raw) or {}
+        except FileNotFoundError:
+            data = {}
+
+        flat_update = {key: value}
+        nested_update = unflatten_config_mapping(flat_update)
+        merge_nested_dicts(data, nested_update)
+
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+        self.reload()
     def reload(self) -> None:
         """Clear cache and reload from file."""
         self._cache = None

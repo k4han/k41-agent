@@ -4,7 +4,7 @@ import uuid
 
 from agent.modules.channels.infrastructure.repository import ChannelSettingsRepository
 from agent.shared.infrastructure.db import UserPreferencesRepository, Base
-from agent.modules.users.infrastructure.models import User
+from agent.modules.users.infrastructure.models import User, UserIdentity, PairingCode
 from agent.shared.infrastructure.db.engine import close_async_engine, initialize_async_engine
 from agent.shared.infrastructure.db.session import get_async_session_maker
 
@@ -18,8 +18,15 @@ async def repository_db(monkeypatch: pytest.MonkeyPatch, tmp_path, request):
     # Use test name to ensure unique DB per test
     test_name = request.node.name
     db_path = tmp_path / f"{test_name}.sqlite"
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.resolve().as_posix()}")
+    db_url = f"sqlite:///{db_path.resolve().as_posix()}"
+    monkeypatch.setenv("DATABASE_URL", db_url)
     monkeypatch.setenv("PERSISTENCE_ALLOW_ANY_PATH", "true")
+    
+    # Also mock get_database_url so it uses the test DB
+    import agent.shared.infrastructure.db.engine as engine_module
+    monkeypatch.setattr(engine_module, "get_database_url", lambda: db_url)
+    # Clear the cached database URL if any
+    engine_module._cached_database_url = None
 
     await initialize_async_engine(metadata=Base.metadata)
 
@@ -29,12 +36,11 @@ async def repository_db(monkeypatch: pytest.MonkeyPatch, tmp_path, request):
         await close_async_engine()
 
 
-async def _create_test_user(username: str) -> int:
+async def _create_test_user() -> int:
     """Helper to create a test user and return its ID."""
     session_maker = get_async_session_maker()
     async with session_maker() as session:
-        # Use UUID to ensure unique external_id
-        user = User(username=username, external_id=str(uuid.uuid4()), platform="telegram")
+        user = User(is_active=True)
         session.add(user)
         await session.commit()
         await session.refresh(user)
@@ -43,7 +49,7 @@ async def _create_test_user(username: str) -> int:
 
 @pytest.mark.asyncio
 async def test_channel_settings_repository_crud(repository_db):
-    user_id = await _create_test_user("channel-user")
+    user_id = await _create_test_user()
     repo = ChannelSettingsRepository()
 
     created = await repo.upsert(
@@ -82,7 +88,7 @@ async def test_channel_settings_repository_crud(repository_db):
 
 @pytest.mark.asyncio
 async def test_user_preferences_repository_crud(repository_db):
-    user_id = await _create_test_user("pref-user")
+    user_id = await _create_test_user()
     repo = UserPreferencesRepository()
 
     created = await repo.upsert(user_id, "language", "vi")

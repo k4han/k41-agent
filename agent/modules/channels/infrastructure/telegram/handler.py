@@ -8,6 +8,8 @@ from agent.modules.channels.infrastructure.telegram.formatter import (
     format_telegram_message,
     chunk_telegram_message,
 )
+from agent.modules.users.application.pairing_handler import authenticate_channel_message
+from agent.modules.users.domain.constants import Platform
 from agent.modules.workflows.infrastructure.langgraph.run_config import DEFAULT_WORKING_DIR
 from agent.shared.config import get_config_service
 from agent.shared.infrastructure.validation import is_placeholder_value
@@ -34,11 +36,9 @@ async def handle_streaming_response(message, params) -> None:
         if event["type"] == "tool_call":
             tool_name = event["name"]
             args = event.get("args", {})
-            # Ensure args is a dict/string and truncate if too long
             arg_str = str(args) if args else ""
             if len(arg_str) > 50:
-                # arg_str = arg_str[:47] + "..."
-                pass
+                arg_str = arg_str[:47] + "..."
 
             tools_called.append(f"{tool_name}({arg_str})")
 
@@ -98,6 +98,18 @@ def create_dispatcher():
         raise ImportError("Install: pip install aiogram") from exc
 
     dp = Dispatcher()
+
+    @dp.message.outer_middleware()
+    async def auth_middleware(handler, event: Message, data: dict):
+        if not getattr(event, "text", None) or not getattr(event, "from_user", None):
+            return await handler(event, data)
+
+        user_id = str(event.from_user.id)
+
+        if not await authenticate_channel_message(Platform.TELEGRAM, user_id, event.text, event.answer):
+            return
+
+        return await handler(event, data)
 
     from agent.modules.agents.public import get_catalog_service
 
