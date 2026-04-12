@@ -3,7 +3,8 @@ from langchain_core.tools import tool
 
 @tool
 def get_current_time() -> str:
-    """Return current time."""
+    """Return current time with timezone."""
     from datetime import datetime
 
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now().astimezone()
+    return now.strftime("%Y-%m-%d %H:%M:%S %Z (UTC%z)")

@@ -1,24 +1,28 @@
 """Script to verify how many graphs are built at startup."""
 
+import asyncio
+
 from agent.modules.workflows.application.register_builtin_workflows import (
     register_builtin_workflows,
 )
-from agent.modules.workflows.infrastructure.langgraph.compiled_registry import (
-    GraphRegistry,
-)
+from agent.modules.workflows.public import list_registered_workflows
+from agent.bootstrap.runtime import initialize_persistence
 
 
-def main():
+async def main():
     print("=" * 60)
     print("GRAPH REGISTRATION VERIFICATION")
     print("=" * 60)
+
+    print("\n[0] Initializing persistence...")
+    await initialize_persistence()
 
     # Register all builtin workflows
     print("\n[1] Registering builtin workflows...")
     register_builtin_workflows()
 
-    # Get all registered graphs
-    graphs = GraphRegistry.list_all()
+    # Get all registered graphs via public API
+    graphs = list_registered_workflows()
 
     print(f"\n[2] Total graphs registered: {len(graphs)}")
     print("\nRegistered graph names:")
@@ -39,4 +43,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

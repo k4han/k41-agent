@@ -14,6 +14,7 @@ from agent.modules.workflows.infrastructure.langgraph.run_config import (
 from agent.modules.workflows.infrastructure.langgraph.checkpoint.store import (
     close_checkpointer,
     initialize_checkpointer,
+    get_checkpointer,
 )
 
 
@@ -40,6 +41,7 @@ __all__ = [
     "delete_workflow_thread",
     "get_workflow_graph",
     "initialize_checkpointer",
+    "get_checkpointer",
     "list_registered_workflows",
     "make_run_context",
     "make_run_config",

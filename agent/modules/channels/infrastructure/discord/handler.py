@@ -6,6 +6,7 @@ from agent.modules.users.application.pairing_handler import authenticate_channel
 from agent.modules.users.domain.constants import Platform
 from agent.shared.config import get_config_service
 from agent.shared.infrastructure.validation import is_placeholder_value
+from agent.modules.scheduler.public import set_discord_client
 
 logger = logging.getLogger(__name__)
 
@@ -73,4 +74,5 @@ async def run_discord_bot() -> None:
         )
 
     client = create_discord_client()
+    set_discord_client(client)
     await client.start(token)

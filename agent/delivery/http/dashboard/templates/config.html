@@ -215,7 +215,7 @@
             const val = input.value === "" ? null : input.value;
 
             try {
-                const res = await fetch(`/dashboard/settings/${key}`, {
+                const res = await fetch(`/settings/${key}`, {
                     method: "PUT",
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ value: val })

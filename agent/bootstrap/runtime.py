@@ -15,6 +15,7 @@ from agent.modules.workflows.public import (
     initialize_checkpointer,
     register_builtin_workflows,
 )
+from agent.modules.scheduler.public import initialize_scheduler, stop_scheduler
 from agent.modules.skills.public import reload_skills
 from agent.shared.infrastructure.db import Base, load_orm_models
 from agent.shared.infrastructure.db.engine import (
@@ -72,6 +73,10 @@ class AppRuntime:
 
             self._register_channels()
             await self._start_enabled_channels()
+            
+            logger.info("Starting background scheduler...")
+            await initialize_scheduler()
+            
             self._started = True
             logger.info("Application runtime is ready.")
         except Exception:
@@ -83,6 +88,9 @@ class AppRuntime:
         if self.channel_manager.names():
             logger.info("Stopping managed channels...")
             await stop_all_channels(self.channel_manager)
+
+        logger.info("Stopping background scheduler...")
+        await stop_scheduler()
 
         if self._persistence_ready:
             logger.info("Closing persistence...")

@@ -229,7 +229,7 @@
             btn.disabled = true;
 
             try {
-                const res = await fetch("/dashboard/channels/pair", { method: "POST" });
+                const res = await fetch("/channels/pair", { method: "POST" });
                 if (res.ok) {
                     const data = await res.json();
                     const codeDisplay = document.getElementById("code-result");
@@ -251,7 +251,7 @@
             if (!confirm("Are you sure you want to unpair this client?")) return;
 
             try {
-                const res = await fetch(`/dashboard/channels/identities/${identityId}`, { method: "DELETE" });
+                const res = await fetch(`/channels/identities/${identityId}`, { method: "DELETE" });
                 if (res.ok) {
                     window.location.reload();
                 } else {

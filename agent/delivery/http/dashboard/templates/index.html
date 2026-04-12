@@ -214,7 +214,7 @@
     <script>
         async function startService(name) {
             try {
-                const res = await fetch(`/dashboard/services/${name}/start`, { method: "POST" });
+                const res = await fetch(`/services/${name}/start`, { method: "POST" });
                 if (res.ok) window.location.reload();
                 else alert("Failed to start service");
             } catch (err) {
@@ -225,7 +225,7 @@
         async function stopService(name) {
             if (!confirm(`Are you sure you want to stop ${name}?`)) return;
             try {
-                const res = await fetch(`/dashboard/services/${name}/stop`, { method: "POST" });
+                const res = await fetch(`/services/${name}/stop`, { method: "POST" });
                 if (res.ok) window.location.reload();
                 else alert("Failed to stop service: " + await res.text());
             } catch (err) {

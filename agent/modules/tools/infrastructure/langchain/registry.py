@@ -20,7 +20,11 @@ from agent.modules.tools.infrastructure.langchain.utility_tools.echo import echo
 from agent.modules.tools.infrastructure.langchain.utility_tools.get_current_time import (
     get_current_time,
 )
-
+from agent.modules.tools.infrastructure.langchain.schedule_tools.schedule import (
+    schedule_task,
+    list_scheduled_tasks,
+    delete_scheduled_task,
+)
 
 def get_all_langchain_tools() -> list[BaseTool]:
     """Return all available LangChain tools."""
@@ -33,4 +37,7 @@ def get_all_langchain_tools() -> list[BaseTool]:
         run_bash,
         list_files,
         call_agent,
+        schedule_task,
+        list_scheduled_tasks,
+        delete_scheduled_task,
     ]
