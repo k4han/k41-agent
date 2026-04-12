@@ -12,7 +12,7 @@ class ChannelSpec:
 
 
 def load_telegram_runner() -> ChannelRunner:
-    from agent.modules.channels.infrastructure.telegram.handler import run_telegram_bot
+    from agent.modules.channels.infrastructure.telegram.bot import run_telegram_bot
 
     return run_telegram_bot
 
