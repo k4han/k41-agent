@@ -1,17 +1,21 @@
 import logging
 import uuid
-from typing import Optional
+from typing import Any, Optional, TYPE_CHECKING
 
 import tzlocal
-from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
-from discord import Client
 from sqlalchemy import create_engine
 
-from agent.modules.users.domain.constants import Platform
-from agent.modules.agent_runtime.application.session import SessionManager
-from agent.modules.agent_runtime.application.runner import run_agent_full
+if TYPE_CHECKING:
+    from aiogram import Bot
+    from discord import Client
+else:
+    Bot = Any
+    Client = Any
+
+from agent.modules.users.public import Platform
+from agent.modules.agent_runtime.public import SessionManager, run_agent_full
 from agent.modules.workflows.public import get_workflow_graph, make_run_config
 from agent.shared.infrastructure.db.engine import (
     get_database_url,

@@ -6,7 +6,7 @@ from datetime import datetime
 import logging
 
 from agent.modules.scheduler.public import get_scheduler, execute_scheduled_task
-from agent.modules.agent_runtime.application.session import SessionManager
+from agent.modules.agent_runtime.public import SessionManager
 
 logger = logging.getLogger(__name__)
 

@@ -3,8 +3,11 @@ from langchain_core.tools import BaseTool
 from langgraph.prebuilt import ToolNode
 from langgraph.runtime import Runtime
 
-from agent.modules.tools.infrastructure.runtime.context import get_context_value
-from agent.modules.tools.public import get_default_tools, resolve_tools
+from agent.modules.tools.public import (
+    get_default_tools,
+    get_runtime_context_value,
+    resolve_tools,
+)
 from agent.modules.workflows.infrastructure.langgraph.run_config import WorkflowContext
 
 
@@ -23,7 +26,11 @@ async def tool_node(
     runtime: Runtime[WorkflowContext],
 ):
     """Resolve the executable tool set at runtime to match llm_node bindings."""
-    allowed_tool_names = get_context_value(runtime.context, "allowed_tool_names", None)
+    allowed_tool_names = get_runtime_context_value(
+        runtime.context,
+        "allowed_tool_names",
+        None,
+    )
     tools = (
         get_default_tools()
         if allowed_tool_names is None

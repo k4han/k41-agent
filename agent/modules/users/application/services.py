@@ -2,7 +2,6 @@ from datetime import timedelta, timezone
 import logging
 import secrets
 from sqlalchemy import select, update
-import bcrypt
 
 from agent.shared.infrastructure.db.session import get_async_session
 from agent.shared.infrastructure.db.base import utcnow
@@ -10,7 +9,8 @@ from agent.modules.users.infrastructure.models import UserIdentity, PairingCode,
 
 logger = logging.getLogger(__name__)
 
-class UserService:
+
+class PairingService:
     async def get_or_create_identity(self, platform: str, external_id: str) -> UserIdentity:
         session = await get_async_session()
         async with session:
@@ -173,31 +173,3 @@ class UserService:
             except Exception:
                 await session.rollback()
                 raise
-
-
-    async def get_admin_user(self) -> User | None:
-        session = await get_async_session()
-        async with session:
-            stmt = select(User).where(User.is_active == True).order_by(User.id)
-            result = await session.execute(stmt)
-            return result.scalars().first()
-
-    def get_password_hash(self, password: str) -> str:
-        return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-
-    def verify_password(self, plain_password: str, hashed_password: str) -> bool:
-        return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
-
-    async def update_admin_password(self, password: str) -> bool:
-        session = await get_async_session()
-        async with session:
-            stmt = select(User).where(User.is_active == True).order_by(User.id)
-            result = await session.execute(stmt)
-            user = result.scalars().first()
-
-            if not user:
-                return False
-
-            user.password_hash = self.get_password_hash(password)
-            await session.commit()
-            return True

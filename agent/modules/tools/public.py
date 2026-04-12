@@ -6,10 +6,14 @@ Other modules should import from here, not from internal packages.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import TypeVar
 
 from langchain_core.tools import BaseTool
 
 from agent.modules.tools.application.registry_service import get_registry_service
+from agent.modules.tools.infrastructure.runtime.context import get_context_value
+
+T = TypeVar("T")
 
 
 def get_tool_by_name(name: str) -> BaseTool | None:
@@ -36,9 +40,15 @@ def get_default_tool_names() -> list[str]:
     return service.get_tool_names()
 
 
+def get_runtime_context_value(runtime_or_context, key: str, default: T) -> T:
+    """Read a value from runtime context. Public wrapper to avoid importing from infrastructure."""
+    return get_context_value(runtime_or_context, key, default)
+
+
 __all__ = [
     "get_tool_by_name",
     "get_default_tools",
     "resolve_tools",
     "get_default_tool_names",
+    "get_runtime_context_value",
 ]

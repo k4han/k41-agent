@@ -33,6 +33,6 @@ def test_init_registers_orm_models_before_creating_tables(
         assert result.exit_code == 0, result.output
         assert "[OK] Database tables created" in result.output
         assert captured["database_url"] == database_url
-        assert {"users", "bot_settings", "user_preferences"} <= set(captured["tables"])
+        assert {"admin_credentials", "users", "bot_settings", "user_preferences"} <= set(captured["tables"])
     finally:
         shutil.rmtree(temp_path, ignore_errors=True)

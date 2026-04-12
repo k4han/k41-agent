@@ -4,7 +4,7 @@ from langchain_core.messages import BaseMessage, RemoveMessage
 from langchain_core.messages.utils import count_tokens_approximately, trim_messages
 from langgraph.runtime import Runtime
 
-from agent.modules.tools.infrastructure.runtime.context import get_context_value
+from agent.modules.tools.public import get_runtime_context_value
 from agent.modules.workflows.infrastructure.langgraph.run_config import WorkflowContext
 
 
@@ -30,7 +30,7 @@ def make_prepare_context_node(
         if not messages:
             return {}
 
-        max_context_value = get_context_value(
+        max_context_value = get_runtime_context_value(
             runtime.context, "max_context_tokens", None
         )
 

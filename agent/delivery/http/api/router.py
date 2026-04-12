@@ -1,15 +1,14 @@
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.responses import StreamingResponse
 
-from agent.modules.users.application.auth import get_current_admin
+from agent.modules.admin_auth.public import get_current_admin
 from agent.delivery.http.api.schemas import ChatRequest, ChatResponse, PairingCodeResponse
 from agent.modules.agent_runtime.public import (
     build_run_params,
     run_agent,
     run_agent_full,
 )
-from agent.modules.users.application.pairing_handler import get_user_service
-from agent.modules.users.domain.constants import Platform
+from agent.modules.users.public import Platform, get_pairing_service
 from agent.modules.workflows.public import list_registered_workflows
 from agent.shared.config import get_config_service
 
@@ -63,6 +62,6 @@ async def health():
 
 @router.post("/users/pairing-code", response_model=PairingCodeResponse)
 async def generate_pairing_code():
-    user_service = get_user_service()
-    pairing_code, user_id = await user_service.create_pairing_root_user_and_code()
+    pairing_service = get_pairing_service()
+    pairing_code, user_id = await pairing_service.create_pairing_root_user_and_code()
     return PairingCodeResponse(user_id=str(user_id), pairing_code=pairing_code)

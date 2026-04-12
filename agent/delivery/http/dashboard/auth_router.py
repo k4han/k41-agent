@@ -2,8 +2,11 @@ from fastapi import APIRouter, Depends, Form, Request, Response, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from agent.modules.users.application.auth import create_access_token, get_current_admin
-from agent.modules.users.application.pairing_handler import get_user_service
+from agent.modules.admin_auth.public import (
+    create_access_token,
+    get_admin_auth_service,
+    get_current_admin,
+)
 
 router = APIRouter(tags=["auth"])
 # Note: Provide appropriate path for templates
@@ -15,9 +18,9 @@ async def login_get(request: Request):
 
 @router.post("/login")
 async def login_post(request: Request, password: str = Form(...)):
-    user_service = get_user_service()
-    admin = await user_service.get_admin_user()
-    if not admin or not admin.password_hash or not user_service.verify_password(password, admin.password_hash):
+    auth_service = get_admin_auth_service()
+    admin = await auth_service.authenticate(password)
+    if admin is None:
         return templates.TemplateResponse(request=request, name="login.html", context={"error": "Invalid password"})
 
     token = create_access_token({"sub": str(admin.id)})
@@ -42,14 +45,10 @@ async def change_password_post(
     new_password: str = Form(...),
     _ = Depends(get_current_admin)
 ):
-    user_service = get_user_service()
-    admin = await user_service.get_admin_user()
-    
-    if not admin or not admin.password_hash or not user_service.verify_password(old_password, admin.password_hash):
+    auth_service = get_admin_auth_service()
+
+    if not await auth_service.verify_current_password(old_password):
         return templates.TemplateResponse(request=request, name="change_password.html", context={"error": "Mật khẩu cũ không chính xác"})
 
-    success = await user_service.update_admin_password(new_password)
-    if success:
-        return templates.TemplateResponse(request=request, name="change_password.html", context={"success": "Đổi mật khẩu thành công"})
-    
-    return templates.TemplateResponse(request=request, name="change_password.html", context={"error": "Có lỗi xảy ra, không thể đổi mật khẩu"})
+    await auth_service.set_admin_password(new_password)
+    return templates.TemplateResponse(request=request, name="change_password.html", context={"success": "Đổi mật khẩu thành công"})

@@ -2,9 +2,23 @@ import importlib
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.requests import Request
+
+from agent.modules.admin_auth.public import get_current_admin
 
 
 router_module = importlib.import_module("agent.delivery.http.api.router")
+
+
+def _create_client() -> TestClient:
+    app = FastAPI()
+    app.include_router(router_module.router)
+
+    async def mock_admin(_: Request) -> str:
+        return "test_admin"
+
+    app.dependency_overrides[get_current_admin] = mock_admin
+    return TestClient(app)
 
 
 def test_chat_sync_returns_response_payload(monkeypatch):
@@ -13,7 +27,6 @@ def test_chat_sync_returns_response_payload(monkeypatch):
         "thread_id": "api_alice",
         "agent_name": "default",
         "workflow": "react_agent",
-        "service_type": "backend",
         "working_dir": "D:/workspace/sample",
         "max_context_tokens": None,
     }
@@ -24,7 +37,6 @@ def test_chat_sync_returns_response_payload(monkeypatch):
             "user_id": "alice",
             "user_input": "List files",
             "workflow": "react_agent",
-            "service_type": "backend",
             "working_dir": "D:/workspace/sample",
             "agent_name": "default",
         }
@@ -37,17 +49,13 @@ def test_chat_sync_returns_response_payload(monkeypatch):
     monkeypatch.setattr(router_module, "build_run_params", fake_build_run_params)
     monkeypatch.setattr(router_module, "run_agent_full", fake_run_agent_full)
 
-    app = FastAPI()
-    app.include_router(router_module.router)
-
-    client = TestClient(app)
+    client = _create_client()
     response = client.post(
         "/api/chat",
         json={
             "message": "List files",
             "user_id": "alice",
             "workflow": "react_agent",
-            "service_type": "backend",
             "working_dir": "D:/workspace/sample",
         },
     )
@@ -88,10 +96,7 @@ def test_chat_sync_prefers_agent_name_over_workflow(monkeypatch):
     monkeypatch.setattr(router_module, "build_run_params", fake_build_run_params)
     monkeypatch.setattr(router_module, "run_agent_full", fake_run_agent_full)
 
-    app = FastAPI()
-    app.include_router(router_module.router)
-
-    client = TestClient(app)
+    client = _create_client()
     response = client.post(
         "/api/chat",
         json={
@@ -117,10 +122,7 @@ def test_graph_endpoints_reflect_registered_workflows(monkeypatch):
         lambda: ["react_agent", "research_chain", "router"],
     )
 
-    app = FastAPI()
-    app.include_router(router_module.router)
-
-    client = TestClient(app)
+    client = _create_client()
 
     graphs_response = client.get("/api/graphs")
     assert graphs_response.status_code == 200

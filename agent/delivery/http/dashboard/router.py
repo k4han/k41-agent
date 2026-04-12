@@ -19,9 +19,9 @@ from agent.modules.channels.public import (
     stop_channel,
 )
 from agent.shared.config import is_runtime_key, ConfigService
-from agent.modules.users.application.pairing_handler import get_user_service
+from agent.modules.users.public import get_pairing_service
 from fastapi import Depends
-from agent.modules.users.application.auth import get_current_admin
+from agent.modules.admin_auth.public import get_current_admin
 
 router = APIRouter(tags=["dashboard"], dependencies=[Depends(get_current_admin)])
 logger = logging.getLogger(__name__)
@@ -65,22 +65,22 @@ async def dashboard_index(request: Request) -> HTMLResponse:
 
 @router.get("/channels", response_class=HTMLResponse)
 async def dashboard_channels(request: Request) -> HTMLResponse:
-    user_service = get_user_service()
-    identities = await user_service.list_paired_identities()
+    pairing_service = get_pairing_service()
+    identities = await pairing_service.list_paired_identities()
     return templates.TemplateResponse(
         request=request, name="channels.html", context={"request": request, "identities": identities}
     )
 
 @router.post("/channels/pair")
 async def generate_pairing_code(request: Request) -> dict[str, str]:
-    user_service = get_user_service()
-    code, user_id = await user_service.create_pairing_root_user_and_code()
+    pairing_service = get_pairing_service()
+    code, user_id = await pairing_service.create_pairing_root_user_and_code()
     return {"code": code, "user_id": user_id}
 
 @router.delete("/channels/identities/{identity_id}")
 async def unpair_identity(identity_id: int) -> dict[str, str]:
-    user_service = get_user_service()
-    await user_service.unpair_identity(identity_id)
+    pairing_service = get_pairing_service()
+    await pairing_service.unpair_identity(identity_id)
     return {"status": "success"}
 
 @router.get("/config", response_class=HTMLResponse)
@@ -90,6 +90,12 @@ async def dashboard_config(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request=request, name="config.html", context={"settings": settings}
     )
+
+
+@router.get("/services")
+async def get_services(request: Request) -> dict[str, list[dict[str, str | None]]]:
+    channel_manager = _get_channel_manager(request)
+    return _collection_payload(channel_manager)
 
 @router.get("/services/{name}")
 async def get_service(name: str, request: Request) -> dict[str, str | None]:

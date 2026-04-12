@@ -2,8 +2,7 @@ import logging
 
 from agent.modules.agent_runtime.public import build_run_params, run_agent_full
 from agent.modules.agents.public import resolve_catalog_agent_name
-from agent.modules.users.application.pairing_handler import authenticate_channel_message
-from agent.modules.users.domain.constants import Platform
+from agent.modules.users.public import authenticate_channel_message, Platform
 from agent.shared.config import get_config_service
 from agent.shared.infrastructure.validation import is_placeholder_value
 from agent.modules.scheduler.public import set_discord_client

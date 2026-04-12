@@ -1,19 +1,19 @@
 from typing import Callable, Awaitable
 
-from agent.modules.users.application.services import UserService
+from agent.modules.users.application.services import PairingService
 from agent.shared.infrastructure.cache import get_cache
 
 AUTH_CACHE_TTL_SECONDS = 3600
 
-_user_service: UserService | None = None
+_pairing_service: PairingService | None = None
 
 
-def get_user_service() -> UserService:
-    """Get or create a singleton UserService instance."""
-    global _user_service
-    if _user_service is None:
-        _user_service = UserService()
-    return _user_service
+def get_pairing_service() -> PairingService:
+    """Get or create a singleton PairingService instance."""
+    global _pairing_service
+    if _pairing_service is None:
+        _pairing_service = PairingService()
+    return _pairing_service
 
 
 def make_auth_cache_key(platform: str, user_id: str) -> str:
@@ -51,8 +51,8 @@ async def handle_pairing_command(
         await reply_fn("Vui lòng cung cấp mã liên kết.")
         return True
 
-    user_service = get_user_service()
-    success = await user_service.process_pairing(platform, user_id, code)
+    pairing_service = get_pairing_service()
+    success = await pairing_service.process_pairing(platform, user_id, code)
 
     if success:
         _cache_user_auth(platform, user_id)
@@ -80,8 +80,8 @@ async def check_user_authenticated(
     if cached_auth is True:
         return True
 
-    user_service = get_user_service()
-    identity = await user_service.get_or_create_identity(platform, user_id)
+    pairing_service = get_pairing_service()
+    identity = await pairing_service.get_or_create_identity(platform, user_id)
 
     if identity.user_id:
         _cache_user_auth(platform, user_id)

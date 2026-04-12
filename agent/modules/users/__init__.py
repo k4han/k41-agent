@@ -1,3 +1,3 @@
-from agent.modules.users.infrastructure.models import User
+from agent.modules.users.infrastructure.models import PairingCode, User, UserIdentity
 
-__all__ = ["User"]
+__all__ = ["PairingCode", "User", "UserIdentity"]

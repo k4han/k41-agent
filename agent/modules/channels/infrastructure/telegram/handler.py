@@ -8,9 +8,8 @@ from agent.modules.channels.infrastructure.telegram.formatter import (
     format_telegram_message,
     chunk_telegram_message,
 )
-from agent.modules.users.application.pairing_handler import authenticate_channel_message
-from agent.modules.users.domain.constants import Platform
-from agent.modules.workflows.infrastructure.langgraph.run_config import DEFAULT_WORKING_DIR
+from agent.modules.users.public import authenticate_channel_message, Platform
+from agent.modules.workflows import DEFAULT_WORKING_DIR
 from agent.shared.config import get_config_service
 from agent.shared.infrastructure.validation import is_placeholder_value
 from agent.modules.scheduler.public import set_telegram_bot

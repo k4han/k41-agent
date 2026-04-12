@@ -11,6 +11,10 @@ from agent.modules.workflows.infrastructure.langgraph.run_config import (
     make_context as make_run_context,
     make_config as make_run_config,
 )
+from agent.modules.workflows.infrastructure.langgraph.constants import (
+    REACT_AGENT_GRAPH_TYPE,
+    ROUTER_GRAPH_TYPE,
+)
 from agent.modules.workflows.infrastructure.langgraph.checkpoint.store import (
     close_checkpointer,
     initialize_checkpointer,
@@ -47,4 +51,6 @@ __all__ = [
     "make_run_config",
     "register_builtin_workflows",
     "close_checkpointer",
+    "REACT_AGENT_GRAPH_TYPE",
+    "ROUTER_GRAPH_TYPE",
 ]

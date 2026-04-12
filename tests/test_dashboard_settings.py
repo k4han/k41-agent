@@ -17,7 +17,7 @@ def dashboard_client(monkeypatch: pytest.MonkeyPatch):
 
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    from agent.modules.users.application.auth import get_current_admin
+    from agent.modules.admin_auth.public import get_current_admin
 
     from agent.delivery.http.dashboard.router import router
 

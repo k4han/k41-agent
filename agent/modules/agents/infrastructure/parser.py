@@ -9,7 +9,7 @@ from pathlib import Path
 
 from agent.modules.agents.domain.subagent import AgentConfig
 from agent.shared.infrastructure.parsing import parse_string_or_list
-from agent.modules.workflows.infrastructure.langgraph.constants import (
+from agent.modules.workflows import (
     ROUTER_GRAPH_TYPE,
     REACT_AGENT_GRAPH_TYPE,
 )
