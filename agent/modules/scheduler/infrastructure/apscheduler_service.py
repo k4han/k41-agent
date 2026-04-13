@@ -23,7 +23,7 @@ from agent.shared.infrastructure.db.engine import (
 )
 from langchain_core.messages import AIMessage, HumanMessage
 
-AGENT_NAME = "default"
+AGENT_NAME = "scheduler-executor"
 GRAPH_NAME = "react_agent"
 NODE_NAME = "llm"
 BACKGROUND_THREAD_PREFIX = "bg"
