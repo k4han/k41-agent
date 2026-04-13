@@ -66,7 +66,6 @@ def schedule_task(
             execute_scheduled_task,
             trigger=trigger_type,
             kwargs={"platform": platform, "user_id": user_id, "task": task_description},
-            tags=[f"{platform}_{user_id}"],
             **trigger_args
         )
 
@@ -87,8 +86,11 @@ def list_scheduled_tasks(runtime: Annotated[ToolRuntime, InjectedToolArg]) -> st
         platform, user_id = result
 
         scheduler = get_scheduler()
-        user_tag = f"{platform}_{user_id}"
-        user_jobs = scheduler.get_jobs(tags=[user_tag])
+        all_jobs = scheduler.get_jobs()
+        user_jobs = [
+            j for j in all_jobs
+            if j.kwargs.get("platform") == platform and j.kwargs.get("user_id") == user_id
+        ]
 
         if not user_jobs:
             return "You have no scheduled tasks."

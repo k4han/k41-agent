@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Scheduler</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f3f4f6;
+            color: #1f2937;
+        }
+
+        .sidebar {
+            width: 250px;
+            height: 100vh;
+            background: #111827;
+            color: white;
+            position: fixed;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar h2 {
+            margin: 0;
+            padding: 20px;
+            font-size: 1.25rem;
+            font-weight: 600;
+            border-bottom: 1px solid #374151;
+        }
+
+        .nav { display: flex; flex-direction: column; padding: 10px 0; }
+        .nav a { color: #d1d5db; text-decoration: none; padding: 10px 20px; font-size: 1rem; }
+        .nav a:hover, .nav a.active { background: #374151; color: white; }
+
+        .main-content { margin-left: 250px; padding: 20px; }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #e5e7eb;
+            padding-bottom: 12px;
+        }
+        .header h1 { font-size: 1.5rem; margin: 0; }
+
+        .card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .card-header {
+            font-size: 1.15rem;
+            font-weight: 600;
+            margin-bottom: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .table { width: 100%; border-collapse: collapse; }
+        .table th, .table td { padding: 12px; text-align: left; border-bottom: 1px solid #e5e7eb; }
+        .table th { background-color: #f9fafb; font-weight: 600; }
+
+        .badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            text-transform: capitalize;
+        }
+        .badge-cron    { background: #ede9fe; color: #5b21b6; }
+        .badge-interval{ background: #dbeafe; color: #1e40af; }
+        .badge-date    { background: #fef3c7; color: #92400e; }
+        .badge-paused  { background: #fee2e2; color: #991b1b; }
+        .badge-active  { background: #d1fae5; color: #065f46; }
+        .badge-tg      { background: #e0f2fe; color: #0369a1; }
+        .badge-dc      { background: #ede9fe; color: #5b21b6; }
+
+        .btn {
+            display: inline-block;
+            padding: 6px 12px;
+            background: #2563eb;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+        .btn:hover      { background: #1d4ed8; }
+        .btn-danger     { background: #dc2626; }
+        .btn-danger:hover  { background: #b91c1c; }
+        .btn-warning    { background: #d97706; }
+        .btn-warning:hover { background: #b45309; }
+        .btn-success    { background: #059669; }
+        .btn-success:hover { background: #047857; }
+        .btn-sm { padding: 4px 8px; font-size: 0.75rem; }
+
+        .actions { display: flex; gap: 6px; }
+
+        .empty-state { padding: 20px; text-align: center; color: #6b7280; }
+
+        .task-cell {
+            max-width: 260px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .mono { font-family: monospace; font-size: 0.8rem; color: #6b7280; }
+
+        /* Stats */
+        .stats-row { display: flex; gap: 16px; margin-bottom: 20px; }
+        .stat-card {
+            background: white;
+            padding: 16px 20px;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            flex: 1;
+            text-align: center;
+        }
+        .stat-value { font-size: 2rem; font-weight: 700; color: #111827; }
+        .stat-label { font-size: 0.8rem; color: #6b7280; margin-top: 4px; }
+
+        /* Form */
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+        .form-group { display: flex; flex-direction: column; gap: 4px; }
+        .form-group.full { grid-column: 1 / -1; }
+        .form-group.thirds { grid-column: span 1; }
+        label { font-size: 0.82rem; font-weight: 600; color: #374151; }
+        input[type="text"], input[type="number"], input[type="datetime-local"],
+        select, textarea {
+            padding: 7px 10px;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            font-size: 0.875rem;
+            font-family: inherit;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        textarea { resize: vertical; min-height: 56px; }
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #2563eb;
+            box-shadow: 0 0 0 2px rgba(37,99,235,0.12);
+        }
+        .form-actions { margin-top: 14px; display: flex; gap: 8px; justify-content: flex-end; }
+        .form-hint { font-size: 0.73rem; color: #9ca3af; }
+
+        /* Trigger fields panels */
+        .trigger-panel { display: none; grid-column: 1 / -1; }
+        .trigger-panel.active { display: contents; }
+
+        /* Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.45);
+            z-index: 100;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.2);
+            width: 560px;
+            max-width: 90vw;
+            max-height: 85vh;
+            overflow-y: auto;
+            padding: 24px;
+        }
+        .modal-header {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .modal-close {
+            background: none; border: none;
+            font-size: 1.3rem; cursor: pointer; color: #6b7280;
+        }
+        .modal-close:hover { color: #111827; }
+
+        /* Toast */
+        .toast {
+            position: fixed; bottom: 20px; right: 20px;
+            background: #065f46; color: white;
+            padding: 11px 18px; border-radius: 6px;
+            font-size: 0.875rem; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            opacity: 0; transform: translateY(8px);
+            transition: opacity 0.25s, transform 0.25s;
+            z-index: 1000;
+        }
+        .toast.show { opacity: 1; transform: translateY(0); }
+        .toast.error { background: #991b1b; }
+    </style>
+</head>
+
+<body>
+    <div class="sidebar">
+        <h2>Kaka Dashboard</h2>
+        <div class="nav">
+            <a href="/">Overview</a>
+            <a href="/channels">Pair Channels</a>
+            <a href="/scheduler" class="active">Scheduler</a>
+            <a href="/config">Configuration</a>
+            <hr style="border-color:#374151;width:100%;margin:10px 0;">
+            <a href="/change-password">Đổi mật khẩu</a>
+            <a href="/logout" style="color:#ef4444;">Đăng xuất</a>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div class="header"><h1>Scheduled Tasks</h1></div>
+
+        <!-- Stats -->
+        <div class="stats-row">
+            <div class="stat-card">
+                <div class="stat-value">{{ jobs | length }}</div>
+                <div class="stat-label">Total Jobs</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ jobs | selectattr("paused","equalto",false) | list | length }}</div>
+                <div class="stat-label">Active</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ jobs | selectattr("paused","equalto",true) | list | length }}</div>
+                <div class="stat-label">Paused</div>
+            </div>
+        </div>
+
+        <!-- Create form -->
+        <div class="card">
+            <div class="card-header">Create New Job</div>
+            <form id="create-form" onsubmit="createJob(event)">
+                <div class="form-grid">
+
+                    <!-- Task -->
+                    <div class="form-group full">
+                        <label for="c-task">Task Description</label>
+                        <textarea id="c-task" placeholder="Describe what the AI should do..." required></textarea>
+                    </div>
+
+                    <!-- Target user -->
+                    <div class="form-group full">
+                        <label for="c-identity">Target User</label>
+                        <select id="c-identity" required onchange="onIdentityChange()">
+                            {% for identity in identities %}
+                            <option value="{{ identity.platform }}::{{ identity.external_id }}">
+                                {{ identity.platform | capitalize }} — {{ identity.external_id }}
+                            </option>
+                            {% endfor %}
+                            <option value="__manual__">✏️ Enter manually...</option>
+                        </select>
+                    </div>
+
+                    <!-- Manual platform/user (hidden by default) -->
+                    <div class="form-group" id="c-manual-platform" style="display:none;">
+                        <label for="c-platform">Platform</label>
+                        <select id="c-platform">
+                            <option value="telegram">Telegram</option>
+                            <option value="discord">Discord</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="c-manual-userid" style="display:none;">
+                        <label for="c-user-id">User ID</label>
+                        <input type="text" id="c-user-id" placeholder="e.g. 123456789">
+                    </div>
+
+                    <!-- Trigger type -->
+                    <div class="form-group full">
+                        <label for="c-trigger-type">Trigger Type</label>
+                        <select id="c-trigger-type" required onchange="switchTriggerPanel('c')">
+                            <option value="date">One-time (date)</option>
+                            <option value="interval">Recurring (interval)</option>
+                            <option value="cron">Cron</option>
+                        </select>
+                    </div>
+
+                    <!-- DATE panel -->
+                    <div class="trigger-panel active" id="c-panel-date">
+                        <div class="form-group full">
+                            <label for="c-date-run">Run at</label>
+                            <input type="datetime-local" id="c-date-run" required>
+                            <span class="form-hint">Local timezone ({{ "Asia/Bangkok" }})</span>
+                        </div>
+                    </div>
+
+                    <!-- INTERVAL panel -->
+                    <div class="trigger-panel" id="c-panel-interval">
+                        <div class="form-group thirds">
+                            <label for="c-int-weeks">Weeks</label>
+                            <input type="number" id="c-int-weeks" min="0" placeholder="0">
+                        </div>
+                        <div class="form-group thirds">
+                            <label for="c-int-days">Days</label>
+                            <input type="number" id="c-int-days" min="0" placeholder="0">
+                        </div>
+                        <div class="form-group thirds">
+                            <label for="c-int-hours">Hours</label>
+                            <input type="number" id="c-int-hours" min="0" placeholder="0">
+                        </div>
+                        <div class="form-group thirds">
+                            <label for="c-int-minutes">Minutes</label>
+                            <input type="number" id="c-int-minutes" min="0" placeholder="0">
+                        </div>
+                        <div class="form-group thirds">
+                            <label for="c-int-seconds">Seconds</label>
+                            <input type="number" id="c-int-seconds" min="0" placeholder="0">
+                        </div>
+                    </div>
+
+                    <!-- CRON panel -->
+                    <div class="trigger-panel" id="c-panel-cron">
+                        <div class="form-group thirds">
+                            <label for="c-cron-minute">Minute</label>
+                            <input type="text" id="c-cron-minute" placeholder="0" value="0">
+                            <span class="form-hint">0–59 or *</span>
+                        </div>
+                        <div class="form-group thirds">
+                            <label for="c-cron-hour">Hour</label>
+                            <input type="text" id="c-cron-hour" placeholder="*" value="*">
+                            <span class="form-hint">0–23 or *</span>
+                        </div>
+                        <div class="form-group thirds">
+                            <label for="c-cron-day">Day</label>
+                            <input type="text" id="c-cron-day" placeholder="*" value="*">
+                            <span class="form-hint">1–31 or *</span>
+                        </div>
+                        <div class="form-group thirds">
+                            <label for="c-cron-month">Month</label>
+                            <input type="text" id="c-cron-month" placeholder="*" value="*">
+                            <span class="form-hint">1–12 or *</span>
+                        </div>
+                        <div class="form-group thirds">
+                            <label for="c-cron-dow">Day of Week</label>
+                            <input type="text" id="c-cron-dow" placeholder="*" value="*">
+                            <span class="form-hint">mon-sun or *</span>
+                        </div>
+                    </div>
+
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn">Create Job</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Jobs table -->
+        <div class="card">
+            <div class="card-header">All Scheduled Jobs</div>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Job ID</th>
+                        <th>Task</th>
+                        <th>User</th>
+                        <th>Trigger</th>
+                        <th>Next Run</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for job in jobs %}
+                    <tr id="row-{{ job.id }}">
+                        <td class="mono" title="{{ job.id }}">{{ job.id[:10] }}…</td>
+                        <td class="task-cell" title="{{ job.task }}">{{ job.task }}</td>
+                        <td>
+                            <span class="badge badge-{{ 'tg' if job.platform == 'telegram' else 'dc' }}">{{ job.platform }}</span>
+                            <span class="mono">{{ job.user_id }}</span>
+                        </td>
+                        <td><span class="badge badge-{{ job.trigger_type }}">{{ job.trigger_type }}</span></td>
+                        <td style="font-size:0.85rem;">{{ job.next_run_time or "—" }}</td>
+                        <td>
+                            {% if job.paused %}
+                            <span class="badge badge-paused">Paused</span>
+                            {% else %}
+                            <span class="badge badge-active">Active</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="actions">
+                                <button class="btn btn-sm" onclick="openEditModal('{{ job.id }}', {{ job | tojson }})" title="Edit">✎</button>
+                                {% if job.paused %}
+                                <button class="btn btn-success btn-sm" onclick="resumeJob('{{ job.id }}')" title="Resume">▶</button>
+                                {% else %}
+                                <button class="btn btn-warning btn-sm" onclick="pauseJob('{{ job.id }}')" title="Pause">⏸</button>
+                                {% endif %}
+                                <button class="btn btn-danger btn-sm" onclick="deleteJob('{{ job.id }}')" title="Delete">✕</button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="7"><div class="empty-state">No scheduled jobs. Create one above.</div></td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Edit Modal -->
+    <div class="modal-overlay" id="edit-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <span>Edit Job</span>
+                <button class="modal-close" onclick="closeEditModal()">&times;</button>
+            </div>
+            <form id="edit-form" onsubmit="updateJob(event)">
+                <input type="hidden" id="e-job-id">
+                <div class="form-grid">
+
+                    <div class="form-group full">
+                        <label for="e-task">Task Description</label>
+                        <textarea id="e-task" required></textarea>
+                    </div>
+
+                    <div class="form-group full">
+                        <label>
+                            <input type="checkbox" id="e-change-trigger" onchange="toggleEditTrigger()">
+                            Change trigger schedule
+                        </label>
+                    </div>
+
+                    <!-- Trigger edit section (collapsed by default) -->
+                    <div id="e-trigger-section" style="display:none; grid-column:1/-1;">
+                        <div class="form-grid">
+                            <div class="form-group full">
+                                <label for="e-trigger-type">Trigger Type</label>
+                                <select id="e-trigger-type" onchange="switchTriggerPanel('e')">
+                                    <option value="date">One-time (date)</option>
+                                    <option value="interval">Recurring (interval)</option>
+                                    <option value="cron">Cron</option>
+                                </select>
+                            </div>
+
+                            <!-- DATE -->
+                            <div class="trigger-panel active" id="e-panel-date">
+                                <div class="form-group full">
+                                    <label for="e-date-run">Run at</label>
+                                    <input type="datetime-local" id="e-date-run">
+                                </div>
+                            </div>
+
+                            <!-- INTERVAL -->
+                            <div class="trigger-panel" id="e-panel-interval">
+                                <div class="form-group thirds">
+                                    <label for="e-int-weeks">Weeks</label>
+                                    <input type="number" id="e-int-weeks" min="0" placeholder="0">
+                                </div>
+                                <div class="form-group thirds">
+                                    <label for="e-int-days">Days</label>
+                                    <input type="number" id="e-int-days" min="0" placeholder="0">
+                                </div>
+                                <div class="form-group thirds">
+                                    <label for="e-int-hours">Hours</label>
+                                    <input type="number" id="e-int-hours" min="0" placeholder="0">
+                                </div>
+                                <div class="form-group thirds">
+                                    <label for="e-int-minutes">Minutes</label>
+                                    <input type="number" id="e-int-minutes" min="0" placeholder="0">
+                                </div>
+                                <div class="form-group thirds">
+                                    <label for="e-int-seconds">Seconds</label>
+                                    <input type="number" id="e-int-seconds" min="0" placeholder="0">
+                                </div>
+                            </div>
+
+                            <!-- CRON -->
+                            <div class="trigger-panel" id="e-panel-cron">
+                                <div class="form-group thirds">
+                                    <label for="e-cron-minute">Minute</label>
+                                    <input type="text" id="e-cron-minute" placeholder="0">
+                                </div>
+                                <div class="form-group thirds">
+                                    <label for="e-cron-hour">Hour</label>
+                                    <input type="text" id="e-cron-hour" placeholder="*">
+                                </div>
+                                <div class="form-group thirds">
+                                    <label for="e-cron-day">Day</label>
+                                    <input type="text" id="e-cron-day" placeholder="*">
+                                </div>
+                                <div class="form-group thirds">
+                                    <label for="e-cron-month">Month</label>
+                                    <input type="text" id="e-cron-month" placeholder="*">
+                                </div>
+                                <div class="form-group thirds">
+                                    <label for="e-cron-dow">Day of Week</label>
+                                    <input type="text" id="e-cron-dow" placeholder="*">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn" style="background:#6b7280;" onclick="closeEditModal()">Cancel</button>
+                    <button type="submit" class="btn">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        // ===================== Utilities =====================
+        function showToast(msg, isError = false) {
+            const t = document.getElementById("toast");
+            t.textContent = msg;
+            t.className = "toast show" + (isError ? " error" : "");
+            setTimeout(() => t.className = "toast", 3000);
+        }
+
+        // ===================== Identity selector =====================
+        function onIdentityChange() {
+            const val = document.getElementById("c-identity").value;
+            const manual = val === "__manual__";
+            document.getElementById("c-manual-platform").style.display = manual ? "" : "none";
+            document.getElementById("c-manual-userid").style.display   = manual ? "" : "none";
+        }
+
+        function getIdentity() {
+            const val = document.getElementById("c-identity").value;
+            if (val === "__manual__") {
+                const platform = document.getElementById("c-platform").value;
+                const userId   = document.getElementById("c-user-id").value.trim();
+                if (!userId) { showToast("Please enter User ID.", true); return null; }
+                return { platform, userId };
+            }
+            const [platform, ...rest] = val.split("::");
+            return { platform, userId: rest.join("::") };
+        }
+
+        // ===================== Trigger panel switcher =====================
+        function switchTriggerPanel(prefix) {
+            const type = document.getElementById(`${prefix}-trigger-type`).value;
+            ["date", "interval", "cron"].forEach(t => {
+                const el = document.getElementById(`${prefix}-panel-${t}`);
+                if (el) el.classList.toggle("active", t === type);
+            });
+        }
+
+        // ===================== Build trigger_args from form =====================
+        function buildTriggerArgs(prefix) {
+            const type = document.getElementById(`${prefix}-trigger-type`).value;
+
+            if (type === "date") {
+                const dt = document.getElementById(`${prefix}-date-run`).value;
+                if (!dt) { showToast("Please select a run date/time.", true); return null; }
+                // datetime-local gives "YYYY-MM-DDTHH:MM", APScheduler wants "YYYY-MM-DD HH:MM:SS"
+                return { run_date: dt.replace("T", " ") + ":00" };
+            }
+
+            if (type === "interval") {
+                const args = {};
+                const fields = ["weeks", "days", "hours", "minutes", "seconds"];
+                fields.forEach(f => {
+                    const val = parseInt(document.getElementById(`${prefix}-int-${f}`).value || "0", 10);
+                    if (val > 0) args[f] = val;
+                });
+                if (Object.keys(args).length === 0) {
+                    showToast("Please specify at least one interval value.", true);
+                    return null;
+                }
+                return args;
+            }
+
+            if (type === "cron") {
+                const args = {};
+                const fields = [
+                    ["minute", `${prefix}-cron-minute`],
+                    ["hour",   `${prefix}-cron-hour`],
+                    ["day",    `${prefix}-cron-day`],
+                    ["month",  `${prefix}-cron-month`],
+                    ["day_of_week", `${prefix}-cron-dow`],
+                ];
+                fields.forEach(([key, id]) => {
+                    const v = document.getElementById(id).value.trim();
+                    if (v && v !== "*") args[key] = v;
+                });
+                return args;   // empty = every minute (valid cron)
+            }
+
+            return null;
+        }
+
+        // ===================== Create =====================
+        async function createJob(e) {
+            e.preventDefault();
+            const task     = document.getElementById("c-task").value.trim();
+            const identity = getIdentity();
+            if (!identity) return;
+            const { platform, userId } = identity;
+
+            const triggerType = document.getElementById("c-trigger-type").value;
+            const triggerArgs = buildTriggerArgs("c");
+            if (triggerArgs === null) return;
+
+            try {
+                const res = await fetch("/scheduler/jobs", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        task, platform, user_id: userId,
+                        trigger_type: triggerType, trigger_args: triggerArgs
+                    })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    showToast("Job created successfully.");
+                    setTimeout(() => location.reload(), 600);
+                } else {
+                    showToast("Failed: " + (data.detail || "Unknown error"), true);
+                }
+            } catch (err) {
+                console.error(err);
+                showToast("Error creating job.", true);
+            }
+        }
+
+        // ===================== Edit Modal =====================
+        function openEditModal(jobId, job) {
+            document.getElementById("e-job-id").value = jobId;
+            document.getElementById("e-task").value   = job.task || "";
+            document.getElementById("e-change-trigger").checked = false;
+            document.getElementById("e-trigger-section").style.display = "none";
+            // Pre-select trigger type
+            const tt = document.getElementById("e-trigger-type");
+            if (tt) tt.value = job.trigger_type || "date";
+            switchTriggerPanel("e");
+            document.getElementById("edit-modal").classList.add("active");
+        }
+
+        function closeEditModal() {
+            document.getElementById("edit-modal").classList.remove("active");
+        }
+
+        function toggleEditTrigger() {
+            const checked = document.getElementById("e-change-trigger").checked;
+            document.getElementById("e-trigger-section").style.display = checked ? "" : "none";
+        }
+
+        document.getElementById("edit-modal").addEventListener("click", function (ev) {
+            if (ev.target === this) closeEditModal();
+        });
+
+        async function updateJob(e) {
+            e.preventDefault();
+            const jobId = document.getElementById("e-job-id").value;
+            const task  = document.getElementById("e-task").value.trim();
+            const body  = { task };
+
+            const changeTrigger = document.getElementById("e-change-trigger").checked;
+            if (changeTrigger) {
+                const triggerType = document.getElementById("e-trigger-type").value;
+                const triggerArgs = buildTriggerArgs("e");
+                if (triggerArgs === null) return;
+                body.trigger_type = triggerType;
+                body.trigger_args = triggerArgs;
+            }
+
+            try {
+                const res = await fetch(`/scheduler/jobs/${jobId}`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(body)
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    showToast("Job updated.");
+                    closeEditModal();
+                    setTimeout(() => location.reload(), 600);
+                } else {
+                    showToast("Failed: " + (data.detail || "Unknown error"), true);
+                }
+            } catch (err) {
+                console.error(err);
+                showToast("Error updating job.", true);
+            }
+        }
+
+        // ===================== Delete / Pause / Resume =====================
+        async function deleteJob(jobId) {
+            if (!confirm("Delete this job?")) return;
+            const res = await fetch(`/scheduler/jobs/${jobId}`, { method: "DELETE" });
+            if (res.ok) { showToast("Job deleted."); setTimeout(() => location.reload(), 500); }
+            else showToast("Failed to delete.", true);
+        }
+
+        async function pauseJob(jobId) {
+            const res = await fetch(`/scheduler/jobs/${jobId}/pause`, { method: "POST" });
+            if (res.ok) { showToast("Job paused."); setTimeout(() => location.reload(), 500); }
+            else showToast("Failed to pause.", true);
+        }
+
+        async function resumeJob(jobId) {
+            const res = await fetch(`/scheduler/jobs/${jobId}/resume`, { method: "POST" });
+            if (res.ok) { showToast("Job resumed."); setTimeout(() => location.reload(), 500); }
+            else showToast("Failed to resume.", true);
+        }
+    </script>
+</body>
+</html>
