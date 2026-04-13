@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from apscheduler.job import Job
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -210,8 +210,15 @@ def _list_all_jobs() -> list[dict[str, Any]]:
     return [_serialize_job(j) for j in scheduler.get_jobs()]
 
 
+def _scheduler_timezone_label(scheduler: Any) -> str:
+    timezone = getattr(scheduler, "timezone", None)
+    if timezone is None:
+        return "local time"
+    return getattr(timezone, "key", None) or str(timezone)
+
+
 def _get_job_or_404(job_id: str) -> Job:
-    scheduler = get_scheduler()
+    scheduler = _get_scheduler()
     job = scheduler.get_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
@@ -221,9 +228,12 @@ def _get_job_or_404(job_id: str) -> Job:
 @router.get("/scheduler", response_class=HTMLResponse)
 async def dashboard_scheduler(request: Request) -> HTMLResponse:
     try:
+        scheduler = get_scheduler()
         jobs = _list_all_jobs()
+        scheduler_timezone = _scheduler_timezone_label(scheduler)
     except RuntimeError:
         jobs = []
+        scheduler_timezone = "local time"
 
     pairing_service = get_pairing_service()
     identities = await pairing_service.list_paired_identities()
@@ -231,7 +241,11 @@ async def dashboard_scheduler(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request=request,
         name="scheduler.html",
-        context={"jobs": jobs, "identities": identities},
+        context={
+            "jobs": jobs,
+            "identities": identities,
+            "scheduler_timezone": scheduler_timezone,
+        },
     )
 
 
@@ -310,13 +324,11 @@ async def update_scheduler_job(job_id: str, body: UpdateJobBody) -> dict[str, An
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Failed to update job: {exc}") from exc
 
-    updated = scheduler.get_job(job_id)
-    return {"status": "updated", "job": _serialize_job(updated)}
+    return {"status": "updated", "job": _serialize_job(job)}
 
 
 @router.delete("/scheduler/jobs/{job_id}")
 async def delete_scheduler_job(job_id: str) -> dict[str, str]:
-    scheduler = _get_scheduler()
     job = _get_job_or_404(job_id)
     job.remove()
     return {"status": "deleted", "job_id": job_id}
@@ -324,7 +336,6 @@ async def delete_scheduler_job(job_id: str) -> dict[str, str]:
 
 @router.post("/scheduler/jobs/{job_id}/pause")
 async def pause_scheduler_job(job_id: str) -> dict[str, str]:
-    _get_scheduler()
     job = _get_job_or_404(job_id)
     job.pause()
     return {"status": "paused", "job_id": job_id}
@@ -332,7 +343,31 @@ async def pause_scheduler_job(job_id: str) -> dict[str, str]:
 
 @router.post("/scheduler/jobs/{job_id}/resume")
 async def resume_scheduler_job(job_id: str) -> dict[str, str]:
-    _get_scheduler()
     job = _get_job_or_404(job_id)
     job.resume()
     return {"status": "resumed", "job_id": job_id}
+
+
+@router.post("/scheduler/jobs/{job_id}/run")
+async def run_scheduler_job_now(
+    job_id: str,
+    background_tasks: BackgroundTasks,
+) -> dict[str, str]:
+    job = _get_job_or_404(job_id)
+    platform = job.kwargs.get("platform")
+    user_id = job.kwargs.get("user_id")
+    task = job.kwargs.get("task")
+
+    if not platform or not user_id or not task:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Job '{job_id}' is missing platform, user_id, or task.",
+        )
+
+    background_tasks.add_task(
+        execute_scheduled_task,
+        platform=platform,
+        user_id=user_id,
+        task=task,
+    )
+    return {"status": "queued", "job_id": job_id}

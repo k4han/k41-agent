@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
-from fastapi import FastAPI
+from fastapi import BackgroundTasks, FastAPI
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
@@ -33,6 +33,7 @@ class FakeScheduler:
 
     def __init__(self) -> None:
         self.calls: list[dict] = []
+        self.jobs: dict[str, FakeJob] = {}
 
     def add_job(self, func, trigger: str, kwargs: dict, **trigger_args) -> FakeJob:
         self.calls.append(
@@ -43,7 +44,12 @@ class FakeScheduler:
                 "trigger_args": trigger_args,
             }
         )
-        return FakeJob(DateTrigger(), kwargs, trigger_args.get("run_date"))
+        job = FakeJob(DateTrigger(), kwargs, trigger_args.get("run_date"))
+        self.jobs[job.id] = job
+        return job
+
+    def get_job(self, job_id: str) -> FakeJob | None:
+        return self.jobs.get(job_id)
 
 
 def _create_dashboard_client(channel_manager: ChannelManager) -> TestClient:
@@ -98,6 +104,32 @@ def test_legacy_bots_routes_are_removed() -> None:
     assert response.status_code == 404
 
 
+def test_scheduler_template_uses_safe_job_action_buttons() -> None:
+    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
+    template = dashboard_router_module.templates.get_template("scheduler.html")
+
+    html = template.render(
+        jobs=[
+            {
+                "id": 'job-"quoted"',
+                "task": "don't break buttons",
+                "platform": "telegram",
+                "user_id": "123",
+                "trigger_type": "date",
+                "next_run_time": "2026-04-14 09:00:00 +07",
+                "paused": False,
+            }
+        ],
+        identities=[],
+        scheduler_timezone="Asia/Bangkok",
+    )
+
+    assert 'data-job-action="run"' in html
+    assert 'id="scheduler-jobs-data"' in html
+    assert 'onclick="runJobNow' not in html
+    assert 'onclick="openEditModal' not in html
+
+
 @pytest.mark.asyncio
 async def test_create_scheduler_job_accepts_relative_trigger(monkeypatch) -> None:
     from agent.modules.scheduler.infrastructure import triggers as trigger_module
@@ -122,3 +154,25 @@ async def test_create_scheduler_job_accepts_relative_trigger(monkeypatch) -> Non
     assert result["job"]["trigger_type"] == "date"
     assert scheduler.calls[0]["trigger"] == "date"
     assert scheduler.calls[0]["trigger_args"]["run_date"] == now + timedelta(minutes=2)
+
+
+@pytest.mark.asyncio
+async def test_run_scheduler_job_now_queues_existing_job(monkeypatch) -> None:
+    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
+    scheduler = FakeScheduler()
+    job = FakeJob(
+        DateTrigger(),
+        {"platform": "telegram", "user_id": "123", "task": "eat"},
+        datetime(2026, 4, 14, 9, 0, 0, tzinfo=scheduler.timezone),
+    )
+    scheduler.jobs[job.id] = job
+    monkeypatch.setattr(dashboard_router_module, "_get_scheduler", lambda: scheduler)
+
+    background_tasks = BackgroundTasks()
+    result = await dashboard_router_module.run_scheduler_job_now(job.id, background_tasks)
+
+    assert result == {"status": "queued", "job_id": job.id}
+    assert len(background_tasks.tasks) == 1
+    task = background_tasks.tasks[0]
+    assert task.func is dashboard_router_module.execute_scheduled_task
+    assert task.kwargs == {"platform": "telegram", "user_id": "123", "task": "eat"}

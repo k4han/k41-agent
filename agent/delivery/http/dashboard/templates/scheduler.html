@@ -47,6 +47,11 @@
             padding-bottom: 12px;
         }
         .header h1 { font-size: 1.5rem; margin: 0; }
+        .page-subtitle {
+            margin: -8px 0 20px;
+            color: #4b5563;
+            font-size: 0.92rem;
+        }
 
         .card {
             background: white;
@@ -97,6 +102,14 @@
             font-weight: 500;
         }
         .btn:hover      { background: #1d4ed8; }
+        .btn-secondary  { background: #4b5563; }
+        .btn-secondary:hover { background: #374151; }
+        .btn-ghost {
+            background: white;
+            color: #374151;
+            border: 1px solid #d1d5db;
+        }
+        .btn-ghost:hover { background: #f9fafb; }
         .btn-danger     { background: #dc2626; }
         .btn-danger:hover  { background: #b91c1c; }
         .btn-warning    { background: #d97706; }
@@ -154,10 +167,58 @@
         }
         .form-actions { margin-top: 14px; display: flex; gap: 8px; justify-content: flex-end; }
         .form-hint { font-size: 0.73rem; color: #9ca3af; }
+        .inline-help {
+            margin: 0;
+            color: #4b5563;
+            font-size: 0.85rem;
+            line-height: 1.45;
+        }
+        .quick-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+        .quick-actions .label {
+            color: #4b5563;
+            font-size: 0.8rem;
+            font-weight: 600;
+            margin-right: 2px;
+        }
+        .schedule-preview {
+            grid-column: 1 / -1;
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            color: #374151;
+            font-size: 0.88rem;
+            line-height: 1.45;
+            padding: 12px;
+        }
+        .schedule-preview strong { color: #111827; }
 
         /* Trigger fields panels */
         .trigger-panel { display: none; grid-column: 1 / -1; }
         .trigger-panel.active { display: contents; }
+
+        /* Table helpers */
+        .table-toolbar {
+            display: grid;
+            grid-template-columns: minmax(220px, 1fr) 180px 180px auto;
+            gap: 10px;
+            margin-bottom: 14px;
+            align-items: center;
+        }
+        .table-toolbar input,
+        .table-toolbar select { min-height: 36px; }
+        .table-wrap { overflow-x: auto; }
+        .job-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .job-meta .mono { word-break: break-all; }
+        .is-hidden { display: none; }
 
         /* Modal */
         .modal-overlay {
@@ -206,6 +267,25 @@
         }
         .toast.show { opacity: 1; transform: translateY(0); }
         .toast.error { background: #991b1b; }
+
+        @media (max-width: 900px) {
+            .sidebar {
+                position: static;
+                width: auto;
+                height: auto;
+            }
+            .main-content { margin-left: 0; }
+            .stats-row,
+            .form-grid,
+            .table-toolbar {
+                display: flex;
+                flex-direction: column;
+            }
+            .form-group.thirds { grid-column: 1 / -1; }
+            .form-actions { justify-content: stretch; }
+            .form-actions .btn { width: 100%; }
+            .actions { flex-wrap: wrap; }
+        }
     </style>
 </head>
 
@@ -225,6 +305,9 @@
 
     <div class="main-content">
         <div class="header"><h1>Scheduled Tasks</h1></div>
+        <p class="page-subtitle">
+            Scheduler timezone: <strong>{{ scheduler_timezone }}</strong>. Use quick presets for common schedules, or switch to cron for advanced recurring jobs.
+        </p>
 
         <!-- Stats -->
         <div class="stats-row">
@@ -244,14 +327,15 @@
 
         <!-- Create form -->
         <div class="card">
-            <div class="card-header">Create New Job</div>
+            <div class="card-header">Create Scheduled Job</div>
             <form id="create-form" onsubmit="createJob(event)">
                 <div class="form-grid">
 
                     <!-- Task -->
                     <div class="form-group full">
-                        <label for="c-task">Task Description</label>
-                        <textarea id="c-task" placeholder="Describe what the AI should do..." required></textarea>
+                        <label for="c-task">Task</label>
+                        <textarea id="c-task" placeholder="Example: Send a reminder to review the deployment checklist." required></textarea>
+                        <p class="inline-help">Write the instruction exactly as the scheduled agent should receive it.</p>
                     </div>
 
                     <!-- Target user -->
@@ -265,6 +349,7 @@
                             {% endfor %}
                             <option value="__manual__">✏️ Enter manually...</option>
                         </select>
+                        <p class="inline-help">The result will be delivered back to this paired user.</p>
                     </div>
 
                     <!-- Manual platform/user (hidden by default) -->
@@ -282,100 +367,135 @@
 
                     <!-- Trigger type -->
                     <div class="form-group full">
-                        <label for="c-trigger-type">Trigger Type</label>
-                        <select id="c-trigger-type" required onchange="switchTriggerPanel('c')">
-                            <option value="date">One-time (date)</option>
-                            <option value="relative">One-time delay (relative)</option>
-                            <option value="interval">Recurring (interval)</option>
-                            <option value="cron">Cron</option>
+                        <label for="c-trigger-type">Schedule</label>
+                        <select id="c-trigger-type" required onchange="switchTriggerPanel('c'); updateSchedulePreview('c');">
+                            <option value="date">Run once at a specific time</option>
+                            <option value="relative">Run once after a delay</option>
+                            <option value="interval">Run repeatedly every interval</option>
+                            <option value="cron">Advanced cron schedule</option>
                         </select>
                     </div>
 
                     <!-- DATE panel -->
                     <div class="trigger-panel active" id="c-panel-date">
                         <div class="form-group full">
+                            <div class="quick-actions">
+                                <span class="label">Quick set</span>
+                                <button type="button" class="btn btn-ghost btn-sm" onclick="setDateOffset('c', 15)">In 15 minutes</button>
+                                <button type="button" class="btn btn-ghost btn-sm" onclick="setDateOffset('c', 60)">In 1 hour</button>
+                                <button type="button" class="btn btn-ghost btn-sm" onclick="setTomorrowMorning('c')">Tomorrow 09:00</button>
+                            </div>
+                        </div>
+                        <div class="form-group full">
                             <label for="c-date-run">Run at</label>
-                            <input type="datetime-local" id="c-date-run">
-                            <span class="form-hint">Local timezone ({{ "Asia/Bangkok" }})</span>
+                            <input type="datetime-local" id="c-date-run" onchange="updateSchedulePreview('c')" oninput="updateSchedulePreview('c')">
+                            <span class="form-hint">Scheduler timezone: {{ scheduler_timezone }}</span>
                         </div>
                     </div>
 
                     <!-- RELATIVE panel -->
                     <div class="trigger-panel" id="c-panel-relative">
+                        <div class="form-group full">
+                            <div class="quick-actions">
+                                <span class="label">Quick set</span>
+                                <button type="button" class="btn btn-ghost btn-sm" onclick="setDurationPreset('c', 'rel', { minutes: 5 })">5 minutes</button>
+                                <button type="button" class="btn btn-ghost btn-sm" onclick="setDurationPreset('c', 'rel', { minutes: 15 })">15 minutes</button>
+                                <button type="button" class="btn btn-ghost btn-sm" onclick="setDurationPreset('c', 'rel', { hours: 1 })">1 hour</button>
+                                <button type="button" class="btn btn-ghost btn-sm" onclick="setDurationPreset('c', 'rel', { days: 1 })">1 day</button>
+                            </div>
+                        </div>
                         <div class="form-group thirds">
                             <label for="c-rel-weeks">Weeks</label>
-                            <input type="number" id="c-rel-weeks" min="0" placeholder="0">
+                            <input type="number" id="c-rel-weeks" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('c')">
                         </div>
                         <div class="form-group thirds">
                             <label for="c-rel-days">Days</label>
-                            <input type="number" id="c-rel-days" min="0" placeholder="0">
+                            <input type="number" id="c-rel-days" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('c')">
                         </div>
                         <div class="form-group thirds">
                             <label for="c-rel-hours">Hours</label>
-                            <input type="number" id="c-rel-hours" min="0" placeholder="0">
+                            <input type="number" id="c-rel-hours" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('c')">
                         </div>
                         <div class="form-group thirds">
                             <label for="c-rel-minutes">Minutes</label>
-                            <input type="number" id="c-rel-minutes" min="0" placeholder="0">
+                            <input type="number" id="c-rel-minutes" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('c')">
                         </div>
                         <div class="form-group thirds">
                             <label for="c-rel-seconds">Seconds</label>
-                            <input type="number" id="c-rel-seconds" min="0" placeholder="0">
+                            <input type="number" id="c-rel-seconds" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('c')">
                         </div>
                     </div>
 
                     <!-- INTERVAL panel -->
                     <div class="trigger-panel" id="c-panel-interval">
+                        <div class="form-group full">
+                            <div class="quick-actions">
+                                <span class="label">Quick set</span>
+                                <button type="button" class="btn btn-ghost btn-sm" onclick="setDurationPreset('c', 'int', { hours: 1 })">Hourly</button>
+                                <button type="button" class="btn btn-ghost btn-sm" onclick="setDurationPreset('c', 'int', { days: 1 })">Daily</button>
+                                <button type="button" class="btn btn-ghost btn-sm" onclick="setDurationPreset('c', 'int', { weeks: 1 })">Weekly</button>
+                            </div>
+                        </div>
                         <div class="form-group thirds">
                             <label for="c-int-weeks">Weeks</label>
-                            <input type="number" id="c-int-weeks" min="0" placeholder="0">
+                            <input type="number" id="c-int-weeks" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('c')">
                         </div>
                         <div class="form-group thirds">
                             <label for="c-int-days">Days</label>
-                            <input type="number" id="c-int-days" min="0" placeholder="0">
+                            <input type="number" id="c-int-days" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('c')">
                         </div>
                         <div class="form-group thirds">
                             <label for="c-int-hours">Hours</label>
-                            <input type="number" id="c-int-hours" min="0" placeholder="0">
+                            <input type="number" id="c-int-hours" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('c')">
                         </div>
                         <div class="form-group thirds">
                             <label for="c-int-minutes">Minutes</label>
-                            <input type="number" id="c-int-minutes" min="0" placeholder="0">
+                            <input type="number" id="c-int-minutes" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('c')">
                         </div>
                         <div class="form-group thirds">
                             <label for="c-int-seconds">Seconds</label>
-                            <input type="number" id="c-int-seconds" min="0" placeholder="0">
+                            <input type="number" id="c-int-seconds" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('c')">
                         </div>
                     </div>
 
                     <!-- CRON panel -->
                     <div class="trigger-panel" id="c-panel-cron">
+                        <div class="form-group full">
+                            <div class="quick-actions">
+                                <span class="label">Quick set</span>
+                                <button type="button" class="btn btn-ghost btn-sm" onclick="setCronPreset('c', 'daily')">Daily 09:00</button>
+                                <button type="button" class="btn btn-ghost btn-sm" onclick="setCronPreset('c', 'weekday')">Weekdays 09:00</button>
+                                <button type="button" class="btn btn-ghost btn-sm" onclick="setCronPreset('c', 'monday')">Mondays 09:00</button>
+                            </div>
+                        </div>
                         <div class="form-group thirds">
                             <label for="c-cron-minute">Minute</label>
-                            <input type="text" id="c-cron-minute" placeholder="0" value="0">
+                            <input type="text" id="c-cron-minute" placeholder="0" value="0" oninput="updateSchedulePreview('c')">
                             <span class="form-hint">0–59 or *</span>
                         </div>
                         <div class="form-group thirds">
                             <label for="c-cron-hour">Hour</label>
-                            <input type="text" id="c-cron-hour" placeholder="*" value="*">
+                            <input type="text" id="c-cron-hour" placeholder="*" value="*" oninput="updateSchedulePreview('c')">
                             <span class="form-hint">0–23 or *</span>
                         </div>
                         <div class="form-group thirds">
                             <label for="c-cron-day">Day</label>
-                            <input type="text" id="c-cron-day" placeholder="*" value="*">
+                            <input type="text" id="c-cron-day" placeholder="*" value="*" oninput="updateSchedulePreview('c')">
                             <span class="form-hint">1–31 or *</span>
                         </div>
                         <div class="form-group thirds">
                             <label for="c-cron-month">Month</label>
-                            <input type="text" id="c-cron-month" placeholder="*" value="*">
+                            <input type="text" id="c-cron-month" placeholder="*" value="*" oninput="updateSchedulePreview('c')">
                             <span class="form-hint">1–12 or *</span>
                         </div>
                         <div class="form-group thirds">
                             <label for="c-cron-dow">Day of Week</label>
-                            <input type="text" id="c-cron-dow" placeholder="*" value="*">
+                            <input type="text" id="c-cron-dow" placeholder="*" value="*" oninput="updateSchedulePreview('c')">
                             <span class="form-hint">mon-sun or *</span>
                         </div>
                     </div>
+
+                    <div class="schedule-preview" id="c-schedule-preview" aria-live="polite"></div>
 
                 </div>
                 <div class="form-actions">
@@ -387,57 +507,91 @@
         <!-- Jobs table -->
         <div class="card">
             <div class="card-header">All Scheduled Jobs</div>
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>Job ID</th>
-                        <th>Task</th>
-                        <th>User</th>
-                        <th>Trigger</th>
-                        <th>Next Run</th>
-                        <th>Status</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for job in jobs %}
-                    <tr id="row-{{ job.id }}">
-                        <td class="mono" title="{{ job.id }}">{{ job.id[:10] }}…</td>
-                        <td class="task-cell" title="{{ job.task }}">{{ job.task }}</td>
-                        <td>
-                            <span class="badge badge-{{ 'tg' if job.platform == 'telegram' else 'dc' }}">{{ job.platform }}</span>
-                            <span class="mono">{{ job.user_id }}</span>
-                        </td>
-                        <td><span class="badge badge-{{ job.trigger_type }}">{{ job.trigger_type }}</span></td>
-                        <td style="font-size:0.85rem;">{{ job.next_run_time or "—" }}</td>
-                        <td>
-                            {% if job.paused %}
-                            <span class="badge badge-paused">Paused</span>
-                            {% else %}
-                            <span class="badge badge-active">Active</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            <div class="actions">
-                                <button class="btn btn-sm" onclick="openEditModal('{{ job.id }}', {{ job | tojson }})" title="Edit">✎</button>
+            <div class="table-toolbar">
+                <input type="text" id="job-search" placeholder="Search task, user, or job ID..." oninput="filterJobs()">
+                <select id="status-filter" onchange="filterJobs()">
+                    <option value="">All statuses</option>
+                    <option value="active">Active only</option>
+                    <option value="paused">Paused only</option>
+                </select>
+                <select id="trigger-filter" onchange="filterJobs()">
+                    <option value="">All schedules</option>
+                    <option value="date">One-time</option>
+                    <option value="interval">Interval</option>
+                    <option value="cron">Cron</option>
+                </select>
+                <button type="button" class="btn btn-secondary" onclick="location.reload()">Refresh</button>
+            </div>
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Job ID</th>
+                            <th>Task</th>
+                            <th>User</th>
+                            <th>Trigger</th>
+                            <th>Next Run</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for job in jobs %}
+                        <tr
+                            id="row-{{ job.id }}"
+                            class="job-row"
+                            data-status="{{ 'paused' if job.paused else 'active' }}"
+                            data-trigger="{{ job.trigger_type }}"
+                            data-search="{{ (job.id ~ ' ' ~ job.task ~ ' ' ~ job.platform ~ ' ' ~ job.user_id) | lower }}"
+                        >
+                            <td>
+                                <div class="job-meta">
+                                    <span class="mono" title="{{ job.id }}">{{ job.id[:10] }}…</span>
+                                    <button type="button" class="btn btn-ghost btn-sm" data-job-action="copy" data-job-id="{{ job.id }}">Copy ID</button>
+                                </div>
+                            </td>
+                            <td class="task-cell" title="{{ job.task }}">{{ job.task }}</td>
+                            <td>
+                                <span class="badge badge-{{ 'tg' if job.platform == 'telegram' else 'dc' }}">{{ job.platform }}</span>
+                                <span class="mono">{{ job.user_id }}</span>
+                            </td>
+                            <td><span class="badge badge-{{ job.trigger_type }}">{{ job.trigger_type }}</span></td>
+                            <td style="font-size:0.85rem;">{{ job.next_run_time or "—" }}</td>
+                            <td>
                                 {% if job.paused %}
-                                <button class="btn btn-success btn-sm" onclick="resumeJob('{{ job.id }}')" title="Resume">▶</button>
+                                <span class="badge badge-paused">Paused</span>
                                 {% else %}
-                                <button class="btn btn-warning btn-sm" onclick="pauseJob('{{ job.id }}')" title="Pause">⏸</button>
+                                <span class="badge badge-active">Active</span>
                                 {% endif %}
-                                <button class="btn btn-danger btn-sm" onclick="deleteJob('{{ job.id }}')" title="Delete">✕</button>
-                            </div>
-                        </td>
-                    </tr>
-                    {% else %}
-                    <tr><td colspan="7"><div class="empty-state">No scheduled jobs. Create one above.</div></td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+                            </td>
+                            <td>
+                                <div class="actions">
+                                    <button type="button" class="btn btn-sm" data-job-action="edit" data-job-id="{{ job.id }}">Edit</button>
+                                    <button type="button" class="btn btn-success btn-sm" data-job-action="run" data-job-id="{{ job.id }}">Run now</button>
+                                    {% if job.paused %}
+                                    <button type="button" class="btn btn-success btn-sm" data-job-action="resume" data-job-id="{{ job.id }}">Resume</button>
+                                    {% else %}
+                                    <button type="button" class="btn btn-warning btn-sm" data-job-action="pause" data-job-id="{{ job.id }}">Pause</button>
+                                    {% endif %}
+                                    <button type="button" class="btn btn-danger btn-sm" data-job-action="delete" data-job-id="{{ job.id }}">Delete</button>
+                                </div>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="7"><div class="empty-state">No scheduled jobs. Create one above.</div></td></tr>
+                        {% endfor %}
+                        <tr id="jobs-no-results" class="is-hidden">
+                            <td colspan="7"><div class="empty-state">No jobs match the current filters.</div></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 
     <!-- Edit Modal -->
+    <script type="application/json" id="scheduler-jobs-data">{{ jobs | tojson }}</script>
+
     <div class="modal-overlay" id="edit-modal">
         <div class="modal">
             <div class="modal-header">
@@ -449,7 +603,7 @@
                 <div class="form-grid">
 
                     <div class="form-group full">
-                        <label for="e-task">Task Description</label>
+                        <label for="e-task">Task</label>
                         <textarea id="e-task" required></textarea>
                     </div>
 
@@ -464,94 +618,130 @@
                     <div id="e-trigger-section" style="display:none; grid-column:1/-1;">
                         <div class="form-grid">
                             <div class="form-group full">
-                                <label for="e-trigger-type">Trigger Type</label>
-                                <select id="e-trigger-type" onchange="switchTriggerPanel('e')">
-                                    <option value="date">One-time (date)</option>
-                                    <option value="relative">One-time delay (relative)</option>
-                                    <option value="interval">Recurring (interval)</option>
-                                    <option value="cron">Cron</option>
+                                <label for="e-trigger-type">Schedule</label>
+                                <select id="e-trigger-type" onchange="switchTriggerPanel('e'); updateSchedulePreview('e');">
+                                    <option value="date">Run once at a specific time</option>
+                                    <option value="relative">Run once after a delay</option>
+                                    <option value="interval">Run repeatedly every interval</option>
+                                    <option value="cron">Advanced cron schedule</option>
                                 </select>
                             </div>
 
                             <!-- DATE -->
                             <div class="trigger-panel active" id="e-panel-date">
                                 <div class="form-group full">
+                                    <div class="quick-actions">
+                                        <span class="label">Quick set</span>
+                                        <button type="button" class="btn btn-ghost btn-sm" onclick="setDateOffset('e', 15)">In 15 minutes</button>
+                                        <button type="button" class="btn btn-ghost btn-sm" onclick="setDateOffset('e', 60)">In 1 hour</button>
+                                        <button type="button" class="btn btn-ghost btn-sm" onclick="setTomorrowMorning('e')">Tomorrow 09:00</button>
+                                    </div>
+                                </div>
+                                <div class="form-group full">
                                     <label for="e-date-run">Run at</label>
-                                    <input type="datetime-local" id="e-date-run">
+                                    <input type="datetime-local" id="e-date-run" onchange="updateSchedulePreview('e')" oninput="updateSchedulePreview('e')">
+                                    <span class="form-hint">Scheduler timezone: {{ scheduler_timezone }}</span>
                                 </div>
                             </div>
 
                             <!-- RELATIVE -->
                             <div class="trigger-panel" id="e-panel-relative">
+                                <div class="form-group full">
+                                    <div class="quick-actions">
+                                        <span class="label">Quick set</span>
+                                        <button type="button" class="btn btn-ghost btn-sm" onclick="setDurationPreset('e', 'rel', { minutes: 5 })">5 minutes</button>
+                                        <button type="button" class="btn btn-ghost btn-sm" onclick="setDurationPreset('e', 'rel', { minutes: 15 })">15 minutes</button>
+                                        <button type="button" class="btn btn-ghost btn-sm" onclick="setDurationPreset('e', 'rel', { hours: 1 })">1 hour</button>
+                                        <button type="button" class="btn btn-ghost btn-sm" onclick="setDurationPreset('e', 'rel', { days: 1 })">1 day</button>
+                                    </div>
+                                </div>
                                 <div class="form-group thirds">
                                     <label for="e-rel-weeks">Weeks</label>
-                                    <input type="number" id="e-rel-weeks" min="0" placeholder="0">
+                                    <input type="number" id="e-rel-weeks" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('e')">
                                 </div>
                                 <div class="form-group thirds">
                                     <label for="e-rel-days">Days</label>
-                                    <input type="number" id="e-rel-days" min="0" placeholder="0">
+                                    <input type="number" id="e-rel-days" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('e')">
                                 </div>
                                 <div class="form-group thirds">
                                     <label for="e-rel-hours">Hours</label>
-                                    <input type="number" id="e-rel-hours" min="0" placeholder="0">
+                                    <input type="number" id="e-rel-hours" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('e')">
                                 </div>
                                 <div class="form-group thirds">
                                     <label for="e-rel-minutes">Minutes</label>
-                                    <input type="number" id="e-rel-minutes" min="0" placeholder="0">
+                                    <input type="number" id="e-rel-minutes" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('e')">
                                 </div>
                                 <div class="form-group thirds">
                                     <label for="e-rel-seconds">Seconds</label>
-                                    <input type="number" id="e-rel-seconds" min="0" placeholder="0">
+                                    <input type="number" id="e-rel-seconds" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('e')">
                                 </div>
                             </div>
 
                             <!-- INTERVAL -->
                             <div class="trigger-panel" id="e-panel-interval">
+                                <div class="form-group full">
+                                    <div class="quick-actions">
+                                        <span class="label">Quick set</span>
+                                        <button type="button" class="btn btn-ghost btn-sm" onclick="setDurationPreset('e', 'int', { hours: 1 })">Hourly</button>
+                                        <button type="button" class="btn btn-ghost btn-sm" onclick="setDurationPreset('e', 'int', { days: 1 })">Daily</button>
+                                        <button type="button" class="btn btn-ghost btn-sm" onclick="setDurationPreset('e', 'int', { weeks: 1 })">Weekly</button>
+                                    </div>
+                                </div>
                                 <div class="form-group thirds">
                                     <label for="e-int-weeks">Weeks</label>
-                                    <input type="number" id="e-int-weeks" min="0" placeholder="0">
+                                    <input type="number" id="e-int-weeks" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('e')">
                                 </div>
                                 <div class="form-group thirds">
                                     <label for="e-int-days">Days</label>
-                                    <input type="number" id="e-int-days" min="0" placeholder="0">
+                                    <input type="number" id="e-int-days" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('e')">
                                 </div>
                                 <div class="form-group thirds">
                                     <label for="e-int-hours">Hours</label>
-                                    <input type="number" id="e-int-hours" min="0" placeholder="0">
+                                    <input type="number" id="e-int-hours" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('e')">
                                 </div>
                                 <div class="form-group thirds">
                                     <label for="e-int-minutes">Minutes</label>
-                                    <input type="number" id="e-int-minutes" min="0" placeholder="0">
+                                    <input type="number" id="e-int-minutes" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('e')">
                                 </div>
                                 <div class="form-group thirds">
                                     <label for="e-int-seconds">Seconds</label>
-                                    <input type="number" id="e-int-seconds" min="0" placeholder="0">
+                                    <input type="number" id="e-int-seconds" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('e')">
                                 </div>
                             </div>
 
                             <!-- CRON -->
                             <div class="trigger-panel" id="e-panel-cron">
+                                <div class="form-group full">
+                                    <div class="quick-actions">
+                                        <span class="label">Quick set</span>
+                                        <button type="button" class="btn btn-ghost btn-sm" onclick="setCronPreset('e', 'daily')">Daily 09:00</button>
+                                        <button type="button" class="btn btn-ghost btn-sm" onclick="setCronPreset('e', 'weekday')">Weekdays 09:00</button>
+                                        <button type="button" class="btn btn-ghost btn-sm" onclick="setCronPreset('e', 'monday')">Mondays 09:00</button>
+                                    </div>
+                                </div>
                                 <div class="form-group thirds">
                                     <label for="e-cron-minute">Minute</label>
-                                    <input type="text" id="e-cron-minute" placeholder="0">
+                                    <input type="text" id="e-cron-minute" placeholder="0" oninput="updateSchedulePreview('e')">
                                 </div>
                                 <div class="form-group thirds">
                                     <label for="e-cron-hour">Hour</label>
-                                    <input type="text" id="e-cron-hour" placeholder="*">
+                                    <input type="text" id="e-cron-hour" placeholder="*" oninput="updateSchedulePreview('e')">
                                 </div>
                                 <div class="form-group thirds">
                                     <label for="e-cron-day">Day</label>
-                                    <input type="text" id="e-cron-day" placeholder="*">
+                                    <input type="text" id="e-cron-day" placeholder="*" oninput="updateSchedulePreview('e')">
                                 </div>
                                 <div class="form-group thirds">
                                     <label for="e-cron-month">Month</label>
-                                    <input type="text" id="e-cron-month" placeholder="*">
+                                    <input type="text" id="e-cron-month" placeholder="*" oninput="updateSchedulePreview('e')">
                                 </div>
                                 <div class="form-group thirds">
                                     <label for="e-cron-dow">Day of Week</label>
-                                    <input type="text" id="e-cron-dow" placeholder="*">
+                                    <input type="text" id="e-cron-dow" placeholder="*" oninput="updateSchedulePreview('e')">
                                 </div>
                             </div>
+
+                            <div class="schedule-preview" id="e-schedule-preview" aria-live="polite"></div>
                         </div>
                     </div>
 
@@ -567,7 +757,18 @@
     <div class="toast" id="toast"></div>
 
     <script>
-        // ===================== Utilities =====================
+        const SCHEDULER_TIMEZONE = {{ scheduler_timezone | tojson }};
+        const JOBS = JSON.parse(document.getElementById("scheduler-jobs-data").textContent || "[]");
+        const JOBS_BY_ID = new Map(JOBS.map(job => [job.id, job]));
+        const DURATION_FIELDS = ["weeks", "days", "hours", "minutes", "seconds"];
+        const CRON_FIELDS = [
+            ["minute", "cron-minute"],
+            ["hour", "cron-hour"],
+            ["day", "cron-day"],
+            ["month", "cron-month"],
+            ["day_of_week", "cron-dow"],
+        ];
+
         function showToast(msg, isError = false) {
             const t = document.getElementById("toast");
             t.textContent = msg;
@@ -575,27 +776,39 @@
             setTimeout(() => t.className = "toast", 3000);
         }
 
-        // ===================== Identity selector =====================
+        async function readError(res) {
+            const text = await res.text();
+            if (!text) return "Unknown error";
+            try {
+                const data = JSON.parse(text);
+                return data.detail || data.message || "Unknown error";
+            } catch (_) {
+                return text;
+            }
+        }
+
         function onIdentityChange() {
             const val = document.getElementById("c-identity").value;
             const manual = val === "__manual__";
             document.getElementById("c-manual-platform").style.display = manual ? "" : "none";
-            document.getElementById("c-manual-userid").style.display   = manual ? "" : "none";
+            document.getElementById("c-manual-userid").style.display = manual ? "" : "none";
         }
 
         function getIdentity() {
             const val = document.getElementById("c-identity").value;
             if (val === "__manual__") {
                 const platform = document.getElementById("c-platform").value;
-                const userId   = document.getElementById("c-user-id").value.trim();
-                if (!userId) { showToast("Please enter User ID.", true); return null; }
+                const userId = document.getElementById("c-user-id").value.trim();
+                if (!userId) {
+                    showToast("Please enter User ID.", true);
+                    return null;
+                }
                 return { platform, userId };
             }
             const [platform, ...rest] = val.split("::");
             return { platform, userId: rest.join("::") };
         }
 
-        // ===================== Trigger panel switcher =====================
         function switchTriggerPanel(prefix) {
             const type = document.getElementById(`${prefix}-trigger-type`).value;
             ["date", "relative", "interval", "cron"].forEach(t => {
@@ -604,13 +817,156 @@
             });
         }
 
-        // ===================== Build trigger_args from form =====================
+        function pad(value) {
+            return String(value).padStart(2, "0");
+        }
+
+        function formatDateTimeLocal(date) {
+            return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+        }
+
+        function setDateOffset(prefix, minutes) {
+            const date = new Date(Date.now() + minutes * 60 * 1000);
+            document.getElementById(`${prefix}-date-run`).value = formatDateTimeLocal(date);
+            updateSchedulePreview(prefix);
+        }
+
+        function setTomorrowMorning(prefix) {
+            const date = new Date();
+            date.setDate(date.getDate() + 1);
+            date.setHours(9, 0, 0, 0);
+            document.getElementById(`${prefix}-date-run`).value = formatDateTimeLocal(date);
+            updateSchedulePreview(prefix);
+        }
+
+        function setDefaultRunAt(prefix) {
+            const input = document.getElementById(`${prefix}-date-run`);
+            if (!input) return;
+            const minDate = new Date(Date.now() + 60 * 1000);
+            input.min = formatDateTimeLocal(minDate);
+            if (!input.value) {
+                setDateOffset(prefix, 15);
+            }
+        }
+
+        function clearDuration(prefix, segment) {
+            DURATION_FIELDS.forEach(field => {
+                document.getElementById(`${prefix}-${segment}-${field}`).value = "";
+            });
+        }
+
+        function setDurationPreset(prefix, segment, values) {
+            clearDuration(prefix, segment);
+            Object.entries(values).forEach(([field, value]) => {
+                document.getElementById(`${prefix}-${segment}-${field}`).value = value;
+            });
+            updateSchedulePreview(prefix);
+        }
+
+        function readDurationValues(prefix, segment) {
+            const values = {};
+            for (const field of DURATION_FIELDS) {
+                const raw = document.getElementById(`${prefix}-${segment}-${field}`).value.trim();
+                const number = raw === "" ? 0 : Number(raw);
+                if (!Number.isFinite(number) || number < 0) {
+                    return null;
+                }
+                values[field] = number;
+            }
+            return values;
+        }
+
+        function describeDuration(values) {
+            if (!values) return null;
+            const parts = DURATION_FIELDS
+                .filter(field => values[field] > 0)
+                .map(field => {
+                    const value = values[field];
+                    const label = value === 1 ? field.slice(0, -1) : field;
+                    return `${value} ${label}`;
+                });
+            return parts.length ? parts.join(", ") : null;
+        }
+
+        function setCronPreset(prefix, preset) {
+            const presets = {
+                daily: { minute: "0", hour: "9", day: "*", month: "*", day_of_week: "*" },
+                weekday: { minute: "0", hour: "9", day: "*", month: "*", day_of_week: "mon-fri" },
+                monday: { minute: "0", hour: "9", day: "*", month: "*", day_of_week: "mon" },
+            };
+            const values = presets[preset] || presets.daily;
+            CRON_FIELDS.forEach(([key, suffix]) => {
+                document.getElementById(`${prefix}-${suffix}`).value = values[key];
+            });
+            updateSchedulePreview(prefix);
+        }
+
+        function readCronValues(prefix) {
+            const values = {};
+            CRON_FIELDS.forEach(([key, suffix]) => {
+                values[key] = document.getElementById(`${prefix}-${suffix}`).value.trim() || "*";
+            });
+            return values;
+        }
+
+        let _previewTimeout = null;
+
+        function updateSchedulePreview(prefix) {
+            clearTimeout(_previewTimeout);
+            _previewTimeout = setTimeout(() => {
+                _doUpdateSchedulePreview(prefix);
+            }, 150);
+        }
+
+        function _doUpdateSchedulePreview(prefix) {
+            const preview = document.getElementById(`${prefix}-schedule-preview`);
+            if (!preview) return;
+
+            const type = document.getElementById(`${prefix}-trigger-type`).value;
+            if (type === "date") {
+                const value = document.getElementById(`${prefix}-date-run`).value;
+                if (!value) {
+                    preview.textContent = "Pick a future date and time.";
+                    return;
+                }
+                const date = new Date(value);
+                const label = Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+                const pastWarning = date <= new Date() ? " This is in the past." : "";
+                preview.textContent = `Runs once at ${label} (${SCHEDULER_TIMEZONE}).${pastWarning}`;
+                return;
+            }
+
+            if (type === "relative") {
+                const duration = describeDuration(readDurationValues(prefix, "rel"));
+                preview.textContent = duration
+                    ? `Runs once after ${duration}.`
+                    : "Enter a delay or use a quick preset.";
+                return;
+            }
+
+            if (type === "interval") {
+                const duration = describeDuration(readDurationValues(prefix, "int"));
+                preview.textContent = duration
+                    ? `Runs repeatedly every ${duration}.`
+                    : "Enter an interval or use a quick preset.";
+                return;
+            }
+
+            const cron = readCronValues(prefix);
+            preview.textContent = `Cron: minute ${cron.minute}, hour ${cron.hour}, day ${cron.day}, month ${cron.month}, day of week ${cron.day_of_week}. Use * for every value.`;
+        }
+        }
+
         function buildDurationArgs(prefix, segment, emptyMessage) {
+            const values = readDurationValues(prefix, segment);
+            if (values === null) {
+                showToast("Duration values must be non-negative numbers.", true);
+                return null;
+            }
+
             const args = {};
-            const fields = ["weeks", "days", "hours", "minutes", "seconds"];
-            fields.forEach(f => {
-                const val = parseInt(document.getElementById(`${prefix}-${segment}-${f}`).value || "0", 10);
-                if (val > 0) args[f] = val;
+            DURATION_FIELDS.forEach(field => {
+                if (values[field] > 0) args[field] = values[field];
             });
             if (Object.keys(args).length === 0) {
                 showToast(emptyMessage, true);
@@ -624,9 +980,16 @@
 
             if (type === "date") {
                 const dt = document.getElementById(`${prefix}-date-run`).value;
-                if (!dt) { showToast("Please select a run date/time.", true); return null; }
-                // datetime-local gives "YYYY-MM-DDTHH:MM", APScheduler wants "YYYY-MM-DD HH:MM:SS"
-                return { run_date: dt.replace("T", " ") + ":00" };
+                if (!dt) {
+                    showToast("Please select a run date/time.", true);
+                    return null;
+                }
+                if (new Date(dt) <= new Date()) {
+                    showToast("Run date/time must be in the future.", true);
+                    return null;
+                }
+                const normalized = dt.replace("T", " ");
+                return { run_date: normalized.length === 16 ? `${normalized}:00` : normalized };
             }
 
             if (type === "relative") {
@@ -639,27 +1002,24 @@
 
             if (type === "cron") {
                 const args = {};
-                const fields = [
-                    ["minute", `${prefix}-cron-minute`],
-                    ["hour",   `${prefix}-cron-hour`],
-                    ["day",    `${prefix}-cron-day`],
-                    ["month",  `${prefix}-cron-month`],
-                    ["day_of_week", `${prefix}-cron-dow`],
-                ];
-                fields.forEach(([key, id]) => {
-                    const v = document.getElementById(id).value.trim();
-                    if (v && v !== "*") args[key] = v;
+                CRON_FIELDS.forEach(([key, suffix]) => {
+                    const value = document.getElementById(`${prefix}-${suffix}`).value.trim();
+                    if (value && value !== "*") args[key] = value;
                 });
-                return args;   // empty = every minute (valid cron)
+                return args;
             }
 
             return null;
         }
 
-        // ===================== Create =====================
         async function createJob(e) {
             e.preventDefault();
-            const task     = document.getElementById("c-task").value.trim();
+            const task = document.getElementById("c-task").value.trim();
+            if (!task) {
+                showToast("Please enter a task.", true);
+                return;
+            }
+
             const identity = getIdentity();
             if (!identity) return;
             const { platform, userId } = identity;
@@ -673,16 +1033,18 @@
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
-                        task, platform, user_id: userId,
-                        trigger_type: triggerType, trigger_args: triggerArgs
-                    })
+                        task,
+                        platform,
+                        user_id: userId,
+                        trigger_type: triggerType,
+                        trigger_args: triggerArgs,
+                    }),
                 });
-                const data = await res.json();
                 if (res.ok) {
                     showToast("Job created successfully.");
                     setTimeout(() => location.reload(), 600);
                 } else {
-                    showToast("Failed: " + (data.detail || "Unknown error"), true);
+                    showToast("Failed: " + await readError(res), true);
                 }
             } catch (err) {
                 console.error(err);
@@ -690,16 +1052,24 @@
             }
         }
 
-        // ===================== Edit Modal =====================
+        function resetScheduleInputs(prefix) {
+            clearDuration(prefix, "rel");
+            clearDuration(prefix, "int");
+            setCronPreset(prefix, "daily");
+            setDefaultRunAt(prefix);
+        }
+
         function openEditModal(jobId, job) {
             document.getElementById("e-job-id").value = jobId;
-            document.getElementById("e-task").value   = job.task || "";
+            document.getElementById("e-task").value = job.task || "";
             document.getElementById("e-change-trigger").checked = false;
             document.getElementById("e-trigger-section").style.display = "none";
-            // Pre-select trigger type
+            resetScheduleInputs("e");
+
             const tt = document.getElementById("e-trigger-type");
             if (tt) tt.value = job.trigger_type || "date";
             switchTriggerPanel("e");
+            updateSchedulePreview("e");
             document.getElementById("edit-modal").classList.add("active");
         }
 
@@ -710,6 +1080,7 @@
         function toggleEditTrigger() {
             const checked = document.getElementById("e-change-trigger").checked;
             document.getElementById("e-trigger-section").style.display = checked ? "" : "none";
+            if (checked) updateSchedulePreview("e");
         }
 
         document.getElementById("edit-modal").addEventListener("click", function (ev) {
@@ -719,8 +1090,12 @@
         async function updateJob(e) {
             e.preventDefault();
             const jobId = document.getElementById("e-job-id").value;
-            const task  = document.getElementById("e-task").value.trim();
-            const body  = { task };
+            const task = document.getElementById("e-task").value.trim();
+            if (!task) {
+                showToast("Please enter a task.", true);
+                return;
+            }
+            const body = { task };
 
             const changeTrigger = document.getElementById("e-change-trigger").checked;
             if (changeTrigger) {
@@ -735,15 +1110,14 @@
                 const res = await fetch(`/scheduler/jobs/${jobId}`, {
                     method: "PUT",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(body)
+                    body: JSON.stringify(body),
                 });
-                const data = await res.json();
                 if (res.ok) {
                     showToast("Job updated.");
                     closeEditModal();
                     setTimeout(() => location.reload(), 600);
                 } else {
-                    showToast("Failed: " + (data.detail || "Unknown error"), true);
+                    showToast("Failed: " + await readError(res), true);
                 }
             } catch (err) {
                 console.error(err);
@@ -751,25 +1125,143 @@
             }
         }
 
-        // ===================== Delete / Pause / Resume =====================
+        const JOB_ROWS = document.querySelectorAll(".job-row");
+
+        function filterJobs() {
+            const query = document.getElementById("job-search").value.trim().toLowerCase();
+            const status = document.getElementById("status-filter").value;
+            const trigger = document.getElementById("trigger-filter").value;
+            let visible = 0;
+
+            JOB_ROWS.forEach(row => {
+                const matchesQuery = !query || row.dataset.search.includes(query);
+                const matchesStatus = !status || row.dataset.status === status;
+                const matchesTrigger = !trigger || row.dataset.trigger === trigger;
+                const show = matchesQuery && matchesStatus && matchesTrigger;
+                row.classList.toggle("is-hidden", !show);
+                if (show) visible += 1;
+            });
+
+            const noResults = document.getElementById("jobs-no-results");
+            if (noResults) noResults.classList.toggle("is-hidden", JOB_ROWS.length === 0 || visible > 0);
+        }
+
+        function jobEndpoint(jobId, action = "") {
+            const suffix = action ? `/${action}` : "";
+            return `/scheduler/jobs/${encodeURIComponent(jobId)}${suffix}`;
+        }
+
+        function handleJobAction(button) {
+            const jobId = button.dataset.jobId;
+            const action = button.dataset.jobAction;
+            if (!jobId || !action) return;
+
+            if (action === "copy") {
+                copyJobId(jobId);
+                return;
+            }
+            if (action === "edit") {
+                const job = JOBS_BY_ID.get(jobId);
+                if (!job) {
+                    showToast("Unable to find job data.", true);
+                    return;
+                }
+                openEditModal(jobId, job);
+                return;
+            }
+            if (action === "run") {
+                runJobNow(jobId);
+                return;
+            }
+            if (action === "pause") {
+                pauseJob(jobId);
+                return;
+            }
+            if (action === "resume") {
+                resumeJob(jobId);
+                return;
+            }
+            if (action === "delete") {
+                deleteJob(jobId);
+            }
+        }
+
+        async function copyJobId(jobId) {
+            try {
+                if (navigator.clipboard) {
+                    await navigator.clipboard.writeText(jobId);
+                } else {
+                    const input = document.createElement("textarea");
+                    input.value = jobId;
+                    input.style.position = "fixed";
+                    input.style.left = "-9999px";
+                    document.body.appendChild(input);
+                    input.focus();
+                    input.select();
+                    document.execCommand("copy");
+                    input.remove();
+                }
+                showToast("Job ID copied.");
+            } catch (_) {
+                showToast("Unable to copy Job ID.", true);
+            }
+        }
+
         async function deleteJob(jobId) {
             if (!confirm("Delete this job?")) return;
-            const res = await fetch(`/scheduler/jobs/${jobId}`, { method: "DELETE" });
-            if (res.ok) { showToast("Job deleted."); setTimeout(() => location.reload(), 500); }
-            else showToast("Failed to delete.", true);
+            const res = await fetch(jobEndpoint(jobId), { method: "DELETE" });
+            if (res.ok) {
+                showToast("Job deleted.");
+                setTimeout(() => location.reload(), 500);
+            } else {
+                showToast("Failed: " + await readError(res), true);
+            }
         }
 
         async function pauseJob(jobId) {
-            const res = await fetch(`/scheduler/jobs/${jobId}/pause`, { method: "POST" });
-            if (res.ok) { showToast("Job paused."); setTimeout(() => location.reload(), 500); }
-            else showToast("Failed to pause.", true);
+            const res = await fetch(jobEndpoint(jobId, "pause"), { method: "POST" });
+            if (res.ok) {
+                showToast("Job paused.");
+                setTimeout(() => location.reload(), 500);
+            } else {
+                showToast("Failed: " + await readError(res), true);
+            }
+        }
+
+        async function runJobNow(jobId) {
+            if (!confirm("Run this task now? The existing schedule will stay unchanged.")) return;
+            const res = await fetch(jobEndpoint(jobId, "run"), { method: "POST" });
+            if (res.ok) {
+                showToast("Task queued to run now.");
+            } else {
+                showToast("Failed: " + await readError(res), true);
+            }
         }
 
         async function resumeJob(jobId) {
-            const res = await fetch(`/scheduler/jobs/${jobId}/resume`, { method: "POST" });
-            if (res.ok) { showToast("Job resumed."); setTimeout(() => location.reload(), 500); }
-            else showToast("Failed to resume.", true);
+            const res = await fetch(jobEndpoint(jobId, "resume"), { method: "POST" });
+            if (res.ok) {
+                showToast("Job resumed.");
+                setTimeout(() => location.reload(), 500);
+            } else {
+                showToast("Failed: " + await readError(res), true);
+            }
         }
+
+        document.addEventListener("DOMContentLoaded", function () {
+            onIdentityChange();
+            setDefaultRunAt("c");
+            setDefaultRunAt("e");
+            updateSchedulePreview("c");
+            updateSchedulePreview("e");
+            filterJobs();
+        });
+
+        document.addEventListener("click", function (ev) {
+            const button = ev.target.closest("[data-job-action]");
+            if (!button) return;
+            handleJobAction(button);
+        });
     </script>
 </body>
 </html>
