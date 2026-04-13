@@ -1,14 +1,20 @@
-from langchain_core.tools import tool, InjectedToolArg
-from langgraph.prebuilt import ToolRuntime
-from typing import Annotated, Literal, Optional
-from pydantic import BaseModel, Field
-from datetime import datetime
 import logging
+from typing import Annotated, Any
 
-from agent.modules.scheduler.public import get_scheduler, execute_scheduled_task
+from langchain_core.tools import InjectedToolArg, tool
+from langgraph.prebuilt import ToolRuntime
+from pydantic import BaseModel, Field
+
 from agent.modules.agent_runtime.public import SessionManager
+from agent.modules.scheduler.public import (
+    TriggerType,
+    execute_scheduled_task,
+    get_scheduler,
+    normalize_trigger,
+)
 
 logger = logging.getLogger(__name__)
+
 
 def _parse_runtime_thread_id(runtime: ToolRuntime) -> tuple[str, str] | str:
     """Extract (platform, user_id) from the runtime's thread_id.
@@ -32,28 +38,34 @@ def _parse_runtime_thread_id(runtime: ToolRuntime) -> tuple[str, str] | str:
 class ScheduleTaskInput(BaseModel):
     task_description: str = Field(
         ...,
-        description="Detailed description of the task for the AI to perform at the scheduled time."
+        description="Detailed description of the task for the AI to perform at the scheduled time.",
     )
-    trigger_type: Literal["date", "interval", "cron"] = Field(
+    trigger_type: TriggerType = Field(
         ...,
-        description="The type of schedule trigger. Use 'date' for a specific time, 'interval' for recurring periods, or 'cron' for cron-like schedules."
+        description=(
+            "The type of schedule trigger. Use 'relative' for one-time delays like "
+            "'in 2 minutes', 'date' for a specific one-time clock time, 'interval' "
+            "for recurring periods, or 'cron' for cron-like recurring schedules."
+        ),
     )
     trigger_args: dict = Field(
         ...,
         description="""Arguments for the chosen trigger type.
 - For 'date': {"run_date": "YYYY-MM-DD HH:MM:SS"} (Local timezone).
-- For 'interval': e.g., {"minutes": 10}, {"hours": 1}, {"days": 1}.
-- For 'cron': e.g., {"hour": "2", "minute": "0"} for 2:00 AM daily, {"day_of_week": "mon-fri", "hour": "9"} (Local timezone)."""
+- For 'relative': {"minutes": 2}, {"hours": 1}, {"days": 1} for one-time delays from now.
+- For 'interval': e.g., {"minutes": 10}, {"hours": 1}, {"days": 1} for recurring schedules.
+- For 'cron': e.g., {"hour": "2", "minute": "0"} for 2:00 AM daily, {"day_of_week": "mon-fri", "hour": "9"} (Local timezone).""",
     )
+
 
 @tool(args_schema=ScheduleTaskInput)
 def schedule_task(
     task_description: str,
-    trigger_type: Literal["date", "interval", "cron"],
-    trigger_args: dict,
+    trigger_type: TriggerType,
+    trigger_args: dict[str, Any],
     runtime: Annotated[ToolRuntime, InjectedToolArg],
 ) -> str:
-    """Schedules an AI task to run in the future or periodically. Use this when the user asks you to remind them or do something in the future."""
+    """Schedule an AI task to run in the future or periodically."""
     try:
         result = _parse_runtime_thread_id(runtime)
         if isinstance(result, str):
@@ -61,20 +73,33 @@ def schedule_task(
         platform, user_id = result
 
         scheduler = get_scheduler()
+        normalized_trigger_type, normalized_trigger_args = normalize_trigger(
+            trigger_type,
+            trigger_args,
+            scheduler,
+        )
 
         job = scheduler.add_job(
             execute_scheduled_task,
-            trigger=trigger_type,
+            trigger=normalized_trigger_type,
             kwargs={"platform": platform, "user_id": user_id, "task": task_description},
-            **trigger_args
+            **normalized_trigger_args,
         )
 
-        next_run = job.next_run_time.strftime('%Y-%m-%d %H:%M:%S %Z') if job.next_run_time else 'Unknown'
-        return f"Successfully scheduled task '{task_description}'. Job ID: {job.id}. Next run time: {next_run}"
+        next_run = (
+            job.next_run_time.strftime("%Y-%m-%d %H:%M:%S %Z")
+            if job.next_run_time
+            else "Unknown"
+        )
+        return (
+            f"Successfully scheduled task '{task_description}'. "
+            f"Job ID: {job.id}. Next run time: {next_run}"
+        )
 
-    except Exception as e:
+    except (ValueError, Exception) as e:
         logger.error(f"Failed to schedule task: {e}")
-        return f"Error scheduling task: {str(e)}"
+        return f"Failed to schedule task: {e}"
+
 
 @tool
 def list_scheduled_tasks(runtime: Annotated[ToolRuntime, InjectedToolArg]) -> str:
@@ -107,8 +132,10 @@ def list_scheduled_tasks(runtime: Annotated[ToolRuntime, InjectedToolArg]) -> st
         logger.error(f"Failed to list tasks: {e}")
         return f"Error listing tasks: {str(e)}"
 
+
 class DeleteTaskInput(BaseModel):
     job_id: str = Field(..., description="The ID of the scheduled task to delete.")
+
 
 @tool(args_schema=DeleteTaskInput)
 def delete_scheduled_task(

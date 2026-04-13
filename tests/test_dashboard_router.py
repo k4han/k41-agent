@@ -1,3 +1,8 @@
+import importlib
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.requests import Request
@@ -9,6 +14,36 @@ from agent.modules.channels.public import ChannelManager
 
 async def idle_runner() -> None:
     return None
+
+
+class DateTrigger:
+    pass
+
+
+class FakeJob:
+    def __init__(self, trigger: object, kwargs: dict, next_run_time: datetime | None):
+        self.id = "job-1"
+        self.trigger = trigger
+        self.kwargs = kwargs
+        self.next_run_time = next_run_time
+
+
+class FakeScheduler:
+    timezone = ZoneInfo("Asia/Bangkok")
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def add_job(self, func, trigger: str, kwargs: dict, **trigger_args) -> FakeJob:
+        self.calls.append(
+            {
+                "func": func,
+                "trigger": trigger,
+                "kwargs": kwargs,
+                "trigger_args": trigger_args,
+            }
+        )
+        return FakeJob(DateTrigger(), kwargs, trigger_args.get("run_date"))
 
 
 def _create_dashboard_client(channel_manager: ChannelManager) -> TestClient:
@@ -45,7 +80,7 @@ def test_services_endpoint_returns_runtime_service_snapshot() -> None:
     channel_manager.register("discord", idle_runner)
 
     client = _create_dashboard_client(channel_manager)
-    response = client.get("/dashboard/services")
+    response = client.get("/services")
 
     assert response.status_code == 200
     assert response.json() == {
@@ -58,6 +93,32 @@ def test_services_endpoint_returns_runtime_service_snapshot() -> None:
 
 def test_legacy_bots_routes_are_removed() -> None:
     client = _create_dashboard_client(ChannelManager())
-    response = client.get("/dashboard/bots")
+    response = client.get("/bots")
 
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_create_scheduler_job_accepts_relative_trigger(monkeypatch) -> None:
+    from agent.modules.scheduler.infrastructure import triggers as trigger_module
+
+    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
+    scheduler = FakeScheduler()
+    now = datetime(2026, 4, 13, 22, 30, 0, tzinfo=scheduler.timezone)
+    monkeypatch.setattr(dashboard_router_module, "_get_scheduler", lambda: scheduler)
+    monkeypatch.setattr(trigger_module, "_scheduler_now", lambda _: now)
+
+    body = dashboard_router_module.CreateJobBody(
+        task="eat",
+        platform="telegram",
+        user_id="123",
+        trigger_type="relative",
+        trigger_args={"minutes": 2},
+    )
+
+    result = await dashboard_router_module.create_scheduler_job(body)
+
+    assert result["status"] == "created"
+    assert result["job"]["trigger_type"] == "date"
+    assert scheduler.calls[0]["trigger"] == "date"
+    assert scheduler.calls[0]["trigger_args"]["run_date"] == now + timedelta(minutes=2)

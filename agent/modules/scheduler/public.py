@@ -6,6 +6,11 @@ from agent.modules.scheduler.infrastructure.apscheduler_service import (
     set_discord_client,
     execute_scheduled_task,
 )
+from agent.modules.scheduler.infrastructure.triggers import (
+    APSchedulerTriggerType,
+    TriggerType,
+    normalize_trigger,
+)
 
 __all__ = [
     "initialize_scheduler",
@@ -14,4 +19,7 @@ __all__ = [
     "set_telegram_bot",
     "set_discord_client",
     "execute_scheduled_task",
+    "APSchedulerTriggerType",
+    "TriggerType",
+    "normalize_trigger",
 ]

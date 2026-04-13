@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from apscheduler.job import Job
 from fastapi import APIRouter, HTTPException, Request
@@ -11,7 +10,12 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from agent.modules.scheduler.public import get_scheduler, execute_scheduled_task
+from agent.modules.scheduler.public import (
+    TriggerType,
+    execute_scheduled_task,
+    get_scheduler,
+    normalize_trigger,
+)
 
 from agent.modules.channels.public import (
     ChannelManager,
@@ -184,9 +188,6 @@ async def update_setting(key: str, body: UpdateSettingBody, request: Request) ->
 
 # --- scheduler endpoints -----------------------------------------------
 
-TriggerType = Literal["date", "interval", "cron"]
-
-
 def _serialize_job(job: Job) -> dict[str, Any]:
     trigger_type = type(job.trigger).__name__.lower().replace("trigger", "")
     return {
@@ -261,42 +262,20 @@ class UpdateJobBody(BaseModel):
 async def create_scheduler_job(body: CreateJobBody) -> dict[str, Any]:
     scheduler = _get_scheduler()
 
-    if body.trigger_type == "date":
-        run_date_str = body.trigger_args.get("run_date")
-        if not run_date_str:
-            raise HTTPException(status_code=400, detail="'run_date' is required for date trigger.")
-        try:
-            run_date = datetime.strptime(str(run_date_str), "%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid run_date format '{run_date_str}'. Expected YYYY-MM-DD HH:MM:SS.",
-            )
-        if run_date < datetime.now():
-            raise HTTPException(
-                status_code=400,
-                detail=f"run_date '{run_date_str}' is in the past. Please choose a future date/time.",
-            )
-
-    elif body.trigger_type == "interval":
-        interval_keys = {"weeks", "days", "hours", "minutes", "seconds"}
-        total = sum(
-            int(body.trigger_args.get(k, 0) or 0)
-            for k in interval_keys
-        )
-        if total == 0:
-            raise HTTPException(
-                status_code=400,
-                detail="Interval trigger requires at least one non-zero value (weeks/days/hours/minutes/seconds).",
-            )
-
     try:
+        trigger_type, trigger_args = normalize_trigger(
+            body.trigger_type,
+            body.trigger_args,
+            scheduler,
+        )
         job = scheduler.add_job(
             execute_scheduled_task,
-            trigger=body.trigger_type,
+            trigger=trigger_type,
             kwargs={"platform": body.platform, "user_id": body.user_id, "task": body.task},
-            **body.trigger_args,
+            **trigger_args,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Failed to create job: {exc}") from exc
 
@@ -318,9 +297,16 @@ async def update_scheduler_job(job_id: str, body: UpdateJobBody) -> dict[str, An
             job.modify(kwargs=new_kwargs)
 
         if body.trigger_type is not None and body.trigger_args is not None:
-            job.reschedule(body.trigger_type, **body.trigger_args)
+            trigger_type, trigger_args = normalize_trigger(
+                body.trigger_type,
+                body.trigger_args,
+                scheduler,
+            )
+            job.reschedule(trigger_type, **trigger_args)
     except HTTPException:
         raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Failed to update job: {exc}") from exc
 

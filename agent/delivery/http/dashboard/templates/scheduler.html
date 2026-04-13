@@ -79,6 +79,7 @@
         .badge-cron    { background: #ede9fe; color: #5b21b6; }
         .badge-interval{ background: #dbeafe; color: #1e40af; }
         .badge-date    { background: #fef3c7; color: #92400e; }
+        .badge-relative{ background: #dcfce7; color: #166534; }
         .badge-paused  { background: #fee2e2; color: #991b1b; }
         .badge-active  { background: #d1fae5; color: #065f46; }
         .badge-tg      { background: #e0f2fe; color: #0369a1; }
@@ -284,6 +285,7 @@
                         <label for="c-trigger-type">Trigger Type</label>
                         <select id="c-trigger-type" required onchange="switchTriggerPanel('c')">
                             <option value="date">One-time (date)</option>
+                            <option value="relative">One-time delay (relative)</option>
                             <option value="interval">Recurring (interval)</option>
                             <option value="cron">Cron</option>
                         </select>
@@ -293,8 +295,32 @@
                     <div class="trigger-panel active" id="c-panel-date">
                         <div class="form-group full">
                             <label for="c-date-run">Run at</label>
-                            <input type="datetime-local" id="c-date-run" required>
+                            <input type="datetime-local" id="c-date-run">
                             <span class="form-hint">Local timezone ({{ "Asia/Bangkok" }})</span>
+                        </div>
+                    </div>
+
+                    <!-- RELATIVE panel -->
+                    <div class="trigger-panel" id="c-panel-relative">
+                        <div class="form-group thirds">
+                            <label for="c-rel-weeks">Weeks</label>
+                            <input type="number" id="c-rel-weeks" min="0" placeholder="0">
+                        </div>
+                        <div class="form-group thirds">
+                            <label for="c-rel-days">Days</label>
+                            <input type="number" id="c-rel-days" min="0" placeholder="0">
+                        </div>
+                        <div class="form-group thirds">
+                            <label for="c-rel-hours">Hours</label>
+                            <input type="number" id="c-rel-hours" min="0" placeholder="0">
+                        </div>
+                        <div class="form-group thirds">
+                            <label for="c-rel-minutes">Minutes</label>
+                            <input type="number" id="c-rel-minutes" min="0" placeholder="0">
+                        </div>
+                        <div class="form-group thirds">
+                            <label for="c-rel-seconds">Seconds</label>
+                            <input type="number" id="c-rel-seconds" min="0" placeholder="0">
                         </div>
                     </div>
 
@@ -441,6 +467,7 @@
                                 <label for="e-trigger-type">Trigger Type</label>
                                 <select id="e-trigger-type" onchange="switchTriggerPanel('e')">
                                     <option value="date">One-time (date)</option>
+                                    <option value="relative">One-time delay (relative)</option>
                                     <option value="interval">Recurring (interval)</option>
                                     <option value="cron">Cron</option>
                                 </select>
@@ -451,6 +478,30 @@
                                 <div class="form-group full">
                                     <label for="e-date-run">Run at</label>
                                     <input type="datetime-local" id="e-date-run">
+                                </div>
+                            </div>
+
+                            <!-- RELATIVE -->
+                            <div class="trigger-panel" id="e-panel-relative">
+                                <div class="form-group thirds">
+                                    <label for="e-rel-weeks">Weeks</label>
+                                    <input type="number" id="e-rel-weeks" min="0" placeholder="0">
+                                </div>
+                                <div class="form-group thirds">
+                                    <label for="e-rel-days">Days</label>
+                                    <input type="number" id="e-rel-days" min="0" placeholder="0">
+                                </div>
+                                <div class="form-group thirds">
+                                    <label for="e-rel-hours">Hours</label>
+                                    <input type="number" id="e-rel-hours" min="0" placeholder="0">
+                                </div>
+                                <div class="form-group thirds">
+                                    <label for="e-rel-minutes">Minutes</label>
+                                    <input type="number" id="e-rel-minutes" min="0" placeholder="0">
+                                </div>
+                                <div class="form-group thirds">
+                                    <label for="e-rel-seconds">Seconds</label>
+                                    <input type="number" id="e-rel-seconds" min="0" placeholder="0">
                                 </div>
                             </div>
 
@@ -547,13 +598,27 @@
         // ===================== Trigger panel switcher =====================
         function switchTriggerPanel(prefix) {
             const type = document.getElementById(`${prefix}-trigger-type`).value;
-            ["date", "interval", "cron"].forEach(t => {
+            ["date", "relative", "interval", "cron"].forEach(t => {
                 const el = document.getElementById(`${prefix}-panel-${t}`);
                 if (el) el.classList.toggle("active", t === type);
             });
         }
 
         // ===================== Build trigger_args from form =====================
+        function buildDurationArgs(prefix, segment, emptyMessage) {
+            const args = {};
+            const fields = ["weeks", "days", "hours", "minutes", "seconds"];
+            fields.forEach(f => {
+                const val = parseInt(document.getElementById(`${prefix}-${segment}-${f}`).value || "0", 10);
+                if (val > 0) args[f] = val;
+            });
+            if (Object.keys(args).length === 0) {
+                showToast(emptyMessage, true);
+                return null;
+            }
+            return args;
+        }
+
         function buildTriggerArgs(prefix) {
             const type = document.getElementById(`${prefix}-trigger-type`).value;
 
@@ -564,18 +629,12 @@
                 return { run_date: dt.replace("T", " ") + ":00" };
             }
 
+            if (type === "relative") {
+                return buildDurationArgs(prefix, "rel", "Please specify at least one delay value.");
+            }
+
             if (type === "interval") {
-                const args = {};
-                const fields = ["weeks", "days", "hours", "minutes", "seconds"];
-                fields.forEach(f => {
-                    const val = parseInt(document.getElementById(`${prefix}-int-${f}`).value || "0", 10);
-                    if (val > 0) args[f] = val;
-                });
-                if (Object.keys(args).length === 0) {
-                    showToast("Please specify at least one interval value.", true);
-                    return null;
-                }
-                return args;
+                return buildDurationArgs(prefix, "int", "Please specify at least one interval value.");
             }
 
             if (type === "cron") {
