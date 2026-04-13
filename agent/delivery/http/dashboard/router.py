@@ -75,7 +75,7 @@ async def dashboard_channels(request: Request) -> HTMLResponse:
 async def generate_pairing_code(request: Request) -> dict[str, str]:
     pairing_service = get_pairing_service()
     code, user_id = await pairing_service.create_pairing_root_user_and_code()
-    return {"code": code, "user_id": user_id}
+    return {"code": code, "user_id": str(user_id)}
 
 @router.delete("/channels/identities/{identity_id}")
 async def unpair_identity(identity_id: int) -> dict[str, str]:
