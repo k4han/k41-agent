@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import textwrap
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -20,7 +21,6 @@ from agent.modules.providers.domain.provider import ProviderConfig, ProviderType
 from agent.modules.providers.infrastructure.repository import (
     ConfigProviderRepository,
     DEFAULT_BASE_URL,
-    DEFAULT_GOOGLE_MODEL,
     DEFAULT_MODEL,
     DEFAULT_PROVIDER,
 )
@@ -57,6 +57,10 @@ def _write_config(
     config_path.write_text("\n".join(llm_block) + "\n", encoding="utf-8")
 
 
+def _write_yaml(config_path: Path, content: str) -> None:
+    config_path.write_text(textwrap.dedent(content).strip() + "\n", encoding="utf-8")
+
+
 # --- Domain ---
 
 
@@ -74,7 +78,7 @@ def test_provider_config_creation() -> None:
 
 
 def test_model_config_defaults() -> None:
-    mc = ModelConfig(model_name="gpt-4")
+    mc = ModelConfig(model_name="test-model")
     assert mc.temperature == 0.0
     assert mc.max_tokens is None
 
@@ -123,7 +127,7 @@ def test_repo_google_provider_from_yaml(monkeypatch: MonkeyPatch, tmp_path: Path
         config_path,
         provider="google",
         api_key="google-key",
-        model=DEFAULT_GOOGLE_MODEL,
+        model="google-model",
     )
     _set_config_path(monkeypatch, config_path)
 
@@ -131,12 +135,95 @@ def test_repo_google_provider_from_yaml(monkeypatch: MonkeyPatch, tmp_path: Path
     provider = repo.get_default_provider()
 
     assert provider.provider_type == ProviderType.GOOGLE
-    assert provider.default_model == DEFAULT_GOOGLE_MODEL
+    assert provider.default_model == "google-model"
     assert provider.base_url == ""
     assert provider.api_key == "google-key"
 
     by_alias = repo.get_provider("google")
     assert by_alias.provider_type == ProviderType.GOOGLE
+
+
+def test_repo_multi_provider_with_default_provider(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+        config_path = tmp_path / "config.yaml"
+        _write_yaml(
+                config_path,
+                """
+                llm:
+                    default_provider: "google-main"
+                    providers:
+                        openai-main:
+                            provider: "openai_compatible"
+                            api_key: "openai-key"
+                            base_url: "https://openai-compatible.local/v1"
+                            default_model: "openai-main-model"
+                        google-main:
+                            provider: "google"
+                            api_key: "google-key"
+                            default_model: "google-main-model"
+                """,
+        )
+        _set_config_path(monkeypatch, config_path)
+
+        repo = ConfigProviderRepository()
+        default_provider = repo.get_default_provider()
+        openai_provider = repo.get_provider("openai-main")
+        google_provider = repo.get_provider("google")
+
+        assert default_provider.name == "google-main"
+        assert default_provider.provider_type == ProviderType.GOOGLE
+        assert default_provider.default_model == "google-main-model"
+
+        assert openai_provider.provider_type == ProviderType.OPENAI_COMPATIBLE
+        assert openai_provider.base_url == "https://openai-compatible.local/v1"
+        assert openai_provider.default_model == "openai-main-model"
+
+        assert google_provider.name == "google-main"
+
+
+def test_repo_multi_provider_global_default_model(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+        config_path = tmp_path / "config.yaml"
+        _write_yaml(
+                config_path,
+                """
+                llm:
+                    default_provider: "openai-main"
+                    default_model: "global-model"
+                    providers:
+                        openai-main:
+                            provider: "openai_compatible"
+                            api_key: "openai-key"
+                        google-main:
+                            provider: "google"
+                            api_key: "google-key"
+                """,
+        )
+        _set_config_path(monkeypatch, config_path)
+
+        repo = ConfigProviderRepository()
+
+        assert repo.get_provider("openai-main").default_model == "global-model"
+        assert repo.get_provider("google-main").default_model == "global-model"
+
+
+def test_repo_default_provider_cannot_be_disabled(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+        config_path = tmp_path / "config.yaml"
+        _write_yaml(
+                config_path,
+                """
+                llm:
+                    default_provider: "google-main"
+                    providers:
+                        google-main:
+                            provider: "google"
+                            api_key: "google-key"
+                            enabled: false
+                """,
+        )
+        _set_config_path(monkeypatch, config_path)
+
+        repo = ConfigProviderRepository()
+        with pytest.raises(RuntimeError, match="disabled"):
+                repo.get_default_provider()
 
 
 def test_repo_invalid_provider_raises(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
@@ -217,7 +304,7 @@ def test_resolve_chat_model_with_mock_factory(monkeypatch: MonkeyPatch, tmp_path
     _get_cached_model.cache_clear()
 
     config_path = tmp_path / "config.yaml"
-    _write_config(config_path, api_key="model-key")
+    _write_config(config_path, api_key="model-key", model="test-model")
     _set_config_path(monkeypatch, config_path)
 
     repo = ConfigProviderRepository()
@@ -256,6 +343,25 @@ def test_resolve_chat_model_missing_api_key_raises(monkeypatch: MonkeyPatch, tmp
     _get_cached_model.cache_clear()
 
 
+def test_resolve_chat_model_missing_model_raises(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    _get_cached_model.cache_clear()
+
+    config_path = tmp_path / "config.yaml"
+    _write_config(config_path, api_key="model-key", model="")
+    _set_config_path(monkeypatch, config_path)
+
+    repo = ConfigProviderRepository()
+    service = ProviderService(repository=repo)
+
+    mock_factory = MagicMock()
+    service.register_factory(ProviderType.OPENAI_COMPATIBLE, mock_factory)
+
+    with pytest.raises(RuntimeError, match="Model not configured"):
+        resolve_chat_model(service)
+
+    _get_cached_model.cache_clear()
+
+
 def test_resolve_chat_model_applies_yaml_updates_immediately(
     monkeypatch: MonkeyPatch,
     tmp_path: Path,
@@ -263,7 +369,12 @@ def test_resolve_chat_model_applies_yaml_updates_immediately(
     _get_cached_model.cache_clear()
 
     config_path = tmp_path / "config.yaml"
-    _write_config(config_path, api_key="key-one", base_url="https://api.one/v1")
+    _write_config(
+        config_path,
+        api_key="key-one",
+        base_url="https://api.one/v1",
+        model="test-model",
+    )
     _set_config_path(monkeypatch, config_path)
 
     repo = ConfigProviderRepository()
@@ -282,6 +393,12 @@ def test_resolve_chat_model_applies_yaml_updates_immediately(
     config_service = get_config_service()
     config_service.update_setting("llm.api_key", "key-two")
     config_service.update_setting("llm.base_url", "https://api.two/v1")
+
+    # ConfigService.update_setting calls reload() which clears YAML cache, so the
+    # YAML is re-read on next access. Manually reload the repo instance used by
+    # the test so it picks up the new config values.
+    repo.reload()
+    _get_cached_model.cache_clear()
 
     second = resolve_chat_model(service)
 
@@ -308,7 +425,7 @@ def test_resolve_chat_model_uses_google_factory(monkeypatch: MonkeyPatch, tmp_pa
         config_path,
         provider="google",
         api_key="google-key",
-        model=DEFAULT_GOOGLE_MODEL,
+        model="google-model",
     )
     _set_config_path(monkeypatch, config_path)
 
@@ -334,6 +451,48 @@ def test_resolve_chat_model_uses_google_factory(monkeypatch: MonkeyPatch, tmp_pa
     assert call_args[2] == "google-key"
 
     _get_cached_model.cache_clear()
+
+
+def test_resolve_chat_model_uses_provider_specific_temperature(
+        monkeypatch: MonkeyPatch,
+        tmp_path: Path,
+) -> None:
+        _get_cached_model.cache_clear()
+
+        config_path = tmp_path / "config.yaml"
+        _write_yaml(
+                config_path,
+                """
+                llm:
+                    default_provider: "openai-main"
+                    temperature: 1.2
+                    providers:
+                        openai-main:
+                            provider: "openai_compatible"
+                            api_key: "openai-key"
+                            default_model: "provider-model"
+                            temperature: 0.2
+                """,
+        )
+        _set_config_path(monkeypatch, config_path)
+
+        repo = ConfigProviderRepository()
+        service = ProviderService(repository=repo)
+
+        mock_model = MagicMock()
+        mock_factory = MagicMock()
+        mock_factory.create.return_value = mock_model
+
+        service.register_factory(ProviderType.OPENAI_COMPATIBLE, mock_factory)
+
+        result = resolve_chat_model(service)
+
+        assert result is mock_model
+        call_args = mock_factory.create.call_args.args
+        model_config = call_args[1]
+        assert model_config.temperature == 0.2
+
+        _get_cached_model.cache_clear()
 
 
 # --- Application: _parse_temperature ---

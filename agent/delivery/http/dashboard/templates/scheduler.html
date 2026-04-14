@@ -15,26 +15,65 @@
         }
 
         /* Stats */
-        .stats-row { display: flex; gap: 16px; margin-bottom: 20px; }
+        .stats-row {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
         .stat-card {
             background: white;
             padding: 16px 20px;
             border-radius: 8px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
             flex: 1;
             text-align: center;
         }
-        .stat-value { font-size: 2rem; font-weight: 700; color: #111827; }
-        .stat-label { font-size: 0.8rem; color: #6b7280; margin-top: 4px; }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #111827;
+        }
+
+        .stat-label {
+            font-size: 0.8rem;
+            color: #6b7280;
+            margin-top: 4px;
+        }
 
         /* Form */
-        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-        .form-group { display: flex; flex-direction: column; gap: 4px; }
-        .form-group.full { grid-column: 1 / -1; }
-        .form-group.thirds { grid-column: span 1; }
-        label { font-size: 0.82rem; font-weight: 600; color: #374151; }
-        input[type="text"], input[type="number"], input[type="datetime-local"],
-        select, textarea {
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .form-group.full {
+            grid-column: 1 / -1;
+        }
+
+        .form-group.thirds {
+            grid-column: span 1;
+        }
+
+        label {
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: #374151;
+        }
+
+        input[type="text"],
+        input[type="number"],
+        input[type="datetime-local"],
+        select,
+        textarea {
             padding: 7px 10px;
             border: 1px solid #d1d5db;
             border-radius: 4px;
@@ -43,32 +82,53 @@
             width: 100%;
             box-sizing: border-box;
         }
-        textarea { resize: vertical; min-height: 56px; }
-        input:focus, select:focus, textarea:focus {
+
+        textarea {
+            resize: vertical;
+            min-height: 56px;
+        }
+
+        input:focus,
+        select:focus,
+        textarea:focus {
             outline: none;
             border-color: #2563eb;
-            box-shadow: 0 0 0 2px rgba(37,99,235,0.12);
+            box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
         }
-        .form-actions { margin-top: 14px; display: flex; gap: 8px; justify-content: flex-end; }
-        .form-hint { font-size: 0.73rem; color: #9ca3af; }
+
+        .form-actions {
+            margin-top: 14px;
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+
+        .form-hint {
+            font-size: 0.73rem;
+            color: #9ca3af;
+        }
+
         .inline-help {
             margin: 0;
             color: #4b5563;
             font-size: 0.85rem;
             line-height: 1.45;
         }
+
         .quick-actions {
             display: flex;
             flex-wrap: wrap;
             gap: 8px;
             align-items: center;
         }
+
         .quick-actions .label {
             color: #4b5563;
             font-size: 0.8rem;
             font-weight: 600;
             margin-right: 2px;
         }
+
         .schedule-preview {
             grid-column: 1 / -1;
             background: #f9fafb;
@@ -79,11 +139,20 @@
             line-height: 1.45;
             padding: 12px;
         }
-        .schedule-preview strong { color: #111827; }
+
+        .schedule-preview strong {
+            color: #111827;
+        }
 
         /* Trigger fields panels */
-        .trigger-panel { display: none; grid-column: 1 / -1; }
-        .trigger-panel.active { display: contents; }
+        .trigger-panel {
+            display: none;
+            grid-column: 1 / -1;
+        }
+
+        .trigger-panel.active {
+            display: contents;
+        }
 
         /* Table helpers */
         .table-toolbar {
@@ -93,15 +162,25 @@
             margin-bottom: 14px;
             align-items: center;
         }
+
         .table-toolbar input,
-        .table-toolbar select { min-height: 36px; }
-        .table-wrap { overflow-x: auto; }
+        .table-toolbar select {
+            min-height: 36px;
+        }
+
+        .table-wrap {
+            overflow-x: auto;
+        }
+
         .job-meta {
             display: flex;
             flex-direction: column;
             gap: 4px;
         }
-        .job-meta .mono { word-break: break-all; }
+
+        .job-meta .mono {
+            word-break: break-all;
+        }
 
         /* Table cell helpers */
         .task-cell {
@@ -110,20 +189,38 @@
             overflow: hidden;
             text-overflow: ellipsis;
         }
-        .mono { font-family: monospace; font-size: 0.8rem; color: #6b7280; }
+
+        .mono {
+            font-family: monospace;
+            font-size: 0.8rem;
+            color: #6b7280;
+        }
 
         /* Responsive */
         @media (max-width: 900px) {
+
             .stats-row,
             .form-grid,
             .table-toolbar {
                 display: flex;
                 flex-direction: column;
             }
-            .form-group.thirds { grid-column: 1 / -1; }
-            .form-actions { justify-content: stretch; }
-            .form-actions .btn { width: 100%; }
-            .actions { flex-wrap: wrap; }
+
+            .form-group.thirds {
+                grid-column: 1 / -1;
+            }
+
+            .form-actions {
+                justify-content: stretch;
+            }
+
+            .form-actions .btn {
+                width: 100%;
+            }
+
+            .actions {
+                flex-wrap: wrap;
+            }
         }
     </style>
 </head>
@@ -136,6 +233,7 @@
             <a href="/channels">Pair Channels</a>
             <a href="/scheduler" class="active">Scheduler</a>
             <a href="/config">Configuration</a>
+            <a href="/providers">Provider Config</a>
             <hr style="border-color:#374151;width:100%;margin:10px 0;">
             <a href="/change-password">Đổi mật khẩu</a>
             <a href="/logout" style="color:#ef4444;">Đăng xuất</a>
@@ -143,9 +241,12 @@
     </div>
 
     <div class="main-content">
-        <div class="header"><h1>Scheduled Tasks</h1></div>
+        <div class="header">
+            <h1>Scheduled Tasks</h1>
+        </div>
         <p class="page-subtitle">
-            Scheduler timezone: <strong>{{ scheduler_timezone }}</strong>. Use quick presets for common schedules, or switch to cron for advanced recurring jobs.
+            Scheduler timezone: <strong>{{ scheduler_timezone }}</strong>. Use quick presets for common schedules, or
+            switch to cron for advanced recurring jobs.
         </p>
 
         <!-- Stats -->
@@ -173,8 +274,10 @@
                     <!-- Task -->
                     <div class="form-group full">
                         <label for="c-task">Task</label>
-                        <textarea id="c-task" placeholder="Example: Send a reminder to review the deployment checklist." required></textarea>
-                        <p class="inline-help">Write the instruction exactly as the scheduled agent should receive it.</p>
+                        <textarea id="c-task" placeholder="Example: Send a reminder to review the deployment checklist."
+                            required></textarea>
+                        <p class="inline-help">Write the instruction exactly as the scheduled agent should receive it.
+                        </p>
                     </div>
 
                     <!-- Target user -->
@@ -207,7 +310,8 @@
                     <!-- Trigger type -->
                     <div class="form-group full">
                         <label for="c-trigger-type">Schedule</label>
-                        <select id="c-trigger-type" required onchange="switchTriggerPanel('c'); updateSchedulePreview('c');">
+                        <select id="c-trigger-type" required
+                            onchange="switchTriggerPanel('c'); updateSchedulePreview('c');">
                             <option value="date">Run once at a specific time</option>
                             <option value="relative">Run once after a delay</option>
                             <option value="interval">Run repeatedly every interval</option>
@@ -220,14 +324,18 @@
                         <div class="form-group full">
                             <div class="quick-actions">
                                 <span class="label">Quick set</span>
-                                <button type="button" class="btn btn-ghost btn-sm" onclick="setDateOffset('c', 15)">In 15 minutes</button>
-                                <button type="button" class="btn btn-ghost btn-sm" onclick="setDateOffset('c', 60)">In 1 hour</button>
-                                <button type="button" class="btn btn-ghost btn-sm" onclick="setTomorrowMorning('c')">Tomorrow 09:00</button>
+                                <button type="button" class="btn btn-ghost btn-sm" onclick="setDateOffset('c', 15)">In
+                                    15 minutes</button>
+                                <button type="button" class="btn btn-ghost btn-sm" onclick="setDateOffset('c', 60)">In 1
+                                    hour</button>
+                                <button type="button" class="btn btn-ghost btn-sm"
+                                    onclick="setTomorrowMorning('c')">Tomorrow 09:00</button>
                             </div>
                         </div>
                         <div class="form-group full">
                             <label for="c-date-run">Run at</label>
-                            <input type="datetime-local" id="c-date-run" onchange="updateSchedulePreview('c')" oninput="updateSchedulePreview('c')">
+                            <input type="datetime-local" id="c-date-run" onchange="updateSchedulePreview('c')"
+                                oninput="updateSchedulePreview('c')">
                             <span class="form-hint">Scheduler timezone: {{ scheduler_timezone }}</span>
                         </div>
                     </div>
@@ -237,31 +345,40 @@
                         <div class="form-group full">
                             <div class="quick-actions">
                                 <span class="label">Quick set</span>
-                                <button type="button" class="btn btn-ghost btn-sm" onclick="setDurationPreset('c', 'rel', { minutes: 5 })">5 minutes</button>
-                                <button type="button" class="btn btn-ghost btn-sm" onclick="setDurationPreset('c', 'rel', { minutes: 15 })">15 minutes</button>
-                                <button type="button" class="btn btn-ghost btn-sm" onclick="setDurationPreset('c', 'rel', { hours: 1 })">1 hour</button>
-                                <button type="button" class="btn btn-ghost btn-sm" onclick="setDurationPreset('c', 'rel', { days: 1 })">1 day</button>
+                                <button type="button" class="btn btn-ghost btn-sm"
+                                    onclick="setDurationPreset('c', 'rel', { minutes: 5 })">5 minutes</button>
+                                <button type="button" class="btn btn-ghost btn-sm"
+                                    onclick="setDurationPreset('c', 'rel', { minutes: 15 })">15 minutes</button>
+                                <button type="button" class="btn btn-ghost btn-sm"
+                                    onclick="setDurationPreset('c', 'rel', { hours: 1 })">1 hour</button>
+                                <button type="button" class="btn btn-ghost btn-sm"
+                                    onclick="setDurationPreset('c', 'rel', { days: 1 })">1 day</button>
                             </div>
                         </div>
                         <div class="form-group thirds">
                             <label for="c-rel-weeks">Weeks</label>
-                            <input type="number" id="c-rel-weeks" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('c')">
+                            <input type="number" id="c-rel-weeks" min="0" step="1" placeholder="0"
+                                oninput="updateSchedulePreview('c')">
                         </div>
                         <div class="form-group thirds">
                             <label for="c-rel-days">Days</label>
-                            <input type="number" id="c-rel-days" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('c')">
+                            <input type="number" id="c-rel-days" min="0" step="1" placeholder="0"
+                                oninput="updateSchedulePreview('c')">
                         </div>
                         <div class="form-group thirds">
                             <label for="c-rel-hours">Hours</label>
-                            <input type="number" id="c-rel-hours" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('c')">
+                            <input type="number" id="c-rel-hours" min="0" step="1" placeholder="0"
+                                oninput="updateSchedulePreview('c')">
                         </div>
                         <div class="form-group thirds">
                             <label for="c-rel-minutes">Minutes</label>
-                            <input type="number" id="c-rel-minutes" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('c')">
+                            <input type="number" id="c-rel-minutes" min="0" step="1" placeholder="0"
+                                oninput="updateSchedulePreview('c')">
                         </div>
                         <div class="form-group thirds">
                             <label for="c-rel-seconds">Seconds</label>
-                            <input type="number" id="c-rel-seconds" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('c')">
+                            <input type="number" id="c-rel-seconds" min="0" step="1" placeholder="0"
+                                oninput="updateSchedulePreview('c')">
                         </div>
                     </div>
 
@@ -270,30 +387,38 @@
                         <div class="form-group full">
                             <div class="quick-actions">
                                 <span class="label">Quick set</span>
-                                <button type="button" class="btn btn-ghost btn-sm" onclick="setDurationPreset('c', 'int', { hours: 1 })">Hourly</button>
-                                <button type="button" class="btn btn-ghost btn-sm" onclick="setDurationPreset('c', 'int', { days: 1 })">Daily</button>
-                                <button type="button" class="btn btn-ghost btn-sm" onclick="setDurationPreset('c', 'int', { weeks: 1 })">Weekly</button>
+                                <button type="button" class="btn btn-ghost btn-sm"
+                                    onclick="setDurationPreset('c', 'int', { hours: 1 })">Hourly</button>
+                                <button type="button" class="btn btn-ghost btn-sm"
+                                    onclick="setDurationPreset('c', 'int', { days: 1 })">Daily</button>
+                                <button type="button" class="btn btn-ghost btn-sm"
+                                    onclick="setDurationPreset('c', 'int', { weeks: 1 })">Weekly</button>
                             </div>
                         </div>
                         <div class="form-group thirds">
                             <label for="c-int-weeks">Weeks</label>
-                            <input type="number" id="c-int-weeks" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('c')">
+                            <input type="number" id="c-int-weeks" min="0" step="1" placeholder="0"
+                                oninput="updateSchedulePreview('c')">
                         </div>
                         <div class="form-group thirds">
                             <label for="c-int-days">Days</label>
-                            <input type="number" id="c-int-days" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('c')">
+                            <input type="number" id="c-int-days" min="0" step="1" placeholder="0"
+                                oninput="updateSchedulePreview('c')">
                         </div>
                         <div class="form-group thirds">
                             <label for="c-int-hours">Hours</label>
-                            <input type="number" id="c-int-hours" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('c')">
+                            <input type="number" id="c-int-hours" min="0" step="1" placeholder="0"
+                                oninput="updateSchedulePreview('c')">
                         </div>
                         <div class="form-group thirds">
                             <label for="c-int-minutes">Minutes</label>
-                            <input type="number" id="c-int-minutes" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('c')">
+                            <input type="number" id="c-int-minutes" min="0" step="1" placeholder="0"
+                                oninput="updateSchedulePreview('c')">
                         </div>
                         <div class="form-group thirds">
                             <label for="c-int-seconds">Seconds</label>
-                            <input type="number" id="c-int-seconds" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('c')">
+                            <input type="number" id="c-int-seconds" min="0" step="1" placeholder="0"
+                                oninput="updateSchedulePreview('c')">
                         </div>
                     </div>
 
@@ -302,34 +427,42 @@
                         <div class="form-group full">
                             <div class="quick-actions">
                                 <span class="label">Quick set</span>
-                                <button type="button" class="btn btn-ghost btn-sm" onclick="setCronPreset('c', 'daily')">Daily 09:00</button>
-                                <button type="button" class="btn btn-ghost btn-sm" onclick="setCronPreset('c', 'weekday')">Weekdays 09:00</button>
-                                <button type="button" class="btn btn-ghost btn-sm" onclick="setCronPreset('c', 'monday')">Mondays 09:00</button>
+                                <button type="button" class="btn btn-ghost btn-sm"
+                                    onclick="setCronPreset('c', 'daily')">Daily 09:00</button>
+                                <button type="button" class="btn btn-ghost btn-sm"
+                                    onclick="setCronPreset('c', 'weekday')">Weekdays 09:00</button>
+                                <button type="button" class="btn btn-ghost btn-sm"
+                                    onclick="setCronPreset('c', 'monday')">Mondays 09:00</button>
                             </div>
                         </div>
                         <div class="form-group thirds">
                             <label for="c-cron-minute">Minute</label>
-                            <input type="text" id="c-cron-minute" placeholder="0" value="0" oninput="updateSchedulePreview('c')">
+                            <input type="text" id="c-cron-minute" placeholder="0" value="0"
+                                oninput="updateSchedulePreview('c')">
                             <span class="form-hint">0–59 or *</span>
                         </div>
                         <div class="form-group thirds">
                             <label for="c-cron-hour">Hour</label>
-                            <input type="text" id="c-cron-hour" placeholder="*" value="*" oninput="updateSchedulePreview('c')">
+                            <input type="text" id="c-cron-hour" placeholder="*" value="*"
+                                oninput="updateSchedulePreview('c')">
                             <span class="form-hint">0–23 or *</span>
                         </div>
                         <div class="form-group thirds">
                             <label for="c-cron-day">Day</label>
-                            <input type="text" id="c-cron-day" placeholder="*" value="*" oninput="updateSchedulePreview('c')">
+                            <input type="text" id="c-cron-day" placeholder="*" value="*"
+                                oninput="updateSchedulePreview('c')">
                             <span class="form-hint">1–31 or *</span>
                         </div>
                         <div class="form-group thirds">
                             <label for="c-cron-month">Month</label>
-                            <input type="text" id="c-cron-month" placeholder="*" value="*" oninput="updateSchedulePreview('c')">
+                            <input type="text" id="c-cron-month" placeholder="*" value="*"
+                                oninput="updateSchedulePreview('c')">
                             <span class="form-hint">1–12 or *</span>
                         </div>
                         <div class="form-group thirds">
                             <label for="c-cron-dow">Day of Week</label>
-                            <input type="text" id="c-cron-dow" placeholder="*" value="*" oninput="updateSchedulePreview('c')">
+                            <input type="text" id="c-cron-dow" placeholder="*" value="*"
+                                oninput="updateSchedulePreview('c')">
                             <span class="form-hint">mon-sun or *</span>
                         </div>
                     </div>
@@ -376,22 +509,21 @@
                     </thead>
                     <tbody>
                         {% for job in jobs %}
-                        <tr
-                            id="row-{{ job.id }}"
-                            class="job-row"
+                        <tr id="row-{{ job.id }}" class="job-row"
                             data-status="{{ 'paused' if job.paused else 'active' }}"
                             data-trigger="{{ job.trigger_type }}"
-                            data-search="{{ (job.id ~ ' ' ~ job.task ~ ' ' ~ job.platform ~ ' ' ~ job.user_id) | lower }}"
-                        >
+                            data-search="{{ (job.id ~ ' ' ~ job.task ~ ' ' ~ job.platform ~ ' ' ~ job.user_id) | lower }}">
                             <td>
                                 <div class="job-meta">
                                     <span class="mono" title="{{ job.id }}">{{ job.id[:10] }}…</span>
-                                    <button type="button" class="btn btn-ghost btn-sm" data-job-action="copy" data-job-id="{{ job.id }}">Copy ID</button>
+                                    <button type="button" class="btn btn-ghost btn-sm" data-job-action="copy"
+                                        data-job-id="{{ job.id }}">Copy ID</button>
                                 </div>
                             </td>
                             <td class="task-cell" title="{{ job.task }}">{{ job.task }}</td>
                             <td>
-                                <span class="badge badge-{{ 'tg' if job.platform == 'telegram' else 'dc' }}">{{ job.platform }}</span>
+                                <span class="badge badge-{{ 'tg' if job.platform == 'telegram' else 'dc' }}">{{
+                                    job.platform }}</span>
                                 <span class="mono">{{ job.user_id }}</span>
                             </td>
                             <td><span class="badge badge-{{ job.trigger_type }}">{{ job.trigger_type }}</span></td>
@@ -405,22 +537,33 @@
                             </td>
                             <td>
                                 <div class="actions">
-                                    <button type="button" class="btn btn-sm" data-job-action="edit" data-job-id="{{ job.id }}">Edit</button>
-                                    <button type="button" class="btn btn-success btn-sm" data-job-action="run" data-job-id="{{ job.id }}">Run now</button>
+                                    <button type="button" class="btn btn-sm" data-job-action="edit"
+                                        data-job-id="{{ job.id }}">Edit</button>
+                                    <button type="button" class="btn btn-success btn-sm" data-job-action="run"
+                                        data-job-id="{{ job.id }}">Run now</button>
                                     {% if job.paused %}
-                                    <button type="button" class="btn btn-success btn-sm" data-job-action="resume" data-job-id="{{ job.id }}">Resume</button>
+                                    <button type="button" class="btn btn-success btn-sm" data-job-action="resume"
+                                        data-job-id="{{ job.id }}">Resume</button>
                                     {% else %}
-                                    <button type="button" class="btn btn-warning btn-sm" data-job-action="pause" data-job-id="{{ job.id }}">Pause</button>
+                                    <button type="button" class="btn btn-warning btn-sm" data-job-action="pause"
+                                        data-job-id="{{ job.id }}">Pause</button>
                                     {% endif %}
-                                    <button type="button" class="btn btn-danger btn-sm" data-job-action="delete" data-job-id="{{ job.id }}">Delete</button>
+                                    <button type="button" class="btn btn-danger btn-sm" data-job-action="delete"
+                                        data-job-id="{{ job.id }}">Delete</button>
                                 </div>
                             </td>
                         </tr>
                         {% else %}
-                        <tr><td colspan="7"><div class="empty-state">No scheduled jobs. Create one above.</div></td></tr>
+                        <tr>
+                            <td colspan="7">
+                                <div class="empty-state">No scheduled jobs. Create one above.</div>
+                            </td>
+                        </tr>
                         {% endfor %}
                         <tr id="jobs-no-results" class="is-hidden">
-                            <td colspan="7"><div class="empty-state">No jobs match the current filters.</div></td>
+                            <td colspan="7">
+                                <div class="empty-state">No jobs match the current filters.</div>
+                            </td>
                         </tr>
                     </tbody>
                 </table>
@@ -458,7 +601,8 @@
                         <div class="form-grid">
                             <div class="form-group full">
                                 <label for="e-trigger-type">Schedule</label>
-                                <select id="e-trigger-type" onchange="switchTriggerPanel('e'); updateSchedulePreview('e');">
+                                <select id="e-trigger-type"
+                                    onchange="switchTriggerPanel('e'); updateSchedulePreview('e');">
                                     <option value="date">Run once at a specific time</option>
                                     <option value="relative">Run once after a delay</option>
                                     <option value="interval">Run repeatedly every interval</option>
@@ -471,14 +615,18 @@
                                 <div class="form-group full">
                                     <div class="quick-actions">
                                         <span class="label">Quick set</span>
-                                        <button type="button" class="btn btn-ghost btn-sm" onclick="setDateOffset('e', 15)">In 15 minutes</button>
-                                        <button type="button" class="btn btn-ghost btn-sm" onclick="setDateOffset('e', 60)">In 1 hour</button>
-                                        <button type="button" class="btn btn-ghost btn-sm" onclick="setTomorrowMorning('e')">Tomorrow 09:00</button>
+                                        <button type="button" class="btn btn-ghost btn-sm"
+                                            onclick="setDateOffset('e', 15)">In 15 minutes</button>
+                                        <button type="button" class="btn btn-ghost btn-sm"
+                                            onclick="setDateOffset('e', 60)">In 1 hour</button>
+                                        <button type="button" class="btn btn-ghost btn-sm"
+                                            onclick="setTomorrowMorning('e')">Tomorrow 09:00</button>
                                     </div>
                                 </div>
                                 <div class="form-group full">
                                     <label for="e-date-run">Run at</label>
-                                    <input type="datetime-local" id="e-date-run" onchange="updateSchedulePreview('e')" oninput="updateSchedulePreview('e')">
+                                    <input type="datetime-local" id="e-date-run" onchange="updateSchedulePreview('e')"
+                                        oninput="updateSchedulePreview('e')">
                                     <span class="form-hint">Scheduler timezone: {{ scheduler_timezone }}</span>
                                 </div>
                             </div>
@@ -488,31 +636,40 @@
                                 <div class="form-group full">
                                     <div class="quick-actions">
                                         <span class="label">Quick set</span>
-                                        <button type="button" class="btn btn-ghost btn-sm" onclick="setDurationPreset('e', 'rel', { minutes: 5 })">5 minutes</button>
-                                        <button type="button" class="btn btn-ghost btn-sm" onclick="setDurationPreset('e', 'rel', { minutes: 15 })">15 minutes</button>
-                                        <button type="button" class="btn btn-ghost btn-sm" onclick="setDurationPreset('e', 'rel', { hours: 1 })">1 hour</button>
-                                        <button type="button" class="btn btn-ghost btn-sm" onclick="setDurationPreset('e', 'rel', { days: 1 })">1 day</button>
+                                        <button type="button" class="btn btn-ghost btn-sm"
+                                            onclick="setDurationPreset('e', 'rel', { minutes: 5 })">5 minutes</button>
+                                        <button type="button" class="btn btn-ghost btn-sm"
+                                            onclick="setDurationPreset('e', 'rel', { minutes: 15 })">15 minutes</button>
+                                        <button type="button" class="btn btn-ghost btn-sm"
+                                            onclick="setDurationPreset('e', 'rel', { hours: 1 })">1 hour</button>
+                                        <button type="button" class="btn btn-ghost btn-sm"
+                                            onclick="setDurationPreset('e', 'rel', { days: 1 })">1 day</button>
                                     </div>
                                 </div>
                                 <div class="form-group thirds">
                                     <label for="e-rel-weeks">Weeks</label>
-                                    <input type="number" id="e-rel-weeks" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('e')">
+                                    <input type="number" id="e-rel-weeks" min="0" step="1" placeholder="0"
+                                        oninput="updateSchedulePreview('e')">
                                 </div>
                                 <div class="form-group thirds">
                                     <label for="e-rel-days">Days</label>
-                                    <input type="number" id="e-rel-days" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('e')">
+                                    <input type="number" id="e-rel-days" min="0" step="1" placeholder="0"
+                                        oninput="updateSchedulePreview('e')">
                                 </div>
                                 <div class="form-group thirds">
                                     <label for="e-rel-hours">Hours</label>
-                                    <input type="number" id="e-rel-hours" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('e')">
+                                    <input type="number" id="e-rel-hours" min="0" step="1" placeholder="0"
+                                        oninput="updateSchedulePreview('e')">
                                 </div>
                                 <div class="form-group thirds">
                                     <label for="e-rel-minutes">Minutes</label>
-                                    <input type="number" id="e-rel-minutes" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('e')">
+                                    <input type="number" id="e-rel-minutes" min="0" step="1" placeholder="0"
+                                        oninput="updateSchedulePreview('e')">
                                 </div>
                                 <div class="form-group thirds">
                                     <label for="e-rel-seconds">Seconds</label>
-                                    <input type="number" id="e-rel-seconds" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('e')">
+                                    <input type="number" id="e-rel-seconds" min="0" step="1" placeholder="0"
+                                        oninput="updateSchedulePreview('e')">
                                 </div>
                             </div>
 
@@ -521,30 +678,38 @@
                                 <div class="form-group full">
                                     <div class="quick-actions">
                                         <span class="label">Quick set</span>
-                                        <button type="button" class="btn btn-ghost btn-sm" onclick="setDurationPreset('e', 'int', { hours: 1 })">Hourly</button>
-                                        <button type="button" class="btn btn-ghost btn-sm" onclick="setDurationPreset('e', 'int', { days: 1 })">Daily</button>
-                                        <button type="button" class="btn btn-ghost btn-sm" onclick="setDurationPreset('e', 'int', { weeks: 1 })">Weekly</button>
+                                        <button type="button" class="btn btn-ghost btn-sm"
+                                            onclick="setDurationPreset('e', 'int', { hours: 1 })">Hourly</button>
+                                        <button type="button" class="btn btn-ghost btn-sm"
+                                            onclick="setDurationPreset('e', 'int', { days: 1 })">Daily</button>
+                                        <button type="button" class="btn btn-ghost btn-sm"
+                                            onclick="setDurationPreset('e', 'int', { weeks: 1 })">Weekly</button>
                                     </div>
                                 </div>
                                 <div class="form-group thirds">
                                     <label for="e-int-weeks">Weeks</label>
-                                    <input type="number" id="e-int-weeks" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('e')">
+                                    <input type="number" id="e-int-weeks" min="0" step="1" placeholder="0"
+                                        oninput="updateSchedulePreview('e')">
                                 </div>
                                 <div class="form-group thirds">
                                     <label for="e-int-days">Days</label>
-                                    <input type="number" id="e-int-days" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('e')">
+                                    <input type="number" id="e-int-days" min="0" step="1" placeholder="0"
+                                        oninput="updateSchedulePreview('e')">
                                 </div>
                                 <div class="form-group thirds">
                                     <label for="e-int-hours">Hours</label>
-                                    <input type="number" id="e-int-hours" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('e')">
+                                    <input type="number" id="e-int-hours" min="0" step="1" placeholder="0"
+                                        oninput="updateSchedulePreview('e')">
                                 </div>
                                 <div class="form-group thirds">
                                     <label for="e-int-minutes">Minutes</label>
-                                    <input type="number" id="e-int-minutes" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('e')">
+                                    <input type="number" id="e-int-minutes" min="0" step="1" placeholder="0"
+                                        oninput="updateSchedulePreview('e')">
                                 </div>
                                 <div class="form-group thirds">
                                     <label for="e-int-seconds">Seconds</label>
-                                    <input type="number" id="e-int-seconds" min="0" step="1" placeholder="0" oninput="updateSchedulePreview('e')">
+                                    <input type="number" id="e-int-seconds" min="0" step="1" placeholder="0"
+                                        oninput="updateSchedulePreview('e')">
                                 </div>
                             </div>
 
@@ -553,30 +718,38 @@
                                 <div class="form-group full">
                                     <div class="quick-actions">
                                         <span class="label">Quick set</span>
-                                        <button type="button" class="btn btn-ghost btn-sm" onclick="setCronPreset('e', 'daily')">Daily 09:00</button>
-                                        <button type="button" class="btn btn-ghost btn-sm" onclick="setCronPreset('e', 'weekday')">Weekdays 09:00</button>
-                                        <button type="button" class="btn btn-ghost btn-sm" onclick="setCronPreset('e', 'monday')">Mondays 09:00</button>
+                                        <button type="button" class="btn btn-ghost btn-sm"
+                                            onclick="setCronPreset('e', 'daily')">Daily 09:00</button>
+                                        <button type="button" class="btn btn-ghost btn-sm"
+                                            onclick="setCronPreset('e', 'weekday')">Weekdays 09:00</button>
+                                        <button type="button" class="btn btn-ghost btn-sm"
+                                            onclick="setCronPreset('e', 'monday')">Mondays 09:00</button>
                                     </div>
                                 </div>
                                 <div class="form-group thirds">
                                     <label for="e-cron-minute">Minute</label>
-                                    <input type="text" id="e-cron-minute" placeholder="0" oninput="updateSchedulePreview('e')">
+                                    <input type="text" id="e-cron-minute" placeholder="0"
+                                        oninput="updateSchedulePreview('e')">
                                 </div>
                                 <div class="form-group thirds">
                                     <label for="e-cron-hour">Hour</label>
-                                    <input type="text" id="e-cron-hour" placeholder="*" oninput="updateSchedulePreview('e')">
+                                    <input type="text" id="e-cron-hour" placeholder="*"
+                                        oninput="updateSchedulePreview('e')">
                                 </div>
                                 <div class="form-group thirds">
                                     <label for="e-cron-day">Day</label>
-                                    <input type="text" id="e-cron-day" placeholder="*" oninput="updateSchedulePreview('e')">
+                                    <input type="text" id="e-cron-day" placeholder="*"
+                                        oninput="updateSchedulePreview('e')">
                                 </div>
                                 <div class="form-group thirds">
                                     <label for="e-cron-month">Month</label>
-                                    <input type="text" id="e-cron-month" placeholder="*" oninput="updateSchedulePreview('e')">
+                                    <input type="text" id="e-cron-month" placeholder="*"
+                                        oninput="updateSchedulePreview('e')">
                                 </div>
                                 <div class="form-group thirds">
                                     <label for="e-cron-dow">Day of Week</label>
-                                    <input type="text" id="e-cron-dow" placeholder="*" oninput="updateSchedulePreview('e')">
+                                    <input type="text" id="e-cron-dow" placeholder="*"
+                                        oninput="updateSchedulePreview('e')">
                                 </div>
                             </div>
 
@@ -586,7 +759,8 @@
 
                 </div>
                 <div class="form-actions">
-                    <button type="button" class="btn" style="background:#6b7280;" onclick="closeEditModal()">Cancel</button>
+                    <button type="button" class="btn" style="background:#6b7280;"
+                        onclick="closeEditModal()">Cancel</button>
                     <button type="submit" class="btn">Save Changes</button>
                 </div>
             </form>
@@ -768,7 +942,6 @@
 
             const cron = readCronValues(prefix);
             preview.textContent = `Cron: minute ${cron.minute}, hour ${cron.hour}, day ${cron.day}, month ${cron.month}, day of week ${cron.day_of_week}. Use * for every value.`;
-        }
         }
 
         function buildDurationArgs(prefix, segment, emptyMessage) {
@@ -1078,4 +1251,5 @@
         });
     </script>
 </body>
+
 </html>

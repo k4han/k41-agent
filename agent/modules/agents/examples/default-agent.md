@@ -2,7 +2,7 @@
 name: "default"
 description: "Default general-purpose assistant"
 graph_type: "react_agent"
-model: "devstral-2512"
+model: ""
 tools:
   - "list_files"
   - "read_file"

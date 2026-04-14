@@ -21,17 +21,30 @@ from agent.modules.providers.infrastructure.repository import ConfigProviderRepo
 _provider_service: ProviderService | None = None
 
 
+_repo: ConfigProviderRepository | None = None
+
+
 def _get_provider_service() -> ProviderService:
-    global _provider_service
+    global _provider_service, _repo
     if _provider_service is None:
-        repo = ConfigProviderRepository()
-        service = ProviderService(repository=repo)
+        _repo = ConfigProviderRepository()
+        service = ProviderService(repository=_repo)
         service.register_factory(
             ProviderType.OPENAI_COMPATIBLE, OpenAICompatibleFactory()
         )
         service.register_factory(ProviderType.GOOGLE, GoogleFactory())
         _provider_service = service
     return _provider_service
+
+
+def reload_provider_service() -> None:
+    """Reload provider configs (e.g. after config service reload)."""
+    service = _get_provider_service()
+    service.reload()
+    from agent.modules.providers.application.resolve_chat_model import (
+        _get_cached_model,
+    )
+    _get_cached_model.cache_clear()
 
 
 def get_chat_model(

@@ -18,25 +18,34 @@ enable_dashboard: true
 
 # LLM Provider configuration
 llm:
-  # Provider backend: openai_compatible | google
-  provider: "openai_compatible"
+  # Legacy single-provider mode is still supported:
+  # provider: "openai_compatible"
+  # api_key: "your-api-key-here"
+  # base_url: "https://api.example.com/v1"
+  # model: "your-model-id"
 
-  # API key for LLM provider (REQUIRED)
-  api_key: "your-api-key-here"
+  # Multi-provider mode (recommended)
+  default_provider: "primary"
 
-  # Base URL for OpenAI-compatible API
-  base_url: "https://api.mistral.ai/v1"
+  # Optional global model fallback when provider default_model is not set
+  default_model: ""
 
-  # Default model to use
-  model: "devstral-2512"
+  providers:
+    primary:
+      provider: "openai_compatible"
+      api_key: "your-primary-provider-api-key"
+      base_url: "https://api.example.com/v1"
+      default_model: ""
+      enabled: true
+
+    secondary:
+      provider: "google"
+      api_key: "your-secondary-provider-api-key"
+      default_model: ""
+      enabled: true
 
   # Temperature for model responses (optional)
   # temperature: 0.0
-
-  # Alternative: Use Google Gemini via langchain-google-genai
-  # provider: "google"
-  # model: "gemini-2.0-flash"
-  # base_url is ignored for this provider
 
 # Security Configuration
 security:
@@ -45,11 +54,6 @@ security:
   # IMPORTANT: Keep this secret safe in production.
   # You can generate one manually with: `openssl rand -hex 32` or `python -c "import secrets; print(secrets.token_hex(32))"`
   jwt_secret: ""
-  # temperature: 0.0
-
-  # Alternative: Use OpenAI
-  # base_url: "https://api.openai.com/v1"
-  # model: "gpt-4"
 
 # Channel integrations (optional - uncomment to enable)
 # channels:

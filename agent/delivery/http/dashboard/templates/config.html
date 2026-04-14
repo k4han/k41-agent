@@ -120,6 +120,106 @@
             border-bottom: none;
         }
 
+        /* Provider table layout */
+        .providers-table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+
+        .providers-table th,
+        .providers-table td {
+            border-bottom: 1px solid #e5e7eb;
+            padding: 10px;
+            text-align: left;
+            vertical-align: top;
+        }
+
+        .providers-table th {
+            background: #f9fafb;
+            font-size: 0.8rem;
+            color: #4b5563;
+            text-transform: uppercase;
+            letter-spacing: 0.02em;
+        }
+
+        .provider-name {
+            font-family: monospace;
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: #111827;
+        }
+
+        .provider-row-summary {
+            cursor: pointer;
+        }
+
+        .provider-row-summary:hover {
+            background: #f9fafb;
+        }
+
+        .provider-summary-actions {
+            display: inline-flex;
+            justify-content: flex-end;
+        }
+
+        .setting-row-cell {
+            display: block;
+            padding: 0;
+            border: none;
+            background: transparent;
+            margin: 0;
+        }
+
+        .setting-row-cell.is-dirty {
+            background: #fffbeb;
+            border-radius: 6px;
+            padding: 6px;
+        }
+
+        .setting-row-cell .setting-description {
+            margin-bottom: 4px;
+        }
+
+        .setting-row-cell .input-text,
+        .setting-row-cell .input-number,
+        .setting-row-cell .input-password-wrapper {
+            width: 100%;
+            max-width: 100%;
+        }
+
+        .setting-row-cell .input-number {
+            width: 100%;
+        }
+
+        .setting-row-cell .input-password-wrapper input {
+            min-width: 0;
+        }
+
+        .setting-row-source {
+            margin-top: 6px;
+        }
+
+        .provider-detail-dialog {
+            width: 840px;
+            max-width: 96vw;
+        }
+
+        .provider-detail-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 10px;
+        }
+
+        .provider-detail-row {
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 12px;
+            background: #fff;
+            grid-template-columns: 180px 1fr 100px 120px;
+            margin: 0;
+        }
+
         .setting-key {
             font-family: monospace;
             font-size: 0.875rem;
@@ -300,6 +400,56 @@
             margin-bottom: 4px;
         }
 
+        .source-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .source-item {
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 12px;
+            background: #fff;
+        }
+
+        .source-item-key {
+            font-family: monospace;
+            font-size: 0.86rem;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #1f2937;
+        }
+
+        .source-item-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 6px;
+            font-size: 0.86rem;
+        }
+
+        .source-item-row:last-child {
+            margin-bottom: 0;
+        }
+
+        .source-item-value {
+            color: #374151;
+            word-break: break-all;
+        }
+
+        @media (max-width: 1100px) {
+            .providers-table {
+                display: block;
+                overflow-x: auto;
+                white-space: nowrap;
+            }
+
+            .provider-detail-dialog {
+                width: 96vw;
+            }
+        }
+
         @media (max-width: 900px) {
             .setting-row {
                 grid-template-columns: 1fr;
@@ -313,6 +463,8 @@
     </style>
 </head>
 
+{% set current_nav = active_nav or 'config' %}
+
 <body>
     <div class="sidebar">
         <h2>Kaka Dashboard</h2>
@@ -320,7 +472,8 @@
             <a href="/">Overview</a>
             <a href="/channels">Pair Channels</a>
             <a href="/scheduler">Scheduler</a>
-            <a href="/config" class="active">Configuration</a>
+            <a href="/config" class="{% if current_nav == 'config' %}active{% endif %}">Configuration</a>
+            <a href="/providers" class="{% if current_nav == 'providers' %}active{% endif %}">Provider Config</a>
             <hr style="border-color: #374151; width: 100%; margin: 10px 0;">
             <a href="/change-password">Đổi mật khẩu</a>
             <a href="/logout" style="color: #ef4444;">Đăng xuất</a>
@@ -329,13 +482,16 @@
 
     <div class="main-content">
         <div class="header">
-            <h1>Dynamic Configuration</h1>
+            <h1>{{ page_title or 'Dynamic Configuration' }}</h1>
             <div class="header-actions">
                 <button class="btn" id="save-all-btn" onclick="openDiffModal()" disabled>Save Changes</button>
                 <button class="btn btn-ghost" onclick="reloadSettings()">Reload</button>
                 <button class="btn" onclick="openAddModal()">Add Setting</button>
             </div>
         </div>
+        {% if page_subtitle %}
+        <p class="page-subtitle">{{ page_subtitle }}</p>
+        {% endif %}
 
         <!-- Tabs -->
         <div class="tabs">
@@ -344,6 +500,7 @@
         </div>
 
         <!-- Search Bar -->
+        {% if current_nav != 'providers' %}
         <div class="search-bar">
             <input type="text" class="search-input" id="search-input" placeholder="Search settings..."
                 oninput="filterSettings()">
@@ -355,9 +512,229 @@
                 <option value="security">Security</option>
             </select>
         </div>
+        {% endif %}
 
         <!-- Effective Values Tab -->
         <div class="tab-content active" id="tab-effective">
+            {% if current_nav == 'providers' %}
+            {% if by_category %}
+            {% for category, settings_dict in by_category.items() %}
+            <div class="category-section" data-category="{{ category }}">
+                <div class="category-header" onclick="toggleCategory(this.parentElement)">
+                    <span class="category-arrow">▼</span>
+                    <span class="category-title">{{ category | title }} Defaults</span>
+                    <span class="category-count">{{ settings_dict | length }}</span>
+                </div>
+                <div class="category-items">
+                    {% for key, info in settings_dict.items() %}
+                    <div class="setting-row" data-key="{{ key }}" data-category="{{ category }}"
+                        data-input-type="{{ info.input_type }}" data-source="{{ info.source }}">
+                        <div>
+                            <div class="setting-label">{{ info.label or key }}</div>
+                            <div class="setting-key">{{ key }}</div>
+                            {% if info.description %}
+                            <div class="setting-description">{{ info.description }}</div>
+                            {% endif %}
+                        </div>
+                        <div>
+                            {% if key == 'llm.default_provider' %}
+                            {% set selected_default_provider = info.value if info.value is not none else '' %}
+                            <select class="input-text" id="input-{{ key }}"
+                                onchange="onSettingInputChange('{{ key }}')">
+                                <option value="" {% if not selected_default_provider %}selected{% endif %}>Auto select enabled provider</option>
+                                {% for provider_name in provider_name_options %}
+                                <option value="{{ provider_name }}" {% if provider_name==selected_default_provider
+                                    %}selected{% endif %}>{{ provider_name }}</option>
+                                {% endfor %}
+                                {% if selected_default_provider and selected_default_provider not in
+                                provider_name_options %}
+                                <option value="{{ selected_default_provider }}" selected>{{ selected_default_provider }}
+                                    (custom)</option>
+                                {% endif %}
+                            </select>
+                            {% elif info.input_type == 'boolean' %}
+                            <label class="toggle-switch">
+                                <input id="input-{{ key }}" type="checkbox" {% if info.value %}checked{% endif %}
+                                    onchange="onSettingInputChange('{{ key }}')">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            {% elif info.input_type == 'password' %}
+                            <div class="input-password-wrapper">
+                                <input type="password" id="input-{{ key }}"
+                                    value="{{ info.value if info.value else '' }}" placeholder="{{ info.description }}"
+                                    oninput="onSettingInputChange('{{ key }}')">
+                                <button class="btn-toggle-password" type="button"
+                                    onclick="togglePasswordVisibility('{{ key }}')">👁</button>
+                            </div>
+                            {% elif info.input_type == 'number' %}
+                            <input type="number" class="input-number" id="input-{{ key }}"
+                                value="{{ info.value if info.value is not none else '' }}" {% if info.min is defined
+                                %}min="{{ info.min }}" {% endif %} {% if info.max is defined %}max="{{ info.max }}" {%
+                                endif %} {% if info.step is defined %}step="{{ info.step }}" {% endif %}
+                                oninput="onSettingInputChange('{{ key }}')">
+                            {% else %}
+                            <input type="{% if info.input_type == 'url' %}url{% else %}text{% endif %}"
+                                class="input-text" id="input-{{ key }}"
+                                value="{{ info.value if info.value is not none else '' }}"
+                                placeholder="{{ info.description }}" oninput="onSettingInputChange('{{ key }}')">
+                            {% endif %}
+                        </div>
+                        <div>
+                            <span class="badge source-{{ info.source }}">{{ info.source }}</span>
+                        </div>
+                        <div class="setting-actions">
+                            <button class="btn btn-sm btn-ghost" onclick="copyValue('{{ key }}')"
+                                title="Copy value">📋</button>
+                            <button class="btn btn-sm btn-ghost" onclick="resetToDefault('{{ key }}')"
+                                title="Reset to default">↩</button>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+            {% endif %}
+
+            <div class="card">
+                <div class="card-header">Providers</div>
+                <table class="providers-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 130px;">Provider</th>
+                            <th>Type</th>
+                            <th>Default Model</th>
+                            <th>Enabled</th>
+                            <th style="width: 120px;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for provider_row in provider_rows %}
+                        {% set provider_field = provider_row.fields.get('provider') or provider_row.fields.get('type')
+                        %}
+                        {% set default_model_field = provider_row.fields.get('default_model') %}
+                        {% set enabled_field = provider_row.fields.get('enabled') %}
+                        <tr class="provider-row-summary" data-provider="{{ provider_row.name }}"
+                            onclick="openProviderModal('{{ provider_row.name }}')">
+                            <td><span class="provider-name">{{ provider_row.name }}</span></td>
+                            <td>
+                                {% if provider_field %}
+                                {{ provider_field.info.value if provider_field.info.value is not none else '-' }}
+                                {% else %}-{% endif %}
+                            </td>
+                            <td>
+                                {% if default_model_field %}
+                                {{ default_model_field.info.value if default_model_field.info.value is not none else '-'
+                                }}
+                                {% else %}-{% endif %}
+                            </td>
+                            <td>
+                                {% if enabled_field %}
+                                {% if enabled_field.info.value %}
+                                <span class="badge badge-active">enabled</span>
+                                {% else %}
+                                <span class="badge badge-paused">disabled</span>
+                                {% endif %}
+                                {% else %}
+                                <span style="color: #9ca3af;">-</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <span class="provider-summary-actions">
+                                    <button class="btn btn-sm" type="button"
+                                        onclick="event.stopPropagation(); openProviderModal('{{ provider_row.name }}')">Config</button>
+                                </span>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="5">
+                                <div class="empty-state">No providers found in config (llm.providers.*).</div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            {% for provider_row in provider_rows %}
+            <div class="modal-overlay" id="provider-modal-{{ provider_row.name }}">
+                <div class="modal provider-detail-dialog">
+                    <div class="modal-header">
+                        <h3>Provider: {{ provider_row.name }}</h3>
+                        <button class="modal-close"
+                            onclick="closeProviderModal('{{ provider_row.name }}')">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="setting-description" style="margin-bottom: 12px;">Edit provider-specific settings,
+                            then click Save Changes on top.</p>
+                        <div class="provider-detail-grid">
+                            {% for field_name in provider_field_order %}
+                            {% set field = provider_row.fields.get(field_name) %}
+                            {% if field %}
+                            {% set key = field.key %}
+                            {% set info = field.info %}
+                            <div class="setting-row provider-detail-row" data-key="{{ key }}" data-category="llm"
+                                data-input-type="{{ info.input_type }}" data-source="{{ info.source }}">
+                                <div>
+                                    <div class="setting-label">{{ info.label or key }}</div>
+                                    <div class="setting-key">{{ key }}</div>
+                                    {% if info.description %}
+                                    <div class="setting-description">{{ info.description }}</div>
+                                    {% endif %}
+                                </div>
+                                <div>
+                                    {% if info.input_type == 'boolean' %}
+                                    <label class="toggle-switch">
+                                        <input id="input-{{ key }}" type="checkbox" {% if info.value %}checked{% endif
+                                            %} onchange="onSettingInputChange('{{ key }}')">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                    {% elif info.input_type == 'password' %}
+                                    <div class="input-password-wrapper">
+                                        <input type="password" id="input-{{ key }}"
+                                            value="{{ info.value if info.value else '' }}"
+                                            placeholder="{{ info.description }}"
+                                            oninput="onSettingInputChange('{{ key }}')">
+                                        <button class="btn-toggle-password" type="button"
+                                            onclick="togglePasswordVisibility('{{ key }}')">👁</button>
+                                    </div>
+                                    {% elif info.input_type == 'number' %}
+                                    <input type="number" class="input-number" id="input-{{ key }}"
+                                        value="{{ info.value if info.value is not none else '' }}" {% if info.min is
+                                        defined %}min="{{ info.min }}" {% endif %} {% if info.max is defined
+                                        %}max="{{ info.max }}" {% endif %} {% if info.step is defined
+                                        %}step="{{ info.step }}" {% endif %}
+                                        oninput="onSettingInputChange('{{ key }}')">
+                                    {% else %}
+                                    <input type="{% if info.input_type == 'url' %}url{% else %}text{% endif %}"
+                                        class="input-text" id="input-{{ key }}"
+                                        value="{{ info.value if info.value is not none else '' }}"
+                                        placeholder="{{ info.description }}"
+                                        oninput="onSettingInputChange('{{ key }}')">
+                                    {% endif %}
+                                </div>
+                                <div>
+                                    <span class="badge source-{{ info.source }}">{{ info.source }}</span>
+                                </div>
+                                <div class="setting-actions">
+                                    <button class="btn btn-sm btn-ghost" onclick="copyValue('{{ key }}')"
+                                        title="Copy value">📋</button>
+                                    <button class="btn btn-sm btn-ghost" onclick="resetToDefault('{{ key }}')"
+                                        title="Reset to default">↩</button>
+                                </div>
+                            </div>
+                            {% endif %}
+                            {% endfor %}
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-ghost"
+                            onclick="closeProviderModal('{{ provider_row.name }}')">Close</button>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+            {% else %}
             {% for category, settings_dict in by_category.items() %}
             <div class="category-section" data-category="{{ category }}">
                 <div class="category-header" onclick="toggleCategory(this.parentElement)">
@@ -422,6 +799,7 @@
                 <p>No settings found.</p>
             </div>
             {% endfor %}
+            {% endif %}
         </div>
 
         <!-- By Source Tab -->
@@ -432,6 +810,25 @@
                     This shows the raw values from each configuration source.
                     Higher priority sources override lower ones.
                 </p>
+                {% if current_nav == 'providers' %}
+                <div class="source-list">
+                    {% for key, source_values in settings_sources.items() %}
+                    <div class="source-item">
+                        <div class="source-item-key">{{ key }}</div>
+                        {% for source_value in source_values %}
+                        <div class="source-item-row">
+                            <span class="badge source-{{ source_value.source }}">{{ source_value.source }}</span>
+                            <span class="source-item-value">{{ source_value.value }}</span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div class="empty-state">
+                        <p>No source values found.</p>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
                 <table class="table">
                     <thead>
                         <tr>
@@ -462,6 +859,7 @@
                         {% endfor %}
                     </tbody>
                 </table>
+                {% endif %}
             </div>
         </div>
 
@@ -510,8 +908,14 @@
         }
 
         function applySettingsFilter() {
-            const search = document.getElementById('search-input').value.toLowerCase();
-            const category = document.getElementById('category-filter').value;
+            const searchInput = document.getElementById('search-input');
+            const categoryFilter = document.getElementById('category-filter');
+            if (!searchInput || !categoryFilter) {
+                return;
+            }
+
+            const search = searchInput.value.toLowerCase();
+            const category = categoryFilter.value;
 
             document.querySelectorAll('.setting-row').forEach(row => {
                 const key = row.dataset.key.toLowerCase();
@@ -742,6 +1146,22 @@
 
         function openAddModal() {
             showToast('Add setting feature coming soon', 'warning');
+        }
+
+        function openProviderModal(providerName) {
+            const modal = document.getElementById(`provider-modal-${providerName}`);
+            if (!modal) {
+                return;
+            }
+            modal.classList.add('active');
+        }
+
+        function closeProviderModal(providerName) {
+            const modal = document.getElementById(`provider-modal-${providerName}`);
+            if (!modal) {
+                return;
+            }
+            modal.classList.remove('active');
         }
 
         applySettingsFilter();

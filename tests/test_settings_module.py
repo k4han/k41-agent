@@ -12,6 +12,7 @@ from agent.shared.config import (
     SettingsValue,
     ConfigService,
 )
+from agent.shared.config.constants import get_setting_metadata, is_runtime_key
 from agent.shared.config.default_source import DefaultConfigSource
 
 
@@ -70,8 +71,10 @@ class TestDefaultConfigSource:
             "channels.discord.enabled",
             "database.url",
             "llm.provider",
+            "llm.default_provider",
             "llm.base_url",
             "llm.model",
+            "llm.default_model",
         ):
             assert key in all_settings, f"{key} should be in all_settings"
 
@@ -285,6 +288,42 @@ class TestConfigService:
         assert len(sources["channels.telegram.enabled"]) == 2
         assert sources["channels.telegram.enabled"][0]["source"] == "default"
         assert sources["channels.telegram.enabled"][1]["source"] == "config_file"
+
+    def test_list_all_includes_dynamic_provider_runtime_keys(self) -> None:
+        source = StubSource({
+            "llm.providers.openai-main.api_key": _sv(
+                "llm.providers.openai-main.api_key",
+                "provider-key",
+                SettingsSource.CONFIG_FILE,
+            ),
+            "host": _sv("host", "127.0.0.1", SettingsSource.CONFIG_FILE),
+        }, priority=100)
+
+        service = ConfigService(sources=[source])
+        merged = service.list_all()
+
+        assert "llm.providers.openai-main.api_key" in merged
+        assert "host" not in merged
+
+
+class TestRuntimeKeyMetadata:
+    def test_runtime_key_allows_provider_entries(self) -> None:
+        assert is_runtime_key("llm.providers.openai-main.api_key")
+        assert is_runtime_key("llm.providers.openai-main.default_model")
+        assert is_runtime_key("llm.providers.openai-main.temperature")
+        assert not is_runtime_key("llm.providers.openai-main.random_field")
+
+    def test_provider_setting_metadata(self) -> None:
+        meta = get_setting_metadata("llm.providers.openai-main.api_key")
+
+        assert meta["type"] == "password"
+        assert meta["category"] == "llm"
+        assert "openai-main" in meta["label"]
+
+        temperature_meta = get_setting_metadata("llm.providers.openai-main.temperature")
+        assert temperature_meta["type"] == "number"
+        assert temperature_meta["min"] == 0
+        assert temperature_meta["max"] == 2
 
 
 # =====================================================================

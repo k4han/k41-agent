@@ -2,7 +2,7 @@
 name: "router-orchestrator"
 description: "Orchestrates requests to specialized agents"
 graph_type: "router"
-model: "devstral-2512"
+model: ""
 tools: []
 routing_hints: "delegate requests to specialist agents"
 capabilities:

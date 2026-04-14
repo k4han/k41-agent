@@ -36,3 +36,6 @@ class ProviderService:
 
     def list_providers(self) -> list[ProviderConfig]:
         return self._repository.list_providers()
+
+    def reload(self) -> None:
+        self._repository.reload()

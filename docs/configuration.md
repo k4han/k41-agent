@@ -33,10 +33,25 @@ database:
 
 # LLM Provider configuration
 llm:
-  provider: "openai_compatible"  # or "google"
-  api_key: "your-api-key-here"  # REQUIRED
-  base_url: "https://api.mistral.ai/v1"
-  model: "devstral-2512"
+  # Multi-provider (recommended)
+  default_provider: "openai-main"
+  default_model: ""
+  providers:
+    openai-main:
+      provider: "openai_compatible"
+      api_key: "your-api-key-here"  # REQUIRED
+      base_url: "https://api.mistral.ai/v1"
+      default_model: "devstral-2512"
+    google-main:
+      provider: "google"
+      api_key: "your-google-api-key"
+      default_model: "gemini-2.0-flash"
+
+  # Legacy single-provider mode is still supported:
+  # provider: "openai_compatible"
+  # api_key: "your-api-key-here"
+  # base_url: "https://api.mistral.ai/v1"
+  # model: "devstral-2512"
   temperature: 0.0
 
 # Channel integrations (optional)
@@ -74,8 +89,11 @@ Bạn PHẢI cấu hình API key cho LLM provider:
 
 ```yaml
 llm:
-  provider: "openai_compatible"
-  api_key: "sk-your-actual-api-key"
+  default_provider: "openai-main"
+  providers:
+    openai-main:
+      provider: "openai_compatible"
+      api_key: "sk-your-actual-api-key"
 ```
 
 Nếu không có API key hợp lệ, ứng dụng sẽ không khởi động được.
@@ -130,25 +148,36 @@ Nested YAML structures được flatten thành dot-notation:
 
 ```yaml
 llm:
-  api_key: "sk-123"
-  model: "gpt-4"
+  default_provider: "openai-main"
+  providers:
+    openai-main:
+      provider: "openai_compatible"
+      api_key: "sk-123"
+      default_model: "gpt-4"
 ```
 
-Truy cập bằng: `config.get_str("llm.api_key")`, `config.get_str("llm.model")`
+Truy cập bằng: `config.get_str("llm.default_provider")`, `config.get_str("llm.providers.openai-main.api_key")`
 
 ## Provider Backends
 
-### OpenAI-compatible (default)
+### Multi-provider (recommended)
 
 ```yaml
 llm:
-  provider: "openai_compatible"
-  api_key: "sk-..."
-  base_url: "https://api.mistral.ai/v1"
-  model: "devstral-2512"
+  default_provider: "openai-main"
+  providers:
+    openai-main:
+      provider: "openai_compatible"
+      api_key: "sk-..."
+      base_url: "https://api.mistral.ai/v1"
+      default_model: "devstral-2512"
+    google-main:
+      provider: "google"
+      api_key: "AIza..."
+      default_model: "gemini-2.0-flash"
 ```
 
-### Google Gemini (langchain-google-genai)
+### Legacy single-provider
 
 ```yaml
 llm:
@@ -157,7 +186,7 @@ llm:
   model: "gemini-2.0-flash"
 ```
 
-Với `google`, trường `llm.base_url` sẽ bị bỏ qua.
+Với `google`, trường `base_url` sẽ bị bỏ qua.
 
 ## YAML-only Configuration
 

@@ -2,7 +2,7 @@
 name: "scheduler-executor"
 description: "Executes scheduled tasks directly without further scheduling"
 graph_type: "react_agent"
-model: "devstral-2512"
+model: ""
 tools:
   - "get_current_time"
   - "echo"

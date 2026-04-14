@@ -27,7 +27,13 @@ from agent.modules.scheduler.public import (
     normalize_trigger,
 )
 from agent.modules.users.public import get_pairing_service
-from agent.shared.config import ConfigService, is_runtime_key
+from agent.shared.config import (
+    ConfigService,
+    PROVIDER_SETTING_FIELD_ORDER,
+    get_setting_metadata,
+    is_runtime_key,
+    parse_provider_key,
+)
 
 router = APIRouter(tags=["dashboard"], dependencies=[Depends(get_current_admin)])
 logger = logging.getLogger(__name__)
@@ -67,6 +73,107 @@ def _group_settings_by_category(
         category = info.get("category", "general")
         grouped.setdefault(category, {})[key] = info
     return grouped
+
+
+def _is_provider_setting_key(key: str) -> bool:
+    if key.startswith("llm.providers."):
+        return True
+    return key.startswith("llm.")
+
+
+def _filter_settings[T](
+    settings: dict[str, T],
+    *,
+    include_provider_settings: bool,
+) -> dict[str, T]:
+    return {
+        key: value
+        for key, value in settings.items()
+        if _is_provider_setting_key(key) == include_provider_settings
+    }
+
+
+def _split_provider_settings(
+    settings: dict[str, dict[str, Any]],
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    global_settings: dict[str, dict[str, Any]] = {}
+    provider_settings: dict[str, dict[str, Any]] = {}
+    for key, info in settings.items():
+        if key.startswith("llm.providers."):
+            provider_settings[key] = info
+            continue
+        global_settings[key] = info
+    return global_settings, provider_settings
+
+
+def _build_provider_rows(
+    settings: dict[str, dict[str, Any]],
+    expected_fields: list[str],
+) -> list[dict[str, Any]]:
+    grouped: dict[str, dict[str, dict[str, Any]]] = {}
+    for key, info in settings.items():
+        parsed = parse_provider_key(key)
+        if parsed is None:
+            continue
+
+        provider_name, field_name = parsed
+        grouped.setdefault(provider_name, {})[field_name] = {
+            "key": key,
+            "info": info,
+        }
+
+    provider_rows: list[dict[str, Any]] = []
+    for provider_name in sorted(grouped):
+        fields = grouped[provider_name]
+
+        if "provider" not in fields and "type" in fields:
+            fields["provider"] = fields["type"]
+
+        for field_name in expected_fields:
+            if field_name in fields:
+                continue
+
+            synthetic_key = f"llm.providers.{provider_name}.{field_name}"
+            metadata = get_setting_metadata(synthetic_key)
+            synthetic_info: dict[str, Any] = {
+                "value": None,
+                "source": "default",
+                "input_type": metadata["type"],
+                "description": metadata["description"],
+                "category": metadata["category"],
+                "label": metadata["label"],
+            }
+            for optional_key in ("min", "max", "step"):
+                if optional_key in metadata:
+                    synthetic_info[optional_key] = metadata[optional_key]
+
+            fields[field_name] = {
+                "key": synthetic_key,
+                "info": synthetic_info,
+            }
+
+        provider_rows.append({
+            "name": provider_name,
+            "fields": fields,
+        })
+
+    return provider_rows
+
+
+def _remove_legacy_provider_keys(
+    settings: dict[str, Any],
+) -> dict[str, Any]:
+    hidden_keys = {
+        "llm.provider",
+        "llm.model",
+        "llm.base_url",
+        "llm.temperature",
+    }
+    return {
+        key: value
+        for key, value in settings.items()
+        if key not in hidden_keys
+    }
 
 
 def _ensure_runtime_keys(keys: list[str]) -> None:
@@ -118,17 +225,55 @@ async def unpair_identity(identity_id: int) -> dict[str, str]:
 @router.get("/config", response_class=HTMLResponse)
 async def dashboard_config(request: Request) -> HTMLResponse:
     service = _get_config_service(request)
-    settings = service.get_settings_overview()
-    settings_sources = service.get_settings_sources()
+    settings_raw, settings_sources_raw = service.get_settings_overview_and_sources()
+    settings = _filter_settings(settings_raw, include_provider_settings=False)
+    settings_sources = _filter_settings(settings_sources_raw, include_provider_settings=False)
     by_category = _group_settings_by_category(settings)
 
     return templates.TemplateResponse(
         request=request,
         name="config.html",
         context={
+            "active_nav": "config",
+            "page_title": "Runtime Configuration",
+            "page_subtitle": "Manage channels, database, and security runtime settings.",
             "settings": settings,
             "by_category": by_category,
             "settings_sources": settings_sources,
+        },
+    )
+
+
+@router.get("/providers", response_class=HTMLResponse)
+async def dashboard_providers(request: Request) -> HTMLResponse:
+    service = _get_config_service(request)
+    settings_raw, settings_sources_raw = service.get_settings_overview_and_sources()
+    settings = _remove_legacy_provider_keys(_filter_settings(
+        settings_raw,
+        include_provider_settings=True,
+    ))
+    settings_sources = _remove_legacy_provider_keys(_filter_settings(
+        settings_sources_raw,
+        include_provider_settings=True,
+    ))
+    global_settings, provider_settings = _split_provider_settings(settings)
+    by_category = _group_settings_by_category(global_settings)
+    provider_rows = _build_provider_rows(provider_settings, PROVIDER_SETTING_FIELD_ORDER)
+    provider_name_options = [row["name"] for row in provider_rows]
+
+    return templates.TemplateResponse(
+        request=request,
+        name="config.html",
+        context={
+            "active_nav": "providers",
+            "page_title": "Provider Configuration",
+            "page_subtitle": "Manage default provider and per-provider LLM credentials/models.",
+            "settings": settings,
+            "by_category": by_category,
+            "settings_sources": settings_sources,
+            "provider_rows": provider_rows,
+            "provider_name_options": provider_name_options,
+            "provider_field_order": PROVIDER_SETTING_FIELD_ORDER,
         },
     )
 
@@ -230,8 +375,10 @@ async def update_settings(body: UpdateSettingsBody, request: Request) -> dict[st
     _ensure_runtime_keys(list(body.values))
 
     service = _get_config_service(request)
-    for key, value in body.values.items():
-        service.update_setting(key, value)
+    for source in service._sources:
+        if hasattr(source, "update_settings"):
+            source.update_settings(body.values)
+    service.reload()
 
     return {"status": "success", "updated": list(body.values.keys())}
 

@@ -93,10 +93,14 @@ def init():
                     "# Kaka Agent Configuration\n"
                     "# Please set your LLM API key below\n\n"
                     "llm:\n"
-                    "  provider: \"openai_compatible\"\n"
-                    "  api_key: \"your-api-key-here\"\n"
-                    "  base_url: \"https://api.mistral.ai/v1\"\n"
-                    "  model: \"devstral-2512\"\n"
+                    "  default_provider: \"primary\"\n"
+                    "  default_model: \"\"\n"
+                    "  providers:\n"
+                    "    primary:\n"
+                    "      provider: \"openai_compatible\"\n"
+                    "      api_key: \"your-api-key-here\"\n"
+                    "      base_url: \"https://api.example.com/v1\"\n"
+                    "      default_model: \"\"\n"
                 )
                 config_file.write_text(minimal_config)
                 click.echo(f"[OK] Created minimal config at {config_file}")

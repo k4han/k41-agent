@@ -4,18 +4,18 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from agent.shared.config.models import (
-    SettingsSource,
-    SettingsValue,
-    build_settings_values,
+from agent.shared.config.models import SettingsSource, SettingsValue, build_settings_values
+from agent.shared.infrastructure.config_file import (
+    DEFAULT_CONFIG_PATH,
+    flatten_config_mapping,
+    load_flat_config_file,
+    merge_nested_dicts,
+    unflatten_config_mapping,
 )
-from agent.shared.infrastructure.config_file import flatten_config_mapping, unflatten_config_mapping, merge_nested_dicts
 
 logger = logging.getLogger(__name__)
 
 _MISSING = object()
-
-DEFAULT_CONFIG_PATH = Path.home() / ".kaka-agent" / "config.yaml"
 
 
 class YamlConfigSource:
@@ -57,7 +57,11 @@ class YamlConfigSource:
         """
         data = self._load()
         return build_settings_values(data, SettingsSource.CONFIG_FILE, keys)
+
     def update_setting(self, key: str, value: Any) -> None:
+        self.update_settings({key: value})
+
+    def update_settings(self, updates: dict[str, Any]) -> None:
         import yaml
 
         try:
@@ -66,13 +70,13 @@ class YamlConfigSource:
         except FileNotFoundError:
             data = {}
 
-        flat_update = {key: value}
-        nested_update = unflatten_config_mapping(flat_update)
+        nested_update = unflatten_config_mapping(updates)
         merge_nested_dicts(data, nested_update)
 
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
         self.reload()
+
     def reload(self) -> None:
         """Clear cache and reload from file."""
         self._cache = None
@@ -87,34 +91,8 @@ class YamlConfigSource:
         if self._cache is not None:
             return self._cache
 
-        try:
-            import yaml
-
-            raw = self._path.read_text(encoding="utf-8")
-            data = yaml.safe_load(raw)
-            if not isinstance(data, dict):
-                logger.warning(
-                    "Config file %s does not contain a mapping — ignoring.", self._path
-                )
-                self._cache = {}
-                return self._cache
-
-            self._cache = flatten_config_mapping(data)
-            return self._cache
-        except FileNotFoundError:
-            logger.debug("Config file not found: %s — using empty config.", self._path)
-            self._cache = {}
-            return self._cache
-        except ImportError:
-            logger.warning(
-                "PyYAML is not installed — skipping config file %s.", self._path
-            )
-            self._cache = {}
-            return self._cache
-        except Exception:
-            logger.exception("Failed to read config file %s.", self._path)
-            self._cache = {}
-            return self._cache
+        self._cache = load_flat_config_file(self._path)
+        return self._cache
 
 
 __all__ = ["DEFAULT_CONFIG_PATH", "YamlConfigSource"]

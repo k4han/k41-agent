@@ -10,7 +10,8 @@ from typing import Any
 # These patterns define which keys can be updated at runtime
 RUNTIME_KEY_PATTERNS = [
     r"^channels\.(telegram|discord)\.(enabled|bot_token|default_agent|code_agent|research_agent)$",
-    r"^llm\.(provider|api_key|base_url|model|temperature)$",
+    r"^llm\.(provider|default_provider|api_key|base_url|model|default_model|temperature)$",
+    r"^llm\.providers\.[A-Za-z0-9_-]+\.(provider|type|api_key|base_url|model|default_model|temperature|enabled)$",
     r"^database\.url$",
     r"^security\.jwt_secret$",
 ]
@@ -28,7 +29,15 @@ def _expand_runtime_keys() -> set[str]:
     for channel in ("telegram", "discord"):
         for prop in ("enabled", "bot_token", "default_agent", "code_agent", "research_agent"):
             keys.add(f"channels.{channel}.{prop}")
-    for prop in ("provider", "api_key", "base_url", "model", "temperature"):
+    for prop in (
+        "provider",
+        "default_provider",
+        "api_key",
+        "base_url",
+        "model",
+        "default_model",
+        "temperature",
+    ):
         keys.add(f"llm.{prop}")
     keys.add("database.url")
     keys.add("security.jwt_secret")
@@ -49,8 +58,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "database.url": "",
     # LLM provider configuration
     "llm.provider": "openai_compatible",
-    "llm.base_url": "https://api.mistral.ai/v1",
-    "llm.model": "devstral-2512",
+    "llm.default_provider": "",
+    "llm.base_url": "",
+    "llm.model": "",
+    "llm.default_model": "",
     "llm.temperature": 0.0,
     # Channel integrations
     "channels.telegram.enabled": True,
@@ -127,9 +138,15 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
     # LLM settings
     "llm.provider": {
         "type": "text",
-        "description": "LLM provider backend (openai_compatible or google)",
+        "description": "Legacy provider selector; use llm.default_provider for multi-provider setup",
         "category": "llm",
         "label": "LLM Provider",
+    },
+    "llm.default_provider": {
+        "type": "text",
+        "description": "Default provider name (or provider type alias) used at runtime",
+        "category": "llm",
+        "label": "LLM Default Provider",
     },
     "llm.api_key": {
         "type": "password",
@@ -139,15 +156,21 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
     },
     "llm.base_url": {
         "type": "url",
-        "description": "Base URL for LLM API (e.g., https://api.mistral.ai/v1)",
+        "description": "Base URL for LLM API (e.g., https://api.example.com/v1)",
         "category": "llm",
         "label": "LLM Base URL",
     },
     "llm.model": {
         "type": "text",
-        "description": "Model name to use for LLM",
+        "description": "Legacy global model override (optional)",
         "category": "llm",
         "label": "LLM Model",
+    },
+    "llm.default_model": {
+        "type": "text",
+        "description": "Global default model override used when provider model is not set",
+        "category": "llm",
+        "label": "LLM Default Model",
     },
     "llm.temperature": {
         "type": "number",
@@ -161,7 +184,7 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
     # Database settings
     "database.url": {
         "type": "url",
-        "description": "Database connection URL (e.g., sqlite:///./data.db)",
+        "description": "Database connection URL (e.g., postgresql+asyncpg://user:password@host:5432/dbname)",
         "category": "database",
         "label": "Database URL",
     },
@@ -183,6 +206,111 @@ _DEFAULT_META: dict[str, Any] = {
     "label": "",
 }
 
+# Field order and metadata for provider settings.
+# Order is derived from the dict to ensure consistency with _PROVIDER_SETTING_FIELD_META.
+_PROVIDER_SETTING_FIELD_META: dict[str, dict[str, Any]] = {
+    "provider": {
+        "type": "text",
+        "description": "Provider backend type (openai_compatible or google)",
+        "label": "Provider Type",
+    },
+    "type": {
+        "type": "text",
+        "description": "Provider backend type alias",
+        "label": "Provider Type",
+    },
+    "api_key": {
+        "type": "password",
+        "description": "API key for this provider",
+        "label": "API Key",
+    },
+    "base_url": {
+        "type": "url",
+        "description": "Base URL for OpenAI-compatible provider",
+        "label": "Base URL",
+    },
+    "model": {
+        "type": "text",
+        "description": "Legacy provider-level model override",
+        "label": "Model",
+    },
+    "default_model": {
+        "type": "text",
+        "description": "Default model for this provider",
+        "label": "Default Model",
+    },
+    "temperature": {
+        "type": "number",
+        "description": "Temperature for this provider (0.0 = deterministic, 2.0 = creative)",
+        "label": "Temperature",
+        "min": 0,
+        "max": 2,
+        "step": 0.1,
+    },
+    "enabled": {
+        "type": "boolean",
+        "description": "Enable or disable this provider",
+        "label": "Enabled",
+    },
+}
+
+
+def _split_provider_key(key: str) -> tuple[str, str] | None:
+    """Parse "llm.providers.{name}.{field}" into (name, field)."""
+    prefix = "llm.providers."
+    if not key.startswith(prefix):
+        return None
+    remainder = key[len(prefix):]
+    if "." not in remainder:
+        return None
+    provider_name, field_name = remainder.split(".", 1)
+    if not provider_name:
+        return None
+    return provider_name, field_name
+
+
+def _provider_setting_metadata(key: str) -> dict[str, Any] | None:
+    parsed = _split_provider_key(key)
+    if parsed is None:
+        return None
+    provider_name, field_name = parsed
+
+    base = _PROVIDER_SETTING_FIELD_META.get(field_name)
+    if base is None:
+        return {
+            **_DEFAULT_META,
+            "category": "llm",
+            "description": "Provider-specific setting",
+            "label": f"{provider_name}: {field_name}",
+        }
+
+    metadata: dict[str, Any] = {
+        "type": base["type"],
+        "description": base["description"],
+        "category": "llm",
+        "label": f"{provider_name}: {base['label']}",
+    }
+    for key_name in ("min", "max", "step"):
+        if key_name in base:
+            metadata[key_name] = base[key_name]
+    return metadata
+
+
+# Derived ordering — must match keys in _PROVIDER_SETTING_FIELD_META
+PROVIDER_SETTING_FIELD_ORDER: list[str] = list(_PROVIDER_SETTING_FIELD_META.keys())
+
+
+def parse_provider_key(key: str) -> tuple[str, str] | None:
+    """Parse a provider config key into (provider_name, field_name).
+
+    Examples:
+        "llm.providers.foo.api_key" -> ("foo", "api_key")
+        "llm.providers.foo.enabled" -> ("foo", "enabled")
+
+    Returns None if the key doesn't match the provider key pattern.
+    """
+    return _split_provider_key(key)
+
 
 def get_setting_metadata(key: str) -> dict[str, Any]:
     """Get metadata for a setting key.
@@ -195,6 +323,9 @@ def get_setting_metadata(key: str) -> dict[str, Any]:
     """
     meta = SETTING_METADATA.get(key)
     if meta is None:
+        provider_meta = _provider_setting_metadata(key)
+        if provider_meta is not None:
+            return provider_meta
         return {**_DEFAULT_META, "label": key}
     return meta
 
@@ -219,4 +350,6 @@ __all__ = [
     "get_channel_enabled_key",
     "SETTING_METADATA",
     "get_setting_metadata",
+    "parse_provider_key",
+    "PROVIDER_SETTING_FIELD_ORDER",
 ]

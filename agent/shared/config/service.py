@@ -18,6 +18,7 @@ from agent.shared.config.constants import (
     KNOWN_RUNTIME_KEYS,
     get_channel_enabled_key,
     get_setting_metadata,
+    is_runtime_key,
 )
 from agent.shared.config.models import RuntimeSettings, SettingsValue
 from agent.shared.infrastructure.config_file import coerce_bool
@@ -56,12 +57,6 @@ class ConfigService:
     """
 
     def __init__(self, sources: list[Any]) -> None:
-        """Initialize config service with sources.
-
-        Args:
-            sources: List of ConfigSource instances
-        """
-        # Sort sources by priority (lowest first, so highest wins in merge)
         self._sources = sorted(sources, key=lambda s: s.priority)
 
     # --- Simple config API (backward compatible with old ConfigService) ---
@@ -188,13 +183,21 @@ class ConfigService:
                 result = val
         return result
 
+    def _list_runtime_keys(self) -> list[str]:
+        keys = set(KNOWN_RUNTIME_KEYS)
+        for source in self._sources:
+            for key in source.get_all().keys():
+                if isinstance(key, str) and is_runtime_key(key):
+                    keys.add(key)
+        return sorted(keys)
+
     def list_all(self) -> dict[str, SettingsValue]:
         """Return all effective settings keyed by canonical name.
 
         Only returns known runtime keys with source tracking.
         """
         merged: dict[str, SettingsValue] = {}
-        for key in KNOWN_RUNTIME_KEYS:
+        for key in self._list_runtime_keys():
             for source in self._sources:
                 val = source.get_settings_value(key)
                 if val is not None:
@@ -208,7 +211,7 @@ class ConfigService:
         Useful for the dashboard to show where each value comes from.
         """
         by_key: dict[str, list[SettingsValue]] = {}
-        for key in KNOWN_RUNTIME_KEYS:
+        for key in self._list_runtime_keys():
             for source in self._sources:
                 val = source.get_settings_value(key)
                 if val is not None:
@@ -242,6 +245,42 @@ class ConfigService:
             key: [sv.to_dict() for sv in vals]
             for key, vals in sorted(by_key.items())
         }
+
+    def get_settings_overview_and_sources(
+        self,
+    ) -> tuple[dict[str, dict[str, object]], dict[str, list[dict[str, object]]]]:
+        """Return overview and sources in a single pass over all sources.
+
+        Avoids the double-iteration of calling get_settings_overview() and
+        get_settings_sources() separately, which each independently scan all
+        sources for every key.
+        """
+        # Gather data once
+        keys = self._list_runtime_keys()
+        by_key: dict[str, list[SettingsValue]] = {}
+        merged: dict[str, SettingsValue] = {}
+        for key in keys:
+            values: list[SettingsValue] = []
+            latest: SettingsValue | None = None
+            for source in self._sources:
+                val = source.get_settings_value(key)
+                if val is not None:
+                    values.append(val)
+                    latest = val
+            if values:
+                by_key[key] = values
+            if latest is not None:
+                merged[key] = latest
+
+        overview = {
+            key: _build_settings_overview_entry(sv, get_setting_metadata(key))
+            for key, sv in sorted(merged.items())
+        }
+        sources = {
+            key: [sv.to_dict() for sv in vals]
+            for key, vals in sorted(by_key.items())
+        }
+        return overview, sources
 
     def update_setting(self, key: str, value: Any) -> None:
         """Update a specific config setting.

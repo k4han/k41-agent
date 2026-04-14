@@ -2,7 +2,7 @@
 name: "backend"
 description: "Python/backend engineer assistant"
 graph_type: "react_agent"
-model: "devstral-2512"
+model: ""
 tools:
   - "list_files"
   - "read_file"

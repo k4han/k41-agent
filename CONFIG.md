@@ -29,10 +29,18 @@ Chỉnh sửa `~/.kaka-agent/config.yaml`:
 ```yaml
 # LLM Provider
 llm:
-  provider: "openai_compatible"  # hoặc "google"
-  api_key: "your-actual-api-key"  # Thay bằng API key thật
-  base_url: "https://api.mistral.ai/v1"
-  model: "devstral-2512"
+  default_provider: "openai-main"
+  default_model: ""
+  providers:
+    openai-main:
+      provider: "openai_compatible"
+      api_key: "your-actual-api-key"
+      base_url: "https://api.mistral.ai/v1"
+      default_model: "devstral-2512"
+    google-main:
+      provider: "google"
+      api_key: "your-google-api-key"
+      default_model: "gemini-2.0-flash"
 
 # Telegram Bot (optional)
 channels:
@@ -58,7 +66,7 @@ kaka serve
 Hệ thống đọc cấu hình theo thứ tự ưu tiên:
 
 1. **Config file** (`~/.kaka-agent/config.yaml`)
-  Keys: `llm.provider`, `llm.api_key`, `llm.base_url`, `llm.model`, `database.url`, `channels.telegram.bot_token`, `channels.discord.bot_token`
+  Keys: `llm.default_provider`, `llm.default_model`, `llm.providers.*`, `llm.provider` (legacy), `llm.model` (legacy), `database.url`, `channels.telegram.bot_token`, `channels.discord.bot_token`
 
 2. **Defaults** (thấp nhất)
 
@@ -80,7 +88,7 @@ database:
 
 ## Examples
 
-### Sử dụng OpenAI thay vì Mistral
+### Sử dụng OpenAI-compatible (legacy single-provider)
 
 ```yaml
 llm:
@@ -90,13 +98,21 @@ llm:
   model: "gpt-4"
 ```
 
-### Sử dụng Google Gemini (langchain-google-genai)
+### Sử dụng multi-provider + default provider
 
 ```yaml
 llm:
-  provider: "google"
-  api_key: "AIza..."
-  model: "gemini-2.0-flash"
+  default_provider: "google-main"
+  providers:
+    openai-main:
+      provider: "openai_compatible"
+      api_key: "sk-..."
+      base_url: "https://api.openai.com/v1"
+      default_model: "gpt-4"
+    google-main:
+      provider: "google"
+      api_key: "AIza..."
+      default_model: "gemini-2.0-flash"
 ```
 
 ### Chỉ chạy API, tắt dashboard

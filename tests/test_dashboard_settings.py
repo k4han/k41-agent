@@ -37,6 +37,28 @@ def dashboard_client(monkeypatch: pytest.MonkeyPatch):
 
 
 class TestDashboardSettingsEndpoints:
+    def test_get_config_page_excludes_provider_settings(self, dashboard_client) -> None:
+        resp = dashboard_client.get("/config")
+        assert resp.status_code == 200
+        assert "Runtime Configuration" in resp.text
+        assert "llm.provider" not in resp.text
+        assert "channels.telegram.enabled" in resp.text
+
+    def test_get_providers_page_shows_provider_settings(self, dashboard_client) -> None:
+        resp = dashboard_client.get("/providers")
+        assert resp.status_code == 200
+        assert "Provider Configuration" in resp.text
+        assert "llm.default_provider" in resp.text
+        assert 'id="input-llm.default_provider"' in resp.text
+        assert "Auto select enabled provider" in resp.text
+        assert 'data-key="llm.provider"' not in resp.text
+        assert 'data-key="llm.model"' not in resp.text
+        assert 'data-key="llm.base_url"' not in resp.text
+        assert 'data-key="llm.temperature"' not in resp.text
+        assert "Provider Config" in resp.text
+        assert "<th style=\"width: 130px;\">Provider</th>" in resp.text
+        assert "No providers found in config" in resp.text
+
     def test_get_settings(self, dashboard_client) -> None:
         resp = dashboard_client.get("/settings")
         assert resp.status_code == 200
@@ -73,7 +95,7 @@ class TestDashboardSettingsEndpoints:
             json={
                 "values": {
                     "channels.telegram.enabled": False,
-                    "llm.model": "gpt-4o-mini",
+                    "llm.model": "sample-model",
                 }
             },
         )
@@ -100,3 +122,15 @@ class TestDashboardSettingsEndpoints:
         )
         assert resp.status_code == 400
         assert "Unsupported runtime setting" in resp.json()["detail"]
+
+    def test_put_provider_specific_setting_saves_successfully(self, dashboard_client) -> None:
+        resp = dashboard_client.put(
+            "/settings/llm.providers.openai-main.default_model",
+            json={"value": "sample-model"},
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "status": "success",
+            "key": "llm.providers.openai-main.default_model",
+            "value": "sample-model",
+        }

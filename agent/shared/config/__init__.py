@@ -1,4 +1,13 @@
-from agent.shared.config.constants import DEFAULT_CONFIG, RUNTIME_KEY_PATTERNS, is_runtime_key, KNOWN_RUNTIME_KEYS, get_channel_enabled_key
+from agent.shared.config.constants import (
+    DEFAULT_CONFIG,
+    PROVIDER_SETTING_FIELD_ORDER,
+    RUNTIME_KEY_PATTERNS,
+    is_runtime_key,
+    KNOWN_RUNTIME_KEYS,
+    get_channel_enabled_key,
+    get_setting_metadata,
+    parse_provider_key,
+)
 from agent.shared.config.default_source import DefaultConfigSource
 from agent.shared.config.models import (
     RuntimeSettings,
@@ -31,4 +40,7 @@ __all__ = [
     "is_runtime_key",
     "KNOWN_RUNTIME_KEYS",
     "get_channel_enabled_key",
+    "get_setting_metadata",
+    "parse_provider_key",
+    "PROVIDER_SETTING_FIELD_ORDER",
 ]

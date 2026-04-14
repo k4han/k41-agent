@@ -20,7 +20,7 @@ def test_agent_dir(tmp_path):
 name: "test-agent"
 description: "Test agent for integration testing"
 graph_type: "react_agent"
-model: "devstral-2512"
+model: ""
 tools:
   - "list_files"
 max_context_tokens: 10000
@@ -53,7 +53,7 @@ async def test_agent_workflow_integration(test_agent_dir):
     assert config is not None
     assert config.name == "test-agent"
     assert config.graph_type == "react_agent"
-    assert config.model == "devstral-2512"
+    assert config.model == ""
     assert "list_files" in config.tools
 
     # 3. Build context with agent_name
@@ -89,7 +89,7 @@ def test_default_agent_always_available():
         assert default.name == "default"
         assert default.display_name == ""
         assert default.graph_type == "react_agent"
-        assert default.model == "devstral-2512"
+        assert default.model == ""
         assert "helpful AI assistant" in default.system_prompt
     finally:
         os.rmdir(empty_dir)
@@ -104,12 +104,12 @@ def test_agent_config_overrides_defaults(test_agent_dir):
     default_agent = agents["default"]
 
     # Test agent has custom config
-    assert test_agent.model == "devstral-2512"
+    assert test_agent.model == ""
     assert test_agent.tools == ["list_files"]
     assert "Test response" in test_agent.system_prompt
 
     # Default agent has builtin config
-    assert default_agent.model == "devstral-2512"
+    assert default_agent.model == ""
     assert default_agent.tools == ["list_files", "read_file", "write_file", "search_files"]
     assert "helpful AI assistant" in default_agent.system_prompt
 
