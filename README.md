@@ -17,15 +17,9 @@ agent/
 ├── modules/
 │   ├── agent_runtime/ # Platform-agnostic run facade
 │   ├── channels/     # Telegram/Discord channel management
-│   ├── settings/     # Persisted settings/preferences data access
 │   └── workflows/    # LangGraph graphs, nodes, state, tools, checkpoint store
-├── persistence/      # Compatibility shim for legacy persistence imports
-├── core/             # Thin compatibility shim to agent_runtime
-├── providers/
-│   └── llm.py        # Cached LLM instances
-├── graphs/           # Compatibility shim to workflows module
-├── registry.py       # Compatibility shim to workflow registry
-└── config.py         # Compatibility shim to workflow run config
+└── providers/
+    └── llm.py        # Cached LLM instances
 ```
 
 ## Thiết kế cốt lõi
@@ -63,7 +57,6 @@ Graph compile có gắn checkpointer SQLite
 Canonical ownership:
   - shared DB engine/session/helpers: agent/shared/infrastructure/db/
   - LangGraph checkpoint store: agent/modules/workflows/infrastructure/langgraph/checkpoint/
-  - legacy facade tạm thời: agent/persistence/
 
 database.url mặc định:
   sqlite+aiosqlite:///data/agent_state.db

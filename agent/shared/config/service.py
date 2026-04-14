@@ -59,7 +59,7 @@ class ConfigService:
     def __init__(self, sources: list[Any]) -> None:
         self._sources = sorted(sources, key=lambda s: s.priority)
 
-    # --- Simple config API (backward compatible with old ConfigService) ---
+    # --- Simple config API ---
 
     def get(self, key: str, default: Any = None) -> Any:
         """Get config value with precedence resolution.
