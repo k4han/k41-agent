@@ -108,7 +108,7 @@ Quy ước hiện tại:
 - `ENABLE_WEB`, `ENABLE_API`, `ENABLE_DASHBOARD`: bật các capability của web host khi app khởi động.
 - `ENABLE_TELEGRAM`, `ENABLE_DISCORD`: nếu `true` thì channel sẽ tự khởi động cùng app. Các background channel vẫn luôn được đăng ký vào runtime, nên dashboard vẫn có thể start/stop chúng về sau ngay cả khi giá trị này là `false`.
 - Dashboard chỉ thay đổi trạng thái runtime hiện tại. Khi restart app, trạng thái mặc định quay về theo `.env`.
-- Alias cũ `/dashboard/bots/*` đã bị loại bỏ. Chỉ dùng `/dashboard/services/*`.
+- Với dashboard chạy ở prefix gốc `/`, alias cũ `/bots/*` đã bị loại bỏ. Chỉ dùng `/services/*`.
 - LLM client hiện dùng `ChatOpenAI` với endpoint OpenAI-compatible. Mặc định repo trỏ tới Mistral-compatible `base_url` và `model`, nhưng có thể override bằng `LLM_BASE_URL` và `LLM_MODEL`.
 - `LLM_API_KEY` là contract ưu tiên. Nếu chưa migrate env, `OPENAI_API_KEY` vẫn được chấp nhận như fallback.
 
@@ -125,12 +125,12 @@ Quy ước hiện tại:
 
 | Method | Endpoint                           | Mô tả                         |
 |--------|------------------------------------|-------------------------------|
-| GET    | /dashboard/services                | Liệt kê trạng thái services   |
-| GET    | /dashboard/services/{name}         | Xem trạng thái 1 service      |
-| POST   | /dashboard/services/{name}/start   | Bật 1 service                 |
-| POST   | /dashboard/services/{name}/stop    | Tắt 1 service                 |
-| POST   | /dashboard/services/start-all      | Bật tất cả services           |
-| POST   | /dashboard/services/stop-all       | Tắt tất cả services           |
+| GET    | /services                          | Liệt kê trạng thái services   |
+| GET    | /services/{name}                   | Xem trạng thái 1 service      |
+| POST   | /services/{name}/start             | Bật 1 service                 |
+| POST   | /services/{name}/stop              | Tắt 1 service                 |
+| POST   | /services/start-all                | Bật tất cả services           |
+| POST   | /services/stop-all                 | Tắt tất cả services           |
 
 ### Ví dụ request
 

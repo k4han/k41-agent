@@ -60,6 +60,138 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 
+# Metadata for settings - used by dashboard to render appropriate input types
+SETTING_METADATA: dict[str, dict[str, Any]] = {
+    # Channel settings
+    "channels.telegram.enabled": {
+        "type": "boolean",
+        "description": "Enable Telegram channel integration",
+        "category": "channels",
+        "label": "Telegram Enabled",
+    },
+    "channels.telegram.bot_token": {
+        "type": "password",
+        "description": "Telegram bot token from @BotFather",
+        "category": "channels",
+        "label": "Telegram Bot Token",
+    },
+    "channels.telegram.default_agent": {
+        "type": "text",
+        "description": "Default agent for Telegram DM",
+        "category": "channels",
+        "label": "Telegram Default Agent",
+    },
+    "channels.telegram.code_agent": {
+        "type": "text",
+        "description": "Agent triggered by /code command",
+        "category": "channels",
+        "label": "Telegram Code Agent",
+    },
+    "channels.telegram.research_agent": {
+        "type": "text",
+        "description": "Agent triggered by /research command",
+        "category": "channels",
+        "label": "Telegram Research Agent",
+    },
+    "channels.discord.enabled": {
+        "type": "boolean",
+        "description": "Enable Discord channel integration",
+        "category": "channels",
+        "label": "Discord Enabled",
+    },
+    "channels.discord.bot_token": {
+        "type": "password",
+        "description": "Discord bot token from Developer Portal",
+        "category": "channels",
+        "label": "Discord Bot Token",
+    },
+    "channels.discord.default_agent": {
+        "type": "text",
+        "description": "Default agent for Discord DM",
+        "category": "channels",
+        "label": "Discord Default Agent",
+    },
+    "channels.discord.code_agent": {
+        "type": "text",
+        "description": "Agent triggered by /code command",
+        "category": "channels",
+        "label": "Discord Code Agent",
+    },
+    "channels.discord.research_agent": {
+        "type": "text",
+        "description": "Agent triggered by /research command",
+        "category": "channels",
+        "label": "Discord Research Agent",
+    },
+    # LLM settings
+    "llm.api_key": {
+        "type": "password",
+        "description": "API key for LLM provider",
+        "category": "llm",
+        "label": "LLM API Key",
+    },
+    "llm.base_url": {
+        "type": "url",
+        "description": "Base URL for LLM API (e.g., https://api.mistral.ai/v1)",
+        "category": "llm",
+        "label": "LLM Base URL",
+    },
+    "llm.model": {
+        "type": "text",
+        "description": "Model name to use for LLM",
+        "category": "llm",
+        "label": "LLM Model",
+    },
+    "llm.temperature": {
+        "type": "number",
+        "description": "LLM temperature (0.0 = deterministic, 2.0 = creative)",
+        "category": "llm",
+        "label": "LLM Temperature",
+        "min": 0,
+        "max": 2,
+        "step": 0.1,
+    },
+    # Database settings
+    "database.url": {
+        "type": "url",
+        "description": "Database connection URL (e.g., sqlite:///./data.db)",
+        "category": "database",
+        "label": "Database URL",
+    },
+    # Security settings
+    "security.jwt_secret": {
+        "type": "password",
+        "description": "Secret key for JWT token signing",
+        "category": "security",
+        "label": "JWT Secret",
+    },
+}
+
+
+# Default metadata for unknown keys - defined once to avoid GC pressure
+_DEFAULT_META: dict[str, Any] = {
+    "type": "text",
+    "description": "",
+    "category": "general",
+    "label": "",
+}
+
+
+def get_setting_metadata(key: str) -> dict[str, Any]:
+    """Get metadata for a setting key.
+
+    Args:
+        key: Config key
+
+    Returns:
+        Metadata dict with type, description, category, label
+    """
+    meta = SETTING_METADATA.get(key)
+    if meta is None:
+        return {**_DEFAULT_META, "label": key}
+    return meta
+
+
 def get_channel_enabled_key(channel_name: str) -> str:
     """Build the config key for a channel's enabled setting.
 
@@ -78,4 +210,6 @@ __all__ = [
     "is_runtime_key",
     "KNOWN_RUNTIME_KEYS",
     "get_channel_enabled_key",
+    "SETTING_METADATA",
+    "get_setting_metadata",
 ]

@@ -58,10 +58,40 @@ class TestDashboardSettingsEndpoints:
     def test_put_runtime_setting_saves_successfully(self, dashboard_client) -> None:
         resp = dashboard_client.put(
             "/settings/channels.telegram.enabled",
-            json={"value": "true"},
+            json={"value": True},
         )
         assert resp.status_code == 200
-        assert resp.json() == {"status": "success", "key": "channels.telegram.enabled", "value": "true"}
+        assert resp.json() == {
+            "status": "success",
+            "key": "channels.telegram.enabled",
+            "value": True,
+        }
+
+    def test_put_settings_batch_saves_successfully(self, dashboard_client) -> None:
+        resp = dashboard_client.put(
+            "/settings",
+            json={
+                "values": {
+                    "channels.telegram.enabled": False,
+                    "llm.model": "gpt-4o-mini",
+                }
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "success"
+        assert set(data["updated"]) == {
+            "channels.telegram.enabled",
+            "llm.model",
+        }
+
+    def test_put_settings_batch_rejects_bootstrap_keys(self, dashboard_client) -> None:
+        resp = dashboard_client.put(
+            "/settings",
+            json={"values": {"host": "0.0.0.0"}},
+        )
+        assert resp.status_code == 400
+        assert "Unsupported runtime setting" in resp.json()["detail"]
 
     def test_put_bootstrap_setting_returns_bad_request(self, dashboard_client) -> None:
         resp = dashboard_client.put(

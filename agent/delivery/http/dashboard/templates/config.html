@@ -4,139 +4,142 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard - Config</title>
-    <!-- CSS minimal -->
+    <title>Dashboard - Configuration</title>
+    <link rel="stylesheet" href="/templates/shared.css">
     <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            margin: 0;
-            padding: 0;
-            background-color: #f3f4f6;
+        /* Config-specific styles */
+        .page-subtitle {
+            margin: -8px 0 20px;
+            color: #4b5563;
+            font-size: 0.92rem;
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid #e5e7eb;
+            margin-bottom: 20px;
+        }
+
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            color: #6b7280;
+            font-weight: 500;
+        }
+
+        .tab:hover {
             color: #1f2937;
         }
 
-        .sidebar {
-            width: 250px;
-            height: 100vh;
-            background: #111827;
-            color: white;
-            position: fixed;
+        .tab.active {
+            color: #2563eb;
+            border-bottom-color: #2563eb;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Search */
+        .search-bar {
             display: flex;
-            flex-direction: column;
-        }
-
-        .sidebar h2 {
-            margin: 0;
-            padding: 20px;
-            font-size: 1.25rem;
-            font-weight: 600;
-            border-bottom: 1px solid #374151;
-        }
-
-        .nav {
-            display: flex;
-            flex-direction: column;
-            padding: 10px 0;
-        }
-
-        .nav a {
-            color: #d1d5db;
-            text-decoration: none;
-            padding: 10px 20px;
-            font-size: 1rem;
-        }
-
-        .nav a:hover,
-        .nav a.active {
-            background: #374151;
-            color: white;
-        }
-
-        .main-content {
-            margin-left: 250px;
-            padding: 20px;
-        }
-
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+            gap: 10px;
             margin-bottom: 20px;
         }
 
-        .header h1 {
-            font-size: 1.5rem;
-            margin: 0;
-        }
-
-        .card {
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-            margin-bottom: 20px;
-        }
-
-        .card-header {
-            font-size: 1.25rem;
-            font-weight: 600;
-            margin-bottom: 15px;
-        }
-
-        .table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-
-        .table th,
-        .table td {
-            padding: 12px;
-            text-align: left;
-            border-bottom: 1px solid #e5e7eb;
-        }
-
-        .table th {
-            background-color: #f9fafb;
-            font-weight: 600;
-        }
-
-        .badge {
-            display: inline-block;
-            padding: 4px 8px;
-            border-radius: 4px;
+        .search-input {
+            flex: 1;
+            padding: 10px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
             font-size: 0.875rem;
-            font-weight: 500;
-            background-color: #e5e7eb;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: #2563eb;
+            box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+        }
+
+        /* Category cards */
+        .category-section {
+            margin-bottom: 24px;
+        }
+
+        .category-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+            cursor: pointer;
+        }
+
+        .category-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #1f2937;
+        }
+
+        .category-count {
+            background: #e5e7eb;
+            color: #6b7280;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.75rem;
+        }
+
+        .category-arrow {
+            transition: transform 0.2s;
+        }
+
+        .category-section.collapsed .category-arrow {
+            transform: rotate(-90deg);
+        }
+
+        .category-section.collapsed .category-items {
+            display: none;
+        }
+
+        /* Settings rows */
+        .setting-row {
+            display: grid;
+            grid-template-columns: 200px 1fr 100px 120px;
+            gap: 12px;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid #f3f4f6;
+        }
+
+        .setting-row:last-child {
+            border-bottom: none;
+        }
+
+        .setting-key {
+            font-family: monospace;
+            font-size: 0.875rem;
             color: #374151;
         }
 
-        .badge-source {
-            font-size: 0.75rem;
-            text-transform: uppercase;
-        }
-
-        .btn {
-            display: inline-block;
-            padding: 6px 12px;
-            background: #2563eb;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            text-decoration: none;
+        .setting-label {
             font-size: 0.875rem;
+            color: #6b7280;
         }
 
-        .btn:hover {
-            background: #1d4ed8;
+        .setting-description {
+            font-size: 0.75rem;
+            color: #9ca3af;
+            margin-top: 2px;
         }
 
-        .btn-stop {
-            background: #dc2626;
-        }
-
+        /* Input styles */
         .input-text {
-            padding: 6px 8px;
+            padding: 8px 10px;
             border: 1px solid #d1d5db;
             border-radius: 4px;
             font-size: 0.875rem;
@@ -144,10 +147,168 @@
             box-sizing: border-box;
         }
 
-        .flex {
+        .input-text:focus {
+            outline: none;
+            border-color: #2563eb;
+            box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+        }
+
+        .input-number {
+            padding: 8px 10px;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            font-size: 0.875rem;
+            width: 100px;
+        }
+
+        .input-password-wrapper {
+            position: relative;
             display: flex;
             gap: 8px;
-            align-items: center;
+        }
+
+        .input-password-wrapper input {
+            flex: 1;
+            padding: 8px 10px;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            font-size: 0.875rem;
+        }
+
+        .input-password-wrapper .btn-toggle-password {
+            padding: 8px 12px;
+            background: #f3f4f6;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        /* Toggle switch */
+        .toggle-switch {
+            position: relative;
+            width: 44px;
+            height: 24px;
+            display: inline-block;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #d1d5db;
+            transition: 0.2s;
+            border-radius: 24px;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: 0.2s;
+            border-radius: 50%;
+        }
+
+        .toggle-switch input:checked+.toggle-slider {
+            background-color: #2563eb;
+        }
+
+        .toggle-switch input:checked+.toggle-slider:before {
+            transform: translateX(20px);
+        }
+
+        /* Actions */
+        .setting-actions {
+            display: flex;
+            gap: 6px;
+        }
+
+        .setting-row.is-dirty {
+            background: #fffbeb;
+        }
+
+        .btn[disabled] {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .btn[disabled]:hover {
+            background: #2563eb;
+        }
+
+        /* Diff view */
+        .diff-view {
+            background: #f9fafb;
+            border-radius: 6px;
+            padding: 16px;
+        }
+
+        .diff-row {
+            display: grid;
+            grid-template-columns: 80px 1fr;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .diff-row:last-child {
+            margin-bottom: 0;
+        }
+
+        .diff-label {
+            font-weight: 600;
+            color: #6b7280;
+        }
+
+        .diff-old {
+            color: #dc2626;
+            text-decoration: line-through;
+            font-family: monospace;
+        }
+
+        .diff-new {
+            color: #059669;
+            font-family: monospace;
+        }
+
+        .diff-item {
+            margin-bottom: 14px;
+            padding-bottom: 14px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .diff-item:last-child {
+            margin-bottom: 0;
+            padding-bottom: 0;
+            border-bottom: none;
+        }
+
+        .diff-key {
+            font-family: monospace;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        @media (max-width: 900px) {
+            .setting-row {
+                grid-template-columns: 1fr;
+                gap: 8px;
+            }
+
+            .setting-actions {
+                justify-content: flex-start;
+            }
         }
     </style>
 </head>
@@ -165,74 +326,430 @@
             <a href="/logout" style="color: #ef4444;">Đăng xuất</a>
         </div>
     </div>
+
     <div class="main-content">
         <div class="header">
             <h1>Dynamic Configuration</h1>
+            <div class="header-actions">
+                <button class="btn" id="save-all-btn" onclick="openDiffModal()" disabled>Save Changes</button>
+                <button class="btn btn-ghost" onclick="reloadSettings()">Reload</button>
+                <button class="btn" onclick="openAddModal()">Add Setting</button>
+            </div>
         </div>
 
-        <div class="card">
-            <div class="card-header">Effective Settings Overview</div>
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>Key</th>
-                        <th>Value</th>
-                        <th>Source</th>
-                        <th>Action</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for key, info in settings.items() %}
-                    <tr>
-                        <td style="font-family: monospace;">{{ key }}</td>
-                        <td>
-                            <input type="text" id="input-{{ key }}" class="input-text"
-                                value="{{ info.value if info.value is not none else '' }}" />
-                        </td>
-                        <td>
-                            <span class="badge badge-source">{{ info.source }}</span>
-                        </td>
-                        <td>
-                            <button class="btn" onclick="updateSetting('{{ key }}')">Save</button>
-                        </td>
-                    </tr>
-                    {% else %}
-                    <tr>
-                        <td colspan="4">No settings available.</td>
-                    </tr>
+        <!-- Tabs -->
+        <div class="tabs">
+            <div class="tab active" data-tab="effective">Effective Values</div>
+            <div class="tab" data-tab="sources">By Source</div>
+        </div>
+
+        <!-- Search Bar -->
+        <div class="search-bar">
+            <input type="text" class="search-input" id="search-input" placeholder="Search settings..."
+                oninput="filterSettings()">
+            <select class="search-input" id="category-filter" style="width: 150px;" onchange="filterSettings()">
+                <option value="">All Categories</option>
+                <option value="channels">Channels</option>
+                <option value="llm">LLM</option>
+                <option value="database">Database</option>
+                <option value="security">Security</option>
+            </select>
+        </div>
+
+        <!-- Effective Values Tab -->
+        <div class="tab-content active" id="tab-effective">
+            {% for category, settings_dict in by_category.items() %}
+            <div class="category-section" data-category="{{ category }}">
+                <div class="category-header" onclick="toggleCategory(this.parentElement)">
+                    <span class="category-arrow">▼</span>
+                    <span class="category-title">{{ category | title }}</span>
+                    <span class="category-count">{{ settings_dict | length }}</span>
+                </div>
+                <div class="category-items">
+                    {% for key, info in settings_dict.items() %}
+                    <div class="setting-row" data-key="{{ key }}" data-category="{{ category }}"
+                        data-input-type="{{ info.input_type }}" data-source="{{ info.source }}">
+                        <div>
+                            <div class="setting-label">{{ info.label or key }}</div>
+                            <div class="setting-key">{{ key }}</div>
+                            {% if info.description %}
+                            <div class="setting-description">{{ info.description }}</div>
+                            {% endif %}
+                        </div>
+                        <div>
+                            {% if info.input_type == 'boolean' %}
+                            <label class="toggle-switch">
+                                <input id="input-{{ key }}" type="checkbox" {% if info.value %}checked{% endif %}
+                                    onchange="onSettingInputChange('{{ key }}')">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            {% elif info.input_type == 'password' %}
+                            <div class="input-password-wrapper">
+                                <input type="password" id="input-{{ key }}"
+                                    value="{{ info.value if info.value else '' }}" placeholder="{{ info.description }}"
+                                    oninput="onSettingInputChange('{{ key }}')">
+                                <button class="btn-toggle-password" type="button"
+                                    onclick="togglePasswordVisibility('{{ key }}')">👁</button>
+                            </div>
+                            {% elif info.input_type == 'number' %}
+                            <input type="number" class="input-number" id="input-{{ key }}"
+                                value="{{ info.value if info.value is not none else '' }}" {% if info.min is defined
+                                %}min="{{ info.min }}" {% endif %} {% if info.max is defined %}max="{{ info.max }}" {%
+                                endif %} {% if info.step is defined %}step="{{ info.step }}" {% endif %}
+                                oninput="onSettingInputChange('{{ key }}')">
+                            {% else %}
+                            <input type="{% if info.input_type == 'url' %}url{% else %}text{% endif %}"
+                                class="input-text" id="input-{{ key }}"
+                                value="{{ info.value if info.value is not none else '' }}"
+                                placeholder="{{ info.description }}" oninput="onSettingInputChange('{{ key }}')">
+                            {% endif %}
+                        </div>
+                        <div>
+                            <span class="badge source-{{ info.source }}">{{ info.source }}</span>
+                        </div>
+                        <div class="setting-actions">
+                            <button class="btn btn-sm btn-ghost" onclick="copyValue('{{ key }}')"
+                                title="Copy value">📋</button>
+                            <button class="btn btn-sm btn-ghost" onclick="resetToDefault('{{ key }}')"
+                                title="Reset to default">↩</button>
+                        </div>
+                    </div>
                     {% endfor %}
-                </tbody>
-            </table>
-            <p style="margin-top: 15px; color: #6b7280; font-size: 0.875rem;">
-                Note: Saving changes requires restarting the server to apply in some cases. Runtime setting updates
-                currently have validation but persistence may not be implemented yet.
-            </p>
+                </div>
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <p>No settings found.</p>
+            </div>
+            {% endfor %}
+        </div>
+
+        <!-- By Source Tab -->
+        <div class="tab-content" id="tab-sources">
+            <div class="card">
+                <div class="card-header">Configuration Sources</div>
+                <p style="color: #6b7280; margin-bottom: 16px;">
+                    This shows the raw values from each configuration source.
+                    Higher priority sources override lower ones.
+                </p>
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Key</th>
+                            <th>Default</th>
+                            <th>Config File</th>
+                            <th>Database</th>
+                            <th>Env Override</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for key, source_values in settings_sources.items() %}
+                        {% set by_source = namespace(default='-', config_file='-', database='-', env_override='-') %}
+                        {% for source_value in source_values %}
+                        {% if source_value.source == 'default' %}
+                        {% set by_source.default = source_value.value %}
+                        {% elif source_value.source == 'config_file' %}
+                        {% set by_source.config_file = source_value.value %}
+                        {% elif source_value.source == 'database' %}
+                        {% set by_source.database = source_value.value %}
+                        {% elif source_value.source == 'env_override' %}
+                        {% set by_source.env_override = source_value.value %}
+                        {% endif %}
+                        {% endfor %}
+                        <tr>
+                            <td style="font-family: monospace; font-size: 0.875rem;">{{ key }}</td>
+                            <td style="font-size: 0.875rem;">{{ by_source.default }}</td>
+                            <td style="font-size: 0.875rem;">{{ by_source.config_file }}</td>
+                            <td style="font-size: 0.875rem;">{{ by_source.database }}</td>
+                            <td style="font-size: 0.875rem;">{{ by_source.env_override }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <p style="margin-top: 20px; color: #6b7280; font-size: 0.875rem;">
+            Note: Some changes may require server restart to take effect.
+        </p>
+    </div>
+
+    <!-- Diff Modal -->
+    <div class="modal-overlay" id="diff-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Confirm Changes</h3>
+                <button class="modal-close" onclick="closeDiffModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="diff-summary"></p>
+                <div class="diff-view" id="diff-list"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-ghost" onclick="closeDiffModal()">Cancel</button>
+                <button class="btn" onclick="confirmUpdate()">Confirm Save</button>
+            </div>
         </div>
     </div>
 
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
+
+    <script src="/templates/shared.js"></script>
     <script>
-        async function updateSetting(key) {
-            const input = document.getElementById(`input-${key}`);
-            const val = input.value === "" ? null : input.value;
+        let pendingChanges = [];
+        let filterTimeoutId = null;
+
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                tab.classList.add('active');
+                document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+            });
+        });
+
+        function toggleCategory(section) {
+            section.classList.toggle('collapsed');
+        }
+
+        function applySettingsFilter() {
+            const search = document.getElementById('search-input').value.toLowerCase();
+            const category = document.getElementById('category-filter').value;
+
+            document.querySelectorAll('.setting-row').forEach(row => {
+                const key = row.dataset.key.toLowerCase();
+                const rowCategory = row.dataset.category;
+                const matchesSearch = key.includes(search);
+                const matchesCategory = !category || rowCategory === category;
+                const isVisible = matchesSearch && matchesCategory;
+                row.classList.toggle('is-hidden', !isVisible);
+            });
+
+            document.querySelectorAll('.category-section').forEach(section => {
+                const visibleRows = section.querySelectorAll('.setting-row:not(.is-hidden)');
+                const sectionCategory = section.dataset.category;
+                const matchesCategory = !category || sectionCategory === category;
+                const isVisible = visibleRows.length > 0 && matchesCategory;
+                section.classList.toggle('is-hidden', !isVisible);
+            });
+        }
+
+        function filterSettings() {
+            clearTimeout(filterTimeoutId);
+            filterTimeoutId = setTimeout(applySettingsFilter, 200);
+        }
+
+        function togglePasswordVisibility(key) {
+            const input = document.getElementById('input-' + key);
+            input.type = input.type === 'password' ? 'text' : 'password';
+        }
+
+        function getSettingRow(key) {
+            return document.querySelector(`.setting-row[data-key="${key}"]`);
+        }
+
+        function getTypedValue(input, inputType, useDefault = false) {
+            if (inputType === 'boolean') {
+                return useDefault ? input.defaultChecked : input.checked;
+            }
+
+            const rawValue = useDefault ? input.defaultValue : input.value;
+            if (rawValue === '') {
+                return null;
+            }
+
+            if (inputType === 'number') {
+                const parsed = Number(rawValue);
+                return Number.isNaN(parsed) ? null : parsed;
+            }
+
+            return rawValue;
+        }
+
+        function formatValue(value) {
+            if (value === null) {
+                return '(empty)';
+            }
+            if (typeof value === 'boolean') {
+                return value ? 'true' : 'false';
+            }
+            return String(value);
+        }
+
+        function escapeHtml(text) {
+            return String(text)
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#39;');
+        }
+
+        function collectPendingChanges() {
+            const changes = [];
+
+            document.querySelectorAll('.setting-row').forEach(row => {
+                const key = row.dataset.key;
+                const inputType = row.dataset.inputType;
+                const input = document.getElementById('input-' + key);
+                if (!input) {
+                    return;
+                }
+
+                const forceNull = row.dataset.forceNull === '1';
+                const oldValue = getTypedValue(input, inputType, true);
+                const newValue = forceNull ? null : getTypedValue(input, inputType);
+                const hasChange = forceNull ? oldValue !== null : newValue !== oldValue;
+
+                row.classList.toggle('is-dirty', hasChange);
+                if (!hasChange) {
+                    row.dataset.forceNull = '';
+                    return;
+                }
+
+                changes.push({ key, oldValue, newValue });
+            });
+
+            return changes;
+        }
+
+        function refreshSaveButton() {
+            const changes = collectPendingChanges();
+            const saveButton = document.getElementById('save-all-btn');
+            saveButton.disabled = changes.length === 0;
+            saveButton.textContent = changes.length > 0
+                ? `Save Changes (${changes.length})`
+                : 'Save Changes';
+            return changes;
+        }
+
+        function onSettingInputChange(key) {
+            const row = getSettingRow(key);
+            if (row) {
+                row.dataset.forceNull = '';
+            }
+            refreshSaveButton();
+        }
+
+        function openDiffModal() {
+            const changes = refreshSaveButton();
+
+            if (changes.length === 0) {
+                showToast('No changes to save', 'warning');
+                return;
+            }
+
+            pendingChanges = changes;
+            document.getElementById('diff-summary').textContent = `You are about to update ${changes.length} setting(s):`;
+
+            const diffList = document.getElementById('diff-list');
+            diffList.innerHTML = changes.map(change => `
+                <div class="diff-item">
+                    <div class="diff-key">${escapeHtml(change.key)}</div>
+                    <div class="diff-old">Current: ${escapeHtml(formatValue(change.oldValue))}</div>
+                    <div class="diff-new">New: ${escapeHtml(formatValue(change.newValue))}</div>
+                </div>
+            `).join('');
+
+            document.getElementById('diff-modal').classList.add('active');
+        }
+
+        function closeDiffModal() {
+            document.getElementById('diff-modal').classList.remove('active');
+            pendingChanges = [];
+        }
+
+        async function confirmUpdate() {
+            if (!pendingChanges.length) return;
+
+            const values = {};
+            pendingChanges.forEach(change => {
+                values[change.key] = change.newValue;
+            });
 
             try {
-                const res = await fetch(`/settings/${key}`, {
-                    method: "PUT",
+                const res = await fetch('/settings', {
+                    method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ value: val })
+                    body: JSON.stringify({ values: values })
                 });
 
                 if (res.ok) {
-                    alert('Setting updated successfully!');
+                    showToast(`Updated ${pendingChanges.length} setting(s)`);
+                    scheduleReload();
                 } else {
                     const data = await res.json();
-                    alert("Failed: " + data.detail);
+                    showToast('Failed: ' + (data.detail || 'Unknown error'), 'error');
                 }
             } catch (err) {
                 console.error(err);
-                alert("Error saving setting.");
+                showToast('Error saving settings', 'error');
+            }
+
+            closeDiffModal();
+        }
+
+        async function copyValue(key) {
+            const input = document.getElementById('input-' + key);
+            const row = getSettingRow(key);
+            const value = row
+                ? getTypedValue(input, row.dataset.inputType)
+                : input.value;
+
+            try {
+                await navigator.clipboard.writeText(value === null ? '' : String(value));
+                showToast('Copied to clipboard');
+            } catch (err) {
+                showToast('Failed to copy', 'error');
             }
         }
+
+        function resetToDefault(key) {
+            if (!confirm(`Reset "${key}" to default value?`)) return;
+
+            const row = getSettingRow(key);
+            if (!row) {
+                return;
+            }
+
+            const input = document.getElementById('input-' + key);
+            if (!input) {
+                return;
+            }
+
+            if (row.dataset.source === 'default') {
+                showToast('Setting already uses default source', 'warning');
+                return;
+            }
+
+            row.dataset.forceNull = '1';
+            if (row.dataset.inputType !== 'boolean') {
+                input.value = '';
+            }
+            refreshSaveButton();
+            showToast('Reset queued. Click Save Changes to apply.');
+        }
+
+        async function reloadSettings() {
+            try {
+                const res = await fetch('/settings');
+                if (res.ok) {
+                    showToast('Settings reloaded');
+                    scheduleReload(300);
+                }
+            } catch (err) {
+                console.error(err);
+                showToast('Error reloading settings', 'error');
+            }
+        }
+
+        function openAddModal() {
+            showToast('Add setting feature coming soon', 'warning');
+        }
+
+        applySettingsFilter();
+        refreshSaveButton();
     </script>
 </body>
 

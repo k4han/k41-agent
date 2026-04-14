@@ -5,17 +5,10 @@ from pathlib import Path
 from typing import Any
 
 from apscheduler.job import Job
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
-
-from agent.modules.scheduler.public import (
-    TriggerType,
-    execute_scheduled_task,
-    get_scheduler,
-    normalize_trigger,
-)
 
 from agent.modules.channels.public import (
     ChannelManager,
@@ -26,10 +19,15 @@ from agent.modules.channels.public import (
     stop_all_channels,
     stop_channel,
 )
-from agent.shared.config import is_runtime_key, ConfigService
-from agent.modules.users.public import get_pairing_service
-from fastapi import Depends
 from agent.modules.admin_auth.public import get_current_admin
+from agent.modules.scheduler.public import (
+    TriggerType,
+    execute_scheduled_task,
+    get_scheduler,
+    normalize_trigger,
+)
+from agent.modules.users.public import get_pairing_service
+from agent.shared.config import ConfigService, is_runtime_key
 
 router = APIRouter(tags=["dashboard"], dependencies=[Depends(get_current_admin)])
 logger = logging.getLogger(__name__)
@@ -61,10 +59,23 @@ def _get_scheduler() -> Any:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
-def _collection_payload(
-    channel_manager: ChannelManager,
-) -> dict[str, list[dict[str, str | None]]]:
-    return {"services": list_channel_statuses(channel_manager)}
+def _group_settings_by_category(
+    settings: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, dict[str, Any]]]:
+    grouped: dict[str, dict[str, dict[str, Any]]] = {}
+    for key, info in settings.items():
+        category = info.get("category", "general")
+        grouped.setdefault(category, {})[key] = info
+    return grouped
+
+
+def _ensure_runtime_keys(keys: list[str]) -> None:
+    if invalid_keys := sorted(k for k in keys if not is_runtime_key(k)):
+        suffix = "" if len(invalid_keys) == 1 else "s"
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported runtime setting{suffix}: {', '.join(invalid_keys)}.",
+        )
 
 
 # --- views -------------------------------------------------------------
@@ -78,13 +89,17 @@ async def dashboard_index(request: Request) -> HTMLResponse:
         request=request, name="index.html", context={"services": services}
     )
 
+
 @router.get("/channels", response_class=HTMLResponse)
 async def dashboard_channels(request: Request) -> HTMLResponse:
     pairing_service = get_pairing_service()
     identities = await pairing_service.list_paired_identities()
     return templates.TemplateResponse(
-        request=request, name="channels.html", context={"request": request, "identities": identities}
+        request=request,
+        name="channels.html",
+        context={"request": request, "identities": identities},
     )
+
 
 @router.post("/channels/pair")
 async def generate_pairing_code(request: Request) -> dict[str, str]:
@@ -92,25 +107,37 @@ async def generate_pairing_code(request: Request) -> dict[str, str]:
     code, user_id = await pairing_service.create_pairing_root_user_and_code()
     return {"code": code, "user_id": str(user_id)}
 
+
 @router.delete("/channels/identities/{identity_id}")
 async def unpair_identity(identity_id: int) -> dict[str, str]:
     pairing_service = get_pairing_service()
     await pairing_service.unpair_identity(identity_id)
     return {"status": "success"}
 
+
 @router.get("/config", response_class=HTMLResponse)
 async def dashboard_config(request: Request) -> HTMLResponse:
     service = _get_config_service(request)
     settings = service.get_settings_overview()
+    settings_sources = service.get_settings_sources()
+    by_category = _group_settings_by_category(settings)
+
     return templates.TemplateResponse(
-        request=request, name="config.html", context={"settings": settings}
+        request=request,
+        name="config.html",
+        context={
+            "settings": settings,
+            "by_category": by_category,
+            "settings_sources": settings_sources,
+        },
     )
 
 
 @router.get("/services")
 async def get_services(request: Request) -> dict[str, list[dict[str, str | None]]]:
     channel_manager = _get_channel_manager(request)
-    return _collection_payload(channel_manager)
+    return {"services": list_channel_statuses(channel_manager)}
+
 
 @router.get("/services/{name}")
 async def get_service(name: str, request: Request) -> dict[str, str | None]:
@@ -119,6 +146,7 @@ async def get_service(name: str, request: Request) -> dict[str, str | None]:
         return get_channel_status(channel_manager, name)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
 
 @router.post("/services/{name}/start")
 async def start_service(name: str, request: Request) -> dict[str, str | None]:
@@ -129,6 +157,7 @@ async def start_service(name: str, request: Request) -> dict[str, str | None]:
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+
 @router.post("/services/{name}/stop")
 async def stop_service(name: str, request: Request) -> dict[str, str | None]:
     channel_manager = _get_channel_manager(request)
@@ -138,11 +167,13 @@ async def stop_service(name: str, request: Request) -> dict[str, str | None]:
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+
 @router.post("/services/start-all")
 async def start_all_services(request: Request) -> dict[str, list[dict[str, str | None]]]:
     channel_manager = _get_channel_manager(request)
     services = await start_all_channels(channel_manager)
     return {"services": services}
+
 
 @router.post("/services/stop-all")
 async def stop_all_services(request: Request) -> dict[str, list[dict[str, str | None]]]:
@@ -169,24 +200,44 @@ async def get_settings_sources(request: Request) -> dict[str, dict[str, Any]]:
 
 
 class UpdateSettingBody(BaseModel):
-    value: str | None
+    value: Any | None
+
+
+class UpdateSettingsBody(BaseModel):
+    values: dict[str, Any | None]
 
 
 @router.put("/settings/{key:path}")
-async def update_setting(key: str, body: UpdateSettingBody, request: Request) -> dict[str, str | None]:
+async def update_setting(
+    key: str,
+    body: UpdateSettingBody,
+    request: Request,
+) -> dict[str, Any | None]:
     """Update a runtime setting and persist it to yaml."""
     service = _get_config_service(request)
-    if not is_runtime_key(key):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported runtime setting: '{key}'.",
-        )
+    _ensure_runtime_keys([key])
 
     service.update_setting(key, body.value)
     return {"status": "success", "key": key, "value": body.value}
 
 
+@router.put("/settings")
+async def update_settings(body: UpdateSettingsBody, request: Request) -> dict[str, Any]:
+    """Update multiple runtime settings and persist them to yaml."""
+    if not body.values:
+        return {"status": "success", "updated": []}
+
+    _ensure_runtime_keys(list(body.values))
+
+    service = _get_config_service(request)
+    for key, value in body.values.items():
+        service.update_setting(key, value)
+
+    return {"status": "success", "updated": list(body.values.keys())}
+
+
 # --- scheduler endpoints -----------------------------------------------
+
 
 def _serialize_job(job: Job) -> dict[str, Any]:
     trigger_type = type(job.trigger).__name__.lower().replace("trigger", "")

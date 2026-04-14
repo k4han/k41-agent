@@ -15,6 +15,6 @@ for route in app.routes:
     print(route.path)
 
 client = TestClient(app)
-response = client.get("/dashboard/services")
+response = client.get("/services")
 print(response.status_code)
 print(response.text)

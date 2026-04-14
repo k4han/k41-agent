@@ -5,130 +5,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard - Scheduler</title>
+    <link rel="stylesheet" href="/templates/shared.css">
     <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            margin: 0;
-            padding: 0;
-            background-color: #f3f4f6;
-            color: #1f2937;
-        }
-
-        .sidebar {
-            width: 250px;
-            height: 100vh;
-            background: #111827;
-            color: white;
-            position: fixed;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .sidebar h2 {
-            margin: 0;
-            padding: 20px;
-            font-size: 1.25rem;
-            font-weight: 600;
-            border-bottom: 1px solid #374151;
-        }
-
-        .nav { display: flex; flex-direction: column; padding: 10px 0; }
-        .nav a { color: #d1d5db; text-decoration: none; padding: 10px 20px; font-size: 1rem; }
-        .nav a:hover, .nav a.active { background: #374151; color: white; }
-
-        .main-content { margin-left: 250px; padding: 20px; }
-
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-            border-bottom: 1px solid #e5e7eb;
-            padding-bottom: 12px;
-        }
-        .header h1 { font-size: 1.5rem; margin: 0; }
+        /* Scheduler-specific styles */
         .page-subtitle {
             margin: -8px 0 20px;
             color: #4b5563;
             font-size: 0.92rem;
         }
-
-        .card {
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
-        }
-        .card-header {
-            font-size: 1.15rem;
-            font-weight: 600;
-            margin-bottom: 16px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .table { width: 100%; border-collapse: collapse; }
-        .table th, .table td { padding: 12px; text-align: left; border-bottom: 1px solid #e5e7eb; }
-        .table th { background-color: #f9fafb; font-weight: 600; }
-
-        .badge {
-            display: inline-block;
-            padding: 3px 8px;
-            border-radius: 4px;
-            font-size: 0.8rem;
-            font-weight: 500;
-            text-transform: capitalize;
-        }
-        .badge-cron    { background: #ede9fe; color: #5b21b6; }
-        .badge-interval{ background: #dbeafe; color: #1e40af; }
-        .badge-date    { background: #fef3c7; color: #92400e; }
-        .badge-relative{ background: #dcfce7; color: #166534; }
-        .badge-paused  { background: #fee2e2; color: #991b1b; }
-        .badge-active  { background: #d1fae5; color: #065f46; }
-        .badge-tg      { background: #e0f2fe; color: #0369a1; }
-        .badge-dc      { background: #ede9fe; color: #5b21b6; }
-
-        .btn {
-            display: inline-block;
-            padding: 6px 12px;
-            background: #2563eb;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.875rem;
-            font-weight: 500;
-        }
-        .btn:hover      { background: #1d4ed8; }
-        .btn-secondary  { background: #4b5563; }
-        .btn-secondary:hover { background: #374151; }
-        .btn-ghost {
-            background: white;
-            color: #374151;
-            border: 1px solid #d1d5db;
-        }
-        .btn-ghost:hover { background: #f9fafb; }
-        .btn-danger     { background: #dc2626; }
-        .btn-danger:hover  { background: #b91c1c; }
-        .btn-warning    { background: #d97706; }
-        .btn-warning:hover { background: #b45309; }
-        .btn-success    { background: #059669; }
-        .btn-success:hover { background: #047857; }
-        .btn-sm { padding: 4px 8px; font-size: 0.75rem; }
-
-        .actions { display: flex; gap: 6px; }
-
-        .empty-state { padding: 20px; text-align: center; color: #6b7280; }
-
-        .task-cell {
-            max-width: 260px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        .mono { font-family: monospace; font-size: 0.8rem; color: #6b7280; }
 
         /* Stats */
         .stats-row { display: flex; gap: 16px; margin-bottom: 20px; }
@@ -218,63 +102,18 @@
             gap: 4px;
         }
         .job-meta .mono { word-break: break-all; }
-        .is-hidden { display: none; }
 
-        /* Modal */
-        .modal-overlay {
-            display: none;
-            position: fixed;
-            inset: 0;
-            background: rgba(0,0,0,0.45);
-            z-index: 100;
-            justify-content: center;
-            align-items: center;
+        /* Table cell helpers */
+        .task-cell {
+            max-width: 260px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
-        .modal-overlay.active { display: flex; }
-        .modal {
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 8px 30px rgba(0,0,0,0.2);
-            width: 560px;
-            max-width: 90vw;
-            max-height: 85vh;
-            overflow-y: auto;
-            padding: 24px;
-        }
-        .modal-header {
-            font-size: 1.1rem;
-            font-weight: 600;
-            margin-bottom: 16px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .modal-close {
-            background: none; border: none;
-            font-size: 1.3rem; cursor: pointer; color: #6b7280;
-        }
-        .modal-close:hover { color: #111827; }
+        .mono { font-family: monospace; font-size: 0.8rem; color: #6b7280; }
 
-        /* Toast */
-        .toast {
-            position: fixed; bottom: 20px; right: 20px;
-            background: #065f46; color: white;
-            padding: 11px 18px; border-radius: 6px;
-            font-size: 0.875rem; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            opacity: 0; transform: translateY(8px);
-            transition: opacity 0.25s, transform 0.25s;
-            z-index: 1000;
-        }
-        .toast.show { opacity: 1; transform: translateY(0); }
-        .toast.error { background: #991b1b; }
-
+        /* Responsive */
         @media (max-width: 900px) {
-            .sidebar {
-                position: static;
-                width: auto;
-                height: auto;
-            }
-            .main-content { margin-left: 0; }
             .stats-row,
             .form-grid,
             .table-toolbar {
@@ -756,6 +595,7 @@
 
     <div class="toast" id="toast"></div>
 
+    <script src="/templates/shared.js"></script>
     <script>
         const SCHEDULER_TIMEZONE = {{ scheduler_timezone | tojson }};
         const JOBS = JSON.parse(document.getElementById("scheduler-jobs-data").textContent || "[]");
@@ -768,24 +608,6 @@
             ["month", "cron-month"],
             ["day_of_week", "cron-dow"],
         ];
-
-        function showToast(msg, isError = false) {
-            const t = document.getElementById("toast");
-            t.textContent = msg;
-            t.className = "toast show" + (isError ? " error" : "");
-            setTimeout(() => t.className = "toast", 3000);
-        }
-
-        async function readError(res) {
-            const text = await res.text();
-            if (!text) return "Unknown error";
-            try {
-                const data = JSON.parse(text);
-                return data.detail || data.message || "Unknown error";
-            } catch (_) {
-                return text;
-            }
-        }
 
         function onIdentityChange() {
             const val = document.getElementById("c-identity").value;
@@ -800,7 +622,7 @@
                 const platform = document.getElementById("c-platform").value;
                 const userId = document.getElementById("c-user-id").value.trim();
                 if (!userId) {
-                    showToast("Please enter User ID.", true);
+                    showToast("Please enter User ID.", 'error');
                     return null;
                 }
                 return { platform, userId };
@@ -815,14 +637,6 @@
                 const el = document.getElementById(`${prefix}-panel-${t}`);
                 if (el) el.classList.toggle("active", t === type);
             });
-        }
-
-        function pad(value) {
-            return String(value).padStart(2, "0");
-        }
-
-        function formatDateTimeLocal(date) {
-            return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
         }
 
         function setDateOffset(prefix, minutes) {
@@ -960,7 +774,7 @@
         function buildDurationArgs(prefix, segment, emptyMessage) {
             const values = readDurationValues(prefix, segment);
             if (values === null) {
-                showToast("Duration values must be non-negative numbers.", true);
+                showToast("Duration values must be non-negative numbers.", 'error');
                 return null;
             }
 
@@ -969,7 +783,7 @@
                 if (values[field] > 0) args[field] = values[field];
             });
             if (Object.keys(args).length === 0) {
-                showToast(emptyMessage, true);
+                showToast(emptyMessage, 'error');
                 return null;
             }
             return args;
@@ -981,11 +795,11 @@
             if (type === "date") {
                 const dt = document.getElementById(`${prefix}-date-run`).value;
                 if (!dt) {
-                    showToast("Please select a run date/time.", true);
+                    showToast("Please select a run date/time.", 'error');
                     return null;
                 }
                 if (new Date(dt) <= new Date()) {
-                    showToast("Run date/time must be in the future.", true);
+                    showToast("Run date/time must be in the future.", 'error');
                     return null;
                 }
                 const normalized = dt.replace("T", " ");
@@ -1016,7 +830,7 @@
             e.preventDefault();
             const task = document.getElementById("c-task").value.trim();
             if (!task) {
-                showToast("Please enter a task.", true);
+                showToast("Please enter a task.", 'error');
                 return;
             }
 
@@ -1044,11 +858,11 @@
                     showToast("Job created successfully.");
                     setTimeout(() => location.reload(), 600);
                 } else {
-                    showToast("Failed: " + await readError(res), true);
+                    showToast("Failed: " + await readError(res), 'error');
                 }
             } catch (err) {
                 console.error(err);
-                showToast("Error creating job.", true);
+                showToast("Error creating job.", 'error');
             }
         }
 
@@ -1092,7 +906,7 @@
             const jobId = document.getElementById("e-job-id").value;
             const task = document.getElementById("e-task").value.trim();
             if (!task) {
-                showToast("Please enter a task.", true);
+                showToast("Please enter a task.", 'error');
                 return;
             }
             const body = { task };
@@ -1117,11 +931,11 @@
                     closeEditModal();
                     setTimeout(() => location.reload(), 600);
                 } else {
-                    showToast("Failed: " + await readError(res), true);
+                    showToast("Failed: " + await readError(res), 'error');
                 }
             } catch (err) {
                 console.error(err);
-                showToast("Error updating job.", true);
+                showToast("Error updating job.", 'error');
             }
         }
 
@@ -1163,7 +977,7 @@
             if (action === "edit") {
                 const job = JOBS_BY_ID.get(jobId);
                 if (!job) {
-                    showToast("Unable to find job data.", true);
+                    showToast("Unable to find job data.", 'error');
                     return;
                 }
                 openEditModal(jobId, job);
@@ -1203,7 +1017,7 @@
                 }
                 showToast("Job ID copied.");
             } catch (_) {
-                showToast("Unable to copy Job ID.", true);
+                showToast("Unable to copy Job ID.", 'error');
             }
         }
 
@@ -1214,7 +1028,7 @@
                 showToast("Job deleted.");
                 setTimeout(() => location.reload(), 500);
             } else {
-                showToast("Failed: " + await readError(res), true);
+                showToast("Failed: " + await readError(res), 'error');
             }
         }
 
@@ -1224,7 +1038,7 @@
                 showToast("Job paused.");
                 setTimeout(() => location.reload(), 500);
             } else {
-                showToast("Failed: " + await readError(res), true);
+                showToast("Failed: " + await readError(res), 'error');
             }
         }
 
@@ -1234,7 +1048,7 @@
             if (res.ok) {
                 showToast("Task queued to run now.");
             } else {
-                showToast("Failed: " + await readError(res), true);
+                showToast("Failed: " + await readError(res), 'error');
             }
         }
 
@@ -1244,7 +1058,7 @@
                 showToast("Job resumed.");
                 setTimeout(() => location.reload(), 500);
             } else {
-                showToast("Failed: " + await readError(res), true);
+                showToast("Failed: " + await readError(res), 'error');
             }
         }
 

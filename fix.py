@@ -5,12 +5,13 @@ for path in ['agent/delivery/http/dashboard/templates/index.html',
     with open(path, 'r', encoding='utf-8') as f:
         content = f.read()
 
-    # The actual replacements
-    content = content.replace('href="/"', 'href="/dashboard/"')
-    content = content.replace('href="/channels"', 'href="/dashboard/channels"')
-    content = content.replace('href="/config"', 'href="/dashboard/config"')
-    content = content.replace('href="/change-password"', 'href="/dashboard/change-password"')
-    content = content.replace('href="/logout"', 'href="/dashboard/logout"')
+    # Normalize legacy prefixed links back to root-based dashboard routes.
+    content = content.replace('href="/dashboard/"', 'href="/"')
+    content = content.replace('href="/dashboard/channels"', 'href="/channels"')
+    content = content.replace('href="/dashboard/config"', 'href="/config"')
+    content = content.replace('href="/dashboard/change-password"', 'href="/change-password"')
+    content = content.replace('href="/dashboard/logout"', 'href="/logout"')
+    content = content.replace('href="/dashboard/scheduler"', 'href="/scheduler"')
 
     with open(path, 'w', encoding='utf-8') as f:
         f.write(content)

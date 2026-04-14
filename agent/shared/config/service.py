@@ -14,11 +14,35 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from agent.shared.config.constants import RUNTIME_KEY_PATTERNS, is_runtime_key, KNOWN_RUNTIME_KEYS, get_channel_enabled_key
-from agent.shared.config.models import RuntimeSettings, SettingsSource, SettingsValue
+from agent.shared.config.constants import (
+    KNOWN_RUNTIME_KEYS,
+    get_channel_enabled_key,
+    get_setting_metadata,
+)
+from agent.shared.config.models import RuntimeSettings, SettingsValue
 from agent.shared.infrastructure.config_file import coerce_bool
 
 logger = logging.getLogger(__name__)
+
+_SETTING_META_OPTIONAL_KEYS = ("min", "max", "step")
+
+
+def _build_settings_overview_entry(
+    setting_value: SettingsValue,
+    metadata: dict[str, Any],
+) -> dict[str, object]:
+    entry: dict[str, object] = {
+        **setting_value.to_dict(),
+        "input_type": metadata["type"],
+        "description": metadata["description"],
+        "category": metadata["category"],
+        "label": metadata["label"],
+    }
+
+    for key in _SETTING_META_OPTIONAL_KEYS:
+        if key in metadata:
+            entry[key] = metadata[key]
+    return entry
 
 
 class ConfigService:
@@ -204,9 +228,12 @@ class ConfigService:
         return RuntimeSettings(channel_enabled=channel_enabled)
 
     def get_settings_overview(self) -> dict[str, dict[str, object]]:
-        """Dashboard-friendly overview: effective value + source for each key."""
+        """Dashboard-friendly overview: effective value + source + metadata for each key."""
         merged = self.list_all()
-        return {key: sv.to_dict() for key, sv in sorted(merged.items())}
+        return {
+            key: _build_settings_overview_entry(sv, get_setting_metadata(key))
+            for key, sv in sorted(merged.items())
+        }
 
     def get_settings_sources(self) -> dict[str, list[dict[str, object]]]:
         """Dashboard-friendly: all sources for each key."""
@@ -215,9 +242,10 @@ class ConfigService:
             key: [sv.to_dict() for sv in vals]
             for key, vals in sorted(by_key.items())
         }
+
     def update_setting(self, key: str, value: Any) -> None:
-        """Update a specific config setting. Currently updates the yaml file directly.
-        
+        """Update a specific config setting.
+
         Args:
             key: Config key to update
             value: New value to set
@@ -226,6 +254,8 @@ class ConfigService:
             if hasattr(source, "update_setting"):
                 source.update_setting(key, value)
         self.reload()
+
+
 # Singleton instances
 _config_service: ConfigService | None = None
 _config_sources: list | None = None

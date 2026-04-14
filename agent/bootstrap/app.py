@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from agent.bootstrap.runtime import AppRuntime
 from agent.bootstrap.settings import BootstrapConfig, load_bootstrap_config
@@ -63,6 +64,11 @@ def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:
     if bootstrap_config.enable_dashboard:
         fastapi_app.include_router(auth_router)
         fastapi_app.include_router(dashboard_router)
+        fastapi_app.mount(
+            "/templates",
+            StaticFiles(directory="agent/delivery/http/dashboard/templates"),
+            name="dashboard-static",
+        )
 
     @fastapi_app.get("/health")
     async def health(request: Request):
