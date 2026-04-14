@@ -18,6 +18,9 @@ enable_dashboard: true
 
 # LLM Provider configuration
 llm:
+  # Provider backend: openai_compatible | google
+  provider: "openai_compatible"
+
   # API key for LLM provider (REQUIRED)
   api_key: "your-api-key-here"
 
@@ -29,6 +32,11 @@ llm:
 
   # Temperature for model responses (optional)
   # temperature: 0.0
+
+  # Alternative: Use Google Gemini via langchain-google-genai
+  # provider: "google"
+  # model: "gemini-2.0-flash"
+  # base_url is ignored for this provider
 
 # Security Configuration
 security:

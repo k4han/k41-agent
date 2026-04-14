@@ -16,6 +16,7 @@ from agent.modules.workflows.infrastructure.langgraph.state.extensions import (
     ResearchState,
 )
 from agent.modules.providers.public import get_chat_model
+from agent.shared.infrastructure.parsing import extract_final_text_content
 
 
 async def _research_node(state: ResearchState, config: RunnableConfig):
@@ -37,7 +38,10 @@ async def _summarize_node(state: ResearchState, config: RunnableConfig):
         "có cấu trúc rõ ràng với: Tóm tắt, Điểm chính, Kết luận."
     ))
     response = await llm.ainvoke([system, *state["messages"]])
-    return {"messages": [response], "summary": response.content}
+    return {
+        "messages": [response],
+        "summary": extract_final_text_content(response.content),
+    }
 
 
 def build_research_graph() -> None:

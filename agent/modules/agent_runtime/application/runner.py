@@ -1,6 +1,7 @@
 from typing import Any, AsyncGenerator
 
 from langchain_core.messages import HumanMessage
+from agent.shared.infrastructure.parsing import extract_final_text_content
 
 from agent.modules.agent_runtime.application.session import SessionManager
 from agent.modules.workflows.public import (
@@ -124,8 +125,10 @@ async def run_agent(
         messages = event.get("messages", [])
         if messages:
             last = messages[-1]
-            if last.__class__.__name__ == "AIMessage" and last.content:
-                yield str(last.content)
+            if last.__class__.__name__ == "AIMessage":
+                content = extract_final_text_content(getattr(last, "content", None))
+                if content:
+                    yield content
 
 
 async def run_agent_stream(
@@ -204,10 +207,11 @@ async def run_agent_stream(
                         "name": tc.get("name"),
                         "args": tc.get("args")
                     }
-            if last.content and not tool_calls:
+            content = extract_final_text_content(getattr(last, "content", None))
+            if content and not tool_calls:
                 yield {
                     "type": "final",
-                    "content": str(last.content)
+                    "content": content
                 }
 
 async def run_agent_full(

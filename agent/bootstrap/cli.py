@@ -89,14 +89,15 @@ def init():
                 click.echo("[IMPORTANT] Please edit config.yaml and set your API key!")
             else:
                 # Fallback: create minimal config
-                minimal_config = """# Kaka Agent Configuration
-# Please set your LLM API key below
-
-llm:
-  api_key: "your-api-key-here"
-  base_url: "https://api.mistral.ai/v1"
-  model: "devstral-2512"
-"""
+                minimal_config = (
+                    "# Kaka Agent Configuration\n"
+                    "# Please set your LLM API key below\n\n"
+                    "llm:\n"
+                    "  provider: \"openai_compatible\"\n"
+                    "  api_key: \"your-api-key-here\"\n"
+                    "  base_url: \"https://api.mistral.ai/v1\"\n"
+                    "  model: \"devstral-2512\"\n"
+                )
                 config_file.write_text(minimal_config)
                 click.echo(f"[OK] Created minimal config at {config_file}")
                 click.echo("[IMPORTANT] Please edit config.yaml and set your API key!")

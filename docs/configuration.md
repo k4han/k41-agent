@@ -33,6 +33,7 @@ database:
 
 # LLM Provider configuration
 llm:
+  provider: "openai_compatible"  # or "google"
   api_key: "your-api-key-here"  # REQUIRED
   base_url: "https://api.mistral.ai/v1"
   model: "devstral-2512"
@@ -73,6 +74,7 @@ Bạn PHẢI cấu hình API key cho LLM provider:
 
 ```yaml
 llm:
+  provider: "openai_compatible"
   api_key: "sk-your-actual-api-key"
 ```
 
@@ -133,6 +135,29 @@ llm:
 ```
 
 Truy cập bằng: `config.get_str("llm.api_key")`, `config.get_str("llm.model")`
+
+## Provider Backends
+
+### OpenAI-compatible (default)
+
+```yaml
+llm:
+  provider: "openai_compatible"
+  api_key: "sk-..."
+  base_url: "https://api.mistral.ai/v1"
+  model: "devstral-2512"
+```
+
+### Google Gemini (langchain-google-genai)
+
+```yaml
+llm:
+  provider: "google"
+  api_key: "AIza..."
+  model: "gemini-2.0-flash"
+```
+
+Với `google`, trường `llm.base_url` sẽ bị bỏ qua.
 
 ## YAML-only Configuration
 

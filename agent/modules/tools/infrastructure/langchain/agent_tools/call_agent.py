@@ -10,6 +10,7 @@ from langgraph.prebuilt import ToolRuntime
 from typing import Annotated
 
 from agent.modules.tools.infrastructure.runtime.context import get_context_value
+from agent.shared.infrastructure.parsing import extract_final_text_content
 
 logger = logging.getLogger(__name__)
 
@@ -93,9 +94,11 @@ async def call_agent(
         )
         messages = result.get("messages", [])
         for msg in reversed(messages):
-            content = getattr(msg, "content", None)
-            if content and msg.__class__.__name__ == "AIMessage":
-                return str(content)
+            if msg.__class__.__name__ != "AIMessage":
+                continue
+            content = extract_final_text_content(getattr(msg, "content", None))
+            if content:
+                return content
         return "(empty response)"
     except Exception as e:
         logger.exception(

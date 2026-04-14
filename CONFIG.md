@@ -29,6 +29,7 @@ Chỉnh sửa `~/.kaka-agent/config.yaml`:
 ```yaml
 # LLM Provider
 llm:
+  provider: "openai_compatible"  # hoặc "google"
   api_key: "your-actual-api-key"  # Thay bằng API key thật
   base_url: "https://api.mistral.ai/v1"
   model: "devstral-2512"
@@ -57,9 +58,7 @@ kaka serve
 Hệ thống đọc cấu hình theo thứ tự ưu tiên:
 
 1. **Config file** (`~/.kaka-agent/config.yaml`)
-   - `llm.api_key`, `llm.base_url`, `llm.model`
-   - `database.url`
-   - `channels.telegram.bot_token`, `channels.discord.bot_token`
+  Keys: `llm.provider`, `llm.api_key`, `llm.base_url`, `llm.model`, `database.url`, `channels.telegram.bot_token`, `channels.discord.bot_token`
 
 2. **Defaults** (thấp nhất)
 
@@ -85,9 +84,19 @@ database:
 
 ```yaml
 llm:
+  provider: "openai_compatible"
   api_key: "sk-..."
   base_url: "https://api.openai.com/v1"
   model: "gpt-4"
+```
+
+### Sử dụng Google Gemini (langchain-google-genai)
+
+```yaml
+llm:
+  provider: "google"
+  api_key: "AIza..."
+  model: "gemini-2.0-flash"
 ```
 
 ### Chỉ chạy API, tắt dashboard

@@ -204,6 +204,66 @@ async def test_call_agent_omits_context_for_graph_without_context_schema(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_call_agent_extracts_last_text_from_structured_content(monkeypatch):
+    class _FakeCatalog:
+        def validate_call(self, caller_name: str, target_name: str) -> bool:
+            return True
+
+        def get_agent(self, name: str):
+            if name != "child-agent":
+                return None
+            return SimpleNamespace(
+                graph_type="react_agent",
+                service_type="backend",
+                max_context_tokens=1234,
+                tools=["echo"],
+            )
+
+    class _FakeGraph:
+        async def ainvoke(self, payload, *, config, context):
+            return {
+                "messages": [
+                    AIMessage(
+                        content=[
+                            {"type": "thinking", "thinking": "internal"},
+                            {"type": "text", "text": "child final response"},
+                        ]
+                    )
+                ]
+            }
+
+    monkeypatch.setattr(
+        "agent.modules.agents.public.get_catalog_service",
+        lambda: _FakeCatalog(),
+    )
+    monkeypatch.setattr(
+        "agent.modules.workflows.public.get_workflow_graph",
+        lambda name: _FakeGraph(),
+    )
+    monkeypatch.setattr(
+        "agent.modules.workflows.public.make_run_context",
+        lambda **kwargs: kwargs,
+    )
+    monkeypatch.setattr(
+        "agent.modules.workflows.public.make_run_config",
+        lambda **kwargs: {"configurable": {"thread_id": kwargs["thread_id"]}},
+    )
+
+    runtime = SimpleNamespace(
+        context={"agent_name": "parent-agent", "working_dir": "D:/repo"},
+        config={"configurable": {"thread_id": "parent-thread"}},
+    )
+
+    result = await call_agent.coroutine(
+        task="delegate this",
+        sub_agent="child-agent",
+        runtime=runtime,
+    )
+
+    assert result == "child final response"
+
+
+@pytest.mark.asyncio
 async def test_tool_node_resolves_runtime_allowed_tools(monkeypatch):
     captured: dict = {}
 

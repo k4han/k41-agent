@@ -100,6 +100,7 @@ channels:
     enabled: false
 
 llm:
+  provider: "openai_compatible" # or "google"
   api_key: "sk-..."
   base_url: "https://api.mistral.ai/v1"
   model: "devstral-2512"
@@ -111,7 +112,9 @@ Quy ước hiện tại:
 - `channels.telegram.enabled`, `channels.discord.enabled`: nếu `true` thì channel sẽ tự khởi động cùng app. Các background channel vẫn luôn được đăng ký vào runtime, nên dashboard vẫn có thể start/stop chúng về sau ngay cả khi giá trị này là `false`.
 - Dashboard chỉ thay đổi trạng thái runtime hiện tại. Khi restart app, trạng thái mặc định quay về theo `~/.kaka-agent/config.yaml`.
 - Với dashboard chạy ở prefix gốc `/`, alias cũ `/bots/*` đã bị loại bỏ. Chỉ dùng `/services/*`.
-- LLM client hiện dùng `ChatOpenAI` với endpoint OpenAI-compatible. Mặc định repo trỏ tới Mistral-compatible `llm.base_url` và `llm.model`.
+- LLM client hỗ trợ 2 backend qua `llm.provider`:
+  - `openai_compatible` -> dùng `ChatOpenAI` với `llm.base_url`.
+  - `google` -> dùng `ChatGoogleGenerativeAI` (bỏ qua `llm.base_url`).
 - API key được đọc duy nhất từ `llm.api_key` trong YAML config.
 
 ## API Endpoints

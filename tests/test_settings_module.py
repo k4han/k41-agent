@@ -65,7 +65,14 @@ class TestDefaultConfigSource:
         all_settings = source.get_all_settings_values()
 
         # Check that runtime keys with defaults are in all_settings
-        for key in ("channels.telegram.enabled", "channels.discord.enabled", "database.url", "llm.base_url", "llm.model"):
+        for key in (
+            "channels.telegram.enabled",
+            "channels.discord.enabled",
+            "database.url",
+            "llm.provider",
+            "llm.base_url",
+            "llm.model",
+        ):
             assert key in all_settings, f"{key} should be in all_settings"
 
     def test_all_values_have_default_source(self) -> None:

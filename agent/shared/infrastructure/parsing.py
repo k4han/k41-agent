@@ -3,6 +3,66 @@
 from __future__ import annotations
 
 
+def _normalize_text(value: object) -> str:
+    if value is None:
+        return ""
+    text = value if isinstance(value, str) else str(value)
+    return text if text.strip() else ""
+
+
+def _extract_text_from_part(part: object, *, skip_thinking: bool) -> str:
+    if isinstance(part, str):
+        return _normalize_text(part)
+
+    if isinstance(part, dict):
+        part_type = str(part.get("type", "") or "").strip().lower()
+        if skip_thinking and part_type == "thinking":
+            return ""
+
+        text_value = _normalize_text(part.get("text"))
+        if text_value:
+            return text_value
+
+        content_value = part.get("content")
+        if isinstance(content_value, list):
+            return extract_final_text_content(content_value)
+        if isinstance(content_value, str):
+            return _normalize_text(content_value)
+        return ""
+
+    text_attr = getattr(part, "text", None)
+    return _normalize_text(text_attr)
+
+
+def extract_final_text_content(value: object) -> str:
+    """Extract the final user-visible text from model message content.
+
+    Supports plain strings and structured content blocks (for example Google
+    responses that may contain `thinking` + `text` parts).
+    """
+    if isinstance(value, str):
+        return _normalize_text(value)
+
+    if isinstance(value, dict):
+        return _extract_text_from_part(value, skip_thinking=False)
+
+    if isinstance(value, list):
+        # Prefer the last non-thinking text block.
+        for part in reversed(value):
+            text = _extract_text_from_part(part, skip_thinking=True)
+            if text:
+                return text
+
+        # Fallback: return any last extractable text.
+        for part in reversed(value):
+            text = _extract_text_from_part(part, skip_thinking=False)
+            if text:
+                return text
+        return ""
+
+    return _normalize_text(value)
+
+
 def parse_string_or_list(value: object, separator: str = ",") -> list[str]:
     """Parse a string (comma-separated) or list into a list of strings.
 
@@ -41,4 +101,8 @@ def safe_str_strip(value: object, default: str = "") -> str:
     return result if result else default
 
 
-__all__ = ["parse_string_or_list", "safe_str_strip"]
+__all__ = [
+    "extract_final_text_content",
+    "parse_string_or_list",
+    "safe_str_strip",
+]

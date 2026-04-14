@@ -8,6 +8,9 @@ from langchain_core.language_models import BaseChatModel
 from agent.modules.providers.application.provider_service import ProviderService
 from agent.modules.providers.application.resolve_chat_model import resolve_chat_model
 from agent.modules.providers.domain.provider import ProviderType
+from agent.modules.providers.infrastructure.google.factory import (
+    GoogleFactory,
+)
 from agent.modules.providers.infrastructure.openai_compatible.factory import (
     OpenAICompatibleFactory,
 )
@@ -26,6 +29,7 @@ def _get_provider_service() -> ProviderService:
         service.register_factory(
             ProviderType.OPENAI_COMPATIBLE, OpenAICompatibleFactory()
         )
+        service.register_factory(ProviderType.GOOGLE, GoogleFactory())
         _provider_service = service
     return _provider_service
 

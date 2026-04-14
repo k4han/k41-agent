@@ -10,7 +10,7 @@ from typing import Any
 # These patterns define which keys can be updated at runtime
 RUNTIME_KEY_PATTERNS = [
     r"^channels\.(telegram|discord)\.(enabled|bot_token|default_agent|code_agent|research_agent)$",
-    r"^llm\.(api_key|base_url|model|temperature)$",
+    r"^llm\.(provider|api_key|base_url|model|temperature)$",
     r"^database\.url$",
     r"^security\.jwt_secret$",
 ]
@@ -28,7 +28,7 @@ def _expand_runtime_keys() -> set[str]:
     for channel in ("telegram", "discord"):
         for prop in ("enabled", "bot_token", "default_agent", "code_agent", "research_agent"):
             keys.add(f"channels.{channel}.{prop}")
-    for prop in ("api_key", "base_url", "model", "temperature"):
+    for prop in ("provider", "api_key", "base_url", "model", "temperature"):
         keys.add(f"llm.{prop}")
     keys.add("database.url")
     keys.add("security.jwt_secret")
@@ -48,6 +48,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # Database: Empty by default, will use SQLite if not set
     "database.url": "",
     # LLM provider configuration
+    "llm.provider": "openai_compatible",
     "llm.base_url": "https://api.mistral.ai/v1",
     "llm.model": "devstral-2512",
     "llm.temperature": 0.0,
@@ -124,6 +125,12 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "label": "Discord Research Agent",
     },
     # LLM settings
+    "llm.provider": {
+        "type": "text",
+        "description": "LLM provider backend (openai_compatible or google)",
+        "category": "llm",
+        "label": "LLM Provider",
+    },
     "llm.api_key": {
         "type": "password",
         "description": "API key for LLM provider",
