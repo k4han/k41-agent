@@ -51,12 +51,16 @@ def _extract_provider_entries(flat_config: dict[str, Any]) -> dict[str, dict[str
         if not provider_key:
             continue
 
+        canonical_field_name = "type" if field_name == "provider" else field_name
+
         provider_name = provider_name_raw.strip()
         entry = providers.setdefault(
             provider_key,
             {"_provider_name": provider_name or provider_key},
         )
-        entry[field_name] = value
+        if field_name == "provider" and "type" in entry:
+            continue
+        entry[canonical_field_name] = value
 
     return providers
 
@@ -107,14 +111,10 @@ def _build_provider_config(
     global_default_model: str,
 ) -> ProviderConfig:
     provider_name = str(provider_values.get("_provider_name", provider_key)).strip() or provider_key
-    provider_type_value = (
-        provider_values.get("provider")
-        or provider_values.get("type")
-        or provider_key
-    )
+    provider_type_value = provider_values.get("type") or provider_key
     provider_type = _resolve_provider_type_for_key(
         str(provider_type_value),
-        f"llm.providers.{provider_name}.provider",
+        f"llm.providers.{provider_name}.type",
     )
     enabled = coerce_bool(provider_values.get("enabled", True))
 

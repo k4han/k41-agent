@@ -26,14 +26,14 @@ llm:
 
   providers:
     primary:
-      provider: "openai_compatible"
+      type: "openai_compatible"
       api_key: "your-primary-provider-api-key"
       base_url: "https://api.example.com/v1"
       default_model: ""
       enabled: true
 
     secondary:
-      provider: "google"
+      type: "google"
       api_key: "your-secondary-provider-api-key"
       default_model: ""
       enabled: true

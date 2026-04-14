@@ -1,1 +1,1 @@
-"""Subagents module — define and manage agents via Markdown files."""
+"""Agents module — define and manage agents via Markdown files."""

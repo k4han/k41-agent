@@ -50,7 +50,6 @@ def init():
         kaka_dir,
         kaka_dir / "data",
         kaka_dir / "agents",
-        kaka_dir / "subagents",
         kaka_dir / "skills",
     ]
 
@@ -97,7 +96,7 @@ def init():
                     "  default_model: \"\"\n"
                     "  providers:\n"
                     "    primary:\n"
-                    "      provider: \"openai_compatible\"\n"
+                    "      type: \"openai_compatible\"\n"
                     "      api_key: \"your-api-key-here\"\n"
                     "      base_url: \"https://api.example.com/v1\"\n"
                     "      default_model: \"\"\n"

@@ -152,12 +152,12 @@ def test_repo_multi_provider_with_default_provider(monkeypatch: MonkeyPatch, tmp
                     default_provider: "google-main"
                     providers:
                         openai-main:
-                            provider: "openai_compatible"
+                            type: "openai_compatible"
                             api_key: "openai-key"
                             base_url: "https://openai-compatible.local/v1"
                             default_model: "openai-main-model"
                         google-main:
-                            provider: "google"
+                            type: "google"
                             api_key: "google-key"
                             default_model: "google-main-model"
                 """,
@@ -190,10 +190,10 @@ def test_repo_multi_provider_global_default_model(monkeypatch: MonkeyPatch, tmp_
                     default_model: "global-model"
                     providers:
                         openai-main:
-                            provider: "openai_compatible"
+                            type: "openai_compatible"
                             api_key: "openai-key"
                         google-main:
-                            provider: "google"
+                            type: "google"
                             api_key: "google-key"
                 """,
         )
@@ -214,7 +214,7 @@ def test_repo_default_provider_cannot_be_disabled(monkeypatch: MonkeyPatch, tmp_
                     default_provider: "google-main"
                     providers:
                         google-main:
-                            provider: "google"
+                            type: "google"
                             api_key: "google-key"
                             enabled: false
                 """,
@@ -468,7 +468,7 @@ def test_resolve_chat_model_uses_provider_specific_temperature(
                     temperature: 1.2
                     providers:
                         openai-main:
-                            provider: "openai_compatible"
+                            type: "openai_compatible"
                             api_key: "openai-key"
                             default_model: "provider-model"
                             temperature: 0.2
