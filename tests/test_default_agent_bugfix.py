@@ -63,7 +63,6 @@ async def test_telegram_default_agent_gets_tools():
     """Verify Telegram's default agent flow loads tools correctly."""
     from agent.modules.agent_runtime.application.runner import build_run_params
     from agent.modules.agents.public import get_catalog_service
-    import os
 
     # Simulate Telegram handler logic
     def _resolve_catalog_agent_name(*candidates):
@@ -78,7 +77,7 @@ async def test_telegram_default_agent_gets_tools():
 
     # Simulate what Telegram does
     default_agent_name = _resolve_catalog_agent_name(
-        os.getenv("KAKA_TELEGRAM_DEFAULT_AGENT"),
+        None,
         "default",
     )
 
@@ -91,7 +90,7 @@ async def test_telegram_default_agent_gets_tools():
         user_id="123456",
         user_input="Hello",
         channel_id="789",
-        working_dir=os.getcwd(),
+        working_dir=".",
         agent_name=default_agent_name,
     )
 

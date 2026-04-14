@@ -17,7 +17,6 @@ class SettingsSource(str, Enum):
     DEFAULT = "default"
     CONFIG_FILE = "config_file"
     DATABASE = "database"
-    ENV_OVERRIDE = "env_override"
 
 
 @dataclass(frozen=True, slots=True)

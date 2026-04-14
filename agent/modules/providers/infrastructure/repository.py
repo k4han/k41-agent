@@ -3,8 +3,6 @@
 Reads provider configuration from the centralized config service.
 """
 
-import os
-
 from agent.modules.providers.domain.provider import ProviderConfig, ProviderType
 from agent.shared.config import get_config_service
 from agent.shared.infrastructure.validation import is_placeholder_value
@@ -12,27 +10,19 @@ from agent.shared.infrastructure.validation import is_placeholder_value
 
 DEFAULT_MODEL = "devstral-2512"
 DEFAULT_BASE_URL = "https://api.mistral.ai/v1"
-# Env var name used internally for LangChain compatibility
-_LANGCHAIN_API_KEY_ENV_VAR = "_KAKA_LLM_API_KEY"
 
 
-class EnvProviderRepository:
+class ConfigProviderRepository:
     """Resolve provider configs from config service."""
 
-    def __init__(self) -> None:
-        self._providers: dict[str, ProviderConfig] | None = None
-
     def _load(self) -> dict[str, ProviderConfig]:
-        if self._providers is not None:
-            return self._providers
-
         config = get_config_service()
 
         base_url = config.get_str("llm.base_url", DEFAULT_BASE_URL)
         default_model = config.get_str("llm.model", DEFAULT_MODEL)
 
         # Get API key from config
-        api_key = config.get_str("llm.api_key", "")
+        api_key = config.get_str("llm.api_key", "").strip()
 
         # Validate API key
         if is_placeholder_value(api_key):
@@ -41,21 +31,16 @@ class EnvProviderRepository:
                 "Please set 'llm.api_key' in ~/.kaka-agent/config.yaml"
             )
 
-        # Store API key in environment variable for LangChain compatibility
-        os.environ[_LANGCHAIN_API_KEY_ENV_VAR] = api_key
-        api_key_env_var = _LANGCHAIN_API_KEY_ENV_VAR
-
         default_provider = ProviderConfig(
             name="default",
             provider_type=ProviderType.OPENAI_COMPATIBLE,
             base_url=base_url,
-            api_key_env_var=api_key_env_var,
+            api_key=api_key,
             default_model=default_model,
             enabled=True,
         )
 
-        self._providers = {"default": default_provider}
-        return self._providers
+        return {"default": default_provider}
 
     def get_provider(self, name: str) -> ProviderConfig:
         providers = self._load()

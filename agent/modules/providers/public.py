@@ -11,7 +11,7 @@ from agent.modules.providers.domain.provider import ProviderType
 from agent.modules.providers.infrastructure.openai_compatible.factory import (
     OpenAICompatibleFactory,
 )
-from agent.modules.providers.infrastructure.repository import EnvProviderRepository
+from agent.modules.providers.infrastructure.repository import ConfigProviderRepository
 
 # --- Module-level singleton ---
 
@@ -21,7 +21,7 @@ _provider_service: ProviderService | None = None
 def _get_provider_service() -> ProviderService:
     global _provider_service
     if _provider_service is None:
-        repo = EnvProviderRepository()
+        repo = ConfigProviderRepository()
         service = ProviderService(repository=repo)
         service.register_factory(
             ProviderType.OPENAI_COMPATIBLE, OpenAICompatibleFactory()

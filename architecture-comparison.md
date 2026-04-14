@@ -157,17 +157,17 @@ enabled = config.get_bool("channels.telegram.enabled", False)
 # Hiện tại: providers/public.py
 from agent.modules.providers.application.provider_service import ProviderService
 from agent.modules.providers.domain.provider import ProviderType
-from agent.modules.providers.infrastructure.repository import EnvProviderRepository
+from agent.modules.providers.infrastructure.repository import ConfigProviderRepository
 
 _provider_service: ProviderService | None = None
 
 def _get_provider_service() -> ProviderService:
     global _provider_service
     if _provider_service is None:
-        repo = EnvProviderRepository()
-        service = ProviderService(repository=repo)
-        service.register_factory(ProviderType.OPENAI_COMPATIBLE, OpenAICompatibleFactory())
-        _provider_service = service
+   repo = ConfigProviderRepository()
+   service = ProviderService(repository=repo)
+   service.register_factory(ProviderType.OPENAI_COMPATIBLE, OpenAICompatibleFactory())
+   _provider_service = service
     return _provider_service
 
 # Đề xuất: providers/__init__.py
@@ -188,7 +188,7 @@ def get_chat_model(model: str | None = None, provider: str | None = None) -> Bas
 |-----------|----------|---------|----------|
 | **Số hệ thống config** | 2 hệ thống: `shared/config/` + `modules/settings/` | 1 hệ thống: `shared/config.py` | ✅ **Đề xuất tốt hơn** - Loại bỏ duplication |
 | **Complexity** | ConfigService + RuntimeSettingsService + SettingsRepository | ConfigService duy nhất | ✅ **Đề xuất tốt hơn** - Single source of truth |
-| **Precedence** | DEFAULT → CONFIG_FILE → DATABASE → ENV_OVERRIDE | Giữ nguyên precedence logic | ✅ **Đề xuất giữ nguyên** - Logic đúng |
+| **Precedence** | DEFAULT → CONFIG_FILE | Giữ YAML làm nguồn runtime duy nhất | ✅ **Đề xuất giữ nguyên** - Rõ ràng, không nhầm lẫn |
 
 **Hiện tại có 2 hệ thống:**
 1. `shared/config/service.py` - ConfigService (171 dòng)

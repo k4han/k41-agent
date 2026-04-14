@@ -5,7 +5,7 @@ This service provides both:
 2. Advanced settings tracking (get_effective, list_all_by_source, etc.)
 
 Precedence (low → high):
-    DEFAULT (priority 0) → CONFIG_FILE (priority 100) → DATABASE (priority 200) → ENV_OVERRIDE (priority 300)
+    DEFAULT (priority 0) → CONFIG_FILE (priority 100)
 """
 
 from __future__ import annotations

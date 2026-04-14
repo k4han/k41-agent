@@ -24,7 +24,7 @@ def load_bootstrap_config() -> BootstrapConfig:
     config = get_config_service()
 
     return BootstrapConfig(
-        host=config.get_str(CONFIG_KEY_HOST, "0.0.0.0"),
+        host=config.get_str(CONFIG_KEY_HOST, "localhost"),
         port=config.get_int(CONFIG_KEY_PORT, 8000),
         enable_web=config.get_bool(CONFIG_KEY_ENABLE_WEB, True),
         enable_api=config.get_bool(CONFIG_KEY_ENABLE_API, True),

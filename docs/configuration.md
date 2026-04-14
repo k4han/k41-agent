@@ -97,7 +97,6 @@ Config được load theo thứ tự ưu tiên:
 
 1. **Default values** (priority: 0) - Hardcoded defaults
 2. **YAML file** (priority: 100) - `~/.kaka-agent/config.yaml`
-3. **Database** (priority: 200) - System config table (future)
 
 Higher priority overrides lower priority.
 
@@ -135,31 +134,10 @@ llm:
 
 Truy cập bằng: `config.get_str("llm.api_key")`, `config.get_str("llm.model")`
 
-## Migration from .env
+## YAML-only Configuration
 
-Nếu bạn đang dùng `.env` file, hãy migrate sang `config.yaml`:
-
-### Before (.env)
-```bash
-LLM_API_KEY=sk-xxx
-LLM_MODEL=gpt-4
-TELEGRAM_BOT_TOKEN=123:ABC
-DATABASE_URL=sqlite:///data/db.sqlite
-```
-
-### After (config.yaml)
-```yaml
-llm:
-  api_key: sk-xxx
-  model: gpt-4
-
-channels:
-  telegram:
-    bot_token: 123:ABC
-
-database:
-  url: sqlite+aiosqlite:///data/db.sqlite
-```
+Ứng dụng chỉ đọc cấu hình từ `~/.kaka-agent/config.yaml`.
+Ngoài YAML file, không có thêm nguồn runtime config nào khác.
 
 ## Validation
 
@@ -172,18 +150,7 @@ Khi khởi động, ứng dụng sẽ validate:
 
 ## Future: Database Configuration
 
-Trong tương lai, config có thể được lưu vào database và edit qua dashboard UI:
-
-```sql
-CREATE TABLE system_config (
-    key VARCHAR(255) PRIMARY KEY,
-    value TEXT,
-    value_type VARCHAR(50),
-    description TEXT
-);
-```
-
-Database config sẽ có priority cao nhất và override YAML file.
+Nếu bổ sung database config source trong tương lai, tài liệu này sẽ cập nhật thứ tự precedence tương ứng.
 
 ## Troubleshooting
 

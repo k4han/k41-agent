@@ -439,12 +439,11 @@
                             <th>Default</th>
                             <th>Config File</th>
                             <th>Database</th>
-                            <th>Env Override</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for key, source_values in settings_sources.items() %}
-                        {% set by_source = namespace(default='-', config_file='-', database='-', env_override='-') %}
+                        {% set by_source = namespace(default='-', config_file='-', database='-') %}
                         {% for source_value in source_values %}
                         {% if source_value.source == 'default' %}
                         {% set by_source.default = source_value.value %}
@@ -452,8 +451,6 @@
                         {% set by_source.config_file = source_value.value %}
                         {% elif source_value.source == 'database' %}
                         {% set by_source.database = source_value.value %}
-                        {% elif source_value.source == 'env_override' %}
-                        {% set by_source.env_override = source_value.value %}
                         {% endif %}
                         {% endfor %}
                         <tr>
@@ -461,7 +458,6 @@
                             <td style="font-size: 0.875rem;">{{ by_source.default }}</td>
                             <td style="font-size: 0.875rem;">{{ by_source.config_file }}</td>
                             <td style="font-size: 0.875rem;">{{ by_source.database }}</td>
-                            <td style="font-size: 0.875rem;">{{ by_source.env_override }}</td>
                         </tr>
                         {% endfor %}
                     </tbody>

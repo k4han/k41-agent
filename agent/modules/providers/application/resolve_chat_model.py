@@ -1,6 +1,5 @@
 """Resolve a chat model instance from provider config + model overrides."""
 
-import os
 from functools import lru_cache
 
 from langchain_core.language_models import BaseChatModel
@@ -54,11 +53,11 @@ def resolve_chat_model(
         DEFAULT_TEMPERATURE,
     )
 
-    resolved_api_key = api_key or os.environ.get(provider_config.api_key_env_var, "")
+    resolved_api_key = api_key or provider_config.api_key
     if not resolved_api_key:
         raise RuntimeError(
             "API key not configured. "
-            f"Set {provider_config.api_key_env_var} before starting the app."
+            "Set 'llm.api_key' in ~/.kaka-agent/config.yaml before starting the app."
         )
 
     model_config = ModelConfig(
@@ -73,7 +72,6 @@ def resolve_chat_model(
         provider_type=str(provider_config.provider_type),
         base_url=provider_config.base_url,
         api_key=resolved_api_key,
-        api_key_env_var=provider_config.api_key_env_var,
         model_name=model_config.model_name,
         temperature=model_config.temperature,
     )
@@ -86,7 +84,6 @@ def _get_cached_model(
     provider_type: str,
     base_url: str,
     api_key: str,
-    api_key_env_var: str,
     model_name: str,
     temperature: float,
 ) -> BaseChatModel:
@@ -98,7 +95,7 @@ def _get_cached_model(
         name=provider_type,
         provider_type=ProviderType(provider_type),
         base_url=base_url,
-        api_key_env_var=api_key_env_var,
+        api_key=api_key,
         default_model=model_name,
     )
     model_config = ModelConfig(model_name=model_name, temperature=temperature)

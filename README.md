@@ -65,7 +65,7 @@ Canonical ownership:
   - LangGraph checkpoint store: agent/modules/workflows/infrastructure/langgraph/checkpoint/
   - legacy facade tạm thời: agent/persistence/
 
-DATABASE_URL mặc định:
+database.url mặc định:
   sqlite+aiosqlite:///data/agent_state.db
 ```
 
@@ -73,11 +73,9 @@ DATABASE_URL mặc định:
 
 ```bash
 uv sync
-
-cp .env.example .env
-# Điền LLM_API_KEY vào .env
-# Có thể tiếp tục dùng OPENAI_API_KEY như fallback tương thích ngược
-# Có thể đổi DATABASE_URL nếu muốn lưu file SQLite ở vị trí khác
+uv run kaka init
+# Chỉnh ~/.kaka-agent/config.yaml
+# Bắt buộc set llm.api_key
 ```
 
 ## Chạy
@@ -90,27 +88,31 @@ uv run python app.py
 ```
 
 ### Một số cờ cấu hình runtime
-```env
-ENABLE_WEB=true
-ENABLE_API=true
-ENABLE_DASHBOARD=true
+```yaml
+enable_web: true
+enable_api: true
+enable_dashboard: true
 
-ENABLE_TELEGRAM=true
-ENABLE_DISCORD=false
+channels:
+  telegram:
+    enabled: true
+  discord:
+    enabled: false
 
-LLM_API_KEY=sk-...
-LLM_BASE_URL=https://api.mistral.ai/v1
-LLM_MODEL=devstral-2512
-LLM_TEMPERATURE=0
+llm:
+  api_key: "sk-..."
+  base_url: "https://api.mistral.ai/v1"
+  model: "devstral-2512"
+  temperature: 0.0
 ```
 
 Quy ước hiện tại:
-- `ENABLE_WEB`, `ENABLE_API`, `ENABLE_DASHBOARD`: bật các capability của web host khi app khởi động.
-- `ENABLE_TELEGRAM`, `ENABLE_DISCORD`: nếu `true` thì channel sẽ tự khởi động cùng app. Các background channel vẫn luôn được đăng ký vào runtime, nên dashboard vẫn có thể start/stop chúng về sau ngay cả khi giá trị này là `false`.
-- Dashboard chỉ thay đổi trạng thái runtime hiện tại. Khi restart app, trạng thái mặc định quay về theo `.env`.
+- `enable_web`, `enable_api`, `enable_dashboard`: bật các capability của web host khi app khởi động.
+- `channels.telegram.enabled`, `channels.discord.enabled`: nếu `true` thì channel sẽ tự khởi động cùng app. Các background channel vẫn luôn được đăng ký vào runtime, nên dashboard vẫn có thể start/stop chúng về sau ngay cả khi giá trị này là `false`.
+- Dashboard chỉ thay đổi trạng thái runtime hiện tại. Khi restart app, trạng thái mặc định quay về theo `~/.kaka-agent/config.yaml`.
 - Với dashboard chạy ở prefix gốc `/`, alias cũ `/bots/*` đã bị loại bỏ. Chỉ dùng `/services/*`.
-- LLM client hiện dùng `ChatOpenAI` với endpoint OpenAI-compatible. Mặc định repo trỏ tới Mistral-compatible `base_url` và `model`, nhưng có thể override bằng `LLM_BASE_URL` và `LLM_MODEL`.
-- `LLM_API_KEY` là contract ưu tiên. Nếu chưa migrate env, `OPENAI_API_KEY` vẫn được chấp nhận như fallback.
+- LLM client hiện dùng `ChatOpenAI` với endpoint OpenAI-compatible. Mặc định repo trỏ tới Mistral-compatible `llm.base_url` và `llm.model`.
+- API key được đọc duy nhất từ `llm.api_key` trong YAML config.
 
 ## API Endpoints
 

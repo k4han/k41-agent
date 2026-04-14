@@ -187,14 +187,14 @@ class TestConfigService:
             "channels.telegram.enabled": _sv(
                 "channels.telegram.enabled",
                 False,
-                SettingsSource.ENV_OVERRIDE,
+                SettingsSource.CONFIG_FILE,
             ),
-        }, priority=300)
+        }, priority=100)
 
         service = ConfigService(sources=[low, high])
 
         assert service.get_effective("channels.telegram.enabled").value is False
-        assert service.get_effective("channels.telegram.enabled").source == SettingsSource.ENV_OVERRIDE
+        assert service.get_effective("channels.telegram.enabled").source == SettingsSource.CONFIG_FILE
 
     def test_list_all_merges(self) -> None:
         low = StubSource({
@@ -223,11 +223,11 @@ class TestConfigService:
             "channels.telegram.enabled": _sv("channels.telegram.enabled", True, SettingsSource.DEFAULT),
             "channels.discord.enabled": _sv("channels.discord.enabled", True, SettingsSource.DEFAULT),
         }, priority=0)
-        env = StubSource({
-            "channels.discord.enabled": _sv("channels.discord.enabled", False, SettingsSource.ENV_OVERRIDE),
-        }, priority=300)
+        config_file = StubSource({
+            "channels.discord.enabled": _sv("channels.discord.enabled", False, SettingsSource.CONFIG_FILE),
+        }, priority=100)
 
-        service = ConfigService(sources=[defaults, env])
+        service = ConfigService(sources=[defaults, config_file])
         runtime_settings = service.get_runtime_settings()
 
         assert runtime_settings == RuntimeSettings(
@@ -268,16 +268,16 @@ class TestConfigService:
             "channels.telegram.enabled": _sv(
                 "channels.telegram.enabled",
                 False,
-                SettingsSource.ENV_OVERRIDE,
+                SettingsSource.CONFIG_FILE,
             ),
-        }, priority=300)
+        }, priority=100)
         service = ConfigService(sources=[low, high])
         sources = service.get_settings_sources()
 
         assert "channels.telegram.enabled" in sources
         assert len(sources["channels.telegram.enabled"]) == 2
         assert sources["channels.telegram.enabled"][0]["source"] == "default"
-        assert sources["channels.telegram.enabled"][1]["source"] == "env_override"
+        assert sources["channels.telegram.enabled"][1]["source"] == "config_file"
 
 
 # =====================================================================
@@ -290,9 +290,6 @@ class TestPublicAPI:
         self,
         monkeypatch,
     ) -> None:
-        for var in ("ENABLE_TELEGRAM", "ENABLE_DISCORD"):
-            monkeypatch.delenv(var, raising=False)
-
         from agent.shared.config import get_config_service
         from agent.shared.config.yaml_source import YamlConfigSource
         import agent.shared.config.yaml_source as yaml_src

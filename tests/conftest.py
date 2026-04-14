@@ -1,5 +1,5 @@
-import os
 import sys
+import tempfile
 from pathlib import Path
 from uuid import uuid4
 
@@ -18,10 +18,7 @@ def pytest_configure(config) -> None:
     PYTEST_BASETEMP_ROOT.mkdir(parents=True, exist_ok=True)
 
     runtime_temp = str(PYTEST_RUNTIME_TEMP)
-    os.environ["TMP"] = runtime_temp
-    os.environ["TEMP"] = runtime_temp
-    os.environ["TMPDIR"] = runtime_temp
-    os.environ.setdefault("PYTEST_DEBUG_TEMPROOT", str(PYTEST_TEMP_ROOT))
+    tempfile.tempdir = runtime_temp
 
     if getattr(config.option, "basetemp", None) is None:
         config.option.basetemp = str(PYTEST_BASETEMP_ROOT / f"run-{uuid4()}")

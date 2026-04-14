@@ -20,6 +20,6 @@ class ProviderConfig:
     name: str
     provider_type: ProviderType
     base_url: str
-    api_key_env_var: str
+    api_key: str
     default_model: str
     enabled: bool = True

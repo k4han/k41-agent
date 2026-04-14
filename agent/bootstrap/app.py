@@ -16,7 +16,7 @@ from agent.delivery.http.dashboard.auth_router import router as auth_router
 from agent.modules.channels.public import list_channel_statuses
 from agent.shared.config import get_config_service
 
-log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
+log_level = "INFO"
 logging.basicConfig(
     level=getattr(logging, log_level, logging.INFO),
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",

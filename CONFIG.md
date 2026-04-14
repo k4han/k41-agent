@@ -56,27 +56,14 @@ kaka serve
 
 Hệ thống đọc cấu hình theo thứ tự ưu tiên:
 
-1. **Environment variables** (cao nhất)
-   - `LLM_API_KEY`, `OPENAI_API_KEY`
-   - `LLM_BASE_URL`, `LLM_MODEL`
-   - `DATABASE_URL`
-   - `TELEGRAM_BOT_TOKEN`, `DISCORD_BOT_TOKEN`
-
-2. **Config file** (`~/.kaka-agent/config.yaml`)
+1. **Config file** (`~/.kaka-agent/config.yaml`)
    - `llm.api_key`, `llm.base_url`, `llm.model`
    - `database.url`
    - `channels.telegram.bot_token`, `channels.discord.bot_token`
 
-3. **Defaults** (thấp nhất)
+2. **Defaults** (thấp nhất)
 
-## Backward Compatibility
-
-Hệ thống vẫn tương thích với `.env` file. Nếu bạn có `.env` với các biến:
-- `LLM_API_KEY`
-- `TELEGRAM_BOT_TOKEN`
-- `DISCORD_BOT_TOKEN`
-
-Chúng sẽ được ưu tiên hơn config file.
+Runtime chỉ đọc cấu hình từ YAML file và defaults nội bộ.
 
 ## Database Configuration
 

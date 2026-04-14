@@ -10,7 +10,6 @@ wheels/
 .venv
 
 data/
-.env
 local-dev/
 
 .tmp_*
