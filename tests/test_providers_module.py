@@ -38,18 +38,18 @@ def _set_config_path(monkeypatch: MonkeyPatch, config_path: Path) -> None:
 def _write_config(
     config_path: Path,
     *,
-    provider: str = DEFAULT_PROVIDER,
+    default_provider: str = DEFAULT_PROVIDER,
     api_key: str = "test-key",
     base_url: str = DEFAULT_BASE_URL,
-    model: str = DEFAULT_MODEL,
+    default_model: str = DEFAULT_MODEL,
     temperature: float | None = None,
 ) -> None:
     llm_block = [
         "llm:",
-        f"  provider: {provider!r}",
+        f"  default_provider: {default_provider!r}",
         f"  api_key: {api_key!r}",
         f"  base_url: {base_url!r}",
-        f"  model: {model!r}",
+        f"  default_model: {default_model!r}",
     ]
     if temperature is not None:
         llm_block.append(f"  temperature: {temperature}")
@@ -110,7 +110,7 @@ def test_repo_custom_base_url_and_model(monkeypatch: MonkeyPatch, tmp_path: Path
         config_path,
         api_key="repo-key",
         base_url="https://custom.api/v1",
-        model="custom-model",
+        default_model="custom-model",
     )
     _set_config_path(monkeypatch, config_path)
 
@@ -125,9 +125,9 @@ def test_repo_google_provider_from_yaml(monkeypatch: MonkeyPatch, tmp_path: Path
     config_path = tmp_path / "config.yaml"
     _write_config(
         config_path,
-        provider="google",
+        default_provider="google",
         api_key="google-key",
-        model="google-model",
+        default_model="google-model",
     )
     _set_config_path(monkeypatch, config_path)
 
@@ -228,11 +228,11 @@ def test_repo_default_provider_cannot_be_disabled(monkeypatch: MonkeyPatch, tmp_
 
 def test_repo_invalid_provider_raises(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
-    _write_config(config_path, provider="not-supported")
+    _write_config(config_path, default_provider="not-supported")
     _set_config_path(monkeypatch, config_path)
 
     repo = ConfigProviderRepository()
-    with pytest.raises(ValueError, match="llm.provider"):
+    with pytest.raises(ValueError, match="llm.default_provider"):
         repo.get_default_provider()
 
 
@@ -304,7 +304,7 @@ def test_resolve_chat_model_with_mock_factory(monkeypatch: MonkeyPatch, tmp_path
     _get_cached_model.cache_clear()
 
     config_path = tmp_path / "config.yaml"
-    _write_config(config_path, api_key="model-key", model="test-model")
+    _write_config(config_path, api_key="model-key", default_model="test-model")
     _set_config_path(monkeypatch, config_path)
 
     repo = ConfigProviderRepository()
@@ -347,7 +347,7 @@ def test_resolve_chat_model_missing_model_raises(monkeypatch: MonkeyPatch, tmp_p
     _get_cached_model.cache_clear()
 
     config_path = tmp_path / "config.yaml"
-    _write_config(config_path, api_key="model-key", model="")
+    _write_config(config_path, api_key="model-key", default_model="")
     _set_config_path(monkeypatch, config_path)
 
     repo = ConfigProviderRepository()
@@ -373,7 +373,7 @@ def test_resolve_chat_model_applies_yaml_updates_immediately(
         config_path,
         api_key="key-one",
         base_url="https://api.one/v1",
-        model="test-model",
+        default_model="test-model",
     )
     _set_config_path(monkeypatch, config_path)
 
@@ -423,9 +423,9 @@ def test_resolve_chat_model_uses_google_factory(monkeypatch: MonkeyPatch, tmp_pa
     config_path = tmp_path / "config.yaml"
     _write_config(
         config_path,
-        provider="google",
+        default_provider="google",
         api_key="google-key",
-        model="google-model",
+        default_model="google-model",
     )
     _set_config_path(monkeypatch, config_path)
 

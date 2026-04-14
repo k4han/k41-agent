@@ -12,7 +12,6 @@ logger = logging.getLogger(__name__)
 
 
 DEFAULT_AGENTS_DIR = str(Path.home() / ".kaka-agent" / "agents")
-LEGACY_SUBAGENTS_DIR = str(Path.home() / ".kaka-agent" / "subagents")
 
 # Directory containing agents shipped with the package (bundled defaults).
 _BUILTIN_DIR = Path(__file__).parent / "_builtin"
@@ -51,24 +50,16 @@ class FilesystemAgentRepository:
     def _scan_dirs(self) -> list[Path]:
         """Return directories to scan for agent markdown files.
 
-        By default, support both the new agents dir and the legacy subagents dir.
         If a custom dir is provided, only that directory is scanned.
         """
-        default_dir = Path(DEFAULT_AGENTS_DIR)
-        if self._dir != default_dir:
-            return [self._dir]
-
-        legacy_dir = Path(LEGACY_SUBAGENTS_DIR)
-        if legacy_dir == default_dir:
-            return [default_dir]
-        return [default_dir, legacy_dir]
+        return [self._dir]
 
     def load(self) -> dict[str, AgentConfig]:
         """Scan directories and return all agents, with user agents overriding builtins.
 
         Load order (later entries override earlier ones on name collision):
         1. Bundled agents from the package _builtin directory.
-        2. User-defined agents from ~/.kaka-agent/agents (and legacy subagents dir).
+        2. User-defined agents from ~/.kaka-agent/agents.
 
         This means a user can shadow any builtin agent (including "default") by
         creating a file with the same ``name`` field in their agents directory.

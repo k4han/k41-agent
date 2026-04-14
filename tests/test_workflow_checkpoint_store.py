@@ -10,11 +10,6 @@ from agent.modules.workflows.infrastructure.langgraph.checkpoint import (
     get_checkpointer as get_canonical_checkpointer,
     initialize_checkpointer,
 )
-from agent.persistence import (
-    close_persistence,
-    get_checkpointer as get_legacy_checkpointer,
-    initialize_persistence,
-)
 
 
 class PersistState(MessagesState):
@@ -75,13 +70,3 @@ async def test_canonical_checkpointer_restores_conversation(canonical_checkpoint
     assert "echo:second" in second_contents
 
 
-@pytest.mark.asyncio
-async def test_legacy_persistence_checkpointer_matches_canonical(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
-    pytest.importorskip("aiosqlite")
-
-    await initialize_persistence()
-    try:
-        assert get_legacy_checkpointer() is get_canonical_checkpointer()
-    finally:
-        await close_persistence()

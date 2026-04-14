@@ -95,7 +95,7 @@ class TestDashboardSettingsEndpoints:
             json={
                 "values": {
                     "channels.telegram.enabled": False,
-                    "llm.model": "sample-model",
+                    "llm.default_model": "sample-model",
                 }
             },
         )
@@ -104,7 +104,7 @@ class TestDashboardSettingsEndpoints:
         assert data["status"] == "success"
         assert set(data["updated"]) == {
             "channels.telegram.enabled",
-            "llm.model",
+            "llm.default_model",
         }
 
     def test_put_settings_batch_rejects_bootstrap_keys(self, dashboard_client) -> None:

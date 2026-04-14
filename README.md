@@ -120,7 +120,7 @@ Quy ước hiện tại:
 - `channels.telegram.enabled`, `channels.discord.enabled`: nếu `true` thì channel sẽ tự khởi động cùng app. Các background channel vẫn luôn được đăng ký vào runtime, nên dashboard vẫn có thể start/stop chúng về sau ngay cả khi giá trị này là `false`.
 - Dashboard chỉ thay đổi trạng thái runtime hiện tại. Khi restart app, trạng thái mặc định quay về theo `~/.kaka-agent/config.yaml`.
 - Với dashboard chạy ở prefix gốc `/`, alias cũ `/bots/*` đã bị loại bỏ. Chỉ dùng `/services/*`.
-- LLM config hỗ trợ 2 chế độ: legacy single-provider (`llm.provider`, `llm.api_key`, `llm.base_url`, `llm.model`) và multi-provider (`llm.providers.*`, `llm.default_provider`).
+- LLM config dùng chuẩn `llm.providers.*` + `llm.default_provider` + `llm.default_model`.
 - Backend đang hỗ trợ: `openai_compatible` (dùng `ChatOpenAI`) và `google` (dùng `ChatGoogleGenerativeAI`, bỏ qua `base_url`).
 - Model mặc định được resolve theo thứ tự: `provider.default_model` -> `llm.default_model` -> fallback nội bộ theo loại provider.
 - API key được resolve theo thứ tự: `llm.providers.<name>.api_key` -> `llm.api_key`.

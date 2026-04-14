@@ -46,12 +46,6 @@ llm:
       provider: "google"
       api_key: "your-google-api-key"
       default_model: "gemini-2.0-flash"
-
-  # Legacy single-provider mode is still supported:
-  # provider: "openai_compatible"
-  # api_key: "your-api-key-here"
-  # base_url: "https://api.mistral.ai/v1"
-  # model: "devstral-2512"
   temperature: 0.0
 
 # Channel integrations (optional)
@@ -72,7 +66,6 @@ channels:
 # Paths
 paths:
   agents: "~/.kaka-agent/agents"
-  subagents: "~/.kaka-agent/subagents"
   skills: "~/.kaka-agent/skills"
   data: "~/.kaka-agent/data"
 
@@ -175,15 +168,6 @@ llm:
       provider: "google"
       api_key: "AIza..."
       default_model: "gemini-2.0-flash"
-```
-
-### Legacy single-provider
-
-```yaml
-llm:
-  provider: "google"
-  api_key: "AIza..."
-  model: "gemini-2.0-flash"
 ```
 
 Với `google`, trường `base_url` sẽ bị bỏ qua.

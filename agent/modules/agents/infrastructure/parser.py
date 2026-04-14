@@ -61,8 +61,7 @@ def parse_agent_file(path: str | Path) -> AgentConfig | None:
     # Required field
     name = data.get("name")
     # graph_type is optional for agent-name-first flows.
-    # Accept legacy alias `workflow` and default to react_agent.
-    graph_type = data.get("graph_type") or data.get("workflow") or REACT_AGENT_GRAPH_TYPE
+    graph_type = data.get("graph_type") or REACT_AGENT_GRAPH_TYPE
 
     if not name:
         logger.warning("Agent file %s missing 'name' — skipping.", filepath)

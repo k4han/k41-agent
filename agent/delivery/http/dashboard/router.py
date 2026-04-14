@@ -160,12 +160,10 @@ def _build_provider_rows(
     return provider_rows
 
 
-def _remove_legacy_provider_keys(
+def _remove_hidden_provider_global_keys(
     settings: dict[str, Any],
 ) -> dict[str, Any]:
     hidden_keys = {
-        "llm.provider",
-        "llm.model",
         "llm.base_url",
         "llm.temperature",
     }
@@ -248,11 +246,11 @@ async def dashboard_config(request: Request) -> HTMLResponse:
 async def dashboard_providers(request: Request) -> HTMLResponse:
     service = _get_config_service(request)
     settings_raw, settings_sources_raw = service.get_settings_overview_and_sources()
-    settings = _remove_legacy_provider_keys(_filter_settings(
+    settings = _remove_hidden_provider_global_keys(_filter_settings(
         settings_raw,
         include_provider_settings=True,
     ))
-    settings_sources = _remove_legacy_provider_keys(_filter_settings(
+    settings_sources = _remove_hidden_provider_global_keys(_filter_settings(
         settings_sources_raw,
         include_provider_settings=True,
     ))

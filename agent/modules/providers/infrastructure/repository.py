@@ -23,12 +23,9 @@ _PROVIDER_ALIASES: dict[str, ProviderType] = {
     "google": ProviderType.GOOGLE,
 }
 
+
 def _normalize_provider_name(value: str) -> str:
     return value.strip().lower().replace("-", "_")
-
-
-def _resolve_provider_type(value: str) -> ProviderType:
-    return _resolve_provider_type_for_key(value, "llm.provider")
 
 
 def _resolve_provider_type_for_key(value: str, key_name: str) -> ProviderType:
@@ -68,10 +65,9 @@ def _resolve_default_model(
     provider_values: dict[str, Any],
     global_default_model: str,
 ) -> str:
-    for key in ("default_model", "model"):
-        value = provider_values.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
+    value = provider_values.get("default_model")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
 
     if global_default_model:
         return global_default_model
@@ -160,10 +156,7 @@ class ConfigProviderRepository:
         providers: dict[str, ProviderConfig],
     ) -> str:
         config = get_config_service()
-        configured_default = (
-            config.get_str("llm.default_provider", "").strip()
-            or config.get_str("llm.provider", "").strip()
-        )
+        configured_default = config.get_str("llm.default_provider", "").strip()
 
         if not configured_default:
             if DEFAULT_PROVIDER_NAME in providers:
@@ -211,10 +204,7 @@ class ConfigProviderRepository:
 
         shared_api_key = config.get_str("llm.api_key", "").strip()
         shared_base_url = config.get_str("llm.base_url", DEFAULT_BASE_URL).strip()
-        global_default_model = (
-            config.get_str("llm.default_model", "").strip()
-            or config.get_str("llm.model", "").strip()
-        )
+        global_default_model = config.get_str("llm.default_model", "").strip()
 
         providers = _extract_provider_entries(config.get_all())
         if providers:
@@ -238,10 +228,10 @@ class ConfigProviderRepository:
             return self._cache
 
         configured_default_provider = config.get_str("llm.default_provider", "").strip()
-        fallback_provider = config.get_str("llm.provider", DEFAULT_PROVIDER).strip()
+        resolved_default_provider = configured_default_provider or DEFAULT_PROVIDER
         provider_type = _resolve_provider_type_for_key(
-            configured_default_provider or fallback_provider or DEFAULT_PROVIDER,
-            "llm.default_provider" if configured_default_provider else "llm.provider",
+            resolved_default_provider,
+            "llm.default_provider",
         )
 
         default_provider = ProviderConfig(

@@ -154,8 +154,7 @@ async def cmd_agents(message):
     if not agents:
         await message.answer(
             "No custom agents defined.\n"
-            "Use /code or /research, or create .md files in ~/.kaka-agent/agents/ "
-            "(legacy: ~/.kaka-agent/subagents/)"
+            "Use /code or /research, or create .md files in ~/.kaka-agent/agents/."
         )
         return
 

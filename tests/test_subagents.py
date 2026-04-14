@@ -119,13 +119,13 @@ class TestParseAgentFile:
         os.unlink(p)
         os.rmdir(d)
 
-    def test_parse_file_uses_workflow_alias_for_graph_type(self):
+    def test_parse_file_ignores_legacy_workflow_key(self):
         d = tempfile.mkdtemp()
         p = Path(d, "workflow_alias.md")
         p.write_text("---\nname: test\nworkflow: research_chain\n---\nBody.", encoding="utf-8")
         config = parse_agent_file(p)
         assert config is not None
-        assert config.graph_type == "research_chain"
+        assert config.graph_type == "react_agent"
         os.unlink(p)
         os.rmdir(d)
 

@@ -19,7 +19,6 @@ Lệnh này sẽ tạo:
 - `~/.kaka-agent/config.yaml` - File cấu hình
 - `~/.kaka-agent/data/` - Database và dữ liệu
 - `~/.kaka-agent/agents/` - Custom agents
-- `~/.kaka-agent/subagents/` - Sub-agents
 - `~/.kaka-agent/skills/` - Custom skills
 
 ### 3. Cấu hình
@@ -66,7 +65,7 @@ kaka serve
 Hệ thống đọc cấu hình theo thứ tự ưu tiên:
 
 1. **Config file** (`~/.kaka-agent/config.yaml`)
-  Keys: `llm.default_provider`, `llm.default_model`, `llm.providers.*`, `llm.provider` (legacy), `llm.model` (legacy), `database.url`, `channels.telegram.bot_token`, `channels.discord.bot_token`
+  Keys: `llm.default_provider`, `llm.default_model`, `llm.providers.*`, `database.url`, `channels.telegram.bot_token`, `channels.discord.bot_token`
 
 2. **Defaults** (thấp nhất)
 
@@ -88,14 +87,18 @@ database:
 
 ## Examples
 
-### Sử dụng OpenAI-compatible (legacy single-provider)
+### Sử dụng 1 default provider
 
 ```yaml
 llm:
-  provider: "openai_compatible"
-  api_key: "sk-..."
-  base_url: "https://api.openai.com/v1"
-  model: "gpt-4"
+  default_provider: "openai-main"
+  default_model: "gpt-4"
+  providers:
+    openai-main:
+      provider: "openai_compatible"
+      api_key: "sk-..."
+      base_url: "https://api.openai.com/v1"
+      default_model: "gpt-4"
 ```
 
 ### Sử dụng multi-provider + default provider

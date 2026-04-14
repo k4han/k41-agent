@@ -2,6 +2,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import text
 
+import agent.shared.infrastructure.db.engine as db_engine
 from agent.shared.infrastructure.db.base import Base
 from agent.shared.infrastructure.db.models import load_orm_models
 from agent.shared.infrastructure.db.engine import (
@@ -15,20 +16,33 @@ from agent.shared.infrastructure.db.engine import (
 from agent.shared.infrastructure.db.session import get_async_session
 
 
-def test_canonical_get_database_type_sqlite_variants(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("DATABASE_URL", "sqlite:///./data/agent_state.db")
-    assert get_database_type() == "sqlite"
+class _StubConfigService:
+    def __init__(self, database_url: str) -> None:
+        self._database_url = database_url
 
-    monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///./data/agent_state.db")
+    def get_str(self, key: str, default: str = "") -> str:
+        if key == "database.url":
+            return self._database_url
+        return default
+
+
+def _set_database_url(monkeypatch: pytest.MonkeyPatch, database_url: str) -> None:
+    monkeypatch.setattr(db_engine, "_cached_database_url", None)
+    monkeypatch.setattr(db_engine, "get_config_service", lambda: _StubConfigService(database_url))
+
+
+def test_canonical_get_database_type_defaults_to_internal_sqlite(monkeypatch: pytest.MonkeyPatch):
+    _set_database_url(monkeypatch, "")
     assert get_database_type() == "sqlite"
 
 
 def test_canonical_get_database_type_postgres_variants(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/app")
+    _set_database_url(monkeypatch, "postgresql://user:pass@localhost:5432/app")
     assert get_database_type() == "postgres"
 
-    monkeypatch.setenv(
-        "DATABASE_URL", "postgresql+asyncpg://user:pass@localhost:5432/app"
+    _set_database_url(
+        monkeypatch,
+        "postgresql+asyncpg://user:pass@localhost:5432/app",
     )
     assert get_database_type() == "postgres"
 
@@ -36,8 +50,8 @@ def test_canonical_get_database_type_postgres_variants(monkeypatch: pytest.Monke
 def test_canonical_get_postgres_conn_string_preserves_query_params(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    monkeypatch.setenv(
-        "DATABASE_URL",
+    _set_database_url(
+        monkeypatch,
         "postgresql+asyncpg://user:pass@db.example.com:5432/appdb?sslmode=require&application_name=kaka",
     )
 
@@ -48,16 +62,22 @@ def test_canonical_get_postgres_conn_string_preserves_query_params(
     assert "application_name=kaka" in conn
 
 
-def test_canonical_get_sqlite_conn_string_memory(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
-    assert get_sqlite_conn_string() == ":memory:"
+def test_canonical_get_sqlite_conn_string_uses_internal_sqlite(monkeypatch: pytest.MonkeyPatch):
+    _set_database_url(monkeypatch, "")
+    conn = get_sqlite_conn_string()
+    assert conn.endswith("agent_state.db")
 
 
 @pytest_asyncio.fixture
 async def shared_db(monkeypatch: pytest.MonkeyPatch, tmp_path):
     db_path = tmp_path / "shared-db.sqlite"
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.resolve().as_posix()}")
-    monkeypatch.setenv("PERSISTENCE_ALLOW_ANY_PATH", "true")
+    db_url = f"sqlite+aiosqlite:///{db_path.resolve().as_posix()}"
+    _set_database_url(monkeypatch, "")
+    monkeypatch.setattr(db_engine, "DEFAULT_DATABASE_URL", db_url)
+    monkeypatch.setattr(db_engine, "_cached_database_url", None)
+    monkeypatch.setattr(db_engine, "_async_engine", None)
+    monkeypatch.setattr(db_engine, "_async_session_maker", None)
+    monkeypatch.setattr(db_engine, "_tables_created", False)
 
     load_orm_models()
     await initialize_async_engine(metadata=Base.metadata)
