@@ -5,7 +5,7 @@ import pytest_asyncio
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END, START, MessagesState, StateGraph
 
-from agent.modules.workflows.infrastructure.langgraph.checkpoint import (
+from agent.modules.workflows.checkpoint import (
     close_checkpointer,
     get_checkpointer as get_canonical_checkpointer,
     initialize_checkpointer,

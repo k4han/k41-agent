@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from agent.modules.channels.public import ChannelManager, ChannelStatus
+from agent.modules.channels import ChannelManager, ChannelStatus
 
 
 async def wait_for_status(

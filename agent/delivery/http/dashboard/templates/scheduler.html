@@ -573,6 +573,7 @@
 
     <!-- Edit Modal -->
     <script type="application/json" id="scheduler-jobs-data">{{ jobs | tojson }}</script>
+    <script type="application/json" id="scheduler-timezone-data">{{ scheduler_timezone | tojson }}</script>
 
     <div class="modal-overlay" id="edit-modal">
         <div class="modal">
@@ -771,7 +772,7 @@
 
     <script src="/templates/shared.js"></script>
     <script>
-        const SCHEDULER_TIMEZONE = {{ scheduler_timezone | tojson }};
+        const SCHEDULER_TIMEZONE = JSON.parse(document.getElementById("scheduler-timezone-data").textContent);
         const JOBS = JSON.parse(document.getElementById("scheduler-jobs-data").textContent || "[]");
         const JOBS_BY_ID = new Map(JOBS.map(job => [job.id, job]));
         const DURATION_FIELDS = ["weeks", "days", "hours", "minutes", "seconds"];

@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage
 
-from agent.modules.workflows.infrastructure.langgraph.nodes.trim import (
+from agent.modules.workflows.nodes.trim import (
     make_prepare_context_node,
 )
 

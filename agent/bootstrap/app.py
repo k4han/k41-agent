@@ -13,7 +13,7 @@ from agent.bootstrap.runtime import AppRuntime
 from agent.bootstrap.settings import BootstrapConfig, load_bootstrap_config
 from agent.delivery.http import api_router, dashboard_router
 from agent.delivery.http.dashboard.auth_router import router as auth_router
-from agent.modules.channels.public import list_channel_statuses
+from agent.modules.channels import list_channel_statuses
 from agent.shared.config import get_config_service
 
 log_level = "INFO"

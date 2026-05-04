@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-import agent.modules.workflows.infrastructure.langgraph.prompt_builders as prompt_builders
+import agent.modules.workflows.prompt_builders as prompt_builders
 
 
 class _FakeCatalog:

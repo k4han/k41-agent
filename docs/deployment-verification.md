@@ -74,7 +74,7 @@ curl -X POST http://localhost:8000/api/chat \
 ### Check Agent Loading
 ```python
 # Run in Python console
-from agent.modules.agents.public import get_catalog_service
+from agent.modules.agents import get_catalog_service
 
 catalog = get_catalog_service()
 agents = catalog.list_agents()
@@ -92,7 +92,7 @@ for agent in agents:
 
 ### Check Graph Registration
 ```python
-from agent.modules.workflows.public import list_registered_workflows
+from agent.modules.workflows import list_registered_workflows
 
 graphs = list_registered_workflows()
 print(f"Registered graphs: {graphs}")

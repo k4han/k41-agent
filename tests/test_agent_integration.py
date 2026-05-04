@@ -3,9 +3,9 @@
 import pytest
 from langchain_core.messages import HumanMessage
 
-from agent.modules.agents.infrastructure.repository import FilesystemAgentRepository
-from agent.modules.agents.application.service import AgentCatalogService
-from agent.modules.workflows.public import get_workflow_graph, make_run_config, make_run_context
+from agent.modules.agents.repository import FilesystemAgentRepository
+from agent.modules.agents.service import AgentCatalogService
+from agent.modules.workflows import get_workflow_graph, make_run_config, make_run_context
 
 
 @pytest.fixture

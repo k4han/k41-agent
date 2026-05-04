@@ -8,9 +8,9 @@ from pathlib import Path
 import click
 
 from agent.bootstrap.app import run as run_server
-from agent.modules.admin_auth.public import get_admin_auth_service
+from agent.modules.admin_auth import get_admin_auth_service
 from agent.shared.infrastructure.db import Base, create_tables, get_database_url, load_orm_models, initialize_async_engine
-from agent.modules.users.public import get_pairing_service
+from agent.modules.users import get_pairing_service
 
 logger = logging.getLogger(__name__)
 

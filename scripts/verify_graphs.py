@@ -2,10 +2,10 @@
 
 import asyncio
 
-from agent.modules.workflows.application.register_builtin_workflows import (
+from agent.modules.workflows.register_builtin_workflows import (
     register_builtin_workflows,
 )
-from agent.modules.workflows.public import list_registered_workflows
+from agent.modules.workflows import list_registered_workflows
 from agent.bootstrap.runtime import initialize_persistence
 
 

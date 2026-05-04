@@ -9,16 +9,16 @@ from unittest.mock import MagicMock
 import pytest
 from pytest import MonkeyPatch
 
-from agent.modules.providers.application.provider_service import ProviderService
-from agent.modules.providers.application.resolve_chat_model import (
+from agent.modules.providers.service import ProviderService
+from agent.modules.providers.resolve_chat_model import (
     _get_cached_model,
     _parse_temperature,
     resolve_chat_model,
 )
-from agent.modules.providers.domain.model import ModelConfig
-from agent.modules.providers.domain.ports import ChatModelFactory
-from agent.modules.providers.domain.provider import ProviderConfig, ProviderType
-from agent.modules.providers.infrastructure.repository import (
+from agent.modules.providers.models import ModelConfig
+from agent.modules.providers.ports import ChatModelFactory
+from agent.modules.providers.provider import ProviderConfig, ProviderType
+from agent.modules.providers.repository import (
     ConfigProviderRepository,
     DEFAULT_BASE_URL,
     DEFAULT_MODEL,
@@ -519,6 +519,6 @@ def test_parse_temperature_invalid() -> None:
 
 
 def test_get_chat_model_import() -> None:
-    from agent.modules.providers.public import get_chat_model  # noqa: F401
+    from agent.modules.providers import get_chat_model  # noqa: F401
 
     assert callable(get_chat_model)

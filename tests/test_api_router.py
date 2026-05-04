@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
-from agent.modules.admin_auth.public import get_current_admin
+from agent.modules.admin_auth import get_current_admin
 
 
 router_module = importlib.import_module("agent.delivery.http.api.router")

@@ -6,10 +6,10 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from agent.modules.agents.domain.subagent import AgentConfig
-from agent.modules.agents.infrastructure.parser import parse_agent_file
-from agent.modules.agents.infrastructure.repository import FilesystemAgentRepository
-from agent.modules.agents.application.service import AgentCatalogService
+from agent.modules.agents.models import AgentConfig
+from agent.modules.agents.parser import parse_agent_file
+from agent.modules.agents.repository import FilesystemAgentRepository
+from agent.modules.agents.service import AgentCatalogService
 
 
 # --- Fixtures ---
@@ -218,8 +218,8 @@ class TestAgentCatalogService:
     @pytest.fixture(autouse=True)
     def setup_service(self, agents_dir):
         """Reset singleton and create service with test agents dir."""
-        import agent.modules.agents.infrastructure.repository as repo_mod
-        import agent.modules.agents.application.service as svc_mod
+        import agent.modules.agents.repository as repo_mod
+        import agent.modules.agents.service as svc_mod
 
         repo_mod._repository = None
         svc_mod._service = None

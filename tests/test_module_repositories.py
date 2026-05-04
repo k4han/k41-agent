@@ -2,9 +2,9 @@ import pytest
 import pytest_asyncio
 import uuid
 
-from agent.modules.channels.infrastructure.repository import ChannelSettingsRepository
+from agent.modules.channels.repository import ChannelSettingsRepository
 from agent.shared.infrastructure.db import UserPreferencesRepository, Base
-from agent.modules.users.public import User
+from agent.modules.users import User
 from agent.shared.infrastructure.db.engine import close_async_engine, initialize_async_engine
 from agent.shared.infrastructure.db.session import get_async_session_maker
 

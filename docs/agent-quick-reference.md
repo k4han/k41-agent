@@ -138,7 +138,7 @@ LLM sẽ tự động gọi:
 ### Check loaded agents
 
 ```python
-from agent.modules.agents.public import get_catalog_service
+from agent.modules.agents import get_catalog_service
 
 catalog = get_catalog_service()
 agents = catalog.list_agents()
@@ -157,7 +157,7 @@ print(f"Can parent call child? {is_allowed}")
 ### List registered graphs
 
 ```python
-from agent.modules.workflows.public import list_registered_workflows
+from agent.modules.workflows import list_registered_workflows
 
 graphs = list_registered_workflows()
 print(f"Available graphs: {graphs}")

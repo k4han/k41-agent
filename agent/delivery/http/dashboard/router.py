@@ -10,7 +10,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from agent.modules.channels.public import (
+from agent.modules.channels import (
     ChannelManager,
     get_channel_status,
     list_channel_statuses,
@@ -19,14 +19,14 @@ from agent.modules.channels.public import (
     stop_all_channels,
     stop_channel,
 )
-from agent.modules.admin_auth.public import get_current_admin
-from agent.modules.scheduler.public import (
+from agent.modules.admin_auth import get_current_admin
+from agent.modules.scheduler import (
     TriggerType,
     execute_scheduled_task,
     get_scheduler,
     normalize_trigger,
 )
-from agent.modules.users.public import get_pairing_service
+from agent.modules.users import get_pairing_service
 from agent.shared.config import (
     ConfigService,
     PROVIDER_SETTING_FIELD_ORDER,

@@ -8,8 +8,8 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from agent.delivery.http.dashboard.router import router as dashboard_router
-from agent.modules.admin_auth.public import get_current_admin
-from agent.modules.channels.public import ChannelManager
+from agent.modules.admin_auth import get_current_admin
+from agent.modules.channels import ChannelManager
 
 
 async def idle_runner() -> None:
@@ -116,7 +116,7 @@ def test_scheduler_template_uses_safe_job_action_buttons() -> None:
 
 @pytest.mark.asyncio
 async def test_create_scheduler_job_accepts_relative_trigger(monkeypatch) -> None:
-    from agent.modules.scheduler.infrastructure import triggers as trigger_module
+    from agent.modules.scheduler import triggers as trigger_module
 
     dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
     scheduler = FakeScheduler()

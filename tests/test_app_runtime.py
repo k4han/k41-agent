@@ -5,7 +5,7 @@ import pytest
 import agent.bootstrap.runtime as runtime_module
 from agent.bootstrap.runtime import AppRuntime, ChannelSpec
 from agent.bootstrap.settings import BootstrapConfig
-from agent.modules.channels.public import ChannelStatus
+from agent.modules.channels import ChannelStatus
 from agent.shared.config import RuntimeSettings
 
 

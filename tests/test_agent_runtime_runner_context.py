@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 from langchain_core.messages import AIMessage
 
-from agent.modules.agent_runtime.application import runner as runner_module
+from agent.modules.agent_runtime import runner as runner_module
 
 
 @pytest.mark.asyncio
@@ -27,7 +27,7 @@ async def test_run_agent_omits_context_for_graph_without_context_schema(monkeypa
             yield {"messages": [AIMessage(content="done")]}
 
     monkeypatch.setattr(
-        "agent.modules.agents.public.get_catalog_service",
+        "agent.modules.agents.get_catalog_service",
         lambda: _FakeCatalog(),
     )
     monkeypatch.setattr(runner_module, "get_workflow_graph", lambda name: _FakeGraph())
@@ -74,7 +74,7 @@ async def test_run_agent_stream_omits_context_for_graph_without_context_schema(
             yield {"messages": [AIMessage(content="stream-done", id="msg-1")]}
 
     monkeypatch.setattr(
-        "agent.modules.agents.public.get_catalog_service",
+        "agent.modules.agents.get_catalog_service",
         lambda: _FakeCatalog(),
     )
     monkeypatch.setattr(runner_module, "get_workflow_graph", lambda name: _FakeGraph())
@@ -124,7 +124,7 @@ async def test_run_agent_extracts_last_text_from_structured_content(monkeypatch)
             }
 
     monkeypatch.setattr(
-        "agent.modules.agents.public.get_catalog_service",
+        "agent.modules.agents.get_catalog_service",
         lambda: _FakeCatalog(),
     )
     monkeypatch.setattr(runner_module, "get_workflow_graph", lambda name: _FakeGraph())
@@ -174,7 +174,7 @@ async def test_run_agent_stream_extracts_last_text_from_structured_content(monke
             }
 
     monkeypatch.setattr(
-        "agent.modules.agents.public.get_catalog_service",
+        "agent.modules.agents.get_catalog_service",
         lambda: _FakeCatalog(),
     )
     monkeypatch.setattr(runner_module, "get_workflow_graph", lambda name: _FakeGraph())

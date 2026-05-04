@@ -4,16 +4,16 @@ import re
 from pathlib import Path
 
 
-INTERNAL_LAYER_IMPORT_RE = re.compile(
-    r"^\s*from\s+agent\.modules\.(?P<module>[a-z_]+)\.(domain|application|infrastructure)\b"
+DEEP_MODULE_IMPORT_RE = re.compile(
+    r"^\s*(?:from|import)\s+agent\.modules\.(?P<module>[a-z_]+)\.[a-zA-Z_][\w.]*"
 )
 
 
-def test_module_internal_layers_are_not_imported_cross_module() -> None:
-    """Enforce imports through each module's public API.
+def test_module_internals_are_not_imported_cross_module() -> None:
+    """Enforce imports through each module package API.
 
     Files under agent/modules/<name>/ are allowed to import that same module's
-    internal layers. External callers must import through agent.modules.<name>.public.
+    internals. External callers must import through agent.modules.<name>.
     """
 
     offenders: list[str] = []
@@ -23,7 +23,7 @@ def test_module_internal_layers_are_not_imported_cross_module() -> None:
         normalized = path.as_posix()
         content = path.read_text(encoding="utf-8")
         for idx, line in enumerate(content.splitlines(), start=1):
-            match = INTERNAL_LAYER_IMPORT_RE.search(line)
+            match = DEEP_MODULE_IMPORT_RE.search(line)
             if not match:
                 continue
 

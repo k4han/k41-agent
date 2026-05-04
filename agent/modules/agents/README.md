@@ -92,7 +92,7 @@ INFO  User agent 'default' (/path/to/default.md) overrides builtin.
 ### Programmatic
 
 ```python
-from agent.modules.agents.public import get_catalog_service
+from agent.modules.agents import get_catalog_service
 
 catalog = get_catalog_service()
 

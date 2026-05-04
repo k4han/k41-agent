@@ -1,15 +1,15 @@
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.responses import StreamingResponse
 
-from agent.modules.admin_auth.public import get_current_admin
+from agent.modules.admin_auth import get_current_admin
 from agent.delivery.http.api.schemas import ChatRequest, ChatResponse, PairingCodeResponse
-from agent.modules.agent_runtime.public import (
+from agent.modules.agent_runtime import (
     build_run_params,
     run_agent,
     run_agent_full,
 )
-from agent.modules.users.public import Platform, get_pairing_service
-from agent.modules.workflows.public import list_registered_workflows
+from agent.modules.users import Platform, get_pairing_service
+from agent.modules.workflows import list_registered_workflows
 from agent.shared.config import get_config_service
 
 router = APIRouter(prefix="/api", tags=["agent"], dependencies=[Depends(get_current_admin)])

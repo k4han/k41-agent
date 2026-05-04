@@ -3,12 +3,12 @@ from types import SimpleNamespace
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from agent.modules.agents.domain.subagent import AgentConfig
-import agent.modules.workflows.infrastructure.langgraph.graphs.router as router_module
-from agent.modules.workflows.infrastructure.langgraph.compiled_registry import (
+from agent.modules.agents.models import AgentConfig
+import agent.modules.workflows.graphs.router as router_module
+from agent.modules.workflows.registry import (
     GraphRegistry,
 )
-from agent.modules.workflows.infrastructure.langgraph.run_config import WorkflowContext
+from agent.modules.workflows.run_config import WorkflowContext
 
 
 class _FakeChatModel:

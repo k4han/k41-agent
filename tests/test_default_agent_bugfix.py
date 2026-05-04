@@ -6,7 +6,7 @@ import pytest
 @pytest.fixture(autouse=True)
 def load_agents():
     """Load agents before each test."""
-    from agent.modules.agents.infrastructure.repository import load_agents_from_dir
+    from agent.modules.agents.repository import load_agents_from_dir
     load_agents_from_dir()
 
 
@@ -18,8 +18,8 @@ async def test_run_agent_loads_tools_for_default_agent():
     - if agent_name and agent_name != "default" would skip loading tools
     - Fixed to: if agent_name (without the != "default" check)
     """
-    from agent.modules.agent_runtime.application.runner import build_run_params
-    from agent.modules.agents.public import get_catalog_service
+    from agent.modules.agent_runtime.runner import build_run_params
+    from agent.modules.agents import get_catalog_service
 
     # Get default agent config
     catalog = get_catalog_service()
@@ -61,8 +61,8 @@ async def test_run_agent_loads_tools_for_default_agent():
 @pytest.mark.asyncio
 async def test_telegram_default_agent_gets_tools():
     """Verify Telegram's default agent flow loads tools correctly."""
-    from agent.modules.agent_runtime.application.runner import build_run_params
-    from agent.modules.agents.public import get_catalog_service
+    from agent.modules.agent_runtime.runner import build_run_params
+    from agent.modules.agents import get_catalog_service
 
     # Simulate Telegram handler logic
     def _resolve_catalog_agent_name(*candidates):

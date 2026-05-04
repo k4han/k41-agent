@@ -180,7 +180,7 @@ curl -X POST http://localhost:8000/api/chat/stream \
 ## Thêm platform mới (Slack, Zalo,...)
 
 1. Tạo `agent/modules/channels/infrastructure/slack/handler.py`
-2. Gọi `build_run_params()` + `run_agent_full()` từ `agent.modules.agent_runtime.public`
+2. Gọi `build_run_params()` + `run_agent_full()` từ `agent.modules.agent_runtime`
 3. Thêm `ChannelSpec` mới vào `agent/modules/channels/infrastructure/service_specs.py`
 4. **Không cần** động vào `delivery/http` hay `modules/workflows`
 

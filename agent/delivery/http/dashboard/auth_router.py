@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Form, Request, Response, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from agent.modules.admin_auth.public import (
+from agent.modules.admin_auth import (
     create_access_token,
     get_admin_auth_service,
     get_current_admin,

@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from agent.modules.skills.domain.skill import Skill, SkillSummary
-from agent.modules.skills.infrastructure.filesystem_repository import (
+from agent.modules.skills.models import Skill, SkillSummary
+from agent.modules.skills.repository import (
     FilesystemSkillRepository,
 )
-from agent.modules.skills.infrastructure.parser import parse_skill_md
+from agent.modules.skills.parser import parse_skill_md
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +268,7 @@ class TestFilesystemSkillRepository:
 
 class TestPublicAPI:
     def test_catalog_xml_empty(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        import agent.modules.skills.public as pub
+        import agent.modules.skills as pub
         repo = FilesystemSkillRepository(skills_root=tmp_path)
         monkeypatch.setattr(pub, "_repository", repo)
 
@@ -277,7 +277,7 @@ class TestPublicAPI:
 
     def test_catalog_xml_with_skills(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _create_skill_dir(tmp_path, "xml-skill", description="XML test skill.")
-        import agent.modules.skills.public as pub
+        import agent.modules.skills as pub
         repo = FilesystemSkillRepository(skills_root=tmp_path)
         monkeypatch.setattr(pub, "_repository", repo)
 
@@ -296,7 +296,7 @@ class TestPublicAPI:
             body="# How to use\nStep 1.",
             create_resources=True,
         )
-        import agent.modules.skills.public as pub
+        import agent.modules.skills as pub
         repo = FilesystemSkillRepository(skills_root=tmp_path)
         monkeypatch.setattr(pub, "_repository", repo)
 
@@ -309,7 +309,7 @@ class TestPublicAPI:
         assert "<file>scripts/run.py</file>" in xml
 
     def test_skill_content_xml_not_found(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        import agent.modules.skills.public as pub
+        import agent.modules.skills as pub
         repo = FilesystemSkillRepository(skills_root=tmp_path)
         monkeypatch.setattr(pub, "_repository", repo)
 
@@ -317,7 +317,7 @@ class TestPublicAPI:
 
     def test_list_and_get(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _create_skill_dir(tmp_path, "api-skill", description="API test.")
-        import agent.modules.skills.public as pub
+        import agent.modules.skills as pub
         repo = FilesystemSkillRepository(skills_root=tmp_path)
         monkeypatch.setattr(pub, "_repository", repo)
 
@@ -330,7 +330,7 @@ class TestPublicAPI:
         assert skill.description == "API test."
 
     def test_reload(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        import agent.modules.skills.public as pub
+        import agent.modules.skills as pub
         repo = FilesystemSkillRepository(skills_root=tmp_path)
         monkeypatch.setattr(pub, "_repository", repo)
 

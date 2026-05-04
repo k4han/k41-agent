@@ -3,12 +3,12 @@ from types import SimpleNamespace
 import pytest
 from langchain_core.messages import AIMessage
 
-import agent.modules.workflows.infrastructure.langgraph.nodes.tool as tool_node_module
-from agent.modules.tools.infrastructure.langchain.agent_tools.call_agent import (
+import agent.modules.workflows.nodes.tool as tool_node_module
+from agent.modules.tools.langchain.agent_tools.call_agent import (
     call_agent,
 )
-from agent.modules.workflows.public import DEFAULT_WORKING_DIR
-from agent.modules.tools.public import get_default_tool_names
+from agent.modules.workflows import DEFAULT_WORKING_DIR
+from agent.modules.tools import get_default_tool_names
 
 
 @pytest.mark.asyncio
@@ -38,19 +38,19 @@ async def test_call_agent_inherits_parent_runtime_context(monkeypatch):
             return {"messages": [AIMessage(content="child complete")]}
 
     monkeypatch.setattr(
-        "agent.modules.agents.public.get_catalog_service",
+        "agent.modules.agents.get_catalog_service",
         lambda: _FakeCatalog(),
     )
     monkeypatch.setattr(
-        "agent.modules.workflows.public.get_workflow_graph",
+        "agent.modules.workflows.get_workflow_graph",
         lambda name: _FakeGraph(),
     )
     monkeypatch.setattr(
-        "agent.modules.workflows.public.make_run_context",
+        "agent.modules.workflows.make_run_context",
         lambda **kwargs: kwargs,
     )
     monkeypatch.setattr(
-        "agent.modules.workflows.public.make_run_config",
+        "agent.modules.workflows.make_run_config",
         lambda **kwargs: {"configurable": {"thread_id": kwargs["thread_id"]}},
     )
 
@@ -107,19 +107,19 @@ async def test_call_agent_uses_canonical_default_working_dir(monkeypatch):
             return {"messages": [AIMessage(content="ok")]}
 
     monkeypatch.setattr(
-        "agent.modules.agents.public.get_catalog_service",
+        "agent.modules.agents.get_catalog_service",
         lambda: _FakeCatalog(),
     )
     monkeypatch.setattr(
-        "agent.modules.workflows.public.get_workflow_graph",
+        "agent.modules.workflows.get_workflow_graph",
         lambda name: _FakeGraph(),
     )
     monkeypatch.setattr(
-        "agent.modules.workflows.public.make_run_context",
+        "agent.modules.workflows.make_run_context",
         lambda **kwargs: kwargs,
     )
     monkeypatch.setattr(
-        "agent.modules.workflows.public.make_run_config",
+        "agent.modules.workflows.make_run_config",
         lambda **kwargs: {"configurable": {"thread_id": kwargs["thread_id"]}},
     )
 
@@ -172,19 +172,19 @@ async def test_call_agent_omits_context_for_graph_without_context_schema(monkeyp
             return {"messages": [AIMessage(content="ok")]}
 
     monkeypatch.setattr(
-        "agent.modules.agents.public.get_catalog_service",
+        "agent.modules.agents.get_catalog_service",
         lambda: _FakeCatalog(),
     )
     monkeypatch.setattr(
-        "agent.modules.workflows.public.get_workflow_graph",
+        "agent.modules.workflows.get_workflow_graph",
         lambda name: _FakeGraph(),
     )
     monkeypatch.setattr(
-        "agent.modules.workflows.public.make_run_context",
+        "agent.modules.workflows.make_run_context",
         lambda **kwargs: kwargs,
     )
     monkeypatch.setattr(
-        "agent.modules.workflows.public.make_run_config",
+        "agent.modules.workflows.make_run_config",
         lambda **kwargs: {"configurable": {"thread_id": kwargs["thread_id"]}},
     )
 
@@ -233,19 +233,19 @@ async def test_call_agent_extracts_last_text_from_structured_content(monkeypatch
             }
 
     monkeypatch.setattr(
-        "agent.modules.agents.public.get_catalog_service",
+        "agent.modules.agents.get_catalog_service",
         lambda: _FakeCatalog(),
     )
     monkeypatch.setattr(
-        "agent.modules.workflows.public.get_workflow_graph",
+        "agent.modules.workflows.get_workflow_graph",
         lambda name: _FakeGraph(),
     )
     monkeypatch.setattr(
-        "agent.modules.workflows.public.make_run_context",
+        "agent.modules.workflows.make_run_context",
         lambda **kwargs: kwargs,
     )
     monkeypatch.setattr(
-        "agent.modules.workflows.public.make_run_config",
+        "agent.modules.workflows.make_run_config",
         lambda **kwargs: {"configurable": {"thread_id": kwargs["thread_id"]}},
     )
 

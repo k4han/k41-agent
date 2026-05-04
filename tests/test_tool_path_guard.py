@@ -2,11 +2,11 @@ from types import SimpleNamespace
 
 import pytest
 
-import agent.modules.tools.infrastructure.langchain.file_tools.list_files as list_files_module
-import agent.modules.tools.infrastructure.langchain.file_tools.read_file as read_file_module
-import agent.modules.tools.infrastructure.langchain.file_tools.write_file as write_file_module
-import agent.modules.tools.infrastructure.langchain.shell_tools.run_bash as run_bash_module
-from agent.modules.tools.infrastructure.runtime.path_guard import resolve_safe_path
+import agent.modules.tools.langchain.file_tools.list_files as list_files_module
+import agent.modules.tools.langchain.file_tools.read_file as read_file_module
+import agent.modules.tools.langchain.file_tools.write_file as write_file_module
+import agent.modules.tools.langchain.shell_tools.run_bash as run_bash_module
+from agent.modules.tools.runtime.path_guard import resolve_safe_path
 
 
 def _runtime(working_dir: str) -> SimpleNamespace:

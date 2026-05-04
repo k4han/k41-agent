@@ -1,1 +1,0 @@
-# Skills infrastructure layer

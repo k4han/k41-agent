@@ -1,7 +1,7 @@
 import logging
 
 from agent.bootstrap.settings import BootstrapConfig
-from agent.modules.channels.public import (
+from agent.modules.channels import (
     BUILTIN_CHANNEL_SPECS,
     ChannelManager,
     ChannelSpec,
@@ -10,13 +10,13 @@ from agent.modules.channels.public import (
     stop_all_channels,
 )
 from agent.shared.config import RuntimeSettings
-from agent.modules.workflows.public import (
+from agent.modules.workflows import (
     close_checkpointer,
     initialize_checkpointer,
     register_builtin_workflows,
 )
-from agent.modules.scheduler.public import initialize_scheduler, stop_scheduler
-from agent.modules.skills.public import reload_skills
+from agent.modules.scheduler import initialize_scheduler, stop_scheduler
+from agent.modules.skills import reload_skills
 from agent.shared.infrastructure.db import Base, load_orm_models
 from agent.shared.infrastructure.db.engine import (
     close_async_engine,

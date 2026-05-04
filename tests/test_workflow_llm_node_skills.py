@@ -2,8 +2,8 @@ from types import SimpleNamespace
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-import agent.modules.workflows.infrastructure.langgraph.nodes.llm as llm_node_module
-from agent.modules.workflows.infrastructure.langgraph.run_config import WorkflowContext
+import agent.modules.workflows.nodes.llm as llm_node_module
+from agent.modules.workflows.run_config import WorkflowContext
 
 
 class _FakeChatModel:
@@ -60,7 +60,7 @@ def test_llm_node_uses_prompt_builder_output_for_system_message(monkeypatch):
         lambda names: [SimpleNamespace(name=name) for name in names],
     )
     monkeypatch.setattr(
-        "agent.modules.agents.public.get_catalog_service",
+        "agent.modules.agents.get_catalog_service",
         lambda: _FakeCatalog(),
     )
 
@@ -121,7 +121,7 @@ def test_llm_node_prefers_runtime_allowed_tool_names_before_building_prompt(monk
         lambda names: [SimpleNamespace(name=name) for name in names],
     )
     monkeypatch.setattr(
-        "agent.modules.agents.public.get_catalog_service",
+        "agent.modules.agents.get_catalog_service",
         lambda: _FakeCatalog(),
     )
 
