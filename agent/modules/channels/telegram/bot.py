@@ -4,7 +4,7 @@ import logging
 
 from agent.shared.config import get_config_service
 from agent.shared.infrastructure.validation import is_placeholder_value
-from agent.modules.scheduler import set_telegram_bot
+from agent.modules.notifications import set_telegram_bot
 from agent.modules.channels.telegram.commands import (
     auth_middleware,
     cmd_start,

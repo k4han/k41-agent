@@ -1,7 +1,7 @@
 import logging
 import pickle
 import uuid
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Optional
 
 import tzlocal
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -9,15 +9,12 @@ from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 
-if TYPE_CHECKING:
-    from aiogram import Bot
-    from discord import Client
-else:
-    Bot = Any
-    Client = Any
-
-from agent.modules.users import Platform
 from agent.modules.agent_runtime import SessionManager, run_agent_full
+from agent.modules.notifications import (
+    send_notification as _send_notification,
+    set_discord_client,
+    set_telegram_bot,
+)
 from agent.modules.workflows import get_workflow_graph, make_run_config
 from agent.shared.infrastructure.db.engine import (
     get_database_url,
@@ -39,37 +36,7 @@ CURRENT_EXECUTE_TASK_REF = "agent.modules.scheduler.service:execute_scheduled_ta
 
 logger = logging.getLogger(__name__)
 
-_telegram_bot: Optional[Bot] = None
-_discord_client: Optional[Client] = None
-
 _sync_engine = None
-
-
-def set_telegram_bot(bot: Bot) -> None:
-    global _telegram_bot
-    _telegram_bot = bot
-
-
-def set_discord_client(client: Client) -> None:
-    global _discord_client
-    _discord_client = client
-
-
-async def send_push_notification(platform: str, user_id: str, message: str):
-    """Send a push notification via the appropriate channel client."""
-    try:
-        if platform == Platform.TELEGRAM and _telegram_bot:
-            await _telegram_bot.send_message(chat_id=user_id, text=message, parse_mode="HTML")
-        elif platform == Platform.DISCORD and _discord_client:
-            discord_user = _discord_client.get_user(int(user_id))
-            if discord_user is None:
-                discord_user = await _discord_client.fetch_user(int(user_id))
-            if discord_user:
-                await discord_user.send(message)
-        else:
-            logger.warning(f"No active client for platform {platform} to push notification.")
-    except Exception as e:
-        logger.error(f"Failed to send push notification to {platform} user {user_id}: {e}")
 
 
 _scheduler: Optional[AsyncIOScheduler] = None
@@ -79,7 +46,7 @@ async def execute_scheduled_task(platform: str, user_id: str, task: str):
     """Execute a scheduled task: run the agent, inject results into user thread, and notify."""
     job_id = str(uuid.uuid4())
     background_thread_id = f"{BACKGROUND_THREAD_PREFIX}_{platform}_{user_id}_{task[:TASK_DESCRIPTION_MAX_LEN]}_{job_id}"
-    user_thread_id = SessionManager.make_thread_id(platform, user_id)
+    user_thread_id = SessionManager.make_thread_id(platform, user_id, user_id)
 
     logger.info(f"Executing scheduled task for {user_thread_id}: {task}")
 
@@ -100,12 +67,12 @@ async def execute_scheduled_task(platform: str, user_id: str, task: str):
         )
 
         notification = f"<b>Scheduled task completed:</b>\n{task}\n\n<b>Result:</b>\n{response_text}"
-        await send_push_notification(platform, user_id, notification)
+        await _send_notification(platform, user_id, notification)
 
     except Exception as e:
         logger.error(f"Failed to execute scheduled task '{task}' for {user_thread_id}: {e}", exc_info=True)
         error_msg = f"<b>Scheduled task failed:</b>\n{task}\n\nError: {str(e)}"
-        await send_push_notification(platform, user_id, error_msg)
+        await _send_notification(platform, user_id, error_msg)
 
 
 def get_scheduler() -> AsyncIOScheduler:

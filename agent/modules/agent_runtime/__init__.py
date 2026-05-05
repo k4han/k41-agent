@@ -5,6 +5,7 @@ from agent.modules.agent_runtime.active_sessions import (
 )
 from agent.modules.agent_runtime.background_tasks import (
     BackgroundTaskManager,
+    NotifyChannel,
     get_background_task_manager,
 )
 from agent.modules.agent_runtime.runner import (
@@ -20,6 +21,7 @@ __all__ = [
     "ActiveSession",
     "ActiveSessionRegistry",
     "BackgroundTaskManager",
+    "NotifyChannel",
     "SessionManager",
     "build_run_params",
     "clear_agent_session",

@@ -106,6 +106,25 @@
             box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
         }
 
+        .notify-select {
+            padding: 10px 14px;
+            border: 1.5px solid #d1d5db;
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 0.95rem;
+            color: #111827;
+            background: white;
+            min-width: 180px;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+
+        .notify-select:focus {
+            outline: none;
+            border-color: #6366f1;
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+        }
+
         .btn-submit-task {
             display: inline-flex;
             align-items: center;
@@ -545,6 +564,17 @@
                             {% endfor %}
                         </select>
                     </div>
+                    <div class="task-input-group" style="flex: 0 0 auto;">
+                        <label for="notify-select">Notify</label>
+                        <select id="notify-select" class="notify-select">
+                            <option value="">No notification</option>
+                            {% for identity in identities %}
+                            <option value="{{ identity.platform }}:{{ identity.external_id }}">
+                                {{ identity.platform | capitalize }} — {{ identity.external_id }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
                     <button id="submit-btn" class="btn-submit-task" onclick="submitTask()">
                         <span class="spinner"></span>
                         <span class="btn-text">▶ Run Task</span>
@@ -694,6 +724,11 @@
                             <span class="meta-icon">🔗</span>
                             <span>${escapeHtml(t.thread_id)}</span>
                         </div>
+                        ${t.notify_channel ? `
+                        <div class="task-meta-item">
+                            <span class="meta-icon">🔔</span>
+                            <span>${escapeHtml(t.notify_channel.platform)} — ${escapeHtml(t.notify_channel.external_id)}</span>
+                        </div>` : ''}
                     </div>
                     ${actionsHtml}
                     ${resultHtml}
@@ -760,6 +795,7 @@
         async function submitTask() {
             const textarea = document.getElementById('task-request');
             const agentSelect = document.getElementById('agent-select');
+            const notifySelect = document.getElementById('notify-select');
             const btn = document.getElementById('submit-btn');
 
             const request = textarea.value.trim();
@@ -772,14 +808,23 @@
             btn.classList.add('loading');
             btn.disabled = true;
 
+            const payload = {
+                request: request,
+                agent_name: agentSelect.value,
+            };
+
+            const notifyValue = notifySelect.value;
+            if (notifyValue) {
+                const [platform, externalId] = notifyValue.split(':', 2);
+                payload.notify_platform = platform;
+                payload.notify_external_id = externalId;
+            }
+
             try {
                 const res = await fetch('/tasks', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        request: request,
-                        agent_name: agentSelect.value,
-                    }),
+                    body: JSON.stringify(payload),
                 });
 
                 if (!res.ok) {

@@ -5,7 +5,7 @@ from agent.modules.agents import resolve_catalog_agent_name
 from agent.modules.users import authenticate_channel_message, Platform
 from agent.shared.config import get_config_service
 from agent.shared.infrastructure.validation import is_placeholder_value
-from agent.modules.scheduler import set_discord_client
+from agent.modules.notifications import set_discord_client
 
 logger = logging.getLogger(__name__)
 

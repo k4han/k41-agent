@@ -26,7 +26,7 @@ from agent.modules.scheduler import (
     get_scheduler,
     normalize_trigger,
 )
-from agent.modules.agent_runtime import get_active_session_registry, get_background_task_manager
+from agent.modules.agent_runtime import get_active_session_registry, get_background_task_manager, NotifyChannel
 from agent.modules.agents import get_catalog_service
 from agent.modules.users import get_pairing_service
 from agent.shared.config import (
@@ -598,6 +598,9 @@ async def list_active_sessions() -> dict[str, Any]:
 class SubmitTaskBody(BaseModel):
     request: str
     agent_name: str = "default"
+    notify_platform: str | None = None
+    notify_external_id: str | None = None
+    notify_channel_id: str | None = None
 
 
 @router.get("/tasks", response_class=HTMLResponse)
@@ -608,10 +611,13 @@ async def dashboard_tasks(request: Request) -> HTMLResponse:
     catalog = get_catalog_service()
     agents = catalog.list_agents()
 
+    pairing_service = get_pairing_service()
+    identities = await pairing_service.list_paired_identities()
+
     return templates.TemplateResponse(
         request=request,
         name="tasks.html",
-        context={"tasks": tasks, "agents": agents},
+        context={"tasks": tasks, "agents": agents, "identities": identities},
     )
 
 
@@ -627,10 +633,19 @@ async def submit_background_task(body: SubmitTaskBody) -> dict[str, Any]:
     if not body.request.strip():
         raise HTTPException(status_code=400, detail="Request cannot be empty.")
 
+    notify_channel = None
+    if body.notify_platform and body.notify_external_id:
+        notify_channel = NotifyChannel(
+            platform=body.notify_platform,
+            external_id=body.notify_external_id,
+            channel_id=body.notify_channel_id or body.notify_external_id,
+        )
+
     manager = get_background_task_manager()
     task_id = await manager.submit(
         request=body.request.strip(),
         agent_name=body.agent_name,
+        notify_channel=notify_channel,
     )
     return {"status": "submitted", "task_id": task_id}
 
