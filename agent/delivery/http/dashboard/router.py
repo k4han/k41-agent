@@ -26,6 +26,8 @@ from agent.modules.scheduler import (
     get_scheduler,
     normalize_trigger,
 )
+from agent.modules.agent_runtime import get_active_session_registry, get_background_task_manager
+from agent.modules.agents import get_catalog_service
 from agent.modules.users import get_pairing_service
 from agent.shared.config import (
     ConfigService,
@@ -567,3 +569,90 @@ async def run_scheduler_job_now(
         task=task,
     )
     return {"status": "queued", "job_id": job_id}
+
+
+# --- active sessions endpoints ------------------------------------------
+
+
+@router.get("/sessions", response_class=HTMLResponse)
+async def dashboard_sessions(request: Request) -> HTMLResponse:
+    registry = get_active_session_registry()
+    sessions = registry.list_active()
+    return templates.TemplateResponse(
+        request=request,
+        name="sessions.html",
+        context={"sessions": sessions, "count": len(sessions)},
+    )
+
+
+@router.get("/sessions/active")
+async def list_active_sessions() -> dict[str, Any]:
+    registry = get_active_session_registry()
+    sessions = registry.list_active()
+    return {"sessions": sessions, "count": len(sessions)}
+
+
+# --- background tasks endpoints -----------------------------------------
+
+
+class SubmitTaskBody(BaseModel):
+    request: str
+    agent_name: str = "default"
+
+
+@router.get("/tasks", response_class=HTMLResponse)
+async def dashboard_tasks(request: Request) -> HTMLResponse:
+    manager = get_background_task_manager()
+    tasks = manager.list_all()
+
+    catalog = get_catalog_service()
+    agents = catalog.list_agents()
+
+    return templates.TemplateResponse(
+        request=request,
+        name="tasks.html",
+        context={"tasks": tasks, "agents": agents},
+    )
+
+
+@router.get("/tasks/list")
+async def list_background_tasks() -> dict[str, Any]:
+    manager = get_background_task_manager()
+    tasks = manager.list_all()
+    return {"tasks": tasks}
+
+
+@router.post("/tasks")
+async def submit_background_task(body: SubmitTaskBody) -> dict[str, Any]:
+    if not body.request.strip():
+        raise HTTPException(status_code=400, detail="Request cannot be empty.")
+
+    manager = get_background_task_manager()
+    task_id = await manager.submit(
+        request=body.request.strip(),
+        agent_name=body.agent_name,
+    )
+    return {"status": "submitted", "task_id": task_id}
+
+
+@router.post("/tasks/{task_id}/cancel")
+async def cancel_background_task(task_id: str) -> dict[str, str]:
+    manager = get_background_task_manager()
+    result = manager.cancel(task_id)
+    if result == "not_found":
+        raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found.")
+    if result == "not_running":
+        raise HTTPException(status_code=400, detail="Task is not running.")
+    return {"status": "cancelled", "task_id": task_id}
+
+
+@router.delete("/tasks/{task_id}")
+async def remove_background_task(task_id: str) -> dict[str, str]:
+    manager = get_background_task_manager()
+    removed = manager.remove(task_id)
+    if not removed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Task '{task_id}' not found or still running.",
+        )
+    return {"status": "removed", "task_id": task_id}

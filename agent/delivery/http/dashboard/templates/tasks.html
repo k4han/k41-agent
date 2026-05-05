@@ -1,0 +1,913 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Background Tasks — Kaka Dashboard</title>
+    <link rel="stylesheet" href="/templates/shared.css">
+    <style>
+        /* Task submission area */
+        .task-submit-card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            padding: 24px;
+            margin-bottom: 24px;
+            border: 1px solid #e5e7eb;
+        }
+
+        .task-submit-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+
+        .task-submit-header h2 {
+            margin: 0;
+            font-size: 1.15rem;
+            font-weight: 600;
+            color: #111827;
+        }
+
+        .task-submit-header .icon {
+            font-size: 1.3rem;
+        }
+
+        .task-form {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .task-input-row {
+            display: flex;
+            gap: 12px;
+            align-items: flex-end;
+        }
+
+        .task-input-group {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .task-input-group label {
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .task-textarea {
+            width: 100%;
+            min-height: 80px;
+            max-height: 200px;
+            padding: 12px 14px;
+            border: 1.5px solid #d1d5db;
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 0.95rem;
+            color: #111827;
+            resize: vertical;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            box-sizing: border-box;
+        }
+
+        .task-textarea:focus {
+            outline: none;
+            border-color: #6366f1;
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+        }
+
+        .task-textarea::placeholder {
+            color: #9ca3af;
+        }
+
+        .agent-select {
+            padding: 10px 14px;
+            border: 1.5px solid #d1d5db;
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 0.95rem;
+            color: #111827;
+            background: white;
+            min-width: 160px;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+
+        .agent-select:focus {
+            outline: none;
+            border-color: #6366f1;
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+        }
+
+        .btn-submit-task {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 10px 24px;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s;
+            white-space: nowrap;
+        }
+
+        .btn-submit-task:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35);
+        }
+
+        .btn-submit-task:active {
+            transform: translateY(0);
+        }
+
+        .btn-submit-task:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .btn-submit-task .spinner {
+            display: none;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+        }
+
+        .btn-submit-task.loading .spinner {
+            display: inline-block;
+        }
+
+        .btn-submit-task.loading .btn-text {
+            display: none;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Stats bar */
+        .stats-bar {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .stat-card {
+            background: white;
+            border-radius: 10px;
+            padding: 14px 20px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-width: 140px;
+            border: 1px solid #f3f4f6;
+        }
+
+        .stat-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.15rem;
+        }
+
+        .stat-icon.running { background: #dbeafe; }
+        .stat-icon.completed { background: #d1fae5; }
+        .stat-icon.failed { background: #fee2e2; }
+        .stat-icon.total { background: #f3f4f6; }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #111827;
+            line-height: 1;
+        }
+
+        .stat-label {
+            font-size: 0.75rem;
+            color: #6b7280;
+            margin-top: 2px;
+        }
+
+        /* Task list */
+        .task-list-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .task-list-header h2 {
+            margin: 0;
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #111827;
+        }
+
+        .refresh-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.8rem;
+            color: #6b7280;
+        }
+
+        .refresh-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #10b981;
+            animation: pulse-dot 2s infinite;
+        }
+
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        /* Task cards */
+        .task-grid {
+            display: grid;
+            gap: 12px;
+        }
+
+        .task-card {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+            padding: 18px 20px;
+            border-left: 4px solid #d1d5db;
+            transition: box-shadow 0.2s, border-color 0.2s;
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        .task-card:hover {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        }
+
+        .task-card.status-running {
+            border-left-color: #3b82f6;
+        }
+
+        .task-card.status-completed {
+            border-left-color: #10b981;
+        }
+
+        .task-card.status-failed {
+            border-left-color: #ef4444;
+        }
+
+        .task-card.status-cancelled {
+            border-left-color: #f59e0b;
+        }
+
+        .task-card.status-pending {
+            border-left-color: #9ca3af;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .task-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 10px;
+            gap: 12px;
+        }
+
+        .task-card-left {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .task-id {
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 0.8rem;
+            color: #6b7280;
+            margin-bottom: 4px;
+        }
+
+        .task-request {
+            font-size: 0.95rem;
+            color: #111827;
+            line-height: 1.5;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+        }
+
+        .task-request-preview {
+            max-height: 3em;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .task-card-right {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+
+        .task-status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            text-transform: capitalize;
+        }
+
+        .task-status-badge.running {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+
+        .task-status-badge.running::before {
+            content: '';
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #3b82f6;
+            animation: pulse-dot 1.5s infinite;
+        }
+
+        .task-status-badge.completed {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .task-status-badge.failed {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .task-status-badge.cancelled {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .task-status-badge.pending {
+            background: #f3f4f6;
+            color: #6b7280;
+        }
+
+        .task-elapsed {
+            font-size: 0.8rem;
+            color: #6b7280;
+        }
+
+        .task-meta {
+            display: flex;
+            gap: 16px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+
+        .task-meta-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.8rem;
+            color: #6b7280;
+        }
+
+        .task-meta-item .meta-icon {
+            font-size: 0.85rem;
+        }
+
+        .task-actions {
+            display: flex;
+            gap: 6px;
+            margin-top: 10px;
+        }
+
+        .task-actions .btn {
+            font-size: 0.78rem;
+            padding: 4px 10px;
+        }
+
+        /* Result panel */
+        .task-result {
+            margin-top: 12px;
+            padding: 12px 14px;
+            background: #f9fafb;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+            display: none;
+        }
+
+        .task-result.visible {
+            display: block;
+        }
+
+        .task-result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .task-result-label {
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .task-result-content {
+            font-size: 0.9rem;
+            color: #374151;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .task-error-content {
+            color: #dc2626;
+        }
+
+        /* Empty state */
+        .empty-tasks {
+            text-align: center;
+            padding: 50px 20px;
+            color: #9ca3af;
+        }
+
+        .empty-tasks-icon {
+            font-size: 3rem;
+            margin-bottom: 12px;
+        }
+
+        .empty-tasks h3 {
+            color: #6b7280;
+            margin: 0 0 6px 0;
+            font-size: 1.05rem;
+        }
+
+        .empty-tasks p {
+            margin: 0;
+            font-size: 0.88rem;
+        }
+
+        /* Keyboard shortcut hint */
+        .shortcut-hint {
+            font-size: 0.75rem;
+            color: #9ca3af;
+            margin-top: 6px;
+        }
+
+        .shortcut-hint kbd {
+            background: #f3f4f6;
+            border: 1px solid #d1d5db;
+            border-radius: 3px;
+            padding: 1px 5px;
+            font-size: 0.72rem;
+            font-family: inherit;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="sidebar">
+        <h2>Kaka Dashboard</h2>
+        <div class="nav">
+            <a href="/">Overview</a>
+            <a href="/channels">Pair Channels</a>
+            <a href="/sessions">Active Sessions</a>
+            <a href="/tasks" class="active">Background Tasks</a>
+            <a href="/scheduler">Scheduler</a>
+            <a href="/config">Configuration</a>
+            <a href="/providers">Provider Config</a>
+            <hr style="border-color: #374151; width: 100%; margin: 10px 0;">
+            <a href="/change-password">Đổi mật khẩu</a>
+            <a href="/logout" style="color: #ef4444;">Đăng xuất</a>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div class="header">
+            <h1>Background Tasks</h1>
+        </div>
+
+        <!-- Task submission -->
+        <div class="task-submit-card" id="task-submit-card">
+            <div class="task-submit-header">
+                <span class="icon">🚀</span>
+                <h2>New Task</h2>
+            </div>
+            <div class="task-form">
+                <div class="task-input-group">
+                    <label for="task-request">Request</label>
+                    <textarea
+                        id="task-request"
+                        class="task-textarea"
+                        placeholder="Describe what you want the agent to do..."
+                        rows="3"
+                    ></textarea>
+                </div>
+                <div class="task-input-row">
+                    <div class="task-input-group" style="flex: 0 0 auto;">
+                        <label for="agent-select">Agent</label>
+                        <select id="agent-select" class="agent-select">
+                            {% for agent in agents %}
+                            <option value="{{ agent.name }}"
+                                {% if agent.name == "default" %}selected{% endif %}>
+                                {{ agent.display_name or agent.name }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <button id="submit-btn" class="btn-submit-task" onclick="submitTask()">
+                        <span class="spinner"></span>
+                        <span class="btn-text">▶ Run Task</span>
+                    </button>
+                </div>
+                <div class="shortcut-hint">
+                    Press <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to submit
+                </div>
+            </div>
+        </div>
+
+        <!-- Stats -->
+        <div class="stats-bar" id="stats-bar">
+            <div class="stat-card">
+                <div class="stat-icon running">🔄</div>
+                <div>
+                    <div class="stat-value" id="stat-running">0</div>
+                    <div class="stat-label">Running</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon completed">✅</div>
+                <div>
+                    <div class="stat-value" id="stat-completed">0</div>
+                    <div class="stat-label">Completed</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon failed">❌</div>
+                <div>
+                    <div class="stat-value" id="stat-failed">0</div>
+                    <div class="stat-label">Failed</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon total">📋</div>
+                <div>
+                    <div class="stat-value" id="stat-total">0</div>
+                    <div class="stat-label">Total</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Task list -->
+        <div class="task-list-header">
+            <h2>Task History</h2>
+            <div class="refresh-indicator" id="refresh-indicator" style="display: none;">
+                <span class="refresh-dot"></span>
+                <span>Auto-refresh every <strong>5s</strong></span>
+            </div>
+        </div>
+
+        <div id="tasks-container"></div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script src="/templates/shared.js"></script>
+    <script>
+        const REFRESH_INTERVAL_MS = 5000;
+        const INITIAL_TASKS = {{ tasks | tojson }};
+        let refreshTimer = null;
+        let expandedResults = new Set();
+        let lastTaskPayload = '';
+
+        // --- Helpers ---
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = String(text);
+            return div.innerHTML;
+        }
+
+        function truncateText(text, maxLen = 120) {
+            if (text.length <= maxLen) return text;
+            return text.substring(0, maxLen) + '…';
+        }
+
+        function getStatusIcon(status) {
+            const map = {
+                pending: '⏳',
+                running: '🔄',
+                completed: '✅',
+                failed: '❌',
+                cancelled: '⚠️',
+            };
+            return map[status] || '❓';
+        }
+
+        // --- Render ---
+
+        function renderTaskCard(t) {
+            const isExpanded = expandedResults.has(t.task_id);
+            const hasResult = t.status === 'completed' && t.result;
+            const hasError = t.status === 'failed' && t.error;
+            const isActive = t.status === 'running' || t.status === 'pending';
+
+            let resultHtml = '';
+            if (hasResult) {
+                resultHtml = `
+                    <div class="task-result ${isExpanded ? 'visible' : ''}" id="result-${escapeHtml(t.task_id)}">
+                        <div class="task-result-header">
+                            <span class="task-result-label">Result</span>
+                        </div>
+                        <div class="task-result-content">${escapeHtml(t.result)}</div>
+                    </div>`;
+            } else if (hasError) {
+                resultHtml = `
+                    <div class="task-result ${isExpanded ? 'visible' : ''}" id="result-${escapeHtml(t.task_id)}">
+                        <div class="task-result-header">
+                            <span class="task-result-label">Error</span>
+                        </div>
+                        <div class="task-result-content task-error-content">${escapeHtml(t.error)}</div>
+                    </div>`;
+            }
+
+            let actionsHtml = '<div class="task-actions">';
+            if (hasResult || hasError) {
+                actionsHtml += `<button class="btn btn-ghost btn-sm" onclick="toggleResult('${escapeHtml(t.task_id)}')">${isExpanded ? '▲ Hide' : '▼ Show'} Details</button>`;
+            }
+            if (isActive) {
+                actionsHtml += `<button class="btn btn-warning btn-sm" onclick="cancelTask('${escapeHtml(t.task_id)}')">Cancel</button>`;
+            }
+            if (!isActive) {
+                actionsHtml += `<button class="btn btn-danger btn-sm" onclick="removeTask('${escapeHtml(t.task_id)}')">Remove</button>`;
+            }
+            actionsHtml += '</div>';
+
+            return `
+                <div class="task-card status-${escapeHtml(t.status)}" data-task-id="${escapeHtml(t.task_id)}">
+                    <div class="task-card-header">
+                        <div class="task-card-left">
+                            <div class="task-id">#${escapeHtml(t.task_id)}</div>
+                            <div class="task-request">${escapeHtml(truncateText(t.request, 200))}</div>
+                        </div>
+                        <div class="task-card-right">
+                            <span class="task-status-badge ${escapeHtml(t.status)}">${getStatusIcon(t.status)} ${escapeHtml(t.status)}</span>
+                            <span class="task-elapsed">⏱ ${escapeHtml(t.elapsed_display)}</span>
+                        </div>
+                    </div>
+                    <div class="task-meta">
+                        <div class="task-meta-item">
+                            <span class="meta-icon">🤖</span>
+                            <span>${escapeHtml(t.agent_name)}</span>
+                        </div>
+                        <div class="task-meta-item">
+                            <span class="meta-icon">🔗</span>
+                            <span>${escapeHtml(t.thread_id)}</span>
+                        </div>
+                    </div>
+                    ${actionsHtml}
+                    ${resultHtml}
+                </div>
+            `;
+        }
+
+        function renderTasks(tasks) {
+            updateStats(tasks);
+
+            const container = document.getElementById('tasks-container');
+            const payload = JSON.stringify(tasks.map(t => ({
+                task_id: t.task_id,
+                request: t.request,
+                agent_name: t.agent_name,
+                status: t.status,
+                result: t.result,
+                error: t.error,
+                thread_id: t.thread_id,
+                expanded: expandedResults.has(t.task_id),
+            })));
+
+            if (payload === lastTaskPayload) {
+                container.querySelectorAll('.task-card').forEach((card, index) => {
+                    const elapsed = card.querySelector('.task-elapsed');
+                    if (elapsed) elapsed.textContent = `⏱ ${tasks[index].elapsed_display}`;
+                });
+            } else if (tasks.length === 0) {
+                lastTaskPayload = payload;
+                container.innerHTML = `
+                    <div class="card">
+                        <div class="empty-tasks" id="empty-state">
+                            <div class="empty-tasks-icon">📭</div>
+                            <h3>No tasks yet</h3>
+                            <p>Submit a task above and the agent will work on it in the background.</p>
+                        </div>
+                    </div>
+                `;
+            } else {
+                lastTaskPayload = payload;
+                const cardsHtml = tasks.map(renderTaskCard).join('');
+                container.innerHTML = `<div class="task-grid" id="task-grid">${cardsHtml}</div>`;
+            }
+
+            const hasActive = tasks.some(t => t.status === 'running' || t.status === 'pending');
+            document.getElementById('refresh-indicator').style.display = hasActive ? 'flex' : 'none';
+        }
+
+        function updateStats(tasks) {
+            const counts = { running: 0, completed: 0, failed: 0 };
+            for (const t of tasks) {
+                if (t.status === 'running' || t.status === 'pending') counts.running++;
+                else if (t.status === 'completed') counts.completed++;
+                else if (t.status === 'failed' || t.status === 'cancelled') counts.failed++;
+            }
+            document.getElementById('stat-running').textContent = counts.running;
+            document.getElementById('stat-completed').textContent = counts.completed;
+            document.getElementById('stat-failed').textContent = counts.failed;
+            document.getElementById('stat-total').textContent = tasks.length;
+        }
+
+        // --- Actions ---
+
+        async function submitTask() {
+            const textarea = document.getElementById('task-request');
+            const agentSelect = document.getElementById('agent-select');
+            const btn = document.getElementById('submit-btn');
+
+            const request = textarea.value.trim();
+            if (!request) {
+                showToast('Please enter a task description.', 'warning');
+                textarea.focus();
+                return;
+            }
+
+            btn.classList.add('loading');
+            btn.disabled = true;
+
+            try {
+                const res = await fetch('/tasks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        request: request,
+                        agent_name: agentSelect.value,
+                    }),
+                });
+
+                if (!res.ok) {
+                    const error = await readError(res);
+                    showToast('Failed to submit task: ' + error, 'error');
+                    return;
+                }
+
+                const data = await res.json();
+                showToast(`Task #${data.task_id} submitted!`);
+                textarea.value = '';
+                await refreshTasks();
+                startRefresh();
+            } catch (err) {
+                showToast('Failed to submit task: ' + err.message, 'error');
+            } finally {
+                btn.classList.remove('loading');
+                btn.disabled = false;
+            }
+        }
+
+        async function cancelTask(taskId) {
+            if (!confirm('Cancel this task?')) return;
+            try {
+                const res = await fetch(`/tasks/${taskId}/cancel`, { method: 'POST' });
+                if (res.ok) {
+                    showToast('Task cancelled.');
+                    await refreshTasks();
+                } else {
+                    const error = await readError(res);
+                    showToast('Failed to cancel: ' + error, 'error');
+                }
+            } catch (err) {
+                showToast('Error: ' + err.message, 'error');
+            }
+        }
+
+        async function removeTask(taskId) {
+            try {
+                const res = await fetch(`/tasks/${taskId}`, { method: 'DELETE' });
+                if (res.ok) {
+                    expandedResults.delete(taskId);
+                    showToast('Task removed.');
+                    await refreshTasks();
+                } else {
+                    const error = await readError(res);
+                    showToast('Failed to remove: ' + error, 'error');
+                }
+            } catch (err) {
+                showToast('Error: ' + err.message, 'error');
+            }
+        }
+
+        function toggleResult(taskId) {
+            const el = document.getElementById(`result-${taskId}`);
+            if (!el) return;
+            if (expandedResults.has(taskId)) {
+                expandedResults.delete(taskId);
+                el.classList.remove('visible');
+            } else {
+                expandedResults.add(taskId);
+                el.classList.add('visible');
+            }
+
+            // Update button text
+            const card = el.closest('.task-card');
+            if (card) {
+                const btn = card.querySelector('.task-actions .btn-ghost');
+                if (btn) {
+                    btn.textContent = expandedResults.has(taskId)
+                        ? '▲ Hide Details'
+                        : '▼ Show Details';
+                }
+            }
+        }
+
+        // --- Refresh ---
+
+        async function refreshTasks() {
+            try {
+                const res = await fetch('/tasks/list');
+                if (!res.ok) return false;
+                const data = await res.json();
+                renderTasks(data.tasks);
+
+                const hasActive = data.tasks.some(t => t.status === 'running' || t.status === 'pending');
+                if (!hasActive && refreshTimer) {
+                    stopRefresh();
+                }
+                return hasActive;
+            } catch (err) {
+                console.error('Failed to refresh tasks:', err);
+                return false;
+            }
+        }
+
+        function startRefresh() {
+            if (!refreshTimer) {
+                refreshTimer = setInterval(refreshTasks, REFRESH_INTERVAL_MS);
+            }
+        }
+
+        function stopRefresh() {
+            clearInterval(refreshTimer);
+            refreshTimer = null;
+        }
+
+        document.addEventListener('visibilitychange', async () => {
+            if (document.hidden) {
+                stopRefresh();
+            } else if (await refreshTasks()) {
+                startRefresh();
+            }
+        });
+
+        // Keyboard shortcut: Ctrl+Enter to submit
+        document.getElementById('task-request').addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === 'Enter') {
+                e.preventDefault();
+                submitTask();
+            }
+        });
+
+        // Initial render
+        renderTasks(INITIAL_TASKS);
+        const hasActive = INITIAL_TASKS.some(t => t.status === 'running' || t.status === 'pending');
+        if (hasActive) startRefresh();
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Active Sessions — Kaka Dashboard</title>
+    <link rel="stylesheet" href="/templates/shared.css">
+    <style>
+        /* Stats bar */
+        .stats-bar {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: white;
+            border-radius: 8px;
+            padding: 16px 24px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            min-width: 180px;
+        }
+
+        .stat-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.3rem;
+        }
+
+        .stat-icon.green {
+            background: #d1fae5;
+        }
+
+        .stat-icon.blue {
+            background: #dbeafe;
+        }
+
+        .stat-icon.purple {
+            background: #ede9fe;
+        }
+
+        .stat-value {
+            font-size: 1.75rem;
+            font-weight: 700;
+            color: #111827;
+            line-height: 1;
+        }
+
+        .stat-label {
+            font-size: 0.8rem;
+            color: #6b7280;
+            margin-top: 2px;
+        }
+
+        /* Auto-refresh indicator */
+        .refresh-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.8rem;
+            color: #6b7280;
+        }
+
+        .refresh-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #10b981;
+            animation: pulse-dot 2s infinite;
+        }
+
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        /* Session cards */
+        .session-grid {
+            display: grid;
+            gap: 16px;
+        }
+
+        .session-card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            border-left: 4px solid #10b981;
+            transition: box-shadow 0.2s;
+        }
+
+        .session-card:hover {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .session-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 12px;
+        }
+
+        .session-thread-id {
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 0.85rem;
+            color: #374151;
+            background: #f3f4f6;
+            padding: 3px 8px;
+            border-radius: 4px;
+        }
+
+        .session-elapsed {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: #059669;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .session-meta {
+            display: flex;
+            gap: 24px;
+            margin-bottom: 14px;
+            flex-wrap: wrap;
+        }
+
+        .session-meta-item {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .session-meta-label {
+            font-size: 0.7rem;
+            color: #9ca3af;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 600;
+        }
+
+        .session-meta-value {
+            font-size: 0.9rem;
+            color: #374151;
+            font-weight: 500;
+        }
+
+        /* Step indicator */
+        .session-step {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: #f0fdf4;
+            border-radius: 6px;
+            margin-bottom: 12px;
+        }
+
+        .step-icon {
+            font-size: 1rem;
+        }
+
+        .step-label {
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: #166534;
+        }
+
+        /* Step variants */
+        .session-step.thinking {
+            background: #eff6ff;
+        }
+        .session-step.thinking .step-label {
+            color: #1e40af;
+        }
+
+        .session-step.tool {
+            background: #fef3c7;
+        }
+        .session-step.tool .step-label {
+            color: #92400e;
+        }
+
+        .session-step.responding {
+            background: #f0fdf4;
+        }
+        .session-step.responding .step-label {
+            color: #166534;
+        }
+
+        .session-step.initializing {
+            background: #f3f4f6;
+        }
+        .session-step.initializing .step-label {
+            color: #6b7280;
+        }
+
+        /* Tool chips */
+        .tools-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .tool-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 10px;
+            background: #f3f4f6;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            color: #4b5563;
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+        }
+
+        .tool-chip::before {
+            content: '🔧';
+            font-size: 0.65rem;
+        }
+
+        /* Platform badges */
+        .badge-telegram {
+            background: #e0f2fe;
+            color: #0369a1;
+        }
+
+        .badge-discord {
+            background: #ede9fe;
+            color: #5b21b6;
+        }
+
+        .badge-api {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .badge-platform {
+            text-transform: capitalize;
+        }
+
+        /* Empty state */
+        .empty-sessions {
+            text-align: center;
+            padding: 60px 20px;
+            color: #9ca3af;
+        }
+
+        .empty-sessions-icon {
+            font-size: 3rem;
+            margin-bottom: 16px;
+        }
+
+        .empty-sessions h3 {
+            color: #6b7280;
+            margin: 0 0 8px 0;
+            font-size: 1.1rem;
+        }
+
+        .empty-sessions p {
+            margin: 0;
+            font-size: 0.9rem;
+        }
+
+        /* Fade-in animation for new sessions */
+        .session-card {
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(8px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="sidebar">
+        <h2>Kaka Dashboard</h2>
+        <div class="nav">
+            <a href="/">Overview</a>
+            <a href="/channels">Pair Channels</a>
+            <a href="/sessions" class="active">Active Sessions</a>
+            <a href="/tasks">Background Tasks</a>
+            <a href="/scheduler">Scheduler</a>
+            <a href="/config">Configuration</a>
+            <a href="/providers">Provider Config</a>
+            <hr style="border-color: #374151; width: 100%; margin: 10px 0;">
+            <a href="/change-password">Đổi mật khẩu</a>
+            <a href="/logout" style="color: #ef4444;">Đăng xuất</a>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div class="header">
+            <h1>Active Sessions</h1>
+            <div class="refresh-indicator">
+                <span class="refresh-dot"></span>
+                <span>Auto-refresh every <strong>3s</strong></span>
+            </div>
+        </div>
+
+        <div class="stats-bar">
+            <div class="stat-card">
+                <div class="stat-icon green">🟢</div>
+                <div>
+                    <div class="stat-value" id="session-count">{{ count }}</div>
+                    <div class="stat-label">Active Sessions</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="sessions-container"></div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script src="/templates/shared.js"></script>
+    <script>
+        const REFRESH_INTERVAL_MS = 3000;
+        const INITIAL_SESSIONS = {{ sessions | tojson }};
+        let lastRenderedPayload = '';
+        let refreshTimer = null;
+
+        function getStepClass(step) {
+            if (step === 'thinking') return 'thinking';
+            if (step.startsWith('tool:')) return 'tool';
+            if (step === 'responding') return 'responding';
+            return 'initializing';
+        }
+
+        function getStepIcon(step) {
+            if (step === 'thinking') return '💭';
+            if (step.startsWith('tool:')) return '🔧';
+            if (step === 'responding') return '✍️';
+            return '⏳';
+        }
+
+        function getPlatformBadgeClass(platform) {
+            const map = { telegram: 'badge-telegram', discord: 'badge-discord', api: 'badge-api' };
+            return map[platform] || '';
+        }
+
+        function renderSessionCard(s) {
+            const stepClass = getStepClass(s.current_step);
+            const stepIcon = getStepIcon(s.current_step);
+            const platformClass = getPlatformBadgeClass(s.platform);
+
+            const channelHtml = s.channel_id
+                ? `<div class="session-meta-item">
+                       <span class="session-meta-label">Channel</span>
+                       <span class="session-meta-value">${escapeHtml(s.channel_id)}</span>
+                   </div>`
+                : '';
+
+            const toolsHtml = s.tools_called.length > 0
+                ? `<div class="tools-list">${s.tools_called.map(t => `<span class="tool-chip">${escapeHtml(t)}</span>`).join('')}</div>`
+                : '';
+
+            return `
+                <div class="session-card" data-session-id="${escapeHtml(s.session_id)}">
+                    <div class="session-card-header">
+                        <span class="session-thread-id">${escapeHtml(s.thread_id)}</span>
+                        <span class="session-elapsed">⏱ ${escapeHtml(s.elapsed_display)}</span>
+                    </div>
+                    <div class="session-meta">
+                        <div class="session-meta-item">
+                            <span class="session-meta-label">Platform</span>
+                            <span class="session-meta-value">
+                                <span class="badge badge-platform ${platformClass}">${escapeHtml(s.platform)}</span>
+                            </span>
+                        </div>
+                        <div class="session-meta-item">
+                            <span class="session-meta-label">User ID</span>
+                            <span class="session-meta-value">${escapeHtml(s.user_id)}</span>
+                        </div>
+                        ${channelHtml}
+                        <div class="session-meta-item">
+                            <span class="session-meta-label">Agent</span>
+                            <span class="session-meta-value">${escapeHtml(s.agent_name)}</span>
+                        </div>
+                    </div>
+                    <div class="session-step ${stepClass}">
+                        <span class="step-icon">${stepIcon}</span>
+                        <span class="step-label">${escapeHtml(s.current_step)}</span>
+                    </div>
+                    ${toolsHtml}
+                </div>
+            `;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = String(text);
+            return div.innerHTML;
+        }
+
+        function renderSessions(sessions, count) {
+            const payload = JSON.stringify(sessions.map(s => ({
+                session_id: s.session_id,
+                thread_id: s.thread_id,
+                platform: s.platform,
+                user_id: s.user_id,
+                channel_id: s.channel_id,
+                agent_name: s.agent_name,
+                current_step: s.current_step,
+                tools_called: s.tools_called,
+            })));
+
+            const countEl = document.getElementById('session-count');
+            if (countEl) countEl.textContent = count;
+
+            const container = document.getElementById('sessions-container');
+            if (payload === lastRenderedPayload) {
+                container.querySelectorAll('.session-card').forEach((card, index) => {
+                    card.querySelector('.session-elapsed').textContent = `⏱ ${sessions[index].elapsed_display}`;
+                });
+                return;
+            }
+            lastRenderedPayload = payload;
+
+            if (sessions.length === 0) {
+                container.innerHTML = `
+                    <div class="card">
+                        <div class="empty-sessions" id="empty-state">
+                            <div class="empty-sessions-icon">😴</div>
+                            <h3>No active sessions</h3>
+                            <p>Sessions will appear here when users send messages to the agent.</p>
+                        </div>
+                    </div>
+                `;
+            } else {
+                const cardsHtml = sessions.map(renderSessionCard).join('');
+                container.innerHTML = `<div class="session-grid" id="session-grid">${cardsHtml}</div>`;
+            }
+        }
+
+        async function refreshSessions() {
+            try {
+                const res = await fetch('/sessions/active');
+                if (!res.ok) return;
+                const data = await res.json();
+                renderSessions(data.sessions, data.count);
+            } catch (err) {
+                console.error('Failed to refresh sessions:', err);
+            }
+        }
+
+        function startRefresh() {
+            if (!refreshTimer) {
+                refreshTimer = setInterval(refreshSessions, REFRESH_INTERVAL_MS);
+            }
+        }
+
+        function stopRefresh() {
+            clearInterval(refreshTimer);
+            refreshTimer = null;
+        }
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                stopRefresh();
+            } else {
+                refreshSessions();
+                startRefresh();
+            }
+        });
+
+        renderSessions(INITIAL_SESSIONS, INITIAL_SESSIONS.length);
+        startRefresh();
+    </script>
+</body>
+
+</html>

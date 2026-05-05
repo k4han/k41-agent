@@ -1,8 +1,15 @@
-from typing import Any, AsyncGenerator
+from contextlib import contextmanager
+from typing import Any, AsyncGenerator, Iterator
 
 from langchain_core.messages import AIMessage, HumanMessage
 from agent.shared.infrastructure.parsing import extract_final_text_content
 
+from agent.modules.agent_runtime.active_sessions import (
+    ActiveSession,
+    SESSION_STEP_RESPONDING,
+    SESSION_STEP_THINKING,
+    get_active_session_registry,
+)
 from agent.modules.agent_runtime.session import SessionManager
 from agent.modules.workflows import (
     get_workflow_graph,
@@ -66,6 +73,25 @@ def _graph_accepts_context(graph: Any) -> bool:
     return context_schema is not None
 
 
+@contextmanager
+def _track_active_session(thread_id: str, agent_name: str) -> Iterator[str]:
+    registry = get_active_session_registry()
+    platform, user_id, channel_id = SessionManager.parse_thread_id(thread_id)
+    session = ActiveSession(
+        thread_id=thread_id,
+        platform=platform,
+        user_id=user_id,
+        channel_id=channel_id,
+        agent_name=agent_name,
+    )
+    session_id = registry.register(session)
+    try:
+        registry.update_step(session_id, SESSION_STEP_THINKING)
+        yield session_id
+    finally:
+        registry.unregister(session_id)
+
+
 async def run_agent(
     user_input: str,
     thread_id: str,
@@ -118,17 +144,20 @@ async def run_agent(
     if _graph_accepts_context(graph):
         stream_kwargs["context"] = context
 
-    async for event in graph.astream(
-        {"messages": [HumanMessage(content=user_input)]},
-        **stream_kwargs,
-    ):
-        messages = event.get("messages", [])
-        if messages:
-            last = messages[-1]
-            if isinstance(last, AIMessage):
-                content = extract_final_text_content(getattr(last, "content", None))
-                if content:
-                    yield content
+    registry = get_active_session_registry()
+    with _track_active_session(thread_id, agent_name) as session_id:
+        async for event in graph.astream(
+            {"messages": [HumanMessage(content=user_input)]},
+            **stream_kwargs,
+        ):
+            messages = event.get("messages", [])
+            if messages:
+                last = messages[-1]
+                if isinstance(last, AIMessage):
+                    content = extract_final_text_content(getattr(last, "content", None))
+                    if content:
+                        registry.update_step(session_id, SESSION_STEP_RESPONDING)
+                        yield content
 
 
 async def run_agent_stream(
@@ -185,34 +214,39 @@ async def run_agent_stream(
     if _graph_accepts_context(graph):
         stream_kwargs["context"] = context
 
-    async for event in graph.astream(
-        {"messages": [HumanMessage(content=user_input)]},
-        **stream_kwargs,
-    ):
-        messages = event.get("messages", [])
-        if not messages:
-            continue
+    registry = get_active_session_registry()
+    with _track_active_session(thread_id, agent_name) as session_id:
+        async for event in graph.astream(
+            {"messages": [HumanMessage(content=user_input)]},
+            **stream_kwargs,
+        ):
+            messages = event.get("messages", [])
+            if not messages:
+                continue
 
-        last = messages[-1]
-        if last.id in seen_ids:
-            continue
-        seen_ids.add(last.id)
+            last = messages[-1]
+            if last.id in seen_ids:
+                continue
+            seen_ids.add(last.id)
 
-        if isinstance(last, AIMessage):
-            tool_calls = getattr(last, "tool_calls", None)
-            if tool_calls:
-                for tc in tool_calls:
+            if isinstance(last, AIMessage):
+                tool_calls = getattr(last, "tool_calls", None)
+                if tool_calls:
+                    for tc in tool_calls:
+                        tool_name = tc.get("name") or "unknown"
+                        registry.add_tool_call(session_id, tool_name)
+                        yield {
+                            "type": "tool_call",
+                            "name": tool_name,
+                            "args": tc.get("args"),
+                        }
+                content = extract_final_text_content(getattr(last, "content", None))
+                if content and not tool_calls:
+                    registry.update_step(session_id, SESSION_STEP_RESPONDING)
                     yield {
-                        "type": "tool_call",
-                        "name": tc.get("name"),
-                        "args": tc.get("args")
+                        "type": "final",
+                        "content": content,
                     }
-            content = extract_final_text_content(getattr(last, "content", None))
-            if content and not tool_calls:
-                yield {
-                    "type": "final",
-                    "content": content
-                }
 
 async def run_agent_full(
     user_input: str,
@@ -227,6 +261,9 @@ async def run_agent_full(
     """Run a workflow graph and return the final assistant response.
 
     Loads full config from agent_name, allows selective overrides.
+
+    Note: Session tracking is handled by run_agent() internally,
+    so this function does not need its own register/unregister.
 
     Args:
         user_input: User message
