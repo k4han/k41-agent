@@ -194,7 +194,7 @@ async def stop_scheduler():
     """Stop the scheduler gracefully."""
     global _scheduler, _sync_engine
     if _scheduler:
-        _scheduler.shutdown(wait=True, timeout=SCHEDULER_SHUTDOWN_TIMEOUT)
+        _scheduler.shutdown(wait=True)
         _scheduler = None
     if _sync_engine:
         _sync_engine.dispose()

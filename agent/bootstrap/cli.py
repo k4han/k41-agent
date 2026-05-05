@@ -125,6 +125,14 @@ def serve():
     run_server()
 
 
+@cli.command("cli")
+def chat_cli():
+    """Start an interactive chat CLI with the agent."""
+    from agent.delivery.cli import run_repl
+
+    run_repl()
+
+
 @cli.command("pair-code")
 @with_async_db
 async def pair_code() -> None:
