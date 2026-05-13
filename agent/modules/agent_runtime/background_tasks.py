@@ -3,7 +3,7 @@
 Background tasks are long-running agent executions that:
 - Are submitted via dashboard or adapters (Telegram /task, etc.)
 - Run asynchronously in the background
-- Track their lifecycle: pending → running → completed/failed
+- Track their lifecycle: pending -> running -> completed/failed
 - Store results for later retrieval
 """
 
@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from agent.modules.channels.telegram.formatter import escape_html
 from agent.modules.notifications import send_notification as _send_notification
 from agent.modules.workflows import REACT_AGENT_GRAPH_TYPE
 
@@ -210,19 +211,19 @@ class BackgroundTaskManager:
         if task.status == TaskStatus.COMPLETED:
             message = (
                 f"<b>\u2705 Task completed</b>\n"
-                f"<b>Request:</b> {request_preview}\n\n"
-                f"<b>Result:</b>\n{task.result[:1000]}"
+                f"<b>Request:</b> {escape_html(request_preview)}\n\n"
+                f"<b>Result:</b>\n{escape_html(task.result[:1000])}"
             )
         elif task.status == TaskStatus.FAILED:
             message = (
                 f"<b>\u274c Task failed</b>\n"
-                f"<b>Request:</b> {request_preview}\n\n"
-                f"<b>Error:</b> {task.error[:500]}"
+                f"<b>Request:</b> {escape_html(request_preview)}\n\n"
+                f"<b>Error:</b> {escape_html(task.error[:500])}"
             )
         elif task.status == TaskStatus.CANCELLED:
             message = (
                 f"<b>\u26a0\ufe0f Task cancelled</b>\n"
-                f"<b>Request:</b> {request_preview}"
+                f"<b>Request:</b> {escape_html(request_preview)}"
             )
         else:
             return

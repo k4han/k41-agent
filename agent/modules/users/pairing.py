@@ -48,7 +48,7 @@ async def handle_pairing_command(
     code = parts[1].strip() if len(parts) > 1 else ""
 
     if not code:
-        await reply_fn("Vui lòng cung cấp mã liên kết.")
+        await reply_fn("Please provide a pairing code.")
         return True
 
     pairing_service = get_pairing_service()
@@ -56,9 +56,9 @@ async def handle_pairing_command(
 
     if success:
         _cache_user_auth(platform, user_id)
-        await reply_fn("Tài khoản đã được liên kết thành công!")
+        await reply_fn("Account paired successfully.")
     else:
-        await reply_fn("Mã liên kết không hợp lệ hoặc đã hết hạn.")
+        await reply_fn("Pairing code is invalid or expired.")
 
     return True
 
@@ -87,7 +87,7 @@ async def check_user_authenticated(
         _cache_user_auth(platform, user_id)
         return True
 
-    await reply_fn("Vui lòng nhận mã liên kết và gửi lệnh /pair MÃ_SỐ để xác thực.")
+    await reply_fn("Create a pairing code and send /pair CODE to authenticate.")
     return False
 
 

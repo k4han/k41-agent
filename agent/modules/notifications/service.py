@@ -7,23 +7,23 @@ message to a user on their preferred platform.
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from agent.modules.users import Platform
 
 logger = logging.getLogger(__name__)
 
-_telegram_bot: Optional[Any] = None
-_discord_client: Optional[Any] = None
+_telegram_bot: Any | None = None
+_discord_client: Any | None = None
 
 
-def set_telegram_bot(bot: Any) -> None:
+def set_telegram_bot(bot: Any | None) -> None:
     """Store the Telegram bot instance for later notification use."""
     global _telegram_bot
     _telegram_bot = bot
 
 
-def set_discord_client(client: Any) -> None:
+def set_discord_client(client: Any | None) -> None:
     """Store the Discord client instance for later notification use."""
     global _discord_client
     _discord_client = client
@@ -36,10 +36,15 @@ async def send_notification(platform: str, external_id: str, message: str) -> bo
     """
     try:
         if platform == Platform.TELEGRAM and _telegram_bot:
-            await _telegram_bot.send_message(
-                chat_id=external_id, text=message, parse_mode="HTML"
+            from agent.modules.channels import send_telegram_bot_message
+
+            sent = await send_telegram_bot_message(
+                _telegram_bot,
+                external_id,
+                message,
+                mode="html",
             )
-            return True
+            return bool(sent)
 
         if platform == Platform.DISCORD and _discord_client:
             uid = int(external_id)

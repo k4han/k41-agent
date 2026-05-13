@@ -15,6 +15,24 @@ _default_agent_name: str | None = None
 _code_agent_name: str | None = None
 _research_agent_name: str | None = None
 
+PUBLIC_COMMANDS = {"start", "help"}
+
+
+def _telegram_command_name(text: str) -> str:
+    if not text.startswith("/"):
+        return ""
+    token = text.split(maxsplit=1)[0][1:]
+    return token.split("@", 1)[0].lower()
+
+
+def _is_private_chat(event) -> bool:
+    chat = getattr(event, "chat", None)
+    chat_type = getattr(chat, "type", None)
+    if chat_type is None:
+        return True
+    chat_type_value = getattr(chat_type, "value", str(chat_type))
+    return chat_type_value == "private"
+
 
 def resolve_agent_config() -> None:
     """Resolve and cache agent names from config."""
@@ -39,6 +57,18 @@ def resolve_agent_config() -> None:
 
 async def auth_middleware(handler, event, data: dict):
     if not getattr(event, "text", None) or not getattr(event, "from_user", None):
+        return await handler(event, data)
+
+    if not _is_private_chat(event):
+        chat = getattr(event, "chat", None)
+        logger.info(
+            "Ignoring non-private Telegram message from chat_id=%s chat_type=%s",
+            getattr(chat, "id", None),
+            getattr(chat, "type", None),
+        )
+        return
+
+    if _telegram_command_name(event.text) in PUBLIC_COMMANDS:
         return await handler(event, data)
 
     user_id = str(event.from_user.id)
@@ -85,11 +115,11 @@ async def cmd_clear(message):
         user_id=str(message.from_user.id),
         channel_id=str(message.chat.id),
     )
-    await message.answer("Cuộc trò chuyện đã được xoá.")
+    await message.answer("Chat history has been cleared.")
 
 
 async def cmd_code(message):
-    """Handle /code command — run the coding agent."""
+    """Handle /code command - run the coding agent."""
     text = message.text.removeprefix("/code").strip()
     if not text:
         await message.answer("Example: /code list files in directory")
@@ -100,7 +130,7 @@ async def cmd_code(message):
 
 
 async def cmd_research(message):
-    """Handle /research command — run the research agent."""
+    """Handle /research command - run the research agent."""
     text = message.text.removeprefix("/research").strip()
     if not text:
         await message.answer("Example: /research pros and cons of microservices")
@@ -116,7 +146,7 @@ async def cmd_research(message):
 
 
 async def cmd_agent(message):
-    """Handle /agent <name> <task> command — run a specific agent."""
+    """Handle /agent <name> <task> command - run a specific agent."""
     text = message.text.removeprefix("/agent").strip()
     if not text:
         await message.answer("Example: /agent researcher Find info about AI")
@@ -139,7 +169,7 @@ async def cmd_agent(message):
         else:
             available = ", ".join(a.name for a in agents)
             await message.answer(
-                f"Agent '{agent_name}' không tồn tại. Có sẵn: {available}"
+                f"Agent '{agent_name}' does not exist. Available: {available}"
             )
         return
 
@@ -148,7 +178,7 @@ async def cmd_agent(message):
 
 
 async def cmd_agents(message):
-    """Handle /agents command — list all available agents from MD files."""
+    """Handle /agents command - list all available agents from MD files."""
     catalog = get_catalog_service()
     agents = catalog.list_agents()
     if not agents:
@@ -167,14 +197,14 @@ async def cmd_agents(message):
             else ""
         )
         lines.append(
-            f"- <b>{dn}</b> <code>{a.name}</code> — graph: {a.graph_type}{sub}"
+            f"- <b>{dn}</b> <code>{a.name}</code> - graph: {a.graph_type}{sub}"
         )
 
     await message.answer("\n".join(lines))
 
 
 async def on_message(message):
-    """Default message handler — run the default agent."""
+    """Default message handler - run the default agent."""
     if not message.text:
         return
 

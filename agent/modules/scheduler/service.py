@@ -10,11 +10,8 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from agent.modules.agent_runtime import SessionManager, run_agent_full
-from agent.modules.notifications import (
-    send_notification as _send_notification,
-    set_discord_client,
-    set_telegram_bot,
-)
+from agent.modules.channels.telegram.formatter import escape_html
+from agent.modules.notifications import send_notification as _send_notification
 from agent.modules.workflows import get_workflow_graph, make_run_config
 from agent.shared.infrastructure.db.engine import (
     get_database_url,
@@ -66,12 +63,18 @@ async def execute_scheduled_task(platform: str, user_id: str, task: str):
             as_node=NODE_NAME,
         )
 
-        notification = f"<b>Scheduled task completed:</b>\n{task}\n\n<b>Result:</b>\n{response_text}"
+        notification = (
+            f"<b>Scheduled task completed:</b>\n{escape_html(task)}\n\n"
+            f"<b>Result:</b>\n{escape_html(response_text)}"
+        )
         await _send_notification(platform, user_id, notification)
 
     except Exception as e:
         logger.error(f"Failed to execute scheduled task '{task}' for {user_thread_id}: {e}", exc_info=True)
-        error_msg = f"<b>Scheduled task failed:</b>\n{task}\n\nError: {str(e)}"
+        error_msg = (
+            f"<b>Scheduled task failed:</b>\n{escape_html(task)}\n\n"
+            f"Error: {escape_html(str(e))}"
+        )
         await _send_notification(platform, user_id, error_msg)
 
 

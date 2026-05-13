@@ -43,10 +43,20 @@ def _html_to_markdown(html: str, max_length: int = MAX_OUTPUT_LENGTH) -> str:
 
 
 def _read_limited_response(response: httpx.Response) -> bytes:
-    content_length = response.headers.get("content-length")
-    if content_length and int(content_length) > MAX_RESPONSE_BYTES:
-        return response.read(MAX_RESPONSE_BYTES)
-    return response.read()
+    chunks: list[bytes] = []
+    bytes_read = 0
+
+    for chunk in response.iter_bytes():
+        remaining = MAX_RESPONSE_BYTES - bytes_read
+        if remaining <= 0:
+            break
+        if len(chunk) > remaining:
+            chunks.append(chunk[:remaining])
+            break
+        chunks.append(chunk)
+        bytes_read += len(chunk)
+
+    return b"".join(chunks)
 
 
 @tool

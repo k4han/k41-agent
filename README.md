@@ -89,6 +89,8 @@ enable_dashboard: true
 channels:
   telegram:
     enabled: true
+    update_mode: "polling"
+    bot_token: "123456:telegram-token"
   discord:
     enabled: false
 
@@ -111,6 +113,7 @@ llm:
 Quy ước hiện tại:
 - `enable_web`, `enable_api`, `enable_dashboard`: bật các capability của web host khi app khởi động.
 - `channels.telegram.enabled`, `channels.discord.enabled`: nếu `true` thì channel sẽ tự khởi động cùng app. Các background channel vẫn luôn được đăng ký vào runtime, nên dashboard vẫn có thể start/stop chúng về sau ngay cả khi giá trị này là `false`.
+- `channels.telegram.update_mode`: mặc định `polling`, phù hợp local/headless. Nếu dùng `webhook`, cần `enable_web: true`, `channels.telegram.webhook_url` là URL HTTPS public trỏ tới `/channels/telegram/webhook`, và `channels.telegram.webhook_secret` để kiểm tra header `X-Telegram-Bot-Api-Secret-Token`.
 - Dashboard chỉ thay đổi trạng thái runtime hiện tại. Khi restart app, trạng thái mặc định quay về theo `~/.kaka-agent/config.yaml`.
 - Với dashboard chạy ở prefix gốc `/`, alias cũ `/bots/*` đã bị loại bỏ. Chỉ dùng `/services/*`.
 - LLM config dùng chuẩn `llm.providers.*` + `llm.default_provider` + `llm.default_model`.

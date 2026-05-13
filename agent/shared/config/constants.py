@@ -9,7 +9,8 @@ from typing import Any
 # Runtime configuration key patterns
 # These patterns define which keys can be updated at runtime
 RUNTIME_KEY_PATTERNS = [
-    r"^channels\.(telegram|discord)\.(enabled|bot_token|default_agent|code_agent|research_agent)$",
+    r"^channels\.telegram\.(enabled|bot_token|default_agent|code_agent|research_agent|update_mode|webhook_url|webhook_secret)$",
+    r"^channels\.discord\.(enabled|bot_token|default_agent|code_agent|research_agent)$",
     r"^llm\.(default_provider|api_key|base_url|default_model|temperature)$",
     r"^llm\.providers\.[A-Za-z0-9_-]+\.(provider|type|api_key|base_url|default_model|temperature|enabled)$",
     r"^database\.url$",
@@ -26,9 +27,19 @@ def is_runtime_key(key: str) -> bool:
 def _expand_runtime_keys() -> set[str]:
     """Expand patterns into a set of all valid runtime keys."""
     keys: set[str] = set()
-    for channel in ("telegram", "discord"):
-        for prop in ("enabled", "bot_token", "default_agent", "code_agent", "research_agent"):
-            keys.add(f"channels.{channel}.{prop}")
+    for prop in (
+        "enabled",
+        "bot_token",
+        "default_agent",
+        "code_agent",
+        "research_agent",
+        "update_mode",
+        "webhook_url",
+        "webhook_secret",
+    ):
+        keys.add(f"channels.telegram.{prop}")
+    for prop in ("enabled", "bot_token", "default_agent", "code_agent", "research_agent"):
+        keys.add(f"channels.discord.{prop}")
     for prop in (
         "default_provider",
         "api_key",
@@ -61,6 +72,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "llm.temperature": 0.0,
     # Channel integrations
     "channels.telegram.enabled": True,
+    "channels.telegram.update_mode": "polling",
+    "channels.telegram.webhook_url": "",
+    "channels.telegram.webhook_secret": "",
     "channels.discord.enabled": True,
     # Security
     "persistence.allow_any_path": False,
@@ -100,6 +114,24 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "description": "Agent triggered by /research command",
         "category": "channels",
         "label": "Telegram Research Agent",
+    },
+    "channels.telegram.update_mode": {
+        "type": "text",
+        "description": "Telegram update mode: polling or webhook",
+        "category": "channels",
+        "label": "Telegram Update Mode",
+    },
+    "channels.telegram.webhook_url": {
+        "type": "url",
+        "description": "Public HTTPS endpoint for Telegram webhook mode",
+        "category": "channels",
+        "label": "Telegram Webhook URL",
+    },
+    "channels.telegram.webhook_secret": {
+        "type": "password",
+        "description": "Secret token checked against Telegram webhook requests",
+        "category": "channels",
+        "label": "Telegram Webhook Secret",
     },
     "channels.discord.enabled": {
         "type": "boolean",
@@ -275,7 +307,7 @@ def _provider_setting_metadata(key: str) -> dict[str, Any] | None:
     return metadata
 
 
-# Derived ordering — must match keys in _PROVIDER_SETTING_FIELD_META
+# Derived ordering - must match keys in _PROVIDER_SETTING_FIELD_META
 PROVIDER_SETTING_FIELD_ORDER: list[str] = list(_PROVIDER_SETTING_FIELD_META.keys())
 
 

@@ -1,9 +1,9 @@
+import html
 import re
-from typing import List
 
 def escape_html(text: str) -> str:
-    """Escape '<' and '>' to prevent them from being parsed as HTML tags."""
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    """Escape text to prevent it from being parsed as Telegram HTML."""
+    return html.escape(text, quote=True)
 
 def format_telegram_message(text: str) -> str:
     """
@@ -72,7 +72,7 @@ def format_telegram_message(text: str) -> str:
 
     return text
 
-def chunk_telegram_message(text: str, max_len: int = 4000) -> List[str]:
+def chunk_telegram_message(text: str, max_len: int = 4000) -> list[str]:
     """
     Split a message into chunks within Telegram's character limit. 
     It doesn't perfectly align HTML tags (which is hard if splitting a huge <pre> fallback).
@@ -87,6 +87,9 @@ def chunk_telegram_message(text: str, max_len: int = 4000) -> List[str]:
         if split_idx == -1:
             split_idx = text.rfind('\n', 0, max_len)
         if split_idx == -1:
+            split_idx = max_len
+
+        if split_idx <= 0:
             split_idx = max_len
             
         chunks.append(text[:split_idx])

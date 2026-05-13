@@ -10,7 +10,7 @@ import httpx
 from bs4 import BeautifulSoup, SoupStrainer
 from langchain_core.tools import tool
 
-from agent.modules.tools.langchain.web_tools.web_fetch import DEFAULT_HEADERS, MAX_RESPONSE_BYTES
+from agent.modules.tools.langchain.web_tools.web_fetch import DEFAULT_HEADERS, _read_limited_response
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +82,7 @@ def _duckduckgo_search(query: str, num_results: int = 5) -> str:
         ) as client:
             with client.stream("POST", DDGS_HTML_URL, data={"q": query}) as response:
                 response.raise_for_status()
-                content = response.read(MAX_RESPONSE_BYTES)
+                content = _read_limited_response(response)
 
         soup = BeautifulSoup(
             content.decode(response.encoding or "utf-8", errors="replace"),

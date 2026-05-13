@@ -76,7 +76,10 @@ def _graph_accepts_context(graph: Any) -> bool:
 @contextmanager
 def _track_active_session(thread_id: str, agent_name: str) -> Iterator[str]:
     registry = get_active_session_registry()
-    platform, user_id, channel_id = SessionManager.parse_thread_id(thread_id)
+    try:
+        platform, user_id, channel_id = SessionManager.parse_thread_id(thread_id)
+    except ValueError:
+        platform, user_id, channel_id = "unknown", thread_id, ""
     session = ActiveSession(
         thread_id=thread_id,
         platform=platform,

@@ -53,6 +53,10 @@ channels:
   telegram:
     bot_token: "your-telegram-bot-token-here"
     enabled: true
+    update_mode: "polling"
+    # Required only when update_mode is "webhook"
+    webhook_url: "https://your-domain.example/channels/telegram/webhook"
+    webhook_secret: "your-telegram-webhook-secret"
     # Optional agent overrides
     default_agent: "default"
     code_agent: "code-agent"
@@ -99,10 +103,16 @@ Nếu muốn sử dụng Telegram hoặc Discord:
 channels:
   telegram:
     bot_token: "123456:ABC-DEF..."
+    update_mode: "polling"
   
   discord:
     bot_token: "MTk4NjIyNDgzNDcxOTI1MjQ4.Cl2FMQ..."
 ```
+
+Telegram có hai chế độ nhận update:
+
+- `polling`: mặc định, phù hợp local/headless, chỉ cần `channels.telegram.bot_token`.
+- `webhook`: cần `enable_web: true`, HTTPS public URL ở `channels.telegram.webhook_url`, và secret ở `channels.telegram.webhook_secret`. Endpoint nhận update là `/channels/telegram/webhook` và kiểm tra header `X-Telegram-Bot-Api-Secret-Token`.
 
 ## Configuration Precedence
 
@@ -216,6 +226,8 @@ WARNING: Channel 'telegram' required config keys missing
 ```
 
 → Kiểm tra `channels.telegram.bot_token` đã được set
+
+Nếu dùng Telegram webhook mà channel chuyển sang `error`, kiểm tra thêm `channels.telegram.webhook_url`, `channels.telegram.webhook_secret`, public HTTPS endpoint và reverse proxy.
 
 ### Database path error
 

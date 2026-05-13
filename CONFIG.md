@@ -44,12 +44,25 @@ llm:
 # Telegram Bot (optional)
 channels:
   telegram:
+    enabled: true
+    update_mode: "polling"
     bot_token: "your-telegram-bot-token"
-
-# Discord Bot (optional)
-channels:
   discord:
+    enabled: false
     bot_token: "your-discord-bot-token"
+```
+
+Với Telegram webhook production, dùng:
+
+```yaml
+enable_web: true
+channels:
+  telegram:
+    enabled: true
+    update_mode: "webhook"
+    bot_token: "your-telegram-bot-token"
+    webhook_url: "https://your-domain.example/channels/telegram/webhook"
+    webhook_secret: "your-telegram-webhook-secret"
 ```
 
 ### 4. Chạy
@@ -65,7 +78,7 @@ kaka serve
 Hệ thống đọc cấu hình theo thứ tự ưu tiên:
 
 1. **Config file** (`~/.kaka-agent/config.yaml`)
-  Keys: `llm.default_provider`, `llm.default_model`, `llm.providers.*`, `database.url`, `channels.telegram.bot_token`, `channels.discord.bot_token`
+  Keys: `llm.default_provider`, `llm.default_model`, `llm.providers.*`, `database.url`, `channels.telegram.*`, `channels.discord.*`
 
 2. **Defaults** (thấp nhất)
 

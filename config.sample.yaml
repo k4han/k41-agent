@@ -52,10 +52,17 @@ security:
 # Channel integrations (optional - uncomment to enable)
 # channels:
 #   telegram:
+#     enabled: true
+#     # Use "polling" for local/headless deployments, or "webhook" behind HTTPS.
+#     update_mode: "polling"
 #     # Telegram Bot Token from @BotFather
 #     bot_token: "your-telegram-bot-token-here"
+#     # Required only when update_mode is "webhook".
+#     webhook_url: "https://your-domain.example/channels/telegram/webhook"
+#     webhook_secret: "your-telegram-webhook-secret"
 #
 #   discord:
+#     enabled: false
 #     # Discord Bot Token from Discord Developer Portal
 #     bot_token: "your-discord-bot-token-here"
 

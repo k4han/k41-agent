@@ -20,6 +20,12 @@ from agent.modules.channels.service_specs import (
     ChannelSpec,
 )
 from agent.modules.channels.models import BotSettings
+from agent.modules.channels.telegram.bot import (
+    TelegramWebhookRuntime,
+    get_telegram_webhook_runtime,
+    set_telegram_webhook_runtime,
+)
+from agent.modules.channels.telegram.sender import send_telegram_bot_message
 
 __all__ = [
     "BUILTIN_CHANNEL_SPECS",
@@ -28,10 +34,14 @@ __all__ = [
     "ChannelSpec",
     "ChannelStatus",
     "ManagedChannel",
+    "TelegramWebhookRuntime",
     "get_channel_status",
+    "get_telegram_webhook_runtime",
     "list_channel_statuses",
     "register_builtin_channels",
     "register_channels",
+    "send_telegram_bot_message",
+    "set_telegram_webhook_runtime",
     "start_all_channels",
     "start_channel",
     "start_enabled_channels",
