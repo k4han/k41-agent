@@ -274,14 +274,12 @@
                             </td>
                             <td>
                                 <div class="chip-list">
-                                    {% if card.sub_agents is none %}
-                                    <span class="chip">leaf</span>
-                                    {% else %}
+                                    {% if card.sub_agents %}
                                     {% for sub_agent in card.sub_agents %}
                                     <span class="chip">{{ sub_agent }}</span>
-                                    {% else %}
-                                    <span class="chip">empty list</span>
                                     {% endfor %}
+                                    {% else %}
+                                    <span class="chip">none selected</span>
                                     {% endif %}
                                 </div>
                             </td>
@@ -361,11 +359,7 @@
                             <div class="checkbox-grid" id="agent-tools"></div>
                         </div>
                         <div class="form-group full">
-                            <label for="agent-sub-agents-mode">Sub-agents</label>
-                            <select id="agent-sub-agents-mode" onchange="toggleSubAgentOptions()">
-                                <option value="leaf">Leaf (cannot call agents)</option>
-                                <option value="list">Allow selected agents</option>
-                            </select>
+                            <label>Sub-agents</label>
                             <div class="checkbox-grid" id="agent-sub-agents"></div>
                         </div>
                         <div class="form-group full">
@@ -443,9 +437,8 @@
             });
         }
 
-        function toggleSubAgentOptions() {
-            const mode = document.getElementById('agent-sub-agents-mode').value;
-            const disabled = mode === 'leaf' || modalMode === 'view';
+        function syncSubAgentOptionsState() {
+            const disabled = modalMode === 'view';
             document.querySelectorAll('#agent-sub-agents input').forEach(input => {
                 input.disabled = disabled;
             });
@@ -467,10 +460,9 @@
                 document.getElementById('agent-sub-agents'),
                 availableAgents,
                 subAgents,
-                modalMode === 'view' || card.sub_agents === null
+                modalMode === 'view'
             );
-            document.getElementById('agent-sub-agents-mode').value = card.sub_agents === null ? 'leaf' : 'list';
-            toggleSubAgentOptions();
+            syncSubAgentOptionsState();
         }
 
         function blankAgentCard() {
@@ -481,7 +473,7 @@
                 graph_type: workflowOptions.includes('react_agent') ? 'react_agent' : workflowOptions[0],
                 model: '',
                 tools: [],
-                sub_agents: null,
+                sub_agents: [],
                 max_context_tokens: 50000,
                 system_prompt: '',
             };
@@ -514,7 +506,7 @@
             fillAgentForm(card);
             setFormDisabled(mode === 'view');
             document.getElementById('agent-name').disabled = true;
-            toggleSubAgentOptions();
+            syncSubAgentOptionsState();
             document.getElementById('agent-modal').classList.add('active');
         }
 
@@ -523,7 +515,6 @@
         }
 
         function buildPayload() {
-            const subMode = document.getElementById('agent-sub-agents-mode').value;
             return {
                 name: document.getElementById('agent-name').value.trim(),
                 display_name: document.getElementById('agent-display-name').value.trim(),
@@ -531,7 +522,7 @@
                 graph_type: document.getElementById('agent-graph-type').value,
                 model: document.getElementById('agent-model').value.trim(),
                 tools: readCheckedValues('agent-tools'),
-                sub_agents: subMode === 'leaf' ? null : readCheckedValues('agent-sub-agents'),
+                sub_agents: readCheckedValues('agent-sub-agents'),
                 max_context_tokens: Number(document.getElementById('agent-max-context-tokens').value),
                 system_prompt: document.getElementById('agent-system-prompt').value.trim(),
             };

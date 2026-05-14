@@ -45,7 +45,7 @@ def _payload(name: str) -> dict:
         "graph_type": "react_agent",
         "model": "",
         "tools": ["read_file"],
-        "sub_agents": None,
+        "sub_agents": [],
         "max_context_tokens": 1000,
         "system_prompt": "You are a sample dashboard agent.",
     }
@@ -61,6 +61,8 @@ def test_agents_page_renders_cards_and_sidebar_link(dashboard_agent_client) -> N
     assert 'href="/agents" class="active"' in response.text
     assert "default" in response.text
     assert "Clone" in response.text
+    assert "Leaf (cannot call agents)" not in response.text
+    assert "Allow selected agents" not in response.text
 
     index_response = client.get("/")
     assert index_response.status_code == 200
