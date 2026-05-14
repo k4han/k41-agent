@@ -14,7 +14,6 @@ DEFAULT_AGENT_NAME = "default"
 # String normalization constants
 STRIP_PREFIXES = "-* "
 STRIP_QUOTES = "`'\""
-NAME_SEPARATORS = ("_", "-")
 
 
 __all__ = [
@@ -25,5 +24,4 @@ __all__ = [
     "DEFAULT_AGENT_NAME",
     "STRIP_PREFIXES",
     "STRIP_QUOTES",
-    "NAME_SEPARATORS",
 ]

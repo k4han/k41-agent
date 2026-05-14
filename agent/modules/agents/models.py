@@ -18,8 +18,6 @@ class AgentConfig(BaseModel):
     tools: list[str] = Field(default_factory=list)
     sub_agents: Optional[list[str]] = None  # None = leaf (no call_agent), list = allowed targets
     max_context_tokens: int = 50_000
-    routing_hints: str = ""
-    capabilities: list[str] = Field(default_factory=list)
     system_prompt: str = ""  # Markdown body content (after frontmatter)
 
 
@@ -34,8 +32,6 @@ class AgentCard(BaseModel):
     tools: list[str] = Field(default_factory=list)
     sub_agents: Optional[list[str]] = None
     max_context_tokens: int = 50_000
-    routing_hints: str = ""
-    capabilities: list[str] = Field(default_factory=list)
     system_prompt: str = ""
     source: Literal["builtin", "user"]
     path: str
@@ -64,8 +60,6 @@ class AgentCard(BaseModel):
             tools=list(config.tools),
             sub_agents=list(config.sub_agents) if config.sub_agents is not None else None,
             max_context_tokens=config.max_context_tokens,
-            routing_hints=config.routing_hints,
-            capabilities=list(config.capabilities),
             system_prompt=config.system_prompt,
             source=source,
             path=path,
@@ -108,7 +102,5 @@ class AgentCard(BaseModel):
             tools=list(self.tools),
             sub_agents=list(self.sub_agents) if self.sub_agents is not None else None,
             max_context_tokens=self.max_context_tokens,
-            routing_hints=self.routing_hints,
-            capabilities=list(self.capabilities),
             system_prompt=self.system_prompt,
         )

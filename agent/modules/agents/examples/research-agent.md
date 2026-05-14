@@ -8,11 +8,6 @@ tools:
   - "webfetch"
   - "list_files"
   - "read_file"
-routing_hints: "deep research, source validation, and synthesis"
-capabilities:
-  - "research"
-  - "analysis"
-  - "fact-checking"
 max_context_tokens: 50000
 ---
 

@@ -31,10 +31,6 @@ model: ""  # optional override; empty = use provider default model
 tools:
   - "tool1"
   - "tool2"
-routing_hints: "best for architecture design and refactors"
-capabilities:
-  - "backend"
-  - "python"
 sub_agents:  # Optional: list of agents this agent can call
   - "sub-agent-1"
   - "sub-agent-2"
@@ -54,8 +50,6 @@ Can use {working_dir} placeholder.
 - **graph_type**: Workflow template (default: `react_agent`)
 - **model**: Model ID override (default: empty, so runtime uses provider default)
 - **tools**: Danh sách tools agent có thể sử dụng (empty = all default tools)
-- **routing_hints**: Gợi ý ngắn để router hiểu intent/domain phù hợp với agent
-- **capabilities**: Danh sách nhãn năng lực để router so khớp yêu cầu người dùng
 - **sub_agents**: 
   - `null` (không có field): leaf agent, không thể call sub-agents
   - `[]` (empty list): có thể call sub-agents nhưng chưa config

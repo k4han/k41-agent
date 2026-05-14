@@ -8,11 +8,6 @@ tools:
   - "read_file"
   - "write_file"
   - "search_files"
-routing_hints: "general support, coding, and file operations"
-capabilities:
-  - "general"
-  - "coding"
-  - "files"
 max_context_tokens: 50000
 ---
 

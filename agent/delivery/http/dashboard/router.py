@@ -247,8 +247,6 @@ def _agent_config_from_body(body: "AgentCardBody") -> AgentConfig:
         tools=list(body.tools),
         sub_agents=list(body.sub_agents) if body.sub_agents is not None else None,
         max_context_tokens=body.max_context_tokens,
-        routing_hints=body.routing_hints.strip(),
-        capabilities=list(body.capabilities),
         system_prompt=body.system_prompt.strip(),
     )
 
@@ -265,8 +263,6 @@ class AgentCardBody(BaseModel):
     tools: list[str] = Field(default_factory=list)
     sub_agents: list[str] | None = None
     max_context_tokens: int = 50_000
-    routing_hints: str = ""
-    capabilities: list[str] = Field(default_factory=list)
     system_prompt: str = ""
 
 

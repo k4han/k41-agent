@@ -28,7 +28,6 @@ from agent.modules.workflows.constants import (
     DEFAULT_AGENT_NAME,
     STRIP_PREFIXES,
     STRIP_QUOTES,
-    NAME_SEPARATORS,
 )
 from agent.modules.providers import get_chat_model
 from agent.shared.infrastructure.parsing import safe_str_strip
@@ -52,10 +51,7 @@ def _agent_description(config: AgentConfig) -> str:
     description = safe_str_strip(getattr(config, "description", ""))
     if description:
         return description
-    name = config.name
-    for sep in NAME_SEPARATORS:
-        name = name.replace(sep, " ")
-    return f"{name} agent"
+    return "No description provided"
 
 
 def _build_router_system(
@@ -75,10 +71,7 @@ def _build_router_system(
         )
 
     agent_options = "\n".join(
-        f"- {name} | workflow={config.graph_type} | "
-        f"capabilities={', '.join(config.capabilities) if config.capabilities else 'none'} | "
-        f"routing_hints={safe_str_strip(config.routing_hints, 'none')} | "
-        f"description={_agent_description(config)}"
+        f"- {name}: {_agent_description(config)}"
         for name, config in candidates.items()
     )
 

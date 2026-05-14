@@ -26,8 +26,6 @@ def _config(name: str, *, sub_agents: list[str] | None = None) -> AgentConfig:
         tools=["read_file"],
         sub_agents=sub_agents,
         max_context_tokens=1000,
-        routing_hints="",
-        capabilities=["sample"],
         system_prompt="You are a sample agent.",
     )
 

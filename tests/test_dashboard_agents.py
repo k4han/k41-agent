@@ -47,8 +47,6 @@ def _payload(name: str) -> dict:
         "tools": ["read_file"],
         "sub_agents": None,
         "max_context_tokens": 1000,
-        "routing_hints": "",
-        "capabilities": ["sample"],
         "system_prompt": "You are a sample dashboard agent.",
     }
 

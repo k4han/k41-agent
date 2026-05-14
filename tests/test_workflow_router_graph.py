@@ -52,8 +52,6 @@ def _make_agent(
     description: str = "",
     tools: list[str] | None = None,
     max_context_tokens: int = 50_000,
-    routing_hints: str = "",
-    capabilities: list[str] | None = None,
     system_prompt: str = (
         "You are router {caller_agent_name}.\n"
         "Candidates:\n{agent_options}\n\n"
@@ -70,8 +68,6 @@ def _make_agent(
         tools=list(tools or []),
         sub_agents=None,
         max_context_tokens=max_context_tokens,
-        routing_hints=routing_hints,
-        capabilities=list(capabilities or []),
         system_prompt=system_prompt,
     )
 
@@ -159,8 +155,6 @@ async def test_router_node_routes_to_selected_sub_agent(
                     description="Research specialist",
                     tools=["websearch", "webfetch"],
                     max_context_tokens=12000,
-                    routing_hints="deep research tasks",
-                    capabilities=["research", "writing"],
                 ),
                 "default": _make_agent(name="default", graph_type="react_agent"),
             },
@@ -195,9 +189,10 @@ async def test_router_node_routes_to_selected_sub_agent(
     assert target_context.allowed_tool_names == ["websearch", "webfetch"]
 
     system_prompt = captured["messages"][0].content
-    assert "researcher" in system_prompt
-    assert "capabilities=research, writing" in system_prompt
-    assert "routing_hints=deep research tasks" in system_prompt
+    assert "- researcher: Research specialist" in system_prompt
+    assert "capabilities=" not in system_prompt
+    assert "routing_hints=" not in system_prompt
+    assert "workflow=" not in system_prompt
     assert "Plan this implementation work" in system_prompt
 
 

@@ -4,9 +4,6 @@ description: "Orchestrates requests to specialized agents"
 graph_type: "router"
 model: ""
 tools: []
-routing_hints: "delegate requests to specialist agents"
-capabilities:
-  - "routing"
 sub_agents:
   - "backend"
   - "frontend"

@@ -123,8 +123,6 @@ def serialize_agent_config(config: AgentConfig) -> str:
         "model": config.model,
         "tools": list(config.tools),
         "max_context_tokens": config.max_context_tokens,
-        "routing_hints": config.routing_hints,
-        "capabilities": list(config.capabilities),
     }
     if config.sub_agents is not None:
         data["sub_agents"] = list(config.sub_agents)
@@ -167,9 +165,6 @@ def _build_agent_config(
         raise AgentMarkdownError(
             f"Agent file {source_label} has invalid 'max_context_tokens'."
         ) from exc
-    routing_hints = str(data.get("routing_hints", ""))
-
-    capabilities = parse_string_or_list(data.get("capabilities", []))
     tools = parse_string_or_list(data.get("tools", []))
 
     # sub_agents: None means leaf (cannot call anyone), list means can call those
@@ -197,8 +192,6 @@ def _build_agent_config(
             tools=tools,
             sub_agents=sub_agents,
             max_context_tokens=max_context_tokens,
-            routing_hints=routing_hints,
-            capabilities=capabilities,
             system_prompt=body,
         )
     except Exception as exc:

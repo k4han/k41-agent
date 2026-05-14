@@ -356,14 +356,6 @@
                             <label for="agent-max-context-tokens">Max Context Tokens</label>
                             <input id="agent-max-context-tokens" type="number" min="1" step="1" required>
                         </div>
-                        <div class="form-group">
-                            <label for="agent-capabilities">Capabilities</label>
-                            <input id="agent-capabilities" type="text" placeholder="backend, python">
-                        </div>
-                        <div class="form-group full">
-                            <label for="agent-routing-hints">Routing Hints</label>
-                            <input id="agent-routing-hints" type="text">
-                        </div>
                         <div class="form-group full">
                             <label>Tools</label>
                             <div class="checkbox-grid" id="agent-tools"></div>
@@ -419,17 +411,6 @@
                 || cards.find(card => card.name === name);
         }
 
-        function csvToList(value) {
-            return String(value || '')
-                .split(',')
-                .map(item => item.trim())
-                .filter(Boolean);
-        }
-
-        function listToCsv(value) {
-            return Array.isArray(value) ? value.join(', ') : '';
-        }
-
         function sortedUnique(values) {
             return Array.from(new Set(values.filter(Boolean))).sort();
         }
@@ -477,8 +458,6 @@
             renderSelect(document.getElementById('agent-graph-type'), workflowOptions, card.graph_type || 'react_agent');
             document.getElementById('agent-model').value = card.model || '';
             document.getElementById('agent-max-context-tokens').value = card.max_context_tokens || 50000;
-            document.getElementById('agent-capabilities').value = listToCsv(card.capabilities);
-            document.getElementById('agent-routing-hints').value = card.routing_hints || '';
             document.getElementById('agent-system-prompt').value = card.system_prompt || '';
 
             renderCheckboxes(document.getElementById('agent-tools'), toolOptions, card.tools || [], modalMode === 'view');
@@ -504,8 +483,6 @@
                 tools: [],
                 sub_agents: null,
                 max_context_tokens: 50000,
-                routing_hints: '',
-                capabilities: [],
                 system_prompt: '',
             };
         }
@@ -556,8 +533,6 @@
                 tools: readCheckedValues('agent-tools'),
                 sub_agents: subMode === 'leaf' ? null : readCheckedValues('agent-sub-agents'),
                 max_context_tokens: Number(document.getElementById('agent-max-context-tokens').value),
-                routing_hints: document.getElementById('agent-routing-hints').value.trim(),
-                capabilities: csvToList(document.getElementById('agent-capabilities').value),
                 system_prompt: document.getElementById('agent-system-prompt').value.trim(),
             };
         }

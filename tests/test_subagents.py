@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from agent.modules.agents.models import AgentConfig
-from agent.modules.agents.parser import parse_agent_file
+from agent.modules.agents.parser import parse_agent_file, serialize_agent_config
 from agent.modules.agents.repository import FilesystemAgentRepository
 from agent.modules.agents.service import AgentCatalogService
 
@@ -25,8 +25,6 @@ graph_type: react_agent
 tools: [read_file, list_files, call_agent]
 sub_agents: []
 max_context_tokens: 30000
-routing_hints: "in-depth research and synthesis"
-capabilities: [research, writing]
 ---
 
 You are a research assistant. Help the user find and synthesize information.
@@ -43,8 +41,6 @@ graph_type: react_agent
 tools: [read_file, write_file, run_bash, list_files, call_agent]
 sub_agents: [researcher]
 max_context_tokens: 50000
-routing_hints: "backend implementation and debugging"
-capabilities: backend, python
 ---
 
 You are a coding assistant specialized in Python development.
@@ -87,8 +83,6 @@ class TestParseAgentFile:
         assert config.tools == ["read_file", "list_files", "call_agent"]
         assert config.sub_agents == []
         assert config.max_context_tokens == 30000
-        assert config.routing_hints == "in-depth research and synthesis"
-        assert config.capabilities == ["research", "writing"]
         assert "research assistant" in config.system_prompt
 
     def test_parse_file_no_frontmatter(self):
@@ -151,26 +145,28 @@ class TestParseAgentFile:
         os.unlink(p)
         os.rmdir(d)
 
-    def test_parse_file_capabilities_string_is_coerced_to_list(self):
+    def test_parse_file_ignores_legacy_routing_metadata(self):
         d = tempfile.mkdtemp()
-        p = Path(d, "caps_string.md")
+        p = Path(d, "legacy_routing_metadata.md")
         p.write_text(
-            "---\nname: test\ngraph_type: react_agent\ncapabilities: backend, python\n---\nBody.",
+            (
+                "---\n"
+                "name: test\n"
+                "graph_type: react_agent\n"
+                "routing_hints: legacy hints\n"
+                "capabilities: backend, python\n"
+                "---\n"
+                "Body."
+            ),
             encoding="utf-8",
         )
         config = parse_agent_file(p)
         assert config is not None
-        assert config.capabilities == ["backend", "python"]
-        os.unlink(p)
-        os.rmdir(d)
-
-    def test_parse_file_routing_hints_defaults_to_empty_string(self):
-        d = tempfile.mkdtemp()
-        p = Path(d, "no_hints.md")
-        p.write_text("---\nname: test\ngraph_type: react_agent\n---\nBody.", encoding="utf-8")
-        config = parse_agent_file(p)
-        assert config is not None
-        assert config.routing_hints == ""
+        assert not hasattr(config, "routing_hints")
+        assert not hasattr(config, "capabilities")
+        serialized = serialize_agent_config(config)
+        assert "routing_hints" not in serialized
+        assert "capabilities" not in serialized
         os.unlink(p)
         os.rmdir(d)
 
@@ -187,7 +183,6 @@ class TestFilesystemAgentRepository:
         assert "default" in agents
         assert "scheduler-executor" in agents
         assert agents["researcher"].graph_type == "react_agent"
-        assert agents["coder"].capabilities == ["backend", "python"]
         assert agents["default"].name == "default"
 
     def test_load_empty_directory(self):
