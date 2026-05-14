@@ -22,4 +22,5 @@ class ProviderConfig:
     base_url: str
     api_key: str
     default_model: str
+    models: tuple[str, ...] = ()
     enabled: bool = True

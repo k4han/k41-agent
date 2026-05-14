@@ -21,8 +21,7 @@ def _parse_temperature(value: str | float | int | None, default: float) -> float
     except (TypeError, ValueError) as exc:
         raise ValueError(
             "Invalid LLM temperature configuration. "
-            "Set llm.providers.<provider>.temperature (or llm.temperature) "
-            "in config.yaml to a numeric value."
+            "Set llm.providers.<provider>.temperature in config.yaml to a numeric value."
         ) from exc
 
 
@@ -50,10 +49,7 @@ def resolve_chat_model(
 
     resolved_model = (model or provider_config.default_model).strip()
     provider_temperature_key = f"llm.providers.{provider_config.name}.temperature"
-    configured_temperature = config.get(
-        provider_temperature_key,
-        config.get("llm.temperature"),
-    )
+    configured_temperature = config.get(provider_temperature_key)
     resolved_temperature = _parse_temperature(
         temperature if temperature is not None else configured_temperature,
         DEFAULT_TEMPERATURE,
@@ -63,14 +59,14 @@ def resolve_chat_model(
     if not resolved_api_key:
         raise RuntimeError(
             "API key not configured. "
-            "Set 'llm.api_key' in ~/.kaka-agent/config.yaml before starting the app."
+            f"Set 'llm.providers.{provider_config.name}.api_key' "
+            "in ~/.kaka-agent/config.yaml before starting the app."
         )
 
     if not resolved_model:
         raise RuntimeError(
             "Model not configured. "
-            "Set 'llm.default_model' "
-            "(or fallback 'llm.providers.<provider>.default_model') "
+            f"Set 'llm.providers.{provider_config.name}.default_model' "
             "in ~/.kaka-agent/config.yaml before starting the app."
         )
 
@@ -111,6 +107,7 @@ def _get_cached_model(
         base_url=base_url,
         api_key=api_key,
         default_model=model_name,
+        models=(),
     )
     model_config = ModelConfig(model_name=model_name, temperature=temperature)
 

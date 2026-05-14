@@ -22,6 +22,7 @@ def _config(name: str, *, sub_agents: list[str] | None = None) -> AgentConfig:
         display_name="Sample",
         description="Sample agent",
         graph_type="react_agent",
+        provider="default",
         model="",
         tools=["read_file"],
         sub_agents=sub_agents,
@@ -37,6 +38,7 @@ def test_agent_cards_include_source_metadata_and_user_override(tmp_path: Path) -
         """---
 name: default
 graph_type: react_agent
+provider: default
 tools: []
 max_context_tokens: 1000
 ---
@@ -102,6 +104,7 @@ def test_clone_builtin_agent_creates_user_override_and_rejects_collision(
             AgentConfig(
                 name="bad-tokens",
                 graph_type="react_agent",
+                provider="default",
                 max_context_tokens=0,
                 system_prompt="Prompt",
             ),
@@ -111,6 +114,7 @@ def test_clone_builtin_agent_creates_user_override_and_rejects_collision(
             AgentConfig(
                 name="bad-router",
                 graph_type="router",
+                provider="default",
                 sub_agents=[],
                 system_prompt="Choose an agent.",
             ),

@@ -2,6 +2,7 @@
 name: "scheduler-executor"
 description: "Executes scheduled tasks directly without further scheduling"
 graph_type: "react_agent"
+provider: "default"
 model: ""
 tools:
   - "get_current_time"

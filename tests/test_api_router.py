@@ -29,6 +29,7 @@ def test_chat_sync_returns_response_payload(monkeypatch):
         "workflow": "react_agent",
         "working_dir": "D:/workspace/sample",
         "max_context_tokens": None,
+        "provider": None,
         "model": None,
     }
 
@@ -40,6 +41,7 @@ def test_chat_sync_returns_response_payload(monkeypatch):
             "workflow": "react_agent",
             "working_dir": "D:/workspace/sample",
             "agent_name": "default",
+            "provider": None,
             "model": None,
         }
         return dict(built_params)
@@ -78,6 +80,7 @@ def test_chat_sync_prefers_agent_name_over_workflow(monkeypatch):
         "workflow": "react_agent",
         "working_dir": None,
         "max_context_tokens": None,
+        "provider": None,
         "model": None,
     }
 
@@ -89,6 +92,7 @@ def test_chat_sync_prefers_agent_name_over_workflow(monkeypatch):
             "workflow": "react_agent",
             "working_dir": None,
             "agent_name": "research-agent",
+            "provider": None,
             "model": None,
         }
         return dict(built_params)
@@ -127,6 +131,7 @@ def test_chat_sync_passes_model_override(monkeypatch):
         "workflow": "react_agent",
         "working_dir": None,
         "max_context_tokens": None,
+        "provider": "openai-main",
         "model": "direct-model",
     }
 
@@ -138,6 +143,7 @@ def test_chat_sync_passes_model_override(monkeypatch):
             "workflow": None,
             "working_dir": None,
             "agent_name": "default",
+            "provider": "openai-main",
             "model": "direct-model",
         }
         return dict(built_params)
@@ -155,6 +161,7 @@ def test_chat_sync_passes_model_override(monkeypatch):
         json={
             "message": "Use a faster model",
             "user_id": "cara",
+            "provider": "openai-main",
             "model": "direct-model",
         },
     )

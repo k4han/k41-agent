@@ -10,12 +10,12 @@ from typing import Any
 from agent.modules.providers.provider import ProviderConfig, ProviderType
 from agent.shared.config import get_config_service, parse_provider_key
 from agent.shared.infrastructure.config_file import coerce_bool
+from agent.shared.infrastructure.parsing import parse_string_or_list
 from agent.shared.infrastructure.validation import is_placeholder_value
 
 
 DEFAULT_MODEL = ""
 DEFAULT_BASE_URL = ""
-DEFAULT_PROVIDER = "openai_compatible"
 DEFAULT_PROVIDER_NAME = "default"
 
 _PROVIDER_ALIASES: dict[str, ProviderType] = {
@@ -65,13 +65,7 @@ def _extract_provider_entries(flat_config: dict[str, Any]) -> dict[str, dict[str
     return providers
 
 
-def _resolve_default_model(
-    provider_values: dict[str, Any],
-    global_default_model: str,
-) -> str:
-    if global_default_model:
-        return global_default_model
-
+def _resolve_default_model(provider_values: dict[str, Any]) -> str:
     value = provider_values.get("default_model")
     if isinstance(value, str) and value.strip():
         return value.strip()
@@ -79,14 +73,17 @@ def _resolve_default_model(
     return DEFAULT_MODEL
 
 
+def _resolve_model_options(provider_values: dict[str, Any]) -> tuple[str, ...]:
+    return tuple(parse_string_or_list(provider_values.get("models", [])))
+
+
 def _resolve_api_key(
     provider_name: str,
     provider_values: dict[str, Any],
-    shared_api_key: str,
     *,
     enabled: bool,
 ) -> str:
-    raw_api_key = provider_values.get("api_key", shared_api_key)
+    raw_api_key = provider_values.get("api_key", "")
     api_key = str(raw_api_key).strip() if raw_api_key is not None else ""
 
     if not enabled:
@@ -95,8 +92,7 @@ def _resolve_api_key(
     if is_placeholder_value(api_key):
         raise RuntimeError(
             "LLM API key not configured. "
-            f"Please set 'llm.providers.{provider_name}.api_key' "
-            "(or fallback 'llm.api_key') in ~/.kaka-agent/config.yaml"
+            f"Please set 'llm.providers.{provider_name}.api_key' in ~/.kaka-agent/config.yaml"
         )
 
     return api_key
@@ -105,10 +101,6 @@ def _resolve_api_key(
 def _build_provider_config(
     provider_key: str,
     provider_values: dict[str, Any],
-    *,
-    shared_api_key: str,
-    shared_base_url: str,
-    global_default_model: str,
 ) -> ProviderConfig:
     provider_name = str(provider_values.get("_provider_name", provider_key)).strip() or provider_key
     provider_type_value = provider_values.get("type") or provider_key
@@ -118,7 +110,7 @@ def _build_provider_config(
     )
     enabled = coerce_bool(provider_values.get("enabled", True))
 
-    base_url = str(provider_values.get("base_url", shared_base_url)).strip()
+    base_url = str(provider_values.get("base_url", "")).strip()
     if provider_type == ProviderType.OPENAI_COMPATIBLE:
         base_url = base_url or DEFAULT_BASE_URL
     else:
@@ -131,13 +123,10 @@ def _build_provider_config(
         api_key=_resolve_api_key(
             provider_name,
             provider_values,
-            shared_api_key,
             enabled=enabled,
         ),
-        default_model=_resolve_default_model(
-            provider_values,
-            global_default_model,
-        ),
+        default_model=_resolve_default_model(provider_values),
+        models=_resolve_model_options(provider_values),
         enabled=enabled,
     )
 
@@ -202,56 +191,27 @@ class ConfigProviderRepository:
             return self._cache
         config = get_config_service()
 
-        shared_api_key = config.get_str("llm.api_key", "").strip()
-        shared_base_url = config.get_str("llm.base_url", DEFAULT_BASE_URL).strip()
-        global_default_model = config.get_str("llm.default_model", "").strip()
-
         providers = _extract_provider_entries(config.get_all())
-        if providers:
-            loaded: dict[str, ProviderConfig] = {}
-            for provider_name, provider_values in providers.items():
-                loaded[provider_name] = _build_provider_config(
-                    provider_name,
-                    provider_values,
-                    shared_api_key=shared_api_key,
-                    shared_base_url=shared_base_url,
-                    global_default_model=global_default_model,
-                )
+        if not providers:
+            raise RuntimeError(
+                "No providers configured. "
+                "Please configure at least one provider in llm.providers."
+            )
 
-            default_provider_name = self._resolve_default_provider_name(loaded)
-            if not loaded[default_provider_name].enabled:
-                raise RuntimeError(
-                    f"Default provider {default_provider_name!r} is disabled. "
-                    "Set llm.default_provider to an enabled provider."
-                )
-            self._cache = (loaded, default_provider_name)
-            return self._cache
+        loaded: dict[str, ProviderConfig] = {}
+        for provider_name, provider_values in providers.items():
+            loaded[provider_name] = _build_provider_config(
+                provider_name,
+                provider_values,
+            )
 
-        configured_default_provider = config.get_str("llm.default_provider", "").strip()
-        resolved_default_provider = configured_default_provider or DEFAULT_PROVIDER
-        provider_type = _resolve_provider_type_for_key(
-            resolved_default_provider,
-            "llm.default_provider",
-        )
-
-        default_provider = ProviderConfig(
-            name=DEFAULT_PROVIDER_NAME,
-            provider_type=provider_type,
-            base_url=(shared_base_url or DEFAULT_BASE_URL)
-            if provider_type == ProviderType.OPENAI_COMPATIBLE
-            else "",
-            api_key=_resolve_api_key(
-                DEFAULT_PROVIDER_NAME,
-                {},
-                shared_api_key,
-                enabled=True,
-            ),
-            default_model=global_default_model
-            or DEFAULT_MODEL,
-            enabled=True,
-        )
-
-        self._cache = ({DEFAULT_PROVIDER_NAME: default_provider}, DEFAULT_PROVIDER_NAME)
+        default_provider_name = self._resolve_default_provider_name(loaded)
+        if not loaded[default_provider_name].enabled:
+            raise RuntimeError(
+                f"Default provider {default_provider_name!r} is disabled. "
+                "Set llm.default_provider to an enabled provider."
+            )
+        self._cache = (loaded, default_provider_name)
         return self._cache
 
     def get_provider(self, name: str) -> ProviderConfig:

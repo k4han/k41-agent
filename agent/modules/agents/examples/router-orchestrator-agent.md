@@ -2,6 +2,7 @@
 name: "router-orchestrator"
 description: "Orchestrates requests to specialized agents"
 graph_type: "router"
+provider: "default"
 model: ""
 tools: []
 sub_agents:

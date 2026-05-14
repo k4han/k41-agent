@@ -15,6 +15,7 @@ class WorkflowContext:
     max_context_tokens: int
     agent_name: str
     allowed_tool_names: list[str]
+    provider: str | None = None
     model: str | None = None
 
     def get_agent_name(self) -> str:
@@ -24,6 +25,10 @@ class WorkflowContext:
     def get_model(self) -> str | None:
         """Get run-scoped model override from context."""
         return self.model
+
+    def get_provider(self) -> str | None:
+        """Get run-scoped provider override from context."""
+        return self.provider
 
     def get_working_dir(self) -> str:
         """Get working directory from context."""
@@ -43,6 +48,7 @@ def make_context(
     max_context_tokens: int = DEFAULT_MAX_CONTEXT_TOKENS,
     agent_name: str = "default",
     allowed_tool_names: list[str] | None = None,
+    provider: str | None = None,
     model: str | None = None,
 ) -> WorkflowContext:
     """Create a runtime context payload for a graph run."""
@@ -59,6 +65,7 @@ def make_context(
         max_context_tokens=max_context_tokens,
         agent_name=agent_name,
         allowed_tool_names=allowed_tool_names,
+        provider=provider.strip() if provider else None,
         model=model.strip() if model else None,
     )
 

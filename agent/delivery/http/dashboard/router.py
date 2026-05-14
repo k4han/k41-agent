@@ -26,8 +26,16 @@ from agent.modules.scheduler import (
     get_scheduler,
     normalize_trigger,
 )
-from agent.modules.agent_runtime import get_active_session_registry, get_background_task_manager, NotifyChannel
+from agent.modules.agent_runtime import (
+    NotifyChannel,
+    get_active_session_registry,
+    get_background_task_manager,
+)
 from agent.modules.agents import AgentCard, AgentConfig, get_catalog_service
+from agent.modules.providers import (
+    list_provider_model_catalog,
+    list_provider_model_catalogs,
+)
 from agent.modules.tools import get_default_tool_names
 from agent.modules.workflows import (
     REACT_AGENT_GRAPH_TYPE,
@@ -168,20 +176,6 @@ def _build_provider_rows(
     return provider_rows
 
 
-def _remove_hidden_provider_global_keys(
-    settings: dict[str, Any],
-) -> dict[str, Any]:
-    hidden_keys = {
-        "llm.base_url",
-        "llm.temperature",
-    }
-    return {
-        key: value
-        for key, value in settings.items()
-        if key not in hidden_keys
-    }
-
-
 def _ensure_runtime_keys(keys: list[str]) -> None:
     if invalid_keys := sorted(k for k in keys if not is_runtime_key(k)):
         suffix = "" if len(invalid_keys) == 1 else "s"
@@ -201,7 +195,46 @@ def _serialize_agent_card(card: AgentCard) -> dict[str, Any]:
     return _dump_model(card)
 
 
-def _agent_card_options(cards: list[AgentCard] | None = None) -> dict[str, Any]:
+def _serialize_model_catalog(catalog: Any) -> dict[str, Any]:
+    return {
+        "provider": catalog.provider,
+        "provider_type": catalog.provider_type,
+        "default_model": catalog.default_model,
+        "can_list_models": catalog.can_list_models,
+        "models": [
+            {
+                "id": option.id,
+                "label": option.label,
+                "source": option.source,
+            }
+            for option in catalog.models
+        ],
+        "error": catalog.error,
+    }
+
+
+async def _provider_model_options() -> dict[str, Any]:
+    try:
+        catalogs = await list_provider_model_catalogs()
+        default_catalog = await list_provider_model_catalog()
+    except Exception as exc:
+        logger.warning("Failed to load provider model options: %s", exc)
+        return {
+            "provider_names": [],
+            "default_provider": "",
+            "model_catalogs": [],
+            "model_catalog_error": str(exc),
+        }
+
+    return {
+        "provider_names": sorted(catalog.provider for catalog in catalogs),
+        "default_provider": default_catalog.provider,
+        "model_catalogs": [_serialize_model_catalog(catalog) for catalog in catalogs],
+        "model_catalog_error": "",
+    }
+
+
+async def _agent_card_options(cards: list[AgentCard] | None = None) -> dict[str, Any]:
     catalog = get_catalog_service()
     cards = cards if cards is not None else catalog.list_agent_cards()
 
@@ -223,6 +256,7 @@ def _agent_card_options(cards: list[AgentCard] | None = None) -> dict[str, Any]:
         "tools": sorted(tool_names),
         "workflows": workflows,
         "agent_names": sorted(agent_names),
+        **await _provider_model_options(),
     }
 
 
@@ -243,6 +277,7 @@ def _agent_config_from_body(body: "AgentCardBody") -> AgentConfig:
         display_name=body.display_name.strip(),
         description=body.description.strip(),
         graph_type=body.graph_type.strip() or REACT_AGENT_GRAPH_TYPE,
+        provider=body.provider.strip(),
         model=body.model.strip(),
         tools=list(body.tools),
         sub_agents=list(body.sub_agents) if body.sub_agents is not None else None,
@@ -259,6 +294,7 @@ class AgentCardBody(BaseModel):
     display_name: str = ""
     description: str = ""
     graph_type: str = REACT_AGENT_GRAPH_TYPE
+    provider: str = "default"
     model: str = ""
     tools: list[str] = Field(default_factory=list)
     sub_agents: list[str] | None = None
@@ -282,13 +318,13 @@ async def dashboard_agents(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request=request,
         name="agents.html",
-        context=_agent_card_options(cards),
+        context=await _agent_card_options(cards),
     )
 
 
 @router.get("/agents/cards")
 async def list_agent_cards() -> dict[str, Any]:
-    return _agent_card_options()
+    return await _agent_card_options()
 
 
 @router.post("/agents/cards")
@@ -335,7 +371,20 @@ async def clone_builtin_agent_card(name: str) -> dict[str, Any]:
 async def reload_agent_cards() -> dict[str, Any]:
     catalog = get_catalog_service()
     catalog.reload_agents()
-    return {"status": "reloaded", **_agent_card_options()}
+    return {"status": "reloaded", **await _agent_card_options()}
+
+
+@router.get("/providers/models")
+async def list_dashboard_provider_models(refresh: bool = False) -> dict[str, Any]:
+    try:
+        catalogs = await list_provider_model_catalogs(include_remote=refresh)
+        default_catalog = await list_provider_model_catalog(include_remote=refresh)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "default_provider": default_catalog.provider,
+        "providers": [_serialize_model_catalog(catalog) for catalog in catalogs],
+    }
 
 
 @router.get("/channels", response_class=HTMLResponse)
@@ -389,14 +438,14 @@ async def dashboard_config(request: Request) -> HTMLResponse:
 async def dashboard_providers(request: Request) -> HTMLResponse:
     service = _get_config_service(request)
     settings_raw, settings_sources_raw = service.get_settings_overview_and_sources()
-    settings = _remove_hidden_provider_global_keys(_filter_settings(
+    settings = _filter_settings(
         settings_raw,
         include_provider_settings=True,
-    ))
-    settings_sources = _remove_hidden_provider_global_keys(_filter_settings(
+    )
+    settings_sources = _filter_settings(
         settings_sources_raw,
         include_provider_settings=True,
-    ))
+    )
     global_settings, provider_settings = _split_provider_settings(settings)
     by_category = _group_settings_by_category(global_settings)
     provider_rows = _build_provider_rows(provider_settings, PROVIDER_SETTING_FIELD_ORDER)

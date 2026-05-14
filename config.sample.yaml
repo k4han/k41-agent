@@ -21,21 +21,20 @@ llm:
   # Multi-provider mode
   default_provider: "primary"
 
-  # Optional global model override used before provider default_model
-  default_model: ""
-
   providers:
     primary:
       type: "openai_compatible"
       api_key: "your-primary-provider-api-key"
       base_url: "https://api.example.com/v1"
       default_model: ""
+      models: []
       enabled: true
 
     secondary:
       type: "google"
       api_key: "your-secondary-provider-api-key"
       default_model: ""
+      models: []
       enabled: true
 
   # Temperature for model responses (optional)

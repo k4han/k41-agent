@@ -14,6 +14,7 @@ class AgentConfig(BaseModel):
     display_name: str = ""
     description: str = ""
     graph_type: str  # Registered workflow name
+    provider: str
     model: str = ""
     tools: list[str] = Field(default_factory=list)
     sub_agents: Optional[list[str]] = None  # None = leaf (no call_agent), list = allowed targets
@@ -28,6 +29,7 @@ class AgentCard(BaseModel):
     display_name: str = ""
     description: str = ""
     graph_type: str = ""
+    provider: str = ""
     model: str = ""
     tools: list[str] = Field(default_factory=list)
     sub_agents: Optional[list[str]] = None
@@ -56,6 +58,7 @@ class AgentCard(BaseModel):
             display_name=config.display_name,
             description=config.description,
             graph_type=config.graph_type,
+            provider=config.provider,
             model=config.model,
             tools=list(config.tools),
             sub_agents=list(config.sub_agents) if config.sub_agents is not None else None,
@@ -98,6 +101,7 @@ class AgentCard(BaseModel):
             display_name=self.display_name,
             description=self.description,
             graph_type=self.graph_type,
+            provider=self.provider,
             model=self.model,
             tools=list(self.tools),
             sub_agents=list(self.sub_agents) if self.sub_agents is not None else None,

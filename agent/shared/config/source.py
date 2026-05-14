@@ -17,7 +17,7 @@ class ConfigSource(Protocol):
         """Get a single config value by key.
 
         Args:
-            key: Config key in dot notation (e.g., "llm.api_key")
+            key: Config key in dot notation (e.g., "llm.providers.primary.api_key")
 
         Returns:
             Config value or None if not found

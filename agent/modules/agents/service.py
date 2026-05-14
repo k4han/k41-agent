@@ -108,6 +108,8 @@ class AgentCatalogService:
             raise ValueError("Agent name cannot include leading or trailing whitespace.")
         if not config.graph_type.strip():
             raise ValueError("Graph type is required.")
+        if not config.provider.strip():
+            raise ValueError('Provider is required. Use "default" to use llm.default_provider.')
         if config.max_context_tokens <= 0:
             raise ValueError("max_context_tokens must be greater than 0.")
         if config.graph_type == ROUTER_GRAPH_TYPE:

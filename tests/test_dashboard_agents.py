@@ -43,6 +43,7 @@ def _payload(name: str) -> dict:
         "display_name": "Sample",
         "description": "Sample dashboard agent",
         "graph_type": "react_agent",
+        "provider": "default",
         "model": "",
         "tools": ["read_file"],
         "sub_agents": [],

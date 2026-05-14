@@ -22,7 +22,7 @@ class YamlConfigSource:
     """Read configuration from YAML file.
 
     This source loads configuration from a YAML file and flattens nested
-    structures into dot-notation keys (e.g., llm.api_key).
+    structures into dot-notation keys (e.g., llm.providers.primary.api_key).
     """
 
     def __init__(self, path: Path | None = None) -> None:

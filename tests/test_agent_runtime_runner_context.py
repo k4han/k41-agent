@@ -87,11 +87,13 @@ async def test_run_agent_passes_model_override_to_context(monkeypatch):
             user_input="hi",
             thread_id="thread-1",
             agent_name="default",
+            provider="openai-main",
             model="direct-model",
         )
     ]
 
     assert chunks == ["done"]
+    assert captured["kwargs"]["context"]["provider"] == "openai-main"
     assert captured["kwargs"]["context"]["model"] == "direct-model"
 
 

@@ -71,8 +71,6 @@ class TestDefaultConfigSource:
             "channels.discord.enabled",
             "database.url",
             "llm.default_provider",
-            "llm.base_url",
-            "llm.default_model",
         ):
             assert key in all_settings, f"{key} should be in all_settings"
 
@@ -308,6 +306,7 @@ class TestRuntimeKeyMetadata:
     def test_runtime_key_allows_provider_entries(self) -> None:
         assert is_runtime_key("llm.providers.openai-main.api_key")
         assert is_runtime_key("llm.providers.openai-main.default_model")
+        assert is_runtime_key("llm.providers.openai-main.models")
         assert is_runtime_key("llm.providers.openai-main.temperature")
         assert not is_runtime_key("llm.providers.openai-main.random_field")
 
@@ -322,6 +321,10 @@ class TestRuntimeKeyMetadata:
         assert temperature_meta["type"] == "number"
         assert temperature_meta["min"] == 0
         assert temperature_meta["max"] == 2
+
+        models_meta = get_setting_metadata("llm.providers.openai-main.models")
+        assert models_meta["type"] == "text"
+        assert "models" in models_meta["label"].lower()
 
 
 # =====================================================================

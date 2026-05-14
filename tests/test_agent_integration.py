@@ -20,6 +20,7 @@ def test_agent_dir(tmp_path):
 name: "test-agent"
 description: "Test agent for integration testing"
 graph_type: "react_agent"
+provider: "default"
 model: ""
 tools:
   - "list_files"
@@ -124,6 +125,7 @@ def test_agent_with_sub_agents(tmp_path):
     parent.write_text("""---
 name: "parent"
 graph_type: "react_agent"
+provider: "default"
 tools:
   - "call_agent"
 sub_agents:
@@ -138,6 +140,7 @@ Parent agent that can call child.
     child.write_text("""---
 name: "child"
 graph_type: "react_agent"
+provider: "default"
 tools:
   - "list_files"
 ---

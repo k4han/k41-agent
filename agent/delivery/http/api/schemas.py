@@ -9,6 +9,7 @@ class ChatRequest(BaseModel):
     workflow: Optional[str] = None
     working_dir: Optional[str] = None
     agent_name: Optional[str] = None
+    provider: Optional[str] = None
     model: Optional[str] = None
 
 

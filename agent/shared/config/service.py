@@ -65,7 +65,7 @@ class ConfigService:
         """Get config value with precedence resolution.
 
         Args:
-            key: Config key in dot notation (e.g., "llm.api_key")
+            key: Config key in dot notation (e.g., "llm.providers.primary.api_key")
             default: Default value if key not found
 
         Returns:

@@ -17,5 +17,27 @@ class GoogleFactory:
         return ChatGoogleGenerativeAI(
             model=model_config.model_name,
             google_api_key=api_key,
-            temperature=model_config.temperature,            
+            temperature=model_config.temperature,
         )
+
+    async def list_models(
+        self,
+        provider_config: ProviderConfig,
+        api_key: str,
+    ) -> list[str]:
+        try:
+            import google.genai as genai
+        except ImportError:
+            return []
+
+        _ = provider_config
+        client = genai.Client(api_key=api_key)
+        models = client.models.list()
+        model_names: list[str] = []
+        for model in models:
+            name = str(getattr(model, "name", "")).strip()
+            if name.startswith("models/"):
+                name = name.removeprefix("models/")
+            if name:
+                model_names.append(name)
+        return sorted(set(model_names))

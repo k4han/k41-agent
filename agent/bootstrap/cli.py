@@ -93,13 +93,13 @@ def init():
                     "# Please set your LLM API key below\n\n"
                     "llm:\n"
                     "  default_provider: \"primary\"\n"
-                    "  default_model: \"\"\n"
                     "  providers:\n"
                     "    primary:\n"
                     "      type: \"openai_compatible\"\n"
                     "      api_key: \"your-api-key-here\"\n"
                     "      base_url: \"https://api.example.com/v1\"\n"
                     "      default_model: \"\"\n"
+                    "      models: []\n"
                 )
                 config_file.write_text(minimal_config)
                 click.echo(f"[OK] Created minimal config at {config_file}")

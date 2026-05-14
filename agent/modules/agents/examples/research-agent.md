@@ -2,6 +2,7 @@
 name: "research-agent"
 description: "Used to research more in depth questions"
 graph_type: "react_agent"
+provider: "default"
 model: ""
 tools:
   - "websearch"

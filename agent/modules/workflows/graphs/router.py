@@ -125,9 +125,10 @@ async def _route_agent_name(
     candidates: dict[str, AgentConfig],
     router_prompt_template: str,
     caller_agent_name: str,
+    provider: str | None = None,
     model: str | None = None,
 ) -> str:
-    llm = get_chat_model(model=model)
+    llm = get_chat_model(provider_name=provider, model=model)
     router_system = _build_router_system(
         user_input=user_input,
         candidates=candidates,
@@ -192,6 +193,7 @@ def _build_target_context(runtime_context: WorkflowContext, target_agent: AgentC
         max_context_tokens=target_agent.max_context_tokens,
         agent_name=target_agent.name,
         allowed_tool_names=allowed_tool_names,
+        provider=runtime_context.get_provider(),
         model=runtime_context.get_model(),
     )
 
@@ -217,8 +219,11 @@ async def llm_call_router(
     caller_agent_name = ctx.get_agent_name()
 
     caller_agent = catalog.get_agent(caller_agent_name)
+    if caller_agent is None:
+        raise RuntimeError(f"Router agent '{caller_agent_name}' not found in catalog.")
     candidates = _build_candidate_agents(caller_agent_name, catalog)
-    model = ctx.get_model() or getattr(caller_agent, "model", "") or None
+    provider = ctx.get_provider() or caller_agent.provider
+    model = ctx.get_model() or caller_agent.model or None
 
     selected_agent_name = ""
     if candidates:
@@ -227,6 +232,7 @@ async def llm_call_router(
             candidates,
             router_prompt_template=getattr(caller_agent, "system_prompt", ""),
             caller_agent_name=caller_agent_name,
+            provider=provider,
             model=model,
         )
 

@@ -5,6 +5,8 @@ Other modules should import from here, not from internal packages.
 
 from langchain_core.language_models import BaseChatModel
 
+from agent.modules.providers.models import ProviderModelCatalog
+from agent.modules.providers.provider import ProviderConfig
 from agent.modules.providers.service import ProviderService
 from agent.modules.providers.resolve_chat_model import resolve_chat_model
 
@@ -58,8 +60,36 @@ def get_chat_model(
     )
 
 
+def list_providers() -> list[ProviderConfig]:
+    service = _get_provider_service()
+    return service.list_providers()
+
+
+async def list_provider_model_catalog(
+    provider_name: str | None = None,
+    *,
+    include_remote: bool = False,
+) -> ProviderModelCatalog:
+    service = _get_provider_service()
+    return await service.list_model_catalog(
+        provider_name,
+        include_remote=include_remote,
+    )
+
+
+async def list_provider_model_catalogs(
+    *,
+    include_remote: bool = False,
+) -> list[ProviderModelCatalog]:
+    service = _get_provider_service()
+    return await service.list_model_catalogs(include_remote=include_remote)
+
+
 __all__ = [
     "ProviderService",
     "get_chat_model",
+    "list_provider_model_catalog",
+    "list_provider_model_catalogs",
+    "list_providers",
     "resolve_chat_model",
 ]

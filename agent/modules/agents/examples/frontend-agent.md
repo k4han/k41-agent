@@ -2,6 +2,7 @@
 name: "frontend"
 description: "React/TypeScript frontend engineer assistant"
 graph_type: "react_agent"
+provider: "default"
 model: ""
 tools:
   - "list_files"

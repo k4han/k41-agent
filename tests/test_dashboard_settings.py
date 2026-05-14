@@ -53,8 +53,6 @@ class TestDashboardSettingsEndpoints:
         assert "Auto select enabled provider" in resp.text
         assert 'data-key="llm.provider"' not in resp.text
         assert 'data-key="llm.model"' not in resp.text
-        assert 'data-key="llm.base_url"' not in resp.text
-        assert 'data-key="llm.temperature"' not in resp.text
         assert "Provider Config" in resp.text
         assert "<th style=\"width: 130px;\">Provider</th>" in resp.text
         assert "No providers found in config" in resp.text
@@ -95,7 +93,7 @@ class TestDashboardSettingsEndpoints:
             json={
                 "values": {
                     "channels.telegram.enabled": False,
-                    "llm.default_model": "sample-model",
+                    "llm.providers.openai-main.default_model": "sample-model",
                 }
             },
         )
@@ -104,7 +102,7 @@ class TestDashboardSettingsEndpoints:
         assert data["status"] == "success"
         assert set(data["updated"]) == {
             "channels.telegram.enabled",
-            "llm.default_model",
+            "llm.providers.openai-main.default_model",
         }
 
     def test_put_settings_batch_rejects_bootstrap_keys(self, dashboard_client) -> None:

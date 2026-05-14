@@ -20,7 +20,8 @@ class _FakeChatModel:
 
 
 def _fake_chat_model_factory(captured: dict):
-    def _factory(model: str):
+    def _factory(model: str | None = None, *, provider_name: str | None = None):
+        captured["provider"] = provider_name
         captured["model"] = model
         return _FakeChatModel(captured)
 
@@ -35,6 +36,7 @@ def test_llm_node_uses_prompt_builder_output_for_system_message(monkeypatch):
         def get_agent(self, name: str):
             assert name == "builder-agent"
             return SimpleNamespace(
+                provider="provider-x",
                 model="model-x",
                 system_prompt="Agent prompt: {working_dir}",
                 tools=["skill", "read_file"],
@@ -81,6 +83,7 @@ def test_llm_node_uses_prompt_builder_output_for_system_message(monkeypatch):
     assert isinstance(system_message, SystemMessage)
     assert system_message.content == "Prompt built elsewhere"
     assert captured["model"] == "model-x"
+    assert captured["provider"] == "provider-x"
     assert [tool.name for tool in captured["tools"]] == ["skill", "read_file"]
     assert builder_calls["system_prompt_template"] == "Agent prompt: {working_dir}"
     assert builder_calls["working_dir"] == "D:/repo"
@@ -96,6 +99,7 @@ def test_llm_node_prefers_runtime_allowed_tool_names_before_building_prompt(monk
         def get_agent(self, name: str):
             assert name == "override-agent"
             return SimpleNamespace(
+                provider="default",
                 model="model-y",
                 system_prompt="Override prompt",
                 tools=["read_file"],
@@ -148,6 +152,7 @@ def test_llm_node_prefers_runtime_model_over_agent_card_model(monkeypatch):
         def get_agent(self, name: str):
             assert name == "override-agent"
             return SimpleNamespace(
+                provider="default",
                 model="agent-card-model",
                 system_prompt="Override prompt",
                 tools=[],

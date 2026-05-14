@@ -11,8 +11,8 @@ from typing import Any
 RUNTIME_KEY_PATTERNS = [
     r"^channels\.telegram\.(enabled|bot_token|default_agent|code_agent|research_agent|update_mode|webhook_url|webhook_secret)$",
     r"^channels\.discord\.(enabled|bot_token|default_agent|code_agent|research_agent)$",
-    r"^llm\.(default_provider|api_key|base_url|default_model|temperature)$",
-    r"^llm\.providers\.[A-Za-z0-9_-]+\.(provider|type|api_key|base_url|default_model|temperature|enabled)$",
+    r"^llm\.default_provider$",
+    r"^llm\.providers\.[A-Za-z0-9_-]+\.(provider|type|api_key|base_url|default_model|models|temperature|enabled)$",
     r"^database\.url$",
     r"^security\.jwt_secret$",
 ]
@@ -40,14 +40,7 @@ def _expand_runtime_keys() -> set[str]:
         keys.add(f"channels.telegram.{prop}")
     for prop in ("enabled", "bot_token", "default_agent", "code_agent", "research_agent"):
         keys.add(f"channels.discord.{prop}")
-    for prop in (
-        "default_provider",
-        "api_key",
-        "base_url",
-        "default_model",
-        "temperature",
-    ):
-        keys.add(f"llm.{prop}")
+    keys.add("llm.default_provider")
     keys.add("database.url")
     keys.add("security.jwt_secret")
     return keys
@@ -67,9 +60,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "database.url": "",
     # LLM provider configuration
     "llm.default_provider": "",
-    "llm.base_url": "",
-    "llm.default_model": "",
-    "llm.temperature": 0.0,
     # Channel integrations
     "channels.telegram.enabled": True,
     "channels.telegram.update_mode": "polling",
@@ -170,33 +160,6 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "category": "llm",
         "label": "LLM Default Provider",
     },
-    "llm.api_key": {
-        "type": "password",
-        "description": "API key for LLM provider",
-        "category": "llm",
-        "label": "LLM API Key",
-    },
-    "llm.base_url": {
-        "type": "url",
-        "description": "Base URL for LLM API (e.g., https://api.example.com/v1)",
-        "category": "llm",
-        "label": "LLM Base URL",
-    },
-    "llm.default_model": {
-        "type": "text",
-        "description": "Global default model used before provider-specific defaults",
-        "category": "llm",
-        "label": "LLM Default Model",
-    },
-    "llm.temperature": {
-        "type": "number",
-        "description": "LLM temperature (0.0 = deterministic, 2.0 = creative)",
-        "category": "llm",
-        "label": "LLM Temperature",
-        "min": 0,
-        "max": 2,
-        "step": 0.1,
-    },
     # Database settings
     "database.url": {
         "type": "url",
@@ -249,6 +212,11 @@ _PROVIDER_SETTING_FIELD_META: dict[str, dict[str, Any]] = {
         "type": "text",
         "description": "Default model for this provider",
         "label": "Default Model",
+    },
+    "models": {
+        "type": "text",
+        "description": "Optional comma-separated or YAML list of selectable models for this provider",
+        "label": "Models",
     },
     "temperature": {
         "type": "number",

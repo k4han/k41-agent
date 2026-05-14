@@ -19,23 +19,36 @@ from agent.modules.providers import get_chat_model
 from agent.shared.infrastructure.parsing import extract_final_text_content
 
 
-async def _research_node(state: ResearchState, config: RunnableConfig):
-    """Bước 1: Thu thập thông tin theo yêu cầu."""
-    llm = get_chat_model()
+def _resolve_runtime_model(runtime):
+    from agent.modules.agents import get_catalog_service
+
+    ctx = runtime.context
+    catalog = get_catalog_service()
+    agent_config = catalog.get_agent(ctx.get_agent_name())
+    if agent_config is None:
+        raise RuntimeError(f"Agent '{ctx.get_agent_name()}' not found in catalog.")
+    provider = ctx.get_provider() or agent_config.provider
+    model = ctx.get_model() or agent_config.model or None
+    return get_chat_model(provider_name=provider, model=model)
+
+
+async def _research_node(state: ResearchState, config: RunnableConfig, runtime):
+    """Collect research directions for the request."""
+    llm = _resolve_runtime_model(runtime)
     system = SystemMessage(content=(
-        "Bạn là research assistant. "
-        "Hãy phân tích yêu cầu và liệt kê các nguồn thông tin cần tìm hiểu."
+        "You are a research assistant. "
+        "Analyze the request and list the information sources to investigate."
     ))
     response = await llm.ainvoke([system, *state["messages"]])
     return {"messages": [response]}
 
 
-async def _summarize_node(state: ResearchState, config: RunnableConfig):
-    """Bước 2: Tổng hợp kết quả nghiên cứu."""
-    llm = get_chat_model()
+async def _summarize_node(state: ResearchState, config: RunnableConfig, runtime):
+    """Summarize the collected research context."""
+    llm = _resolve_runtime_model(runtime)
     system = SystemMessage(content=(
-        "Dựa trên thông tin đã thu thập, hãy tổng hợp thành báo cáo ngắn gọn, "
-        "có cấu trúc rõ ràng với: Tóm tắt, Điểm chính, Kết luận."
+        "Based on the collected information, write a concise report with "
+        "clear sections: Summary, Key Points, and Conclusion."
     ))
     response = await llm.ainvoke([system, *state["messages"]])
     return {

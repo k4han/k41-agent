@@ -22,7 +22,6 @@ from agent.modules.providers.repository import (
     ConfigProviderRepository,
     DEFAULT_BASE_URL,
     DEFAULT_MODEL,
-    DEFAULT_PROVIDER,
 )
 
 
@@ -38,21 +37,28 @@ def _set_config_path(monkeypatch: MonkeyPatch, config_path: Path) -> None:
 def _write_config(
     config_path: Path,
     *,
-    default_provider: str = DEFAULT_PROVIDER,
+    provider_name: str = "openai-main",
+    provider_type: str = "openai_compatible",
+    default_provider: str | None = None,
     api_key: str = "test-key",
     base_url: str = DEFAULT_BASE_URL,
     default_model: str = DEFAULT_MODEL,
     temperature: float | None = None,
 ) -> None:
+    resolved_default_provider = default_provider or provider_name
     llm_block = [
         "llm:",
-        f"  default_provider: {default_provider!r}",
-        f"  api_key: {api_key!r}",
-        f"  base_url: {base_url!r}",
-        f"  default_model: {default_model!r}",
+        f"  default_provider: {resolved_default_provider!r}",
+        "  providers:",
+        f"    {provider_name}:",
+        f"      type: {provider_type!r}",
+        f"      api_key: {api_key!r}",
+        f"      default_model: {default_model!r}",
     ]
+    if base_url:
+        llm_block.append(f"      base_url: {base_url!r}")
     if temperature is not None:
-        llm_block.append(f"  temperature: {temperature}")
+        llm_block.append(f"      temperature: {temperature}")
 
     config_path.write_text("\n".join(llm_block) + "\n", encoding="utf-8")
 
@@ -94,7 +100,7 @@ def test_repo_default_provider_from_yaml(monkeypatch: MonkeyPatch, tmp_path: Pat
     repo = ConfigProviderRepository()
     provider = repo.get_default_provider()
 
-    assert provider.name == "default"
+    assert provider.name == "openai-main"
     assert provider.provider_type == ProviderType.OPENAI_COMPATIBLE
     assert provider.base_url == DEFAULT_BASE_URL
     assert provider.default_model == DEFAULT_MODEL
@@ -125,7 +131,9 @@ def test_repo_google_provider_from_yaml(monkeypatch: MonkeyPatch, tmp_path: Path
     config_path = tmp_path / "config.yaml"
     _write_config(
         config_path,
-        default_provider="google",
+        provider_name="google-main",
+        provider_type="google",
+        default_provider="google-main",
         api_key="google-key",
         default_model="google-model",
     )
@@ -180,7 +188,35 @@ def test_repo_multi_provider_with_default_provider(monkeypatch: MonkeyPatch, tmp
         assert google_provider.name == "google-main"
 
 
-def test_repo_multi_provider_global_default_model(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+def test_repo_provider_models_from_yaml(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+        config_path = tmp_path / "config.yaml"
+        _write_yaml(
+                config_path,
+                """
+                llm:
+                    default_provider: "openai-main"
+                    providers:
+                        openai-main:
+                            type: "openai_compatible"
+                            api_key: "openai-key"
+                            default_model: "openai-default"
+                            models:
+                                - "openai-default"
+                                - "openai-fast"
+                """,
+        )
+        _set_config_path(monkeypatch, config_path)
+
+        repo = ConfigProviderRepository()
+        provider = repo.get_provider("openai-main")
+
+        assert provider.models == ("openai-default", "openai-fast")
+
+
+def test_repo_requires_provider_specific_default_model(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
         config_path = tmp_path / "config.yaml"
         _write_yaml(
                 config_path,
@@ -201,11 +237,11 @@ def test_repo_multi_provider_global_default_model(monkeypatch: MonkeyPatch, tmp_
 
         repo = ConfigProviderRepository()
 
-        assert repo.get_provider("openai-main").default_model == "global-model"
-        assert repo.get_provider("google-main").default_model == "global-model"
+        assert repo.get_provider("openai-main").default_model == ""
+        assert repo.get_provider("google-main").default_model == ""
 
 
-def test_repo_global_default_model_overrides_provider_default_model(
+def test_repo_global_default_model_does_not_override_provider_default_model(
     monkeypatch: MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -231,8 +267,8 @@ def test_repo_global_default_model_overrides_provider_default_model(
 
         repo = ConfigProviderRepository()
 
-        assert repo.get_provider("openai-main").default_model == "global-model"
-        assert repo.get_provider("google-main").default_model == "global-model"
+        assert repo.get_provider("openai-main").default_model == "openai-provider-model"
+        assert repo.get_provider("google-main").default_model == "google-provider-model"
 
 
 def test_repo_default_provider_cannot_be_disabled(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
@@ -268,11 +304,22 @@ def test_repo_invalid_provider_raises(monkeypatch: MonkeyPatch, tmp_path: Path) 
 
 def test_repo_missing_api_key_raises(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("llm:\n  api_key: ''\n", encoding="utf-8")
+    _write_yaml(
+        config_path,
+        """
+        llm:
+            default_provider: "openai-main"
+            providers:
+                openai-main:
+                    type: "openai_compatible"
+                    api_key: ""
+                    default_model: "model"
+        """,
+    )
     _set_config_path(monkeypatch, config_path)
 
     repo = ConfigProviderRepository()
-    with pytest.raises(RuntimeError, match="llm.api_key"):
+    with pytest.raises(RuntimeError, match="llm.providers.openai-main.api_key"):
         repo.get_default_provider()
 
 
@@ -295,7 +342,7 @@ def test_repo_list_providers(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
     providers = repo.list_providers()
 
     assert len(providers) == 1
-    assert providers[0].name == "default"
+    assert providers[0].name == "openai-main"
 
 
 # --- Application: ProviderService ---
@@ -325,6 +372,42 @@ def test_provider_service_missing_factory_raises(monkeypatch: MonkeyPatch, tmp_p
 
     with pytest.raises(RuntimeError, match="No factory registered"):
         service.get_factory(ProviderType.ANTHROPIC)
+
+
+@pytest.mark.asyncio
+async def test_provider_service_model_catalog_merges_config_and_default(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    _write_yaml(
+        config_path,
+        """
+        llm:
+            default_provider: "openai-main"
+            providers:
+                openai-main:
+                    type: "openai_compatible"
+                    api_key: "openai-key"
+                    default_model: "openai-default"
+                    models:
+                        - "openai-fast"
+        """,
+    )
+    _set_config_path(monkeypatch, config_path)
+
+    repo = ConfigProviderRepository()
+    service = ProviderService(repository=repo)
+    service.register_factory(ProviderType.OPENAI_COMPATIBLE, MagicMock())
+
+    catalog = await service.list_model_catalog("openai-main")
+
+    assert catalog.provider == "openai-main"
+    assert catalog.default_model == "openai-default"
+    assert [(option.id, option.source) for option in catalog.models] == [
+        ("openai-fast", "config"),
+        ("openai-default", "default"),
+    ]
 
 
 # --- Application: resolve_chat_model ---
@@ -387,7 +470,18 @@ def test_resolve_chat_model_missing_api_key_raises(monkeypatch: MonkeyPatch, tmp
     _get_cached_model.cache_clear()
 
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("llm:\n  api_key: ''\n", encoding="utf-8")
+    _write_yaml(
+        config_path,
+        """
+        llm:
+            default_provider: "openai-main"
+            providers:
+                openai-main:
+                    type: "openai_compatible"
+                    api_key: ""
+                    default_model: "model"
+        """,
+    )
     _set_config_path(monkeypatch, config_path)
 
     repo = ConfigProviderRepository()
@@ -396,7 +490,7 @@ def test_resolve_chat_model_missing_api_key_raises(monkeypatch: MonkeyPatch, tmp
     mock_factory = MagicMock()
     service.register_factory(ProviderType.OPENAI_COMPATIBLE, mock_factory)
 
-    with pytest.raises(RuntimeError, match="llm.api_key"):
+    with pytest.raises(RuntimeError, match="llm.providers.openai-main.api_key"):
         resolve_chat_model(service)
 
     _get_cached_model.cache_clear()
@@ -421,7 +515,7 @@ def test_resolve_chat_model_missing_model_raises(monkeypatch: MonkeyPatch, tmp_p
     _get_cached_model.cache_clear()
 
 
-def test_resolve_chat_model_applies_yaml_updates_immediately(
+def test_resolve_chat_model_applies_provider_yaml_updates_immediately(
     monkeypatch: MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -450,8 +544,11 @@ def test_resolve_chat_model_applies_yaml_updates_immediately(
     from agent.shared.config import get_config_service
 
     config_service = get_config_service()
-    config_service.update_setting("llm.api_key", "key-two")
-    config_service.update_setting("llm.base_url", "https://api.two/v1")
+    config_service.update_setting("llm.providers.openai-main.api_key", "key-two")
+    config_service.update_setting(
+        "llm.providers.openai-main.base_url",
+        "https://api.two/v1",
+    )
 
     # ConfigService.update_setting calls reload() which clears YAML cache, so the
     # YAML is re-read on next access. Manually reload the repo instance used by
@@ -482,7 +579,9 @@ def test_resolve_chat_model_uses_google_factory(monkeypatch: MonkeyPatch, tmp_pa
     config_path = tmp_path / "config.yaml"
     _write_config(
         config_path,
-        default_provider="google",
+        provider_name="google-main",
+        provider_type="google",
+        default_provider="google-main",
         api_key="google-key",
         default_model="google-model",
     )
@@ -524,7 +623,6 @@ def test_resolve_chat_model_uses_provider_specific_temperature(
                 """
                 llm:
                     default_provider: "openai-main"
-                    temperature: 1.2
                     providers:
                         openai-main:
                             type: "openai_compatible"
@@ -570,7 +668,7 @@ def test_parse_temperature_valid() -> None:
 
 
 def test_parse_temperature_invalid() -> None:
-    with pytest.raises(ValueError, match="llm.temperature"):
+    with pytest.raises(ValueError, match="llm.providers.<provider>.temperature"):
         _parse_temperature("not-a-number", 0.5)
 
 

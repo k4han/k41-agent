@@ -120,6 +120,7 @@ def serialize_agent_config(config: AgentConfig) -> str:
         "display_name": config.display_name,
         "description": config.description,
         "graph_type": config.graph_type,
+        "provider": config.provider,
         "model": config.model,
         "tools": list(config.tools),
         "max_context_tokens": config.max_context_tokens,
@@ -155,6 +156,13 @@ def _build_agent_config(
     name = str(name).strip()
     graph_type = str(graph_type).strip() or REACT_AGENT_GRAPH_TYPE
 
+    provider = str(data.get("provider", "")).strip()
+    if not provider:
+        raise AgentMarkdownError(
+            f"Agent file {source_label} is missing required 'provider'. "
+            'Use provider: "default" to use llm.default_provider.'
+        )
+
     # Optional fields with defaults
     display_name = str(data.get("display_name", ""))
     description = str(data.get("description", ""))
@@ -188,6 +196,7 @@ def _build_agent_config(
             display_name=display_name,
             description=description,
             graph_type=graph_type,
+            provider=provider,
             model=model,
             tools=tools,
             sub_agents=sub_agents,

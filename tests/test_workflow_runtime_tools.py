@@ -58,6 +58,8 @@ async def test_call_agent_inherits_parent_runtime_context(monkeypatch):
         context={
             "agent_name": "parent-agent",
             "working_dir": "D:/repo",
+            "provider": "openai-main",
+            "model": "parent-model",
         },
         config={
             "configurable": {
@@ -78,6 +80,8 @@ async def test_call_agent_inherits_parent_runtime_context(monkeypatch):
     assert captured["context"]["working_dir"] == "D:/repo"
     assert captured["context"]["agent_name"] == "child-agent"
     assert captured["context"]["allowed_tool_names"] == ["echo"]
+    assert captured["context"]["provider"] == "openai-main"
+    assert captured["context"]["model"] == "parent-model"
     assert captured["config"]["configurable"]["thread_id"].startswith(
         "parent-thread:sub:child-agent:"
     )

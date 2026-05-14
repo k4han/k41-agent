@@ -2,6 +2,7 @@
 name: "backend"
 description: "Python/backend engineer assistant"
 graph_type: "react_agent"
+provider: "default"
 model: ""
 tools:
   - "list_files"

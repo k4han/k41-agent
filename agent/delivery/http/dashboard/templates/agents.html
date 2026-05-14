@@ -236,6 +236,7 @@
                         <tr>
                             <th>Agent</th>
                             <th>Source</th>
+                            <th>Provider / Model</th>
                             <!-- <th>Workflow</th> -->
                             <th>Tools</th>
                             <th>Sub-agents</th>
@@ -261,6 +262,12 @@
                                 {% if card.overrides_builtin %}
                                 <span class="badge badge-override">override</span>
                                 {% endif %}
+                            </td>
+                            <td>
+                                <div class="chip-list">
+                                    <span class="chip">{{ card.provider }}</span>
+                                    <span class="chip">{{ card.model or "provider default" }}</span>
+                                </div>
                             </td>
                             <!-- <td><span class="chip">{{ card.graph_type or "-" }}</span></td> -->
                             <td>
@@ -347,8 +354,15 @@
                             <select id="agent-graph-type"></select>
                         </div>
                         <div class="form-group">
+                            <label for="agent-provider">Provider</label>
+                            <select id="agent-provider" onchange="onProviderChanged()"></select>
+                            <span class="field-hint">Use default to follow llm.default_provider.</span>
+                        </div>
+                        <div class="form-group">
                             <label for="agent-model">Model</label>
-                            <input id="agent-model" type="text" placeholder="Use provider default">
+                            <select id="agent-model" onchange="syncCustomModelInput()"></select>
+                            <input id="agent-model-custom" type="text" placeholder="Custom model id" style="display: none; margin-top: 6px;">
+                            <span class="field-hint">Empty uses the selected provider default model.</span>
                         </div>
                         <div class="form-group">
                             <label for="agent-max-context-tokens">Max Context Tokens</label>
@@ -382,12 +396,18 @@
     <script id="tools-data" type="application/json">{{ tools | tojson }}</script>
     <script id="workflows-data" type="application/json">{{ workflows | tojson }}</script>
     <script id="agent-names-data" type="application/json">{{ agent_names | tojson }}</script>
+    <script id="provider-names-data" type="application/json">{{ provider_names | tojson }}</script>
+    <script id="default-provider-data" type="application/json">{{ default_provider | tojson }}</script>
+    <script id="model-catalogs-data" type="application/json">{{ model_catalogs | tojson }}</script>
     <script src="/templates/shared.js"></script>
     <script>
         let cards = JSON.parse(document.getElementById('agents-data').textContent || '[]');
         let toolOptions = JSON.parse(document.getElementById('tools-data').textContent || '[]');
         let workflowOptions = JSON.parse(document.getElementById('workflows-data').textContent || '[]');
         let agentNames = JSON.parse(document.getElementById('agent-names-data').textContent || '[]');
+        let providerNames = JSON.parse(document.getElementById('provider-names-data').textContent || '[]');
+        let defaultProvider = JSON.parse(document.getElementById('default-provider-data').textContent || '""');
+        let modelCatalogs = JSON.parse(document.getElementById('model-catalogs-data').textContent || '[]');
         let modalMode = 'create';
         let currentAgentName = '';
 
@@ -415,6 +435,61 @@
             )).join('');
         }
 
+        function renderProviderSelect(selected) {
+            const select = document.getElementById('agent-provider');
+            const selectedValue = selected || 'default';
+            const options = sortedUnique(['default', ...providerNames, selectedValue]);
+            const optionHtml = [
+                ...options.map(value => (
+                    `<option value="${escapeHtml(value)}" ${value === selectedValue ? 'selected' : ''}>${value === 'default' && defaultProvider ? `default (${escapeHtml(defaultProvider)})` : escapeHtml(value)}</option>`
+                )),
+            ];
+            select.innerHTML = optionHtml.join('');
+        }
+
+        function selectedProviderForModels(providerValue) {
+            return providerValue === 'default' ? defaultProvider : providerValue;
+        }
+
+        function findModelCatalog(providerValue) {
+            const provider = selectedProviderForModels(providerValue);
+            return modelCatalogs.find(catalog => catalog.provider === provider) || null;
+        }
+
+        function renderModelSelect(selectedModel, providerValue) {
+            const select = document.getElementById('agent-model');
+            const catalog = findModelCatalog(providerValue);
+            const values = catalog ? catalog.models.map(model => model.id) : [];
+            const modelValues = sortedUnique([...values, selectedModel]);
+            const defaultLabel = catalog && catalog.default_model
+                ? `Use provider default (${catalog.default_model})`
+                : 'Use provider default';
+            const options = [
+                `<option value="" ${selectedModel ? '' : 'selected'}>${escapeHtml(defaultLabel)}</option>`,
+                ...modelValues.map(value => (
+                    `<option value="${escapeHtml(value)}" ${value === selectedModel ? 'selected' : ''}>${escapeHtml(value)}</option>`
+                )),
+                `<option value="__custom__">Custom...</option>`,
+            ];
+            select.innerHTML = options.join('');
+            syncCustomModelInput();
+        }
+
+        function syncCustomModelInput() {
+            const select = document.getElementById('agent-model');
+            const input = document.getElementById('agent-model-custom');
+            const isCustom = select.value === '__custom__';
+            input.style.display = isCustom ? '' : 'none';
+            input.disabled = select.disabled || !isCustom;
+            if (!isCustom) {
+                input.value = '';
+            }
+        }
+
+        function onProviderChanged() {
+            renderModelSelect('', document.getElementById('agent-provider').value);
+        }
+
         function renderCheckboxes(container, values, selectedValues, disabled) {
             const selected = new Set(selectedValues || []);
             const options = sortedUnique([...values, ...selected]);
@@ -435,6 +510,7 @@
             document.querySelectorAll('#agent-form input, #agent-form select, #agent-form textarea').forEach(el => {
                 el.disabled = disabled;
             });
+            syncCustomModelInput();
         }
 
         function syncSubAgentOptionsState() {
@@ -449,7 +525,8 @@
             document.getElementById('agent-display-name').value = card.display_name || '';
             document.getElementById('agent-description').value = card.description || '';
             renderSelect(document.getElementById('agent-graph-type'), workflowOptions, card.graph_type || 'react_agent');
-            document.getElementById('agent-model').value = card.model || '';
+            renderProviderSelect(card.provider || 'default');
+            renderModelSelect(card.model || '', card.provider || 'default');
             document.getElementById('agent-max-context-tokens').value = card.max_context_tokens || 50000;
             document.getElementById('agent-system-prompt').value = card.system_prompt || '';
 
@@ -471,6 +548,7 @@
                 display_name: '',
                 description: '',
                 graph_type: workflowOptions.includes('react_agent') ? 'react_agent' : workflowOptions[0],
+                provider: 'default',
                 model: '',
                 tools: [],
                 sub_agents: [],
@@ -515,12 +593,17 @@
         }
 
         function buildPayload() {
+            const modelSelectValue = document.getElementById('agent-model').value;
+            const modelValue = modelSelectValue === '__custom__'
+                ? document.getElementById('agent-model-custom').value.trim()
+                : modelSelectValue.trim();
             return {
                 name: document.getElementById('agent-name').value.trim(),
                 display_name: document.getElementById('agent-display-name').value.trim(),
                 description: document.getElementById('agent-description').value.trim(),
                 graph_type: document.getElementById('agent-graph-type').value,
-                model: document.getElementById('agent-model').value.trim(),
+                provider: document.getElementById('agent-provider').value.trim(),
+                model: modelValue,
                 tools: readCheckedValues('agent-tools'),
                 sub_agents: readCheckedValues('agent-sub-agents'),
                 max_context_tokens: Number(document.getElementById('agent-max-context-tokens').value),

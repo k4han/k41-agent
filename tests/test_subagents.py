@@ -22,6 +22,7 @@ def sample_agent_md():
 name: researcher
 display_name: Research Agent
 graph_type: react_agent
+provider: default
 tools: [read_file, list_files, call_agent]
 sub_agents: []
 max_context_tokens: 30000
@@ -38,6 +39,7 @@ def sample_coder_agent_md():
 name: coder
 display_name: Coder Agent
 graph_type: react_agent
+provider: default
 tools: [read_file, write_file, run_bash, list_files, call_agent]
 sub_agents: [researcher]
 max_context_tokens: 50000
@@ -103,10 +105,19 @@ class TestParseAgentFile:
         os.unlink(p)
         os.rmdir(d)
 
-    def test_parse_file_missing_graph_type_defaults_to_react_agent(self):
+    def test_parse_file_missing_provider(self):
         d = tempfile.mkdtemp()
         p = Path(d, "bad.md")
         p.write_text("---\nname: test\n---\nBody.", encoding="utf-8")
+        config = parse_agent_file(p)
+        assert config is None
+        os.unlink(p)
+        os.rmdir(d)
+
+    def test_parse_file_missing_graph_type_defaults_to_react_agent(self):
+        d = tempfile.mkdtemp()
+        p = Path(d, "default_graph.md")
+        p.write_text("---\nname: test\nprovider: default\n---\nBody.", encoding="utf-8")
         config = parse_agent_file(p)
         assert config is not None
         assert config.graph_type == "react_agent"
@@ -116,7 +127,7 @@ class TestParseAgentFile:
     def test_parse_file_ignores_legacy_workflow_key(self):
         d = tempfile.mkdtemp()
         p = Path(d, "workflow_alias.md")
-        p.write_text("---\nname: test\nworkflow: research_chain\n---\nBody.", encoding="utf-8")
+        p.write_text("---\nname: test\nprovider: default\nworkflow: research_chain\n---\nBody.", encoding="utf-8")
         config = parse_agent_file(p)
         assert config is not None
         assert config.graph_type == "react_agent"
@@ -127,7 +138,7 @@ class TestParseAgentFile:
         """No sub_agents key in YAML = None (leaf, cannot call anyone)."""
         d = tempfile.mkdtemp()
         p = Path(d, "leaf.md")
-        p.write_text("---\nname: leaf\ngraph_type: react_agent\n---\nI am a leaf.", encoding="utf-8")
+        p.write_text("---\nname: leaf\ngraph_type: react_agent\nprovider: default\n---\nI am a leaf.", encoding="utf-8")
         config = parse_agent_file(p)
         assert config is not None
         assert config.sub_agents is None
@@ -138,7 +149,7 @@ class TestParseAgentFile:
         """Empty sub_agents list = can call no one (but IS a non-leaf)."""
         d = tempfile.mkdtemp()
         p = Path(d, "empty_sub.md")
-        p.write_text("---\nname: empty\ngraph_type: react_agent\nsub_agents: []\n---\nEmpty.", encoding="utf-8")
+        p.write_text("---\nname: empty\ngraph_type: react_agent\nprovider: default\nsub_agents: []\n---\nEmpty.", encoding="utf-8")
         config = parse_agent_file(p)
         assert config is not None
         assert config.sub_agents == []
@@ -153,6 +164,7 @@ class TestParseAgentFile:
                 "---\n"
                 "name: test\n"
                 "graph_type: react_agent\n"
+                "provider: default\n"
                 "routing_hints: legacy hints\n"
                 "capabilities: backend, python\n"
                 "---\n"

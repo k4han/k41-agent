@@ -1,5 +1,8 @@
 """Provider service — manages provider configurations and factory registry."""
 
+import inspect
+
+from agent.modules.providers.models import ModelOption, ProviderModelCatalog
 from agent.modules.providers.ports import ChatModelFactory, ProviderRepository
 from agent.modules.providers.provider import ProviderConfig, ProviderType
 
@@ -37,5 +40,89 @@ class ProviderService:
     def list_providers(self) -> list[ProviderConfig]:
         return self._repository.list_providers()
 
+    async def list_model_catalog(
+        self,
+        provider_name: str | None = None,
+        *,
+        include_remote: bool = False,
+    ) -> ProviderModelCatalog:
+        provider = (
+            self.get_provider(provider_name)
+            if provider_name
+            else self.get_default_provider()
+        )
+        factory = self.get_factory(provider.provider_type)
+        list_models = getattr(factory, "list_models", None)
+        can_list_models = callable(list_models)
+
+        remote_models: list[str] = []
+        error: str | None = None
+        if include_remote and can_list_models:
+            try:
+                result = list_models(provider, provider.api_key)
+                if inspect.isawaitable(result):
+                    result = await result
+                remote_models = [
+                    str(model).strip()
+                    for model in result
+                    if str(model).strip()
+                ]
+            except Exception as exc:
+                error = str(exc)
+
+        return ProviderModelCatalog(
+            provider=provider.name,
+            provider_type=str(provider.provider_type),
+            default_model=provider.default_model,
+            can_list_models=can_list_models,
+            models=_merge_model_options(
+                remote_models=remote_models,
+                configured_models=list(provider.models),
+                default_model=provider.default_model,
+            ),
+            error=error,
+        )
+
+    async def list_model_catalogs(
+        self,
+        *,
+        include_remote: bool = False,
+    ) -> list[ProviderModelCatalog]:
+        catalogs = []
+        for provider in self.list_providers():
+            catalogs.append(
+                await self.list_model_catalog(
+                    provider.name,
+                    include_remote=include_remote,
+                )
+            )
+        return catalogs
+
     def reload(self) -> None:
         self._repository.reload()
+
+
+def _merge_model_options(
+    *,
+    remote_models: list[str],
+    configured_models: list[str],
+    default_model: str,
+) -> tuple[ModelOption, ...]:
+    options: dict[str, ModelOption] = {}
+
+    def add(model_id: str, source: str) -> None:
+        normalized = model_id.strip()
+        if normalized and normalized not in options:
+            options[normalized] = ModelOption(
+                id=normalized,
+                label=normalized,
+                source=source,
+            )
+
+    for model_id in remote_models:
+        add(model_id, "live")
+    for model_id in configured_models:
+        add(model_id, "config")
+    add(default_model, "default")
+
+    return tuple(options.values())

@@ -68,7 +68,7 @@ database.url mặc định:
 uv sync
 uv run kaka init
 # Chỉnh ~/.kaka-agent/config.yaml
-# Bắt buộc set llm.api_key
+# Bắt buộc set llm.providers.<name>.api_key
 ```
 
 ## Chạy
@@ -96,17 +96,20 @@ channels:
 
 llm:
   default_provider: "openai-main"
-  default_model: ""
   providers:
     openai-main:
       provider: "openai_compatible"
       api_key: "sk-..."
       base_url: "https://api.mistral.ai/v1"
       default_model: "devstral-2512"
+      models:
+        - "devstral-2512"
     google-main:
       provider: "google"
       api_key: "AIza..."
       default_model: "gemini-2.0-flash"
+      models:
+        - "gemini-2.0-flash"
   temperature: 0.0
 ```
 
@@ -116,10 +119,11 @@ Quy ước hiện tại:
 - `channels.telegram.update_mode`: mặc định `polling`, phù hợp local/headless. Nếu dùng `webhook`, cần `enable_web: true`, `channels.telegram.webhook_url` là URL HTTPS public trỏ tới `/channels/telegram/webhook`, và `channels.telegram.webhook_secret` để kiểm tra header `X-Telegram-Bot-Api-Secret-Token`.
 - Dashboard chỉ thay đổi trạng thái runtime hiện tại. Khi restart app, trạng thái mặc định quay về theo `~/.kaka-agent/config.yaml`.
 - Với dashboard chạy ở prefix gốc `/`, alias cũ `/bots/*` đã bị loại bỏ. Chỉ dùng `/services/*`.
-- LLM config dùng chuẩn `llm.providers.*` + `llm.default_provider` + `llm.default_model`.
+- LLM config dùng chuẩn `llm.providers.*` + `llm.default_provider`; không còn fallback qua `llm.api_key`, `llm.base_url`, hoặc `llm.default_model`.
 - Backend đang hỗ trợ: `openai_compatible` (dùng `ChatOpenAI`) và `google` (dùng `ChatGoogleGenerativeAI`, bỏ qua `base_url`).
-- Model mặc định được resolve theo thứ tự: `llm.default_model` -> `provider.default_model` -> fallback nội bộ theo loại provider.
-- API key được resolve theo thứ tự: `llm.providers.<name>.api_key` -> `llm.api_key`.
+- Model mặc định được resolve theo thứ tự: request override -> agent card -> `provider.default_model`.
+- Dropdown model lấy từ `llm.providers.<name>.models`, cộng thêm `default_model`; endpoint hỗ trợ refresh live nếu provider có API list model.
+- API key phải đặt tại `llm.providers.<name>.api_key`.
 
 ## API Endpoints
 
@@ -128,6 +132,8 @@ Quy ước hiện tại:
 | POST   | /api/chat         | Chat sync                |
 | POST   | /api/chat/stream  | Chat với streaming       |
 | GET    | /api/graphs       | Liệt kê graphs           |
+| GET    | /api/providers    | Liệt kê providers        |
+| GET    | /api/providers/models | Liệt kê model options |
 | GET    | /api/health       | Health check             |
 
 ## Dashboard Endpoints
