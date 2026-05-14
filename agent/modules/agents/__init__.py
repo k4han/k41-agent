@@ -7,7 +7,7 @@ from agent.modules.agents.service import (
     AgentCatalogService,
     get_catalog_service,
 )
-from agent.modules.agents.models import AgentConfig
+from agent.modules.agents.models import AgentCard, AgentConfig
 from agent.modules.agents.repository import (
     load_agents_from_dir,
     reload_agents,
@@ -28,6 +28,7 @@ def resolve_catalog_agent_name(*candidates: str | None) -> str | None:
 
 __all__ = [
     "AgentConfig",
+    "AgentCard",
     "AgentCatalogService",
     "get_catalog_service",
     "reload_agents",

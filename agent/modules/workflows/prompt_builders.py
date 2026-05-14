@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from functools import lru_cache
 from typing import Any
 
 from agent.modules.skills import get_skills_catalog_xml
@@ -31,7 +30,6 @@ def _has_tool(tools: Sequence[object] | None, tool_name: str) -> bool:
     return any(getattr(tool, "name", "") == tool_name for tool in tools or ())
 
 
-@lru_cache(maxsize=1)
 def _build_skills_prompt_section() -> str:
     catalog_xml = get_skills_catalog_xml().strip()
     if catalog_xml == "<available_skills/>":

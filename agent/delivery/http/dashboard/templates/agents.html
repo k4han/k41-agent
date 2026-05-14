@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agents - Kaka Dashboard</title>
+    <link rel="stylesheet" href="/templates/shared.css">
+    <style>
+        .page-subtitle {
+            margin: -8px 0 20px;
+            color: #4b5563;
+            font-size: 0.92rem;
+        }
+
+        .toolbar {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 16px;
+            align-items: center;
+        }
+
+        .toolbar input {
+            flex: 1;
+            padding: 9px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            font-size: 0.9rem;
+        }
+
+        .agent-name {
+            font-family: monospace;
+            font-weight: 600;
+        }
+
+        .agent-description {
+            color: #6b7280;
+            font-size: 0.82rem;
+            margin-top: 3px;
+        }
+
+        .path-text {
+            color: #6b7280;
+            font-family: monospace;
+            font-size: 0.75rem;
+            margin-top: 3px;
+            word-break: break-all;
+        }
+
+        .chip-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+        }
+
+        .chip {
+            display: inline-flex;
+            padding: 2px 7px;
+            border-radius: 4px;
+            background: #f3f4f6;
+            color: #374151;
+            font-family: monospace;
+            font-size: 0.74rem;
+        }
+
+        .source-builtin {
+            background: #ede9fe;
+            color: #5b21b6;
+        }
+
+        .source-user {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+
+        .badge-valid {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .badge-invalid {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .badge-override {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .agents-table-wrap {
+            overflow-x: auto;
+        }
+
+        .agents-table td {
+            vertical-align: top;
+        }
+
+        .modal-wide {
+            width: 920px;
+            max-width: 96vw;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .form-group.full {
+            grid-column: 1 / -1;
+        }
+
+        .form-group label {
+            color: #374151;
+            font-size: 0.82rem;
+            font-weight: 600;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-family: inherit;
+            font-size: 0.9rem;
+            padding: 8px 10px;
+            width: 100%;
+        }
+
+        .form-group textarea {
+            min-height: 260px;
+            resize: vertical;
+            font-family: "SF Mono", Consolas, monospace;
+            line-height: 1.45;
+        }
+
+        .checkbox-grid {
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            display: grid;
+            gap: 6px;
+            grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+            max-height: 170px;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        .checkbox-item {
+            align-items: center;
+            color: #374151;
+            display: flex;
+            font-family: monospace;
+            font-size: 0.82rem;
+            gap: 6px;
+            min-width: 0;
+        }
+
+        .checkbox-item input {
+            flex: 0 0 auto;
+            width: auto;
+        }
+
+        .field-hint {
+            color: #6b7280;
+            font-size: 0.76rem;
+        }
+
+        .error-panel {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 6px;
+            color: #991b1b;
+            font-size: 0.84rem;
+            margin-top: 8px;
+            padding: 10px;
+            white-space: pre-wrap;
+        }
+
+        .is-filtered {
+            display: none;
+        }
+
+        @media (max-width: 900px) {
+            .toolbar,
+            .form-grid {
+                display: flex;
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="sidebar">
+        <h2>Kaka Dashboard</h2>
+        <div class="nav">
+            <a href="/">Overview</a>
+            <a href="/channels">Pair Channels</a>
+            <a href="/agents" class="active">Agents</a>
+            <a href="/sessions">Active Sessions</a>
+            <a href="/tasks">Background Tasks</a>
+            <a href="/scheduler">Scheduler</a>
+            <a href="/config">Configuration</a>
+            <a href="/providers">Provider Config</a>
+            <hr style="border-color: #374151; width: 100%; margin: 10px 0;">
+            <a href="/change-password">Change Password</a>
+            <a href="/logout" style="color: #ef4444;">Logout</a>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div class="header">
+            <h1>Agents</h1>
+            <div class="header-actions">
+                <button class="btn" type="button" onclick="openCreateModal()">New Agent</button>
+                <button class="btn btn-ghost" type="button" onclick="reloadAgents()">Reload</button>
+            </div>
+        </div>
+        <p class="page-subtitle">Manage Markdown agent cards loaded by the runtime catalog.</p>
+
+        <div class="card">
+            <div class="toolbar">
+                <input id="agent-search" type="search" placeholder="Search agents..." oninput="filterAgents()">
+            </div>
+            <div class="agents-table-wrap">
+                <table class="table agents-table">
+                    <thead>
+                        <tr>
+                            <th>Agent</th>
+                            <th>Source</th>
+                            <th>Workflow</th>
+                            <th>Tools</th>
+                            <th>Sub-agents</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="agents-table-body">
+                        {% for card in cards %}
+                        <tr class="agent-row" data-agent-name="{{ card.name }}" data-agent-search="{{ (card.name ~ ' ' ~ card.display_name ~ ' ' ~ card.description ~ ' ' ~ card.graph_type ~ ' ' ~ card.source) | lower }}">
+                            <td>
+                                <div class="agent-name">{{ card.name }}</div>
+                                {% if card.display_name %}
+                                <div>{{ card.display_name }}</div>
+                                {% endif %}
+                                {% if card.description %}
+                                <div class="agent-description">{{ card.description }}</div>
+                                {% endif %}
+                                <div class="path-text">{{ card.path }}</div>
+                            </td>
+                            <td>
+                                <span class="badge source-{{ card.source }}">{{ card.source }}</span>
+                                {% if card.overrides_builtin %}
+                                <span class="badge badge-override">override</span>
+                                {% endif %}
+                            </td>
+                            <td><span class="chip">{{ card.graph_type or "-" }}</span></td>
+                            <td>
+                                <div class="chip-list">
+                                    {% for tool in card.tools %}
+                                    <span class="chip">{{ tool }}</span>
+                                    {% else %}
+                                    <span class="chip">default</span>
+                                    {% endfor %}
+                                </div>
+                            </td>
+                            <td>
+                                <div class="chip-list">
+                                    {% if card.sub_agents is none %}
+                                    <span class="chip">leaf</span>
+                                    {% else %}
+                                    {% for sub_agent in card.sub_agents %}
+                                    <span class="chip">{{ sub_agent }}</span>
+                                    {% else %}
+                                    <span class="chip">empty list</span>
+                                    {% endfor %}
+                                    {% endif %}
+                                </div>
+                            </td>
+                            <td>
+                                {% if card.valid %}
+                                <span class="badge badge-valid">valid</span>
+                                {% else %}
+                                <span class="badge badge-invalid">invalid</span>
+                                <div class="error-panel">{{ card.error }}</div>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <div class="actions">
+                                    {% if card.valid %}
+                                    <button class="btn btn-sm btn-ghost" type="button" data-agent-action="view" data-agent-name="{{ card.name }}">View</button>
+                                    {% if card.editable %}
+                                    <button class="btn btn-sm" type="button" data-agent-action="edit" data-agent-name="{{ card.name }}">Edit</button>
+                                    <button class="btn btn-sm btn-danger" type="button" data-agent-action="delete" data-agent-name="{{ card.name }}">Delete</button>
+                                    {% else %}
+                                    <button class="btn btn-sm" type="button" data-agent-action="clone" data-agent-name="{{ card.name }}">Clone</button>
+                                    {% endif %}
+                                    {% elif card.editable %}
+                                    <button class="btn btn-sm btn-danger" type="button" data-agent-action="delete" data-agent-name="{{ card.name }}">Delete</button>
+                                    {% endif %}
+                                </div>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="7">
+                                <div class="empty-state">No agent cards found.</div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="agent-modal">
+        <div class="modal modal-wide">
+            <div class="modal-header">
+                <h3 id="agent-modal-title">Agent</h3>
+                <button class="modal-close" type="button" onclick="closeAgentModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="agent-form">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="agent-name">Name</label>
+                            <input id="agent-name" type="text" required pattern="[A-Za-z0-9_-]+">
+                            <span class="field-hint">Letters, numbers, underscores, and hyphens only.</span>
+                        </div>
+                        <div class="form-group">
+                            <label for="agent-display-name">Display Name</label>
+                            <input id="agent-display-name" type="text">
+                        </div>
+                        <div class="form-group full">
+                            <label for="agent-description">Description</label>
+                            <input id="agent-description" type="text">
+                        </div>
+                        <div class="form-group">
+                            <label for="agent-graph-type">Graph Type</label>
+                            <select id="agent-graph-type"></select>
+                        </div>
+                        <div class="form-group">
+                            <label for="agent-model">Model</label>
+                            <input id="agent-model" type="text" placeholder="Use provider default">
+                        </div>
+                        <div class="form-group">
+                            <label for="agent-max-context-tokens">Max Context Tokens</label>
+                            <input id="agent-max-context-tokens" type="number" min="1" step="1" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="agent-capabilities">Capabilities</label>
+                            <input id="agent-capabilities" type="text" placeholder="backend, python">
+                        </div>
+                        <div class="form-group full">
+                            <label for="agent-routing-hints">Routing Hints</label>
+                            <input id="agent-routing-hints" type="text">
+                        </div>
+                        <div class="form-group full">
+                            <label>Tools</label>
+                            <div class="checkbox-grid" id="agent-tools"></div>
+                        </div>
+                        <div class="form-group full">
+                            <label for="agent-sub-agents-mode">Sub-agents</label>
+                            <select id="agent-sub-agents-mode" onchange="toggleSubAgentOptions()">
+                                <option value="leaf">Leaf (cannot call agents)</option>
+                                <option value="list">Allow selected agents</option>
+                            </select>
+                            <div class="checkbox-grid" id="agent-sub-agents"></div>
+                        </div>
+                        <div class="form-group full">
+                            <label for="agent-system-prompt">System Prompt</label>
+                            <textarea id="agent-system-prompt" required></textarea>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-ghost" type="button" onclick="closeAgentModal()">Close</button>
+                <button class="btn" type="button" id="agent-save-btn" onclick="saveAgent()">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script id="agents-data" type="application/json">{{ cards | tojson }}</script>
+    <script id="tools-data" type="application/json">{{ tools | tojson }}</script>
+    <script id="workflows-data" type="application/json">{{ workflows | tojson }}</script>
+    <script id="agent-names-data" type="application/json">{{ agent_names | tojson }}</script>
+    <script src="/templates/shared.js"></script>
+    <script>
+        let cards = JSON.parse(document.getElementById('agents-data').textContent || '[]');
+        let toolOptions = JSON.parse(document.getElementById('tools-data').textContent || '[]');
+        let workflowOptions = JSON.parse(document.getElementById('workflows-data').textContent || '[]');
+        let agentNames = JSON.parse(document.getElementById('agent-names-data').textContent || '[]');
+        let modalMode = 'create';
+        let currentAgentName = '';
+
+        function escapeHtml(value) {
+            return String(value)
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#39;');
+        }
+
+        function findCard(name) {
+            return cards.find(card => card.name === name && card.valid)
+                || cards.find(card => card.name === name);
+        }
+
+        function csvToList(value) {
+            return String(value || '')
+                .split(',')
+                .map(item => item.trim())
+                .filter(Boolean);
+        }
+
+        function listToCsv(value) {
+            return Array.isArray(value) ? value.join(', ') : '';
+        }
+
+        function sortedUnique(values) {
+            return Array.from(new Set(values.filter(Boolean))).sort();
+        }
+
+        function renderSelect(select, values, selected) {
+            select.innerHTML = sortedUnique(values).map(value => (
+                `<option value="${escapeHtml(value)}" ${value === selected ? 'selected' : ''}>${escapeHtml(value)}</option>`
+            )).join('');
+        }
+
+        function renderCheckboxes(container, values, selectedValues, disabled) {
+            const selected = new Set(selectedValues || []);
+            const options = sortedUnique([...values, ...selected]);
+            container.innerHTML = options.map(value => `
+                <label class="checkbox-item">
+                    <input type="checkbox" value="${escapeHtml(value)}" ${selected.has(value) ? 'checked' : ''} ${disabled ? 'disabled' : ''}>
+                    <span title="${escapeHtml(value)}">${escapeHtml(value)}</span>
+                </label>
+            `).join('');
+        }
+
+        function readCheckedValues(containerId) {
+            return Array.from(document.querySelectorAll(`#${containerId} input:checked`))
+                .map(input => input.value);
+        }
+
+        function setFormDisabled(disabled) {
+            document.querySelectorAll('#agent-form input, #agent-form select, #agent-form textarea').forEach(el => {
+                el.disabled = disabled;
+            });
+        }
+
+        function toggleSubAgentOptions() {
+            const mode = document.getElementById('agent-sub-agents-mode').value;
+            const disabled = mode === 'leaf' || modalMode === 'view';
+            document.querySelectorAll('#agent-sub-agents input').forEach(input => {
+                input.disabled = disabled;
+            });
+        }
+
+        function fillAgentForm(card) {
+            document.getElementById('agent-name').value = card.name || '';
+            document.getElementById('agent-display-name').value = card.display_name || '';
+            document.getElementById('agent-description').value = card.description || '';
+            renderSelect(document.getElementById('agent-graph-type'), workflowOptions, card.graph_type || 'react_agent');
+            document.getElementById('agent-model').value = card.model || '';
+            document.getElementById('agent-max-context-tokens').value = card.max_context_tokens || 50000;
+            document.getElementById('agent-capabilities').value = listToCsv(card.capabilities);
+            document.getElementById('agent-routing-hints').value = card.routing_hints || '';
+            document.getElementById('agent-system-prompt').value = card.system_prompt || '';
+
+            renderCheckboxes(document.getElementById('agent-tools'), toolOptions, card.tools || [], modalMode === 'view');
+            const subAgents = card.sub_agents === null ? [] : card.sub_agents || [];
+            const availableAgents = agentNames.filter(name => name !== card.name);
+            renderCheckboxes(
+                document.getElementById('agent-sub-agents'),
+                availableAgents,
+                subAgents,
+                modalMode === 'view' || card.sub_agents === null
+            );
+            document.getElementById('agent-sub-agents-mode').value = card.sub_agents === null ? 'leaf' : 'list';
+            toggleSubAgentOptions();
+        }
+
+        function blankAgentCard() {
+            return {
+                name: '',
+                display_name: '',
+                description: '',
+                graph_type: workflowOptions.includes('react_agent') ? 'react_agent' : workflowOptions[0],
+                model: '',
+                tools: [],
+                sub_agents: null,
+                max_context_tokens: 50000,
+                routing_hints: '',
+                capabilities: [],
+                system_prompt: '',
+            };
+        }
+
+        function openCreateModal() {
+            modalMode = 'create';
+            currentAgentName = '';
+            document.getElementById('agent-modal-title').textContent = 'New Agent';
+            document.getElementById('agent-name').disabled = false;
+            document.getElementById('agent-save-btn').style.display = '';
+            fillAgentForm(blankAgentCard());
+            setFormDisabled(false);
+            document.getElementById('agent-name').disabled = false;
+            document.getElementById('agent-modal').classList.add('active');
+        }
+
+        function openAgentModal(name, mode) {
+            const card = findCard(name);
+            if (!card || !card.valid) {
+                showToast('Agent card is not available.', 'error');
+                return;
+            }
+
+            modalMode = mode;
+            currentAgentName = name;
+            document.getElementById('agent-modal-title').textContent =
+                mode === 'edit' ? `Edit ${name}` : `View ${name}`;
+            document.getElementById('agent-save-btn').style.display = mode === 'edit' ? '' : 'none';
+            fillAgentForm(card);
+            setFormDisabled(mode === 'view');
+            document.getElementById('agent-name').disabled = true;
+            toggleSubAgentOptions();
+            document.getElementById('agent-modal').classList.add('active');
+        }
+
+        function closeAgentModal() {
+            document.getElementById('agent-modal').classList.remove('active');
+        }
+
+        function buildPayload() {
+            const subMode = document.getElementById('agent-sub-agents-mode').value;
+            return {
+                name: document.getElementById('agent-name').value.trim(),
+                display_name: document.getElementById('agent-display-name').value.trim(),
+                description: document.getElementById('agent-description').value.trim(),
+                graph_type: document.getElementById('agent-graph-type').value,
+                model: document.getElementById('agent-model').value.trim(),
+                tools: readCheckedValues('agent-tools'),
+                sub_agents: subMode === 'leaf' ? null : readCheckedValues('agent-sub-agents'),
+                max_context_tokens: Number(document.getElementById('agent-max-context-tokens').value),
+                routing_hints: document.getElementById('agent-routing-hints').value.trim(),
+                capabilities: csvToList(document.getElementById('agent-capabilities').value),
+                system_prompt: document.getElementById('agent-system-prompt').value.trim(),
+            };
+        }
+
+        async function saveAgent() {
+            const payload = buildPayload();
+            if (!payload.name || !/^[A-Za-z0-9_-]+$/.test(payload.name)) {
+                showToast('Agent name is invalid.', 'error');
+                return;
+            }
+            if (!payload.system_prompt) {
+                showToast('System prompt is required.', 'error');
+                return;
+            }
+
+            const isCreate = modalMode === 'create';
+            const endpoint = isCreate
+                ? '/agents/cards'
+                : `/agents/cards/${encodeURIComponent(currentAgentName)}`;
+            const method = isCreate ? 'POST' : 'PUT';
+
+            try {
+                const res = await fetch(endpoint, {
+                    method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                if (!res.ok) {
+                    showToast('Failed: ' + await readError(res), 'error');
+                    return;
+                }
+                showToast(isCreate ? 'Agent created.' : 'Agent updated.');
+                scheduleReload();
+            } catch (err) {
+                showToast('Error saving agent: ' + err.message, 'error');
+            }
+        }
+
+        async function cloneAgent(name) {
+            try {
+                const res = await fetch(`/agents/cards/${encodeURIComponent(name)}/clone`, { method: 'POST' });
+                if (!res.ok) {
+                    showToast('Failed: ' + await readError(res), 'error');
+                    return;
+                }
+                showToast('Agent cloned.');
+                scheduleReload();
+            } catch (err) {
+                showToast('Error cloning agent: ' + err.message, 'error');
+            }
+        }
+
+        async function deleteAgent(name) {
+            if (!confirm(`Delete user agent card "${name}"?`)) return;
+            try {
+                const res = await fetch(`/agents/cards/${encodeURIComponent(name)}`, { method: 'DELETE' });
+                if (!res.ok) {
+                    showToast('Failed: ' + await readError(res), 'error');
+                    return;
+                }
+                showToast('Agent deleted.');
+                scheduleReload();
+            } catch (err) {
+                showToast('Error deleting agent: ' + err.message, 'error');
+            }
+        }
+
+        async function reloadAgents() {
+            try {
+                const res = await fetch('/agents/reload', { method: 'POST' });
+                if (!res.ok) {
+                    showToast('Failed: ' + await readError(res), 'error');
+                    return;
+                }
+                showToast('Agents reloaded.');
+                scheduleReload(300);
+            } catch (err) {
+                showToast('Error reloading agents: ' + err.message, 'error');
+            }
+        }
+
+        function filterAgents() {
+            const query = document.getElementById('agent-search').value.trim().toLowerCase();
+            document.querySelectorAll('.agent-row').forEach(row => {
+                row.classList.toggle('is-filtered', query && !row.dataset.agentSearch.includes(query));
+            });
+        }
+
+        document.addEventListener('click', event => {
+            const button = event.target.closest('[data-agent-action]');
+            if (!button) return;
+            const action = button.dataset.agentAction;
+            const name = button.dataset.agentName;
+            if (action === 'view') openAgentModal(name, 'view');
+            if (action === 'edit') openAgentModal(name, 'edit');
+            if (action === 'clone') cloneAgent(name);
+            if (action === 'delete') deleteAgent(name);
+        });
+    </script>
+</body>
+
+</html>

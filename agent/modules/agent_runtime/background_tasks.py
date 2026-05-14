@@ -16,9 +16,9 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
+from html import escape as escape_html
 from typing import Any
 
-from agent.modules.channels.telegram.formatter import escape_html
 from agent.modules.notifications import send_notification as _send_notification
 from agent.modules.workflows import REACT_AGENT_GRAPH_TYPE
 

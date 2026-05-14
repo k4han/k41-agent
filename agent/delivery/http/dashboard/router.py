@@ -8,7 +8,7 @@ from apscheduler.job import Job
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from agent.modules.channels import (
     ChannelManager,
@@ -27,7 +27,13 @@ from agent.modules.scheduler import (
     normalize_trigger,
 )
 from agent.modules.agent_runtime import get_active_session_registry, get_background_task_manager, NotifyChannel
-from agent.modules.agents import get_catalog_service
+from agent.modules.agents import AgentCard, AgentConfig, get_catalog_service
+from agent.modules.tools import get_default_tool_names
+from agent.modules.workflows import (
+    REACT_AGENT_GRAPH_TYPE,
+    ROUTER_GRAPH_TYPE,
+    list_registered_workflows,
+)
 from agent.modules.users import get_pairing_service
 from agent.shared.config import (
     ConfigService,
@@ -185,7 +191,83 @@ def _ensure_runtime_keys(keys: list[str]) -> None:
         )
 
 
+def _dump_model(model: BaseModel) -> dict[str, Any]:
+    if hasattr(model, "model_dump"):
+        return model.model_dump()
+    return model.dict()
+
+
+def _serialize_agent_card(card: AgentCard) -> dict[str, Any]:
+    return _dump_model(card)
+
+
+def _agent_card_options(cards: list[AgentCard] | None = None) -> dict[str, Any]:
+    catalog = get_catalog_service()
+    cards = cards if cards is not None else catalog.list_agent_cards()
+
+    workflows = list_registered_workflows()
+    for workflow_name in (REACT_AGENT_GRAPH_TYPE, ROUTER_GRAPH_TYPE):
+        if workflow_name not in workflows:
+            workflows.append(workflow_name)
+
+    tool_names = set(get_default_tool_names())
+    agent_names = []
+    for card in cards:
+        if not card.valid:
+            continue
+        agent_names.append(card.name)
+        tool_names.update(card.tools)
+
+    return {
+        "cards": [_serialize_agent_card(card) for card in cards],
+        "tools": sorted(tool_names),
+        "workflows": workflows,
+        "agent_names": sorted(agent_names),
+    }
+
+
+def _handle_agent_card_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, FileNotFoundError):
+        return HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, FileExistsError):
+        return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, ValueError):
+        return HTTPException(status_code=400, detail=str(exc))
+    logger.exception("Unexpected agent card operation failure.")
+    return HTTPException(status_code=500, detail=str(exc))
+
+
+def _agent_config_from_body(body: "AgentCardBody") -> AgentConfig:
+    return AgentConfig(
+        name=body.name.strip(),
+        display_name=body.display_name.strip(),
+        description=body.description.strip(),
+        graph_type=body.graph_type.strip() or REACT_AGENT_GRAPH_TYPE,
+        model=body.model.strip(),
+        tools=list(body.tools),
+        sub_agents=list(body.sub_agents) if body.sub_agents is not None else None,
+        max_context_tokens=body.max_context_tokens,
+        routing_hints=body.routing_hints.strip(),
+        capabilities=list(body.capabilities),
+        system_prompt=body.system_prompt.strip(),
+    )
+
+
 # --- views -------------------------------------------------------------
+
+
+class AgentCardBody(BaseModel):
+    name: str
+    display_name: str = ""
+    description: str = ""
+    graph_type: str = REACT_AGENT_GRAPH_TYPE
+    model: str = ""
+    tools: list[str] = Field(default_factory=list)
+    sub_agents: list[str] | None = None
+    max_context_tokens: int = 50_000
+    routing_hints: str = ""
+    capabilities: list[str] = Field(default_factory=list)
+    system_prompt: str = ""
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -195,6 +277,69 @@ async def dashboard_index(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request=request, name="index.html", context={"services": services}
     )
+
+
+@router.get("/agents", response_class=HTMLResponse)
+async def dashboard_agents(request: Request) -> HTMLResponse:
+    catalog = get_catalog_service()
+    cards = catalog.list_agent_cards()
+    return templates.TemplateResponse(
+        request=request,
+        name="agents.html",
+        context=_agent_card_options(cards),
+    )
+
+
+@router.get("/agents/cards")
+async def list_agent_cards() -> dict[str, Any]:
+    return _agent_card_options()
+
+
+@router.post("/agents/cards")
+async def create_agent_card(body: AgentCardBody) -> dict[str, Any]:
+    catalog = get_catalog_service()
+    try:
+        card = catalog.create_agent_card(_agent_config_from_body(body))
+    except Exception as exc:
+        raise _handle_agent_card_error(exc) from exc
+    return {"status": "created", "card": _serialize_agent_card(card)}
+
+
+@router.put("/agents/cards/{name}")
+async def update_agent_card(name: str, body: AgentCardBody) -> dict[str, Any]:
+    catalog = get_catalog_service()
+    try:
+        card = catalog.update_agent_card(name, _agent_config_from_body(body))
+    except Exception as exc:
+        raise _handle_agent_card_error(exc) from exc
+    return {"status": "updated", "card": _serialize_agent_card(card)}
+
+
+@router.delete("/agents/cards/{name}")
+async def delete_agent_card(name: str) -> dict[str, str]:
+    catalog = get_catalog_service()
+    try:
+        catalog.delete_agent_card(name)
+    except Exception as exc:
+        raise _handle_agent_card_error(exc) from exc
+    return {"status": "deleted", "name": name}
+
+
+@router.post("/agents/cards/{name}/clone")
+async def clone_builtin_agent_card(name: str) -> dict[str, Any]:
+    catalog = get_catalog_service()
+    try:
+        card = catalog.clone_builtin_agent(name)
+    except Exception as exc:
+        raise _handle_agent_card_error(exc) from exc
+    return {"status": "cloned", "card": _serialize_agent_card(card)}
+
+
+@router.post("/agents/reload")
+async def reload_agent_cards() -> dict[str, Any]:
+    catalog = get_catalog_service()
+    catalog.reload_agents()
+    return {"status": "reloaded", **_agent_card_options()}
 
 
 @router.get("/channels", response_class=HTMLResponse)

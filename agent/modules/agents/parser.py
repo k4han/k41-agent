@@ -22,6 +22,44 @@ _FRONTMATTER_RE = re.compile(
 )
 
 
+class AgentMarkdownError(ValueError):
+    """Raised when an agent Markdown document cannot be parsed."""
+
+
+def parse_agent_markdown_content(
+    content: str,
+    *,
+    source_label: str = "<memory>",
+    strict_router_template: bool = False,
+) -> AgentConfig:
+    """Parse agent Markdown content and raise on invalid input."""
+    match = _FRONTMATTER_RE.match(content)
+    if not match:
+        raise AgentMarkdownError(f"Agent file {source_label} has no valid frontmatter.")
+
+    yaml_block = match.group(1)
+    body = match.group(2).strip()
+
+    try:
+        data = yaml.safe_load(yaml_block)
+    except Exception as exc:
+        raise AgentMarkdownError(
+            f"Agent file {source_label} has unparseable YAML: {exc}."
+        ) from exc
+
+    if not isinstance(data, dict):
+        raise AgentMarkdownError(
+            f"Agent file {source_label} frontmatter is not a mapping."
+        )
+
+    return _build_agent_config(
+        data,
+        body,
+        source_label=source_label,
+        strict_router_template=strict_router_template,
+    )
+
+
 def parse_agent_file(path: str | Path) -> AgentConfig | None:
     """Parse a Markdown agent file and return AgentConfig, or None on failure.
 
@@ -40,32 +78,81 @@ def parse_agent_file(path: str | Path) -> AgentConfig | None:
         logger.warning("Failed to read agent file %s: %s", filepath, e)
         return None
 
-    match = _FRONTMATTER_RE.match(content)
-    if not match:
-        logger.warning("Agent file %s has no valid frontmatter — skipping.", filepath)
+    try:
+        return parse_agent_markdown_content(content, source_label=str(filepath))
+    except AgentMarkdownError as e:
+        logger.warning("%s — skipping.", e)
+        return None
+    except Exception as e:
+        logger.warning("Failed to validate AgentConfig for %s: %s — skipping.", filepath, e)
         return None
 
-    yaml_block = match.group(1)
-    body = match.group(2).strip()
+
+def parse_agent_file_with_error(
+    path: str | Path,
+    *,
+    strict_router_template: bool = False,
+) -> tuple[AgentConfig | None, str]:
+    """Parse a file and return either an AgentConfig or a user-facing error."""
+    filepath = Path(path)
+    try:
+        content = filepath.read_text(encoding="utf-8")
+    except Exception as exc:
+        return None, f"Failed to read agent file: {exc}"
 
     try:
-        data = yaml.safe_load(yaml_block)
-    except Exception as e:
-        logger.warning("Agent file %s has unparseable YAML: %s — skipping.", filepath, e)
-        return None
+        return (
+            parse_agent_markdown_content(
+                content,
+                source_label=str(filepath),
+                strict_router_template=strict_router_template,
+            ),
+            "",
+        )
+    except Exception as exc:
+        return None, str(exc)
 
-    if not isinstance(data, dict):
-        logger.warning("Agent file %s frontmatter is not a mapping — skipping.", filepath)
-        return None
 
+def serialize_agent_config(config: AgentConfig) -> str:
+    """Serialize an AgentConfig to canonical Markdown with YAML frontmatter."""
+    data: dict[str, object] = {
+        "name": config.name,
+        "display_name": config.display_name,
+        "description": config.description,
+        "graph_type": config.graph_type,
+        "model": config.model,
+        "tools": list(config.tools),
+        "max_context_tokens": config.max_context_tokens,
+        "routing_hints": config.routing_hints,
+        "capabilities": list(config.capabilities),
+    }
+    if config.sub_agents is not None:
+        data["sub_agents"] = list(config.sub_agents)
+
+    yaml_block = yaml.safe_dump(
+        data,
+        allow_unicode=False,
+        default_flow_style=False,
+        sort_keys=False,
+    )
+    body = config.system_prompt.strip()
+    return f"---\n{yaml_block}---\n\n{body}\n"
+
+
+def _build_agent_config(
+    data: dict,
+    body: str,
+    *,
+    source_label: str,
+    strict_router_template: bool,
+) -> AgentConfig:
     # Required field
     name = data.get("name")
     # graph_type is optional for agent-name-first flows.
     graph_type = data.get("graph_type") or REACT_AGENT_GRAPH_TYPE
 
     if not name:
-        logger.warning("Agent file %s missing 'name' — skipping.", filepath)
-        return None
+        raise AgentMarkdownError(f"Agent file {source_label} is missing 'name'.")
 
     name = str(name).strip()
     graph_type = str(graph_type).strip() or REACT_AGENT_GRAPH_TYPE
@@ -74,7 +161,12 @@ def parse_agent_file(path: str | Path) -> AgentConfig | None:
     display_name = str(data.get("display_name", ""))
     description = str(data.get("description", ""))
     model = str(data.get("model", "")).strip()
-    max_context_tokens = int(data.get("max_context_tokens", 50_000))
+    try:
+        max_context_tokens = int(data.get("max_context_tokens", 50_000))
+    except (TypeError, ValueError) as exc:
+        raise AgentMarkdownError(
+            f"Agent file {source_label} has invalid 'max_context_tokens'."
+        ) from exc
     routing_hints = str(data.get("routing_hints", ""))
 
     capabilities = parse_string_or_list(data.get("capabilities", []))
@@ -89,7 +181,11 @@ def parse_agent_file(path: str | Path) -> AgentConfig | None:
 
     # Validate router agent template at parse time
     if graph_type == ROUTER_GRAPH_TYPE and body:
-        _validate_router_template(body, name)
+        _validate_router_template(
+            body,
+            name,
+            strict=strict_router_template,
+        )
 
     try:
         return AgentConfig(
@@ -105,17 +201,27 @@ def parse_agent_file(path: str | Path) -> AgentConfig | None:
             capabilities=capabilities,
             system_prompt=body,
         )
-    except Exception as e:
-        logger.warning("Failed to validate AgentConfig for %s: %s — skipping.", filepath, e)
-        return None
+    except Exception as exc:
+        raise AgentMarkdownError(
+            f"Failed to validate AgentConfig for {source_label}: {exc}."
+        ) from exc
 
 
-def _validate_router_template(template: str, agent_name: str) -> None:
+def _validate_router_template(
+    template: str,
+    agent_name: str,
+    *,
+    strict: bool = False,
+) -> None:
     """Validate router agent template has required placeholders."""
     required_placeholders = ["{agent_options}", "{user_input}"]
     missing = [p for p in required_placeholders if p not in template]
     if missing:
         joined = ", ".join(missing)
+        if strict:
+            raise AgentMarkdownError(
+                f"Router agent '{agent_name}' system_prompt is missing required placeholders: {joined}."
+            )
         logger.warning(
             "Router agent '%s' system_prompt is missing required placeholders: %s",
             agent_name,
@@ -123,4 +229,10 @@ def _validate_router_template(template: str, agent_name: str) -> None:
         )
 
 
-__all__ = ["parse_agent_file"]
+__all__ = [
+    "AgentMarkdownError",
+    "parse_agent_file",
+    "parse_agent_file_with_error",
+    "parse_agent_markdown_content",
+    "serialize_agent_config",
+]

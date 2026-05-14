@@ -1,6 +1,7 @@
 import logging
 import pickle
 import uuid
+from html import escape as escape_html
 from typing import Any, Optional
 
 import tzlocal
@@ -10,7 +11,6 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from agent.modules.agent_runtime import SessionManager, run_agent_full
-from agent.modules.channels.telegram.formatter import escape_html
 from agent.modules.notifications import send_notification as _send_notification
 from agent.modules.workflows import get_workflow_graph, make_run_config
 from agent.shared.infrastructure.db.engine import (
