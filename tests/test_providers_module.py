@@ -375,7 +375,7 @@ def test_provider_service_missing_factory_raises(monkeypatch: MonkeyPatch, tmp_p
 
 
 @pytest.mark.asyncio
-async def test_provider_service_model_catalog_merges_config_and_default(
+async def test_provider_service_model_catalog_merges_live_config_and_default(
     monkeypatch: MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -398,12 +398,60 @@ async def test_provider_service_model_catalog_merges_config_and_default(
 
     repo = ConfigProviderRepository()
     service = ProviderService(repository=repo)
-    service.register_factory(ProviderType.OPENAI_COMPATIBLE, MagicMock())
+    class ListingFactory:
+        def create(self, provider_config, model_config, api_key):
+            raise NotImplementedError
 
-    catalog = await service.list_model_catalog("openai-main")
+        def list_models(self, provider_config, api_key):
+            return ["openai-live", "openai-fast"]
+
+    service.register_factory(ProviderType.OPENAI_COMPATIBLE, ListingFactory())
+
+    catalog = await service.list_model_catalog("openai-main", include_remote=True)
 
     assert catalog.provider == "openai-main"
     assert catalog.default_model == "openai-default"
+    assert catalog.can_list_models is True
+    assert [(option.id, option.source) for option in catalog.models] == [
+        ("openai-live", "live"),
+        ("openai-fast", "live"),
+        ("openai-default", "default"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_provider_service_model_catalog_uses_config_when_factory_cannot_list(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    _write_yaml(
+        config_path,
+        """
+        llm:
+            default_provider: "openai-main"
+            providers:
+                openai-main:
+                    type: "openai_compatible"
+                    api_key: "openai-key"
+                    default_model: "openai-default"
+                    models:
+                        - "openai-fast"
+        """,
+    )
+    _set_config_path(monkeypatch, config_path)
+
+    repo = ConfigProviderRepository()
+    service = ProviderService(repository=repo)
+    class ConfigOnlyFactory:
+        def create(self, provider_config, model_config, api_key):
+            raise NotImplementedError
+
+    service.register_factory(ProviderType.OPENAI_COMPATIBLE, ConfigOnlyFactory())
+
+    catalog = await service.list_model_catalog("openai-main", include_remote=True)
+
+    assert catalog.can_list_models is False
     assert [(option.id, option.source) for option in catalog.models] == [
         ("openai-fast", "config"),
         ("openai-default", "default"),

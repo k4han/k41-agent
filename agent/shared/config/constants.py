@@ -215,7 +215,7 @@ _PROVIDER_SETTING_FIELD_META: dict[str, dict[str, Any]] = {
     },
     "models": {
         "type": "text",
-        "description": "Optional comma-separated or YAML list of selectable models for this provider",
+        "description": "Selectable models for providers without model listing; saved as a YAML list",
         "label": "Models",
     },
     "temperature": {

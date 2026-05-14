@@ -62,6 +62,8 @@ def test_agents_page_renders_cards_and_sidebar_link(dashboard_agent_client) -> N
     assert 'href="/agents" class="active"' in response.text
     assert "default" in response.text
     assert "Clone" in response.text
+    assert "refreshRemoteModelCatalog" in response.text
+    assert "/providers/models?refresh=true" in response.text
     assert "Leaf (cannot call agents)" not in response.text
     assert "Allow selected agents" not in response.text
 

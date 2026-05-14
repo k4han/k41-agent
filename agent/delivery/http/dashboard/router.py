@@ -191,6 +191,20 @@ def _dump_model(model: BaseModel) -> dict[str, Any]:
     return model.dict()
 
 
+def _normalize_setting_value(key: str, value: Any | None) -> Any | None:
+    if value is None or not key.endswith(".models"):
+        return value
+    if isinstance(value, str):
+        return [item.strip() for item in value.replace("\n", ",").split(",") if item.strip()]
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return value
+
+
+def _normalize_setting_updates(values: dict[str, Any | None]) -> dict[str, Any | None]:
+    return {key: _normalize_setting_value(key, value) for key, value in values.items()}
+
+
 def _serialize_agent_card(card: AgentCard) -> dict[str, Any]:
     return _dump_model(card)
 
@@ -552,8 +566,9 @@ async def update_setting(
     service = _get_config_service(request)
     _ensure_runtime_keys([key])
 
-    service.update_setting(key, body.value)
-    return {"status": "success", "key": key, "value": body.value}
+    value = _normalize_setting_value(key, body.value)
+    service.update_setting(key, value)
+    return {"status": "success", "key": key, "value": value}
 
 
 @router.put("/settings")
@@ -564,13 +579,14 @@ async def update_settings(body: UpdateSettingsBody, request: Request) -> dict[st
 
     _ensure_runtime_keys(list(body.values))
 
+    values = _normalize_setting_updates(body.values)
     service = _get_config_service(request)
     for source in service._sources:
         if hasattr(source, "update_settings"):
-            source.update_settings(body.values)
+            source.update_settings(values)
     service.reload()
 
-    return {"status": "success", "updated": list(body.values.keys())}
+    return {"status": "success", "updated": list(values.keys())}
 
 
 # --- scheduler endpoints -----------------------------------------------

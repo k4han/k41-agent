@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from agent.modules.admin_auth import get_current_admin
+from agent.modules.providers.models import ModelOption, ProviderModelCatalog
 
 
 router_module = importlib.import_module("agent.delivery.http.api.router")
@@ -171,6 +172,44 @@ def test_chat_sync_passes_model_override(monkeypatch):
         "response": "model-response",
         "thread_id": "api_cara",
         "workflow": "react_agent",
+    }
+
+
+def test_provider_models_endpoint_refreshes_and_serializes_catalog(monkeypatch):
+    async def fake_list_provider_model_catalog(provider_name, include_remote=False):
+        assert provider_name == "openai-main"
+        assert include_remote is True
+        return ProviderModelCatalog(
+            provider="openai-main",
+            provider_type="openai_compatible",
+            default_model="openai-default",
+            can_list_models=True,
+            models=(
+                ModelOption(id="openai-live", label="openai-live", source="live"),
+                ModelOption(id="openai-config", label="openai-config", source="config"),
+            ),
+        )
+
+    monkeypatch.setattr(
+        router_module,
+        "list_provider_model_catalog",
+        fake_list_provider_model_catalog,
+    )
+
+    client = _create_client()
+    response = client.get("/api/providers/openai-main/models?refresh=true")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "provider": "openai-main",
+        "provider_type": "openai_compatible",
+        "default_model": "openai-default",
+        "can_list_models": True,
+        "models": [
+            {"id": "openai-live", "label": "openai-live", "source": "live"},
+            {"id": "openai-config", "label": "openai-config", "source": "config"},
+        ],
+        "error": None,
     }
 
 

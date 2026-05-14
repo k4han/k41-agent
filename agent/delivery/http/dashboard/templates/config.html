@@ -247,6 +247,34 @@
             box-sizing: border-box;
         }
 
+        .model-entry {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .model-entry.is-listing .manual-models {
+            display: none;
+        }
+
+        .model-entry:not(.is-listing) .listed-models {
+            display: none;
+        }
+
+        .model-entry-hint {
+            color: #6b7280;
+            font-size: 0.75rem;
+        }
+
+        .model-picker {
+            display: flex;
+            gap: 8px;
+        }
+
+        .model-picker .input-text {
+            min-width: 0;
+        }
+
         .input-text:focus {
             outline: none;
             border-color: #2563eb;
@@ -708,6 +736,31 @@
                                         %}max="{{ info.max }}" {% endif %} {% if info.step is defined
                                         %}step="{{ info.step }}" {% endif %}
                                         oninput="onSettingInputChange('{{ key }}')">
+                                    {% elif field_name == 'models' %}
+                                    <div class="model-entry" id="model-entry-{{ provider_row.name }}">
+                                        <input type="text" class="input-text listed-models" id="input-{{ key }}-listed"
+                                            list="model-options-{{ provider_row.name }}"
+                                            placeholder="Select a loaded model"
+                                            oninput="syncProviderModels('{{ provider_row.name }}', 'listed')">
+                                        <input type="text" class="input-text manual-models" id="input-{{ key }}-manual"
+                                            value="{{ info.value | join(', ') if info.value is sequence and info.value is not string else (info.value if info.value is not none else '') }}"
+                                            placeholder="{{ info.description }}"
+                                            oninput="syncProviderModels('{{ provider_row.name }}', 'manual')">
+                                        <input type="hidden" id="input-{{ key }}"
+                                            value="{{ info.value | join('\n') if info.value is sequence and info.value is not string else (info.value if info.value is not none else '') }}">
+                                        <span class="model-entry-hint" id="model-entry-hint-{{ provider_row.name }}">Load models if the provider supports it, or enter models manually.</span>
+                                    </div>
+                                    {% elif field_name == 'default_model' %}
+                                    <div class="model-picker">
+                                        <input type="text" class="input-text" id="input-{{ key }}"
+                                            list="model-options-{{ provider_row.name }}"
+                                            value="{{ info.value if info.value is not none else '' }}"
+                                            placeholder="{{ info.description }}"
+                                            oninput="onSettingInputChange('{{ key }}')">
+                                        <button class="btn btn-sm btn-ghost" type="button"
+                                            onclick="loadProviderModels('{{ provider_row.name }}')">Load models</button>
+                                    </div>
+                                    <datalist id="model-options-{{ provider_row.name }}"></datalist>
                                     {% else %}
                                     <input type="{% if info.input_type == 'url' %}url{% else %}text{% endif %}"
                                         class="input-text" id="input-{{ key }}"
@@ -948,6 +1001,81 @@
             input.type = input.type === 'password' ? 'text' : 'password';
         }
 
+        function parseModelList(value) {
+            return String(value || '')
+                .split(/[\n,]+/)
+                .map(model => model.trim())
+                .filter(Boolean);
+        }
+
+        function uniqueModels(models) {
+            return Array.from(new Set(models.filter(Boolean)));
+        }
+
+        function syncProviderModels(providerName, mode) {
+            const modelsKey = ['llm', 'providers', providerName, 'models'].join('.');
+            const hiddenInput = document.getElementById('input-' + modelsKey);
+            const manualInput = document.getElementById('input-' + modelsKey + '-manual');
+            const listedInput = document.getElementById('input-' + modelsKey + '-listed');
+            if (!hiddenInput) return;
+
+            const models = mode === 'listed'
+                ? parseModelList(listedInput ? listedInput.value : '')
+                : parseModelList(manualInput ? manualInput.value : '');
+            hiddenInput.value = uniqueModels(models).join('\n');
+            onSettingInputChange(modelsKey);
+        }
+
+        function setProviderModelOptions(providerName, models) {
+            const modelsKey = ['llm', 'providers', providerName, 'models'].join('.');
+            const defaultModelInput = document.getElementById('input-' + ['llm', 'providers', providerName, 'default_model'].join('.'));
+            const hiddenInput = document.getElementById('input-' + modelsKey);
+            const listedInput = document.getElementById('input-' + modelsKey + '-listed');
+            const datalist = document.getElementById(`model-options-${providerName}`);
+            const entry = document.getElementById(`model-entry-${providerName}`);
+            const hint = document.getElementById(`model-entry-hint-${providerName}`);
+            if (!hiddenInput || !listedInput || !datalist || !entry) return;
+
+            const currentModel = defaultModelInput ? defaultModelInput.value.trim() : '';
+            const orderedModels = uniqueModels([currentModel, ...models]);
+            datalist.innerHTML = orderedModels.map(model => `<option value="${escapeHtml(model)}"></option>`).join('');
+            listedInput.value = currentModel || orderedModels[0] || '';
+            hiddenInput.value = orderedModels.join('\n');
+            entry.classList.toggle('is-listing', orderedModels.length > 0);
+            if (hint) {
+                hint.textContent = orderedModels.length > 0
+                    ? 'Provider supports model listing. Pick a model from the dropdown or type to filter.'
+                    : 'No models were returned. Enter models manually.';
+            }
+            onSettingInputChange(modelsKey);
+        }
+
+        async function loadProviderModels(providerName) {
+            const datalist = document.getElementById(`model-options-${providerName}`);
+            if (!datalist) return;
+
+            try {
+                const res = await fetch('/providers/models?refresh=true');
+                if (!res.ok) {
+                    showToast('Failed to load provider models: ' + await readError(res), 'error');
+                    return;
+                }
+
+                const data = await res.json();
+                const catalog = (data.providers || []).find(provider => provider.provider === providerName);
+                if (!catalog) {
+                    showToast('Provider models are not available.', 'error');
+                    return;
+                }
+
+                const models = (catalog.models || []).map(model => model.id).filter(Boolean);
+                setProviderModelOptions(providerName, models);
+                showToast(models.length > 0 ? `Loaded ${models.length} model(s).` : 'No models found for this provider.');
+            } catch (err) {
+                showToast('Error loading provider models: ' + err.message, 'error');
+            }
+        }
+
         function getSettingRow(key) {
             return document.querySelector(`.setting-row[data-key="${key}"]`);
         }
@@ -960,6 +1088,11 @@
             const rawValue = useDefault ? input.defaultValue : input.value;
             if (rawValue === '') {
                 return null;
+            }
+
+            if (input.id.endsWith('.models')) {
+                const models = parseModelList(rawValue);
+                return models.length > 0 ? models : null;
             }
 
             if (inputType === 'number') {

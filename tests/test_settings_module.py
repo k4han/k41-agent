@@ -325,6 +325,7 @@ class TestRuntimeKeyMetadata:
         models_meta = get_setting_metadata("llm.providers.openai-main.models")
         assert models_meta["type"] == "text"
         assert "models" in models_meta["label"].lower()
+        assert "saved as a YAML list" in models_meta["description"]
 
 
 # =====================================================================

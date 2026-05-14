@@ -456,6 +456,29 @@
             return modelCatalogs.find(catalog => catalog.provider === provider) || null;
         }
 
+        function updateModelCatalogs(catalogs) {
+            catalogs.forEach(catalog => {
+                const index = modelCatalogs.findIndex(existing => existing.provider === catalog.provider);
+                if (index >= 0) {
+                    modelCatalogs[index] = catalog;
+                } else {
+                    modelCatalogs.push(catalog);
+                }
+            });
+        }
+
+        async function refreshRemoteModelCatalog(providerValue) {
+            const catalog = findModelCatalog(providerValue);
+            if (!catalog || !catalog.can_list_models) return;
+
+            const res = await fetch('/providers/models?refresh=true');
+            if (!res.ok) {
+                throw new Error(await readError(res));
+            }
+            const data = await res.json();
+            updateModelCatalogs(data.providers || []);
+        }
+
         function renderModelSelect(selectedModel, providerValue) {
             const select = document.getElementById('agent-model');
             const catalog = findModelCatalog(providerValue);
@@ -486,8 +509,15 @@
             }
         }
 
-        function onProviderChanged() {
-            renderModelSelect('', document.getElementById('agent-provider').value);
+        async function onProviderChanged() {
+            const providerValue = document.getElementById('agent-provider').value;
+            renderModelSelect('', providerValue);
+            try {
+                await refreshRemoteModelCatalog(providerValue);
+                renderModelSelect('', providerValue);
+            } catch (err) {
+                showToast('Failed to refresh provider models: ' + err.message, 'error');
+            }
         }
 
         function renderCheckboxes(container, values, selectedValues, disabled) {
