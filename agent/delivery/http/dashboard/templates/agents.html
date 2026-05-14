@@ -236,7 +236,7 @@
                         <tr>
                             <th>Agent</th>
                             <th>Source</th>
-                            <th>Workflow</th>
+                            <!-- <th>Workflow</th> -->
                             <th>Tools</th>
                             <th>Sub-agents</th>
                             <th>Status</th>
@@ -254,7 +254,7 @@
                                 {% if card.description %}
                                 <div class="agent-description">{{ card.description }}</div>
                                 {% endif %}
-                                <div class="path-text">{{ card.path }}</div>
+                                <!-- <div class="path-text">{{ card.path }}</div> -->
                             </td>
                             <td>
                                 <span class="badge source-{{ card.source }}">{{ card.source }}</span>
@@ -262,7 +262,7 @@
                                 <span class="badge badge-override">override</span>
                                 {% endif %}
                             </td>
-                            <td><span class="chip">{{ card.graph_type or "-" }}</span></td>
+                            <!-- <td><span class="chip">{{ card.graph_type or "-" }}</span></td> -->
                             <td>
                                 <div class="chip-list">
                                     {% for tool in card.tools %}
