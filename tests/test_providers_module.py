@@ -205,6 +205,36 @@ def test_repo_multi_provider_global_default_model(monkeypatch: MonkeyPatch, tmp_
         assert repo.get_provider("google-main").default_model == "global-model"
 
 
+def test_repo_global_default_model_overrides_provider_default_model(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+        config_path = tmp_path / "config.yaml"
+        _write_yaml(
+                config_path,
+                """
+                llm:
+                    default_provider: "google-main"
+                    default_model: "global-model"
+                    providers:
+                        openai-main:
+                            type: "openai_compatible"
+                            api_key: "openai-key"
+                            default_model: "openai-provider-model"
+                        google-main:
+                            type: "google"
+                            api_key: "google-key"
+                            default_model: "google-provider-model"
+                """,
+        )
+        _set_config_path(monkeypatch, config_path)
+
+        repo = ConfigProviderRepository()
+
+        assert repo.get_provider("openai-main").default_model == "global-model"
+        assert repo.get_provider("google-main").default_model == "global-model"
+
+
 def test_repo_default_provider_cannot_be_disabled(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
         config_path = tmp_path / "config.yaml"
         _write_yaml(
@@ -320,6 +350,35 @@ def test_resolve_chat_model_with_mock_factory(monkeypatch: MonkeyPatch, tmp_path
 
     assert result is mock_model
     mock_factory.create.assert_called_once()
+
+    _get_cached_model.cache_clear()
+
+
+def test_resolve_chat_model_prefers_explicit_model(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _get_cached_model.cache_clear()
+
+    config_path = tmp_path / "config.yaml"
+    _write_config(config_path, api_key="model-key", default_model="config-model")
+    _set_config_path(monkeypatch, config_path)
+
+    repo = ConfigProviderRepository()
+    service = ProviderService(repository=repo)
+
+    mock_model = MagicMock()
+    mock_factory = MagicMock()
+    mock_factory.create.return_value = mock_model
+
+    service.register_factory(ProviderType.OPENAI_COMPATIBLE, mock_factory)
+
+    result = resolve_chat_model(service, model="direct-model")
+
+    assert result is mock_model
+    call_args = mock_factory.create.call_args.args
+    model_config = call_args[1]
+    assert model_config.model_name == "direct-model"
 
     _get_cached_model.cache_clear()
 

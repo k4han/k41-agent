@@ -28,6 +28,7 @@ def build_run_params(
     max_context_tokens: int | None = None,
     channel_id: str = "",
     agent_name: str = "default",
+    model: str | None = None,
 ) -> dict[str, Any]:
     """Build run parameters for agent execution.
 
@@ -42,6 +43,7 @@ def build_run_params(
         max_context_tokens: Override agent's max_context_tokens if needed
         channel_id: Channel identifier (for multi-channel platforms)
         agent_name: Agent to use (loads config from catalog)
+        model: Override agent card model for this run if needed
     """
     return {
         "user_input": user_input,
@@ -50,6 +52,7 @@ def build_run_params(
         "workflow": workflow,
         "working_dir": working_dir,
         "max_context_tokens": max_context_tokens,
+        "model": model,
     }
 
 
@@ -104,6 +107,7 @@ async def run_agent(
     working_dir: str | None = None,
     max_context_tokens: int | None = None,
     allowed_tool_names: list[str] | None = None,
+    model: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """Run a workflow graph and stream assistant chunks.
 
@@ -117,6 +121,7 @@ async def run_agent(
         working_dir: Working directory for tools
         max_context_tokens: Override agent's max_context_tokens if needed
         allowed_tool_names: Override agent's tools if needed
+        model: Override agent card model for this run if needed
     """
     from agent.modules.agents import get_catalog_service
 
@@ -138,6 +143,7 @@ async def run_agent(
         max_context_tokens=resolved_max_tokens,
         agent_name=agent_name,
         allowed_tool_names=resolved_tools or None,
+        model=model,
     )
 
     stream_kwargs: dict[str, Any] = {
@@ -172,6 +178,7 @@ async def run_agent_stream(
     working_dir: str | None = None,
     max_context_tokens: int | None = None,
     allowed_tool_names: list[str] | None = None,
+    model: str | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Run a workflow graph and stream UI events (tool calls and text chunks).
 
@@ -185,6 +192,7 @@ async def run_agent_stream(
         working_dir: Working directory for tools
         max_context_tokens: Override agent's max_context_tokens if needed
         allowed_tool_names: Override agent's tools if needed
+        model: Override agent card model for this run if needed
     """
     from agent.modules.agents import get_catalog_service
 
@@ -206,6 +214,7 @@ async def run_agent_stream(
         max_context_tokens=resolved_max_tokens,
         agent_name=agent_name,
         allowed_tool_names=resolved_tools or None,
+        model=model,
     )
 
     seen_ids = set()
@@ -260,6 +269,7 @@ async def run_agent_full(
     working_dir: str | None = None,
     max_context_tokens: int | None = None,
     allowed_tool_names: list[str] | None = None,
+    model: str | None = None,
 ) -> str:
     """Run a workflow graph and return the final assistant response.
 
@@ -276,6 +286,7 @@ async def run_agent_full(
         working_dir: Working directory for tools
         max_context_tokens: Override agent's max_context_tokens if needed
         allowed_tool_names: Override agent's tools if needed
+        model: Override agent card model for this run if needed
     """
     chunks = []
     async for chunk in run_agent(
@@ -286,6 +297,7 @@ async def run_agent_full(
         working_dir=working_dir,
         max_context_tokens=max_context_tokens,
         allowed_tool_names=allowed_tool_names,
+        model=model,
     ):
         chunks.append(chunk)
     return chunks[-1] if chunks else ""

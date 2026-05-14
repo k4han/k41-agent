@@ -69,12 +69,12 @@ def _resolve_default_model(
     provider_values: dict[str, Any],
     global_default_model: str,
 ) -> str:
+    if global_default_model:
+        return global_default_model
+
     value = provider_values.get("default_model")
     if isinstance(value, str) and value.strip():
         return value.strip()
-
-    if global_default_model:
-        return global_default_model
 
     return DEFAULT_MODEL
 

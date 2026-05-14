@@ -118,7 +118,7 @@ Quy ước hiện tại:
 - Với dashboard chạy ở prefix gốc `/`, alias cũ `/bots/*` đã bị loại bỏ. Chỉ dùng `/services/*`.
 - LLM config dùng chuẩn `llm.providers.*` + `llm.default_provider` + `llm.default_model`.
 - Backend đang hỗ trợ: `openai_compatible` (dùng `ChatOpenAI`) và `google` (dùng `ChatGoogleGenerativeAI`, bỏ qua `base_url`).
-- Model mặc định được resolve theo thứ tự: `provider.default_model` -> `llm.default_model` -> fallback nội bộ theo loại provider.
+- Model mặc định được resolve theo thứ tự: `llm.default_model` -> `provider.default_model` -> fallback nội bộ theo loại provider.
 - API key được resolve theo thứ tự: `llm.providers.<name>.api_key` -> `llm.api_key`.
 
 ## API Endpoints

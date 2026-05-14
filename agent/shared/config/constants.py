@@ -184,7 +184,7 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
     },
     "llm.default_model": {
         "type": "text",
-        "description": "Global default model override used when provider model is not set",
+        "description": "Global default model used before provider-specific defaults",
         "category": "llm",
         "label": "LLM Default Model",
     },

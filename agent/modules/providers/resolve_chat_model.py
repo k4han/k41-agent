@@ -69,8 +69,8 @@ def resolve_chat_model(
     if not resolved_model:
         raise RuntimeError(
             "Model not configured. "
-            "Set 'llm.providers.<provider>.default_model' "
-            "(or fallback 'llm.default_model') "
+            "Set 'llm.default_model' "
+            "(or fallback 'llm.providers.<provider>.default_model') "
             "in ~/.kaka-agent/config.yaml before starting the app."
         )
 

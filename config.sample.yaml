@@ -21,7 +21,7 @@ llm:
   # Multi-provider mode
   default_provider: "primary"
 
-  # Optional global model fallback when provider default_model is not set
+  # Optional global model override used before provider default_model
   default_model: ""
 
   providers:

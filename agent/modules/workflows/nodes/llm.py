@@ -48,7 +48,7 @@ def llm_node(state, runtime: Runtime[WorkflowContext]):
         config = catalog.get_agent("default")
 
     # config is guaranteed non-None at this point (builtin default always present).
-    model = config.model
+    model = ctx.get_model() or config.model
     system_prompt_template = config.system_prompt
     tool_names = config.tools if config.tools else None
 
@@ -79,4 +79,3 @@ def llm_node(state, runtime: Runtime[WorkflowContext]):
     llm = get_chat_model(model=model).bind_tools(tools)
     response = llm.invoke(messages)
     return {"messages": [response]}
-

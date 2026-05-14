@@ -139,3 +139,46 @@ def test_llm_node_prefers_runtime_allowed_tool_names_before_building_prompt(monk
 
     assert [tool.name for tool in captured["tools"]] == ["call_agent", "skill"]
     assert [tool.name for tool in builder_calls["tools"]] == ["call_agent", "skill"]
+
+
+def test_llm_node_prefers_runtime_model_over_agent_card_model(monkeypatch):
+    captured: dict = {}
+
+    class _FakeCatalog:
+        def get_agent(self, name: str):
+            assert name == "override-agent"
+            return SimpleNamespace(
+                model="agent-card-model",
+                system_prompt="Override prompt",
+                tools=[],
+            )
+
+    monkeypatch.setattr(
+        llm_node_module,
+        "get_chat_model",
+        _fake_chat_model_factory(captured),
+    )
+    monkeypatch.setattr(
+        llm_node_module,
+        "_resolve_tools",
+        lambda names: [],
+    )
+    monkeypatch.setattr(
+        "agent.modules.agents.get_catalog_service",
+        lambda: _FakeCatalog(),
+    )
+
+    llm_node_module.llm_node(
+        {"messages": [HumanMessage(content="hello")]},
+        SimpleNamespace(
+            context=WorkflowContext(
+                agent_name="override-agent",
+                working_dir="D:/repo",
+                max_context_tokens=50000,
+                allowed_tool_names=[],
+                model="runtime-model",
+            )
+        ),
+    )
+
+    assert captured["model"] == "runtime-model"

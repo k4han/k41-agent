@@ -50,6 +50,7 @@ def _make_agent(
     name: str,
     graph_type: str,
     description: str = "",
+    model: str = "",
     tools: list[str] | None = None,
     max_context_tokens: int = 50_000,
     system_prompt: str = (
@@ -64,7 +65,7 @@ def _make_agent(
         display_name="",
         description=description,
         graph_type=graph_type,
-        model="",
+        model=model,
         tools=list(tools or []),
         sub_agents=None,
         max_context_tokens=max_context_tokens,
@@ -141,14 +142,21 @@ async def test_router_node_routes_to_selected_sub_agent(
     monkeypatch.setattr(
         router_module,
         "get_chat_model",
-        lambda: _FakeChatModel("researcher", captured),
+        lambda model=None: (
+            captured.__setitem__("model", model),
+            _FakeChatModel("researcher", captured),
+        )[1],
     )
     monkeypatch.setattr(
         router_module,
         "get_catalog_service",
         lambda: _FakeCatalog(
             agents={
-                "orchestrator": _make_agent(name="orchestrator", graph_type="router"),
+                "orchestrator": _make_agent(
+                    name="orchestrator",
+                    graph_type="router",
+                    model="router-model",
+                ),
                 "researcher": _make_agent(
                     name="researcher",
                     graph_type="research_chain",
@@ -187,6 +195,8 @@ async def test_router_node_routes_to_selected_sub_agent(
     assert target_context.working_dir == "D:/repo"
     assert target_context.max_context_tokens == 12000
     assert target_context.allowed_tool_names == ["websearch", "webfetch"]
+    assert target_context.model is None
+    assert captured["model"] == "router-model"
 
     system_prompt = captured["messages"][0].content
     assert "- researcher: Research specialist" in system_prompt
@@ -210,7 +220,7 @@ async def test_router_node_falls_back_to_first_callable_agent_when_llm_selects_i
     monkeypatch.setattr(
         router_module,
         "get_chat_model",
-        lambda: _FakeChatModel("outsider", {}),
+        lambda model=None: _FakeChatModel("outsider", {}),
     )
     monkeypatch.setattr(
         router_module,
@@ -273,7 +283,9 @@ async def test_router_node_falls_back_to_default_agent_when_no_callable_sub_agen
     monkeypatch.setattr(
         router_module,
         "get_chat_model",
-        lambda: (_ for _ in ()).throw(AssertionError("LLM should not be called")),
+        lambda model=None: (_ for _ in ()).throw(
+            AssertionError("LLM should not be called")
+        ),
     )
     monkeypatch.setattr(
         router_module,
@@ -327,7 +339,7 @@ async def test_router_node_omits_context_for_graph_without_context_schema(
     monkeypatch.setattr(
         router_module,
         "get_chat_model",
-        lambda: _FakeChatModel("legacy-agent", {}),
+        lambda model=None: _FakeChatModel("legacy-agent", {}),
     )
     monkeypatch.setattr(
         router_module,

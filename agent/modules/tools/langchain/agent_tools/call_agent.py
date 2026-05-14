@@ -56,6 +56,7 @@ async def call_agent(
         "working_dir",
         DEFAULT_WORKING_DIR,
     )
+    inherited_model = get_context_value(runtime.context, "model", None)
 
     catalog = get_catalog_service()
 
@@ -76,6 +77,7 @@ async def call_agent(
         max_context_tokens=target_config.max_context_tokens,
         agent_name=sub_agent,
         allowed_tool_names=target_config.tools if target_config.tools else None,
+        model=inherited_model,
     )
     config = make_run_config(
         thread_id=_make_subagent_thread_id(runtime, sub_agent),
