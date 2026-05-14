@@ -336,6 +336,17 @@ async def dashboard_agents(request: Request) -> HTMLResponse:
     )
 
 
+@router.get("/chat", response_class=HTMLResponse)
+async def dashboard_chat(request: Request) -> HTMLResponse:
+    catalog = get_catalog_service()
+    cards = catalog.list_agent_cards()
+    return templates.TemplateResponse(
+        request=request,
+        name="chat.html",
+        context=await _agent_card_options(cards),
+    )
+
+
 @router.get("/agents/cards")
 async def list_agent_cards() -> dict[str, Any]:
     return await _agent_card_options()

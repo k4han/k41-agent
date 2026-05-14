@@ -175,6 +175,47 @@ def test_chat_sync_passes_model_override(monkeypatch):
     }
 
 
+def test_chat_events_streams_tool_calls_as_ndjson(monkeypatch):
+    built_params = {
+        "user_input": "Use a tool",
+        "thread_id": "api_alice",
+        "agent_name": "default",
+        "workflow": None,
+        "working_dir": None,
+        "max_context_tokens": None,
+        "provider": None,
+        "model": None,
+    }
+
+    def fake_build_run_params(**params):
+        return dict(built_params)
+
+    async def fake_run_agent_stream(**params):
+        assert params == built_params
+        yield {"type": "tool_call", "id": "call-1", "name": "list_files", "args": {"path": "."}}
+        yield {
+            "type": "tool_result",
+            "tool_call_id": "call-1",
+            "name": "list_files",
+            "content": "README.md",
+        }
+        yield {"type": "final", "content": "done"}
+
+    monkeypatch.setattr(router_module, "build_run_params", fake_build_run_params)
+    monkeypatch.setattr(router_module, "run_agent_stream", fake_run_agent_stream)
+
+    client = _create_client()
+    response = client.post("/api/chat/events", json={"message": "Use a tool", "user_id": "alice"})
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/x-ndjson")
+    assert response.text == (
+        '{"type": "tool_call", "id": "call-1", "name": "list_files", "args": {"path": "."}}\n'
+        '{"type": "tool_result", "tool_call_id": "call-1", "name": "list_files", "content": "README.md"}\n'
+        '{"type": "final", "content": "done"}\n'
+    )
+
+
 def test_provider_models_endpoint_refreshes_and_serializes_catalog(monkeypatch):
     async def fake_list_provider_model_catalog(provider_name, include_remote=False):
         assert provider_name == "openai-main"

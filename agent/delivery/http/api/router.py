@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
@@ -11,6 +13,7 @@ from agent.modules.agent_runtime import (
     build_run_params,
     run_agent,
     run_agent_full,
+    run_agent_stream,
 )
 from agent.modules.providers import (
     list_provider_model_catalog,
@@ -64,6 +67,19 @@ async def chat_stream(request: ChatRequest):
             yield chunk
 
     return StreamingResponse(event_generator(), media_type="text/plain")
+
+
+@router.post("/chat/events")
+async def chat_events(request: ChatRequest):
+    """Stream UI events for a chat request as newline-delimited JSON."""
+
+    params = _request_to_run_params(request)
+
+    async def event_generator():
+        async for event in run_agent_stream(**params):
+            yield json.dumps(event, ensure_ascii=False) + "\n"
+
+    return StreamingResponse(event_generator(), media_type="application/x-ndjson")
 
 
 @router.get("/graphs")

@@ -205,6 +205,7 @@
             <a href="/">Overview</a>
             <a href="/channels">Pair Channels</a>
             <a href="/agents" class="active">Agents</a>
+            <a href="/chat">Chat</a>
             <a href="/sessions">Active Sessions</a>
             <a href="/tasks">Background Tasks</a>
             <a href="/scheduler">Scheduler</a>
@@ -301,6 +302,7 @@
                             <td>
                                 <div class="actions">
                                     {% if card.valid %}
+                                    <a class="btn btn-sm btn-ghost" href="/chat?agent={{ card.name | urlencode }}">Chat</a>
                                     <button class="btn btn-sm btn-ghost" type="button" data-agent-action="view" data-agent-name="{{ card.name }}">View</button>
                                     {% if card.editable %}
                                     <button class="btn btn-sm" type="button" data-agent-action="edit" data-agent-name="{{ card.name }}">Edit</button>

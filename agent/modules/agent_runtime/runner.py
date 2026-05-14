@@ -1,7 +1,7 @@
 from contextlib import contextmanager
 from typing import Any, AsyncGenerator, Iterator
 
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from agent.shared.infrastructure.parsing import extract_final_text_content
 
 from agent.modules.agent_runtime.active_sessions import (
@@ -258,6 +258,7 @@ async def run_agent_stream(
                         registry.add_tool_call(session_id, tool_name)
                         yield {
                             "type": "tool_call",
+                            "id": tc.get("id"),
                             "name": tool_name,
                             "args": tc.get("args"),
                         }
@@ -268,6 +269,13 @@ async def run_agent_stream(
                         "type": "final",
                         "content": content,
                     }
+            elif isinstance(last, ToolMessage):
+                yield {
+                    "type": "tool_result",
+                    "tool_call_id": getattr(last, "tool_call_id", None),
+                    "name": getattr(last, "name", None),
+                    "content": extract_final_text_content(getattr(last, "content", None)),
+                }
 
 async def run_agent_full(
     user_input: str,
