@@ -1,0 +1,266 @@
+import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { Play, RefreshCw, Square, Trash2 } from "lucide-solid";
+
+import { AppShell } from "@/components/AppShell";
+import { DataGate } from "@/components/State";
+import { useToast } from "@/components/Toast";
+import { apiFetch, deleteJson, postJson } from "@/lib/api";
+import { statusBadgeClass, truncateText } from "@/lib/utils";
+import type { AgentConfig, BackgroundTask, Identity } from "@/types";
+
+type TasksPayload = {
+  tasks: BackgroundTask[];
+  agents: AgentConfig[];
+  identities: Identity[];
+};
+
+export function TasksPage() {
+  const [data, setData] = createSignal<TasksPayload>();
+  const [error, setError] = createSignal("");
+  const [request, setRequest] = createSignal("");
+  const [agentName, setAgentName] = createSignal("default");
+  const [notify, setNotify] = createSignal("");
+  const [expanded, setExpanded] = createSignal<Record<string, boolean>>({});
+  const { showToast } = useToast();
+  let timer: number | undefined;
+
+  const load = async () => {
+    setError("");
+    try {
+      const payload = await apiFetch<TasksPayload>("/dashboard-api/tasks");
+      setData(payload);
+      if (!payload.agents.some((agent) => agent.name === agentName()) && payload.agents[0]) {
+        setAgentName(payload.agents[0].name);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load tasks");
+    }
+  };
+
+  const refreshTasks = async () => {
+    try {
+      const result = await apiFetch<{ tasks: BackgroundTask[] }>("/tasks/list");
+      setData((current) => current && { ...current, tasks: result.tasks });
+    } catch {
+      return;
+    }
+  };
+
+  const submitTask = async () => {
+    const text = request().trim();
+    if (!text) {
+      showToast("Enter a task request.", "warning");
+      return;
+    }
+    const payload: Record<string, string> = {
+      request: text,
+      agent_name: agentName(),
+    };
+    if (notify()) {
+      const [platform, externalId] = notify().split(":", 2);
+      payload.notify_platform = platform;
+      payload.notify_external_id = externalId;
+    }
+
+    try {
+      const result = await postJson<{ task_id: string }>("/tasks", payload);
+      setRequest("");
+      showToast(`Task ${result.task_id} submitted.`);
+      await load();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to submit task", "error");
+    }
+  };
+
+  const cancelTask = async (taskId: string) => {
+    try {
+      await postJson(`/tasks/${encodeURIComponent(taskId)}/cancel`);
+      showToast("Task cancelled.");
+      await refreshTasks();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to cancel task", "error");
+    }
+  };
+
+  const removeTask = async (taskId: string) => {
+    try {
+      await deleteJson(`/tasks/${encodeURIComponent(taskId)}`);
+      showToast("Task removed.");
+      await refreshTasks();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to remove task", "error");
+    }
+  };
+
+  const toggleExpanded = (taskId: string) => {
+    setExpanded((current) => ({ ...current, [taskId]: !current[taskId] }));
+  };
+
+  onMount(() => {
+    void load();
+    timer = window.setInterval(refreshTasks, 5000);
+  });
+  onCleanup(() => {
+    if (timer) {
+      window.clearInterval(timer);
+    }
+  });
+
+  return (
+    <AppShell
+      title="Background Tasks"
+      subtitle="Submit long-running agent work and inspect task history."
+      actions={
+        <button class="btn" type="button" onClick={load}>
+          <RefreshCw size={14} />
+          Refresh
+        </button>
+      }
+    >
+      <DataGate data={data()} error={error()} onRetry={load}>
+        {(payload) => {
+          const active = payload.tasks.filter((task) => ["running", "pending"].includes(task.status)).length;
+          const completed = payload.tasks.filter((task) => task.status === "completed").length;
+          const failed = payload.tasks.filter((task) => ["failed", "cancelled"].includes(task.status)).length;
+          return (
+            <div class="stack">
+              <section class="panel">
+                <div class="panel-header">
+                  <div class="panel-title">New Task</div>
+                </div>
+                <div class="panel-body stack">
+                  <textarea
+                    class="textarea"
+                    rows={3}
+                    value={request()}
+                    placeholder="Describe what the agent should do..."
+                    onInput={(event) => setRequest(event.currentTarget.value)}
+                    onKeyDown={(event) => {
+                      if (event.ctrlKey && event.key === "Enter") {
+                        event.preventDefault();
+                        void submitTask();
+                      }
+                    }}
+                  />
+                  <div class="row-wrap">
+                    <select
+                      class="select"
+                      style={{ width: "220px" }}
+                      value={agentName()}
+                      onChange={(event) => setAgentName(event.currentTarget.value)}
+                    >
+                      <For each={payload.agents}>
+                        {(agent) => <option value={agent.name}>{agent.display_name || agent.name}</option>}
+                      </For>
+                    </select>
+                    <select
+                      class="select"
+                      style={{ width: "260px" }}
+                      value={notify()}
+                      onChange={(event) => setNotify(event.currentTarget.value)}
+                    >
+                      <option value="">No notification</option>
+                      <For each={payload.identities}>
+                        {(identity) => (
+                          <option value={`${identity.platform}:${identity.external_id}`}>
+                            {identity.platform} - {identity.external_id}
+                          </option>
+                        )}
+                      </For>
+                    </select>
+                    <button class="btn btn-primary" type="button" onClick={submitTask}>
+                      <Play size={14} />
+                      Run Task
+                    </button>
+                  </div>
+                </div>
+              </section>
+
+              <div class="grid-3">
+                <div class="panel metric">
+                  <div class="metric-value">{active}</div>
+                  <div class="metric-label">Active</div>
+                </div>
+                <div class="panel metric">
+                  <div class="metric-value">{completed}</div>
+                  <div class="metric-label">Completed</div>
+                </div>
+                <div class="panel metric">
+                  <div class="metric-value">{failed}</div>
+                  <div class="metric-label">Failed or cancelled</div>
+                </div>
+              </div>
+
+              <section class="panel">
+                <div class="panel-header">
+                  <div class="panel-title">Task History</div>
+                  <span class="hint">Auto-refresh every 5s</span>
+                </div>
+                <div class="panel-body stack">
+                  <For each={payload.tasks} fallback={<div class="empty">No tasks yet.</div>}>
+                    {(task) => {
+                      const isActive = ["running", "pending"].includes(task.status);
+                      const hasDetails = Boolean(task.result || task.error);
+                      return (
+                        <article class="panel">
+                          <div class="panel-body stack">
+                            <div class="split">
+                              <div>
+                                <div class="mono">#{task.task_id}</div>
+                                <div>{truncateText(task.request, 220)}</div>
+                                <div class="hint">
+                                  {task.agent_name} - {task.thread_id}
+                                </div>
+                              </div>
+                              <div class="row-wrap">
+                                <span class={statusBadgeClass(task.status)}>{task.status}</span>
+                                <span class="badge">{task.elapsed_display}</span>
+                              </div>
+                            </div>
+                            <div class="row-wrap">
+                              <Show when={hasDetails}>
+                                <button class="btn btn-sm" type="button" onClick={() => toggleExpanded(task.task_id)}>
+                                  {expanded()[task.task_id] ? "Hide" : "Show"} Details
+                                </button>
+                              </Show>
+                              <Show
+                                when={isActive}
+                                fallback={
+                                  <button
+                                    class="btn btn-sm btn-danger"
+                                    type="button"
+                                    onClick={() => removeTask(task.task_id)}
+                                  >
+                                    <Trash2 size={13} />
+                                    Remove
+                                  </button>
+                                }
+                              >
+                                <button
+                                  class="btn btn-sm btn-warning"
+                                  type="button"
+                                  onClick={() => cancelTask(task.task_id)}
+                                >
+                                  <Square size={13} />
+                                  Cancel
+                                </button>
+                              </Show>
+                            </div>
+                            <Show when={expanded()[task.task_id] && hasDetails}>
+                              <pre class="code-block">{task.result || task.error}</pre>
+                            </Show>
+                          </div>
+                        </article>
+                      );
+                    }}
+                  </For>
+                </div>
+              </section>
+            </div>
+          );
+        }}
+      </DataGate>
+    </AppShell>
+  );
+}
+

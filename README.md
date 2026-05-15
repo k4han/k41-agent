@@ -66,10 +66,27 @@ database.url mặc định:
 
 ```bash
 uv sync
+pnpm install
 uv run kaka init
 # Chỉnh ~/.kaka-agent/config.yaml
 # Bắt buộc set llm.providers.<name>.api_key
 ```
+
+## Dashboard frontend
+
+Dashboard hiện là SPA `Solid + Vite`, được FastAPI serve từ static build:
+
+```bash
+pnpm dashboard:check
+pnpm dashboard:build
+uv run python app.py
+```
+
+- Source frontend: `agent/delivery/http/dashboard/frontend`
+- Static build được xuất ra: `agent/delivery/http/dashboard/static`
+- Assets được serve tại `/dashboard-assets`
+- Các route dashboard như `/`, `/agents`, `/chat`, `/tasks`, `/scheduler`, `/config`, `/providers` trả cùng SPA shell.
+- Dữ liệu đọc cho dashboard nằm dưới `/dashboard-api/*`; các mutation cũ như `/agents/cards`, `/settings`, `/scheduler/jobs`, `/tasks` vẫn được giữ.
 
 ## Chạy
 

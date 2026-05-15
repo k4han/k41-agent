@@ -1,0 +1,23 @@
+{
+  "name": "kaka-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@solidjs/router": "^0.15.3",
+    "lucide-solid": "^0.562.0",
+    "solid-js": "^1.9.10"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.18",
+    "tailwindcss": "^4.1.18",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.0",
+    "vite-plugin-solid": "^2.11.12"
+  }
+}

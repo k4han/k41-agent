@@ -13,6 +13,7 @@ from agent.bootstrap.runtime import AppRuntime
 from agent.bootstrap.settings import BootstrapConfig, load_bootstrap_config
 from agent.delivery.http import api_router, dashboard_router, telegram_webhook_router
 from agent.delivery.http.dashboard.auth_router import router as auth_router
+from agent.delivery.http.dashboard.spa import STATIC_DIR
 from agent.modules.channels import list_channel_statuses
 from agent.shared.config import get_config_service
 
@@ -67,9 +68,9 @@ def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:
         fastapi_app.include_router(auth_router)
         fastapi_app.include_router(dashboard_router)
         fastapi_app.mount(
-            "/templates",
-            StaticFiles(directory="agent/delivery/http/dashboard/templates"),
-            name="dashboard-static",
+            "/dashboard-assets",
+            StaticFiles(directory=STATIC_DIR, check_dir=False),
+            name="dashboard-assets",
         )
 
     @fastapi_app.get("/health")

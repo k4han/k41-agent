@@ -9,6 +9,9 @@ wheels/
 # Virtual environments
 .venv
 
+# Node dependencies
+node_modules/
+
 data/
 local-dev/
 

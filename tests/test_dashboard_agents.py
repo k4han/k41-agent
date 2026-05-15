@@ -52,45 +52,35 @@ def _payload(name: str) -> dict:
     }
 
 
-def test_agents_page_renders_cards_and_sidebar_link(dashboard_agent_client) -> None:
+def test_agents_page_serves_spa_and_agent_api_returns_cards(dashboard_agent_client) -> None:
     client, _ = dashboard_agent_client
 
     response = client.get("/agents")
 
     assert response.status_code == 200
-    assert "Agents" in response.text
-    assert 'href="/agents" class="active"' in response.text
-    assert 'href="/chat"' in response.text
-    assert 'href="/chat?agent=default"' in response.text
-    assert "default" in response.text
-    assert "Clone" in response.text
-    assert "refreshRemoteModelCatalog" in response.text
-    assert "/providers/models?refresh=true" in response.text
-    assert "Leaf (cannot call agents)" not in response.text
-    assert "Allow selected agents" not in response.text
+    assert '<div id="root">' in response.text
+    assert "/dashboard-assets/" in response.text
+
+    api_response = client.get("/dashboard-api/agents")
+    assert api_response.status_code == 200
+    data = api_response.json()
+    assert any(card["name"] == "default" for card in data["cards"])
+    assert "react_agent" in data["workflows"]
+    assert "tools" in data
 
     index_response = client.get("/")
     assert index_response.status_code == 200
-    assert 'href="/agents"' in index_response.text
-    assert 'href="/chat"' in index_response.text
+    assert '<div id="root">' in index_response.text
 
 
-def test_chat_page_renders_agent_playground(dashboard_agent_client) -> None:
+def test_chat_page_serves_spa(dashboard_agent_client) -> None:
     client, _ = dashboard_agent_client
 
     response = client.get("/chat?agent=default")
 
     assert response.status_code == 200
-    assert "Agent Chat" in response.text
-    assert 'href="/chat" class="active"' in response.text
-    assert 'id="agent-select"' in response.text
-    assert 'id="prompt-input"' in response.text
-    assert "tool-call" in response.text
-    assert "appendToolCall" in response.text
-    assert "appendToolResult" in response.text
-    assert "Waiting for tool result" in response.text
-    assert "fetch('/api/chat/events'" in response.text
-    assert '"name": "default"' in response.text
+    assert '<div id="root">' in response.text
+    assert "/dashboard-assets/" in response.text
 
 
 def test_agent_card_crud_endpoints(dashboard_agent_client) -> None:

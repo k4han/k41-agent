@@ -67,27 +67,27 @@ def dashboard_client(make_dashboard_client):
 
 
 class TestDashboardSettingsEndpoints:
-    def test_get_config_page_excludes_provider_settings(self, dashboard_client) -> None:
-        resp = dashboard_client.get("/config")
+    def test_get_config_api_excludes_provider_settings(self, dashboard_client) -> None:
+        resp = dashboard_client.get("/dashboard-api/config")
         assert resp.status_code == 200
-        assert "Runtime Configuration" in resp.text
-        assert "llm.provider" not in resp.text
-        assert "channels.telegram.enabled" in resp.text
+        data = resp.json()
+        assert data["page_title"] == "Runtime Configuration"
+        assert "llm.provider" not in data["settings"]
+        assert "channels.telegram.enabled" in data["settings"]
+        assert "channels" in data["by_category"]
 
-    def test_get_providers_page_shows_provider_settings(self, dashboard_client) -> None:
-        resp = dashboard_client.get("/providers")
+    def test_get_providers_api_shows_provider_settings(self, dashboard_client) -> None:
+        resp = dashboard_client.get("/dashboard-api/providers")
         assert resp.status_code == 200
-        assert "Provider Configuration" in resp.text
-        assert "llm.default_provider" in resp.text
-        assert 'id="input-llm.default_provider"' in resp.text
-        assert "Auto select enabled provider" in resp.text
-        assert 'data-key="llm.provider"' not in resp.text
-        assert 'data-key="llm.model"' not in resp.text
-        assert "Provider Config" in resp.text
-        assert "<th style=\"width: 130px;\">Provider</th>" in resp.text
-        assert "No providers found in config" in resp.text
+        data = resp.json()
+        assert data["page_title"] == "Provider Configuration"
+        assert "llm.default_provider" in data["settings"]
+        assert "llm.provider" not in data["settings"]
+        assert "llm.model" not in data["settings"]
+        assert data["provider_rows"] == []
+        assert data["provider_name_options"] == []
 
-    def test_get_providers_page_renders_models_as_textarea(self, make_dashboard_client) -> None:
+    def test_get_providers_api_returns_provider_model_fields(self, make_dashboard_client) -> None:
         source = StubSource({
             "llm.providers.openai-main.type": SettingsValue(
                 key="llm.providers.openai-main.type",
@@ -107,20 +107,20 @@ class TestDashboardSettingsEndpoints:
         })
         client = make_dashboard_client(ConfigService(sources=[DefaultConfigSource(), source]))
 
-        resp = client.get("/providers")
+        resp = client.get("/dashboard-api/providers")
 
         assert resp.status_code == 200
-        assert 'id="input-llm.providers.openai-main.default_model"' in resp.text
-        assert 'list="model-options-openai-main"' in resp.text
-        assert 'id="model-options-openai-main"' in resp.text
-        assert "Load models" in resp.text
-        assert "loadProviderModels" in resp.text
-        assert 'id="input-llm.providers.openai-main.models"' in resp.text
-        assert 'id="input-llm.providers.openai-main.models-listed"' in resp.text
-        assert 'id="input-llm.providers.openai-main.models-manual"' in resp.text
-        assert "syncProviderModels" in resp.text
-        assert "openai-default,openai-fast" in resp.text
-        assert "saved as a YAML list" in resp.text
+        data = resp.json()
+        rows = data["provider_rows"]
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["name"] == "openai-main"
+        assert row["fields"]["default_model"]["key"] == (
+            "llm.providers.openai-main.default_model"
+        )
+        assert row["fields"]["models"]["key"] == "llm.providers.openai-main.models"
+        assert row["fields"]["models"]["info"]["value"] == "openai-default,openai-fast"
+        assert "models" in data["provider_field_order"]
 
     def test_get_settings(self, dashboard_client) -> None:
         resp = dashboard_client.get("/settings")

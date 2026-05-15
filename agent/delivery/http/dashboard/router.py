@@ -1,15 +1,22 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
+from datetime import datetime
 from typing import Any
 
 from apscheduler.job import Job
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
+from agent.delivery.http.dashboard.spa import spa_index_response
+from agent.modules.admin_auth import get_current_admin
+from agent.modules.agent_runtime import (
+    NotifyChannel,
+    get_active_session_registry,
+    get_background_task_manager,
+)
+from agent.modules.agents import AgentCard, AgentConfig, get_catalog_service
 from agent.modules.channels import (
     ChannelManager,
     get_channel_status,
@@ -19,33 +26,26 @@ from agent.modules.channels import (
     stop_all_channels,
     stop_channel,
 )
-from agent.modules.admin_auth import get_current_admin
+from agent.modules.providers import (
+    list_provider_model_catalog,
+    list_provider_model_catalogs,
+)
 from agent.modules.scheduler import (
     TriggerType,
     execute_scheduled_task,
     get_scheduler,
     normalize_trigger,
 )
-from agent.modules.agent_runtime import (
-    NotifyChannel,
-    get_active_session_registry,
-    get_background_task_manager,
-)
-from agent.modules.agents import AgentCard, AgentConfig, get_catalog_service
-from agent.modules.providers import (
-    list_provider_model_catalog,
-    list_provider_model_catalogs,
-)
 from agent.modules.tools import get_default_tool_names
+from agent.modules.users import get_pairing_service
 from agent.modules.workflows import (
     REACT_AGENT_GRAPH_TYPE,
     ROUTER_GRAPH_TYPE,
     list_registered_workflows,
 )
-from agent.modules.users import get_pairing_service
 from agent.shared.config import (
-    ConfigService,
     PROVIDER_SETTING_FIELD_ORDER,
+    ConfigService,
     get_setting_metadata,
     is_runtime_key,
     parse_provider_key,
@@ -54,8 +54,6 @@ from agent.shared.config import (
 router = APIRouter(tags=["dashboard"], dependencies=[Depends(get_current_admin)])
 logger = logging.getLogger(__name__)
 
-BASE_DIR = Path(__file__).resolve().parent
-templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 # --- helpers ----------------------------------------------------------
 
@@ -209,6 +207,29 @@ def _serialize_agent_card(card: AgentCard) -> dict[str, Any]:
     return _dump_model(card)
 
 
+def _serialize_agent_config(config: AgentConfig) -> dict[str, Any]:
+    return _dump_model(config)
+
+
+def _serialize_datetime(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value)
+
+
+def _serialize_identity(identity: Any) -> dict[str, Any]:
+    return {
+        "id": getattr(identity, "id", None),
+        "user_id": getattr(identity, "user_id", None),
+        "platform": getattr(identity, "platform", ""),
+        "external_id": getattr(identity, "external_id", ""),
+        "created_at": _serialize_datetime(getattr(identity, "created_at", None)),
+        "updated_at": _serialize_datetime(getattr(identity, "updated_at", None)),
+    }
+
+
 def _serialize_model_catalog(catalog: Any) -> dict[str, Any]:
     return {
         "provider": catalog.provider,
@@ -274,6 +295,49 @@ async def _agent_card_options(cards: list[AgentCard] | None = None) -> dict[str,
     }
 
 
+async def _paired_identities() -> list[dict[str, Any]]:
+    pairing_service = get_pairing_service()
+    identities = await pairing_service.list_paired_identities()
+    return [_serialize_identity(identity) for identity in identities]
+
+
+def _settings_payload(request: Request, *, include_provider_settings: bool) -> dict[str, Any]:
+    service = _get_config_service(request)
+    settings_raw, settings_sources_raw = service.get_settings_overview_and_sources()
+    settings = _filter_settings(
+        settings_raw,
+        include_provider_settings=include_provider_settings,
+    )
+    settings_sources = _filter_settings(
+        settings_sources_raw,
+        include_provider_settings=include_provider_settings,
+    )
+
+    if not include_provider_settings:
+        return {
+            "active_nav": "config",
+            "page_title": "Runtime Configuration",
+            "page_subtitle": "Manage channels, database, and security runtime settings.",
+            "settings": settings,
+            "by_category": _group_settings_by_category(settings),
+            "settings_sources": settings_sources,
+        }
+
+    global_settings, provider_settings = _split_provider_settings(settings)
+    provider_rows = _build_provider_rows(provider_settings, PROVIDER_SETTING_FIELD_ORDER)
+    return {
+        "active_nav": "providers",
+        "page_title": "Provider Configuration",
+        "page_subtitle": "Manage default provider and per-provider LLM credentials/models.",
+        "settings": settings,
+        "by_category": _group_settings_by_category(global_settings),
+        "settings_sources": settings_sources,
+        "provider_rows": provider_rows,
+        "provider_name_options": [row["name"] for row in provider_rows],
+        "provider_field_order": PROVIDER_SETTING_FIELD_ORDER,
+    }
+
+
 def _handle_agent_card_error(exc: Exception) -> HTTPException:
     if isinstance(exc, FileNotFoundError):
         return HTTPException(status_code=404, detail=str(exc))
@@ -300,7 +364,96 @@ def _agent_config_from_body(body: "AgentCardBody") -> AgentConfig:
     )
 
 
-# --- views -------------------------------------------------------------
+def _dashboard_spa() -> Response:
+    return spa_index_response()
+
+
+# --- SPA routes -------------------------------------------------------
+
+
+@router.get("/", include_in_schema=False)
+@router.get("/agents", include_in_schema=False)
+@router.get("/chat", include_in_schema=False)
+@router.get("/channels", include_in_schema=False)
+@router.get("/sessions", include_in_schema=False)
+@router.get("/tasks", include_in_schema=False)
+@router.get("/scheduler", include_in_schema=False)
+@router.get("/config", include_in_schema=False)
+@router.get("/providers", include_in_schema=False)
+async def dashboard_spa() -> Response:
+    return _dashboard_spa()
+
+
+# --- dashboard API ----------------------------------------------------
+
+
+@router.get("/dashboard-api/session")
+async def get_dashboard_session(current_admin: str = Depends(get_current_admin)) -> dict[str, Any]:
+    return {"authenticated": True, "admin_id": current_admin}
+
+
+@router.get("/dashboard-api/overview")
+async def get_dashboard_overview(request: Request) -> dict[str, Any]:
+    channel_manager = _get_channel_manager(request)
+    return {"services": list_channel_statuses(channel_manager)}
+
+
+@router.get("/dashboard-api/channels")
+async def get_dashboard_channels() -> dict[str, Any]:
+    return {"identities": await _paired_identities()}
+
+
+@router.get("/dashboard-api/agents")
+async def get_dashboard_agents() -> dict[str, Any]:
+    return await _agent_card_options()
+
+
+@router.get("/dashboard-api/tasks")
+async def get_dashboard_tasks() -> dict[str, Any]:
+    manager = get_background_task_manager()
+    catalog = get_catalog_service()
+    return {
+        "tasks": manager.list_all(),
+        "agents": [_serialize_agent_config(agent) for agent in catalog.list_agents()],
+        "identities": await _paired_identities(),
+    }
+
+
+@router.get("/dashboard-api/scheduler")
+async def get_dashboard_scheduler() -> dict[str, Any]:
+    try:
+        scheduler = get_scheduler()
+        jobs = _list_all_jobs()
+        scheduler_timezone = _scheduler_timezone_label(scheduler)
+    except RuntimeError:
+        jobs = []
+        scheduler_timezone = "local time"
+
+    return {
+        "jobs": jobs,
+        "identities": await _paired_identities(),
+        "scheduler_timezone": scheduler_timezone,
+    }
+
+
+@router.get("/dashboard-api/sessions")
+async def get_dashboard_sessions() -> dict[str, Any]:
+    registry = get_active_session_registry()
+    sessions = registry.list_active()
+    return {"sessions": sessions, "count": len(sessions)}
+
+
+@router.get("/dashboard-api/config")
+async def get_dashboard_config(request: Request) -> dict[str, Any]:
+    return _settings_payload(request, include_provider_settings=False)
+
+
+@router.get("/dashboard-api/providers")
+async def get_dashboard_providers(request: Request) -> dict[str, Any]:
+    return _settings_payload(request, include_provider_settings=True)
+
+
+# --- agent card endpoints --------------------------------------------
 
 
 class AgentCardBody(BaseModel):
@@ -314,37 +467,6 @@ class AgentCardBody(BaseModel):
     sub_agents: list[str] | None = None
     max_context_tokens: int = 50_000
     system_prompt: str = ""
-
-
-@router.get("/", response_class=HTMLResponse)
-async def dashboard_index(request: Request) -> HTMLResponse:
-    channel_manager = _get_channel_manager(request)
-    services = list_channel_statuses(channel_manager)
-    return templates.TemplateResponse(
-        request=request, name="index.html", context={"services": services}
-    )
-
-
-@router.get("/agents", response_class=HTMLResponse)
-async def dashboard_agents(request: Request) -> HTMLResponse:
-    catalog = get_catalog_service()
-    cards = catalog.list_agent_cards()
-    return templates.TemplateResponse(
-        request=request,
-        name="agents.html",
-        context=await _agent_card_options(cards),
-    )
-
-
-@router.get("/chat", response_class=HTMLResponse)
-async def dashboard_chat(request: Request) -> HTMLResponse:
-    catalog = get_catalog_service()
-    cards = catalog.list_agent_cards()
-    return templates.TemplateResponse(
-        request=request,
-        name="chat.html",
-        context=await _agent_card_options(cards),
-    )
 
 
 @router.get("/agents/cards")
@@ -412,19 +534,11 @@ async def list_dashboard_provider_models(refresh: bool = False) -> dict[str, Any
     }
 
 
-@router.get("/channels", response_class=HTMLResponse)
-async def dashboard_channels(request: Request) -> HTMLResponse:
-    pairing_service = get_pairing_service()
-    identities = await pairing_service.list_paired_identities()
-    return templates.TemplateResponse(
-        request=request,
-        name="channels.html",
-        context={"request": request, "identities": identities},
-    )
+# --- channel endpoints ------------------------------------------------
 
 
 @router.post("/channels/pair")
-async def generate_pairing_code(request: Request) -> dict[str, str]:
+async def generate_pairing_code() -> dict[str, str]:
     pairing_service = get_pairing_service()
     code, user_id = await pairing_service.create_pairing_root_user_and_code()
     return {"code": code, "user_id": str(user_id)}
@@ -435,62 +549,6 @@ async def unpair_identity(identity_id: int) -> dict[str, str]:
     pairing_service = get_pairing_service()
     await pairing_service.unpair_identity(identity_id)
     return {"status": "success"}
-
-
-@router.get("/config", response_class=HTMLResponse)
-async def dashboard_config(request: Request) -> HTMLResponse:
-    service = _get_config_service(request)
-    settings_raw, settings_sources_raw = service.get_settings_overview_and_sources()
-    settings = _filter_settings(settings_raw, include_provider_settings=False)
-    settings_sources = _filter_settings(settings_sources_raw, include_provider_settings=False)
-    by_category = _group_settings_by_category(settings)
-
-    return templates.TemplateResponse(
-        request=request,
-        name="config.html",
-        context={
-            "active_nav": "config",
-            "page_title": "Runtime Configuration",
-            "page_subtitle": "Manage channels, database, and security runtime settings.",
-            "settings": settings,
-            "by_category": by_category,
-            "settings_sources": settings_sources,
-        },
-    )
-
-
-@router.get("/providers", response_class=HTMLResponse)
-async def dashboard_providers(request: Request) -> HTMLResponse:
-    service = _get_config_service(request)
-    settings_raw, settings_sources_raw = service.get_settings_overview_and_sources()
-    settings = _filter_settings(
-        settings_raw,
-        include_provider_settings=True,
-    )
-    settings_sources = _filter_settings(
-        settings_sources_raw,
-        include_provider_settings=True,
-    )
-    global_settings, provider_settings = _split_provider_settings(settings)
-    by_category = _group_settings_by_category(global_settings)
-    provider_rows = _build_provider_rows(provider_settings, PROVIDER_SETTING_FIELD_ORDER)
-    provider_name_options = [row["name"] for row in provider_rows]
-
-    return templates.TemplateResponse(
-        request=request,
-        name="config.html",
-        context={
-            "active_nav": "providers",
-            "page_title": "Provider Configuration",
-            "page_subtitle": "Manage default provider and per-provider LLM credentials/models.",
-            "settings": settings,
-            "by_category": by_category,
-            "settings_sources": settings_sources,
-            "provider_rows": provider_rows,
-            "provider_name_options": provider_name_options,
-            "provider_field_order": PROVIDER_SETTING_FIELD_ORDER,
-        },
-    )
 
 
 @router.get("/services")
@@ -547,14 +605,12 @@ async def stop_all_services(request: Request) -> dict[str, list[dict[str, str | 
 
 @router.get("/settings")
 async def get_settings(request: Request) -> dict[str, dict[str, Any]]:
-    """Return all effective settings with their source."""
     service = _get_config_service(request)
     return {"settings": service.get_settings_overview()}
 
 
 @router.get("/settings/sources")
 async def get_settings_sources(request: Request) -> dict[str, dict[str, Any]]:
-    """Return all values from all sources, grouped by key."""
     service = _get_config_service(request)
     return {"sources": service.get_settings_sources()}
 
@@ -573,7 +629,6 @@ async def update_setting(
     body: UpdateSettingBody,
     request: Request,
 ) -> dict[str, Any | None]:
-    """Update a runtime setting and persist it to yaml."""
     service = _get_config_service(request)
     _ensure_runtime_keys([key])
 
@@ -584,7 +639,6 @@ async def update_setting(
 
 @router.put("/settings")
 async def update_settings(body: UpdateSettingsBody, request: Request) -> dict[str, Any]:
-    """Update multiple runtime settings and persist them to yaml."""
     if not body.values:
         return {"status": "success", "updated": []}
 
@@ -600,7 +654,7 @@ async def update_settings(body: UpdateSettingsBody, request: Request) -> dict[st
     return {"status": "success", "updated": list(values.keys())}
 
 
-# --- scheduler endpoints -----------------------------------------------
+# --- scheduler endpoints ----------------------------------------------
 
 
 def _serialize_job(job: Job) -> dict[str, Any]:
@@ -608,8 +662,8 @@ def _serialize_job(job: Job) -> dict[str, Any]:
     return {
         "id": job.id,
         "task": job.kwargs.get("task", "Unknown"),
-        "platform": job.kwargs.get("platform", "—"),
-        "user_id": job.kwargs.get("user_id", "—"),
+        "platform": job.kwargs.get("platform", "-"),
+        "user_id": job.kwargs.get("user_id", "-"),
         "trigger_type": trigger_type,
         "next_run_time": (
             job.next_run_time.strftime("%Y-%m-%d %H:%M:%S %Z")
@@ -638,30 +692,6 @@ def _get_job_or_404(job_id: str) -> Job:
     if job is None:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
     return job
-
-
-@router.get("/scheduler", response_class=HTMLResponse)
-async def dashboard_scheduler(request: Request) -> HTMLResponse:
-    try:
-        scheduler = get_scheduler()
-        jobs = _list_all_jobs()
-        scheduler_timezone = _scheduler_timezone_label(scheduler)
-    except RuntimeError:
-        jobs = []
-        scheduler_timezone = "local time"
-
-    pairing_service = get_pairing_service()
-    identities = await pairing_service.list_paired_identities()
-
-    return templates.TemplateResponse(
-        request=request,
-        name="scheduler.html",
-        context={
-            "jobs": jobs,
-            "identities": identities,
-            "scheduler_timezone": scheduler_timezone,
-        },
-    )
 
 
 @router.get("/scheduler/jobs")
@@ -713,7 +743,6 @@ async def create_scheduler_job(body: CreateJobBody) -> dict[str, Any]:
 
 @router.put("/scheduler/jobs/{job_id}")
 async def update_scheduler_job(job_id: str, body: UpdateJobBody) -> dict[str, Any]:
-    scheduler = _get_scheduler()
     job = _get_job_or_404(job_id)
 
     if body.task is None and (body.trigger_type is None or body.trigger_args is None):
@@ -726,6 +755,7 @@ async def update_scheduler_job(job_id: str, body: UpdateJobBody) -> dict[str, An
             job.modify(kwargs=new_kwargs)
 
         if body.trigger_type is not None and body.trigger_args is not None:
+            scheduler = _get_scheduler()
             trigger_type, trigger_args = normalize_trigger(
                 body.trigger_type,
                 body.trigger_args,
@@ -788,18 +818,7 @@ async def run_scheduler_job_now(
     return {"status": "queued", "job_id": job_id}
 
 
-# --- active sessions endpoints ------------------------------------------
-
-
-@router.get("/sessions", response_class=HTMLResponse)
-async def dashboard_sessions(request: Request) -> HTMLResponse:
-    registry = get_active_session_registry()
-    sessions = registry.list_active()
-    return templates.TemplateResponse(
-        request=request,
-        name="sessions.html",
-        context={"sessions": sessions, "count": len(sessions)},
-    )
+# --- active sessions endpoints ----------------------------------------
 
 
 @router.get("/sessions/active")
@@ -809,7 +828,7 @@ async def list_active_sessions() -> dict[str, Any]:
     return {"sessions": sessions, "count": len(sessions)}
 
 
-# --- background tasks endpoints -----------------------------------------
+# --- background tasks endpoints ---------------------------------------
 
 
 class SubmitTaskBody(BaseModel):
@@ -818,24 +837,6 @@ class SubmitTaskBody(BaseModel):
     notify_platform: str | None = None
     notify_external_id: str | None = None
     notify_channel_id: str | None = None
-
-
-@router.get("/tasks", response_class=HTMLResponse)
-async def dashboard_tasks(request: Request) -> HTMLResponse:
-    manager = get_background_task_manager()
-    tasks = manager.list_all()
-
-    catalog = get_catalog_service()
-    agents = catalog.list_agents()
-
-    pairing_service = get_pairing_service()
-    identities = await pairing_service.list_paired_identities()
-
-    return templates.TemplateResponse(
-        request=request,
-        name="tasks.html",
-        context={"tasks": tasks, "agents": agents, "identities": identities},
-    )
 
 
 @router.get("/tasks/list")
@@ -888,3 +889,4 @@ async def remove_background_task(task_id: str) -> dict[str, str]:
             detail=f"Task '{task_id}' not found or still running.",
         )
     return {"status": "removed", "task_id": task_id}
+

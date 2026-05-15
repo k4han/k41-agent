@@ -4,10 +4,13 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi import BackgroundTasks, FastAPI
+from fastapi.staticfiles import StaticFiles
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
+from agent.delivery.http.dashboard.auth_router import router as auth_router
 from agent.delivery.http.dashboard.router import router as dashboard_router
+from agent.delivery.http.dashboard.spa import STATIC_DIR
 from agent.modules.admin_auth import get_current_admin
 from agent.modules.channels import ChannelManager
 
@@ -88,30 +91,98 @@ def test_legacy_bots_routes_are_removed() -> None:
     assert response.status_code == 404
 
 
-def test_scheduler_template_uses_safe_job_action_buttons() -> None:
-    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
-    template = dashboard_router_module.templates.get_template("scheduler.html")
+def test_dashboard_spa_route_serves_index() -> None:
+    client = _create_dashboard_client(ChannelManager())
 
-    html = template.render(
-        jobs=[
-            {
-                "id": 'job-"quoted"',
-                "task": "don't break buttons",
-                "platform": "telegram",
-                "user_id": "123",
-                "trigger_type": "date",
-                "next_run_time": "2026-04-14 09:00:00 +07",
-                "paused": False,
-            }
-        ],
-        identities=[],
-        scheduler_timezone="Asia/Bangkok",
+    response = client.get("/scheduler")
+
+    assert response.status_code == 200
+    assert '<div id="root">' in response.text
+    assert "/dashboard-assets/" in response.text
+
+
+def test_dashboard_api_overview_returns_runtime_snapshot() -> None:
+    channel_manager = ChannelManager()
+    channel_manager.register("telegram", idle_runner)
+
+    client = _create_dashboard_client(channel_manager)
+    response = client.get("/dashboard-api/overview")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "services": [{"name": "telegram", "status": "stopped", "error": None}]
+    }
+
+
+def test_dashboard_api_requires_json_auth() -> None:
+    app = FastAPI()
+    app.state.channel_manager = ChannelManager()
+    app.include_router(dashboard_router)
+    client = TestClient(app)
+
+    response = client.get("/dashboard-api/session")
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Not authenticated"
+
+
+def test_login_route_serves_public_spa_index() -> None:
+    app = FastAPI()
+    app.include_router(auth_router)
+    client = TestClient(app)
+
+    response = client.get("/login")
+
+    assert response.status_code == 200
+    assert '<div id="root">' in response.text
+
+
+def test_dashboard_assets_are_public_when_built() -> None:
+    asset = next((STATIC_DIR / "assets").glob("*.js"))
+    app = FastAPI()
+    app.mount(
+        "/dashboard-assets",
+        StaticFiles(directory=STATIC_DIR, check_dir=False),
+        name="dashboard-assets",
+    )
+    client = TestClient(app)
+
+    response = client.get(f"/dashboard-assets/assets/{asset.name}")
+
+    assert response.status_code == 200
+    assert "javascript" in response.headers["content-type"]
+
+
+def test_login_json_sets_admin_cookie(monkeypatch: pytest.MonkeyPatch) -> None:
+    auth_router_module = importlib.import_module("agent.delivery.http.dashboard.auth_router")
+
+    class Admin:
+        id = 123
+
+    class FakeAuthService:
+        async def authenticate(self, password: str):
+            return Admin() if password == "secret" else None
+
+    monkeypatch.setattr(
+        auth_router_module,
+        "get_admin_auth_service",
+        lambda: FakeAuthService(),
+    )
+    monkeypatch.setattr(auth_router_module, "create_access_token", lambda _: "token-value")
+
+    app = FastAPI()
+    app.include_router(auth_router_module.router)
+    client = TestClient(app)
+
+    response = client.post(
+        "/login",
+        json={"password": "secret"},
+        headers={"accept": "application/json"},
     )
 
-    assert 'data-job-action="run"' in html
-    assert 'id="scheduler-jobs-data"' in html
-    assert 'onclick="runJobNow' not in html
-    assert 'onclick="openEditModal' not in html
+    assert response.status_code == 200
+    assert response.json() == {"status": "success"}
+    assert response.cookies.get("admin_token") == "token-value"
 
 
 @pytest.mark.asyncio

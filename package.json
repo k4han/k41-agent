@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "scripts": {
+    "dashboard:dev": "pnpm --dir agent/delivery/http/dashboard/frontend dev",
+    "dashboard:check": "pnpm --dir agent/delivery/http/dashboard/frontend check",
+    "dashboard:build": "pnpm --dir agent/delivery/http/dashboard/frontend build"
+  }
+}
