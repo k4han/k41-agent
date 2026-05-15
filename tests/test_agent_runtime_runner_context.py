@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 import pytest
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 
 from agent.modules.agent_runtime import runner as runner_module
 
@@ -241,6 +241,62 @@ async def test_run_agent_stream_extracts_last_text_from_structured_content(monke
     ]
 
     assert events == [{"type": "final", "content": "visible response"}]
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_emits_message_chunks_and_final(monkeypatch):
+    captured: dict = {}
+
+    class _FakeCatalog:
+        def get_agent(self, name: str):
+            return SimpleNamespace(
+                graph_type="react_agent",
+                max_context_tokens=1234,
+                tools=["list_files"],
+            )
+
+    class _FakeGraph:
+        async def astream(self, payload, **kwargs):
+            captured["kwargs"] = kwargs
+            yield ("messages", (AIMessageChunk(content="hel"), {"langgraph_node": "llm"}))
+            yield ("messages", (AIMessageChunk(content=" "), {"langgraph_node": "llm"}))
+            yield (
+                "messages",
+                (
+                    AIMessageChunk(content=[{"type": "text", "text": "lo"}]),
+                    {"langgraph_node": "llm"},
+                ),
+            )
+            yield ("values", {"messages": [AIMessage(content="hel lo", id="ai-final")]})
+
+    monkeypatch.setattr(
+        "agent.modules.agents.get_catalog_service",
+        lambda: _FakeCatalog(),
+    )
+    monkeypatch.setattr(runner_module, "get_workflow_graph", lambda name: _FakeGraph())
+    monkeypatch.setattr(runner_module, "make_run_context", lambda **kwargs: kwargs)
+    monkeypatch.setattr(
+        runner_module,
+        "make_run_config",
+        lambda **kwargs: {"configurable": {"thread_id": kwargs["thread_id"]}},
+    )
+
+    events = [
+        event
+        async for event in runner_module.run_agent_stream(
+            user_input="hi",
+            thread_id="thread-1",
+            agent_name="default",
+        )
+    ]
+
+    assert captured["kwargs"]["stream_mode"] == ["messages", "values"]
+    assert events == [
+        {"type": "message", "content": "hel"},
+        {"type": "message", "content": " "},
+        {"type": "message", "content": "lo"},
+        {"type": "final", "content": "hel lo"},
+    ]
 
 
 @pytest.mark.asyncio

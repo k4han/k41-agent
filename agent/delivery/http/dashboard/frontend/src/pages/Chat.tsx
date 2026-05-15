@@ -159,7 +159,23 @@ export function ChatPage() {
     return payload;
   };
 
-  const handleEvent = (event: Record<string, unknown>, assistantIdRef: { id: number | null }) => {
+  const handleEvent = (
+    event: Record<string, unknown>,
+    assistantIdRef: { id: number | null },
+    streamedRef: { received: boolean },
+  ) => {
+    if (event.type === "message") {
+      const content = String(event.content || "");
+      if (!content) {
+        return;
+      }
+      if (assistantIdRef.id === null) {
+        assistantIdRef.id = appendItem({ type: "message", role: "assistant", text: "" });
+      }
+      streamedRef.received = true;
+      updateMessage(assistantIdRef.id, content);
+      return;
+    }
     if (event.type === "tool_call") {
       appendItem({
         type: "tool",
@@ -178,11 +194,26 @@ export function ChatPage() {
       );
       return;
     }
+    if (event.type === "error") {
+      appendItem({
+        type: "message",
+        role: "error",
+        text: String(event.content || event.message || "Chat failed"),
+      });
+      return;
+    }
     if (event.type === "final") {
+      if (streamedRef.received) {
+        return;
+      }
+      const content = String(event.content || "");
+      if (!content) {
+        return;
+      }
       if (assistantIdRef.id === null) {
         assistantIdRef.id = appendItem({ type: "message", role: "assistant", text: "" });
       }
-      updateMessage(assistantIdRef.id, String(event.content || ""));
+      updateMessage(assistantIdRef.id, content);
     }
   };
 
@@ -203,6 +234,7 @@ export function ChatPage() {
     setController(abortController);
     setStreaming(true);
     const assistantIdRef = { id: null as number | null };
+    const streamedRef = { received: false };
 
     try {
       const response = await fetch("/api/chat/events", {
@@ -231,14 +263,14 @@ export function ChatPage() {
           if (!line.trim()) {
             continue;
           }
-          handleEvent(JSON.parse(line) as Record<string, unknown>, assistantIdRef);
+          handleEvent(JSON.parse(line) as Record<string, unknown>, assistantIdRef, streamedRef);
         }
         if (done) {
           break;
         }
       }
       if (buffer.trim()) {
-        handleEvent(JSON.parse(buffer) as Record<string, unknown>, assistantIdRef);
+        handleEvent(JSON.parse(buffer) as Record<string, unknown>, assistantIdRef, streamedRef);
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {

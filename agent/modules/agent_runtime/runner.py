@@ -1,7 +1,7 @@
 from contextlib import contextmanager
 from typing import Any, AsyncGenerator, Iterator
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 from agent.shared.infrastructure.parsing import extract_final_text_content
 
 from agent.modules.agent_runtime.active_sessions import (
@@ -77,6 +77,45 @@ def _graph_accepts_context(graph: Any) -> bool:
     if context_schema is Ellipsis:
         return True
     return context_schema is not None
+
+
+def _coerce_stream_event(event: Any) -> tuple[str, Any]:
+    if isinstance(event, tuple):
+        if len(event) == 2 and isinstance(event[0], str):
+            return event[0], event[1]
+        if len(event) == 3 and isinstance(event[1], str):
+            return event[1], event[2]
+    return "values", event
+
+
+def _extract_message_chunk_content(event: Any) -> str:
+    chunk = event[0] if isinstance(event, tuple) and event else event
+    if not isinstance(chunk, AIMessageChunk):
+        return ""
+
+    def extract_part(value: Any) -> str:
+        if isinstance(value, str):
+            return value
+        if isinstance(value, dict):
+            part_type = str(value.get("type", "") or "").strip().lower()
+            if part_type == "thinking":
+                return ""
+            text = value.get("text")
+            if isinstance(text, str):
+                return text
+            content = value.get("content")
+            if isinstance(content, list):
+                return "".join(extract_part(part) for part in content)
+            if isinstance(content, str):
+                return content
+            return ""
+        text_attr = getattr(value, "text", None)
+        return text_attr if isinstance(text_attr, str) else ""
+
+    content = getattr(chunk, "content", None)
+    if isinstance(content, list):
+        return "".join(extract_part(part) for part in content)
+    return extract_part(content)
 
 
 @contextmanager
@@ -230,7 +269,7 @@ async def run_agent_stream(
 
     stream_kwargs: dict[str, Any] = {
         "config": config,
-        "stream_mode": "values",
+        "stream_mode": ["messages", "values"],
     }
     if _graph_accepts_context(graph):
         stream_kwargs["context"] = context
@@ -241,14 +280,31 @@ async def run_agent_stream(
             {"messages": [HumanMessage(content=user_input)]},
             **stream_kwargs,
         ):
+            stream_mode, event_data = _coerce_stream_event(event)
+            if stream_mode == "messages":
+                content = _extract_message_chunk_content(event_data)
+                if content:
+                    registry.update_step(session_id, SESSION_STEP_RESPONDING)
+                    yield {
+                        "type": "message",
+                        "content": content,
+                    }
+                continue
+
+            if stream_mode != "values":
+                continue
+
+            event = event_data
             messages = event.get("messages", [])
             if not messages:
                 continue
 
             last = messages[-1]
-            if last.id in seen_ids:
-                continue
-            seen_ids.add(last.id)
+            message_id = getattr(last, "id", None)
+            if message_id:
+                if message_id in seen_ids:
+                    continue
+                seen_ids.add(message_id)
 
             if isinstance(last, AIMessage):
                 tool_calls = getattr(last, "tool_calls", None)
