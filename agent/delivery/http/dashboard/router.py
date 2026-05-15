@@ -372,14 +372,21 @@ def _dashboard_spa() -> Response:
 
 
 @router.get("/", include_in_schema=False)
-@router.get("/agents", include_in_schema=False)
 @router.get("/chat", include_in_schema=False)
-@router.get("/channels", include_in_schema=False)
 @router.get("/sessions", include_in_schema=False)
 @router.get("/tasks", include_in_schema=False)
 @router.get("/scheduler", include_in_schema=False)
-@router.get("/config", include_in_schema=False)
-@router.get("/providers", include_in_schema=False)
+@router.get("/settings", include_in_schema=False)
+@router.get("/settings/config", include_in_schema=False)
+@router.get("/settings/providers", include_in_schema=False)
+@router.get("/settings/channels", include_in_schema=False)
+@router.get("/settings/agents", include_in_schema=False)
+@router.get("/settings/security", include_in_schema=False)
+@router.get("/settings/appearance", include_in_schema=False)
+# Legacy routes — SPA handles redirect to /settings/*
+@router.get("/channels", include_in_schema=False)
+@router.get("/agents", include_in_schema=False)
+@router.get("/change-password", include_in_schema=False)
 async def dashboard_spa() -> Response:
     return _dashboard_spa()
 

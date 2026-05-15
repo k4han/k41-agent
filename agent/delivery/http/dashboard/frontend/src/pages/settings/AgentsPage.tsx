@@ -1,13 +1,14 @@
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { Copy, Edit3, Eye, MessageSquare, Plus, RefreshCw, Trash2 } from "lucide-solid";
 
-import { AppShell } from "@/components/AppShell";
 import { Dialog } from "@/components/Dialog";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
 import { statusBadgeClass, truncateText, uniqueSorted } from "@/lib/utils";
 import type { AgentCard, AgentsPayload } from "@/types";
+
+import { SettingsLayout } from "./SettingsLayout";
 
 type AgentForm = {
   name: string;
@@ -203,7 +204,7 @@ export function AgentsPage() {
   onMount(load);
 
   return (
-    <AppShell
+    <SettingsLayout
       title="Agents"
       subtitle="Manage Markdown agent cards loaded by the runtime catalog."
       actions={
@@ -519,7 +520,6 @@ export function AgentsPage() {
           </div>
         )}
       </DataGate>
-    </AppShell>
+    </SettingsLayout>
   );
 }
-

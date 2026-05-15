@@ -1,55 +1,43 @@
 import { A, useLocation } from "@solidjs/router";
 import {
-  Activity,
+  ArrowLeft,
   Bot,
-  CalendarClock,
   ChevronsLeft,
   ChevronsRight,
-  LogOut,
-  MessageSquare,
-  PanelsTopLeft,
-  PlaySquare,
-  Settings,
+  Cog,
+  KeyRound,
+  Network,
+  Palette,
+  Users,
+  Workflow,
 } from "lucide-solid";
-import { createSignal, JSX, onCleanup, onMount, Show } from "solid-js";
+import { createSignal, JSX, onMount, Show } from "solid-js";
 
-type NavItem = {
+type SettingsNavItem = {
   href: string;
   label: string;
   icon: JSX.Element;
 };
 
-const navItems: NavItem[] = [
-  { href: "/", label: "Overview", icon: <PanelsTopLeft size={15} /> },
-  { href: "/chat", label: "Chat", icon: <MessageSquare size={15} /> },
-  { href: "/sessions", label: "Active Sessions", icon: <Activity size={15} /> },
-  { href: "/tasks", label: "Background Tasks", icon: <PlaySquare size={15} /> },
-  { href: "/scheduler", label: "Scheduler", icon: <CalendarClock size={15} /> },
+const settingsNavItems: SettingsNavItem[] = [
+  { href: "/settings/config", label: "Runtime", icon: <Cog size={15} /> },
+  { href: "/settings/providers", label: "Providers", icon: <Workflow size={15} /> },
+  { href: "/settings/channels", label: "Channels", icon: <Network size={15} /> },
+  { href: "/settings/agents", label: "Agents", icon: <Users size={15} /> },
+  { href: "/settings/security", label: "Security", icon: <KeyRound size={15} /> },
+  { href: "/settings/appearance", label: "Appearance", icon: <Palette size={15} /> },
 ];
 
-export function AppShell(props: {
+export function SettingsLayout(props: {
   title: string;
   subtitle?: string;
   actions?: JSX.Element;
   children: JSX.Element;
 }) {
   const location = useLocation();
-  const [menuOpen, setMenuOpen] = createSignal(false);
   const [collapsed, setCollapsed] = createSignal(false);
 
-  const isActive = (href: string) => {
-    if (href === "/") {
-      return location.pathname === "/";
-    }
-    return location.pathname.startsWith(href);
-  };
-
-  const handleClickOutside = (event: MouseEvent) => {
-    const target = event.target as HTMLElement;
-    if (!target.closest(".user-menu-wrapper")) {
-      setMenuOpen(false);
-    }
-  };
+  const isActive = (href: string) => location.pathname === href;
 
   const toggleSidebar = () => {
     const next = !collapsed();
@@ -61,11 +49,6 @@ export function AppShell(props: {
     if (window.localStorage.getItem("kaka-dashboard-sidebar") === "collapsed") {
       setCollapsed(true);
     }
-    document.addEventListener("click", handleClickOutside);
-  });
-
-  onCleanup(() => {
-    document.removeEventListener("click", handleClickOutside);
   });
 
   return (
@@ -104,7 +87,13 @@ export function AppShell(props: {
           </Show>
         </div>
         <nav class="nav">
-          {navItems.map((item) => (
+          <A href="/" class="nav-link" title="Back">
+            <ArrowLeft size={15} />
+            <span class="nav-label">Back</span>
+          </A>
+          <div class="nav-separator" />
+          <div class="nav-section-title">Settings</div>
+          {settingsNavItems.map((item) => (
             <A
               href={item.href}
               class={`nav-link ${isActive(item.href) ? "active" : ""}`}
@@ -115,31 +104,6 @@ export function AppShell(props: {
             </A>
           ))}
         </nav>
-        <div class="sidebar-footer">
-          <div class="sidebar-footer-row">
-            <div class="user-menu-wrapper">
-              <button
-                class="user-avatar"
-                type="button"
-                onClick={() => setMenuOpen(!menuOpen())}
-                title="Account"
-              >
-                A
-              </button>
-              <Show when={menuOpen()}>
-                <div class="user-menu">
-                  <a class="user-menu-item user-menu-danger" href="/logout">
-                    <LogOut size={14} />
-                    <span>Logout</span>
-                  </a>
-                </div>
-              </Show>
-            </div>
-            <A href="/settings" class="btn btn-icon" title="Settings">
-              <Settings size={15} />
-            </A>
-          </div>
-        </div>
       </aside>
       <main class="main">
         <header class="topbar">

@@ -1,11 +1,12 @@
 import { createSignal } from "solid-js";
 import { KeyRound, Save } from "lucide-solid";
 
-import { AppShell } from "@/components/AppShell";
 import { useToast } from "@/components/Toast";
 import { postJson } from "@/lib/api";
 
-export function ChangePasswordPage() {
+import { SettingsLayout } from "./SettingsLayout";
+
+export function SecurityPage() {
   const [oldPassword, setOldPassword] = createSignal("");
   const [newPassword, setNewPassword] = createSignal("");
   const [loading, setLoading] = createSignal(false);
@@ -30,7 +31,7 @@ export function ChangePasswordPage() {
   };
 
   return (
-    <AppShell title="Change Password" subtitle="Update the dashboard admin password.">
+    <SettingsLayout title="Security" subtitle="Update the dashboard admin password.">
       <section class="panel" style={{ "max-width": "520px" }}>
         <div class="panel-header">
           <div class="panel-title row">
@@ -65,7 +66,6 @@ export function ChangePasswordPage() {
           </form>
         </div>
       </section>
-    </AppShell>
+    </SettingsLayout>
   );
 }
-

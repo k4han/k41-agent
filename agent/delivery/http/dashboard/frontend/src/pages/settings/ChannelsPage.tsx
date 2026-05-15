@@ -1,11 +1,12 @@
 import { createSignal, For, onMount, Show } from "solid-js";
 import { Link2, RefreshCw, Trash2 } from "lucide-solid";
 
-import { AppShell } from "@/components/AppShell";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson } from "@/lib/api";
 import type { Identity } from "@/types";
+
+import { SettingsLayout } from "./SettingsLayout";
 
 type ChannelsPayload = {
   identities: Identity[];
@@ -59,7 +60,7 @@ export function ChannelsPage() {
   onMount(load);
 
   return (
-    <AppShell
+    <SettingsLayout
       title="Pair Channels"
       subtitle="Connect external channel identities to dashboard users."
       actions={
@@ -144,7 +145,6 @@ export function ChannelsPage() {
           )}
         </DataGate>
       </div>
-    </AppShell>
+    </SettingsLayout>
   );
 }
-
