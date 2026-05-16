@@ -4,29 +4,14 @@ import { createEffect, createMemo, createSignal, For, onMount, Show } from "soli
 
 import { AppShell } from "@/components/AppShell";
 import { DataGate } from "@/components/State";
+import { TranscriptItemView } from "@/components/Transcript";
 import { useToast } from "@/components/Toast";
 import { apiFetch, readError } from "@/lib/api";
-import { formatValue, uniqueSorted } from "@/lib/utils";
+import { uniqueSorted } from "@/lib/utils";
+import type { TranscriptItem } from "@/components/Transcript";
 import type { AgentCard, AgentsPayload } from "@/types";
 
-type TranscriptMessage = {
-  id: number;
-  type: "message";
-  role: "user" | "assistant" | "error";
-  text: string;
-};
-
-type TranscriptTool = {
-  id: number;
-  type: "tool";
-  tool_call_id: string;
-  name: string;
-  args: unknown;
-  result: unknown;
-};
-
-type TranscriptItem = TranscriptMessage | TranscriptTool;
-type NewTranscriptItem = Omit<TranscriptMessage, "id"> | Omit<TranscriptTool, "id">;
+type ChatTranscriptItem = TranscriptItem & { id: number };
 
 let nextItemId = 1;
 
@@ -39,7 +24,7 @@ export function ChatPage() {
   const [provider, setProvider] = createSignal("default");
   const [model, setModel] = createSignal("");
   const [prompt, setPrompt] = createSignal("");
-  const [items, setItems] = createSignal<TranscriptItem[]>([]);
+  const [items, setItems] = createSignal<ChatTranscriptItem[]>([]);
   const [streaming, setStreaming] = createSignal(false);
   const [controller, setController] = createSignal<AbortController | null>(null);
   const { showToast } = useToast();
@@ -97,10 +82,10 @@ export function ChatPage() {
     }, 0);
   };
 
-  const appendItem = (item: NewTranscriptItem): number => {
+  const appendItem = (item: TranscriptItem): number => {
     const id = nextItemId;
     nextItemId += 1;
-    setItems((current) => [...current, { ...item, id } as TranscriptItem]);
+    setItems((current) => [...current, { ...item, id } as ChatTranscriptItem]);
     scrollToBottom();
     return id;
   };
@@ -131,7 +116,7 @@ export function ChatPage() {
             name,
             args: null,
             result,
-          } satisfies TranscriptTool,
+          } satisfies ChatTranscriptItem,
         ];
       }
       return current.map((item) =>
@@ -391,25 +376,7 @@ export function ChatPage() {
                   fallback={<div class="empty">Send a message to start a conversation.</div>}
                 >
                   <For each={items()}>
-                    {(item) =>
-                      item.type === "message" ? (
-                        <div class={`message ${item.role}`}>
-                          <div class="message-bubble">
-                            <div class="hint">{item.role}</div>
-                            {item.text}
-                          </div>
-                        </div>
-                      ) : (
-                        <details class="tool-call" open>
-                          <summary>
-                            <span class="hint">Tool call</span>{" "}
-                            <span class="mono">{item.name}</span>
-                          </summary>
-                          <pre>{formatValue(item.args)}</pre>
-                          <pre>{item.result === null ? "Waiting for tool result..." : formatValue(item.result)}</pre>
-                        </details>
-                      )
-                    }
+                    {(item) => <TranscriptItemView item={item} />}
                   </For>
                 </Show>
               </div>

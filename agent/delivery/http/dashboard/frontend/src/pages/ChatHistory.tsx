@@ -1,12 +1,14 @@
 import { A, useParams } from "@solidjs/router";
-import { ArrowLeft, Clock, MessageSquare, RefreshCw, Trash2, User } from "lucide-solid";
-import { createSignal, For, onMount, Show } from "solid-js";
+import { ArrowLeft, MessageSquare, RefreshCw, Trash2, User } from "lucide-solid";
+import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 
 import { AppShell } from "@/components/AppShell";
 import { DataGate } from "@/components/State";
+import { TranscriptItemView } from "@/components/Transcript";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson } from "@/lib/api";
-import { formatValue, truncateText } from "@/lib/utils";
+import { truncateText } from "@/lib/utils";
+import type { TranscriptItem, TranscriptTool } from "@/components/Transcript";
 
 type ThreadSummary = {
   thread_id: string;
@@ -37,6 +39,79 @@ type ThreadMessagesPayload = {
   user_id: string;
   channel_id: string;
 };
+
+type HistoryTranscriptItem = TranscriptItem & { key: string };
+
+function toHistoryTranscript(messages: ThreadMessage[]): HistoryTranscriptItem[] {
+  const items: HistoryTranscriptItem[] = [];
+  const pendingByCallId = new Map<string, TranscriptTool>();
+
+  const findPendingToolByName = (name?: string | null): TranscriptTool | undefined => {
+    if (!name) {
+      return undefined;
+    }
+    for (let index = items.length - 1; index >= 0; index -= 1) {
+      const item = items[index];
+      if (item.type === "tool" && item.name === name && item.result === null) {
+        return item;
+      }
+    }
+    return undefined;
+  };
+
+  messages.forEach((msg, messageIndex) => {
+    if (msg.role === "tool") {
+      const target =
+        (msg.tool_call_id ? pendingByCallId.get(msg.tool_call_id) : undefined) ||
+        findPendingToolByName(msg.name);
+
+      if (target) {
+        target.result = msg.content;
+        target.tool_call_id = target.tool_call_id || msg.tool_call_id || null;
+        target.name = target.name || msg.name || "unknown";
+        return;
+      }
+
+      items.push({
+        key: `tool-result-${messageIndex}-${msg.tool_call_id || msg.name || "unknown"}`,
+        type: "tool",
+        tool_call_id: msg.tool_call_id || null,
+        name: msg.name || "unknown",
+        args: null,
+        result: msg.content,
+      });
+      return;
+    }
+
+    if (msg.tool_calls?.length) {
+      msg.tool_calls.forEach((toolCall, toolCallIndex) => {
+        const item: HistoryTranscriptItem = {
+          key: `tool-call-${messageIndex}-${toolCallIndex}-${toolCall.id || "unknown"}`,
+          type: "tool",
+          tool_call_id: toolCall.id || null,
+          name: toolCall.name || "unknown",
+          args: toolCall.args ?? null,
+          result: null,
+        };
+        items.push(item);
+        if (toolCall.id) {
+          pendingByCallId.set(toolCall.id, item);
+        }
+      });
+    }
+
+    if (msg.content || !msg.tool_calls?.length) {
+      items.push({
+        key: `message-${messageIndex}-${msg.id || "unknown"}`,
+        type: "message",
+        role: msg.role,
+        text: msg.content,
+      });
+    }
+  });
+
+  return items;
+}
 
 export function ChatHistoryListPage() {
   const [data, setData] = createSignal<ThreadListPayload>();
@@ -153,6 +228,7 @@ export function ChatHistoryDetailPage() {
   const params = useParams<{ threadId: string }>();
   const [data, setData] = createSignal<ThreadMessagesPayload>();
   const [error, setError] = createSignal("");
+  const transcriptItems = createMemo(() => toHistoryTranscript(data()?.messages || []));
 
   const load = async () => {
     setError("");
@@ -205,52 +281,13 @@ export function ChatHistoryDetailPage() {
             <div class="panel">
               <div class="history-transcript">
                 <Show
-                  when={payload.messages.length > 0}
+                  when={transcriptItems().length > 0}
                   fallback={
                     <div class="empty">No messages in this thread.</div>
                   }
                 >
-                  <For each={payload.messages}>
-                    {(msg) => (
-                      <Show
-                        when={msg.role !== "tool"}
-                        fallback={
-                          <details class="tool-call">
-                            <summary>
-                              <span class="hint">Tool result</span>{" "}
-                              <span class="mono">{msg.name}</span>
-                            </summary>
-                            <pre>{truncateText(msg.content, 2000)}</pre>
-                          </details>
-                        }
-                      >
-                        <Show
-                          when={!msg.tool_calls?.length}
-                          fallback={
-                            <div class="history-tool-calls">
-                              <For each={msg.tool_calls}>
-                                {(tc) => (
-                                  <details class="tool-call" open>
-                                    <summary>
-                                      <span class="hint">Tool call</span>{" "}
-                                      <span class="mono">{tc.name}</span>
-                                    </summary>
-                                    <pre>{formatValue(tc.args)}</pre>
-                                  </details>
-                                )}
-                              </For>
-                            </div>
-                          }
-                        >
-                          <div class={`message ${msg.role}`}>
-                            <div class="message-bubble">
-                              <div class="hint">{msg.role}</div>
-                              {msg.content}
-                            </div>
-                          </div>
-                        </Show>
-                      </Show>
-                    )}
+                  <For each={transcriptItems()}>
+                    {(item) => <TranscriptItemView item={item} />}
                   </For>
                 </Show>
               </div>
