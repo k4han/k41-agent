@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any
 
 from apscheduler.job import Job
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
@@ -985,25 +985,32 @@ def _parse_thread_id_safe(thread_id: str) -> dict[str, str]:
         return {"platform": "unknown", "user_id": thread_id, "channel_id": ""}
 
 
-async def _list_threads_from_db() -> list[dict[str, Any]]:
+async def _list_threads_from_db(
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
     """List distinct thread IDs from the checkpointer database."""
     checkpointer = _get_checkpointer()
     conn = getattr(checkpointer, "conn", None)
     if conn is None:
         return []
 
+    query = """
+        SELECT thread_id,
+               MAX(checkpoint_id) AS latest_checkpoint_id,
+               COUNT(*) AS checkpoint_count
+        FROM checkpoints
+        WHERE checkpoint_ns = ''
+        GROUP BY thread_id
+        ORDER BY MAX(checkpoint_id) DESC
+        """
+    params: list[int] = []
+    if limit is not None:
+        query += " LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+
     try:
-        async with conn.execute(
-            """
-            SELECT thread_id,
-                   MAX(checkpoint_id) AS latest_checkpoint_id,
-                   COUNT(*) AS checkpoint_count
-            FROM checkpoints
-            WHERE checkpoint_ns = ''
-            GROUP BY thread_id
-            ORDER BY MAX(checkpoint_id) DESC
-            """
-        ) as cursor:
+        async with conn.execute(query, params) as cursor:
             rows = await cursor.fetchall()
     except Exception as exc:
         logger.warning("Failed to list threads from checkpointer: %s", exc)
@@ -1091,9 +1098,22 @@ async def _get_thread_messages(thread_id: str) -> list[dict[str, Any]]:
 
 
 @router.get("/dashboard-api/chat-history")
-async def get_chat_history() -> dict[str, Any]:
-    threads = await _list_threads_from_db()
-    return {"threads": threads}
+async def get_chat_history(
+    limit: int | None = Query(default=None, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, Any]:
+    fetch_limit = limit + 1 if limit is not None else None
+    threads = await _list_threads_from_db(limit=fetch_limit, offset=offset)
+    has_more = limit is not None and len(threads) > limit
+
+    if limit is not None:
+        threads = threads[:limit]
+
+    return {
+        "threads": threads,
+        "has_more": has_more,
+        "next_offset": offset + len(threads),
+    }
 
 
 @router.get("/dashboard-api/chat-history/{thread_id:path}")

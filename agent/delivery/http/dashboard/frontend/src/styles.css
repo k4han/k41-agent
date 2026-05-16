@@ -208,9 +208,12 @@ a {
   align-items: center;
   gap: 9px;
   min-height: 34px;
+  border: 0;
   border-radius: 8px;
+  background: transparent;
   color: var(--muted);
   padding: 0 9px;
+  text-align: left;
   white-space: nowrap;
   overflow: hidden;
   transition:
@@ -218,9 +221,206 @@ a {
     color 120ms ease;
 }
 
+.nav-link svg {
+  flex-shrink: 0;
+}
+
 .nav-label {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.nav-history-toggle {
+  width: 100%;
+}
+
+.nav-history-group {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.nav-history-group.open {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.nav-history-caret {
+  display: grid;
+  flex-shrink: 0;
+  margin-left: auto;
+  place-items: center;
+  color: var(--muted-2);
+}
+
+.nav-history-list {
+  display: flex;
+  width: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+}
+
+.nav-history-link {
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+  width: 100%;
+  min-width: 0;
+  flex: 0 0 auto;
+  gap: 6px;
+  overflow: hidden;
+  border-radius: 7px;
+  color: var(--muted);
+  padding: 0 8px;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.nav-history-link:hover,
+.nav-history-link.active,
+.nav-history-item:hover .nav-history-link,
+.nav-history-item.active .nav-history-link {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+
+.nav-history-item-wrapper {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  flex: 0 0 auto;
+}
+
+.nav-history-item {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+}
+
+.nav-history-item .nav-history-link {
+  padding-right: 34px;
+}
+
+.nav-history-action {
+  position: absolute;
+  top: 50%;
+  right: 3px;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--muted);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    opacity 120ms ease;
+}
+
+.nav-history-item:hover .nav-history-action,
+.nav-history-item:focus-within .nav-history-action,
+.nav-history-action.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.nav-history-action:hover,
+.nav-history-action.active {
+  background: var(--surface-3);
+  color: var(--fg);
+}
+
+.nav-history-menu {
+  display: flex;
+  width: 124px;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 4px 4px auto;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.nav-history-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  width: 100%;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  padding: 0 8px;
+  text-align: left;
+}
+
+.nav-history-menu-item:hover {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+
+.nav-history-menu-danger,
+.nav-history-menu-danger:hover {
+  color: var(--danger);
+}
+
+.nav-history-title,
+.nav-history-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-history-title {
+  display: block;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.nav-history-meta,
+.nav-history-status {
+  color: var(--muted-2);
+  font-size: 11px;
+}
+
+.nav-history-status,
+.nav-history-retry {
+  min-height: 28px;
+  flex: 0 0 auto;
+  padding: 6px 8px;
+}
+
+.nav-history-retry {
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  text-align: left;
+}
+
+.nav-history-retry:hover {
+  background: var(--surface-2);
+  color: var(--fg);
 }
 
 
@@ -932,6 +1132,16 @@ a {
   display: none;
 }
 
+.sidebar-collapsed .nav-history-group {
+  display: flex;
+  justify-content: center;
+  width: 36px;
+}
+
+.sidebar-collapsed .nav-history-caret {
+  display: none;
+}
+
 .sidebar-collapsed .nav-section-title {
   display: none;
 }
@@ -967,6 +1177,30 @@ a {
 
   .nav-link {
     flex: 0 0 auto;
+  }
+
+  .nav-history-toggle {
+    width: auto;
+  }
+
+  .nav-history-group {
+    flex: 0 0 auto;
+    width: auto;
+  }
+
+  .nav-history-group.open {
+    flex: 0 0 auto;
+  }
+
+  .nav-history-caret {
+    display: none;
+  }
+
+  .nav-history-list {
+    flex: 0 0 auto;
+    width: 220px;
+    max-height: 240px;
+    margin: 4px 0 0;
   }
 
   .sidebar-footer {
