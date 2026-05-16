@@ -2,6 +2,7 @@ import { Navigate, Route, Router } from "@solidjs/router";
 import { render } from "solid-js/web";
 
 import { ToastProvider } from "@/components/Toast";
+import { ChatHistoryDetailPage, ChatHistoryListPage } from "@/pages/ChatHistory";
 import { ChatPage } from "@/pages/Chat";
 import { LoginPage } from "@/pages/Login";
 import { OverviewPage } from "@/pages/Overview";
@@ -29,6 +30,8 @@ render(
         <Route path="/" component={OverviewPage} />
         <Route path="/login" component={LoginPage} />
         <Route path="/chat" component={ChatPage} />
+        <Route path="/history" component={ChatHistoryListPage} />
+        <Route path="/history/:threadId" component={ChatHistoryDetailPage} />
         <Route path="/sessions" component={SessionsPage} />
         <Route path="/tasks" component={TasksPage} />
         <Route path="/scheduler" component={SchedulerPage} />
@@ -49,3 +52,4 @@ render(
   ),
   document.getElementById("root") as HTMLElement,
 );
+

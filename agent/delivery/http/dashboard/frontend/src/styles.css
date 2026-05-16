@@ -886,6 +886,30 @@ a {
   display: none;
 }
 
+/* --- Chat history ---------------------------------------------------- */
+
+.history-thread-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--fg);
+  transition: color 120ms ease;
+}
+
+.history-thread-link:hover {
+  color: var(--info);
+}
+
+.history-transcript {
+  max-height: calc(100vh - 250px);
+  overflow-y: auto;
+  padding: 18px;
+}
+
+.history-tool-calls {
+  margin: 0 0 14px 22px;
+}
+
 /* --- Collapsed sidebar ------------------------------------------------- */
 
 .sidebar-collapsed {

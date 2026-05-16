@@ -376,6 +376,8 @@ def _dashboard_spa() -> Response:
 @router.get("/sessions", include_in_schema=False)
 @router.get("/tasks", include_in_schema=False)
 @router.get("/scheduler", include_in_schema=False)
+@router.get("/history", include_in_schema=False)
+@router.get("/history/{thread_id:path}", include_in_schema=False)
 @router.get("/settings", include_in_schema=False)
 @router.get("/settings/config", include_in_schema=False)
 @router.get("/settings/providers", include_in_schema=False)
@@ -896,4 +898,152 @@ async def remove_background_task(task_id: str) -> dict[str, str]:
             detail=f"Task '{task_id}' not found or still running.",
         )
     return {"status": "removed", "task_id": task_id}
+
+
+# --- chat history endpoints -------------------------------------------
+
+
+def _get_checkpointer():
+    from agent.modules.workflows import get_checkpointer
+
+    try:
+        return get_checkpointer()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def _parse_thread_id_safe(thread_id: str) -> dict[str, str]:
+    try:
+        from agent.modules.agent_runtime.session import SessionManager
+
+        platform, user_id, channel_id = SessionManager.parse_thread_id(thread_id)
+        return {"platform": platform, "user_id": user_id, "channel_id": channel_id}
+    except ValueError:
+        return {"platform": "unknown", "user_id": thread_id, "channel_id": ""}
+
+
+async def _list_threads_from_db() -> list[dict[str, Any]]:
+    """List distinct thread IDs from the checkpointer database."""
+    checkpointer = _get_checkpointer()
+    conn = getattr(checkpointer, "conn", None)
+    if conn is None:
+        return []
+
+    try:
+        async with conn.execute(
+            """
+            SELECT thread_id,
+                   MAX(checkpoint_id) AS latest_checkpoint_id,
+                   COUNT(*) AS checkpoint_count
+            FROM checkpoints
+            WHERE checkpoint_ns = ''
+            GROUP BY thread_id
+            ORDER BY MAX(checkpoint_id) DESC
+            """
+        ) as cursor:
+            rows = await cursor.fetchall()
+    except Exception as exc:
+        logger.warning("Failed to list threads from checkpointer: %s", exc)
+        return []
+
+    threads = []
+    for thread_id, latest_checkpoint_id, checkpoint_count in rows:
+        parsed = _parse_thread_id_safe(thread_id)
+        threads.append({
+            "thread_id": thread_id,
+            "latest_checkpoint_id": latest_checkpoint_id,
+            "checkpoint_count": checkpoint_count,
+            **parsed,
+        })
+    return threads
+
+
+async def _get_thread_messages(thread_id: str) -> list[dict[str, Any]]:
+    """Get messages from a thread via the checkpointer."""
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+    checkpointer = _get_checkpointer()
+    config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+
+    try:
+        checkpoint_tuple = await checkpointer.aget_tuple(config)
+    except Exception as exc:
+        logger.warning("Failed to get checkpoint for thread %s: %s", thread_id, exc)
+        return []
+
+    if checkpoint_tuple is None:
+        return []
+
+    checkpoint_data = checkpoint_tuple.checkpoint
+    channel_values = checkpoint_data.get("channel_values", {})
+    messages = channel_values.get("messages", [])
+
+    result = []
+    for msg in messages:
+        entry: dict[str, Any] = {"id": getattr(msg, "id", None)}
+        if isinstance(msg, HumanMessage):
+            text_content = msg.content
+            if isinstance(text_content, list):
+                text_content = " ".join(
+                    part.get("text", "") if isinstance(part, dict) else str(part)
+                    for part in text_content
+                )
+            entry["role"] = "user"
+            entry["content"] = str(text_content)
+        elif isinstance(msg, AIMessage):
+            from agent.shared.infrastructure.parsing import extract_final_text_content
+
+            tool_calls = getattr(msg, "tool_calls", None)
+            if tool_calls:
+                entry["role"] = "assistant"
+                entry["content"] = ""
+                entry["tool_calls"] = [
+                    {
+                        "id": tc.get("id"),
+                        "name": tc.get("name"),
+                        "args": tc.get("args"),
+                    }
+                    for tc in tool_calls
+                ]
+            else:
+                content = extract_final_text_content(getattr(msg, "content", None))
+                entry["role"] = "assistant"
+                entry["content"] = content or ""
+        elif isinstance(msg, ToolMessage):
+            from agent.shared.infrastructure.parsing import extract_final_text_content
+
+            entry["role"] = "tool"
+            entry["name"] = getattr(msg, "name", None)
+            entry["tool_call_id"] = getattr(msg, "tool_call_id", None)
+            entry["content"] = extract_final_text_content(
+                getattr(msg, "content", None)
+            ) or ""
+        else:
+            entry["role"] = "system"
+            entry["content"] = str(getattr(msg, "content", ""))
+
+        result.append(entry)
+
+    return result
+
+
+@router.get("/dashboard-api/chat-history")
+async def get_chat_history() -> dict[str, Any]:
+    threads = await _list_threads_from_db()
+    return {"threads": threads}
+
+
+@router.get("/dashboard-api/chat-history/{thread_id:path}")
+async def get_chat_thread_messages(thread_id: str) -> dict[str, Any]:
+    messages = await _get_thread_messages(thread_id)
+    parsed = _parse_thread_id_safe(thread_id)
+    return {"thread_id": thread_id, "messages": messages, **parsed}
+
+
+@router.delete("/dashboard-api/chat-history/{thread_id:path}")
+async def delete_chat_thread(thread_id: str) -> dict[str, str]:
+    from agent.modules.workflows import delete_workflow_thread
+
+    await delete_workflow_thread(thread_id)
+    return {"status": "deleted", "thread_id": thread_id}
 
