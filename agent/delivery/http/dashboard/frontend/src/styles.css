@@ -974,6 +974,21 @@ a {
   flex-direction: column;
 }
 
+.thread-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  padding: 10px 14px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.thread-banner-error {
+  color: var(--danger);
+}
+
 .transcript {
   min-height: 0;
   flex: 1;

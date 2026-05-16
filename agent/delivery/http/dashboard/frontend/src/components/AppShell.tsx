@@ -20,6 +20,11 @@ import {
 import { createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
 
 import { apiFetch, deleteJson } from "@/lib/api";
+import {
+  chatThreadHref,
+  historyThreadHref,
+  threadApiPath,
+} from "@/lib/chatThreads";
 import { truncateText } from "@/lib/utils";
 import { useToast } from "@/components/Toast";
 
@@ -39,6 +44,7 @@ const navItems: NavItem[] = [
 ];
 
 const HISTORY_PAGE_SIZE = 20;
+const HISTORY_PANEL_STORAGE_KEY = "kaka-dashboard-history";
 
 type ThreadSummary = {
   thread_id: string;
@@ -130,22 +136,36 @@ export function AppShell(props: {
     }
   };
 
-  const toggleHistory = () => {
-    if (collapsed()) {
-      setSidebarCollapsed(false);
-    }
+  const selectedChatThreadId = () => (
+    location.pathname === "/chat"
+      ? new URLSearchParams(location.search).get("thread") || ""
+      : ""
+  );
+  const isHistoryActive = () => (
+    location.pathname.startsWith("/history")
+    || (location.pathname === "/chat" && Boolean(selectedChatThreadId()))
+  );
+  const isThreadActive = (threadId: string) => (
+    selectedChatThreadId() === threadId
+    || location.pathname === historyThreadHref(threadId)
+  );
 
-    const next = !historyOpen();
+  const setHistoryPanelOpen = (next: boolean) => {
     setHistoryOpen(next);
+    window.localStorage.setItem(HISTORY_PANEL_STORAGE_KEY, next ? "open" : "closed");
 
     if (next && !historyLoaded()) {
       void loadHistory(true);
     }
   };
 
-  const historyHref = (threadId: string) => `/history/${encodeURIComponent(threadId)}`;
-  const isHistoryActive = () => location.pathname.startsWith("/history");
-  const isThreadActive = (threadId: string) => location.pathname === historyHref(threadId);
+  const toggleHistory = () => {
+    if (collapsed()) {
+      setSidebarCollapsed(false);
+    }
+
+    setHistoryPanelOpen(!historyOpen());
+  };
   const threadTitle = (thread: ThreadSummary) => truncateText(thread.thread_id, 30);
   const threadMeta = (thread: ThreadSummary) => {
     const owner = thread.channel_id || thread.user_id;
@@ -180,7 +200,7 @@ export function AppShell(props: {
 
     setHistoryMenuThreadId(null);
     try {
-      await deleteJson(`/dashboard-api/chat-history/${encodeURIComponent(thread.thread_id)}`);
+      await deleteJson(threadApiPath(thread.thread_id));
       setHistoryThreads((current) => (
         current.filter((item) => item.thread_id !== thread.thread_id)
       ));
@@ -188,7 +208,7 @@ export function AppShell(props: {
       showToast("Thread deleted.", "success");
 
       if (isThreadActive(thread.thread_id)) {
-        navigate("/history");
+        navigate(location.pathname.startsWith("/history") ? "/history" : "/chat");
       }
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Delete failed", "error");
@@ -198,6 +218,10 @@ export function AppShell(props: {
   onMount(() => {
     if (window.localStorage.getItem("kaka-dashboard-sidebar") === "collapsed") {
       setCollapsed(true);
+    }
+    const savedHistoryState = window.localStorage.getItem(HISTORY_PANEL_STORAGE_KEY);
+    if (savedHistoryState === "open" || isHistoryActive()) {
+      setHistoryPanelOpen(true);
     }
     document.addEventListener("click", handleClickOutside);
   });
@@ -290,7 +314,7 @@ export function AppShell(props: {
                         class={`nav-history-item ${isThreadActive(thread.thread_id) ? "active" : ""}`}
                       >
                         <A
-                          href={historyHref(thread.thread_id)}
+                          href={chatThreadHref(thread.thread_id)}
                           class="nav-history-link"
                           title={`${thread.thread_id} - ${threadMeta(thread)}`}
                         >

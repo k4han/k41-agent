@@ -175,6 +175,53 @@ def test_chat_sync_passes_model_override(monkeypatch):
     }
 
 
+def test_chat_events_can_resume_existing_thread(monkeypatch):
+    built_params = {
+        "user_input": "Continue",
+        "thread_id": "telegram_123_456",
+        "agent_name": "default",
+        "workflow": None,
+        "working_dir": None,
+        "max_context_tokens": None,
+        "provider": None,
+        "model": None,
+    }
+
+    def fake_build_run_params(**params):
+        assert params == {
+            "platform": "api",
+            "user_id": "dashboard",
+            "user_input": "Continue",
+            "workflow": None,
+            "working_dir": None,
+            "agent_name": "default",
+            "provider": None,
+            "model": None,
+            "thread_id": "telegram_123_456",
+        }
+        return dict(built_params)
+
+    async def fake_run_agent_stream(**params):
+        assert params == built_params
+        yield {"type": "final", "content": "resumed"}
+
+    monkeypatch.setattr(router_module, "build_run_params", fake_build_run_params)
+    monkeypatch.setattr(router_module, "run_agent_stream", fake_run_agent_stream)
+
+    client = _create_client()
+    response = client.post(
+        "/api/chat/events",
+        json={
+            "message": "Continue",
+            "user_id": "dashboard",
+            "thread_id": "telegram_123_456",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.text == '{"type": "final", "content": "resumed"}\n'
+
+
 def test_chat_events_streams_tool_calls_as_ndjson(monkeypatch):
     built_params = {
         "user_input": "Use a tool",

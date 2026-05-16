@@ -23,6 +23,7 @@ def build_run_params(
     platform: str,
     user_id: str,
     user_input: str,
+    thread_id: str | None = None,
     workflow: str | None = None,
     working_dir: str | None = None,
     max_context_tokens: int | None = None,
@@ -39,6 +40,7 @@ def build_run_params(
         platform: Platform identifier (telegram, discord, api, etc.)
         user_id: User identifier
         user_input: User message
+        thread_id: Existing session thread ID to resume
         workflow: Override agent's graph_type if needed
         working_dir: Working directory for tools
         max_context_tokens: Override agent's max_context_tokens if needed
@@ -49,7 +51,7 @@ def build_run_params(
     """
     return {
         "user_input": user_input,
-        "thread_id": SessionManager.make_thread_id(platform, user_id, channel_id),
+        "thread_id": thread_id or SessionManager.make_thread_id(platform, user_id, channel_id),
         "agent_name": agent_name,
         "workflow": workflow,
         "working_dir": working_dir,

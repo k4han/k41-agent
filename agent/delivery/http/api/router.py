@@ -31,16 +31,19 @@ router = APIRouter(
 
 
 def _request_to_run_params(request: ChatRequest) -> dict[str, object]:
-    return build_run_params(
-        platform=Platform.API,
-        user_id=request.user_id,
-        user_input=request.message,
-        workflow=request.workflow,
-        working_dir=request.working_dir,
-        agent_name=request.agent_name or "default",
-        provider=request.provider,
-        model=request.model,
-    )
+    params = {
+        "platform": Platform.API,
+        "user_id": request.user_id,
+        "user_input": request.message,
+        "workflow": request.workflow,
+        "working_dir": request.working_dir,
+        "agent_name": request.agent_name or "default",
+        "provider": request.provider,
+        "model": request.model,
+    }
+    if request.thread_id:
+        params["thread_id"] = request.thread_id
+    return build_run_params(**params)
 
 
 @router.post("/chat", response_model=ChatResponse)

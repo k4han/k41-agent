@@ -34,6 +34,20 @@ def test_default_agent_tools_loaded():
     assert default_config.graph_type == "react_agent"
 
 
+def test_build_run_params_can_resume_thread():
+    from agent.modules.agent_runtime.runner import build_run_params
+
+    params = build_run_params(
+        platform="api",
+        user_id="dashboard",
+        user_input="continue",
+        thread_id="telegram_123_456",
+        agent_name="default",
+    )
+
+    assert params["thread_id"] == "telegram_123_456"
+
+
 def test_default_agent_config_exists():
     """Verify default agent config is always available."""
     from agent.modules.agents import get_catalog_service

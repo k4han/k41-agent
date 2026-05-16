@@ -1,4 +1,4 @@
-import { useSearchParams } from "@solidjs/router";
+import { useNavigate, useSearchParams } from "@solidjs/router";
 import { Bot, RefreshCw, Send, Square, Trash2 } from "lucide-solid";
 import { createEffect, createMemo, createSignal, For, onMount, Show } from "solid-js";
 
@@ -11,18 +11,28 @@ import {
 } from "@/components/Transcript";
 import { useToast } from "@/components/Toast";
 import { apiFetch, readError } from "@/lib/api";
-import { uniqueSorted } from "@/lib/utils";
+import {
+  threadApiPath,
+  toThreadTranscript,
+} from "@/lib/chatThreads";
+import { truncateText, uniqueSorted } from "@/lib/utils";
 import type { TranscriptItem } from "@/components/Transcript";
+import type { ThreadMessagesPayload } from "@/lib/chatThreads";
 import type { AgentCard, AgentsPayload } from "@/types";
 
-type ChatTranscriptItem = TranscriptItem & { id: number };
+type ChatTranscriptItem = TranscriptItem & { id: number; key?: string };
 
 let nextItemId = 1;
 
 export function ChatPage() {
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [data, setData] = createSignal<AgentsPayload>();
   const [error, setError] = createSignal("");
+  const [threadData, setThreadData] = createSignal<ThreadMessagesPayload>();
+  const [threadError, setThreadError] = createSignal("");
+  const [threadLoading, setThreadLoading] = createSignal(false);
+  const [currentThreadId, setCurrentThreadId] = createSignal("");
   const [agentName, setAgentName] = createSignal("");
   const [workflow, setWorkflow] = createSignal("");
   const [provider, setProvider] = createSignal("default");
@@ -33,6 +43,8 @@ export function ChatPage() {
   const [controller, setController] = createSignal<AbortController | null>(null);
   const { showToast } = useToast();
   let transcriptRef: HTMLDivElement | undefined;
+  let loadedThreadId: string | null = null;
+  let threadLoadRequestId = 0;
 
   const load = async () => {
     setError("");
@@ -54,6 +66,11 @@ export function ChatPage() {
     const catalog = data()?.model_catalogs.find((item) => item.provider === resolvedProvider());
     return uniqueSorted([...(catalog?.models.map((entry) => entry.id) || []), catalog?.default_model, selectedCard()?.model, model()]);
   });
+  const pageSubtitle = createMemo(() => (
+    currentThreadId()
+      ? `Continue thread ${truncateText(currentThreadId(), 88)}`
+      : "Stream an agent response with visible tool calls."
+  ));
 
   createEffect(() => {
     const payload = data();
@@ -93,6 +110,62 @@ export function ChatPage() {
     scrollToBottom();
     return id;
   };
+
+  const loadThread = async (threadId: string) => {
+    const requestId = threadLoadRequestId + 1;
+    threadLoadRequestId = requestId;
+    setCurrentThreadId(threadId);
+    setThreadData(undefined);
+    setThreadError("");
+    setThreadLoading(true);
+    setItems([]);
+
+    try {
+      const payload = await apiFetch<ThreadMessagesPayload>(threadApiPath(threadId));
+      if (requestId !== threadLoadRequestId) {
+        return;
+      }
+      setThreadData(payload);
+      setCurrentThreadId(payload.thread_id);
+      setItems(
+        toThreadTranscript(payload.messages).map((item) => ({
+          ...item,
+          id: nextItemId++,
+        })),
+      );
+      scrollToBottom();
+    } catch (err) {
+      if (requestId !== threadLoadRequestId) {
+        return;
+      }
+      setThreadError(err instanceof Error ? err.message : "Failed to load thread");
+    } finally {
+      if (requestId === threadLoadRequestId) {
+        setThreadLoading(false);
+      }
+    }
+  };
+
+  createEffect(() => {
+    const threadId = String(searchParams.thread || "");
+    if (threadId === loadedThreadId) {
+      return;
+    }
+
+    loadedThreadId = threadId;
+    threadLoadRequestId += 1;
+
+    if (!threadId) {
+      setCurrentThreadId("");
+      setThreadData(undefined);
+      setThreadError("");
+      setThreadLoading(false);
+      setItems([]);
+      return;
+    }
+
+    void loadThread(threadId);
+  });
 
   const updateMessage = (id: number, chunk: string) => {
     setItems((current) =>
@@ -138,6 +211,9 @@ export function ChatPage() {
     }
     if (model()) {
       payload.model = model();
+    }
+    if (currentThreadId()) {
+      payload.thread_id = currentThreadId();
     }
     return payload;
   };
@@ -206,6 +282,10 @@ export function ChatPage() {
       showToast("Enter a message.", "warning");
       return;
     }
+    if (threadLoading()) {
+      showToast("Wait for the thread to load.", "warning");
+      return;
+    }
     if (!agentName()) {
       showToast("No valid agent is available.", "error");
       return;
@@ -272,14 +352,19 @@ export function ChatPage() {
   };
 
   const stopChat = () => controller()?.abort();
-  const resetChat = () => setItems([]);
+  const resetChat = () => {
+    setItems([]);
+    if (currentThreadId()) {
+      navigate("/chat");
+    }
+  };
 
   onMount(load);
 
   return (
     <AppShell
-      title="Agent Chat"
-      subtitle="Stream an agent response with visible tool calls."
+      title={currentThreadId() ? "Thread Chat" : "Agent Chat"}
+      subtitle={pageSubtitle()}
       actions={
         <button class="btn" type="button" onClick={load}>
           <RefreshCw size={14} />
@@ -368,10 +453,28 @@ export function ChatPage() {
             </aside>
 
             <section class="panel chat-panel">
+              <Show when={currentThreadId() || threadError()}>
+                <div class={`thread-banner ${threadError() ? "thread-banner-error" : ""}`}>
+                  <div class="row-wrap">
+                    <span class="badge">{threadData()?.platform || "thread"}</span>
+                    <span class="mono">{truncateText(currentThreadId(), 84)}</span>
+                  </div>
+                  <Show when={threadError()}>
+                    <span>{threadError()}</span>
+                  </Show>
+                </div>
+              </Show>
               <div class="transcript" ref={transcriptRef}>
                 <Show
                   when={items().length > 0}
-                  fallback={<div class="empty">Send a message to start a conversation.</div>}
+                  fallback={
+                    <Show
+                      when={threadLoading()}
+                      fallback={<div class="empty">Send a message to start a conversation.</div>}
+                    >
+                      <div class="empty">Loading thread...</div>
+                    </Show>
+                  }
                 >
                   <For each={items()}>
                     {(item) => <TranscriptItemView item={item} />}
@@ -383,8 +486,8 @@ export function ChatPage() {
                   class="textarea"
                   rows={4}
                   value={prompt()}
-                  disabled={streaming()}
-                  placeholder="Ask the selected agent something..."
+                  disabled={streaming() || threadLoading()}
+                  placeholder={currentThreadId() ? "Continue this thread..." : "Ask the selected agent something..."}
                   onInput={(event) => setPrompt(event.currentTarget.value)}
                   onKeyDown={(event) => {
                     if (event.ctrlKey && event.key === "Enter") {
@@ -398,13 +501,13 @@ export function ChatPage() {
                   <div class="row-wrap">
                     <button class="btn" type="button" onClick={resetChat} disabled={streaming()}>
                       <Trash2 size={14} />
-                      Reset
+                      {currentThreadId() ? "New Chat" : "Reset"}
                     </button>
                     <button class="btn btn-warning" type="button" onClick={stopChat} disabled={!streaming()}>
                       <Square size={14} />
                       Stop
                     </button>
-                    <button class="btn btn-primary" type="button" onClick={sendMessage} disabled={streaming()}>
+                    <button class="btn btn-primary" type="button" onClick={sendMessage} disabled={streaming() || threadLoading()}>
                       <Send size={14} />
                       Send
                     </button>

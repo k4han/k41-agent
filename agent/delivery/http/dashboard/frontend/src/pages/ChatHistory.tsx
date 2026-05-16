@@ -1,102 +1,20 @@
 import { A, useParams } from "@solidjs/router";
 import { ArrowLeft, MessageSquare, RefreshCw, Trash2, User } from "lucide-solid";
-import { createMemo, createSignal, For, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onMount, Show } from "solid-js";
 
 import { AppShell } from "@/components/AppShell";
 import { DataGate } from "@/components/State";
-import {
-  createTranscriptTool,
-  findTranscriptToolTarget,
-  TranscriptItemView,
-} from "@/components/Transcript";
+import { TranscriptItemView } from "@/components/Transcript";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson } from "@/lib/api";
+import {
+  chatThreadHref,
+  decodeThreadRouteParam,
+  threadApiPath,
+  toThreadTranscript,
+} from "@/lib/chatThreads";
 import { truncateText } from "@/lib/utils";
-import type { TranscriptItem } from "@/components/Transcript";
-
-type ThreadSummary = {
-  thread_id: string;
-  latest_checkpoint_id: string;
-  checkpoint_count: number;
-  platform: string;
-  user_id: string;
-  channel_id: string;
-};
-
-type ThreadListPayload = {
-  threads: ThreadSummary[];
-};
-
-type ThreadMessage = {
-  id: string | null;
-  role: "user" | "assistant" | "tool" | "system";
-  content: string;
-  name?: string;
-  tool_call_id?: string;
-  tool_calls?: Array<{ id: string; name: string; args: unknown }>;
-};
-
-type ThreadMessagesPayload = {
-  thread_id: string;
-  messages: ThreadMessage[];
-  platform: string;
-  user_id: string;
-  channel_id: string;
-};
-
-type HistoryTranscriptItem = TranscriptItem & { key: string };
-
-function toHistoryTranscript(messages: ThreadMessage[]): HistoryTranscriptItem[] {
-  const items: HistoryTranscriptItem[] = [];
-
-  messages.forEach((msg, messageIndex) => {
-    if (msg.role === "tool") {
-      const target = findTranscriptToolTarget(items, msg.tool_call_id, msg.name);
-
-      if (target) {
-        target.result = msg.content;
-        target.tool_call_id = target.tool_call_id || msg.tool_call_id || null;
-        target.name = target.name || msg.name || "unknown";
-        return;
-      }
-
-      items.push({
-        key: `tool-result-${messageIndex}-${msg.tool_call_id || msg.name || "unknown"}`,
-        ...createTranscriptTool({
-          toolCallId: msg.tool_call_id,
-          name: msg.name,
-          result: msg.content,
-        }),
-      });
-      return;
-    }
-
-    if (msg.tool_calls?.length) {
-      msg.tool_calls.forEach((toolCall, toolCallIndex) => {
-        const item: HistoryTranscriptItem = {
-          key: `tool-call-${messageIndex}-${toolCallIndex}-${toolCall.id || "unknown"}`,
-          ...createTranscriptTool({
-            toolCallId: toolCall.id,
-            name: toolCall.name,
-            args: toolCall.args,
-          }),
-        };
-        items.push(item);
-      });
-    }
-
-    if (msg.content || !msg.tool_calls?.length) {
-      items.push({
-        key: `message-${messageIndex}-${msg.id || "unknown"}`,
-        type: "message",
-        role: msg.role,
-        text: msg.content,
-      });
-    }
-  });
-
-  return items;
-}
+import type { ThreadListPayload, ThreadMessagesPayload } from "@/lib/chatThreads";
 
 export function ChatHistoryListPage() {
   const [data, setData] = createSignal<ThreadListPayload>();
@@ -117,7 +35,7 @@ export function ChatHistoryListPage() {
       return;
     }
     try {
-      await deleteJson(`/dashboard-api/chat-history/${threadId}`);
+      await deleteJson(threadApiPath(threadId));
       showToast("Thread deleted.", "success");
       await load();
     } catch (err) {
@@ -162,7 +80,7 @@ export function ChatHistoryListPage() {
                         <tr>
                           <td>
                             <A
-                              href={`/history/${encodeURIComponent(thread.thread_id)}`}
+                              href={chatThreadHref(thread.thread_id)}
                               class="history-thread-link"
                             >
                               <MessageSquare size={13} />
@@ -181,10 +99,10 @@ export function ChatHistoryListPage() {
                           <td>
                             <div class="row-wrap">
                               <A
-                                href={`/history/${encodeURIComponent(thread.thread_id)}`}
+                                href={chatThreadHref(thread.thread_id)}
                                 class="btn btn-sm"
                               >
-                                View
+                                Chat
                               </A>
                               <button
                                 class="btn btn-sm btn-danger"
@@ -213,15 +131,19 @@ export function ChatHistoryDetailPage() {
   const params = useParams<{ threadId: string }>();
   const [data, setData] = createSignal<ThreadMessagesPayload>();
   const [error, setError] = createSignal("");
-  const transcriptItems = createMemo(() => toHistoryTranscript(data()?.messages || []));
+  const transcriptItems = createMemo(() => toThreadTranscript(data()?.messages || []));
+  const currentThreadId = createMemo(() => decodeThreadRouteParam(params.threadId || ""));
 
-  const load = async () => {
+  const load = async (threadId = currentThreadId()) => {
+    if (!threadId) {
+      return;
+    }
     setError("");
+    setData(undefined);
     try {
-      const threadId = decodeURIComponent(params.threadId);
       setData(
         await apiFetch<ThreadMessagesPayload>(
-          `/dashboard-api/chat-history/${threadId}`,
+          threadApiPath(threadId),
         ),
       );
     } catch (err) {
@@ -229,7 +151,9 @@ export function ChatHistoryDetailPage() {
     }
   };
 
-  onMount(load);
+  createEffect(() => {
+    void load(currentThreadId());
+  });
 
   return (
     <AppShell
@@ -241,7 +165,11 @@ export function ChatHistoryDetailPage() {
             <ArrowLeft size={14} />
             Back
           </A>
-          <button class="btn" type="button" onClick={load}>
+          <A href={chatThreadHref(currentThreadId())} class="btn btn-primary">
+            <MessageSquare size={14} />
+            Continue Chat
+          </A>
+          <button class="btn" type="button" onClick={() => void load()}>
             <RefreshCw size={14} />
             Refresh
           </button>
