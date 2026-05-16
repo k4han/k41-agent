@@ -4,11 +4,15 @@ import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 
 import { AppShell } from "@/components/AppShell";
 import { DataGate } from "@/components/State";
-import { TranscriptItemView } from "@/components/Transcript";
+import {
+  createTranscriptTool,
+  findTranscriptToolTarget,
+  TranscriptItemView,
+} from "@/components/Transcript";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson } from "@/lib/api";
 import { truncateText } from "@/lib/utils";
-import type { TranscriptItem, TranscriptTool } from "@/components/Transcript";
+import type { TranscriptItem } from "@/components/Transcript";
 
 type ThreadSummary = {
   thread_id: string;
@@ -44,26 +48,10 @@ type HistoryTranscriptItem = TranscriptItem & { key: string };
 
 function toHistoryTranscript(messages: ThreadMessage[]): HistoryTranscriptItem[] {
   const items: HistoryTranscriptItem[] = [];
-  const pendingByCallId = new Map<string, TranscriptTool>();
-
-  const findPendingToolByName = (name?: string | null): TranscriptTool | undefined => {
-    if (!name) {
-      return undefined;
-    }
-    for (let index = items.length - 1; index >= 0; index -= 1) {
-      const item = items[index];
-      if (item.type === "tool" && item.name === name && item.result === null) {
-        return item;
-      }
-    }
-    return undefined;
-  };
 
   messages.forEach((msg, messageIndex) => {
     if (msg.role === "tool") {
-      const target =
-        (msg.tool_call_id ? pendingByCallId.get(msg.tool_call_id) : undefined) ||
-        findPendingToolByName(msg.name);
+      const target = findTranscriptToolTarget(items, msg.tool_call_id, msg.name);
 
       if (target) {
         target.result = msg.content;
@@ -74,11 +62,11 @@ function toHistoryTranscript(messages: ThreadMessage[]): HistoryTranscriptItem[]
 
       items.push({
         key: `tool-result-${messageIndex}-${msg.tool_call_id || msg.name || "unknown"}`,
-        type: "tool",
-        tool_call_id: msg.tool_call_id || null,
-        name: msg.name || "unknown",
-        args: null,
-        result: msg.content,
+        ...createTranscriptTool({
+          toolCallId: msg.tool_call_id,
+          name: msg.name,
+          result: msg.content,
+        }),
       });
       return;
     }
@@ -87,16 +75,13 @@ function toHistoryTranscript(messages: ThreadMessage[]): HistoryTranscriptItem[]
       msg.tool_calls.forEach((toolCall, toolCallIndex) => {
         const item: HistoryTranscriptItem = {
           key: `tool-call-${messageIndex}-${toolCallIndex}-${toolCall.id || "unknown"}`,
-          type: "tool",
-          tool_call_id: toolCall.id || null,
-          name: toolCall.name || "unknown",
-          args: toolCall.args ?? null,
-          result: null,
+          ...createTranscriptTool({
+            toolCallId: toolCall.id,
+            name: toolCall.name,
+            args: toolCall.args,
+          }),
         };
         items.push(item);
-        if (toolCall.id) {
-          pendingByCallId.set(toolCall.id, item);
-        }
       });
     }
 

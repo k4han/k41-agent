@@ -4,7 +4,11 @@ import { createEffect, createMemo, createSignal, For, onMount, Show } from "soli
 
 import { AppShell } from "@/components/AppShell";
 import { DataGate } from "@/components/State";
-import { TranscriptItemView } from "@/components/Transcript";
+import {
+  createTranscriptTool,
+  findTranscriptToolTarget,
+  TranscriptItemView,
+} from "@/components/Transcript";
 import { useToast } from "@/components/Toast";
 import { apiFetch, readError } from "@/lib/api";
 import { uniqueSorted } from "@/lib/utils";
@@ -103,19 +107,13 @@ export function ChatPage() {
 
   const updateToolResult = (toolCallId: string, name: string, result: unknown) => {
     setItems((current) => {
-      const target =
-        current.find((item) => item.type === "tool" && item.tool_call_id === toolCallId) ||
-        current.find((item) => item.type === "tool" && item.name === name);
+      const target = findTranscriptToolTarget(current, toolCallId, name);
       if (!target) {
         return [
           ...current,
           {
             id: nextItemId++,
-            type: "tool",
-            tool_call_id: toolCallId,
-            name,
-            args: null,
-            result,
+            ...createTranscriptTool({ toolCallId, name, result }),
           } satisfies ChatTranscriptItem,
         ];
       }
@@ -162,13 +160,13 @@ export function ChatPage() {
       return;
     }
     if (event.type === "tool_call") {
-      appendItem({
-        type: "tool",
-        tool_call_id: String(event.id || ""),
-        name: String(event.name || "unknown"),
-        args: event.args ?? null,
-        result: null,
-      });
+      appendItem(
+        createTranscriptTool({
+          toolCallId: String(event.id || ""),
+          name: String(event.name || "unknown"),
+          args: event.args ?? null,
+        }),
+      );
       return;
     }
     if (event.type === "tool_result") {

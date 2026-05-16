@@ -18,6 +18,50 @@ export type TranscriptTool = {
 
 export type TranscriptItem = TranscriptMessage | TranscriptTool;
 
+type TranscriptToolTarget<T extends TranscriptItem> = Extract<T, { type: "tool" }>;
+
+export function createTranscriptTool(options: {
+  toolCallId?: string | null;
+  name?: string | null;
+  args?: unknown;
+  result?: unknown;
+}): TranscriptTool {
+  return {
+    type: "tool",
+    tool_call_id: options.toolCallId || null,
+    name: options.name || "unknown",
+    args: options.args ?? null,
+    result: options.result ?? null,
+  };
+}
+
+export function findTranscriptToolTarget<T extends TranscriptItem>(
+  items: T[],
+  toolCallId?: string | null,
+  name?: string | null,
+): TranscriptToolTarget<T> | undefined {
+  const targetById = toolCallId
+    ? items.find(
+        (item): item is TranscriptToolTarget<T> =>
+          item.type === "tool" && item.tool_call_id === toolCallId,
+      )
+    : undefined;
+  if (targetById) {
+    return targetById;
+  }
+  if (!name) {
+    return undefined;
+  }
+
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item.type === "tool" && item.name === name && item.result === null) {
+      return item as TranscriptToolTarget<T>;
+    }
+  }
+  return undefined;
+}
+
 export function TranscriptMessageView(props: { role: TranscriptRole; text: string }) {
   return (
     <div class={`message ${props.role}`}>
