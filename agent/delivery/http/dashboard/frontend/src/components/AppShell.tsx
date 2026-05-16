@@ -6,6 +6,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   History,
+  GitPullRequest,
   LogOut,
   MessageSquare,
   PanelsTopLeft,
@@ -25,6 +26,7 @@ const navItems: NavItem[] = [
   { href: "/chat", label: "Chat", icon: <MessageSquare size={15} /> },
   { href: "/history", label: "History", icon: <History size={15} /> },
   { href: "/sessions", label: "Active Sessions", icon: <Activity size={15} /> },
+  { href: "/repositories", label: "Repositories", icon: <GitPullRequest size={15} /> },
   { href: "/tasks", label: "Background Tasks", icon: <PlaySquare size={15} /> },
   { href: "/scheduler", label: "Scheduler", icon: <CalendarClock size={15} /> },
 ];

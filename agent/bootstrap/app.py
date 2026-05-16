@@ -11,7 +11,12 @@ from fastapi.staticfiles import StaticFiles
 
 from agent.bootstrap.runtime import AppRuntime
 from agent.bootstrap.settings import BootstrapConfig, load_bootstrap_config
-from agent.delivery.http import api_router, dashboard_router, telegram_webhook_router
+from agent.delivery.http import (
+    api_router,
+    dashboard_router,
+    github_webhook_router,
+    telegram_webhook_router,
+)
 from agent.delivery.http.dashboard.auth_router import router as auth_router
 from agent.delivery.http.dashboard.spa import STATIC_DIR
 from agent.modules.channels import list_channel_statuses
@@ -63,6 +68,7 @@ def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:
         fastapi_app.include_router(api_router)
 
     fastapi_app.include_router(telegram_webhook_router)
+    fastapi_app.include_router(github_webhook_router)
 
     if bootstrap_config.enable_dashboard:
         fastapi_app.include_router(auth_router)

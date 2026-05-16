@@ -240,6 +240,7 @@ class TestConfigService:
             channel_enabled={
                 "telegram": True,
                 "discord": False,
+                "github": False,
             }
         )
 
@@ -308,6 +309,8 @@ class TestRuntimeKeyMetadata:
         assert is_runtime_key("llm.providers.openai-main.default_model")
         assert is_runtime_key("llm.providers.openai-main.models")
         assert is_runtime_key("llm.providers.openai-main.temperature")
+        assert is_runtime_key("channels.github.app_id")
+        assert is_runtime_key("channels.github.webhook_secret")
         assert not is_runtime_key("llm.providers.openai-main.random_field")
 
     def test_provider_setting_metadata(self) -> None:
@@ -356,6 +359,7 @@ class TestPublicAPI:
             channel_enabled={
                 "telegram": True,
                 "discord": True,
+                "github": False,
             }
         )
 

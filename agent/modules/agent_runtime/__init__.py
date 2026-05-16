@@ -11,8 +11,10 @@ from agent.modules.agent_runtime.runner import (
     run_agent_stream,
 )
 from agent.modules.agent_runtime.background_tasks import (
+    BackgroundTask,
     BackgroundTaskManager,
     NotifyChannel,
+    TaskStatus,
     get_background_task_manager,
 )
 from agent.modules.agent_runtime.session import SessionManager
@@ -20,9 +22,11 @@ from agent.modules.agent_runtime.session import SessionManager
 __all__ = [
     "ActiveSession",
     "ActiveSessionRegistry",
+    "BackgroundTask",
     "BackgroundTaskManager",
     "NotifyChannel",
     "SessionManager",
+    "TaskStatus",
     "build_run_params",
     "clear_agent_session",
     "get_active_session_registry",

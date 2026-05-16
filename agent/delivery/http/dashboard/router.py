@@ -26,6 +26,7 @@ from agent.modules.channels import (
     stop_all_channels,
     stop_channel,
 )
+from agent.modules.github import get_github_automation_service, get_github_settings
 from agent.modules.providers import (
     list_provider_model_catalog,
     list_provider_model_catalogs,
@@ -376,9 +377,9 @@ def _dashboard_spa() -> Response:
 @router.get("/sessions", include_in_schema=False)
 @router.get("/tasks", include_in_schema=False)
 @router.get("/scheduler", include_in_schema=False)
+@router.get("/repositories", include_in_schema=False)
 @router.get("/history", include_in_schema=False)
 @router.get("/history/{thread_id:path}", include_in_schema=False)
-@router.get("/settings", include_in_schema=False)
 @router.get("/settings/config", include_in_schema=False)
 @router.get("/settings/providers", include_in_schema=False)
 @router.get("/settings/channels", include_in_schema=False)
@@ -460,6 +461,68 @@ async def get_dashboard_config(request: Request) -> dict[str, Any]:
 @router.get("/dashboard-api/providers")
 async def get_dashboard_providers(request: Request) -> dict[str, Any]:
     return _settings_payload(request, include_provider_settings=True)
+
+
+@router.get("/dashboard-api/github")
+async def get_dashboard_github(request: Request) -> dict[str, Any]:
+    settings = get_github_settings()
+    service = get_github_automation_service()
+    cards = get_catalog_service().list_agent_cards()
+    agent_names = sorted(card.name for card in cards if card.valid)
+    webhook_url = f"{str(request.base_url).rstrip('/')}/channels/github/webhook"
+    install_url = (
+        f"https://github.com/apps/{settings.app_slug}/installations/new"
+        if settings.app_slug
+        else ""
+    )
+    return {
+        "configured": settings.is_configured,
+        "enabled": settings.enabled,
+        "app_slug": settings.app_slug,
+        "webhook_url": webhook_url,
+        "install_url": install_url,
+        "default_agent": settings.default_agent,
+        "trigger_label": settings.trigger_label,
+        "mention_triggers": list(settings.mention_triggers),
+        "repositories": await service.list_repository_bindings(),
+        "agent_names": agent_names,
+    }
+
+
+@router.post("/dashboard-api/github/sync")
+async def sync_dashboard_github() -> dict[str, Any]:
+    service = get_github_automation_service()
+    try:
+        result = await service.sync_installations()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "synced", **result}
+
+
+class GitHubRepositoryBindingBody(BaseModel):
+    enabled: bool = False
+    agent_name: str = ""
+    trigger_label: str = ""
+    mention_triggers: list[str] = Field(default_factory=list)
+
+
+@router.put("/dashboard-api/github/repositories/{repository_id}/binding")
+async def update_dashboard_github_repository_binding(
+    repository_id: int,
+    body: GitHubRepositoryBindingBody,
+) -> dict[str, Any]:
+    service = get_github_automation_service()
+    try:
+        binding = await service.update_repository_binding(
+            repository_id,
+            enabled=body.enabled,
+            agent_name=body.agent_name,
+            trigger_label=body.trigger_label,
+            mention_triggers=body.mention_triggers,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"status": "updated", "repository": binding}
 
 
 # --- agent card endpoints --------------------------------------------
@@ -914,7 +977,7 @@ def _get_checkpointer():
 
 def _parse_thread_id_safe(thread_id: str) -> dict[str, str]:
     try:
-        from agent.modules.agent_runtime.session import SessionManager
+        from agent.modules.agent_runtime import SessionManager
 
         platform, user_id, channel_id = SessionManager.parse_thread_id(thread_id)
         return {"platform": platform, "user_id": user_id, "channel_id": channel_id}
@@ -1046,4 +1109,3 @@ async def delete_chat_thread(thread_id: str) -> dict[str, str]:
 
     await delete_workflow_thread(thread_id)
     return {"status": "deleted", "thread_id": thread_id}
-

@@ -11,6 +11,7 @@ from typing import Any
 RUNTIME_KEY_PATTERNS = [
     r"^channels\.telegram\.(enabled|bot_token|default_agent|code_agent|research_agent|update_mode|webhook_url|webhook_secret)$",
     r"^channels\.discord\.(enabled|bot_token|default_agent|code_agent|research_agent)$",
+    r"^channels\.github\.(enabled|app_id|app_slug|private_key|private_key_path|webhook_secret|default_agent|trigger_label|mention_triggers)$",
     r"^llm\.default_provider$",
     r"^llm\.providers\.[A-Za-z0-9_-]+\.(provider|type|api_key|base_url|default_model|models|temperature|enabled)$",
     r"^database\.url$",
@@ -40,6 +41,18 @@ def _expand_runtime_keys() -> set[str]:
         keys.add(f"channels.telegram.{prop}")
     for prop in ("enabled", "bot_token", "default_agent", "code_agent", "research_agent"):
         keys.add(f"channels.discord.{prop}")
+    for prop in (
+        "enabled",
+        "app_id",
+        "app_slug",
+        "private_key",
+        "private_key_path",
+        "webhook_secret",
+        "default_agent",
+        "trigger_label",
+        "mention_triggers",
+    ):
+        keys.add(f"channels.github.{prop}")
     keys.add("llm.default_provider")
     keys.add("database.url")
     keys.add("security.jwt_secret")
@@ -66,6 +79,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "channels.telegram.webhook_url": "",
     "channels.telegram.webhook_secret": "",
     "channels.discord.enabled": True,
+    "channels.github.enabled": False,
+    "channels.github.app_slug": "",
+    "channels.github.trigger_label": "kaka-agent",
+    "channels.github.mention_triggers": "@kaka-agent,/kaka",
     # Security
     "persistence.allow_any_path": False,
     "security.jwt_secret": "",
@@ -152,6 +169,60 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "description": "Agent triggered by /research command",
         "category": "channels",
         "label": "Discord Research Agent",
+    },
+    "channels.github.enabled": {
+        "type": "boolean",
+        "description": "Enable GitHub App webhook automation",
+        "category": "channels",
+        "label": "GitHub Enabled",
+    },
+    "channels.github.app_id": {
+        "type": "text",
+        "description": "GitHub App ID used to mint installation tokens",
+        "category": "channels",
+        "label": "GitHub App ID",
+    },
+    "channels.github.app_slug": {
+        "type": "text",
+        "description": "GitHub App slug used to build the install URL",
+        "category": "channels",
+        "label": "GitHub App Slug",
+    },
+    "channels.github.private_key": {
+        "type": "password",
+        "description": "PEM private key for the GitHub App",
+        "category": "channels",
+        "label": "GitHub Private Key",
+    },
+    "channels.github.private_key_path": {
+        "type": "text",
+        "description": "Path to the PEM private key for the GitHub App",
+        "category": "channels",
+        "label": "GitHub Private Key Path",
+    },
+    "channels.github.webhook_secret": {
+        "type": "password",
+        "description": "Secret used to validate GitHub webhook signatures",
+        "category": "channels",
+        "label": "GitHub Webhook Secret",
+    },
+    "channels.github.default_agent": {
+        "type": "text",
+        "description": "Default agent for GitHub repository automation",
+        "category": "channels",
+        "label": "GitHub Default Agent",
+    },
+    "channels.github.trigger_label": {
+        "type": "text",
+        "description": "Default issue label that triggers GitHub automation",
+        "category": "channels",
+        "label": "GitHub Trigger Label",
+    },
+    "channels.github.mention_triggers": {
+        "type": "text",
+        "description": "Comma-separated comment triggers for GitHub automation",
+        "category": "channels",
+        "label": "GitHub Mention Triggers",
     },
     # LLM settings
     "llm.default_provider": {

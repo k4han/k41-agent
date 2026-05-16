@@ -67,6 +67,18 @@ channels:
     enabled: true
     default_agent: "default"
 
+  github:
+    enabled: true
+    app_id: "123456"
+    app_slug: "your-github-app-slug"
+    private_key_path: "~/.kaka-agent/github-app.pem"
+    webhook_secret: "your-github-webhook-secret"
+    default_agent: "default"
+    trigger_label: "kaka-agent"
+    mention_triggers:
+      - "@kaka-agent"
+      - "/kaka"
+
 # Paths
 paths:
   agents: "~/.kaka-agent/agents"
@@ -228,6 +240,23 @@ WARNING: Channel 'telegram' required config keys missing
 → Kiểm tra `channels.telegram.bot_token` đã được set
 
 Nếu dùng Telegram webhook mà channel chuyển sang `error`, kiểm tra thêm `channels.telegram.webhook_url`, `channels.telegram.webhook_secret`, public HTTPS endpoint và reverse proxy.
+
+### GitHub automation
+
+GitHub App V1 dùng một app cho toàn instance, không dùng OAuth từng user nên không cần `client_secret`. Cấu hình bắt buộc:
+
+```yaml
+channels:
+  github:
+    enabled: true
+    app_id: "123456"
+    private_key_path: "~/.kaka-agent/github-app.pem"
+    webhook_secret: "your-github-webhook-secret"
+```
+
+App cần quyền Metadata read, Issues read/write, Contents read/write, Pull requests read/write. Bật events `issues`, `issue_comment`, `installation`, `installation_repositories`, `ping`. Endpoint nhận webhook là `/channels/github/webhook`.
+
+Repo được clone vào `~/kaka-agent/github-workspaces/{owner}/{repo}`. Khi issue/comment được trigger, backend chuẩn bị branch local, chạy agent trong working directory của repo, rồi commit/push/create PR bằng installation token.
 
 ### Database path error
 

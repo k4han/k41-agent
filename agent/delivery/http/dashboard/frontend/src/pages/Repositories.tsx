@@ -1,0 +1,248 @@
+import { createMemo, createSignal, For, onMount, Show } from "solid-js";
+import { GitPullRequest, RefreshCw, Save } from "lucide-solid";
+
+import { AppShell } from "@/components/AppShell";
+import { DataGate } from "@/components/State";
+import { useToast } from "@/components/Toast";
+import { apiFetch, postJson, putJson } from "@/lib/api";
+import type { GitHubPayload, GitHubRepositoryBinding } from "@/types";
+
+type RepositoryDraft = {
+  enabled: boolean;
+  agent_name: string;
+  trigger_label: string;
+  mention_triggers_text: string;
+};
+
+function toDraft(repo: GitHubRepositoryBinding): RepositoryDraft {
+  return {
+    enabled: repo.enabled,
+    agent_name: repo.agent_name,
+    trigger_label: repo.trigger_label,
+    mention_triggers_text: repo.mention_triggers.join(", "),
+  };
+}
+
+function splitTriggers(value: string): string[] {
+  return value
+    .replace(/\n/g, ",")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+export function RepositoriesPage() {
+  const [data, setData] = createSignal<GitHubPayload>();
+  const [error, setError] = createSignal("");
+  const [drafts, setDrafts] = createSignal<Record<number, RepositoryDraft>>({});
+  const { showToast } = useToast();
+
+  const load = async () => {
+    setError("");
+    try {
+      const payload = await apiFetch<GitHubPayload>("/dashboard-api/github");
+      setData(payload);
+      setDrafts(
+        Object.fromEntries(payload.repositories.map((repo) => [repo.repository_id, toDraft(repo)])),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load repositories");
+    }
+  };
+
+  const sync = async () => {
+    try {
+      await postJson("/dashboard-api/github/sync");
+      showToast("GitHub repositories synced.");
+      await load();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to sync GitHub", "error");
+    }
+  };
+
+  const updateDraft = <K extends keyof RepositoryDraft>(
+    repo: GitHubRepositoryBinding,
+    key: K,
+    value: RepositoryDraft[K],
+  ) => {
+    setDrafts((current) => ({
+      ...current,
+      [repo.repository_id]: {
+        ...(current[repo.repository_id] || toDraft(repo)),
+        [key]: value,
+      },
+    }));
+  };
+
+  const save = async (repo: GitHubRepositoryBinding) => {
+    const draft = drafts()[repo.repository_id] || toDraft(repo);
+    try {
+      await putJson(`/dashboard-api/github/repositories/${repo.repository_id}/binding`, {
+        enabled: draft.enabled,
+        agent_name: draft.agent_name,
+        trigger_label: draft.trigger_label,
+        mention_triggers: splitTriggers(draft.mention_triggers_text),
+      });
+      showToast("Repository binding updated.");
+      await load();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to update binding", "error");
+    }
+  };
+
+  const activeCount = createMemo(() => data()?.repositories.filter((repo) => repo.enabled).length || 0);
+
+  onMount(load);
+
+  return (
+    <AppShell
+      title="Repositories"
+      subtitle="Map GitHub repositories to agents."
+      actions={
+        <>
+          <button class="btn" type="button" onClick={load}>
+            <RefreshCw size={14} />
+            Refresh
+          </button>
+          <button class="btn btn-primary" type="button" onClick={sync}>
+            <GitPullRequest size={14} />
+            Sync GitHub
+          </button>
+        </>
+      }
+    >
+      <DataGate data={data()} error={error()} onRetry={load}>
+        {(payload) => (
+          <div class="stack">
+            <div class="grid-3">
+              <div class="panel metric">
+                <div class="metric-value">{payload.repositories.length}</div>
+                <div class="metric-label">Synced repositories</div>
+              </div>
+              <div class="panel metric">
+                <div class="metric-value">{activeCount()}</div>
+                <div class="metric-label">Enabled bindings</div>
+              </div>
+              <div class="panel metric">
+                <div class="metric-value">{payload.configured ? "Ready" : "Setup"}</div>
+                <div class="metric-label">GitHub App</div>
+              </div>
+            </div>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div class="panel-title">Connection</div>
+              </div>
+              <div class="panel-body stack">
+                <div class="row-wrap">
+                  <span class={payload.enabled ? "badge badge-success" : "badge badge-warning"}>
+                    {payload.enabled ? "enabled" : "disabled"}
+                  </span>
+                  <span class={payload.configured ? "badge badge-success" : "badge badge-warning"}>
+                    {payload.configured ? "configured" : "missing credentials"}
+                  </span>
+                  <Show when={payload.install_url}>
+                    <a class="btn btn-sm" href={payload.install_url} target="_blank" rel="noreferrer">
+                      Install App
+                    </a>
+                  </Show>
+                </div>
+                <div class="field">
+                  <label>Webhook URL</label>
+                  <input class="input mono" readOnly value={payload.webhook_url} />
+                </div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Repository</th>
+                      <th>Enabled</th>
+                      <th>Agent</th>
+                      <th>Triggers</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <For
+                      each={payload.repositories}
+                      fallback={
+                        <tr>
+                          <td colSpan={5}>
+                            <div class="empty">No repositories synced.</div>
+                          </td>
+                        </tr>
+                      }
+                    >
+                      {(repo) => {
+                        const draft = () => drafts()[repo.repository_id] || toDraft(repo);
+                        return (
+                          <tr>
+                            <td>
+                              <div class="mono">{repo.full_name}</div>
+                              <div class="chips" style={{ "margin-top": "6px" }}>
+                                <span class="chip">{repo.default_branch}</span>
+                                <span class="chip">{repo.private ? "private" : "public"}</span>
+                                <span class="chip">installation {repo.installation_id}</span>
+                              </div>
+                            </td>
+                            <td>
+                              <label class="checkbox-row">
+                                <input
+                                  type="checkbox"
+                                  checked={draft().enabled}
+                                  onChange={(event) => updateDraft(repo, "enabled", event.currentTarget.checked)}
+                                />
+                                <span>{draft().enabled ? "enabled" : "disabled"}</span>
+                              </label>
+                            </td>
+                            <td>
+                              <select
+                                class="select"
+                                value={draft().agent_name}
+                                onChange={(event) => updateDraft(repo, "agent_name", event.currentTarget.value)}
+                              >
+                                <For each={[...new Set([repo.agent_name, payload.default_agent, ...payload.agent_names].filter(Boolean))]}>
+                                  {(agent) => <option value={agent}>{agent}</option>}
+                                </For>
+                              </select>
+                            </td>
+                            <td>
+                              <div class="stack">
+                                <input
+                                  class="input"
+                                  value={draft().trigger_label}
+                                  placeholder={payload.trigger_label}
+                                  onInput={(event) => updateDraft(repo, "trigger_label", event.currentTarget.value)}
+                                />
+                                <input
+                                  class="input"
+                                  value={draft().mention_triggers_text}
+                                  placeholder={payload.mention_triggers.join(", ")}
+                                  onInput={(event) => updateDraft(repo, "mention_triggers_text", event.currentTarget.value)}
+                                />
+                              </div>
+                            </td>
+                            <td>
+                              <button class="btn btn-sm" type="button" onClick={() => save(repo)}>
+                                <Save size={13} />
+                                Save
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      }}
+                    </For>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        )}
+      </DataGate>
+    </AppShell>
+  );
+}

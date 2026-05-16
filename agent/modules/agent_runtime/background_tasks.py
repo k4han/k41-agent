@@ -17,7 +17,7 @@ import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from html import escape as escape_html
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from agent.modules.notifications import send_notification as _send_notification
 from agent.modules.workflows import REACT_AGENT_GRAPH_TYPE
@@ -55,7 +55,12 @@ class BackgroundTask:
     task_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     request: str = ""
     agent_name: str = "default"
+    working_dir: str | None = None
     notify_channel: NotifyChannel | None = None
+    completion_hook: Callable[["BackgroundTask"], Awaitable[None]] | None = field(
+        default=None,
+        repr=False,
+    )
     status: TaskStatus = TaskStatus.PENDING
     result: str = ""
     error: str = ""
@@ -84,6 +89,7 @@ class BackgroundTask:
             "task_id": self.task_id,
             "request": self.request,
             "agent_name": self.agent_name,
+            "working_dir": self.working_dir,
             "status": self.status.value,
             "result": self.result,
             "error": self.error,
@@ -127,7 +133,9 @@ class BackgroundTaskManager:
         self,
         request: str,
         agent_name: str = "default",
+        working_dir: str | None = None,
         notify_channel: NotifyChannel | None = None,
+        completion_hook: Callable[[BackgroundTask], Awaitable[None]] | None = None,
     ) -> str:
         """Submit a new background task and start it.
 
@@ -138,7 +146,9 @@ class BackgroundTaskManager:
         task = BackgroundTask(
             request=request,
             agent_name=agent_name,
+            working_dir=working_dir,
             notify_channel=notify_channel,
+            completion_hook=completion_hook,
         )
         task.thread_id = (
             f"{BACKGROUND_THREAD_PREFIX}_dashboard_{task.task_id}"
@@ -173,8 +183,11 @@ class BackgroundTaskManager:
                 user_input=task.request,
                 thread_id=task.thread_id,
                 agent_name=task.agent_name,
+                working_dir=task.working_dir,
             )
             task.result = _truncate_stored_text(result)
+            if task.completion_hook is not None:
+                await task.completion_hook(task)
             task.status = TaskStatus.COMPLETED
             logger.info("Background task %s completed successfully.", task.task_id)
         except asyncio.CancelledError:

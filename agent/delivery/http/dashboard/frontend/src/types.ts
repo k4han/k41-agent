@@ -75,6 +75,7 @@ export type BackgroundTask = {
   task_id: string;
   request: string;
   agent_name: string;
+  working_dir: string | null;
   status: string;
   result: string;
   error: string;
@@ -151,3 +152,32 @@ export type SettingsPayload = {
   provider_field_order?: string[];
 };
 
+export type GitHubRepositoryBinding = {
+  id: number;
+  repository_id: number;
+  installation_id: number;
+  full_name: string;
+  account_login: string;
+  private: boolean;
+  default_branch: string;
+  enabled: boolean;
+  agent_name: string;
+  trigger_label: string;
+  mention_triggers: string[];
+  last_synced_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type GitHubPayload = {
+  configured: boolean;
+  enabled: boolean;
+  app_slug: string;
+  webhook_url: string;
+  install_url: string;
+  default_agent: string;
+  trigger_label: string;
+  mention_triggers: string[];
+  repositories: GitHubRepositoryBinding[];
+  agent_names: string[];
+};

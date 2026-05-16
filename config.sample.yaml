@@ -64,6 +64,21 @@ security:
 #     enabled: false
 #     # Discord Bot Token from Discord Developer Portal
 #     bot_token: "your-discord-bot-token-here"
+#
+#   github:
+#     enabled: false
+#     # GitHub App settings. client_secret is not needed for the single-admin V1 flow.
+#     app_id: "your-github-app-id"
+#     app_slug: "your-github-app-slug"
+#     private_key_path: "~/.kaka-agent/github-app.pem"
+#     # You may use private_key instead of private_key_path for a PEM string.
+#     private_key: ""
+#     webhook_secret: "your-github-webhook-secret"
+#     default_agent: "default"
+#     trigger_label: "kaka-agent"
+#     mention_triggers:
+#       - "@kaka-agent"
+#       - "/kaka"
 
 # Security (optional)
 # persistence:

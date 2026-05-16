@@ -1,5 +1,6 @@
 import importlib
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -112,6 +113,51 @@ def test_dashboard_api_overview_returns_runtime_snapshot() -> None:
     assert response.json() == {
         "services": [{"name": "telegram", "status": "stopped", "error": None}]
     }
+
+
+def test_dashboard_api_github_returns_repository_bindings(monkeypatch: pytest.MonkeyPatch) -> None:
+    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
+
+    class FakeService:
+        async def list_repository_bindings(self):
+            return [{"repository_id": 100, "full_name": "octo/example"}]
+
+    class FakeCatalog:
+        def list_agent_cards(self):
+            return [SimpleNamespace(name="default", valid=True)]
+
+    monkeypatch.setattr(
+        dashboard_router_module,
+        "get_github_settings",
+        lambda: SimpleNamespace(
+            is_configured=True,
+            enabled=True,
+            app_slug="kaka-agent",
+            default_agent="default",
+            trigger_label="kaka-agent",
+            mention_triggers=("@kaka-agent", "/kaka"),
+        ),
+    )
+    monkeypatch.setattr(
+        dashboard_router_module,
+        "get_github_automation_service",
+        lambda: FakeService(),
+    )
+    monkeypatch.setattr(
+        dashboard_router_module,
+        "get_catalog_service",
+        lambda: FakeCatalog(),
+    )
+
+    client = _create_dashboard_client(ChannelManager())
+    response = client.get("/dashboard-api/github")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["configured"] is True
+    assert data["install_url"] == "https://github.com/apps/kaka-agent/installations/new"
+    assert data["repositories"] == [{"repository_id": 100, "full_name": "octo/example"}]
+    assert data["agent_names"] == ["default"]
 
 
 def test_dashboard_api_requires_json_auth() -> None:

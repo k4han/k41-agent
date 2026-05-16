@@ -6,6 +6,7 @@ import { ChatHistoryDetailPage, ChatHistoryListPage } from "@/pages/ChatHistory"
 import { ChatPage } from "@/pages/Chat";
 import { LoginPage } from "@/pages/Login";
 import { OverviewPage } from "@/pages/Overview";
+import { RepositoriesPage } from "@/pages/Repositories";
 import { SchedulerPage } from "@/pages/Scheduler";
 import { SessionsPage } from "@/pages/Sessions";
 import {
@@ -33,6 +34,7 @@ render(
         <Route path="/history" component={ChatHistoryListPage} />
         <Route path="/history/:threadId" component={ChatHistoryDetailPage} />
         <Route path="/sessions" component={SessionsPage} />
+        <Route path="/repositories" component={RepositoriesPage} />
         <Route path="/tasks" component={TasksPage} />
         <Route path="/scheduler" component={SchedulerPage} />
         <Route path="/settings" component={() => <Navigate href="/settings/config" />} />
@@ -52,4 +54,3 @@ render(
   ),
   document.getElementById("root") as HTMLElement,
 );
-

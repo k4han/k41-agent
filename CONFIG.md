@@ -53,6 +53,17 @@ channels:
   discord:
     enabled: false
     bot_token: "your-discord-bot-token"
+  github:
+    enabled: true
+    app_id: "123456"
+    app_slug: "your-github-app-slug"
+    private_key_path: "~/.kaka-agent/github-app.pem"
+    webhook_secret: "your-github-webhook-secret"
+    default_agent: "default"
+    trigger_label: "kaka-agent"
+    mention_triggers:
+      - "@kaka-agent"
+      - "/kaka"
 ```
 
 Với Telegram webhook production, dùng:
@@ -67,6 +78,25 @@ channels:
     webhook_url: "https://your-domain.example/channels/telegram/webhook"
     webhook_secret: "your-telegram-webhook-secret"
 ```
+
+Với GitHub App automation, dùng:
+
+```yaml
+channels:
+  github:
+    enabled: true
+    app_id: "123456"
+    app_slug: "your-github-app-slug"
+    private_key_path: "~/.kaka-agent/github-app.pem"
+    webhook_secret: "your-github-webhook-secret"
+    default_agent: "default"
+    trigger_label: "kaka-agent"
+    mention_triggers:
+      - "@kaka-agent"
+      - "/kaka"
+```
+
+GitHub App V1 dùng một app cho toàn instance, không cần `client_secret`. App cần quyền tối thiểu: Metadata read, Issues read/write, Contents read/write, Pull requests read/write. Bật webhook events: `issues`, `issue_comment`, `installation`, `installation_repositories`, `ping`. Webhook URL là `/channels/github/webhook`.
 
 ### 4. Chạy
 
