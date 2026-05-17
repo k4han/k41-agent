@@ -82,11 +82,12 @@ export function ToolCallDetail(props: {
   return (
     <details class="tool-call" open={props.defaultOpen ?? false}>
       <summary>
-        <span class="hint">Tool call</span>{" "}
         <span class="mono">{props.name || "unknown"}</span>
       </summary>
-      <pre>{formatValue(props.args)}</pre>
-      <pre>{props.result === null ? "Waiting for tool result..." : formatValue(props.result)}</pre>
+      <div class="tool-call-body">
+        <pre>{formatValue(props.args)}</pre>
+        <pre>{props.result === null ? "Waiting for tool result..." : formatValue(props.result)}</pre>
+      </div>
     </details>
   );
 }

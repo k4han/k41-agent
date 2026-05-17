@@ -1387,24 +1387,42 @@ a {
 }
 
 .tool-call {
-  margin: 0 0 14px 22px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface);
+  margin: 0 0 14px;
 }
 
 .tool-call summary {
   cursor: pointer;
-  padding: 9px 11px;
+  padding: 4px 0;
+  color: var(--muted);
+  font-size: 13px;
+  list-style: none;
 }
 
-.tool-call pre {
+.tool-call summary::-webkit-details-marker {
+  display: none;
+}
+
+.tool-call summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 6px;
+  transition: transform 120ms ease;
+}
+
+.tool-call[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.tool-call-body pre {
   max-height: 260px;
   overflow: auto;
-  border-top: 1px solid var(--border);
-  margin: 0;
+  margin: 6px 0 0;
   padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
   white-space: pre-wrap;
+  font-size: 12px;
 }
 
 .composer {
