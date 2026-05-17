@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+import logging
 from typing import Any, AsyncGenerator, Iterator
 
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
@@ -16,6 +17,8 @@ from agent.modules.workflows import (
     make_run_config,
     make_run_context,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def build_run_params(
@@ -79,6 +82,28 @@ def _graph_accepts_context(graph: Any) -> bool:
     if context_schema is Ellipsis:
         return True
     return context_schema is not None
+
+
+async def _record_conversation_thread(
+    *,
+    thread_id: str,
+    agent_name: str,
+    title: str = "",
+) -> None:
+    try:
+        from agent.modules.conversations import upsert_conversation_thread
+
+        await upsert_conversation_thread(
+            thread_id=thread_id,
+            agent_name=agent_name,
+            title=title,
+        )
+    except Exception as exc:
+        logger.debug(
+            "Failed to record conversation thread '%s': %s",
+            thread_id,
+            exc,
+        )
 
 
 def _coerce_stream_event(event: Any) -> tuple[str, Any]:
@@ -192,6 +217,11 @@ async def run_agent(
         provider=provider,
         model=model,
     )
+    await _record_conversation_thread(
+        thread_id=thread_id,
+        agent_name=agent_name,
+        title=user_input,
+    )
 
     stream_kwargs: dict[str, Any] = {
         "config": config,
@@ -265,6 +295,11 @@ async def run_agent_stream(
         allowed_tool_names=resolved_tools or None,
         provider=provider,
         model=model,
+    )
+    await _record_conversation_thread(
+        thread_id=thread_id,
+        agent_name=agent_name,
+        title=user_input,
     )
 
     seen_ids = set()

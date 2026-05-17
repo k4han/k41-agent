@@ -11,6 +11,11 @@ export type ThreadSummary = {
   platform: string;
   user_id: string;
   channel_id: string;
+  agent_name?: string;
+  title?: string;
+  kind?: string;
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 
 export type ThreadListPayload = {
@@ -34,6 +39,9 @@ export type ThreadMessagesPayload = {
   platform: string;
   user_id: string;
   channel_id: string;
+  agent_name?: string;
+  title?: string;
+  kind?: string;
 };
 
 export type ThreadTranscriptItem = TranscriptItem & { key: string };

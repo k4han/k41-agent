@@ -311,6 +311,24 @@ a {
   padding-right: 34px;
 }
 
+.nav-history-rename-input {
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  outline: none;
+  background: var(--surface);
+  color: var(--fg);
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.nav-history-rename-input:focus {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
 .nav-history-action {
   position: absolute;
   top: 50%;
@@ -346,11 +364,15 @@ a {
 }
 
 .nav-history-menu {
+  position: absolute;
+  top: calc(100% + 2px);
+  right: 4px;
+  z-index: 20;
   display: flex;
   width: 124px;
   flex-direction: column;
   gap: 2px;
-  margin: 2px 4px 4px auto;
+  margin: 0;
   padding: 4px;
   border: 1px solid var(--border);
   border-radius: 7px;
@@ -592,6 +614,22 @@ a {
   margin: 3px 0 0;
   color: var(--muted);
   font-size: 12px;
+}
+
+.page-subtitle-input {
+  width: min(520px, 100%);
+  min-height: 28px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  outline: none;
+  background: var(--surface);
+  color: var(--fg);
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.page-subtitle-input:focus {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fg) 8%, transparent);
 }
 
 .content {
@@ -1152,6 +1190,23 @@ a {
 
 .history-thread-link:hover {
   color: var(--info);
+}
+
+.history-thread-rename-input {
+  width: min(420px, 100%);
+  min-height: 30px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  outline: none;
+  background: var(--surface);
+  color: var(--fg);
+  padding: 0 8px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+}
+
+.history-thread-rename-input:focus {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fg) 8%, transparent);
 }
 
 .history-transcript {

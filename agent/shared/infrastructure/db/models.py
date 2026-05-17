@@ -7,6 +7,7 @@ def load_orm_models() -> tuple[type[object], ...]:
     """Import ORM models so they are attached to ``Base.metadata``."""
     from agent.modules.admin_auth import AdminCredential
     from agent.modules.channels import BotSettings
+    from agent.modules.conversations import ConversationThread
     from agent.modules.github import (
         GitHubInstallation,
         GitHubRepositoryBinding,
@@ -17,6 +18,7 @@ def load_orm_models() -> tuple[type[object], ...]:
 
     return (
         AdminCredential,
+        ConversationThread,
         User,
         BotSettings,
         UserPreferences,

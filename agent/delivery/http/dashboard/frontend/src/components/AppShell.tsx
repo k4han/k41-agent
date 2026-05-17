@@ -13,13 +13,14 @@ import {
   MessageSquare,
   MoreHorizontal,
   PanelsTopLeft,
+  Pencil,
   PlaySquare,
   Settings,
   Trash2,
 } from "lucide-solid";
 import { createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
 
-import { apiFetch, deleteJson } from "@/lib/api";
+import { apiFetch, deleteJson, patchJson } from "@/lib/api";
 import {
   chatThreadHref,
   historyThreadHref,
@@ -53,6 +54,11 @@ type ThreadSummary = {
   platform: string;
   user_id: string;
   channel_id: string;
+  agent_name?: string;
+  title?: string;
+  kind?: string;
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 
 type ThreadListPayload = {
@@ -63,7 +69,7 @@ type ThreadListPayload = {
 
 export function AppShell(props: {
   title: string;
-  subtitle?: string;
+  subtitle?: JSX.Element;
   actions?: JSX.Element;
   children: JSX.Element;
 }) {
@@ -80,6 +86,8 @@ export function AppShell(props: {
   const [historyMenuThreadId, setHistoryMenuThreadId] = createSignal<string | null>(null);
   const [historyNextOffset, setHistoryNextOffset] = createSignal(0);
   const [historyLoaded, setHistoryLoaded] = createSignal(false);
+  const [editingHistoryThreadId, setEditingHistoryThreadId] = createSignal<string | null>(null);
+  const [editingHistoryTitle, setEditingHistoryTitle] = createSignal("");
 
   const isActive = (href: string) => {
     if (href === "/") {
@@ -95,6 +103,15 @@ export function AppShell(props: {
     }
     if (!target.closest(".nav-history-item-wrapper")) {
       setHistoryMenuThreadId(null);
+    }
+  };
+
+  const handleThreadsChanged = () => {
+    if (editingHistoryThreadId()) {
+      return;
+    }
+    if (historyLoaded() || historyOpen()) {
+      void loadHistory(true);
     }
   };
 
@@ -166,11 +183,12 @@ export function AppShell(props: {
 
     setHistoryPanelOpen(!historyOpen());
   };
-  const threadTitle = (thread: ThreadSummary) => truncateText(thread.thread_id, 30);
+  const threadTitle = (thread: ThreadSummary) => truncateText(thread.title || thread.thread_id, 30);
   const threadMeta = (thread: ThreadSummary) => {
     const owner = thread.channel_id || thread.user_id;
     return [
       thread.platform,
+      thread.agent_name,
       owner ? truncateText(owner, 16) : "",
       `${thread.checkpoint_count} steps`,
     ].filter(Boolean).join(" / ");
@@ -188,6 +206,7 @@ export function AppShell(props: {
   const toggleHistoryMenu = (threadId: string, event: MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
+    setEditingHistoryThreadId(null);
     setHistoryMenuThreadId((current) => (current === threadId ? null : threadId));
   };
   const deleteHistoryThread = async (thread: ThreadSummary, event: MouseEvent) => {
@@ -214,6 +233,52 @@ export function AppShell(props: {
       showToast(err instanceof Error ? err.message : "Delete failed", "error");
     }
   };
+  const startRenameHistoryThread = (thread: ThreadSummary, event: MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    setHistoryMenuThreadId(null);
+    setEditingHistoryThreadId(thread.thread_id);
+    setEditingHistoryTitle(thread.title || thread.thread_id);
+  };
+  const cancelRenameHistoryThread = () => {
+    setEditingHistoryThreadId(null);
+    setEditingHistoryTitle("");
+  };
+  const finishRenameHistoryThread = async (thread: ThreadSummary) => {
+    if (editingHistoryThreadId() !== thread.thread_id) {
+      return;
+    }
+
+    const trimmedTitle = editingHistoryTitle().trim();
+    if (!trimmedTitle) {
+      showToast("Thread name cannot be empty.", "warning");
+      cancelRenameHistoryThread();
+      return;
+    }
+
+    if (trimmedTitle === (thread.title || thread.thread_id).trim()) {
+      cancelRenameHistoryThread();
+      return;
+    }
+
+    try {
+      const updated = await patchJson<ThreadSummary>(
+        threadApiPath(thread.thread_id),
+        { title: trimmedTitle },
+      );
+      setHistoryThreads((current) =>
+        current.map((item) =>
+          item.thread_id === updated.thread_id ? { ...item, ...updated } : item,
+        ),
+      );
+      cancelRenameHistoryThread();
+      showToast("Thread renamed.", "success");
+      window.dispatchEvent(new CustomEvent("kaka:threads-changed"));
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Rename failed", "error");
+    }
+  };
 
   onMount(() => {
     if (window.localStorage.getItem("kaka-dashboard-sidebar") === "collapsed") {
@@ -224,10 +289,12 @@ export function AppShell(props: {
       setHistoryPanelOpen(true);
     }
     document.addEventListener("click", handleClickOutside);
+    window.addEventListener("kaka:threads-changed", handleThreadsChanged);
   });
 
   onCleanup(() => {
     document.removeEventListener("click", handleClickOutside);
+    window.removeEventListener("kaka:threads-changed", handleThreadsChanged);
   });
 
   return (
@@ -311,28 +378,70 @@ export function AppShell(props: {
                   {(thread) => (
                     <div class="nav-history-item-wrapper">
                       <div
-                        class={`nav-history-item ${isThreadActive(thread.thread_id) ? "active" : ""}`}
+                        class={`nav-history-item ${isThreadActive(thread.thread_id) ? "active" : ""} ${editingHistoryThreadId() === thread.thread_id ? "editing" : ""}`}
                       >
-                        <A
-                          href={chatThreadHref(thread.thread_id)}
-                          class="nav-history-link"
-                          title={`${thread.thread_id} - ${threadMeta(thread)}`}
+                        <Show
+                          when={editingHistoryThreadId() === thread.thread_id}
+                          fallback={
+                            <A
+                              href={chatThreadHref(thread.thread_id)}
+                              class="nav-history-link"
+                              title={`${thread.thread_id} - ${threadMeta(thread)}`}
+                            >
+                              <span class="nav-history-title">{threadTitle(thread)}</span>
+                            </A>
+                          }
                         >
-                          <span class="nav-history-title">{threadTitle(thread)}</span>
-                        </A>
-                        <button
-                          class={`nav-history-action ${historyMenuThreadId() === thread.thread_id ? "active" : ""}`}
-                          type="button"
-                          title="Thread actions"
-                          aria-label="Thread actions"
-                          aria-expanded={historyMenuThreadId() === thread.thread_id}
-                          onClick={(event) => toggleHistoryMenu(thread.thread_id, event)}
-                        >
-                          <MoreHorizontal size={14} />
-                        </button>
+                          <input
+                            class="nav-history-rename-input"
+                            value={editingHistoryTitle()}
+                            ref={(element) => {
+                              window.setTimeout(() => {
+                                element.focus();
+                                element.select();
+                              }, 0);
+                            }}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                            }}
+                            onInput={(event) => setEditingHistoryTitle(event.currentTarget.value)}
+                            onBlur={() => void finishRenameHistoryThread(thread)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                event.currentTarget.blur();
+                              }
+                              if (event.key === "Escape") {
+                                event.preventDefault();
+                                cancelRenameHistoryThread();
+                              }
+                            }}
+                          />
+                        </Show>
+                        <Show when={editingHistoryThreadId() !== thread.thread_id}>
+                          <button
+                            class={`nav-history-action ${historyMenuThreadId() === thread.thread_id ? "active" : ""}`}
+                            type="button"
+                            title="Thread actions"
+                            aria-label="Thread actions"
+                            aria-expanded={historyMenuThreadId() === thread.thread_id}
+                            onClick={(event) => toggleHistoryMenu(thread.thread_id, event)}
+                          >
+                            <MoreHorizontal size={14} />
+                          </button>
+                        </Show>
                       </div>
                       <Show when={historyMenuThreadId() === thread.thread_id}>
                         <div class="nav-history-menu">
+                          <button
+                            class="nav-history-menu-item"
+                            type="button"
+                            onClick={(event) => startRenameHistoryThread(thread, event)}
+                          >
+                            <Pencil size={13} />
+                            <span>Rename</span>
+                          </button>
                           <button
                             class="nav-history-menu-item nav-history-menu-danger"
                             type="button"

@@ -15,6 +15,7 @@ from agent.modules.agent_runtime import (
     run_agent_full,
     run_agent_stream,
 )
+from agent.modules.conversations import create_thread_id
 from agent.modules.providers import (
     list_provider_model_catalog,
     list_provider_model_catalogs,
@@ -31,6 +32,13 @@ router = APIRouter(
 
 
 def _request_to_run_params(request: ChatRequest) -> dict[str, object]:
+    thread_id = request.thread_id
+    if request.new_thread and not thread_id:
+        thread_id = create_thread_id(
+            platform=Platform.API,
+            user_id=request.user_id,
+        )
+
     params = {
         "platform": Platform.API,
         "user_id": request.user_id,
@@ -41,8 +49,8 @@ def _request_to_run_params(request: ChatRequest) -> dict[str, object]:
         "provider": request.provider,
         "model": request.model,
     }
-    if request.thread_id:
-        params["thread_id"] = request.thread_id
+    if thread_id:
+        params["thread_id"] = thread_id
     return build_run_params(**params)
 
 
@@ -77,8 +85,14 @@ async def chat_events(request: ChatRequest):
     """Stream UI events for a chat request as newline-delimited JSON."""
 
     params = _request_to_run_params(request)
+    created_thread = bool(request.new_thread and not request.thread_id)
 
     async def event_generator():
+        if created_thread:
+            yield json.dumps(
+                {"type": "thread_created", "thread_id": params["thread_id"]},
+                ensure_ascii=False,
+            ) + "\n"
         async for event in run_agent_stream(**params):
             yield json.dumps(event, ensure_ascii=False) + "\n"
 

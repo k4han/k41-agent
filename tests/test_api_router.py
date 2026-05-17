@@ -222,6 +222,62 @@ def test_chat_events_can_resume_existing_thread(monkeypatch):
     assert response.text == '{"type": "final", "content": "resumed"}\n'
 
 
+def test_chat_events_can_create_new_thread(monkeypatch):
+    built_params = {
+        "user_input": "Start",
+        "thread_id": "api_dashboard_generated",
+        "agent_name": "default",
+        "workflow": None,
+        "working_dir": None,
+        "max_context_tokens": None,
+        "provider": None,
+        "model": None,
+    }
+
+    monkeypatch.setattr(
+        router_module,
+        "create_thread_id",
+        lambda **kwargs: "api_dashboard_generated",
+    )
+
+    def fake_build_run_params(**params):
+        assert params == {
+            "platform": "api",
+            "user_id": "dashboard",
+            "user_input": "Start",
+            "workflow": None,
+            "working_dir": None,
+            "agent_name": "default",
+            "provider": None,
+            "model": None,
+            "thread_id": "api_dashboard_generated",
+        }
+        return dict(built_params)
+
+    async def fake_run_agent_stream(**params):
+        assert params == built_params
+        yield {"type": "final", "content": "started"}
+
+    monkeypatch.setattr(router_module, "build_run_params", fake_build_run_params)
+    monkeypatch.setattr(router_module, "run_agent_stream", fake_run_agent_stream)
+
+    client = _create_client()
+    response = client.post(
+        "/api/chat/events",
+        json={
+            "message": "Start",
+            "user_id": "dashboard",
+            "new_thread": True,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.text == (
+        '{"type": "thread_created", "thread_id": "api_dashboard_generated"}\n'
+        '{"type": "final", "content": "started"}\n'
+    )
+
+
 def test_chat_events_streams_tool_calls_as_ndjson(monkeypatch):
     built_params = {
         "user_input": "Use a tool",

@@ -56,6 +56,13 @@ async def execute_scheduled_task(platform: str, user_id: str, task: str):
 
         graph = get_workflow_graph(GRAPH_NAME)
         user_config = make_run_config(thread_id=user_thread_id)
+        from agent.modules.conversations import upsert_conversation_thread
+
+        await upsert_conversation_thread(
+            thread_id=user_thread_id,
+            agent_name=AGENT_NAME,
+            title=task,
+        )
 
         await graph.aupdate_state(
             user_config,

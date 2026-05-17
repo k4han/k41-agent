@@ -966,6 +966,10 @@ async def remove_background_task(task_id: str) -> dict[str, str]:
 # --- chat history endpoints -------------------------------------------
 
 
+class RenameThreadBody(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+
+
 def _get_checkpointer():
     from agent.modules.workflows import get_checkpointer
 
@@ -976,56 +980,127 @@ def _get_checkpointer():
 
 
 def _parse_thread_id_safe(thread_id: str) -> dict[str, str]:
-    try:
-        from agent.modules.agent_runtime import SessionManager
+    from agent.modules.conversations import parse_thread_metadata
 
-        platform, user_id, channel_id = SessionManager.parse_thread_id(thread_id)
-        return {"platform": platform, "user_id": user_id, "channel_id": channel_id}
-    except ValueError:
-        return {"platform": "unknown", "user_id": thread_id, "channel_id": ""}
+    return parse_thread_metadata(thread_id)
+
+
+async def _get_checkpoint_stats(thread_id: str) -> dict[str, Any]:
+    """Read lightweight checkpoint stats via the checkpointer API."""
+    try:
+        checkpointer = _get_checkpointer()
+    except HTTPException:
+        return {"latest_checkpoint_id": "", "checkpoint_count": 0}
+
+    config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+    latest_checkpoint_id = ""
+    checkpoint_count = 0
+
+    try:
+        async for checkpoint_tuple in checkpointer.alist(config):
+            checkpoint_count += 1
+            if latest_checkpoint_id:
+                continue
+
+            tuple_config = getattr(checkpoint_tuple, "config", {}) or {}
+            configurable = tuple_config.get("configurable", {})
+            if isinstance(configurable, dict):
+                latest_checkpoint_id = str(configurable.get("checkpoint_id", "") or "")
+
+            if not latest_checkpoint_id:
+                checkpoint = getattr(checkpoint_tuple, "checkpoint", {}) or {}
+                if isinstance(checkpoint, dict):
+                    latest_checkpoint_id = str(checkpoint.get("id", "") or "")
+    except Exception as exc:
+        logger.warning("Failed to get checkpoint stats for %s: %s", thread_id, exc)
+        return {"latest_checkpoint_id": "", "checkpoint_count": 0}
+
+    return {
+        "latest_checkpoint_id": latest_checkpoint_id,
+        "checkpoint_count": checkpoint_count,
+    }
+
+
+async def _list_legacy_threads_from_checkpoints(
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    """Fallback for checkpoint-only threads created before thread metadata existed."""
+    from agent.modules.conversations import THREAD_KIND_USER, infer_thread_kind
+
+    try:
+        checkpointer = _get_checkpointer()
+    except HTTPException:
+        return []
+
+    summaries: dict[str, dict[str, Any]] = {}
+    try:
+        async for checkpoint_tuple in checkpointer.alist(None):
+            tuple_config = getattr(checkpoint_tuple, "config", {}) or {}
+            configurable = tuple_config.get("configurable", {})
+            if not isinstance(configurable, dict):
+                continue
+
+            thread_id = str(configurable.get("thread_id", "") or "")
+            if not thread_id or infer_thread_kind(thread_id) != THREAD_KIND_USER:
+                continue
+
+            checkpoint_ns = str(configurable.get("checkpoint_ns", "") or "")
+            if checkpoint_ns:
+                continue
+
+            checkpoint_id = str(configurable.get("checkpoint_id", "") or "")
+            summary = summaries.get(thread_id)
+            if summary is None:
+                summary = {
+                    "thread_id": thread_id,
+                    "latest_checkpoint_id": checkpoint_id,
+                    "checkpoint_count": 0,
+                    "agent_name": "",
+                    "title": thread_id,
+                    "kind": THREAD_KIND_USER,
+                    "created_at": None,
+                    "updated_at": None,
+                    **_parse_thread_id_safe(thread_id),
+                }
+                summaries[thread_id] = summary
+            summary["checkpoint_count"] += 1
+    except Exception as exc:
+        logger.warning("Failed to list legacy checkpoint threads: %s", exc)
+        return []
+
+    rows = list(summaries.values())
+    if offset:
+        rows = rows[offset:]
+    if limit is not None:
+        rows = rows[:limit]
+    return rows
 
 
 async def _list_threads_from_db(
     limit: int | None = None,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
-    """List distinct thread IDs from the checkpointer database."""
-    checkpointer = _get_checkpointer()
-    conn = getattr(checkpointer, "conn", None)
-    if conn is None:
-        return []
-
-    query = """
-        SELECT thread_id,
-               MAX(checkpoint_id) AS latest_checkpoint_id,
-               COUNT(*) AS checkpoint_count
-        FROM checkpoints
-        WHERE checkpoint_ns = ''
-        GROUP BY thread_id
-        ORDER BY MAX(checkpoint_id) DESC
-        """
-    params: list[int] = []
-    if limit is not None:
-        query += " LIMIT ? OFFSET ?"
-        params.extend([limit, offset])
+    """List user-facing conversation threads from the domain table."""
+    from agent.modules.conversations import list_conversation_threads
 
     try:
-        async with conn.execute(query, params) as cursor:
-            rows = await cursor.fetchall()
+        threads = await list_conversation_threads(limit=limit, offset=offset)
     except Exception as exc:
-        logger.warning("Failed to list threads from checkpointer: %s", exc)
+        logger.warning("Failed to list conversation threads: %s", exc)
         return []
 
-    threads = []
-    for thread_id, latest_checkpoint_id, checkpoint_count in rows:
-        parsed = _parse_thread_id_safe(thread_id)
-        threads.append({
-            "thread_id": thread_id,
-            "latest_checkpoint_id": latest_checkpoint_id,
-            "checkpoint_count": checkpoint_count,
-            **parsed,
+    if not threads:
+        return await _list_legacy_threads_from_checkpoints(limit=limit, offset=offset)
+
+    result = []
+    for thread in threads:
+        stats = await _get_checkpoint_stats(thread["thread_id"])
+        result.append({
+            **thread,
+            **stats,
         })
-    return threads
+    return result
 
 
 async def _get_thread_messages(thread_id: str) -> list[dict[str, Any]]:
@@ -1119,13 +1194,37 @@ async def get_chat_history(
 @router.get("/dashboard-api/chat-history/{thread_id:path}")
 async def get_chat_thread_messages(thread_id: str) -> dict[str, Any]:
     messages = await _get_thread_messages(thread_id)
-    parsed = _parse_thread_id_safe(thread_id)
+    from agent.modules.conversations import get_conversation_thread
+
+    metadata = await get_conversation_thread(thread_id)
+    parsed = metadata or _parse_thread_id_safe(thread_id)
     return {"thread_id": thread_id, "messages": messages, **parsed}
+
+
+@router.patch("/dashboard-api/chat-history/{thread_id:path}")
+async def rename_chat_thread(
+    thread_id: str,
+    body: RenameThreadBody,
+) -> dict[str, Any]:
+    from agent.modules.conversations import rename_conversation_thread
+
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Thread title cannot be empty.")
+
+    metadata = await rename_conversation_thread(thread_id, title)
+    stats = await _get_checkpoint_stats(thread_id)
+    return {
+        **metadata,
+        **stats,
+    }
 
 
 @router.delete("/dashboard-api/chat-history/{thread_id:path}")
 async def delete_chat_thread(thread_id: str) -> dict[str, str]:
+    from agent.modules.conversations import mark_conversation_thread_deleted
     from agent.modules.workflows import delete_workflow_thread
 
+    await mark_conversation_thread_deleted(thread_id)
     await delete_workflow_thread(thread_id)
     return {"status": "deleted", "thread_id": thread_id}

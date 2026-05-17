@@ -263,8 +263,15 @@ class BackgroundTaskManager:
         )
 
         try:
+            from agent.modules.conversations import upsert_conversation_thread
+
             graph = get_workflow_graph(_GRAPH_NAME)
             user_config = make_run_config(thread_id=user_thread_id)
+            await upsert_conversation_thread(
+                thread_id=user_thread_id,
+                agent_name=task.agent_name,
+                title=task.request,
+            )
 
             await graph.aupdate_state(
                 user_config,

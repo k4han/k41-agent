@@ -115,6 +115,43 @@ def test_dashboard_api_overview_returns_runtime_snapshot() -> None:
     }
 
 
+def test_dashboard_api_renames_chat_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
+    conversations_module = importlib.import_module("agent.modules.conversations")
+
+    async def fake_rename(thread_id: str, title: str):
+        assert thread_id == "api_dashboard_123"
+        assert title == "New title"
+        return {
+            "thread_id": thread_id,
+            "platform": "api",
+            "user_id": "dashboard",
+            "channel_id": "123",
+            "agent_name": "default",
+            "title": title,
+            "kind": "user",
+            "created_at": None,
+            "updated_at": None,
+        }
+
+    async def fake_stats(thread_id: str):
+        assert thread_id == "api_dashboard_123"
+        return {"latest_checkpoint_id": "ckpt-1", "checkpoint_count": 2}
+
+    monkeypatch.setattr(conversations_module, "rename_conversation_thread", fake_rename)
+    monkeypatch.setattr(dashboard_router_module, "_get_checkpoint_stats", fake_stats)
+
+    client = _create_dashboard_client(ChannelManager())
+    response = client.patch(
+        "/dashboard-api/chat-history/api_dashboard_123",
+        json={"title": " New title "},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["title"] == "New title"
+    assert response.json()["checkpoint_count"] == 2
+
+
 def test_dashboard_api_github_returns_repository_bindings(monkeypatch: pytest.MonkeyPatch) -> None:
     dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
 

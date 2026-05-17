@@ -61,7 +61,10 @@ export function putJson<T>(path: string, json?: unknown): Promise<T> {
   return apiFetch<T>(path, { method: "PUT", json });
 }
 
+export function patchJson<T>(path: string, json?: unknown): Promise<T> {
+  return apiFetch<T>(path, { method: "PATCH", json });
+}
+
 export function deleteJson<T>(path: string): Promise<T> {
   return apiFetch<T>(path, { method: "DELETE" });
 }
-

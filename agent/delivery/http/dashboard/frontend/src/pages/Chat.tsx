@@ -198,7 +198,7 @@ export function ChatPage() {
   };
 
   const buildPayload = (message: string) => {
-    const payload: Record<string, string> = {
+    const payload: Record<string, string | boolean> = {
       message,
       user_id: "dashboard",
       agent_name: agentName(),
@@ -214,6 +214,8 @@ export function ChatPage() {
     }
     if (currentThreadId()) {
       payload.thread_id = currentThreadId();
+    } else {
+      payload.new_thread = true;
     }
     return payload;
   };
@@ -223,6 +225,16 @@ export function ChatPage() {
     assistantIdRef: { id: number | null },
     streamedRef: { received: boolean },
   ) => {
+    if (event.type === "thread_created") {
+      const threadId = String(event.thread_id || "");
+      if (!threadId) {
+        return;
+      }
+      loadedThreadId = threadId;
+      setCurrentThreadId(threadId);
+      navigate(`/chat?thread=${encodeURIComponent(threadId)}`, { replace: true });
+      return;
+    }
     if (event.type === "message") {
       const content = String(event.content || "");
       if (!content) {
@@ -348,6 +360,9 @@ export function ChatPage() {
     } finally {
       setStreaming(false);
       setController(null);
+      if (currentThreadId()) {
+        window.dispatchEvent(new CustomEvent("kaka:threads-changed"));
+      }
     }
   };
 
