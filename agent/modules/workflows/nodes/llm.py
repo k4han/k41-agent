@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from langchain_core.messages import BaseMessage, SystemMessage
 
 from agent.modules.providers import get_chat_model
+from agent.modules.workflows.message_history import normalize_messages_for_chat_model
 from agent.modules.workflows.prompt_builders import (
     build_llm_system_prompt,
 )
@@ -72,10 +73,12 @@ def llm_node(state, runtime: Runtime[WorkflowContext]):
         catalog=catalog,
     )
 
-    messages: list[BaseMessage] = [
-        SystemMessage(content=system_prompt),
-        *state["messages"],
-    ]
+    messages: list[BaseMessage] = normalize_messages_for_chat_model(
+        [
+            SystemMessage(content=system_prompt),
+            *state["messages"],
+        ]
+    )
 
     llm = get_chat_model(provider_name=provider, model=model).bind_tools(tools)
     response = llm.invoke(messages)

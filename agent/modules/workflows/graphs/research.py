@@ -12,6 +12,7 @@ from agent.modules.workflows.nodes.trim import (
     make_prepare_context_node,
 )
 from agent.modules.workflows.run_config import WorkflowContext
+from agent.modules.workflows.message_history import normalize_messages_for_chat_model
 from agent.modules.workflows.state.extensions import (
     ResearchState,
 )
@@ -39,7 +40,8 @@ async def _research_node(state: ResearchState, config: RunnableConfig, runtime):
         "You are a research assistant. "
         "Analyze the request and list the information sources to investigate."
     ))
-    response = await llm.ainvoke([system, *state["messages"]])
+    messages = normalize_messages_for_chat_model([system, *state["messages"]])
+    response = await llm.ainvoke(messages)
     return {"messages": [response]}
 
 
@@ -50,7 +52,8 @@ async def _summarize_node(state: ResearchState, config: RunnableConfig, runtime)
         "Based on the collected information, write a concise report with "
         "clear sections: Summary, Key Points, and Conclusion."
     ))
-    response = await llm.ainvoke([system, *state["messages"]])
+    messages = normalize_messages_for_chat_model([system, *state["messages"]])
+    response = await llm.ainvoke(messages)
     return {
         "messages": [response],
         "summary": extract_final_text_content(response.content),
