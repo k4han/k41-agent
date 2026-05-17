@@ -13,9 +13,15 @@ from agent.modules.agent_runtime.runner import (
 from agent.modules.agent_runtime.background_tasks import (
     BackgroundTask,
     BackgroundTaskManager,
+    MAX_COMPLETED_TASKS,
     NotifyChannel,
     TaskStatus,
     get_background_task_manager,
+)
+from agent.modules.agent_runtime.models import BackgroundTaskRecord
+from agent.modules.agent_runtime.repository import (
+    BackgroundTaskRepository,
+    get_background_task_repository,
 )
 from agent.modules.agent_runtime.session import SessionManager
 
@@ -24,6 +30,9 @@ __all__ = [
     "ActiveSessionRegistry",
     "BackgroundTask",
     "BackgroundTaskManager",
+    "BackgroundTaskRecord",
+    "BackgroundTaskRepository",
+    "MAX_COMPLETED_TASKS",
     "NotifyChannel",
     "SessionManager",
     "TaskStatus",
@@ -31,6 +40,7 @@ __all__ = [
     "clear_agent_session",
     "get_active_session_registry",
     "get_background_task_manager",
+    "get_background_task_repository",
     "run_agent",
     "run_agent_full",
     "run_agent_stream",

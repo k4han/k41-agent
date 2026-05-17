@@ -634,6 +634,7 @@ a {
 
 .content {
   width: min(100%, 1420px);
+  margin-inline: auto;
   padding: 20px 24px 36px;
 }
 

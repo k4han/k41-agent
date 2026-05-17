@@ -960,7 +960,7 @@ async def cancel_background_task(task_id: str) -> dict[str, str]:
 @router.delete("/tasks/{task_id}")
 async def remove_background_task(task_id: str) -> dict[str, str]:
     manager = get_background_task_manager()
-    removed = manager.remove(task_id)
+    removed = await manager.remove(task_id)
     if not removed:
         raise HTTPException(
             status_code=400,
@@ -1228,6 +1228,80 @@ async def delete_chat_thread(thread_id: str) -> dict[str, str]:
     from agent.modules.conversations import mark_conversation_thread_deleted
     from agent.modules.workflows import delete_workflow_thread
 
+    await mark_conversation_thread_deleted(thread_id)
+    await delete_workflow_thread(thread_id)
+    return {"status": "deleted", "thread_id": thread_id}
+
+
+# --- background task conversation endpoints -------------------------------------------
+
+
+async def _list_background_threads_from_db(
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    """List background task threads from the domain table."""
+    from agent.modules.conversations import THREAD_KIND_BACKGROUND, list_conversation_threads
+
+    try:
+        threads = await list_conversation_threads(
+            limit=limit,
+            offset=offset,
+            kind=THREAD_KIND_BACKGROUND,
+        )
+    except Exception as exc:
+        logger.warning("Failed to list background task threads: %s", exc)
+        return []
+
+    if not threads:
+        return []
+
+    result = []
+    for thread in threads:
+        stats = await _get_checkpoint_stats(thread["thread_id"])
+        result.append({
+            **thread,
+            **stats,
+        })
+    return result
+
+
+@router.get("/dashboard-api/background-tasks")
+async def list_background_task_threads(
+    limit: int | None = Query(default=None, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, Any]:
+    fetch_limit = limit + 1 if limit is not None else None
+    threads = await _list_background_threads_from_db(limit=fetch_limit, offset=offset)
+    has_more = limit is not None and len(threads) > limit
+
+    if limit is not None:
+        threads = threads[:limit]
+
+    return {
+        "tasks": threads,
+        "has_more": has_more,
+        "next_offset": offset + len(threads),
+    }
+
+
+@router.get("/dashboard-api/background-tasks/{thread_id:path}")
+async def get_background_task_messages(thread_id: str) -> dict[str, Any]:
+    messages = await _get_thread_messages(thread_id)
+    from agent.modules.conversations import get_conversation_thread
+
+    metadata = await get_conversation_thread(thread_id)
+    parsed = metadata or _parse_thread_id_safe(thread_id)
+    return {"thread_id": thread_id, "messages": messages, **parsed}
+
+
+@router.delete("/dashboard-api/background-tasks/{thread_id:path}")
+async def delete_background_task_thread(thread_id: str) -> dict[str, str]:
+    from agent.modules.conversations import mark_conversation_thread_deleted
+    from agent.modules.agent_runtime import get_background_task_repository
+    from agent.modules.workflows import delete_workflow_thread
+
+    await get_background_task_repository().mark_deleted_by_thread_id(thread_id)
     await mark_conversation_thread_deleted(thread_id)
     await delete_workflow_thread(thread_id)
     return {"status": "deleted", "thread_id": thread_id}

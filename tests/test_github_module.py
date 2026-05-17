@@ -111,6 +111,9 @@ def binding(**overrides):
         "agent_name": "default",
         "trigger_label": "kaka-agent",
         "mention_triggers_json": '["@kaka-agent", "/kaka"]',
+        "notify_platform": None,
+        "notify_external_id": None,
+        "notify_channel_id": None,
     }
     data.update(overrides)
     return SimpleNamespace(**data)

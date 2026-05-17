@@ -31,6 +31,23 @@ _GRAPH_NAME = REACT_AGENT_GRAPH_TYPE
 _NODE_NAME = "llm"
 
 
+def _parse_timestamp(value: float | str | None) -> float:
+    """Convert a timestamp value to float seconds since epoch."""
+    if value is None:
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        from datetime import datetime, timezone
+
+        dt = datetime.fromisoformat(str(value))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+    except (ValueError, TypeError):
+        return 0.0
+
+
 class TaskStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
@@ -72,8 +89,10 @@ class BackgroundTask:
 
     def elapsed_seconds(self) -> float:
         """Return elapsed time since creation."""
-        end = self.completed_at or time.time()
-        start = self.started_at or self.created_at
+        end = self.completed_at if self.completed_at is not None else time.time()
+        start = self.started_at if self.started_at is not None else self.created_at
+        if start == 0.0:
+            return 0.0
         return end - start
 
     def to_dict(self) -> dict[str, Any]:
@@ -129,6 +148,88 @@ class BackgroundTaskManager:
         self._tasks: dict[str, BackgroundTask] = {}
         self._lock = threading.Lock()
 
+    async def restore_from_persistence(self) -> None:
+        """Restore task history from the background task table."""
+        from agent.modules.agent_runtime.repository import get_background_task_repository
+
+        try:
+            repository = get_background_task_repository()
+            records = await repository.list(limit=MAX_COMPLETED_TASKS, offset=0)
+            new_tasks: dict[str, BackgroundTask] = {}
+            for record in records:
+                task = self._task_from_record(record)
+                if task.task_id in self._tasks:
+                    continue
+
+                if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
+                    task.status = TaskStatus.FAILED
+                    task.error = "Interrupted by server restart"
+                    task.completed_at = time.time()
+                    await self._persist_task(task, repository=repository)
+
+                new_tasks[task.task_id] = task
+
+            with self._lock:
+                self._tasks.update(new_tasks)
+                self._trim_completed()
+            logger.info("Restored %d background tasks from persistence.", len(new_tasks))
+        except Exception as exc:
+            logger.warning("Failed to restore background tasks: %s", exc)
+
+    def _task_from_record(self, record: dict[str, Any]) -> BackgroundTask:
+        status_value = str(record.get("status") or TaskStatus.FAILED.value)
+        try:
+            status = TaskStatus(status_value)
+        except ValueError:
+            status = TaskStatus.FAILED
+
+        notify_channel = None
+        notify_platform = str(record.get("notify_platform") or "")
+        notify_external_id = str(record.get("notify_external_id") or "")
+        if notify_platform and notify_external_id:
+            notify_channel = NotifyChannel(
+                platform=notify_platform,
+                external_id=notify_external_id,
+                channel_id=str(record.get("notify_channel_id") or notify_external_id),
+            )
+
+        return BackgroundTask(
+            task_id=str(record.get("task_id") or ""),
+            request=str(record.get("request") or ""),
+            agent_name=str(record.get("agent_name") or "default"),
+            working_dir=record.get("working_dir"),
+            notify_channel=notify_channel,
+            status=status,
+            result=str(record.get("result") or ""),
+            error=str(record.get("error") or ""),
+            thread_id=str(record.get("thread_id") or ""),
+            created_at=_parse_timestamp(record.get("created_at")),
+            started_at=_parse_timestamp(record.get("started_at")) or None,
+            completed_at=_parse_timestamp(record.get("completed_at")) or None,
+        )
+
+    async def _persist_task(self, task: BackgroundTask, repository: Any | None = None) -> None:
+        from agent.modules.agent_runtime.repository import get_background_task_repository
+
+        notify_channel = task.notify_channel
+        repo = repository or get_background_task_repository()
+        await repo.upsert(
+            task_id=task.task_id,
+            thread_id=task.thread_id,
+            request=task.request,
+            agent_name=task.agent_name,
+            working_dir=task.working_dir,
+            notify_platform=notify_channel.platform if notify_channel else "",
+            notify_external_id=notify_channel.external_id if notify_channel else "",
+            notify_channel_id=notify_channel.channel_id if notify_channel else "",
+            status=task.status.value,
+            result=task.result,
+            error=task.error,
+            created_at=task.created_at,
+            started_at=task.started_at,
+            completed_at=task.completed_at,
+        )
+
     async def submit(
         self,
         request: str,
@@ -154,6 +255,16 @@ class BackgroundTaskManager:
             f"{BACKGROUND_THREAD_PREFIX}_dashboard_{task.task_id}"
         )
 
+        from agent.modules.conversations import THREAD_KIND_BACKGROUND, upsert_conversation_thread
+
+        await self._persist_task(task)
+        await upsert_conversation_thread(
+            thread_id=task.thread_id,
+            agent_name=task.agent_name,
+            title=task.request,
+            kind=THREAD_KIND_BACKGROUND,
+        )
+
         with self._lock:
             self._tasks[task.task_id] = task
             self._trim_completed()
@@ -175,8 +286,14 @@ class BackgroundTaskManager:
 
     async def _execute(self, task: BackgroundTask, run_fn: Any) -> None:
         """Execute the task in the background."""
+        from agent.modules.conversations import THREAD_KIND_BACKGROUND, upsert_conversation_thread
+
         task.status = TaskStatus.RUNNING
         task.started_at = time.time()
+        try:
+            await self._persist_task(task)
+        except Exception as exc:
+            logger.warning("Failed to persist background task %s start: %s", task.task_id, exc)
 
         try:
             result = await run_fn(
@@ -205,9 +322,20 @@ class BackgroundTaskManager:
             )
         finally:
             task.completed_at = time.time()
-            task._async_task = None
+
+            try:
+                await self._persist_task(task)
+                await upsert_conversation_thread(
+                    thread_id=task.thread_id,
+                    agent_name=task.agent_name,
+                    title=task.request,
+                    kind=THREAD_KIND_BACKGROUND,
+                )
+            except Exception as exc:
+                logger.warning("Failed to persist background task %s completion: %s", task.task_id, exc)
             with self._lock:
                 self._trim_completed()
+                task._async_task = None
             await self._notify_completion(task)
 
     async def _notify_completion(self, task: BackgroundTask) -> None:
@@ -263,7 +391,7 @@ class BackgroundTaskManager:
         )
 
         try:
-            from agent.modules.conversations import upsert_conversation_thread
+            from agent.modules.conversations import THREAD_KIND_USER, upsert_conversation_thread
 
             graph = get_workflow_graph(_GRAPH_NAME)
             user_config = make_run_config(thread_id=user_thread_id)
@@ -271,6 +399,7 @@ class BackgroundTaskManager:
                 thread_id=user_thread_id,
                 agent_name=task.agent_name,
                 title=task.request,
+                kind=THREAD_KIND_USER,
             )
 
             await graph.aupdate_state(
@@ -320,7 +449,7 @@ class BackgroundTaskManager:
                 return "cancelled"
         return "not_running"
 
-    def remove(self, task_id: str) -> bool:
+    async def remove(self, task_id: str) -> bool:
         """Remove a completed/failed task from history."""
         with self._lock:
             task = self._tasks.get(task_id)
@@ -328,8 +457,20 @@ class BackgroundTaskManager:
                 return False
             if task.status in (TaskStatus.RUNNING, TaskStatus.PENDING):
                 return False
-            del self._tasks[task_id]
-            return True
+            thread_id = task.thread_id
+
+        from agent.modules.agent_runtime.repository import get_background_task_repository
+        from agent.modules.conversations import mark_conversation_thread_deleted
+
+        await get_background_task_repository().mark_deleted(task_id)
+        if thread_id:
+            await mark_conversation_thread_deleted(thread_id)
+
+        with self._lock:
+            current = self._tasks.get(task_id)
+            if current is task and current.status not in (TaskStatus.RUNNING, TaskStatus.PENDING):
+                del self._tasks[task_id]
+        return True
 
     def count_by_status(self) -> dict[str, int]:
         """Return counts grouped by status."""

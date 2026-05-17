@@ -17,6 +17,7 @@ from agent.modules.workflows import (
 )
 from agent.modules.scheduler import initialize_scheduler, stop_scheduler
 from agent.modules.skills import reload_skills
+from agent.modules.agent_runtime import get_background_task_manager
 from agent.shared.infrastructure.db import Base, load_orm_models
 from agent.shared.infrastructure.db.engine import (
     close_async_engine,
@@ -73,10 +74,13 @@ class AppRuntime:
 
             self._register_channels()
             await self._start_enabled_channels()
-            
+
             logger.info("Starting background scheduler...")
             await initialize_scheduler()
-            
+
+            logger.info("Restoring background task history...")
+            await get_background_task_manager().restore_from_persistence()
+
             self._started = True
             logger.info("Application runtime is ready.")
         except Exception:

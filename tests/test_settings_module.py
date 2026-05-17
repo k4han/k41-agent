@@ -343,8 +343,10 @@ class TestPublicAPI:
     ) -> None:
         from agent.shared.config import get_config_service
         from agent.shared.config.yaml_source import YamlConfigSource
+        import agent.shared.config.service as service_module
         import agent.shared.config.yaml_source as yaml_src
 
+        monkeypatch.setattr(service_module, "_config_service", None)
         monkeypatch.setattr(
             yaml_src,
             "DEFAULT_CONFIG_PATH",
