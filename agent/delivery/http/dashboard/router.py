@@ -504,6 +504,9 @@ class GitHubRepositoryBindingBody(BaseModel):
     agent_name: str = ""
     trigger_label: str = ""
     mention_triggers: list[str] = Field(default_factory=list)
+    notify_platform: str = ""
+    notify_external_id: str = ""
+    notify_channel_id: str = ""
 
 
 @router.put("/dashboard-api/github/repositories/{repository_id}/binding")
@@ -519,6 +522,9 @@ async def update_dashboard_github_repository_binding(
             agent_name=body.agent_name,
             trigger_label=body.trigger_label,
             mention_triggers=body.mention_triggers,
+            notify_platform=body.notify_platform,
+            notify_external_id=body.notify_external_id,
+            notify_channel_id=body.notify_channel_id,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

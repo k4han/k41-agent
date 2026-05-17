@@ -7,7 +7,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-from agent.modules.agent_runtime import BackgroundTask, get_background_task_manager
+from agent.modules.agent_runtime import BackgroundTask, NotifyChannel, get_background_task_manager
 from agent.modules.agents import resolve_catalog_agent_name
 from agent.modules.github.client import GitHubAppClient
 from agent.modules.github.config import (
@@ -89,6 +89,9 @@ class GitHubAutomationService:
         agent_name: str,
         trigger_label: str,
         mention_triggers: list[str],
+        notify_platform: str = "",
+        notify_external_id: str = "",
+        notify_channel_id: str = "",
     ) -> dict[str, Any]:
         resolved_agent = resolve_catalog_agent_name(agent_name, self.settings.default_agent, "default")
         return await self.store.update_binding(
@@ -97,6 +100,9 @@ class GitHubAutomationService:
             agent_name=resolved_agent or "default",
             trigger_label=trigger_label or self.settings.trigger_label,
             mention_triggers=mention_triggers or list(self.settings.mention_triggers),
+            notify_platform=notify_platform,
+            notify_external_id=notify_external_id,
+            notify_channel_id=notify_channel_id,
         )
 
     async def handle_webhook(
@@ -232,10 +238,18 @@ class GitHubAutomationService:
         )
 
         manager = get_background_task_manager()
+        notify_channel = None
+        if binding.notify_platform and binding.notify_external_id:
+            notify_channel = NotifyChannel(
+                platform=binding.notify_platform,
+                external_id=binding.notify_external_id,
+                channel_id=binding.notify_channel_id or binding.notify_external_id,
+            )
         return await manager.submit(
             request=prompt,
             agent_name=agent_name,
             working_dir=str(prepared.path),
+            notify_channel=notify_channel,
             completion_hook=lambda task: self.publish_task_result(task, context),
         )
 

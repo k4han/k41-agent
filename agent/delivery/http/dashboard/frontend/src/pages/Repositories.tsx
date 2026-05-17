@@ -4,22 +4,27 @@ import { GitPullRequest, RefreshCw, Save } from "lucide-solid";
 import { AppShell } from "@/components/AppShell";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
-import { apiFetch, postJson, putJson } from "@/lib/api";
-import type { GitHubPayload, GitHubRepositoryBinding } from "@/types";
+import { apiFetch, putJson } from "@/lib/api";
+import type { GitHubPayload, GitHubRepositoryBinding, Identity } from "@/types";
 
 type RepositoryDraft = {
   enabled: boolean;
   agent_name: string;
   trigger_label: string;
   mention_triggers_text: string;
+  notify_identity: string;
 };
 
 function toDraft(repo: GitHubRepositoryBinding): RepositoryDraft {
+  const notifyIdentity = repo.notify_platform && repo.notify_external_id
+    ? `${repo.notify_platform}:${repo.notify_external_id}`
+    : "";
   return {
     enabled: repo.enabled,
     agent_name: repo.agent_name,
     trigger_label: repo.trigger_label,
     mention_triggers_text: repo.mention_triggers.join(", "),
+    notify_identity: notifyIdentity,
   };
 }
 
@@ -33,6 +38,7 @@ function splitTriggers(value: string): string[] {
 
 export function RepositoriesPage() {
   const [data, setData] = createSignal<GitHubPayload>();
+  const [identities, setIdentities] = createSignal<Identity[]>([]);
   const [error, setError] = createSignal("");
   const [drafts, setDrafts] = createSignal<Record<number, RepositoryDraft>>({});
   const { showToast } = useToast();
@@ -40,8 +46,12 @@ export function RepositoriesPage() {
   const load = async () => {
     setError("");
     try {
-      const payload = await apiFetch<GitHubPayload>("/dashboard-api/github");
+      const [payload, identitiesPayload] = await Promise.all([
+        apiFetch<GitHubPayload>("/dashboard-api/github"),
+        apiFetch<{ identities: Identity[] }>("/dashboard-api/tasks"),
+      ]);
       setData(payload);
+      setIdentities(identitiesPayload.identities || []);
       setDrafts(
         Object.fromEntries(payload.repositories.map((repo) => [repo.repository_id, toDraft(repo)])),
       );
@@ -76,12 +86,22 @@ export function RepositoriesPage() {
 
   const save = async (repo: GitHubRepositoryBinding) => {
     const draft = drafts()[repo.repository_id] || toDraft(repo);
+    let notify_platform = "";
+    let notify_external_id = "";
+    if (draft.notify_identity) {
+      const [platform, externalId] = draft.notify_identity.split(":", 2);
+      notify_platform = platform;
+      notify_external_id = externalId;
+    }
     try {
       await putJson(`/dashboard-api/github/repositories/${repo.repository_id}/binding`, {
         enabled: draft.enabled,
         agent_name: draft.agent_name,
         trigger_label: draft.trigger_label,
         mention_triggers: splitTriggers(draft.mention_triggers_text),
+        notify_platform,
+        notify_external_id,
+        notify_channel_id: notify_external_id,
       });
       showToast("Repository binding updated.");
       await load();
@@ -163,6 +183,7 @@ export function RepositoriesPage() {
                       <th>Enabled</th>
                       <th>Agent</th>
                       <th>Triggers</th>
+                      <th>Notification</th>
                       <th>Actions</th>
                     </tr>
                   </thead>
@@ -171,7 +192,7 @@ export function RepositoriesPage() {
                       each={payload.repositories}
                       fallback={
                         <tr>
-                          <td colSpan={5}>
+                          <td colSpan={6}>
                             <div class="empty">No repositories synced.</div>
                           </td>
                         </tr>
@@ -225,6 +246,22 @@ export function RepositoriesPage() {
                                   onInput={(event) => updateDraft(repo, "mention_triggers_text", event.currentTarget.value)}
                                 />
                               </div>
+                            </td>
+                            <td>
+                              <select
+                                class="select"
+                                value={draft().notify_identity}
+                                onChange={(event) => updateDraft(repo, "notify_identity", event.currentTarget.value)}
+                              >
+                                <option value="">No notification</option>
+                                <For each={identities()}>
+                                  {(identity) => (
+                                    <option value={`${identity.platform}:${identity.external_id}`}>
+                                      {identity.platform} - {identity.external_id}
+                                    </option>
+                                  )}
+                                </For>
+                              </select>
                             </td>
                             <td>
                               <button class="btn btn-sm" type="button" onClick={() => save(repo)}>

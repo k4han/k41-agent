@@ -47,6 +47,9 @@ def _serialize_binding(binding: GitHubRepositoryBinding) -> dict[str, Any]:
         "agent_name": binding.agent_name,
         "trigger_label": binding.trigger_label or DEFAULT_TRIGGER_LABEL,
         "mention_triggers": load_mention_triggers(binding.mention_triggers_json),
+        "notify_platform": binding.notify_platform or "",
+        "notify_external_id": binding.notify_external_id or "",
+        "notify_channel_id": binding.notify_channel_id or "",
         "last_synced_at": binding.last_synced_at.isoformat() if binding.last_synced_at else None,
         "created_at": binding.created_at.isoformat() if binding.created_at else None,
         "updated_at": binding.updated_at.isoformat() if binding.updated_at else None,
@@ -81,6 +84,9 @@ class GitHubRepositoryStore:
         agent_name: str,
         trigger_label: str,
         mention_triggers: list[str],
+        notify_platform: str = "",
+        notify_external_id: str = "",
+        notify_channel_id: str = "",
     ) -> dict[str, Any]:
         session = await get_async_session()
         async with session:
@@ -96,6 +102,9 @@ class GitHubRepositoryStore:
             binding.agent_name = agent_name.strip()
             binding.trigger_label = trigger_label.strip() or DEFAULT_TRIGGER_LABEL
             binding.mention_triggers_json = _json_list(mention_triggers or list(DEFAULT_MENTION_TRIGGERS))
+            binding.notify_platform = notify_platform.strip()
+            binding.notify_external_id = notify_external_id.strip()
+            binding.notify_channel_id = notify_channel_id.strip()
             await session.commit()
             await session.refresh(binding)
             return _serialize_binding(binding)

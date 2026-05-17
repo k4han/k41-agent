@@ -3,6 +3,7 @@ import { ArrowLeft, MessageSquare, Pencil, RefreshCw, Trash2, User } from "lucid
 import { createEffect, createMemo, createSignal, For, onMount, Show } from "solid-js";
 
 import { AppShell } from "@/components/AppShell";
+import { Dialog } from "@/components/Dialog";
 import { DataGate } from "@/components/State";
 import { TranscriptItemView } from "@/components/Transcript";
 import { useToast } from "@/components/Toast";
@@ -21,6 +22,8 @@ export function ChatHistoryListPage() {
   const [error, setError] = createSignal("");
   const [editingThreadId, setEditingThreadId] = createSignal<string | null>(null);
   const [editingTitle, setEditingTitle] = createSignal("");
+  const [deleteTarget, setDeleteTarget] = createSignal<ThreadSummary | null>(null);
+  const [deleting, setDeleting] = createSignal(false);
   const { showToast } = useToast();
 
   const load = async () => {
@@ -32,16 +35,29 @@ export function ChatHistoryListPage() {
     }
   };
 
-  const deleteThread = async (threadId: string) => {
-    if (!confirm(`Delete thread "${threadId}"?`)) {
+  const requestDeleteThread = (thread: ThreadSummary) => {
+    setDeleteTarget(thread);
+  };
+
+  const cancelDelete = () => {
+    setDeleteTarget(null);
+  };
+
+  const confirmDeleteThread = async () => {
+    const thread = deleteTarget();
+    if (!thread) {
       return;
     }
+    setDeleting(true);
     try {
-      await deleteJson(threadApiPath(threadId));
+      await deleteJson(threadApiPath(thread.thread_id));
       showToast("Thread deleted.", "success");
       await load();
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Delete failed", "error");
+    } finally {
+      setDeleting(false);
+      setDeleteTarget(null);
     }
   };
 
@@ -195,7 +211,7 @@ export function ChatHistoryListPage() {
                               <button
                                 class="btn btn-sm btn-danger"
                                 type="button"
-                                onClick={() => deleteThread(thread.thread_id)}
+                                onClick={() => requestDeleteThread(thread)}
                               >
                                 <Trash2 size={12} />
                               </button>
@@ -211,6 +227,29 @@ export function ChatHistoryListPage() {
           </Show>
         )}
       </DataGate>
+
+      <Dialog
+        open={deleteTarget() !== null}
+        title="Delete Thread"
+        onClose={cancelDelete}
+        footer={
+          <div class="row-wrap">
+            <button class="btn" type="button" onClick={cancelDelete} disabled={deleting()}>
+              Cancel
+            </button>
+            <button class="btn btn-danger" type="button" onClick={() => void confirmDeleteThread()} disabled={deleting()}>
+              <Trash2 size={14} />
+              {deleting() ? "Deleting..." : "Delete"}
+            </button>
+          </div>
+        }
+      >
+        <p>
+          Are you sure you want to delete thread{" "}
+          <span class="mono">{truncateText(deleteTarget()?.title || deleteTarget()?.thread_id || "", 60)}</span>?
+        </p>
+        <p class="muted" style="margin-top: 8px;">This action cannot be undone.</p>
+      </Dialog>
     </AppShell>
   );
 }

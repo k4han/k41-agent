@@ -20,6 +20,7 @@ import {
 } from "lucide-solid";
 import { createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
 
+import { Dialog } from "@/components/Dialog";
 import { apiFetch, deleteJson, patchJson } from "@/lib/api";
 import {
   chatThreadHref,
@@ -88,6 +89,8 @@ export function AppShell(props: {
   const [historyLoaded, setHistoryLoaded] = createSignal(false);
   const [editingHistoryThreadId, setEditingHistoryThreadId] = createSignal<string | null>(null);
   const [editingHistoryTitle, setEditingHistoryTitle] = createSignal("");
+  const [deleteTarget, setDeleteTarget] = createSignal<ThreadSummary | null>(null);
+  const [deleting, setDeleting] = createSignal(false);
 
   const isActive = (href: string) => {
     if (href === "/") {
@@ -209,15 +212,23 @@ export function AppShell(props: {
     setEditingHistoryThreadId(null);
     setHistoryMenuThreadId((current) => (current === threadId ? null : threadId));
   };
-  const deleteHistoryThread = async (thread: ThreadSummary, event: MouseEvent) => {
+  const requestDeleteHistoryThread = (thread: ThreadSummary, event: MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
+    setHistoryMenuThreadId(null);
+    setDeleteTarget(thread);
+  };
 
-    if (!confirm(`Delete thread "${thread.thread_id}"?`)) {
+  const cancelDelete = () => {
+    setDeleteTarget(null);
+  };
+
+  const confirmDeleteHistoryThread = async () => {
+    const thread = deleteTarget();
+    if (!thread) {
       return;
     }
-
-    setHistoryMenuThreadId(null);
+    setDeleting(true);
     try {
       await deleteJson(threadApiPath(thread.thread_id));
       setHistoryThreads((current) => (
@@ -231,6 +242,9 @@ export function AppShell(props: {
       }
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Delete failed", "error");
+    } finally {
+      setDeleting(false);
+      setDeleteTarget(null);
     }
   };
   const startRenameHistoryThread = (thread: ThreadSummary, event: MouseEvent) => {
@@ -445,7 +459,7 @@ export function AppShell(props: {
                           <button
                             class="nav-history-menu-item nav-history-menu-danger"
                             type="button"
-                            onClick={(event) => void deleteHistoryThread(thread, event)}
+                            onClick={(event) => requestDeleteHistoryThread(thread, event)}
                           >
                             <Trash2 size={13} />
                             <span>Delete</span>
@@ -525,6 +539,29 @@ export function AppShell(props: {
         </header>
         <div class="content">{props.children}</div>
       </main>
+
+      <Dialog
+        open={deleteTarget() !== null}
+        title="Delete Thread"
+        onClose={cancelDelete}
+        footer={
+          <div class="row-wrap">
+            <button class="btn" type="button" onClick={cancelDelete} disabled={deleting()}>
+              Cancel
+            </button>
+            <button class="btn btn-danger" type="button" onClick={() => void confirmDeleteHistoryThread()} disabled={deleting()}>
+              <Trash2 size={14} />
+              {deleting() ? "Deleting..." : "Delete"}
+            </button>
+          </div>
+        }
+      >
+        <p>
+          Are you sure you want to delete thread{" "}
+          <span class="mono">{truncateText(deleteTarget()?.title || deleteTarget()?.thread_id || "", 60)}</span>?
+        </p>
+        <p class="muted" style="margin-top: 8px;">This action cannot be undone.</p>
+      </Dialog>
     </div>
   );
 }

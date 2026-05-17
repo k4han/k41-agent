@@ -164,6 +164,9 @@ export type GitHubRepositoryBinding = {
   agent_name: string;
   trigger_label: string;
   mention_triggers: string[];
+  notify_platform: string;
+  notify_external_id: string;
+  notify_channel_id: string;
   last_synced_at: string | null;
   created_at: string | null;
   updated_at: string | null;
