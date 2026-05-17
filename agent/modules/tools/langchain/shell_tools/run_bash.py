@@ -1,8 +1,8 @@
 import subprocess
+from typing import Annotated, Any
 
 from langchain_core.tools import tool, InjectedToolArg
 from langgraph.prebuilt import ToolRuntime
-from typing import Annotated
 
 from agent.modules.tools.langchain.working_dir import get_working_dir
 from agent.modules.tools.runtime.path_guard import resolve_safe_path
@@ -11,7 +11,7 @@ from agent.modules.tools.runtime.path_guard import resolve_safe_path
 @tool
 def run_bash(
     command: str,
-    runtime: Annotated[ToolRuntime, InjectedToolArg],
+    runtime: Annotated[ToolRuntime[Any, Any], InjectedToolArg],
 ) -> str:
     """Run bash command in working directory."""
     working_dir = get_working_dir(runtime)

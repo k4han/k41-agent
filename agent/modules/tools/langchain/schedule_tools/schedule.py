@@ -16,7 +16,7 @@ from agent.modules.scheduler import (
 logger = logging.getLogger(__name__)
 
 
-def _parse_runtime_thread_id(runtime: ToolRuntime) -> tuple[str, str] | str:
+def _parse_runtime_thread_id(runtime: ToolRuntime[Any, Any]) -> tuple[str, str] | str:
     """Extract (platform, user_id) from the runtime's thread_id.
 
     Returns an error message string if parsing fails.
@@ -63,7 +63,7 @@ def schedule_task(
     task_description: str,
     trigger_type: TriggerType,
     trigger_args: dict[str, Any],
-    runtime: Annotated[ToolRuntime, InjectedToolArg],
+    runtime: Annotated[ToolRuntime[Any, Any], InjectedToolArg],
 ) -> str:
     """Schedule an AI task to run in the future or periodically."""
     try:
@@ -102,7 +102,9 @@ def schedule_task(
 
 
 @tool
-def list_scheduled_tasks(runtime: Annotated[ToolRuntime, InjectedToolArg]) -> str:
+def list_scheduled_tasks(
+    runtime: Annotated[ToolRuntime[Any, Any], InjectedToolArg],
+) -> str:
     """Lists all scheduled tasks for the current user."""
     try:
         result = _parse_runtime_thread_id(runtime)
@@ -140,7 +142,7 @@ class DeleteTaskInput(BaseModel):
 @tool(args_schema=DeleteTaskInput)
 def delete_scheduled_task(
     job_id: str,
-    runtime: Annotated[ToolRuntime, InjectedToolArg],
+    runtime: Annotated[ToolRuntime[Any, Any], InjectedToolArg],
 ) -> str:
     """Deletes a scheduled task by its ID."""
     try:

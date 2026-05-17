@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import logging
 import uuid
+from typing import Annotated, Any
 
 from langchain_core.tools import InjectedToolArg, tool
 from langgraph.prebuilt import ToolRuntime
-from typing import Annotated
 
 from agent.modules.tools.runtime.context import get_context_value
 from agent.shared.infrastructure.parsing import extract_final_text_content
@@ -15,7 +15,7 @@ from agent.shared.infrastructure.parsing import extract_final_text_content
 logger = logging.getLogger(__name__)
 
 
-def _make_subagent_thread_id(runtime: ToolRuntime, sub_agent: str) -> str:
+def _make_subagent_thread_id(runtime: ToolRuntime[Any, Any], sub_agent: str) -> str:
     configurable = runtime.config.get("configurable", {})
     parent_thread_id = ""
     if isinstance(configurable, dict):
@@ -37,7 +37,7 @@ def _graph_accepts_context(graph: object) -> bool:
 async def call_agent(
     task: str,
     sub_agent: str,
-    runtime: Annotated[ToolRuntime, InjectedToolArg],
+    runtime: Annotated[ToolRuntime[Any, Any], InjectedToolArg],
 ) -> str:
     """Invoke a sub-agent to handle a specific task."""
     from langchain_core.messages import HumanMessage
