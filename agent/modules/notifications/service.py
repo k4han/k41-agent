@@ -7,11 +7,13 @@ message to a user on their preferred platform.
 """
 
 import logging
-from typing import Any
+from typing import Any, Literal
 
 from agent.modules.users import Platform
 
 logger = logging.getLogger(__name__)
+
+NotificationFormat = Literal["markdown", "html", "plain"]
 
 _telegram_bot: Any | None = None
 _discord_client: Any | None = None
@@ -29,7 +31,13 @@ def set_discord_client(client: Any | None) -> None:
     _discord_client = client
 
 
-async def send_notification(platform: str, external_id: str, message: str) -> bool:
+async def send_notification(
+    platform: str,
+    external_id: str,
+    message: str,
+    *,
+    mode: NotificationFormat = "html",
+) -> bool:
     """Send a push notification via the appropriate channel client.
 
     Returns True if the message was sent successfully, False otherwise.
@@ -42,7 +50,7 @@ async def send_notification(platform: str, external_id: str, message: str) -> bo
                 _telegram_bot,
                 external_id,
                 message,
-                mode="html",
+                mode=mode,
             )
             return bool(sent)
 

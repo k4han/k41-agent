@@ -232,6 +232,37 @@ async def test_telegram_notification_uses_chunked_sender() -> None:
     assert all(call[2] == "HTML" for call in bot.calls)
 
 
+@pytest.mark.asyncio
+async def test_telegram_notification_can_send_markdown() -> None:
+    from agent.modules.notifications.service import send_notification, set_telegram_bot
+    from agent.modules.users import Platform
+
+    class FakeBot:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str, str | None]] = []
+
+        async def send_message(self, chat_id: str, text: str, parse_mode: str | None = None):
+            self.calls.append((chat_id, text, parse_mode))
+            return text
+
+    bot = FakeBot()
+    set_telegram_bot(bot)
+    try:
+        ok = await send_notification(
+            Platform.TELEGRAM,
+            "123",
+            "**Result**\n`x<y>`",
+            mode="markdown",
+        )
+    finally:
+        set_telegram_bot(None)
+
+    assert ok is True
+    assert bot.calls == [
+        ("123", "<b>Result</b>\n<code>x&lt;y&gt;</code>", "HTML")
+    ]
+
+
 def _create_webhook_client() -> TestClient:
     from agent.delivery.http.telegram_webhook import router
 

@@ -349,12 +349,14 @@ class BackgroundTaskManager:
             await self._inject_into_user_thread(task)
 
         request_preview = task.request[:200]
+        notification_mode = "html"
         if task.status == TaskStatus.COMPLETED:
             message = (
-                f"<b>\u2705 Task completed</b>\n"
-                f"<b>Request:</b> {escape_html(request_preview)}\n\n"
-                f"<b>Result:</b>\n{escape_html(task.result[:1000])}"
+                f"**\u2705 Task completed**\n"
+                f"**Request:** {request_preview}\n\n"
+                f"**Result:**\n{task.result[:1000]}"
             )
+            notification_mode = "markdown"
         elif task.status == TaskStatus.FAILED:
             message = (
                 f"<b>\u274c Task failed</b>\n"
@@ -373,6 +375,7 @@ class BackgroundTaskManager:
             platform=task.notify_channel.platform,
             external_id=task.notify_channel.external_id,
             message=message,
+            mode=notification_mode,
         )
 
     async def _inject_into_user_thread(self, task: BackgroundTask) -> None:

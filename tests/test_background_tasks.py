@@ -5,8 +5,11 @@ import pytest
 import pytest_asyncio
 
 from agent.modules.agent_runtime.background_tasks import (
+    BackgroundTask,
     BackgroundTaskManager,
     MAX_COMPLETED_TASKS,
+    NotifyChannel,
+    TaskStatus,
 )
 from agent.modules.agent_runtime.repository import BackgroundTaskRepository
 from agent.shared.infrastructure.db import Base, load_orm_models
@@ -165,3 +168,46 @@ async def test_background_task_restore_keeps_memory_bounded(
     await manager.restore_from_persistence()
 
     assert len(manager.list_all()) == MAX_COMPLETED_TASKS
+
+
+@pytest.mark.asyncio
+async def test_background_task_completion_notification_preserves_markdown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agent.modules.agent_runtime.background_tasks as background_tasks_module
+
+    sent: dict = {}
+
+    async def fake_send_notification(**kwargs):
+        sent.update(kwargs)
+        return True
+
+    async def fake_inject_into_user_thread(task: BackgroundTask) -> None:
+        return None
+
+    monkeypatch.setattr(
+        background_tasks_module,
+        "_send_notification",
+        fake_send_notification,
+    )
+
+    manager = BackgroundTaskManager()
+    monkeypatch.setattr(
+        manager,
+        "_inject_into_user_thread",
+        fake_inject_into_user_thread,
+    )
+
+    task = BackgroundTask(
+        request="summarize",
+        notify_channel=NotifyChannel(platform="telegram", external_id="123"),
+        status=TaskStatus.COMPLETED,
+        result="**bold** and `code`",
+    )
+
+    await manager._notify_completion(task)
+
+    assert sent["platform"] == "telegram"
+    assert sent["external_id"] == "123"
+    assert sent["mode"] == "markdown"
+    assert "**bold** and `code`" in sent["message"]

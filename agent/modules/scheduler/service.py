@@ -71,10 +71,10 @@ async def execute_scheduled_task(platform: str, user_id: str, task: str):
         )
 
         notification = (
-            f"<b>Scheduled task completed:</b>\n{escape_html(task)}\n\n"
-            f"<b>Result:</b>\n{escape_html(response_text)}"
+            f"**Scheduled task completed:**\n{task}\n\n"
+            f"**Result:**\n{response_text}"
         )
-        await _send_notification(platform, user_id, notification)
+        await _send_notification(platform, user_id, notification, mode="markdown")
 
     except Exception as e:
         logger.error(f"Failed to execute scheduled task '{task}' for {user_thread_id}: {e}", exc_info=True)
