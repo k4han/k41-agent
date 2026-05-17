@@ -692,6 +692,215 @@ a {
   border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
 }
 
+.settings-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-search {
+  position: relative;
+  width: min(520px, 100%);
+}
+
+.settings-search svg {
+  position: absolute;
+  top: 50%;
+  left: 11px;
+  color: var(--muted);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.settings-search .input {
+  padding-left: 34px;
+}
+
+.settings-group {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 1px;
+}
+
+.settings-section-title {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.settings-list,
+.provider-list,
+.change-list {
+  display: grid;
+  gap: 10px;
+}
+
+.setting-card {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+
+.setting-card-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 430px);
+  gap: 18px;
+  align-items: start;
+  padding: 14px;
+}
+
+.setting-copy {
+  min-width: 0;
+}
+
+.setting-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.setting-title {
+  overflow-wrap: anywhere;
+  font-weight: 650;
+}
+
+.setting-description {
+  max-width: 760px;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.setting-control-panel {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.setting-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.setting-detail-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
+.toggle-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 9px;
+  min-height: 38px;
+  width: fit-content;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  padding: 0 12px 0 5px;
+  font-size: 13px;
+  font-weight: 600;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.toggle-control:hover {
+  background: var(--surface-2);
+}
+
+.toggle-control.active {
+  border-color: color-mix(in srgb, var(--success) 42%, var(--border));
+  color: var(--success);
+}
+
+.toggle-track {
+  position: relative;
+  width: 44px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--surface-3);
+  transition: background-color 120ms ease;
+}
+
+.toggle-control.active .toggle-track {
+  background: color-mix(in srgb, var(--success) 24%, var(--surface-3));
+}
+
+.toggle-thumb {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  transition: transform 120ms ease;
+}
+
+.toggle-control.active .toggle-thumb {
+  transform: translateX(16px);
+}
+
+.provider-config-group {
+  display: grid;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.provider-config-group + .provider-config-group {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+.provider-config-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.change-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.9fr);
+  gap: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 12px;
+}
+
+.change-values {
+  display: grid;
+  gap: 8px;
+}
+
+.change-values > div {
+  display: grid;
+  gap: 3px;
+}
+
 .panel-header {
   display: flex;
   align-items: center;
@@ -1447,8 +1656,14 @@ a {
   .chat-shell,
   .grid-2,
   .grid-3,
-  .task-live-grid {
+  .task-live-grid,
+  .setting-card-main,
+  .change-card {
     grid-template-columns: 1fr;
+  }
+
+  .setting-actions {
+    justify-content: flex-start;
   }
 
   .nav-section-title {

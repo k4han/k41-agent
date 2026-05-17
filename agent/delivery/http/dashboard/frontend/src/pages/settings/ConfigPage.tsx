@@ -1,23 +1,23 @@
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
-import { RefreshCw, Save } from "lucide-solid";
+import { RefreshCw, Save, Search } from "lucide-solid";
 
 import { Dialog } from "@/components/Dialog";
 import { DataGate } from "@/components/State";
-import { formatValue } from "@/lib/utils";
+import type { SettingInfo } from "@/types";
 
 import { SettingsLayout } from "./SettingsLayout";
 import {
+  categoryLabel,
+  ChangesPreview,
   type PendingChange,
   SettingRow,
-  SourcesTab,
   useSettingsData,
 } from "./shared";
 
 export function ConfigPage() {
-  const { data, error, drafts, load, pendingChanges, setDraft, resetDraft, saveChanges } =
+  const { data, error, drafts, load, pendingChanges, setDraft, restoreDraft, saveChanges } =
     useSettingsData("/dashboard-api/config");
 
-  const [tab, setTab] = createSignal<"effective" | "sources">("effective");
   const [search, setSearch] = createSignal("");
   const [confirmOpen, setConfirmOpen] = createSignal(false);
 
@@ -67,31 +67,29 @@ export function ConfigPage() {
       <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => (
           <div class="stack">
-            <div class="tabs">
-              <button class={`tab ${tab() === "effective" ? "active" : ""}`} type="button" onClick={() => setTab("effective")}>
-                Effective Values
-              </button>
-              <button class={`tab ${tab() === "sources" ? "active" : ""}`} type="button" onClick={() => setTab("sources")}>
-                By Source
-              </button>
-            </div>
-
-            <Show when={tab() === "effective"}>
-              <div class="stack">
-                <input
-                  class="input"
-                  type="search"
-                  placeholder="Search settings..."
-                  value={search()}
-                  onInput={(event) => setSearch(event.currentTarget.value)}
-                />
-                <For each={filteredCategories()}>
-                  {(group) => (
-                    <section class="stack">
-                      <div class="row-wrap">
-                        <strong>{group.category}</strong>
-                        <span class="badge">{group.settings.length}</span>
+            <div class="stack">
+              <div class="settings-toolbar">
+                <div class="settings-search">
+                  <Search size={15} />
+                  <input
+                    class="input"
+                    type="search"
+                    placeholder="Search settings..."
+                    value={search()}
+                    onInput={(event) => setSearch(event.currentTarget.value)}
+                  />
+                </div>
+              </div>
+              <For each={filteredCategories()}>
+                {(group) => (
+                  <section class="settings-group">
+                    <div class="settings-section-header">
+                      <div>
+                        <div class="settings-section-title">{categoryLabel(group.category)}</div>
+                        <div class="hint">{group.settings.length} setting{group.settings.length === 1 ? "" : "s"}</div>
                       </div>
+                    </div>
+                    <div class="settings-list">
                       <For each={group.settings}>
                         {([key, info]) => (
                           <SettingRow
@@ -100,23 +98,23 @@ export function ConfigPage() {
                             draft={drafts()[key]}
                             dirty={pendingChanges().some((change) => change.key === key)}
                             onChange={(value) => setDraft(key, value)}
-                            onReset={() => resetDraft(key)}
+                            onRestore={() => restoreDraft(key)}
                           />
                         )}
                       </For>
-                    </section>
-                  )}
-                </For>
-              </div>
-            </Show>
-
-            <Show when={tab() === "sources"}>
-              <SourcesTab sources={payload.settings_sources} />
-            </Show>
+                    </div>
+                  </section>
+                )}
+              </For>
+              <Show when={filteredCategories().length === 0}>
+                <div class="empty">No settings found.</div>
+              </Show>
+            </div>
 
             <ConfirmDialog
               open={confirmOpen()}
               changes={pendingChanges()}
+              settings={payload.settings}
               onClose={() => setConfirmOpen(false)}
               onConfirm={() => saveChanges(() => setConfirmOpen(false))}
             />
@@ -130,6 +128,7 @@ export function ConfigPage() {
 function ConfirmDialog(props: {
   open: boolean;
   changes: PendingChange[];
+  settings: Record<string, SettingInfo>;
   onClose: () => void;
   onConfirm: () => void;
 }) {
@@ -150,18 +149,8 @@ function ConfirmDialog(props: {
       }
     >
       <div class="stack">
-        <p>You are about to update {props.changes.length} setting(s).</p>
-        <For each={props.changes}>
-          {(change) => (
-            <div class="panel">
-              <div class="panel-body">
-                <div class="mono">{change.key}</div>
-                <div class="hint">Current: {formatValue(change.oldValue)}</div>
-                <div>New: {formatValue(change.newValue)}</div>
-              </div>
-            </div>
-          )}
-        </For>
+        <p>You are about to update {props.changes.length} setting{props.changes.length === 1 ? "" : "s"}.</p>
+        <ChangesPreview changes={props.changes} settings={props.settings} />
       </div>
     </Dialog>
   );

@@ -30,6 +30,54 @@ function displayDraft(value: unknown): string {
   return String(value);
 }
 
+function controlInputType(info: SettingInfo): string {
+  if (info.input_type === "password") {
+    return "password";
+  }
+  if (info.input_type === "number") {
+    return "number";
+  }
+  if (info.input_type === "url") {
+    return "url";
+  }
+  return "text";
+}
+
+function providerNameFromKey(settingKey: string): string | null {
+  const match = /^llm\.providers\.([^.]+)\./.exec(settingKey);
+  return match?.[1] ?? null;
+}
+
+export function categoryLabel(category: string): string {
+  return category
+    .replace(/[_-]/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+export function settingLabel(
+  settingKey: string,
+  info?: Pick<SettingInfo, "label">,
+  options: { trimProviderPrefix?: boolean } = {},
+): string {
+  const label = info?.label || settingKey;
+  if (!options.trimProviderPrefix) {
+    return label;
+  }
+
+  const providerName = providerNameFromKey(settingKey);
+  const providerPrefix = providerName ? `${providerName}: ` : "";
+  return providerPrefix && label.startsWith(providerPrefix)
+    ? label.slice(providerPrefix.length)
+    : label;
+}
+
+export function formatSettingValue(info: SettingInfo | undefined, value: unknown): string {
+  if (info?.input_type === "password" && value) {
+    return "********";
+  }
+  return formatValue(value);
+}
+
 export function typedValue(info: SettingInfo, raw: unknown): unknown {
   if (raw === null) {
     return null;
@@ -92,9 +140,15 @@ export function useSettingsData(endpoint: string) {
     setDrafts((current) => ({ ...current, [key]: value }));
   };
 
-  const resetDraft = (key: string) => {
-    setDraft(key, null);
-    showToast("Reset queued. Save changes to apply.", "warning");
+  const restoreDraft = (key: string) => {
+    const payload = data();
+    if (!payload?.settings[key]) {
+      showToast("No server value to restore.", "warning");
+      return;
+    }
+    const current = payload.settings[key].value ?? null;
+    setDraft(key, current);
+    showToast("Change reverted.", "warning");
   };
 
   const saveChanges = async (onSuccess?: () => void) => {
@@ -114,7 +168,16 @@ export function useSettingsData(endpoint: string) {
     }
   };
 
-  return { data, error, drafts, load, pendingChanges, setDraft, resetDraft, saveChanges };
+  return {
+    data,
+    error,
+    drafts,
+    load,
+    pendingChanges,
+    setDraft,
+    restoreDraft,
+    saveChanges,
+  };
 }
 
 // --- Components ----------------------------------------------------------
@@ -133,10 +196,11 @@ export function SettingControl(props: {
           fallback={
             <input
               class="input"
-              type={props.info.input_type === "password" ? "password" : props.info.input_type === "number" ? "number" : "text"}
+              type={controlInputType(props.info)}
               min={props.info.min}
               max={props.info.max}
               step={props.info.step}
+              placeholder="Not set"
               value={displayDraft(props.value)}
               onInput={(event) => props.onChange(event.currentTarget.value)}
             />
@@ -151,14 +215,18 @@ export function SettingControl(props: {
         </Show>
       }
     >
-      <label class="checkbox-row">
-        <input
-          type="checkbox"
-          checked={Boolean(props.value)}
-          onChange={(event) => props.onChange(event.currentTarget.checked)}
-        />
-        <span>{Boolean(props.value) ? "enabled" : "disabled"}</span>
-      </label>
+      <button
+        class={`toggle-control ${Boolean(props.value) ? "active" : ""}`}
+        type="button"
+        role="switch"
+        aria-checked={Boolean(props.value)}
+        onClick={() => props.onChange(!Boolean(props.value))}
+      >
+        <span class="toggle-track">
+          <span class="toggle-thumb" />
+        </span>
+        <span>{Boolean(props.value) ? "Enabled" : "Disabled"}</span>
+      </button>
     </Show>
   );
 }
@@ -168,66 +236,73 @@ export function SettingRow(props: {
   info: SettingInfo;
   draft: unknown;
   dirty: boolean;
+  trimProviderPrefix?: boolean;
   onChange: (value: unknown) => void;
-  onReset: () => void;
+  onRestore: () => void;
 }) {
   return (
-    <div class={`panel ${props.dirty ? "setting-dirty" : ""}`}>
-      <div class="panel-body">
-        <div class="grid-2">
-          <div>
-            <div>{props.info.label || props.settingKey}</div>
-            <div class="mono hint">{props.settingKey}</div>
-            <Show when={props.info.description}>
-              <div class="hint">{props.info.description}</div>
-            </Show>
-            <div class="row-wrap" style={{ "margin-top": "8px" }}>
-              <span class="badge">{props.info.source}</span>
-              <span class="chip">{props.info.input_type}</span>
+    <div class={`setting-card ${props.dirty ? "setting-dirty" : ""}`}>
+      <div class="setting-card-main">
+        <div class="setting-copy">
+          <div class="setting-title-row">
+            <div class="setting-title">
+              {settingLabel(props.settingKey, props.info, {
+                trimProviderPrefix: props.trimProviderPrefix,
+              })}
             </div>
+            <Show when={props.dirty}>
+              <span class="badge badge-warning">Unsaved</span>
+            </Show>
           </div>
-          <div class="stack">
-            <SettingControl info={{ ...props.info, key: props.settingKey }} value={props.draft} onChange={props.onChange} />
-            <div class="row-wrap">
-              <button class="btn btn-sm" type="button" onClick={props.onReset}>
+          <Show when={props.info.description}>
+            <div class="setting-description">{props.info.description}</div>
+          </Show>
+        </div>
+        <div class="setting-control-panel">
+          <SettingControl info={{ ...props.info, key: props.settingKey }} value={props.draft} onChange={props.onChange} />
+          <Show when={props.dirty}>
+            <div class="setting-actions">
+              <button class="btn btn-sm" type="button" onClick={props.onRestore}>
                 <RotateCcw size={13} />
-                Reset
+                Undo
               </button>
             </div>
-          </div>
+          </Show>
         </div>
       </div>
     </div>
   );
 }
 
-export function SourcesTab(props: { sources: Record<string, Array<{ source: string; value: unknown }>> }) {
+export function ChangesPreview(props: {
+  changes: PendingChange[];
+  settings: Record<string, SettingInfo>;
+}) {
   return (
-    <section class="panel">
-      <div class="panel-header">
-        <div class="panel-title">Configuration Sources</div>
-      </div>
-      <div class="panel-body stack">
-        <For each={Object.entries(props.sources)}>
-          {([key, sources]) => (
-            <div class="panel">
-              <div class="panel-body">
-                <div class="mono">{key}</div>
-                <div class="stack" style={{ "margin-top": "8px" }}>
-                  <For each={sources}>
-                    {(source) => (
-                      <div class="row-wrap">
-                        <span class="badge">{source.source}</span>
-                        <span class="mono">{formatValue(source.value)}</span>
-                      </div>
-                    )}
-                  </For>
+    <div class="change-list">
+      <For each={props.changes}>
+        {(change) => {
+          const info = () => props.settings[change.key];
+          return (
+            <div class="change-card">
+              <div>
+                <div class="setting-title">{settingLabel(change.key, info())}</div>
+                <div class="mono hint">{change.key}</div>
+              </div>
+              <div class="change-values">
+                <div>
+                  <span class="setting-detail-label">Current</span>
+                  <span>{formatSettingValue(info(), change.oldValue)}</span>
+                </div>
+                <div>
+                  <span class="setting-detail-label">New</span>
+                  <span>{formatSettingValue(info(), change.newValue)}</span>
                 </div>
               </div>
             </div>
-          )}
-        </For>
-      </div>
-    </section>
+          );
+        }}
+      </For>
+    </div>
   );
 }
