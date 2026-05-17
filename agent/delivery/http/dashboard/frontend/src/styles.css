@@ -1096,6 +1096,45 @@ a {
   white-space: pre-wrap;
 }
 
+.task-live {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  padding: 10px;
+}
+
+.task-live-muted {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.task-live-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.task-live-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.task-live-cell {
+  min-width: 0;
+}
+
+.task-live-value {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 
 .is-hidden {
   display: none;
@@ -1233,7 +1272,8 @@ a {
   .grid-sidebar,
   .chat-shell,
   .grid-2,
-  .grid-3 {
+  .grid-3,
+  .task-live-grid {
     grid-template-columns: 1fr;
   }
 

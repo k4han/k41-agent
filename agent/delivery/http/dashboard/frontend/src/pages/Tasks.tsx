@@ -6,13 +6,27 @@ import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson } from "@/lib/api";
 import { statusBadgeClass, truncateText } from "@/lib/utils";
-import type { AgentConfig, BackgroundTask, Identity } from "@/types";
+import type { ActiveSession, AgentConfig, BackgroundTask, Identity } from "@/types";
 
 type TasksPayload = {
   tasks: BackgroundTask[];
   agents: AgentConfig[];
   identities: Identity[];
+  sessions: ActiveSession[];
 };
+
+type TaskOptionsPayload = {
+  tasks: BackgroundTask[];
+  agents: AgentConfig[];
+  identities: Identity[];
+};
+
+type SessionsPayload = {
+  sessions: ActiveSession[];
+  count: number;
+};
+
+const activeTaskStatuses = new Set(["running", "pending"]);
 
 export function TasksPage() {
   const [data, setData] = createSignal<TasksPayload>();
@@ -27,10 +41,13 @@ export function TasksPage() {
   const load = async () => {
     setError("");
     try {
-      const payload = await apiFetch<TasksPayload>("/dashboard-api/tasks");
-      setData(payload);
-      if (!payload.agents.some((agent) => agent.name === agentName()) && payload.agents[0]) {
-        setAgentName(payload.agents[0].name);
+      const [taskPayload, sessionPayload] = await Promise.all([
+        apiFetch<TaskOptionsPayload>("/dashboard-api/tasks"),
+        apiFetch<SessionsPayload>("/dashboard-api/sessions"),
+      ]);
+      setData({ ...taskPayload, sessions: sessionPayload.sessions });
+      if (!taskPayload.agents.some((agent) => agent.name === agentName()) && taskPayload.agents[0]) {
+        setAgentName(taskPayload.agents[0].name);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load tasks");
@@ -39,8 +56,15 @@ export function TasksPage() {
 
   const refreshTasks = async () => {
     try {
-      const result = await apiFetch<{ tasks: BackgroundTask[] }>("/tasks/list");
-      setData((current) => current && { ...current, tasks: result.tasks });
+      const [taskPayload, sessionPayload] = await Promise.all([
+        apiFetch<{ tasks: BackgroundTask[] }>("/tasks/list"),
+        apiFetch<SessionsPayload>("/dashboard-api/sessions"),
+      ]);
+      setData((current) => current && {
+        ...current,
+        tasks: taskPayload.tasks,
+        sessions: sessionPayload.sessions,
+      });
     } catch {
       return;
     }
@@ -119,9 +143,12 @@ export function TasksPage() {
     >
       <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => {
-          const active = payload.tasks.filter((task) => ["running", "pending"].includes(task.status)).length;
+          const active = payload.tasks.filter((task) => activeTaskStatuses.has(task.status)).length;
           const completed = payload.tasks.filter((task) => task.status === "completed").length;
           const failed = payload.tasks.filter((task) => ["failed", "cancelled"].includes(task.status)).length;
+          const liveSessionsByThread = new Map(
+            payload.sessions.map((session) => [session.thread_id, session]),
+          );
           return (
             <div class="stack">
               <section class="panel">
@@ -199,8 +226,9 @@ export function TasksPage() {
                 <div class="panel-body stack">
                   <For each={payload.tasks} fallback={<div class="empty">No tasks yet.</div>}>
                     {(task) => {
-                      const isActive = ["running", "pending"].includes(task.status);
+                      const isActive = activeTaskStatuses.has(task.status);
                       const hasDetails = Boolean(task.result || task.error);
+                      const liveSession = liveSessionsByThread.get(task.thread_id);
                       return (
                         <article class="panel">
                           <div class="panel-body stack">
@@ -217,6 +245,52 @@ export function TasksPage() {
                                 <span class="badge">{task.elapsed_display}</span>
                               </div>
                             </div>
+                            <Show
+                              when={liveSession}
+                              fallback={
+                                isActive ? (
+                                  <div class="task-live task-live-muted">
+                                    <span class="badge">Live session</span>
+                                    <span class="hint">Waiting for runtime details...</span>
+                                  </div>
+                                ) : null
+                              }
+                            >
+                              {(session) => (
+                                <div class="task-live">
+                                  <div class="task-live-header">
+                                    <div class="row-wrap">
+                                      <span class="badge badge-info">Live session</span>
+                                      <span class="badge">{session().elapsed_display}</span>
+                                    </div>
+                                    <span class="hint">Auto-refresh every 5s</span>
+                                  </div>
+                                  <div class="task-live-grid">
+                                    <div class="task-live-cell">
+                                      <div class="hint">Step</div>
+                                      <div class="mono task-live-value">{session().current_step}</div>
+                                    </div>
+                                    <div class="task-live-cell">
+                                      <div class="hint">Session</div>
+                                      <div class="mono task-live-value">
+                                        {truncateText(session().session_id, 28)}
+                                      </div>
+                                    </div>
+                                    <div class="task-live-cell">
+                                      <div class="hint">Origin</div>
+                                      <div class="task-live-value">
+                                        {session().platform} - {session().user_id}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div class="chips">
+                                    <For each={session().tools_called} fallback={<span class="chip">no tools yet</span>}>
+                                      {(tool) => <span class="chip">{tool}</span>}
+                                    </For>
+                                  </div>
+                                </div>
+                              )}
+                            </Show>
                             <div class="row-wrap">
                               <Show when={hasDetails}>
                                 <button class="btn btn-sm" type="button" onClick={() => toggleExpanded(task.task_id)}>
@@ -263,4 +337,3 @@ export function TasksPage() {
     </AppShell>
   );
 }
-
