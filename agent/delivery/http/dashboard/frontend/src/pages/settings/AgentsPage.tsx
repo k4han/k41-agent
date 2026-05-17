@@ -2,6 +2,7 @@ import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { Copy, Edit3, Eye, MessageSquare, Plus, RefreshCw, Trash2 } from "lucide-solid";
 
 import { Dialog } from "@/components/Dialog";
+import { ModelPicker } from "@/components/ModelPicker";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
@@ -184,19 +185,6 @@ export function AgentsPage() {
     }
   };
 
-  const selectedProvider = createMemo(() => {
-    const provider = form().provider;
-    if (provider === "default") {
-      return data()?.default_provider || provider;
-    }
-    return provider;
-  });
-
-  const modelOptions = createMemo(() => {
-    const catalog = data()?.model_catalogs.find((item) => item.provider === selectedProvider());
-    return uniqueSorted([...(catalog?.models.map((model) => model.id) || []), catalog?.default_model, form().model]);
-  });
-
   const subAgentOptions = createMemo(() =>
     (data()?.agent_names || []).filter((name) => name !== form().name),
   );
@@ -281,8 +269,7 @@ export function AgentsPage() {
                           </td>
                           <td>
                             <div class="chips">
-                              <span class="chip">{card.provider || "default"}</span>
-                              <span class="chip">{card.model || "provider default"}</span>
+                              <span class="chip">{`${card.provider || "default"}/${card.model || "provider default"}`}</span>
                             </div>
                           </td>
                           <td>
@@ -427,47 +414,30 @@ export function AgentsPage() {
                     </select>
                   </div>
                   <div class="field">
-                    <label>Provider</label>
-                    <select
-                      class="select"
-                      value={form().provider}
+                    <label>Provider / Model</label>
+                    <ModelPicker
+                      catalogs={payload.model_catalogs}
+                      providerNames={payload.provider_names}
+                      defaultProvider={payload.default_provider}
+                      provider={form().provider}
+                      model={form().model}
                       disabled={modalMode() === "view"}
-                      onChange={(event) => updateForm("provider", event.currentTarget.value)}
-                    >
-                      <For each={uniqueSorted(["default", ...payload.provider_names, form().provider])}>
-                        {(provider) => <option value={provider}>{provider}</option>}
-                      </For>
-                    </select>
+                      onChange={(provider, model) => {
+                        setForm((current) => ({ ...current, provider, model }));
+                      }}
+                    />
                   </div>
                 </div>
-                <div class="grid-2">
-                  <div class="field">
-                    <label>Model</label>
-                    <input
-                      class="input"
-                      list="agent-model-options"
-                      value={form().model}
-                      disabled={modalMode() === "view"}
-                      placeholder="Provider default"
-                      onInput={(event) => updateForm("model", event.currentTarget.value)}
-                    />
-                    <datalist id="agent-model-options">
-                      <For each={modelOptions()}>
-                        {(model) => <option value={model} />}
-                      </For>
-                    </datalist>
-                  </div>
-                  <div class="field">
-                    <label>Max Context Tokens</label>
-                    <input
-                      class="input"
-                      type="number"
-                      min="1"
-                      value={form().max_context_tokens}
-                      disabled={modalMode() === "view"}
-                      onInput={(event) => updateForm("max_context_tokens", Number(event.currentTarget.value))}
-                    />
-                  </div>
+                <div class="field">
+                  <label>Max Context Tokens</label>
+                  <input
+                    class="input"
+                    type="number"
+                    min="1"
+                    value={form().max_context_tokens}
+                    disabled={modalMode() === "view"}
+                    onInput={(event) => updateForm("max_context_tokens", Number(event.currentTarget.value))}
+                  />
                 </div>
                 <div class="field">
                   <label>Tools</label>

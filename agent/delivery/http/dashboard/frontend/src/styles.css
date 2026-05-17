@@ -818,6 +818,125 @@ a {
   font-weight: 620;
 }
 
+.model-picker {
+  position: relative;
+}
+
+.model-picker-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 38px;
+}
+
+.model-picker-input {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.model-picker-star {
+  display: grid;
+  min-height: 37px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-left: 0;
+  border-radius: 0 8px 8px 0;
+  background: var(--surface);
+  color: var(--muted);
+  padding: 0;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.model-picker-star:hover {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+
+.model-picker-star.active,
+.model-picker-option-star.active {
+  color: var(--warning);
+}
+
+.model-picker-dropdown {
+  position: absolute;
+  top: calc(100% + 5px);
+  right: 0;
+  left: 0;
+  z-index: 70;
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 6px;
+}
+
+.model-picker-group + .model-picker-group {
+  margin-top: 6px;
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+}
+
+.model-picker-group-title {
+  padding: 6px 8px 5px;
+  color: var(--muted-2);
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
+.model-picker-option {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px;
+  align-items: stretch;
+  border-radius: 7px;
+}
+
+.model-picker-option:hover,
+.model-picker-option.active {
+  background: var(--surface-2);
+}
+
+.model-picker-option-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  padding: 8px;
+  text-align: left;
+}
+
+.model-picker-option-main .mono {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-picker-option-star {
+  display: grid;
+  width: 30px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  place-items: center;
+}
+
+.model-picker-option-star:hover {
+  color: var(--fg);
+}
+
+.model-picker-empty {
+  padding: 22px 10px;
+  color: var(--muted);
+  text-align: center;
+}
+
 .hint {
   color: var(--muted);
   font-size: 12px;

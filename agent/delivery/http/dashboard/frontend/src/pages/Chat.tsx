@@ -3,6 +3,7 @@ import { Bot, RefreshCw, Send, Square, Trash2 } from "lucide-solid";
 import { createEffect, createMemo, createSignal, For, onMount, Show } from "solid-js";
 
 import { AppShell } from "@/components/AppShell";
+import { ModelPicker } from "@/components/ModelPicker";
 import { DataGate } from "@/components/State";
 import {
   createTranscriptTool,
@@ -59,13 +60,6 @@ export function ChatPage() {
   const selectedCard = createMemo<AgentCard | undefined>(() =>
     validCards().find((card) => card.name === agentName()),
   );
-  const resolvedProvider = createMemo(() =>
-    provider() === "default" ? data()?.default_provider || "default" : provider(),
-  );
-  const modelOptions = createMemo(() => {
-    const catalog = data()?.model_catalogs.find((item) => item.provider === resolvedProvider());
-    return uniqueSorted([...(catalog?.models.map((entry) => entry.id) || []), catalog?.default_model, selectedCard()?.model, model()]);
-  });
   const pageSubtitle = createMemo(() => (
     currentThreadId()
       ? `Continue thread ${truncateText(currentThreadId(), 88)}`
@@ -423,33 +417,19 @@ export function ChatPage() {
                   </select>
                 </div>
                 <div class="field">
-                  <label>Provider</label>
-                  <select
-                    class="select"
-                    value={provider()}
+                  <label>Provider / Model</label>
+                  <ModelPicker
+                    catalogs={payload.model_catalogs}
+                    providerNames={payload.provider_names}
+                    defaultProvider={payload.default_provider}
+                    provider={provider()}
+                    model={model()}
                     disabled={streaming()}
-                    onChange={(event) => setProvider(event.currentTarget.value)}
-                  >
-                    <For each={uniqueSorted(["default", ...payload.provider_names, provider()])}>
-                      {(item) => <option value={item}>{item}</option>}
-                    </For>
-                  </select>
-                </div>
-                <div class="field">
-                  <label>Model</label>
-                  <input
-                    class="input"
-                    list="chat-model-options"
-                    value={model()}
-                    disabled={streaming()}
-                    placeholder="Provider default"
-                    onInput={(event) => setModel(event.currentTarget.value)}
+                    onChange={(nextProvider, nextModel) => {
+                      setProvider(nextProvider);
+                      setModel(nextModel);
+                    }}
                   />
-                  <datalist id="chat-model-options">
-                    <For each={modelOptions()}>
-                      {(item) => <option value={item} />}
-                    </For>
-                  </datalist>
                 </div>
                 <div class="panel">
                   <div class="panel-body">
