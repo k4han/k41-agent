@@ -374,3 +374,81 @@ async def test_run_agent_stream_emits_tool_call_and_result(monkeypatch):
         },
         {"type": "final", "content": "done"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_emits_text_attached_to_tool_call(monkeypatch):
+    class _FakeCatalog:
+        def get_agent(self, name: str):
+            return SimpleNamespace(
+                graph_type="react_agent",
+                max_context_tokens=1234,
+                tools=["list_files"],
+            )
+
+    class _FakeGraph:
+        async def astream(self, payload, **kwargs):
+            yield {
+                "messages": [
+                    AIMessage(
+                        content="I will inspect the files.",
+                        id="ai-tool",
+                        tool_calls=[
+                            {
+                                "id": "call-1",
+                                "name": "list_files",
+                                "args": {"path": "."},
+                            }
+                        ],
+                    )
+                ]
+            }
+            yield {
+                "messages": [
+                    ToolMessage(
+                        content="README.md\nagent/",
+                        tool_call_id="call-1",
+                        name="list_files",
+                        id="tool-result",
+                    )
+                ]
+            }
+            yield {"messages": [AIMessage(content="done", id="ai-final")]}
+
+    monkeypatch.setattr(
+        "agent.modules.agents.get_catalog_service",
+        lambda: _FakeCatalog(),
+    )
+    monkeypatch.setattr(runner_module, "get_workflow_graph", lambda name: _FakeGraph())
+    monkeypatch.setattr(runner_module, "make_run_context", lambda **kwargs: kwargs)
+    monkeypatch.setattr(
+        runner_module,
+        "make_run_config",
+        lambda **kwargs: {"configurable": {"thread_id": kwargs["thread_id"]}},
+    )
+
+    events = [
+        event
+        async for event in runner_module.run_agent_stream(
+            user_input="hi",
+            thread_id="thread-1",
+            agent_name="default",
+        )
+    ]
+
+    assert events == [
+        {"type": "final", "content": "I will inspect the files."},
+        {
+            "type": "tool_call",
+            "id": "call-1",
+            "name": "list_files",
+            "args": {"path": "."},
+        },
+        {
+            "type": "tool_result",
+            "tool_call_id": "call-1",
+            "name": "list_files",
+            "content": "README.md\nagent/",
+        },
+        {"type": "final", "content": "done"},
+    ]

@@ -66,7 +66,6 @@ export function TranscriptMessageView(props: { role: TranscriptRole; text: strin
   return (
     <div class={`message ${props.role}`}>
       <div class="message-bubble">
-        <div class="hint">{props.role}</div>
         {props.text}
       </div>
     </div>

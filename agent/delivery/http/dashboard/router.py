@@ -1138,10 +1138,11 @@ async def _get_thread_messages(thread_id: str) -> list[dict[str, Any]]:
         elif isinstance(msg, AIMessage):
             from agent.shared.infrastructure.parsing import extract_final_text_content
 
+            content = extract_final_text_content(getattr(msg, "content", None))
+            entry["role"] = "assistant"
+            entry["content"] = content or ""
             tool_calls = getattr(msg, "tool_calls", None)
             if tool_calls:
-                entry["role"] = "assistant"
-                entry["content"] = ""
                 entry["tool_calls"] = [
                     {
                         "id": tc.get("id"),
@@ -1150,10 +1151,6 @@ async def _get_thread_messages(thread_id: str) -> list[dict[str, Any]]:
                     }
                     for tc in tool_calls
                 ]
-            else:
-                content = extract_final_text_content(getattr(msg, "content", None))
-                entry["role"] = "assistant"
-                entry["content"] = content or ""
         elif isinstance(msg, ToolMessage):
             from agent.shared.infrastructure.parsing import extract_final_text_content
 

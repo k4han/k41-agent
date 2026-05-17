@@ -92,6 +92,15 @@ export function toThreadTranscript(messages: ThreadMessage[]): ThreadTranscriptI
       return;
     }
 
+    if (msg.content || !msg.tool_calls?.length) {
+      items.push({
+        key: `message-${messageIndex}-${msg.id || "unknown"}`,
+        type: "message",
+        role: msg.role,
+        text: msg.content,
+      });
+    }
+
     if (msg.tool_calls?.length) {
       msg.tool_calls.forEach((toolCall, toolCallIndex) => {
         items.push({
@@ -102,15 +111,6 @@ export function toThreadTranscript(messages: ThreadMessage[]): ThreadTranscriptI
             args: toolCall.args,
           }),
         });
-      });
-    }
-
-    if (msg.content || !msg.tool_calls?.length) {
-      items.push({
-        key: `message-${messageIndex}-${msg.id || "unknown"}`,
-        type: "message",
-        role: msg.role,
-        text: msg.content,
       });
     }
   });

@@ -152,6 +152,78 @@ def test_dashboard_api_renames_chat_thread(monkeypatch: pytest.MonkeyPatch) -> N
     assert response.json()["checkpoint_count"] == 2
 
 
+@pytest.mark.asyncio
+async def test_dashboard_thread_messages_preserve_assistant_text_with_tool_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
+    from langchain_core.messages import AIMessage, ToolMessage
+
+    class FakeCheckpointer:
+        async def aget_tuple(self, config):
+            assert config == {
+                "configurable": {
+                    "thread_id": "api_dashboard_123",
+                    "checkpoint_ns": "",
+                }
+            }
+            return SimpleNamespace(
+                checkpoint={
+                    "channel_values": {
+                        "messages": [
+                            AIMessage(
+                                content="I will inspect the files.",
+                                id="ai-tool",
+                                tool_calls=[
+                                    {
+                                        "id": "call-1",
+                                        "name": "list_files",
+                                        "args": {"path": "."},
+                                    }
+                                ],
+                            ),
+                            ToolMessage(
+                                content="README.md",
+                                tool_call_id="call-1",
+                                name="list_files",
+                                id="tool-result",
+                            ),
+                        ]
+                    }
+                }
+            )
+
+    monkeypatch.setattr(
+        dashboard_router_module,
+        "_get_checkpointer",
+        lambda: FakeCheckpointer(),
+    )
+
+    messages = await dashboard_router_module._get_thread_messages("api_dashboard_123")
+
+    assert messages == [
+        {
+            "id": "ai-tool",
+            "role": "assistant",
+            "content": "I will inspect the files.",
+            "tool_calls": [
+                {
+                    "id": "call-1",
+                    "name": "list_files",
+                    "args": {"path": "."},
+                }
+            ],
+        },
+        {
+            "id": "tool-result",
+            "role": "tool",
+            "name": "list_files",
+            "tool_call_id": "call-1",
+            "content": "README.md",
+        },
+    ]
+
+
 def test_dashboard_api_github_returns_repository_bindings(monkeypatch: pytest.MonkeyPatch) -> None:
     dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
 

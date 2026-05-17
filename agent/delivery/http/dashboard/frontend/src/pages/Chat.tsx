@@ -244,6 +244,8 @@ export function ChatPage() {
           args: event.args ?? null,
         }),
       );
+      assistantIdRef.id = null;
+      streamedRef.received = false;
       return;
     }
     if (event.type === "tool_result") {

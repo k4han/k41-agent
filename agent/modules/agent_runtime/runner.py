@@ -345,6 +345,13 @@ async def run_agent_stream(
 
             if isinstance(last, AIMessage):
                 tool_calls = getattr(last, "tool_calls", None)
+                content = extract_final_text_content(getattr(last, "content", None))
+                if content:
+                    registry.update_step(session_id, SESSION_STEP_RESPONDING)
+                    yield {
+                        "type": "final",
+                        "content": content,
+                    }
                 if tool_calls:
                     for tc in tool_calls:
                         tool_name = tc.get("name") or "unknown"
@@ -355,13 +362,6 @@ async def run_agent_stream(
                             "name": tool_name,
                             "args": tc.get("args"),
                         }
-                content = extract_final_text_content(getattr(last, "content", None))
-                if content and not tool_calls:
-                    registry.update_step(session_id, SESSION_STEP_RESPONDING)
-                    yield {
-                        "type": "final",
-                        "content": content,
-                    }
             elif isinstance(last, ToolMessage):
                 yield {
                     "type": "tool_result",
