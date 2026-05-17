@@ -16,7 +16,7 @@ import {
   threadApiPath,
   toThreadTranscript,
 } from "@/lib/chatThreads";
-import { truncateText, uniqueSorted } from "@/lib/utils";
+import { truncateText } from "@/lib/utils";
 import type { TranscriptItem } from "@/components/Transcript";
 import type { ThreadMessagesPayload } from "@/lib/chatThreads";
 import type { AgentCard, AgentsPayload } from "@/types";
@@ -35,7 +35,6 @@ export function ChatPage() {
   const [threadLoading, setThreadLoading] = createSignal(false);
   const [currentThreadId, setCurrentThreadId] = createSignal("");
   const [agentName, setAgentName] = createSignal("");
-  const [workflow, setWorkflow] = createSignal("");
   const [provider, setProvider] = createSignal("default");
   const [model, setModel] = createSignal("");
   const [prompt, setPrompt] = createSignal("");
@@ -84,7 +83,6 @@ export function ChatPage() {
     if (!card) {
       return;
     }
-    setWorkflow("");
     setProvider(card.provider || "default");
     setModel(card.model || "");
   });
@@ -197,9 +195,6 @@ export function ChatPage() {
       user_id: "dashboard",
       agent_name: agentName(),
     };
-    if (workflow()) {
-      payload.workflow = workflow();
-    }
     if (provider()) {
       payload.provider = provider();
     }
@@ -403,20 +398,6 @@ export function ChatPage() {
                   </select>
                 </div>
                 <div class="field">
-                  <label>Workflow</label>
-                  <select
-                    class="select"
-                    value={workflow()}
-                    disabled={streaming()}
-                    onChange={(event) => setWorkflow(event.currentTarget.value)}
-                  >
-                    <option value="">Use agent default</option>
-                    <For each={uniqueSorted([...(payload.workflows || []), selectedCard()?.graph_type])}>
-                      {(item) => <option value={item}>{item}</option>}
-                    </For>
-                  </select>
-                </div>
-                <div class="field">
                   <label>Provider / Model</label>
                   <ModelPicker
                     catalogs={payload.model_catalogs}
@@ -485,27 +466,33 @@ export function ChatPage() {
                   placeholder={currentThreadId() ? "Continue this thread..." : "Ask the selected agent something..."}
                   onInput={(event) => setPrompt(event.currentTarget.value)}
                   onKeyDown={(event) => {
-                    if (event.ctrlKey && event.key === "Enter") {
+                    if (event.key === "Enter" && !event.ctrlKey && !event.shiftKey) {
                       event.preventDefault();
                       void sendMessage();
                     }
                   }}
                 />
                 <div class="split">
-                  <span class="hint">Press Ctrl + Enter to send.</span>
+                  <span class="hint">Press Enter to send, Ctrl + Enter for new line.</span>
                   <div class="row-wrap">
                     <button class="btn" type="button" onClick={resetChat} disabled={streaming()}>
                       <Trash2 size={14} />
                       {currentThreadId() ? "New Chat" : "Reset"}
                     </button>
-                    <button class="btn btn-warning" type="button" onClick={stopChat} disabled={!streaming()}>
-                      <Square size={14} />
-                      Stop
-                    </button>
-                    <button class="btn btn-primary" type="button" onClick={sendMessage} disabled={streaming() || threadLoading()}>
-                      <Send size={14} />
-                      Send
-                    </button>
+                    <Show
+                      when={streaming()}
+                      fallback={
+                        <button class="btn btn-primary" type="button" onClick={sendMessage} disabled={threadLoading()}>
+                          <Send size={14} />
+                          Send
+                        </button>
+                      }
+                    >
+                      <button class="btn btn-warning" type="button" onClick={stopChat}>
+                        <Square size={14} />
+                        Stop
+                      </button>
+                    </Show>
                   </div>
                 </div>
               </div>
