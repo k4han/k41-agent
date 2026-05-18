@@ -33,6 +33,7 @@ export function DataGate<T>(props: {
   return (
     <Show
       when={props.data}
+      keyed
       fallback={
         props.error ? (
           <ErrorPanel message={props.error} onRetry={props.onRetry} />
@@ -41,8 +42,7 @@ export function DataGate<T>(props: {
         )
       }
     >
-      {(data) => props.children(data())}
+      {(data) => props.children(data)}
     </Show>
   );
 }
-
