@@ -151,7 +151,7 @@ export function TasksPage() {
       const result = await postJson<{ task_id: string }>("/tasks", payload);
       setRequest("");
       showToast(`Task ${result.task_id} submitted.`);
-      await load();
+      await refreshTasks();
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to submit task", "error");
     }
