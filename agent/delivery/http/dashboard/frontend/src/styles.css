@@ -1539,6 +1539,22 @@ a {
   color: var(--info);
 }
 
+.inline-rename-input {
+  width: 100%;
+  min-height: 28px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  outline: none;
+  background: var(--surface);
+  color: var(--fg);
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.inline-rename-input:focus {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
 .history-thread-rename-input {
   width: min(420px, 100%);
   min-height: 30px;

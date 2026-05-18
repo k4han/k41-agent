@@ -3,9 +3,12 @@ import { Play, RefreshCw, Square, Trash2 } from "lucide-solid";
 
 import { AppShell } from "@/components/AppShell";
 import { DataGate } from "@/components/State";
+import { MetricCard, MetricsRow } from "@/components/Metrics";
+import { IdentityPicker } from "@/components/IdentityPicker";
+import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson } from "@/lib/api";
-import { statusBadgeClass, truncateText } from "@/lib/utils";
+import { truncateText } from "@/lib/utils";
 import type { ActiveSession, AgentConfig, BackgroundTask, Identity } from "@/types";
 
 type TasksPayload = {
@@ -180,21 +183,11 @@ export function TasksPage() {
                         {(agent) => <option value={agent.name}>{agent.display_name || agent.name}</option>}
                       </For>
                     </select>
-                    <select
-                      class="select"
-                      style={{ width: "260px" }}
+                    <IdentityPicker
                       value={notify()}
-                      onChange={(event) => setNotify(event.currentTarget.value)}
-                    >
-                      <option value="">No notification</option>
-                      <For each={payload.identities}>
-                        {(identity) => (
-                          <option value={`${identity.platform}:${identity.external_id}`}>
-                            {identity.platform} - {identity.external_id}
-                          </option>
-                        )}
-                      </For>
-                    </select>
+                      onChange={setNotify}
+                      identities={payload.identities}
+                    />
                     <button class="btn btn-primary" type="button" onClick={submitTask}>
                       <Play size={14} />
                       Run Task
@@ -203,20 +196,11 @@ export function TasksPage() {
                 </div>
               </section>
 
-              <div class="grid-3">
-                <div class="panel metric">
-                  <div class="metric-value">{active}</div>
-                  <div class="metric-label">Active</div>
-                </div>
-                <div class="panel metric">
-                  <div class="metric-value">{completed}</div>
-                  <div class="metric-label">Completed</div>
-                </div>
-                <div class="panel metric">
-                  <div class="metric-value">{failed}</div>
-                  <div class="metric-label">Failed or cancelled</div>
-                </div>
-              </div>
+              <MetricsRow>
+                <MetricCard value={active} label="Active" />
+                <MetricCard value={completed} label="Completed" />
+                <MetricCard value={failed} label="Failed or cancelled" />
+              </MetricsRow>
 
               <section class="panel">
                 <div class="panel-header">
@@ -241,7 +225,7 @@ export function TasksPage() {
                                 </div>
                               </div>
                               <div class="row-wrap">
-                                <span class={statusBadgeClass(task.status)}>{task.status}</span>
+                                <StatusBadge status={task.status} />
                                 <span class="badge">{task.elapsed_display}</span>
                               </div>
                             </div>

@@ -20,7 +20,8 @@ import {
 } from "lucide-solid";
 import { createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
 
-import { Dialog } from "@/components/Dialog";
+import { DeleteThreadDialog } from "@/components/DeleteThreadDialog";
+import { InlineRenameInput } from "@/components/InlineRenameInput";
 import { apiFetch, deleteJson, patchJson } from "@/lib/api";
 import {
   chatThreadHref,
@@ -406,31 +407,12 @@ export function AppShell(props: {
                             </A>
                           }
                         >
-                          <input
+                          <InlineRenameInput
                             class="nav-history-rename-input"
                             value={editingHistoryTitle()}
-                            ref={(element) => {
-                              window.setTimeout(() => {
-                                element.focus();
-                                element.select();
-                              }, 0);
-                            }}
-                            onClick={(event) => {
-                              event.preventDefault();
-                              event.stopPropagation();
-                            }}
-                            onInput={(event) => setEditingHistoryTitle(event.currentTarget.value)}
+                            onInput={setEditingHistoryTitle}
                             onBlur={() => void finishRenameHistoryThread(thread)}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter") {
-                                event.preventDefault();
-                                event.currentTarget.blur();
-                              }
-                              if (event.key === "Escape") {
-                                event.preventDefault();
-                                cancelRenameHistoryThread();
-                              }
-                            }}
+                            onCancel={cancelRenameHistoryThread}
                           />
                         </Show>
                         <Show when={editingHistoryThreadId() !== thread.thread_id}>
@@ -540,28 +522,13 @@ export function AppShell(props: {
         <div class="content">{props.children}</div>
       </main>
 
-      <Dialog
+      <DeleteThreadDialog
         open={deleteTarget() !== null}
-        title="Delete Thread"
+        thread={deleteTarget()}
+        deleting={deleting()}
         onClose={cancelDelete}
-        footer={
-          <div class="row-wrap">
-            <button class="btn" type="button" onClick={cancelDelete} disabled={deleting()}>
-              Cancel
-            </button>
-            <button class="btn btn-danger" type="button" onClick={() => void confirmDeleteHistoryThread()} disabled={deleting()}>
-              <Trash2 size={14} />
-              {deleting() ? "Deleting..." : "Delete"}
-            </button>
-          </div>
-        }
-      >
-        <p>
-          Are you sure you want to delete thread{" "}
-          <span class="mono">{truncateText(deleteTarget()?.title || deleteTarget()?.thread_id || "", 60)}</span>?
-        </p>
-        <p class="muted" style="margin-top: 8px;">This action cannot be undone.</p>
-      </Dialog>
+        onConfirm={() => void confirmDeleteHistoryThread()}
+      />
     </div>
   );
 }

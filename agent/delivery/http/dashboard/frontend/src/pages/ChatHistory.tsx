@@ -3,7 +3,8 @@ import { ArrowLeft, MessageSquare, Pencil, RefreshCw, Trash2, User } from "lucid
 import { createEffect, createMemo, createSignal, For, onMount, Show } from "solid-js";
 
 import { AppShell } from "@/components/AppShell";
-import { Dialog } from "@/components/Dialog";
+import { DeleteThreadDialog } from "@/components/DeleteThreadDialog";
+import { InlineRenameInput } from "@/components/InlineRenameInput";
 import { DataGate } from "@/components/State";
 import { TranscriptItemView } from "@/components/Transcript";
 import { useToast } from "@/components/Toast";
@@ -160,27 +161,12 @@ export function ChatHistoryListPage() {
                                 </A>
                               }
                             >
-                              <input
+                              <InlineRenameInput
                                 class="history-thread-rename-input"
                                 value={editingTitle()}
-                                ref={(element) => {
-                                  window.setTimeout(() => {
-                                    element.focus();
-                                    element.select();
-                                  }, 0);
-                                }}
-                                onInput={(event) => setEditingTitle(event.currentTarget.value)}
+                                onInput={setEditingTitle}
                                 onBlur={() => void finishRenameThread(thread)}
-                                onKeyDown={(event) => {
-                                  if (event.key === "Enter") {
-                                    event.preventDefault();
-                                    event.currentTarget.blur();
-                                  }
-                                  if (event.key === "Escape") {
-                                    event.preventDefault();
-                                    cancelRenameThread();
-                                  }
-                                }}
+                                onCancel={cancelRenameThread}
                               />
                             </Show>
                           </td>
@@ -228,28 +214,13 @@ export function ChatHistoryListPage() {
         )}
       </DataGate>
 
-      <Dialog
+      <DeleteThreadDialog
         open={deleteTarget() !== null}
-        title="Delete Thread"
+        thread={deleteTarget()}
+        deleting={deleting()}
         onClose={cancelDelete}
-        footer={
-          <div class="row-wrap">
-            <button class="btn" type="button" onClick={cancelDelete} disabled={deleting()}>
-              Cancel
-            </button>
-            <button class="btn btn-danger" type="button" onClick={() => void confirmDeleteThread()} disabled={deleting()}>
-              <Trash2 size={14} />
-              {deleting() ? "Deleting..." : "Delete"}
-            </button>
-          </div>
-        }
-      >
-        <p>
-          Are you sure you want to delete thread{" "}
-          <span class="mono">{truncateText(deleteTarget()?.title || deleteTarget()?.thread_id || "", 60)}</span>?
-        </p>
-        <p class="muted" style="margin-top: 8px;">This action cannot be undone.</p>
-      </Dialog>
+        onConfirm={() => void confirmDeleteThread()}
+      />
     </AppShell>
   );
 }
@@ -332,27 +303,12 @@ export function ChatHistoryDetailPage() {
       subtitle={
         editingDetailTitle() !== null
           ? (
-            <input
+            <InlineRenameInput
               class="page-subtitle-input"
               value={editingDetailTitle() || ""}
-              ref={(element) => {
-                window.setTimeout(() => {
-                  element.focus();
-                  element.select();
-                }, 0);
-              }}
-              onInput={(event) => setEditingDetailTitle(event.currentTarget.value)}
+              onInput={setEditingDetailTitle}
               onBlur={() => void finishCurrentThreadRename()}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  event.currentTarget.blur();
-                }
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  cancelCurrentThreadRename();
-                }
-              }}
+              onCancel={cancelCurrentThreadRename}
             />
           )
           : data()?.title || data()?.thread_id || "Loading..."

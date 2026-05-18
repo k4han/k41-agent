@@ -4,9 +4,11 @@ import { Edit3, Play, RefreshCw, Square, Trash2 } from "lucide-solid";
 import { AppShell } from "@/components/AppShell";
 import { Dialog } from "@/components/Dialog";
 import { DataGate } from "@/components/State";
+import { MetricCard, MetricsRow } from "@/components/Metrics";
+import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
-import { dateTimeLocal, statusBadgeClass, triggerArgsFromDateInput } from "@/lib/utils";
+import { dateTimeLocal, triggerArgsFromDateInput } from "@/lib/utils";
 import type { Identity, SchedulerJob } from "@/types";
 
 type SchedulerPayload = {
@@ -109,7 +111,7 @@ function triggerArgs(form: ScheduleForm) {
 
 function identityFromForm(form: ScheduleForm): { platform: string; user_id: string } {
   if (form.identity && form.identity !== "__manual__") {
-    const [platform, ...rest] = form.identity.split("::");
+    const [platform, ...rest] = form.identity.split(":");
     return { platform, user_id: rest.join("::") };
   }
   if (!form.user_id.trim()) {
@@ -213,7 +215,7 @@ export function SchedulerPage() {
       setData(payload);
       setForm((current) => ({
         ...current,
-        identity: current.identity || (payload.identities[0] ? `${payload.identities[0].platform}::${payload.identities[0].external_id}` : "__manual__"),
+        identity: current.identity || (payload.identities[0] ? `${payload.identities[0].platform}:${payload.identities[0].external_id}` : "__manual__"),
       }));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load scheduler");
@@ -301,20 +303,11 @@ export function SchedulerPage() {
           const paused = payload.jobs.filter((job) => job.paused).length;
           return (
             <div class="stack">
-              <div class="grid-3">
-                <div class="panel metric">
-                  <div class="metric-value">{payload.jobs.length}</div>
-                  <div class="metric-label">Total jobs</div>
-                </div>
-                <div class="panel metric">
-                  <div class="metric-value">{active}</div>
-                  <div class="metric-label">Active</div>
-                </div>
-                <div class="panel metric">
-                  <div class="metric-value">{paused}</div>
-                  <div class="metric-label">Paused</div>
-                </div>
-              </div>
+              <MetricsRow>
+                <MetricCard value={payload.jobs.length} label="Total jobs" />
+                <MetricCard value={active} label="Active" />
+                <MetricCard value={paused} label="Paused" />
+              </MetricsRow>
 
               <section class="panel">
                 <div class="panel-header">
@@ -331,7 +324,7 @@ export function SchedulerPage() {
                       <label>Target User</label>
                       <select class="select" value={form().identity} onChange={(event) => setField("identity", event.currentTarget.value)}>
                         <For each={payload.identities}>
-                          {(identity) => <option value={`${identity.platform}::${identity.external_id}`}>{identity.platform} - {identity.external_id}</option>}
+                          {(identity) => <option value={`${identity.platform}:${identity.external_id}`}>{identity.platform} - {identity.external_id}</option>}
                         </For>
                         <option value="__manual__">Enter manually</option>
                       </select>
@@ -410,7 +403,7 @@ export function SchedulerPage() {
                             </td>
                             <td><span class="chip">{job.trigger_type}</span></td>
                             <td>{job.next_run_time || "-"}</td>
-                            <td><span class={statusBadgeClass(job.paused ? "paused" : "active")}>{job.paused ? "paused" : "active"}</span></td>
+                            <td><StatusBadge status={job.paused ? "paused" : "active"} /></td>
                             <td>
                               <div class="row-wrap">
                                 <button class="btn btn-sm" type="button" onClick={() => openEdit(job)}>
@@ -491,4 +484,3 @@ export function SchedulerPage() {
     </AppShell>
   );
 }
-

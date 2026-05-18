@@ -3,9 +3,11 @@ import { RefreshCw, Square, Play } from "lucide-solid";
 
 import { AppShell } from "@/components/AppShell";
 import { DataGate } from "@/components/State";
+import { MetricCard, MetricsRow } from "@/components/Metrics";
+import { StatusBadge } from "@/components/StatusBadge";
+import { EmptyTableRow } from "@/components/EmptyTableRow";
 import { useToast } from "@/components/Toast";
 import { apiFetch, postJson } from "@/lib/api";
-import { statusBadgeClass } from "@/lib/utils";
 import type { ServiceStatus } from "@/types";
 
 type OverviewPayload = {
@@ -72,24 +74,17 @@ export function OverviewPage() {
       <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => (
           <div class="stack">
-            <div class="grid-3">
-              <div class="panel metric">
-                <div class="metric-value">{payload.services.length}</div>
-                <div class="metric-label">Registered services</div>
-              </div>
-              <div class="panel metric">
-                <div class="metric-value">
-                  {payload.services.filter((service) => service.status === "running").length}
-                </div>
-                <div class="metric-label">Running</div>
-              </div>
-              <div class="panel metric">
-                <div class="metric-value">
-                  {payload.services.filter((service) => service.status === "error").length}
-                </div>
-                <div class="metric-label">Errors</div>
-              </div>
-            </div>
+            <MetricsRow>
+              <MetricCard value={payload.services.length} label="Registered services" />
+              <MetricCard
+                value={payload.services.filter((service) => service.status === "running").length}
+                label="Running"
+              />
+              <MetricCard
+                value={payload.services.filter((service) => service.status === "error").length}
+                label="Errors"
+              />
+            </MetricsRow>
 
             <section class="panel">
               <div class="panel-header">
@@ -108,21 +103,13 @@ export function OverviewPage() {
                   <tbody>
                     <For
                       each={payload.services}
-                      fallback={
-                        <tr>
-                          <td colSpan={4}>
-                            <div class="empty">No services registered.</div>
-                          </td>
-                        </tr>
-                      }
+                      fallback={<EmptyTableRow colSpan={4} message="No services registered." />}
                     >
                       {(service) => (
                         <tr>
                           <td class="mono">{service.name}</td>
                           <td>
-                            <span class={statusBadgeClass(service.status)}>
-                              {service.status}
-                            </span>
+                            <StatusBadge status={service.status} />
                           </td>
                           <td class="muted">{service.error || "-"}</td>
                           <td>
@@ -157,4 +144,3 @@ export function OverviewPage() {
     </AppShell>
   );
 }
-

@@ -3,8 +3,11 @@ import { GitPullRequest, RefreshCw, Save } from "lucide-solid";
 
 import { AppShell } from "@/components/AppShell";
 import { DataGate } from "@/components/State";
+import { MetricCard, MetricsRow } from "@/components/Metrics";
+import { IdentityPicker } from "@/components/IdentityPicker";
+import { EmptyTableRow } from "@/components/EmptyTableRow";
 import { useToast } from "@/components/Toast";
-import { apiFetch, putJson } from "@/lib/api";
+import { apiFetch, postJson, putJson } from "@/lib/api";
 import type { GitHubPayload, GitHubRepositoryBinding, Identity } from "@/types";
 
 type RepositoryDraft = {
@@ -134,20 +137,11 @@ export function RepositoriesPage() {
       <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => (
           <div class="stack">
-            <div class="grid-3">
-              <div class="panel metric">
-                <div class="metric-value">{payload.repositories.length}</div>
-                <div class="metric-label">Synced repositories</div>
-              </div>
-              <div class="panel metric">
-                <div class="metric-value">{activeCount()}</div>
-                <div class="metric-label">Enabled bindings</div>
-              </div>
-              <div class="panel metric">
-                <div class="metric-value">{payload.configured ? "Ready" : "Setup"}</div>
-                <div class="metric-label">GitHub App</div>
-              </div>
-            </div>
+            <MetricsRow>
+              <MetricCard value={payload.repositories.length} label="Synced repositories" />
+              <MetricCard value={activeCount()} label="Enabled bindings" />
+              <MetricCard value={payload.configured ? "Ready" : "Setup"} label="GitHub App" />
+            </MetricsRow>
 
             <section class="panel">
               <div class="panel-header">
@@ -190,13 +184,7 @@ export function RepositoriesPage() {
                   <tbody>
                     <For
                       each={payload.repositories}
-                      fallback={
-                        <tr>
-                          <td colSpan={6}>
-                            <div class="empty">No repositories synced.</div>
-                          </td>
-                        </tr>
-                      }
+                      fallback={<EmptyTableRow colSpan={6} message="No repositories synced." />}
                     >
                       {(repo) => {
                         const draft = () => drafts()[repo.repository_id] || toDraft(repo);
@@ -248,20 +236,11 @@ export function RepositoriesPage() {
                               </div>
                             </td>
                             <td>
-                              <select
-                                class="select"
+                              <IdentityPicker
                                 value={draft().notify_identity}
-                                onChange={(event) => updateDraft(repo, "notify_identity", event.currentTarget.value)}
-                              >
-                                <option value="">No notification</option>
-                                <For each={identities()}>
-                                  {(identity) => (
-                                    <option value={`${identity.platform}:${identity.external_id}`}>
-                                      {identity.platform} - {identity.external_id}
-                                    </option>
-                                  )}
-                                </For>
-                              </select>
+                                onChange={(value) => updateDraft(repo, "notify_identity", value)}
+                                identities={identities()}
+                              />
                             </td>
                             <td>
                               <button class="btn btn-sm" type="button" onClick={() => save(repo)}>

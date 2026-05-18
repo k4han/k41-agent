@@ -3,6 +3,8 @@ import { RefreshCw } from "lucide-solid";
 
 import { AppShell } from "@/components/AppShell";
 import { DataGate } from "@/components/State";
+import { MetricCard, MetricsRow } from "@/components/Metrics";
+import { EmptyTableRow } from "@/components/EmptyTableRow";
 import { apiFetch } from "@/lib/api";
 import type { ActiveSession } from "@/types";
 
@@ -49,24 +51,17 @@ export function SessionsPage() {
       <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => (
           <div class="stack">
-            <div class="grid-3">
-              <div class="panel metric">
-                <div class="metric-value">{payload.count}</div>
-                <div class="metric-label">Active sessions</div>
-              </div>
-              <div class="panel metric">
-                <div class="metric-value">
-                  {payload.sessions.reduce((total, session) => total + session.tools_called.length, 0)}
-                </div>
-                <div class="metric-label">Recorded tool calls</div>
-              </div>
-              <div class="panel metric">
-                <div class="metric-value">
-                  {payload.sessions.filter((session) => session.current_step.startsWith("tool:")).length}
-                </div>
-                <div class="metric-label">Using tools</div>
-              </div>
-            </div>
+            <MetricsRow>
+              <MetricCard value={payload.count} label="Active sessions" />
+              <MetricCard
+                value={payload.sessions.reduce((total, session) => total + session.tools_called.length, 0)}
+                label="Recorded tool calls"
+              />
+              <MetricCard
+                value={payload.sessions.filter((session) => session.current_step.startsWith("tool:")).length}
+                label="Using tools"
+              />
+            </MetricsRow>
             <section class="panel">
               <div class="table-wrap">
                 <table class="table">
@@ -83,13 +78,7 @@ export function SessionsPage() {
                   <tbody>
                     <For
                       each={payload.sessions}
-                      fallback={
-                        <tr>
-                          <td colSpan={6}>
-                            <div class="empty">No active sessions.</div>
-                          </td>
-                        </tr>
-                      }
+                      fallback={<EmptyTableRow colSpan={6} message="No active sessions." />}
                     >
                       {(session) => (
                         <tr>
@@ -124,4 +113,3 @@ export function SessionsPage() {
     </AppShell>
   );
 }
-
