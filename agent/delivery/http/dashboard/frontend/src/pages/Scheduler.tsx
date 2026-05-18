@@ -198,7 +198,6 @@ export function SchedulerPage() {
   const [form, setForm] = createSignal<ScheduleForm>(defaultScheduleForm());
   const [editJob, setEditJob] = createSignal<SchedulerJob | null>(null);
   const [editForm, setEditForm] = createSignal<ScheduleForm>(defaultScheduleForm());
-  const [changeTrigger, setChangeTrigger] = createSignal(false);
   const { showToast } = useToast();
 
   const setField = <K extends keyof ScheduleForm>(key: K, value: ScheduleForm[K]) => {
@@ -243,8 +242,31 @@ export function SchedulerPage() {
 
   const openEdit = (job: SchedulerJob) => {
     setEditJob(job);
-    setChangeTrigger(false);
-    setEditForm({ ...defaultScheduleForm(), task: job.task, trigger_type: (job.trigger_type || "date") as TriggerType });
+    const args = job.trigger_args || {};
+    const identityKey = `${job.platform}:${job.user_id}`;
+    const matchedIdentity = data()?.identities.find(
+      (id) => `${id.platform}:${id.external_id}` === identityKey
+    );
+    const identity = matchedIdentity ? `${matchedIdentity.platform}:${matchedIdentity.external_id}` : "__manual__";
+
+    setEditForm({
+      task: job.task,
+      identity,
+      platform: job.platform,
+      user_id: job.user_id,
+      trigger_type: (job.trigger_type || "date") as TriggerType,
+      run_date: (args.run_date as string) || dateTimeLocal(new Date()),
+      weeks: String(args.weeks ?? ""),
+      days: String(args.days ?? ""),
+      hours: String(args.hours ?? ""),
+      minutes: String(args.minutes ?? ""),
+      seconds: String(args.seconds ?? ""),
+      cron_minute: (args.minute as string) || "*",
+      cron_hour: (args.hour as string) || "*",
+      cron_day: (args.day as string) || "*",
+      cron_month: (args.month as string) || "*",
+      cron_day_of_week: (args.day_of_week as string) || "*",
+    });
   };
 
   const updateJob = async () => {
@@ -253,12 +275,15 @@ export function SchedulerPage() {
       return;
     }
     try {
-      const body: Record<string, unknown> = { task: editForm().task };
-      if (changeTrigger()) {
-        body.trigger_type = editForm().trigger_type;
-        body.trigger_args = triggerArgs(editForm());
-      }
-      await putJson(`/scheduler/jobs/${encodeURIComponent(job.id)}`, body);
+      const current = editForm();
+      const identity = identityFromForm(current);
+      await putJson(`/scheduler/jobs/${encodeURIComponent(job.id)}`, {
+        task: current.task,
+        platform: identity.platform,
+        user_id: identity.user_id,
+        trigger_type: current.trigger_type,
+        trigger_args: triggerArgs(current),
+      });
       showToast("Job updated.");
       setEditJob(null);
       await load();
@@ -459,11 +484,16 @@ export function SchedulerPage() {
                     <label>Task</label>
                     <textarea class="textarea" value={editForm().task} onInput={(event) => setEditField("task", event.currentTarget.value)} />
                   </div>
-                  <label class="checkbox-row">
-                    <input type="checkbox" checked={changeTrigger()} onChange={(event) => setChangeTrigger(event.currentTarget.checked)} />
-                    <span>Change trigger</span>
-                  </label>
-                  <Show when={changeTrigger()}>
+                  <div class="grid-2">
+                    <div class="field">
+                      <label>Target User</label>
+                      <select class="select" value={editForm().identity} onChange={(event) => setEditField("identity", event.currentTarget.value)}>
+                        <For each={data()?.identities || []}>
+                          {(identity) => <option value={`${identity.platform}:${identity.external_id}`}>{identity.platform} - {identity.external_id}</option>}
+                        </For>
+                        <option value="__manual__">Enter manually</option>
+                      </select>
+                    </div>
                     <div class="field">
                       <label>Schedule</label>
                       <select class="select" value={editForm().trigger_type} onChange={(event) => setEditField("trigger_type", event.currentTarget.value as TriggerType)}>
@@ -473,8 +503,23 @@ export function SchedulerPage() {
                         <option value="cron">Cron schedule</option>
                       </select>
                     </div>
-                    <TriggerFields form={editForm()} setField={setEditField} />
+                  </div>
+                  <Show when={editForm().identity === "__manual__"}>
+                    <div class="grid-2">
+                      <div class="field">
+                        <label>Platform</label>
+                        <select class="select" value={editForm().platform} onChange={(event) => setEditField("platform", event.currentTarget.value)}>
+                          <option value="telegram">telegram</option>
+                          <option value="discord">discord</option>
+                        </select>
+                      </div>
+                      <div class="field">
+                        <label>User ID</label>
+                        <input class="input" value={editForm().user_id} onInput={(event) => setEditField("user_id", event.currentTarget.value)} />
+                      </div>
+                    </div>
                   </Show>
+                  <TriggerFields form={editForm()} setField={setEditField} />
                 </div>
               </Dialog>
             </div>

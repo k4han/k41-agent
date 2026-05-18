@@ -737,12 +737,26 @@ async def update_settings(body: UpdateSettingsBody, request: Request) -> dict[st
 
 def _serialize_job(job: Job) -> dict[str, Any]:
     trigger_type = type(job.trigger).__name__.lower().replace("trigger", "")
+    trigger_args: dict[str, Any] = {}
+    trigger = job.trigger
+    for attr in ["run_date", "weeks", "days", "hours", "minutes", "seconds",
+                 "minute", "hour", "day", "month", "day_of_week"]:
+        if hasattr(trigger, attr):
+            val = getattr(trigger, attr)
+            if val is not None:
+                trigger_args[attr] = str(val) if not isinstance(val, (int, float, str)) else val
+    if trigger_type == "date" and hasattr(trigger, "run_date"):
+        from datetime import datetime
+        run_date = getattr(trigger, "run_date")
+        if isinstance(run_date, datetime):
+            trigger_args["run_date"] = run_date.strftime("%Y-%m-%dT%H:%M")
     return {
         "id": job.id,
         "task": job.kwargs.get("task", "Unknown"),
         "platform": job.kwargs.get("platform", "-"),
         "user_id": job.kwargs.get("user_id", "-"),
         "trigger_type": trigger_type,
+        "trigger_args": trigger_args,
         "next_run_time": (
             job.next_run_time.strftime("%Y-%m-%d %H:%M:%S %Z")
             if job.next_run_time
@@ -791,6 +805,8 @@ class CreateJobBody(BaseModel):
 
 class UpdateJobBody(BaseModel):
     task: str | None = None
+    platform: str | None = None
+    user_id: str | None = None
     trigger_type: TriggerType | None = None
     trigger_args: dict[str, Any] | None = None
 
@@ -823,13 +839,18 @@ async def create_scheduler_job(body: CreateJobBody) -> dict[str, Any]:
 async def update_scheduler_job(job_id: str, body: UpdateJobBody) -> dict[str, Any]:
     job = _get_job_or_404(job_id)
 
-    if body.task is None and (body.trigger_type is None or body.trigger_args is None):
+    if body.task is None and body.platform is None and body.user_id is None and body.trigger_type is None:
         raise HTTPException(status_code=400, detail="No fields to update.")
 
     try:
-        if body.task is not None:
+        if body.task is not None or body.platform is not None or body.user_id is not None:
             new_kwargs = dict(job.kwargs)
-            new_kwargs["task"] = body.task
+            if body.task is not None:
+                new_kwargs["task"] = body.task
+            if body.platform is not None:
+                new_kwargs["platform"] = body.platform
+            if body.user_id is not None:
+                new_kwargs["user_id"] = body.user_id
             job.modify(kwargs=new_kwargs)
 
         if body.trigger_type is not None and body.trigger_args is not None:

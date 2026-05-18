@@ -69,6 +69,29 @@ type ThreadListPayload = {
   next_offset?: number;
 };
 
+type HistoryCache = {
+  threads: ThreadSummary[];
+  hasMore: boolean;
+  nextOffset: number;
+  loaded: boolean;
+};
+
+type HistoryLoadResult = {
+  payload: ThreadListPayload;
+  offset: number;
+  reset: boolean;
+};
+
+const historyCache: HistoryCache = {
+  threads: [],
+  hasMore: true,
+  nextOffset: 0,
+  loaded: false,
+};
+
+let historyLoadPromise: Promise<HistoryLoadResult> | null = null;
+let historyLoadKey = "";
+
 export function AppShell(props: {
   title: string;
   subtitle?: JSX.Element;
@@ -81,17 +104,50 @@ export function AppShell(props: {
   const [menuOpen, setMenuOpen] = createSignal(false);
   const [collapsed, setCollapsed] = createSignal(false);
   const [historyOpen, setHistoryOpen] = createSignal(false);
-  const [historyThreads, setHistoryThreads] = createSignal<ThreadSummary[]>([]);
+  const [historyThreads, setHistoryThreads] = createSignal<ThreadSummary[]>(historyCache.threads);
   const [historyError, setHistoryError] = createSignal("");
-  const [historyHasMore, setHistoryHasMore] = createSignal(true);
+  const [historyHasMore, setHistoryHasMore] = createSignal(historyCache.hasMore);
   const [historyLoading, setHistoryLoading] = createSignal(false);
   const [historyMenuThreadId, setHistoryMenuThreadId] = createSignal<string | null>(null);
-  const [historyNextOffset, setHistoryNextOffset] = createSignal(0);
-  const [historyLoaded, setHistoryLoaded] = createSignal(false);
+  const [historyNextOffset, setHistoryNextOffset] = createSignal(historyCache.nextOffset);
+  const [historyLoaded, setHistoryLoaded] = createSignal(historyCache.loaded);
   const [editingHistoryThreadId, setEditingHistoryThreadId] = createSignal<string | null>(null);
   const [editingHistoryTitle, setEditingHistoryTitle] = createSignal("");
   const [deleteTarget, setDeleteTarget] = createSignal<ThreadSummary | null>(null);
   const [deleting, setDeleting] = createSignal(false);
+  let disposed = false;
+
+  const applyHistoryState = (next: Partial<HistoryCache>) => {
+    if (next.threads !== undefined) {
+      historyCache.threads = next.threads;
+    }
+    if (next.hasMore !== undefined) {
+      historyCache.hasMore = next.hasMore;
+    }
+    if (next.nextOffset !== undefined) {
+      historyCache.nextOffset = next.nextOffset;
+    }
+    if (next.loaded !== undefined) {
+      historyCache.loaded = next.loaded;
+    }
+
+    if (disposed) {
+      return;
+    }
+
+    if (next.threads !== undefined) {
+      setHistoryThreads(next.threads);
+    }
+    if (next.hasMore !== undefined) {
+      setHistoryHasMore(next.hasMore);
+    }
+    if (next.nextOffset !== undefined) {
+      setHistoryNextOffset(next.nextOffset);
+    }
+    if (next.loaded !== undefined) {
+      setHistoryLoaded(next.loaded);
+    }
+  };
 
   const isActive = (href: string) => {
     if (href === "/") {
@@ -114,14 +170,22 @@ export function AppShell(props: {
     if (editingHistoryThreadId()) {
       return;
     }
-    if (historyLoaded() || historyOpen()) {
+
+    if ((historyOpen() && !collapsed()) || isHistoryActive()) {
       void loadHistory(true);
+      return;
     }
+
+    applyHistoryState({ loaded: false });
   };
 
   const setSidebarCollapsed = (next: boolean) => {
     setCollapsed(next);
     window.localStorage.setItem("kaka-dashboard-sidebar", next ? "collapsed" : "expanded");
+
+    if (!next && historyOpen() && !historyLoaded()) {
+      void loadHistory(true);
+    }
   };
 
   const toggleSidebar = () => {
@@ -129,31 +193,56 @@ export function AppShell(props: {
   };
 
   const loadHistory = async (reset = false) => {
-    if (historyLoading()) {
+    if (disposed || historyLoading()) {
       return;
     }
 
     const offset = reset ? 0 : historyNextOffset();
+    const requestKey = `${reset ? "reset" : "append"}:${offset}`;
     setHistoryError("");
     setHistoryLoading(true);
     try {
-      const params = new URLSearchParams({
-        limit: String(HISTORY_PAGE_SIZE),
-        offset: String(offset),
+      let result: HistoryLoadResult;
+      if (historyLoadPromise && historyLoadKey === requestKey) {
+        result = await historyLoadPromise;
+      } else {
+        const params = new URLSearchParams({
+          limit: String(HISTORY_PAGE_SIZE),
+          offset: String(offset),
+        });
+        let sharedRequest: Promise<HistoryLoadResult>;
+        sharedRequest = apiFetch<ThreadListPayload>(
+          `/dashboard-api/chat-history?${params.toString()}`,
+        )
+          .then((payload) => ({ payload, offset, reset }))
+          .finally(() => {
+            if (historyLoadPromise === sharedRequest) {
+              historyLoadPromise = null;
+              historyLoadKey = "";
+            }
+          });
+        historyLoadPromise = sharedRequest;
+        historyLoadKey = requestKey;
+        result = await sharedRequest;
+      }
+
+      const nextThreads = result.reset
+        ? result.payload.threads
+        : [...historyCache.threads, ...result.payload.threads];
+      applyHistoryState({
+        threads: nextThreads,
+        hasMore: Boolean(result.payload.has_more),
+        nextOffset: result.payload.next_offset ?? result.offset + result.payload.threads.length,
+        loaded: true,
       });
-      const payload = await apiFetch<ThreadListPayload>(
-        `/dashboard-api/chat-history?${params.toString()}`,
-      );
-      setHistoryThreads((current) => (
-        reset ? payload.threads : [...current, ...payload.threads]
-      ));
-      setHistoryHasMore(Boolean(payload.has_more));
-      setHistoryNextOffset(payload.next_offset ?? offset + payload.threads.length);
-      setHistoryLoaded(true);
     } catch (err) {
-      setHistoryError(err instanceof Error ? err.message : "Failed to load chat history");
+      if (!disposed) {
+        setHistoryError(err instanceof Error ? err.message : "Failed to load chat history");
+      }
     } finally {
-      setHistoryLoading(false);
+      if (!disposed) {
+        setHistoryLoading(false);
+      }
     }
   };
 
@@ -175,7 +264,7 @@ export function AppShell(props: {
     setHistoryOpen(next);
     window.localStorage.setItem(HISTORY_PANEL_STORAGE_KEY, next ? "open" : "closed");
 
-    if (next && !historyLoaded()) {
+    if (next && !collapsed() && !historyLoaded()) {
       void loadHistory(true);
     }
   };
@@ -232,10 +321,10 @@ export function AppShell(props: {
     setDeleting(true);
     try {
       await deleteJson(threadApiPath(thread.thread_id));
-      setHistoryThreads((current) => (
-        current.filter((item) => item.thread_id !== thread.thread_id)
-      ));
-      setHistoryNextOffset((current) => Math.max(0, current - 1));
+      applyHistoryState({
+        threads: historyThreads().filter((item) => item.thread_id !== thread.thread_id),
+        nextOffset: Math.max(0, historyNextOffset() - 1),
+      });
       showToast("Thread deleted.", "success");
 
       if (isThreadActive(thread.thread_id)) {
@@ -282,11 +371,11 @@ export function AppShell(props: {
         threadApiPath(thread.thread_id),
         { title: trimmedTitle },
       );
-      setHistoryThreads((current) =>
-        current.map((item) =>
+      applyHistoryState({
+        threads: historyThreads().map((item) =>
           item.thread_id === updated.thread_id ? { ...item, ...updated } : item,
         ),
-      );
+      });
       cancelRenameHistoryThread();
       showToast("Thread renamed.", "success");
       window.dispatchEvent(new CustomEvent("kaka:threads-changed"));
@@ -308,6 +397,7 @@ export function AppShell(props: {
   });
 
   onCleanup(() => {
+    disposed = true;
     document.removeEventListener("click", handleClickOutside);
     window.removeEventListener("kaka:threads-changed", handleThreadsChanged);
   });

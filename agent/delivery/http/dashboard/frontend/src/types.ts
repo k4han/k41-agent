@@ -112,6 +112,7 @@ export type SchedulerJob = {
   platform: string;
   user_id: string;
   trigger_type: string;
+  trigger_args: Record<string, unknown>;
   next_run_time: string | null;
   paused: boolean;
 };
