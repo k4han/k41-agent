@@ -30,6 +30,11 @@ type SessionsPayload = {
 };
 
 const activeTaskStatuses = new Set(["running", "pending"]);
+const TASK_POLL_INTERVAL_MS = 5000;
+
+function hasActiveTasks(tasks: BackgroundTask[]): boolean {
+  return tasks.some((task) => activeTaskStatuses.has(task.status));
+}
 
 export function TasksPage() {
   const [data, setData] = createSignal<TasksPayload>();
@@ -40,36 +45,89 @@ export function TasksPage() {
   const [expanded, setExpanded] = createSignal<Record<string, boolean>>({});
   const { showToast } = useToast();
   let timer: number | undefined;
+  let refreshing = false;
+  let disposed = false;
+
+  const clearRefreshTimer = () => {
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+      timer = undefined;
+    }
+  };
+
+  const scheduleRefresh = (tasks: BackgroundTask[] = data()?.tasks ?? []) => {
+    clearRefreshTimer();
+    if (disposed || document.hidden || !hasActiveTasks(tasks)) {
+      return;
+    }
+
+    timer = window.setTimeout(() => {
+      timer = undefined;
+      void refreshTasks();
+    }, TASK_POLL_INTERVAL_MS);
+  };
+
+  const loadSessionsForTasks = async (tasks: BackgroundTask[]): Promise<ActiveSession[]> => {
+    if (!hasActiveTasks(tasks)) {
+      return [];
+    }
+
+    const sessionPayload = await apiFetch<SessionsPayload>("/dashboard-api/sessions");
+    return sessionPayload.sessions;
+  };
 
   const load = async () => {
+    if (disposed) {
+      return;
+    }
+
+    clearRefreshTimer();
     setError("");
     try {
-      const [taskPayload, sessionPayload] = await Promise.all([
-        apiFetch<TaskOptionsPayload>("/dashboard-api/tasks"),
-        apiFetch<SessionsPayload>("/dashboard-api/sessions"),
-      ]);
-      setData({ ...taskPayload, sessions: sessionPayload.sessions });
+      const taskPayload = await apiFetch<TaskOptionsPayload>("/dashboard-api/tasks");
+      const sessions = await loadSessionsForTasks(taskPayload.tasks);
+      if (disposed) {
+        return;
+      }
+
+      setData({ ...taskPayload, sessions });
       if (!taskPayload.agents.some((agent) => agent.name === agentName()) && taskPayload.agents[0]) {
         setAgentName(taskPayload.agents[0].name);
       }
+      scheduleRefresh(taskPayload.tasks);
     } catch (err) {
+      if (disposed) {
+        return;
+      }
+
       setError(err instanceof Error ? err.message : "Failed to load tasks");
+      scheduleRefresh();
     }
   };
 
   const refreshTasks = async () => {
+    if (disposed || refreshing || document.hidden) {
+      return;
+    }
+
+    refreshing = true;
     try {
-      const [taskPayload, sessionPayload] = await Promise.all([
-        apiFetch<{ tasks: BackgroundTask[] }>("/tasks/list"),
-        apiFetch<SessionsPayload>("/dashboard-api/sessions"),
-      ]);
+      const taskPayload = await apiFetch<{ tasks: BackgroundTask[] }>("/tasks/list");
+      const sessions = await loadSessionsForTasks(taskPayload.tasks);
+      if (disposed) {
+        return;
+      }
+
       setData((current) => current && {
         ...current,
         tasks: taskPayload.tasks,
-        sessions: sessionPayload.sessions,
+        sessions,
       });
     } catch {
       return;
+    } finally {
+      refreshing = false;
+      scheduleRefresh();
     }
   };
 
@@ -123,14 +181,29 @@ export function TasksPage() {
     setExpanded((current) => ({ ...current, [taskId]: !current[taskId] }));
   };
 
+  const handleVisibilityChange = () => {
+    if (disposed) {
+      return;
+    }
+
+    if (document.hidden) {
+      clearRefreshTimer();
+      return;
+    }
+
+    if (hasActiveTasks(data()?.tasks ?? [])) {
+      void refreshTasks();
+    }
+  };
+
   onMount(() => {
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     void load();
-    timer = window.setInterval(refreshTasks, 5000);
   });
   onCleanup(() => {
-    if (timer) {
-      window.clearInterval(timer);
-    }
+    disposed = true;
+    clearRefreshTimer();
+    document.removeEventListener("visibilitychange", handleVisibilityChange);
   });
 
   return (
@@ -205,7 +278,7 @@ export function TasksPage() {
               <section class="panel">
                 <div class="panel-header">
                   <div class="panel-title">Task History</div>
-                  <span class="hint">Auto-refresh every 5s</span>
+                  <span class="hint">Auto-refresh while active</span>
                 </div>
                 <div class="panel-body stack">
                   <For each={payload.tasks} fallback={<div class="empty">No tasks yet.</div>}>
@@ -247,7 +320,7 @@ export function TasksPage() {
                                       <span class="badge badge-info">Live session</span>
                                       <span class="badge">{session().elapsed_display}</span>
                                     </div>
-                                    <span class="hint">Auto-refresh every 5s</span>
+                                    <span class="hint">Auto-refresh while active</span>
                                   </div>
                                   <div class="task-live-grid">
                                     <div class="task-live-cell">

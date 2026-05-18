@@ -13,28 +13,88 @@ type SessionsPayload = {
   count: number;
 };
 
+const ACTIVE_SESSION_POLL_INTERVAL_MS = 5000;
+const IDLE_SESSION_POLL_INTERVAL_MS = 30000;
+
 export function SessionsPage() {
   const [data, setData] = createSignal<SessionsPayload>();
   const [error, setError] = createSignal("");
   let timer: number | undefined;
+  let loading = false;
+  let disposed = false;
 
-  const load = async () => {
-    setError("");
-    try {
-      setData(await apiFetch<SessionsPayload>("/dashboard-api/sessions"));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load sessions");
+  const clearRefreshTimer = () => {
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+      timer = undefined;
     }
   };
 
-  onMount(() => {
+  const scheduleRefresh = (payload = data()) => {
+    clearRefreshTimer();
+    if (disposed || document.hidden) {
+      return;
+    }
+
+    const delay = payload && payload.count > 0
+      ? ACTIVE_SESSION_POLL_INTERVAL_MS
+      : IDLE_SESSION_POLL_INTERVAL_MS;
+
+    timer = window.setTimeout(() => {
+      timer = undefined;
+      void load();
+    }, delay);
+  };
+
+  const load = async () => {
+    if (disposed || loading) {
+      return;
+    }
+
+    loading = true;
+    clearRefreshTimer();
+    setError("");
+    try {
+      const payload = await apiFetch<SessionsPayload>("/dashboard-api/sessions");
+      if (disposed) {
+        return;
+      }
+
+      setData(payload);
+      scheduleRefresh(payload);
+    } catch (err) {
+      if (disposed) {
+        return;
+      }
+
+      setError(err instanceof Error ? err.message : "Failed to load sessions");
+      scheduleRefresh();
+    } finally {
+      loading = false;
+    }
+  };
+
+  const handleVisibilityChange = () => {
+    if (disposed) {
+      return;
+    }
+
+    if (document.hidden) {
+      clearRefreshTimer();
+      return;
+    }
+
     void load();
-    timer = window.setInterval(load, 5000);
+  };
+
+  onMount(() => {
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    void load();
   });
   onCleanup(() => {
-    if (timer) {
-      window.clearInterval(timer);
-    }
+    disposed = true;
+    clearRefreshTimer();
+    document.removeEventListener("visibilitychange", handleVisibilityChange);
   });
 
   return (
