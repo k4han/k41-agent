@@ -60,10 +60,10 @@ async def test_background_task_restore_preserves_completed_status(
 ) -> None:
     import agent.modules.agent_runtime.runner as runner_module
 
-    async def fake_run_agent_full(**kwargs):
-        return "done"
+    async def fake_run_agent_stream(**kwargs):
+        yield {"type": "final", "content": "done"}
 
-    monkeypatch.setattr(runner_module, "run_agent_full", fake_run_agent_full)
+    monkeypatch.setattr(runner_module, "run_agent_stream", fake_run_agent_stream)
 
     manager = BackgroundTaskManager()
     task_id = await manager.submit("do work", agent_name="default")
@@ -123,15 +123,15 @@ async def test_background_task_remove_is_persisted(
     import agent.modules.agent_runtime.runner as runner_module
     import agent.modules.workflows as workflows_module
 
-    async def fake_run_agent_full(**kwargs):
-        return "done"
+    async def fake_run_agent_stream(**kwargs):
+        yield {"type": "final", "content": "done"}
 
     deleted_thread_ids: list[str] = []
 
     async def fake_delete_workflow_thread_tree(thread_id: str) -> None:
         deleted_thread_ids.append(thread_id)
 
-    monkeypatch.setattr(runner_module, "run_agent_full", fake_run_agent_full)
+    monkeypatch.setattr(runner_module, "run_agent_stream", fake_run_agent_stream)
     monkeypatch.setattr(
         workflows_module,
         "delete_workflow_thread_tree",

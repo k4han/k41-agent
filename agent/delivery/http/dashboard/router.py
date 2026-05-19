@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 from datetime import datetime
 from typing import Any
 
 from apscheduler.job import Job
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from agent.delivery.http.dashboard.spa import spa_index_response
@@ -54,6 +56,8 @@ from agent.shared.config import (
 
 router = APIRouter(tags=["dashboard"], dependencies=[Depends(get_current_admin)])
 logger = logging.getLogger(__name__)
+BACKGROUND_TASK_ACTIVE_STATUSES = {"pending", "running"}
+SSE_HEARTBEAT_SECONDS = 15.0
 
 
 # --- helpers ----------------------------------------------------------
@@ -367,6 +371,23 @@ def _agent_config_from_body(body: "AgentCardBody") -> AgentConfig:
 
 def _dashboard_spa() -> Response:
     return spa_index_response()
+
+
+def _sse_event(event: str, data: dict[str, Any]) -> str:
+    payload = json.dumps(data, ensure_ascii=False)
+    return f"event: {event}\ndata: {payload}\n\n"
+
+
+def _active_session_for_thread(thread_id: str) -> dict[str, Any] | None:
+    registry = get_active_session_registry()
+    return next(
+        (session for session in registry.list_active() if session["thread_id"] == thread_id),
+        None,
+    )
+
+
+def _is_active_background_task(task: dict[str, Any] | None) -> bool:
+    return bool(task and task.get("status") in BACKGROUND_TASK_ACTIVE_STATUSES)
 
 
 # --- SPA routes -------------------------------------------------------
@@ -1360,6 +1381,116 @@ async def get_background_task_messages(thread_id: str) -> dict[str, Any]:
     metadata = await get_conversation_thread(thread_id)
     parsed = metadata or _parse_thread_id_safe(thread_id)
     return {"thread_id": thread_id, "messages": messages, **parsed}
+
+
+async def _get_background_task_stream_metadata(
+    thread_id: str,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    from agent.modules.conversations import THREAD_KIND_BACKGROUND, get_conversation_thread
+
+    manager = get_background_task_manager()
+    task = manager.get_by_thread_id(thread_id)
+    metadata = await get_conversation_thread(thread_id)
+    if task is None and (
+        metadata is None or metadata.get("kind") != THREAD_KIND_BACKGROUND
+    ):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Background task thread '{thread_id}' not found.",
+        )
+    return task, metadata
+
+
+async def _get_thread_messages_for_stream(thread_id: str) -> list[dict[str, Any]]:
+    try:
+        return await _get_thread_messages(thread_id)
+    except HTTPException as exc:
+        if exc.status_code == 503:
+            return []
+        raise
+
+
+async def _background_task_snapshot(
+    thread_id: str,
+    *,
+    task: dict[str, Any] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    from agent.modules.conversations import THREAD_KIND_BACKGROUND
+
+    manager = get_background_task_manager()
+    current_task = task if task is not None else manager.get_by_thread_id(thread_id)
+    parsed = metadata or _parse_thread_id_safe(thread_id)
+    if current_task is not None:
+        parsed = {**parsed, "kind": THREAD_KIND_BACKGROUND}
+
+    return {
+        "thread_id": thread_id,
+        "messages": await _get_thread_messages_for_stream(thread_id),
+        "task": current_task,
+        "active_session": _active_session_for_thread(thread_id),
+        **parsed,
+    }
+
+
+@router.get("/dashboard-api/background-task-events")
+async def stream_background_task_events(
+    thread_id: str = Query(..., min_length=1),
+) -> StreamingResponse:
+    manager = get_background_task_manager()
+    task, metadata = await _get_background_task_stream_metadata(thread_id)
+    queue = manager.subscribe(thread_id)
+    try:
+        initial_snapshot = await _background_task_snapshot(
+            thread_id,
+            task=task,
+            metadata=metadata,
+        )
+    except Exception:
+        manager.unsubscribe(thread_id, queue)
+        raise
+
+    async def event_generator():
+        try:
+            yield _sse_event("snapshot", initial_snapshot)
+            latest_task = initial_snapshot.get("task")
+            if not _is_active_background_task(latest_task):
+                yield _sse_event("done", {"task": latest_task})
+                return
+
+            while True:
+                try:
+                    event = await asyncio.wait_for(
+                        queue.get(),
+                        timeout=SSE_HEARTBEAT_SECONDS,
+                    )
+                except asyncio.TimeoutError:
+                    latest_task = manager.get_by_thread_id(thread_id)
+                    yield _sse_event("heartbeat", {})
+                    if not _is_active_background_task(latest_task):
+                        yield _sse_event("done", {"task": latest_task})
+                        return
+                    continue
+
+                event_name = str(event.get("event") or "message")
+                event_data = event.get("data")
+                yield _sse_event(
+                    event_name,
+                    event_data if isinstance(event_data, dict) else {},
+                )
+                if event_name == "done":
+                    return
+        finally:
+            manager.unsubscribe(thread_id, queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.delete("/dashboard-api/background-tasks/{thread_id:path}")

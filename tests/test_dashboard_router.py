@@ -152,6 +152,142 @@ def test_dashboard_api_renames_chat_thread(monkeypatch: pytest.MonkeyPatch) -> N
     assert response.json()["checkpoint_count"] == 2
 
 
+def test_dashboard_background_task_events_streams_snapshot_and_done(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
+    conversations_module = importlib.import_module("agent.modules.conversations")
+    thread_id = "task_dashboard_123"
+    task = {
+        "task_id": "123",
+        "thread_id": thread_id,
+        "request": "do work",
+        "agent_name": "default",
+        "working_dir": None,
+        "status": "completed",
+        "result": "done",
+        "error": "",
+        "created_at": 1.0,
+        "started_at": 2.0,
+        "completed_at": 3.0,
+        "elapsed_seconds": 1.0,
+        "elapsed_display": "1s",
+        "notify_channel": None,
+    }
+
+    class FakeManager:
+        def __init__(self) -> None:
+            self.unsubscribed = False
+
+        def get_by_thread_id(self, requested_thread_id: str):
+            assert requested_thread_id == thread_id
+            return task
+
+        def subscribe(self, requested_thread_id: str):
+            assert requested_thread_id == thread_id
+            import asyncio
+
+            return asyncio.Queue()
+
+        def unsubscribe(self, requested_thread_id: str, queue) -> None:
+            assert requested_thread_id == thread_id
+            self.unsubscribed = True
+
+    async def fake_get_conversation_thread(requested_thread_id: str):
+        assert requested_thread_id == thread_id
+        return {
+            "thread_id": thread_id,
+            "platform": "task",
+            "user_id": "dashboard",
+            "channel_id": "123",
+            "agent_name": "default",
+            "title": "do work",
+            "kind": "background",
+            "created_at": None,
+            "updated_at": None,
+        }
+
+    async def fake_get_thread_messages(requested_thread_id: str):
+        assert requested_thread_id == thread_id
+        return [{"id": "ai-1", "role": "assistant", "content": "done"}]
+
+    manager = FakeManager()
+    monkeypatch.setattr(
+        dashboard_router_module,
+        "get_background_task_manager",
+        lambda: manager,
+    )
+    monkeypatch.setattr(
+        conversations_module,
+        "get_conversation_thread",
+        fake_get_conversation_thread,
+    )
+    monkeypatch.setattr(
+        dashboard_router_module,
+        "_get_thread_messages",
+        fake_get_thread_messages,
+    )
+    monkeypatch.setattr(
+        dashboard_router_module,
+        "get_active_session_registry",
+        lambda: SimpleNamespace(list_active=lambda: []),
+    )
+
+    client = _create_dashboard_client(ChannelManager())
+    response = client.get(
+        "/dashboard-api/background-task-events",
+        params={"thread_id": thread_id},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "event: snapshot" in response.text
+    assert '"thread_id": "task_dashboard_123"' in response.text
+    assert '"role": "assistant"' in response.text
+    assert '"task_id": "123"' in response.text
+    assert "event: done" in response.text
+    assert manager.unsubscribed is True
+
+
+def test_dashboard_background_task_events_returns_404_for_unknown_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
+    conversations_module = importlib.import_module("agent.modules.conversations")
+
+    class FakeManager:
+        def get_by_thread_id(self, thread_id: str):
+            return None
+
+        def subscribe(self, thread_id: str):
+            raise AssertionError("Unknown threads should not be subscribed.")
+
+    async def fake_get_conversation_thread(thread_id: str):
+        return None
+
+    monkeypatch.setattr(
+        dashboard_router_module,
+        "get_background_task_manager",
+        lambda: FakeManager(),
+    )
+    monkeypatch.setattr(
+        conversations_module,
+        "get_conversation_thread",
+        fake_get_conversation_thread,
+    )
+
+    client = _create_dashboard_client(ChannelManager())
+    response = client.get(
+        "/dashboard-api/background-task-events",
+        params={"thread_id": "task_dashboard_missing"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == (
+        "Background task thread 'task_dashboard_missing' not found."
+    )
+
+
 @pytest.mark.asyncio
 async def test_dashboard_delete_chat_thread_deletes_workflow_tree(
     monkeypatch: pytest.MonkeyPatch,

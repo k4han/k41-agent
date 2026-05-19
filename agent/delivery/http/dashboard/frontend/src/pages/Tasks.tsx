@@ -1,5 +1,6 @@
+import { A } from "@solidjs/router";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import { Play, RefreshCw, Square, Trash2 } from "lucide-solid";
+import { MessageSquare, Play, RefreshCw, Square, Trash2 } from "lucide-solid";
 
 import { AppShell } from "@/components/AppShell";
 import { DataGate } from "@/components/State";
@@ -349,6 +350,15 @@ export function TasksPage() {
                               )}
                             </Show>
                             <div class="row-wrap">
+                              <Show when={task.thread_id}>
+                                <A
+                                  class="btn btn-sm"
+                                  href={`/chat?thread=${encodeURIComponent(task.thread_id)}`}
+                                >
+                                  <MessageSquare size={13} />
+                                  {isActive ? "View Live" : "Open Chat"}
+                                </A>
+                              </Show>
                               <Show when={hasDetails}>
                                 <button class="btn btn-sm" type="button" onClick={() => toggleExpanded(task.task_id)}>
                                   {expanded()[task.task_id] ? "Hide" : "Show"} Details

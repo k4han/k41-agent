@@ -30,7 +30,7 @@ import {
 import { truncateText } from "@/lib/utils";
 import type { TranscriptAttachment, TranscriptItem } from "@/components/Transcript";
 import type { ThreadMessagesPayload } from "@/lib/chatThreads";
-import type { AgentCard, AgentsPayload } from "@/types";
+import type { ActiveSession, AgentCard, AgentsPayload, BackgroundTask } from "@/types";
 
 type ChatTranscriptItem = TranscriptItem & { id: number; key?: string };
 type ChatAttachmentKind = "text" | "image";
@@ -56,12 +56,17 @@ type ChatPayload = {
   new_thread?: boolean;
   attachments?: ChatAttachmentPayload[];
 };
+type BackgroundTaskSnapshot = ThreadMessagesPayload & {
+  task?: BackgroundTask | null;
+  active_session?: ActiveSession | null;
+};
 
 const MAX_ATTACHMENTS = 5;
 const MAX_TEXT_ATTACHMENT_BYTES = 100 * 1024;
 const MAX_IMAGE_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 const MAX_TOTAL_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const DEFAULT_ATTACHMENT_MESSAGE = "Please review the attached file(s).";
+const ACTIVE_TASK_STATUSES = new Set(["pending", "running"]);
 const ATTACHMENT_ACCEPT = [
   "image/*",
   ".txt",
@@ -228,6 +233,10 @@ export function ChatPage() {
   const [items, setItems] = createSignal<ChatTranscriptItem[]>([]);
   const [streaming, setStreaming] = createSignal(false);
   const [controller, setController] = createSignal<AbortController | null>(null);
+  const [backgroundTask, setBackgroundTask] = createSignal<BackgroundTask | null>(null);
+  const [backgroundLive, setBackgroundLive] = createSignal(false);
+  const [backgroundStreamError, setBackgroundStreamError] = createSignal("");
+  const [backgroundSession, setBackgroundSession] = createSignal<ActiveSession | null>(null);
   const [composerOptionsOpen, setComposerOptionsOpen] = createSignal(false);
   const [attachments, setAttachments] = createSignal<PendingAttachment[]>([]);
   const { showToast } = useToast();
@@ -235,6 +244,8 @@ export function ChatPage() {
   let fileInputRef: HTMLInputElement | undefined;
   let loadedThreadId: string | null = null;
   let threadLoadRequestId = 0;
+  let backgroundEventSource: EventSource | null = null;
+  let backgroundEventThreadId = "";
 
   const load = async () => {
     setError("");
@@ -259,6 +270,14 @@ export function ChatPage() {
     currentThreadId()
       ? `Continue thread ${truncateText(currentThreadId(), 88)}`
       : "Stream an agent response with visible tool calls."
+  ));
+  const isBackgroundThread = createMemo(() => threadData()?.kind === "background");
+  const backgroundTaskActive = createMemo(() => {
+    const task = backgroundTask();
+    return Boolean(task && ACTIVE_TASK_STATUSES.has(task.status));
+  });
+  const composerDisabled = createMemo(() => (
+    streaming() || threadLoading() || backgroundTaskActive() || backgroundLive()
   ));
 
   createEffect(() => {
@@ -338,6 +357,112 @@ export function ChatPage() {
     clearAttachments([target]);
   };
 
+  const applyThreadPayload = (payload: ThreadMessagesPayload) => {
+    setThreadData(payload);
+    setCurrentThreadId(payload.thread_id);
+    setItems(
+      toThreadTranscript(payload.messages).map((item) => ({
+        ...item,
+        id: nextItemId++,
+      })),
+    );
+    scrollToBottom();
+  };
+
+  const closeBackgroundStream = () => {
+    if (backgroundEventSource) {
+      backgroundEventSource.close();
+    }
+    backgroundEventSource = null;
+    backgroundEventThreadId = "";
+    setBackgroundLive(false);
+    setBackgroundStreamError("");
+    setBackgroundSession(null);
+  };
+
+  const applyBackgroundSnapshot = (snapshot: BackgroundTaskSnapshot) => {
+    applyThreadPayload({
+      thread_id: snapshot.thread_id,
+      messages: snapshot.messages || [],
+      platform: snapshot.platform,
+      user_id: snapshot.user_id,
+      channel_id: snapshot.channel_id,
+      agent_name: snapshot.agent_name,
+      title: snapshot.title,
+      kind: snapshot.kind,
+    });
+    setBackgroundTask(snapshot.task || null);
+    setBackgroundSession(snapshot.active_session || null);
+  };
+
+  const openBackgroundStream = (threadId: string) => {
+    closeBackgroundStream();
+    const assistantIdRef = { id: null as number | null };
+    const streamedRef = { received: false };
+    const source = new EventSource(
+      `/dashboard-api/background-task-events?thread_id=${encodeURIComponent(threadId)}`,
+    );
+    backgroundEventSource = source;
+    backgroundEventThreadId = threadId;
+    setBackgroundLive(true);
+
+    source.addEventListener("snapshot", (event) => {
+      if (backgroundEventThreadId !== threadId) {
+        return;
+      }
+      assistantIdRef.id = null;
+      streamedRef.received = false;
+      setBackgroundStreamError("");
+      applyBackgroundSnapshot(JSON.parse(event.data) as BackgroundTaskSnapshot);
+    });
+    source.addEventListener("agent", (event) => {
+      if (backgroundEventThreadId !== threadId) {
+        return;
+      }
+      handleEvent(
+        JSON.parse(event.data) as Record<string, unknown>,
+        assistantIdRef,
+        streamedRef,
+      );
+    });
+    source.addEventListener("task", (event) => {
+      if (backgroundEventThreadId !== threadId) {
+        return;
+      }
+      const payload = JSON.parse(event.data) as { task?: BackgroundTask | null };
+      setBackgroundTask(payload.task || null);
+      setBackgroundStreamError("");
+    });
+    source.addEventListener("done", (event) => {
+      if (backgroundEventThreadId !== threadId) {
+        return;
+      }
+      const payload = JSON.parse(event.data) as { task?: BackgroundTask | null };
+      setBackgroundTask(payload.task || null);
+      setBackgroundLive(false);
+      source.close();
+      if (backgroundEventSource === source) {
+        backgroundEventSource = null;
+        backgroundEventThreadId = "";
+      }
+      window.dispatchEvent(new CustomEvent("kaka:tasks-changed"));
+    });
+    source.addEventListener("heartbeat", () => {
+      if (backgroundEventThreadId === threadId) {
+        setBackgroundStreamError("");
+      }
+    });
+    source.onerror = () => {
+      if (backgroundEventThreadId !== threadId) {
+        return;
+      }
+      setBackgroundStreamError("Live updates disconnected.");
+      if (source.readyState === EventSource.CLOSED) {
+        setBackgroundLive(false);
+      }
+    };
+  };
+
   const loadThread = async (threadId: string) => {
     const requestId = threadLoadRequestId + 1;
     threadLoadRequestId = requestId;
@@ -346,21 +471,21 @@ export function ChatPage() {
     setThreadError("");
     setThreadLoading(true);
     setItems([]);
+    closeBackgroundStream();
+    setBackgroundTask(null);
 
     try {
       const payload = await apiFetch<ThreadMessagesPayload>(threadApiPath(threadId));
       if (requestId !== threadLoadRequestId) {
         return;
       }
-      setThreadData(payload);
-      setCurrentThreadId(payload.thread_id);
-      setItems(
-        toThreadTranscript(payload.messages).map((item) => ({
-          ...item,
-          id: nextItemId++,
-        })),
-      );
-      scrollToBottom();
+      applyThreadPayload(payload);
+      if (payload.kind === "background") {
+        openBackgroundStream(payload.thread_id);
+      } else {
+        closeBackgroundStream();
+        setBackgroundTask(null);
+      }
     } catch (err) {
       if (requestId !== threadLoadRequestId) {
         return;
@@ -389,6 +514,8 @@ export function ChatPage() {
       setThreadError("");
       setThreadLoading(false);
       setItems([]);
+      closeBackgroundStream();
+      setBackgroundTask(null);
       return;
     }
 
@@ -519,11 +646,11 @@ export function ChatPage() {
     return payload;
   };
 
-  const handleEvent = (
+  function handleEvent(
     event: Record<string, unknown>,
     assistantIdRef: { id: number | null },
     streamedRef: { received: boolean },
-  ) => {
+  ) {
     if (event.type === "thread_created") {
       const threadId = String(event.thread_id || "");
       if (!threadId) {
@@ -587,7 +714,7 @@ export function ChatPage() {
       }
       updateMessage(assistantIdRef.id, content);
     }
-  };
+  }
 
   const sendMessage = async () => {
     const selectedAttachments = attachments();
@@ -601,6 +728,10 @@ export function ChatPage() {
     }
     if (threadLoading()) {
       showToast("Wait for the thread to load.", "warning");
+      return;
+    }
+    if (backgroundTaskActive() || backgroundLive()) {
+      showToast("Wait for the background task to finish.", "warning");
       return;
     }
     if (!agentName()) {
@@ -681,6 +812,8 @@ export function ChatPage() {
 
   onMount(load);
   onCleanup(() => {
+    controller()?.abort();
+    closeBackgroundStream();
     attachments().forEach(revokeAttachmentPreview);
   });
 
@@ -703,10 +836,25 @@ export function ChatPage() {
                 <div class={`thread-banner ${threadError() ? "thread-banner-error" : ""}`}>
                   <div class="row-wrap">
                     <span class="badge">{threadData()?.platform || "thread"}</span>
+                    <Show when={isBackgroundThread()}>
+                      <span class="badge badge-info">background</span>
+                    </Show>
+                    <Show when={backgroundTask()}>
+                      {(task) => <span class="badge">{task().status}</span>}
+                    </Show>
+                    <Show when={backgroundLive()}>
+                      <span class="badge badge-info">live</span>
+                    </Show>
+                    <Show when={backgroundSession()}>
+                      {(session) => <span class="badge">{session().elapsed_display}</span>}
+                    </Show>
                     <span class="mono">{truncateText(currentThreadId(), 84)}</span>
                   </div>
                   <Show when={threadError()}>
                     <span>{threadError()}</span>
+                  </Show>
+                  <Show when={backgroundStreamError()}>
+                    <span>{backgroundStreamError()}</span>
                   </Show>
                 </div>
               </Show>
@@ -740,11 +888,13 @@ export function ChatPage() {
                   class="chat-prompt-input"
                   rows={4}
                   value={prompt()}
-                  disabled={streaming() || threadLoading()}
+                  disabled={composerDisabled()}
                   placeholder={
-                    currentThreadId()
-                      ? "Continue this thread..."
-                      : "Ask Kaka to build features, fix bugs, or work on your code"
+                    backgroundTaskActive()
+                      ? "Background task is running..."
+                      : currentThreadId()
+                        ? "Continue this thread..."
+                        : "Ask Kaka to build features, fix bugs, or work on your code"
                   }
                   onInput={(event) => setPrompt(event.currentTarget.value)}
                   onKeyDown={(event) => {
@@ -784,7 +934,7 @@ export function ChatPage() {
                             class="chat-attachment-remove"
                             type="button"
                             onClick={() => removeAttachment(attachment.id)}
-                            disabled={streaming()}
+                            disabled={composerDisabled()}
                             title="Remove file"
                             aria-label={`Remove ${attachment.name}`}
                           >
@@ -801,7 +951,7 @@ export function ChatPage() {
                       class="chat-agent-picker"
                       value={agentName()}
                       options={agentOptions()}
-                      disabled={streaming()}
+                      disabled={composerDisabled()}
                       onChange={setAgentName}
                       ariaLabel="Agent"
                       title={selectedCard()?.description || "Select agent"}
@@ -811,7 +961,7 @@ export function ChatPage() {
                       class="chat-composer-icon"
                       type="button"
                       onClick={() => fileInputRef?.click()}
-                      disabled={streaming() || threadLoading()}
+                      disabled={composerDisabled()}
                       title="Attach files"
                       aria-label="Attach files"
                     >
@@ -821,7 +971,7 @@ export function ChatPage() {
                       class={`chat-composer-icon ${composerOptionsOpen() ? "active" : ""}`}
                       type="button"
                       onClick={() => setComposerOptionsOpen((current) => !current)}
-                      disabled={streaming()}
+                      disabled={composerDisabled()}
                       title="Run settings"
                       aria-label="Run settings"
                       aria-expanded={composerOptionsOpen()}
@@ -836,7 +986,7 @@ export function ChatPage() {
                         class="chat-composer-icon"
                         type="button"
                         onClick={sendMessage}
-                        disabled={threadLoading() || (!prompt().trim() && !attachments().length)}
+                        disabled={threadLoading() || backgroundTaskActive() || backgroundLive() || (!prompt().trim() && !attachments().length)}
                         title="Send"
                         aria-label="Send"
                       >
@@ -865,7 +1015,7 @@ export function ChatPage() {
                         defaultProvider={payload.default_provider}
                         provider={provider()}
                         model={model()}
-                        disabled={streaming()}
+                        disabled={composerDisabled()}
                         dropdownPlacement="top"
                         onChange={(nextProvider, nextModel) => {
                           setProvider(nextProvider);

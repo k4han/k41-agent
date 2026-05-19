@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 MAX_COMPLETED_TASKS = 100
 MAX_STORED_TEXT_LENGTH = 20_000
+TASK_EVENT_QUEUE_SIZE = 100
 BACKGROUND_THREAD_PREFIX = "task"
 _GRAPH_NAME = REACT_AGENT_GRAPH_TYPE
 _NODE_NAME = "llm"
@@ -146,6 +147,7 @@ class BackgroundTaskManager:
 
     def __init__(self) -> None:
         self._tasks: dict[str, BackgroundTask] = {}
+        self._subscribers: dict[str, set[asyncio.Queue[dict[str, Any]]]] = {}
         self._lock = threading.Lock()
 
     async def restore_from_persistence(self) -> None:
@@ -242,7 +244,7 @@ class BackgroundTaskManager:
 
         Returns the task_id.
         """
-        from agent.modules.agent_runtime.runner import run_agent_full
+        from agent.modules.agent_runtime.runner import run_agent_stream
 
         task = BackgroundTask(
             request=request,
@@ -268,9 +270,10 @@ class BackgroundTaskManager:
         with self._lock:
             self._tasks[task.task_id] = task
             self._trim_completed()
+        self._publish_task_event(task)
 
         async_task = asyncio.create_task(
-            self._execute(task, run_agent_full),
+            self._execute(task, run_agent_stream),
             name=f"bg-task-{task.task_id}",
         )
         task._async_task = async_task
@@ -294,14 +297,10 @@ class BackgroundTaskManager:
             await self._persist_task(task)
         except Exception as exc:
             logger.warning("Failed to persist background task %s start: %s", task.task_id, exc)
+        self._publish_task_event(task)
 
         try:
-            result = await run_fn(
-                user_input=task.request,
-                thread_id=task.thread_id,
-                agent_name=task.agent_name,
-                working_dir=task.working_dir,
-            )
+            result = await self._run_streamed_task(task, run_fn)
             task.result = _truncate_stored_text(result)
             if task.completion_hook is not None:
                 await task.completion_hook(task)
@@ -310,10 +309,12 @@ class BackgroundTaskManager:
         except asyncio.CancelledError:
             task.status = TaskStatus.CANCELLED
             task.error = "Task was cancelled."
+            self._publish_agent_event(task, {"type": "error", "content": task.error})
             logger.info("Background task %s was cancelled.", task.task_id)
         except Exception as exc:
             task.status = TaskStatus.FAILED
             task.error = _truncate_stored_text(str(exc))
+            self._publish_agent_event(task, {"type": "error", "content": task.error})
             logger.error(
                 "Background task %s failed: %s",
                 task.task_id,
@@ -336,7 +337,30 @@ class BackgroundTaskManager:
             with self._lock:
                 self._trim_completed()
                 task._async_task = None
+            self._publish_task_event(task)
+            self._publish_done_event(task)
             await self._notify_completion(task)
+
+    async def _run_streamed_task(self, task: BackgroundTask, run_fn: Any) -> str:
+        message_chunks: list[str] = []
+        final_content = ""
+
+        async for event in run_fn(
+            user_input=task.request,
+            thread_id=task.thread_id,
+            agent_name=task.agent_name,
+            working_dir=task.working_dir,
+        ):
+            if isinstance(event, dict):
+                event_type = str(event.get("type") or "")
+                content = event.get("content")
+                if event_type == "message" and isinstance(content, str):
+                    message_chunks.append(content)
+                elif event_type == "final" and isinstance(content, str):
+                    final_content = content
+                self._publish_agent_event(task, event)
+
+        return final_content or "".join(message_chunks)
 
     async def _notify_completion(self, task: BackgroundTask) -> None:
         """Inject results into the user's thread and send a push notification."""
@@ -434,6 +458,32 @@ class BackgroundTaskManager:
             task = self._tasks.get(task_id)
         return task.to_dict() if task else None
 
+    def get_by_thread_id(self, thread_id: str) -> dict[str, Any] | None:
+        """Return a task by its conversation thread ID, or None."""
+        with self._lock:
+            task = next(
+                (task for task in self._tasks.values() if task.thread_id == thread_id),
+                None,
+            )
+        return task.to_dict() if task else None
+
+    def subscribe(self, thread_id: str) -> asyncio.Queue[dict[str, Any]]:
+        """Subscribe to live events for a background task thread."""
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=TASK_EVENT_QUEUE_SIZE)
+        with self._lock:
+            self._subscribers.setdefault(thread_id, set()).add(queue)
+        return queue
+
+    def unsubscribe(self, thread_id: str, queue: asyncio.Queue[dict[str, Any]]) -> None:
+        """Remove a live event subscription."""
+        with self._lock:
+            subscribers = self._subscribers.get(thread_id)
+            if subscribers is None:
+                return
+            subscribers.discard(queue)
+            if not subscribers:
+                self._subscribers.pop(thread_id, None)
+
     def list_all(self) -> list[dict[str, Any]]:
         """Return all tasks, newest first."""
         with self._lock:
@@ -500,6 +550,35 @@ class BackgroundTaskManager:
         for task in completed[:excess]:
             self._tasks.pop(task.task_id, None)
 
+    def _publish_agent_event(self, task: BackgroundTask, event: dict[str, Any]) -> None:
+        self._publish_event(task.thread_id, "agent", event)
+
+    def _publish_task_event(self, task: BackgroundTask) -> None:
+        self._publish_event(task.thread_id, "task", {"task": task.to_dict()})
+
+    def _publish_done_event(self, task: BackgroundTask) -> None:
+        self._publish_event(task.thread_id, "done", {"task": task.to_dict()})
+
+    def _publish_event(self, thread_id: str, event_name: str, data: dict[str, Any]) -> None:
+        if not thread_id:
+            return
+        with self._lock:
+            subscribers = list(self._subscribers.get(thread_id, ()))
+
+        payload = {"event": event_name, "data": data}
+        for queue in subscribers:
+            try:
+                queue.put_nowait(payload)
+            except asyncio.QueueFull:
+                try:
+                    queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+                try:
+                    queue.put_nowait(payload)
+                except asyncio.QueueFull:
+                    pass
+
 
 # Module-level singleton
 _manager = BackgroundTaskManager()
@@ -514,6 +593,7 @@ __all__ = [
     "BackgroundTask",
     "BackgroundTaskManager",
     "NotifyChannel",
+    "TASK_EVENT_QUEUE_SIZE",
     "TaskStatus",
     "get_background_task_manager",
 ]
