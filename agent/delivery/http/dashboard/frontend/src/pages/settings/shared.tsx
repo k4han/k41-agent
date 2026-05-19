@@ -1,4 +1,4 @@
-import { createMemo, createSignal, For, Show } from "solid-js";
+import { createMemo, createSignal, For, JSX, Show } from "solid-js";
 import { RotateCcw } from "lucide-solid";
 
 import { useToast } from "@/components/Toast";
@@ -220,14 +220,40 @@ export function SettingControl(props: {
         type="button"
         role="switch"
         aria-checked={Boolean(props.value)}
+        aria-label={props.info.label || props.info.key}
         onClick={() => props.onChange(!Boolean(props.value))}
       >
         <span class="toggle-track">
           <span class="toggle-thumb" />
         </span>
-        <span>{Boolean(props.value) ? "Enabled" : "Disabled"}</span>
+        <span class="toggle-label">{Boolean(props.value) ? "Enabled" : "Disabled"}</span>
       </button>
     </Show>
+  );
+}
+
+export function SettingsSection(props: {
+  title: string;
+  description?: JSX.Element;
+  actions?: JSX.Element;
+  class?: string;
+  children: JSX.Element;
+}) {
+  return (
+    <section class={`settings-group ${props.class || ""}`}>
+      <div class="settings-section-header">
+        <div>
+          <div class="settings-section-title">{props.title}</div>
+          <Show when={props.description}>
+            <div class="hint">{props.description}</div>
+          </Show>
+        </div>
+        <Show when={props.actions}>
+          <div class="row-wrap">{props.actions}</div>
+        </Show>
+      </div>
+      {props.children}
+    </section>
   );
 }
 

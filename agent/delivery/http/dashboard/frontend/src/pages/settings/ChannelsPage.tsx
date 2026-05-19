@@ -63,6 +63,8 @@ export function ChannelsPage() {
     <SettingsLayout
       title="Pair Channels"
       subtitle="Connect external channel identities to dashboard users."
+      breadcrumbLabel="Channels"
+      contentWidth="wide"
       actions={
         <>
           <button class="btn" type="button" onClick={load}>

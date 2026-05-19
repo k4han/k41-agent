@@ -37,8 +37,12 @@ export function AppearancePage() {
   };
 
   return (
-    <SettingsLayout title="Appearance" subtitle="Customize how the dashboard looks.">
-      <section class="panel" style={{ "max-width": "520px" }}>
+    <SettingsLayout
+      title="Appearance"
+      subtitle="Customize how the dashboard looks."
+      contentWidth="narrow"
+    >
+      <section class="panel">
         <div class="panel-header">
           <div class="panel-title row">
             {dark() ? <Moon size={14} /> : <Sun size={14} />}

@@ -10,6 +10,7 @@ import { statusBadgeClass, truncateText, uniqueSorted } from "@/lib/utils";
 import type { AgentCard, AgentsPayload } from "@/types";
 
 import { SettingsLayout } from "./SettingsLayout";
+import { SettingsSection } from "./shared";
 
 type AgentForm = {
   name: string;
@@ -195,6 +196,7 @@ export function AgentsPage() {
     <SettingsLayout
       title="Agents"
       subtitle="Manage Markdown agent cards loaded by the runtime catalog."
+      contentWidth="wide"
       actions={
         <>
           <button class="btn" type="button" onClick={reloadAgents}>
@@ -211,116 +213,133 @@ export function AgentsPage() {
       <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => (
           <div class="stack">
-            <section class="panel">
-              <div class="panel-body">
-                <input
-                  class="input"
-                  type="search"
-                  placeholder="Search agents..."
-                  value={query()}
-                  onInput={(event) => setQuery(event.currentTarget.value)}
-                />
-              </div>
-            </section>
+            <SettingsSection title="Catalog" description="Filter runtime agent cards">
+              <section class="panel">
+                <div class="panel-body">
+                  <input
+                    class="input"
+                    type="search"
+                    placeholder="Search agents..."
+                    value={query()}
+                    onInput={(event) => setQuery(event.currentTarget.value)}
+                  />
+                </div>
+              </section>
+            </SettingsSection>
 
-            <section class="panel">
-              <div class="table-wrap">
-                <table class="table">
-                  <thead>
-                    <tr>
-                      <th>Agent</th>
-                      <th>Source</th>
-                      <th>Provider / Model</th>
-                      <th>Tools</th>
-                      <th>Sub-agents</th>
-                      <th>Status</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <For
-                      each={filteredCards()}
-                      fallback={
-                        <tr>
-                          <td colSpan={7}>
-                            <div class="empty">No agent cards found.</div>
-                          </td>
-                        </tr>
-                      }
-                    >
-                      {(card) => (
-                        <tr>
-                          <td>
-                            <div class="mono">{card.name}</div>
-                            <Show when={card.display_name}>
-                              <div>{card.display_name}</div>
-                            </Show>
-                            <Show when={card.description}>
-                              <div class="hint">{truncateText(card.description, 140)}</div>
-                            </Show>
-                          </td>
-                          <td>
-                            <div class="chips">
-                              <span class="badge">{card.source}</span>
-                              <Show when={card.overrides_builtin}>
-                                <span class="badge badge-warning">override</span>
+            <SettingsSection
+              title="Agent Cards"
+              description={`${filteredCards().length} agent${filteredCards().length === 1 ? "" : "s"}`}
+            >
+              <section class="panel">
+                <div class="table-wrap">
+                  <table class="table">
+                    <thead>
+                      <tr>
+                        <th>Agent</th>
+                        <th>Source</th>
+                        <th>Provider / Model</th>
+                        <th>Tools</th>
+                        <th>Sub-agents</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <For
+                        each={filteredCards()}
+                        fallback={
+                          <tr>
+                            <td colSpan={7}>
+                              <div class="empty">No agent cards found.</div>
+                            </td>
+                          </tr>
+                        }
+                      >
+                        {(card) => (
+                          <tr>
+                            <td>
+                              <div class="mono">{card.name}</div>
+                              <Show when={card.display_name}>
+                                <div>{card.display_name}</div>
                               </Show>
-                            </div>
-                          </td>
-                          <td>
-                            <div class="chips">
-                              <span class="chip">{`${card.provider || "default"}/${card.model || "provider default"}`}</span>
-                            </div>
-                          </td>
-                          <td>
-                            <div class="chips">
-                              <For each={card.tools} fallback={<span class="chip">default</span>}>
-                                {(tool) => <span class="chip">{tool}</span>}
-                              </For>
-                            </div>
-                          </td>
-                          <td>
-                            <div class="chips">
-                              <For
-                                each={card.sub_agents || []}
-                                fallback={<span class="chip">none selected</span>}
-                              >
-                                {(agent) => <span class="chip">{agent}</span>}
-                              </For>
-                            </div>
-                          </td>
-                          <td>
-                            <span class={statusBadgeClass(card.valid ? "valid" : "invalid")}>
-                              {card.valid ? "valid" : "invalid"}
-                            </span>
-                            <Show when={!card.valid && card.error}>
-                              <div class="hint">{card.error}</div>
-                            </Show>
-                          </td>
-                          <td>
-                            <div class="row-wrap">
-                              <Show when={card.valid}>
-                                <a class="btn btn-sm" href={`/chat?agent=${encodeURIComponent(card.name)}`}>
-                                  <MessageSquare size={13} />
-                                  Chat
-                                </a>
-                                <button class="btn btn-sm" type="button" onClick={() => openCard(card, "view")}>
-                                  <Eye size={13} />
-                                  View
-                                </button>
-                                <Show
-                                  when={card.editable}
-                                  fallback={
-                                    <button class="btn btn-sm" type="button" onClick={() => cloneAgent(card.name)}>
-                                      <Copy size={13} />
-                                      Clone
-                                    </button>
-                                  }
+                              <Show when={card.description}>
+                                <div class="hint">{truncateText(card.description, 140)}</div>
+                              </Show>
+                            </td>
+                            <td>
+                              <div class="chips">
+                                <span class="badge">{card.source}</span>
+                                <Show when={card.overrides_builtin}>
+                                  <span class="badge badge-warning">override</span>
+                                </Show>
+                              </div>
+                            </td>
+                            <td>
+                              <div class="chips">
+                                <span class="chip">{`${card.provider || "default"}/${card.model || "provider default"}`}</span>
+                              </div>
+                            </td>
+                            <td>
+                              <div class="chips">
+                                <For each={card.tools} fallback={<span class="chip">default</span>}>
+                                  {(tool) => <span class="chip">{tool}</span>}
+                                </For>
+                              </div>
+                            </td>
+                            <td>
+                              <div class="chips">
+                                <For
+                                  each={card.sub_agents || []}
+                                  fallback={<span class="chip">none selected</span>}
                                 >
-                                  <button class="btn btn-sm" type="button" onClick={() => openCard(card, "edit")}>
-                                    <Edit3 size={13} />
-                                    Edit
+                                  {(agent) => <span class="chip">{agent}</span>}
+                                </For>
+                              </div>
+                            </td>
+                            <td>
+                              <span class={statusBadgeClass(card.valid ? "valid" : "invalid")}>
+                                {card.valid ? "valid" : "invalid"}
+                              </span>
+                              <Show when={!card.valid && card.error}>
+                                <div class="hint">{card.error}</div>
+                              </Show>
+                            </td>
+                            <td>
+                              <div class="row-wrap">
+                                <Show when={card.valid}>
+                                  <a class="btn btn-sm" href={`/chat?agent=${encodeURIComponent(card.name)}`}>
+                                    <MessageSquare size={13} />
+                                    Chat
+                                  </a>
+                                  <button class="btn btn-sm" type="button" onClick={() => openCard(card, "view")}>
+                                    <Eye size={13} />
+                                    View
                                   </button>
+                                  <Show
+                                    when={card.editable}
+                                    fallback={
+                                      <button class="btn btn-sm" type="button" onClick={() => cloneAgent(card.name)}>
+                                        <Copy size={13} />
+                                        Clone
+                                      </button>
+                                    }
+                                  >
+                                    <button class="btn btn-sm" type="button" onClick={() => openCard(card, "edit")}>
+                                      <Edit3 size={13} />
+                                      Edit
+                                    </button>
+                                    <button
+                                      class="btn btn-sm btn-danger"
+                                      type="button"
+                                      onClick={() => deleteAgent(card.name)}
+                                    >
+                                      <Trash2 size={13} />
+                                      Delete
+                                    </button>
+                                  </Show>
+                                </Show>
+                                <Show when={!card.valid && card.editable}>
                                   <button
                                     class="btn btn-sm btn-danger"
                                     type="button"
@@ -330,26 +349,16 @@ export function AgentsPage() {
                                     Delete
                                   </button>
                                 </Show>
-                              </Show>
-                              <Show when={!card.valid && card.editable}>
-                                <button
-                                  class="btn btn-sm btn-danger"
-                                  type="button"
-                                  onClick={() => deleteAgent(card.name)}
-                                >
-                                  <Trash2 size={13} />
-                                  Delete
-                                </button>
-                              </Show>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </For>
-                  </tbody>
-                </table>
-              </div>
-            </section>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </For>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </SettingsSection>
 
             <Dialog
               open={modalMode() !== null}

@@ -11,6 +11,7 @@ import {
   ChangesPreview,
   type PendingChange,
   SettingRow,
+  SettingsSection,
   useSettingsData,
 } from "./shared";
 
@@ -46,6 +47,7 @@ export function ConfigPage() {
     <SettingsLayout
       title="Runtime Configuration"
       subtitle="Manage channels, database, and security settings."
+      breadcrumbLabel="Runtime"
       actions={
         <>
           <button class="btn" type="button" onClick={load}>
@@ -82,13 +84,10 @@ export function ConfigPage() {
               </div>
               <For each={filteredCategories()}>
                 {(group) => (
-                  <section class="settings-group">
-                    <div class="settings-section-header">
-                      <div>
-                        <div class="settings-section-title">{categoryLabel(group.category)}</div>
-                        <div class="hint">{group.settings.length} setting{group.settings.length === 1 ? "" : "s"}</div>
-                      </div>
-                    </div>
+                  <SettingsSection
+                    title={categoryLabel(group.category)}
+                    description={`${group.settings.length} setting${group.settings.length === 1 ? "" : "s"}`}
+                  >
                     <div class="settings-list">
                       <For each={group.settings}>
                         {([key, info]) => (
@@ -103,7 +102,7 @@ export function ConfigPage() {
                         )}
                       </For>
                     </div>
-                  </section>
+                  </SettingsSection>
                 )}
               </For>
               <Show when={filteredCategories().length === 0}>

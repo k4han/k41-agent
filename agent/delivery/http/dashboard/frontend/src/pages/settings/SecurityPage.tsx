@@ -31,8 +31,12 @@ export function SecurityPage() {
   };
 
   return (
-    <SettingsLayout title="Security" subtitle="Update the dashboard admin password.">
-      <section class="panel" style={{ "max-width": "520px" }}>
+    <SettingsLayout
+      title="Security"
+      subtitle="Update the dashboard admin password."
+      contentWidth="narrow"
+    >
+      <section class="panel">
         <div class="panel-header">
           <div class="panel-title row">
             <KeyRound size={14} />

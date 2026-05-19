@@ -32,6 +32,8 @@ export function SettingsLayout(props: {
   title: string;
   subtitle?: string;
   actions?: JSX.Element;
+  breadcrumbLabel?: string;
+  contentWidth?: "narrow" | "medium" | "wide";
   children: JSX.Element;
 }) {
   const location = useLocation();
@@ -106,14 +108,25 @@ export function SettingsLayout(props: {
         </nav>
       </aside>
       <main class="main">
-        <header class="topbar">
-          <div>
-            <h1 class="page-title">{props.title}</h1>
-            {props.subtitle ? <p class="page-subtitle">{props.subtitle}</p> : null}
+        <header class="topbar settings-topbar">
+          <div class="settings-breadcrumb" aria-label="Breadcrumb">
+            <span class="settings-breadcrumb-root">Settings</span>
+            <span class="settings-breadcrumb-separator">/</span>
+            <span class="settings-breadcrumb-current">{props.breadcrumbLabel || props.title}</span>
           </div>
           <div class="row-wrap">{props.actions}</div>
         </header>
-        <div class="content">{props.children}</div>
+        <div class={`content settings-content settings-content-${props.contentWidth || "medium"}`}>
+          <A href="/" class="settings-back-link">
+            <ArrowLeft size={13} />
+            Back to dashboard
+          </A>
+          <div class="settings-page-heading">
+            <h1 class="page-title">{props.title}</h1>
+            {props.subtitle ? <p class="page-subtitle">{props.subtitle}</p> : null}
+          </div>
+          <div class="settings-page-body">{props.children}</div>
+        </div>
       </main>
     </div>
   );

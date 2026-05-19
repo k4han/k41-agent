@@ -13,6 +13,7 @@ import {
   ChangesPreview,
   type PendingChange,
   SettingRow,
+  SettingsSection,
   useSettingsData,
 } from "./shared";
 
@@ -97,6 +98,7 @@ export function ProvidersPage() {
     <SettingsLayout
       title="Provider Configuration"
       subtitle="Manage default provider and per-provider LLM credentials/models."
+      breadcrumbLabel="Providers"
       actions={
         <>
           <button class="btn" type="button" onClick={load}>
@@ -134,13 +136,10 @@ export function ProvidersPage() {
 
               <For each={filteredCategories()}>
                 {(group) => (
-                  <section class="settings-group">
-                    <div class="settings-section-header">
-                      <div>
-                        <div class="settings-section-title">{categoryLabel(group.category)}</div>
-                        <div class="hint">{group.settings.length} setting{group.settings.length === 1 ? "" : "s"}</div>
-                      </div>
-                    </div>
+                  <SettingsSection
+                    title={categoryLabel(group.category)}
+                    description={`${group.settings.length} setting${group.settings.length === 1 ? "" : "s"}`}
+                  >
                     <div class="settings-list">
                       <For each={group.settings}>
                         {([key, info]) => (
@@ -155,17 +154,14 @@ export function ProvidersPage() {
                         )}
                       </For>
                     </div>
-                  </section>
+                  </SettingsSection>
                 )}
               </For>
 
-              <section class="settings-group">
-                <div class="settings-section-header">
-                  <div>
-                    <div class="settings-section-title">Providers</div>
-                    <div class="hint">{filteredProviderRows().length} provider{filteredProviderRows().length === 1 ? "" : "s"}</div>
-                  </div>
-                </div>
+              <SettingsSection
+                title="Providers"
+                description={`${filteredProviderRows().length} provider${filteredProviderRows().length === 1 ? "" : "s"}`}
+              >
                 <div class="provider-list">
                   <For each={filteredProviderRows()} fallback={<div class="empty">No providers found.</div>}>
                     {(provider) => (
@@ -198,7 +194,7 @@ export function ProvidersPage() {
                     )}
                   </For>
                 </div>
-              </section>
+              </SettingsSection>
             </div>
 
             <ConfirmDialog
