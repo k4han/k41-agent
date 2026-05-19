@@ -1,9 +1,10 @@
 import { useNavigate, useSearchParams } from "@solidjs/router";
-import { Bot, RefreshCw, Send, Square, Trash2 } from "lucide-solid";
+import { Bot, MoreHorizontal, Plus, RefreshCw, Send, Square } from "lucide-solid";
 import { createEffect, createMemo, createSignal, For, onMount, Show } from "solid-js";
 
 import { AppShell } from "@/components/AppShell";
 import { ModelPicker } from "@/components/ModelPicker";
+import { SelectControl } from "@/components/SelectControl";
 import { DataGate } from "@/components/State";
 import {
   createTranscriptTool,
@@ -41,6 +42,7 @@ export function ChatPage() {
   const [items, setItems] = createSignal<ChatTranscriptItem[]>([]);
   const [streaming, setStreaming] = createSignal(false);
   const [controller, setController] = createSignal<AbortController | null>(null);
+  const [composerOptionsOpen, setComposerOptionsOpen] = createSignal(false);
   const { showToast } = useToast();
   let transcriptRef: HTMLDivElement | undefined;
   let loadedThreadId: string | null = null;
@@ -56,6 +58,12 @@ export function ChatPage() {
   };
 
   const validCards = createMemo(() => (data()?.cards || []).filter((card) => card.valid));
+  const agentOptions = createMemo(() =>
+    validCards().map((card) => ({
+      value: card.name,
+      label: card.display_name || card.name,
+    })),
+  );
   const selectedCard = createMemo<AgentCard | undefined>(() =>
     validCards().find((card) => card.name === agentName()),
   );
@@ -380,56 +388,7 @@ export function ChatPage() {
     >
       <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => (
-          <div class="chat-shell">
-            <aside class="panel">
-              <div class="panel-header">
-                <div class="panel-title">Run Settings</div>
-              </div>
-              <div class="panel-body stack">
-                <div class="field">
-                  <label>Agent</label>
-                  <select
-                    class="select"
-                    value={agentName()}
-                    disabled={streaming()}
-                    onChange={(event) => setAgentName(event.currentTarget.value)}
-                  >
-                    <For each={validCards()}>
-                      {(card) => <option value={card.name}>{card.display_name || card.name}</option>}
-                    </For>
-                  </select>
-                </div>
-                <div class="field">
-                  <label>Provider / Model</label>
-                  <ModelPicker
-                    catalogs={payload.model_catalogs}
-                    providerNames={payload.provider_names}
-                    defaultProvider={payload.default_provider}
-                    provider={provider()}
-                    model={model()}
-                    disabled={streaming()}
-                    onChange={(nextProvider, nextModel) => {
-                      setProvider(nextProvider);
-                      setModel(nextModel);
-                    }}
-                  />
-                </div>
-                <div class="panel">
-                  <div class="panel-body">
-                    <div class="row">
-                      <Bot size={14} />
-                      <strong>{selectedCard()?.display_name || selectedCard()?.name || "No agent"}</strong>
-                    </div>
-                    <p class="hint">{selectedCard()?.description || "No description."}</p>
-                    <div class="chips">
-                      <span class="chip">{selectedCard()?.graph_type || "default"}</span>
-                      <span class="chip">{selectedCard()?.provider || "default"}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </aside>
-
+          <div class="chat-shell chat-shell-flat">
             <section class="panel chat-panel">
               <Show when={currentThreadId() || threadError()}>
                 <div class={`thread-banner ${threadError() ? "thread-banner-error" : ""}`}>
@@ -459,13 +418,17 @@ export function ChatPage() {
                   </For>
                 </Show>
               </div>
-              <div class="composer stack">
+              <div class="composer chat-composer">
                 <textarea
-                  class="textarea"
+                  class="chat-prompt-input"
                   rows={4}
                   value={prompt()}
                   disabled={streaming() || threadLoading()}
-                  placeholder={currentThreadId() ? "Continue this thread..." : "Ask the selected agent something..."}
+                  placeholder={
+                    currentThreadId()
+                      ? "Continue this thread..."
+                      : "Ask Kaka to build features, fix bugs, or work on your code"
+                  }
                   onInput={(event) => setPrompt(event.currentTarget.value)}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" && !event.ctrlKey && !event.shiftKey) {
@@ -474,29 +437,97 @@ export function ChatPage() {
                     }
                   }}
                 />
-                <div class="split">
-                  <span class="hint">Press Enter to send, Ctrl + Enter for new line.</span>
-                  <div class="row-wrap">
-                    <button class="btn" type="button" onClick={resetChat} disabled={streaming()}>
-                      <Trash2 size={14} />
-                      {currentThreadId() ? "New Chat" : "Reset"}
-                    </button>
-                    <Show
-                      when={streaming()}
-                      fallback={
-                        <button class="btn btn-primary" type="button" onClick={sendMessage} disabled={threadLoading()}>
-                          <Send size={14} />
-                          Send
-                        </button>
-                      }
+                <div class="chat-composer-toolbar">
+                  <div class="chat-composer-actions">
+                    <SelectControl
+                      class="chat-agent-picker"
+                      value={agentName()}
+                      options={agentOptions()}
+                      disabled={streaming()}
+                      onChange={setAgentName}
+                      ariaLabel="Agent"
+                      title={selectedCard()?.description || "Select agent"}
+                      icon={<Bot size={14} />}
+                    />
+                    <button
+                      class="chat-composer-icon"
+                      type="button"
+                      onClick={resetChat}
+                      disabled={streaming()}
+                      title={currentThreadId() ? "New chat" : "Clear chat"}
+                      aria-label={currentThreadId() ? "New chat" : "Clear chat"}
                     >
-                      <button class="btn btn-warning" type="button" onClick={stopChat}>
-                        <Square size={14} />
-                        Stop
-                      </button>
-                    </Show>
+                      <Plus size={18} />
+                    </button>
+                    <button
+                      class={`chat-composer-icon ${composerOptionsOpen() ? "active" : ""}`}
+                      type="button"
+                      onClick={() => setComposerOptionsOpen((current) => !current)}
+                      disabled={streaming()}
+                      title="Run settings"
+                      aria-label="Run settings"
+                      aria-expanded={composerOptionsOpen()}
+                    >
+                      <MoreHorizontal size={18} />
+                    </button>
                   </div>
+                  <Show
+                    when={streaming()}
+                    fallback={
+                      <button
+                        class="chat-composer-icon"
+                        type="button"
+                        onClick={sendMessage}
+                        disabled={threadLoading()}
+                        title="Send"
+                        aria-label="Send"
+                      >
+                        <Send size={16} />
+                      </button>
+                    }
+                  >
+                    <button
+                      class="chat-composer-icon chat-composer-stop"
+                      type="button"
+                      onClick={stopChat}
+                      title="Stop"
+                      aria-label="Stop"
+                    >
+                      <Square size={15} />
+                    </button>
+                  </Show>
                 </div>
+                <Show when={composerOptionsOpen()}>
+                  <div class="chat-composer-options">
+                    <div class="field">
+                      <label>Provider / Model</label>
+                      <ModelPicker
+                        catalogs={payload.model_catalogs}
+                        providerNames={payload.provider_names}
+                        defaultProvider={payload.default_provider}
+                        provider={provider()}
+                        model={model()}
+                        disabled={streaming()}
+                        dropdownPlacement="top"
+                        onChange={(nextProvider, nextModel) => {
+                          setProvider(nextProvider);
+                          setModel(nextModel);
+                        }}
+                      />
+                    </div>
+                    <div class="chat-agent-summary">
+                      <div class="row">
+                        <Bot size={14} />
+                        <strong>{selectedCard()?.display_name || selectedCard()?.name || "No agent"}</strong>
+                      </div>
+                      <p class="hint">{selectedCard()?.description || "No description."}</p>
+                      <div class="chips">
+                        <span class="chip">{selectedCard()?.graph_type || "default"}</span>
+                        <span class="chip">{provider() || selectedCard()?.provider || "default"}</span>
+                      </div>
+                    </div>
+                  </div>
+                </Show>
               </div>
             </section>
           </div>

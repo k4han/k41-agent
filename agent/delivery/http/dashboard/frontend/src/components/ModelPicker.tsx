@@ -33,6 +33,7 @@ type ModelPickerProps = {
   provider: string;
   model: string;
   disabled?: boolean;
+  dropdownPlacement?: "top" | "bottom";
   onChange: (provider: string, model: string) => void;
 };
 
@@ -285,7 +286,13 @@ export function ModelPicker(props: ModelPickerProps) {
   });
 
   return (
-    <div class="model-picker" ref={rootRef}>
+    <div
+      class={classNames(
+        "model-picker",
+        props.dropdownPlacement === "top" && "model-picker-up",
+      )}
+      ref={rootRef}
+    >
       <div class="model-picker-control">
         <input
           class="input model-picker-input"
