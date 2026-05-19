@@ -1650,16 +1650,27 @@ a {
   transform: rotate(90deg);
 }
 
-.tool-call-body pre {
-  max-height: 260px;
-  overflow: auto;
-  margin: 6px 0 0;
-  padding: 10px;
+.tool-call-body {
+  overflow: hidden;
+  margin-top: 6px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--surface);
+}
+
+.tool-call-body pre {
+  max-height: 260px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px;
+  border: 0;
+  background: transparent;
   white-space: pre-wrap;
   font-size: 12px;
+}
+
+.tool-call-body pre + pre {
+  border-top: 1px solid var(--border);
 }
 
 .composer {
