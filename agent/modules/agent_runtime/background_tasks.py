@@ -464,10 +464,12 @@ class BackgroundTaskManager:
 
         from agent.modules.agent_runtime.repository import get_background_task_repository
         from agent.modules.conversations import mark_conversation_thread_deleted
+        from agent.modules.workflows import delete_workflow_thread_tree
 
         await get_background_task_repository().mark_deleted(task_id)
         if thread_id:
             await mark_conversation_thread_deleted(thread_id)
+            await delete_workflow_thread_tree(thread_id)
 
         with self._lock:
             current = self._tasks.get(task_id)

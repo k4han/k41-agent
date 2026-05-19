@@ -1,3 +1,5 @@
+import logging
+
 from agent.modules.workflows.run_config import (
     DEFAULT_WORKING_DIR,
     make_context as make_run_context,
@@ -7,6 +9,9 @@ from agent.modules.workflows.constants import (
     REACT_AGENT_GRAPH_TYPE,
     ROUTER_GRAPH_TYPE,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 def register_builtin_workflows() -> None:
@@ -59,9 +64,69 @@ async def delete_workflow_thread(thread_id: str) -> None:
         await checkpointer.adelete_thread(thread_id)
 
 
+def _checkpoint_tuple_thread_id(checkpoint_tuple: object) -> str:
+    tuple_config = getattr(checkpoint_tuple, "config", {}) or {}
+    if not isinstance(tuple_config, dict):
+        return ""
+
+    configurable = tuple_config.get("configurable", {})
+    if not isinstance(configurable, dict):
+        return ""
+
+    return str(configurable.get("thread_id", "") or "")
+
+
+async def _list_workflow_child_thread_ids(checkpointer: object, thread_id: str) -> set[str]:
+    child_prefix = f"{thread_id}:sub:"
+    child_thread_ids: set[str] = set()
+    alist = getattr(checkpointer, "alist", None)
+    if not callable(alist):
+        logger.warning("Cannot list child workflow threads: checkpointer has no alist API.")
+        return child_thread_ids
+
+    async for checkpoint_tuple in alist(None):
+        child_thread_id = _checkpoint_tuple_thread_id(checkpoint_tuple)
+        if child_thread_id.startswith(child_prefix):
+            child_thread_ids.add(child_thread_id)
+
+    return child_thread_ids
+
+
+async def delete_workflow_thread_tree(thread_id: str) -> None:
+    from agent.modules.workflows.checkpoint.store import get_checkpointer
+
+    checkpointer = get_checkpointer()
+    thread_ids = {thread_id}
+    try:
+        thread_ids.update(await _list_workflow_child_thread_ids(checkpointer, thread_id))
+    except Exception as exc:
+        logger.warning(
+            "Failed to list child workflow threads for %s: %s",
+            thread_id,
+            exc,
+        )
+
+    parent_error: Exception | None = None
+    for target_thread_id in sorted(thread_ids, key=lambda value: (value == thread_id, value)):
+        try:
+            await checkpointer.adelete_thread(target_thread_id)
+        except Exception as exc:
+            logger.warning(
+                "Failed to delete workflow thread %s: %s",
+                target_thread_id,
+                exc,
+            )
+            if target_thread_id == thread_id:
+                parent_error = exc
+
+    if parent_error is not None:
+        raise parent_error
+
+
 __all__ = [
     "DEFAULT_WORKING_DIR",
     "delete_workflow_thread",
+    "delete_workflow_thread_tree",
     "get_workflow_graph",
     "initialize_checkpointer",
     "get_checkpointer",

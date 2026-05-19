@@ -153,6 +153,92 @@ def test_dashboard_api_renames_chat_thread(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 @pytest.mark.asyncio
+async def test_dashboard_delete_chat_thread_deletes_workflow_tree(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
+    conversations_module = importlib.import_module("agent.modules.conversations")
+    workflows_module = importlib.import_module("agent.modules.workflows")
+    calls: list[tuple[str, str]] = []
+
+    async def fake_mark_deleted(thread_id: str) -> bool:
+        calls.append(("mark_deleted", thread_id))
+        return True
+
+    async def fake_delete_tree(thread_id: str) -> None:
+        calls.append(("delete_tree", thread_id))
+
+    monkeypatch.setattr(
+        conversations_module,
+        "mark_conversation_thread_deleted",
+        fake_mark_deleted,
+    )
+    monkeypatch.setattr(
+        workflows_module,
+        "delete_workflow_thread_tree",
+        fake_delete_tree,
+    )
+
+    result = await dashboard_router_module.delete_chat_thread("api_dashboard_123")
+
+    assert result == {"status": "deleted", "thread_id": "api_dashboard_123"}
+    assert calls == [
+        ("mark_deleted", "api_dashboard_123"),
+        ("delete_tree", "api_dashboard_123"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_dashboard_delete_background_task_thread_deletes_workflow_tree(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
+    agent_runtime_module = importlib.import_module("agent.modules.agent_runtime")
+    conversations_module = importlib.import_module("agent.modules.conversations")
+    workflows_module = importlib.import_module("agent.modules.workflows")
+    calls: list[tuple[str, str]] = []
+
+    class FakeBackgroundTaskRepository:
+        async def mark_deleted_by_thread_id(self, thread_id: str) -> bool:
+            calls.append(("mark_task_deleted", thread_id))
+            return True
+
+    async def fake_mark_deleted(thread_id: str) -> bool:
+        calls.append(("mark_thread_deleted", thread_id))
+        return True
+
+    async def fake_delete_tree(thread_id: str) -> None:
+        calls.append(("delete_tree", thread_id))
+
+    monkeypatch.setattr(
+        agent_runtime_module,
+        "get_background_task_repository",
+        lambda: FakeBackgroundTaskRepository(),
+    )
+    monkeypatch.setattr(
+        conversations_module,
+        "mark_conversation_thread_deleted",
+        fake_mark_deleted,
+    )
+    monkeypatch.setattr(
+        workflows_module,
+        "delete_workflow_thread_tree",
+        fake_delete_tree,
+    )
+
+    result = await dashboard_router_module.delete_background_task_thread(
+        "task_dashboard_123"
+    )
+
+    assert result == {"status": "deleted", "thread_id": "task_dashboard_123"}
+    assert calls == [
+        ("mark_task_deleted", "task_dashboard_123"),
+        ("mark_thread_deleted", "task_dashboard_123"),
+        ("delete_tree", "task_dashboard_123"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_dashboard_thread_messages_preserve_assistant_text_with_tool_calls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

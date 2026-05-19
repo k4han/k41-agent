@@ -1247,10 +1247,10 @@ async def rename_chat_thread(
 @router.delete("/dashboard-api/chat-history/{thread_id:path}")
 async def delete_chat_thread(thread_id: str) -> dict[str, str]:
     from agent.modules.conversations import mark_conversation_thread_deleted
-    from agent.modules.workflows import delete_workflow_thread
+    from agent.modules.workflows import delete_workflow_thread_tree
 
     await mark_conversation_thread_deleted(thread_id)
-    await delete_workflow_thread(thread_id)
+    await delete_workflow_thread_tree(thread_id)
     return {"status": "deleted", "thread_id": thread_id}
 
 
@@ -1320,9 +1320,9 @@ async def get_background_task_messages(thread_id: str) -> dict[str, Any]:
 async def delete_background_task_thread(thread_id: str) -> dict[str, str]:
     from agent.modules.conversations import mark_conversation_thread_deleted
     from agent.modules.agent_runtime import get_background_task_repository
-    from agent.modules.workflows import delete_workflow_thread
+    from agent.modules.workflows import delete_workflow_thread_tree
 
     await get_background_task_repository().mark_deleted_by_thread_id(thread_id)
     await mark_conversation_thread_deleted(thread_id)
-    await delete_workflow_thread(thread_id)
+    await delete_workflow_thread_tree(thread_id)
     return {"status": "deleted", "thread_id": thread_id}

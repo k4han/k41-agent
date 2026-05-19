@@ -121,15 +121,26 @@ async def test_background_task_remove_is_persisted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import agent.modules.agent_runtime.runner as runner_module
+    import agent.modules.workflows as workflows_module
 
     async def fake_run_agent_full(**kwargs):
         return "done"
 
+    deleted_thread_ids: list[str] = []
+
+    async def fake_delete_workflow_thread_tree(thread_id: str) -> None:
+        deleted_thread_ids.append(thread_id)
+
     monkeypatch.setattr(runner_module, "run_agent_full", fake_run_agent_full)
+    monkeypatch.setattr(
+        workflows_module,
+        "delete_workflow_thread_tree",
+        fake_delete_workflow_thread_tree,
+    )
 
     manager = BackgroundTaskManager()
     task_id = await manager.submit("do work", agent_name="default")
-    await _wait_for_task_status(manager, task_id, "completed")
+    task = await _wait_for_task_status(manager, task_id, "completed")
 
     assert await manager.remove(task_id) is True
 
@@ -138,6 +149,7 @@ async def test_background_task_remove_is_persisted(
 
     assert restored.get(task_id) is None
     assert restored.list_all() == []
+    assert deleted_thread_ids == [task["thread_id"]]
 
 
 @pytest.mark.asyncio
