@@ -1,6 +1,16 @@
 import { useNavigate, useSearchParams } from "@solidjs/router";
-import { Bot, MoreHorizontal, Plus, RefreshCw, Send, Square } from "lucide-solid";
-import { createEffect, createMemo, createSignal, For, onMount, Show } from "solid-js";
+import {
+  Bot,
+  FileText,
+  Image as ImageIcon,
+  MoreHorizontal,
+  Plus,
+  RefreshCw,
+  Send,
+  Square,
+  X,
+} from "lucide-solid";
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 
 import { AppShell } from "@/components/AppShell";
 import { ModelPicker } from "@/components/ModelPicker";
@@ -18,13 +28,189 @@ import {
   toThreadTranscript,
 } from "@/lib/chatThreads";
 import { truncateText } from "@/lib/utils";
-import type { TranscriptItem } from "@/components/Transcript";
+import type { TranscriptAttachment, TranscriptItem } from "@/components/Transcript";
 import type { ThreadMessagesPayload } from "@/lib/chatThreads";
 import type { AgentCard, AgentsPayload } from "@/types";
 
 type ChatTranscriptItem = TranscriptItem & { id: number; key?: string };
+type ChatAttachmentKind = "text" | "image";
+type ChatAttachmentPayload = {
+  name: string;
+  mime_type: string;
+  size: number;
+  kind: ChatAttachmentKind;
+  content?: string;
+  base64?: string;
+};
+type PendingAttachment = ChatAttachmentPayload & {
+  id: number;
+  preview_url?: string;
+};
+type ChatPayload = {
+  message: string;
+  user_id: string;
+  agent_name: string;
+  provider?: string;
+  model?: string;
+  thread_id?: string;
+  new_thread?: boolean;
+  attachments?: ChatAttachmentPayload[];
+};
+
+const MAX_ATTACHMENTS = 5;
+const MAX_TEXT_ATTACHMENT_BYTES = 100 * 1024;
+const MAX_IMAGE_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+const MAX_TOTAL_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+const DEFAULT_ATTACHMENT_MESSAGE = "Please review the attached file(s).";
+const ATTACHMENT_ACCEPT = [
+  "image/*",
+  ".txt",
+  ".md",
+  ".markdown",
+  ".json",
+  ".yaml",
+  ".yml",
+  ".toml",
+  ".xml",
+  ".csv",
+  ".html",
+  ".css",
+  ".js",
+  ".jsx",
+  ".ts",
+  ".tsx",
+  ".py",
+  ".go",
+  ".rs",
+  ".java",
+  ".c",
+  ".cpp",
+  ".h",
+  ".hpp",
+  ".cs",
+  ".php",
+  ".rb",
+  ".swift",
+  ".kt",
+  ".kts",
+  ".dart",
+  ".sql",
+  ".sh",
+  ".ps1",
+  ".bat",
+  ".env",
+  ".gitignore",
+  "Dockerfile",
+].join(",");
+const TEXT_MIME_TYPES = new Set([
+  "application/javascript",
+  "application/json",
+  "application/toml",
+  "application/typescript",
+  "application/xml",
+  "application/x-yaml",
+  "text/javascript",
+]);
+const TEXT_EXTENSIONS = new Set([
+  ".bat",
+  ".c",
+  ".cpp",
+  ".cs",
+  ".css",
+  ".csv",
+  ".dart",
+  ".env",
+  ".gitignore",
+  ".go",
+  ".h",
+  ".hpp",
+  ".html",
+  ".java",
+  ".js",
+  ".json",
+  ".jsx",
+  ".kt",
+  ".kts",
+  ".md",
+  ".markdown",
+  ".php",
+  ".ps1",
+  ".py",
+  ".rb",
+  ".rs",
+  ".sh",
+  ".sql",
+  ".swift",
+  ".toml",
+  ".ts",
+  ".tsx",
+  ".txt",
+  ".xml",
+  ".yaml",
+  ".yml",
+  "dockerfile",
+]);
 
 let nextItemId = 1;
+let nextAttachmentId = 1;
+
+function fileExtension(fileName: string): string {
+  const lowerName = fileName.toLowerCase();
+  const dotIndex = lowerName.lastIndexOf(".");
+  return dotIndex >= 0 ? lowerName.slice(dotIndex) : lowerName;
+}
+
+function attachmentKind(file: File): ChatAttachmentKind | null {
+  if (file.type.startsWith("image/")) {
+    return "image";
+  }
+  if (file.type.startsWith("text/") || TEXT_MIME_TYPES.has(file.type)) {
+    return "text";
+  }
+  return TEXT_EXTENSIONS.has(fileExtension(file.name)) ? "text" : null;
+}
+
+function formatBytes(size: number): string {
+  if (size < 1024) {
+    return `${size} B`;
+  }
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`;
+  }
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || "");
+      resolve(result.includes(",") ? result.split(",", 2)[1] : result);
+    };
+    reader.onerror = () => reject(reader.error || new Error("Failed to read file"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function toTranscriptAttachment(attachment: PendingAttachment): TranscriptAttachment {
+  return {
+    name: attachment.name,
+    mime_type: attachment.mime_type,
+    size: attachment.size,
+    kind: attachment.kind,
+  };
+}
+
+function toPayloadAttachment(attachment: PendingAttachment): ChatAttachmentPayload {
+  return {
+    name: attachment.name,
+    mime_type: attachment.mime_type,
+    size: attachment.size,
+    kind: attachment.kind,
+    content: attachment.content,
+    base64: attachment.base64,
+  };
+}
 
 export function ChatPage() {
   const navigate = useNavigate();
@@ -43,8 +229,10 @@ export function ChatPage() {
   const [streaming, setStreaming] = createSignal(false);
   const [controller, setController] = createSignal<AbortController | null>(null);
   const [composerOptionsOpen, setComposerOptionsOpen] = createSignal(false);
+  const [attachments, setAttachments] = createSignal<PendingAttachment[]>([]);
   const { showToast } = useToast();
   let transcriptRef: HTMLDivElement | undefined;
+  let fileInputRef: HTMLInputElement | undefined;
   let loadedThreadId: string | null = null;
   let threadLoadRequestId = 0;
 
@@ -111,6 +299,45 @@ export function ChatPage() {
     return id;
   };
 
+  const resetFileInput = () => {
+    if (fileInputRef) {
+      fileInputRef.value = "";
+    }
+  };
+
+  const revokeAttachmentPreview = (attachment: PendingAttachment) => {
+    if (attachment.preview_url) {
+      URL.revokeObjectURL(attachment.preview_url);
+    }
+  };
+
+  const clearAttachments = (itemsToClear: PendingAttachment[]) => {
+    if (!itemsToClear.length) {
+      return;
+    }
+    itemsToClear.forEach(revokeAttachmentPreview);
+    setAttachments((current) => current.filter((item) => !itemsToClear.includes(item)));
+    resetFileInput();
+  };
+
+  const clearAllAttachments = () => {
+    const currentAttachments = attachments();
+    if (!currentAttachments.length) {
+      return;
+    }
+    currentAttachments.forEach(revokeAttachmentPreview);
+    setAttachments([]);
+    resetFileInput();
+  };
+
+  const removeAttachment = (id: number) => {
+    const target = attachments().find((attachment) => attachment.id === id);
+    if (!target) {
+      return;
+    }
+    clearAttachments([target]);
+  };
+
   const loadThread = async (threadId: string) => {
     const requestId = threadLoadRequestId + 1;
     threadLoadRequestId = requestId;
@@ -154,6 +381,7 @@ export function ChatPage() {
 
     loadedThreadId = threadId;
     threadLoadRequestId += 1;
+    clearAllAttachments();
 
     if (!threadId) {
       setCurrentThreadId("");
@@ -197,8 +425,79 @@ export function ChatPage() {
     scrollToBottom();
   };
 
-  const buildPayload = (message: string) => {
-    const payload: Record<string, string | boolean> = {
+  const addFiles = async (fileList: FileList | null) => {
+    const files = Array.from(fileList || []);
+    if (!files.length) {
+      return;
+    }
+
+    let nextAttachments = [...attachments()];
+    let totalSize = nextAttachments.reduce((sum, attachment) => sum + attachment.size, 0);
+
+    for (const file of files) {
+      if (nextAttachments.length >= MAX_ATTACHMENTS) {
+        showToast(`Attach up to ${MAX_ATTACHMENTS} files.`, "warning");
+        break;
+      }
+
+      const kind = attachmentKind(file);
+      if (!kind) {
+        showToast(`Unsupported file type: ${file.name}`, "warning");
+        continue;
+      }
+
+      const maxSize = kind === "image" ? MAX_IMAGE_ATTACHMENT_BYTES : MAX_TEXT_ATTACHMENT_BYTES;
+      if (file.size > maxSize) {
+        showToast(`${file.name} exceeds ${formatBytes(maxSize)}.`, "warning");
+        continue;
+      }
+      if (totalSize + file.size > MAX_TOTAL_ATTACHMENT_BYTES) {
+        showToast(`Attached files exceed ${formatBytes(MAX_TOTAL_ATTACHMENT_BYTES)}.`, "warning");
+        continue;
+      }
+
+      try {
+        if (kind === "image") {
+          nextAttachments = [
+            ...nextAttachments,
+            {
+              id: nextAttachmentId++,
+              name: file.name,
+              mime_type: file.type || "image/png",
+              size: file.size,
+              kind,
+              base64: await readFileAsBase64(file),
+              preview_url: URL.createObjectURL(file),
+            },
+          ];
+        } else {
+          nextAttachments = [
+            ...nextAttachments,
+            {
+              id: nextAttachmentId++,
+              name: file.name,
+              mime_type: file.type || "text/plain",
+              size: file.size,
+              kind,
+              content: await file.text(),
+            },
+          ];
+        }
+        totalSize += file.size;
+      } catch (err) {
+        showToast(
+          err instanceof Error ? err.message : `Failed to read ${file.name}.`,
+          "error",
+        );
+      }
+    }
+
+    setAttachments(nextAttachments);
+    resetFileInput();
+  };
+
+  const buildPayload = (message: string, attachedFiles: ChatAttachmentPayload[]) => {
+    const payload: ChatPayload = {
       message,
       user_id: "dashboard",
       agent_name: agentName(),
@@ -213,6 +512,9 @@ export function ChatPage() {
       payload.thread_id = currentThreadId();
     } else {
       payload.new_thread = true;
+    }
+    if (attachedFiles.length) {
+      payload.attachments = attachedFiles;
     }
     return payload;
   };
@@ -288,9 +590,13 @@ export function ChatPage() {
   };
 
   const sendMessage = async () => {
-    const message = prompt().trim();
-    if (!message) {
-      showToast("Enter a message.", "warning");
+    const selectedAttachments = attachments();
+    const attachedFiles = selectedAttachments.map(toPayloadAttachment);
+    const message = prompt().trim() || (
+      selectedAttachments.length ? DEFAULT_ATTACHMENT_MESSAGE : ""
+    );
+    if (!message && !selectedAttachments.length) {
+      showToast("Enter a message or attach a file.", "warning");
       return;
     }
     if (threadLoading()) {
@@ -302,8 +608,14 @@ export function ChatPage() {
       return;
     }
 
-    appendItem({ type: "message", role: "user", text: message });
+    appendItem({
+      type: "message",
+      role: "user",
+      text: message,
+      attachments: selectedAttachments.map(toTranscriptAttachment),
+    });
     setPrompt("");
+    clearAttachments(selectedAttachments);
     const abortController = new AbortController();
     setController(abortController);
     setStreaming(true);
@@ -315,7 +627,7 @@ export function ChatPage() {
         method: "POST",
         headers: { "content-type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify(buildPayload(message)),
+        body: JSON.stringify(buildPayload(message, attachedFiles)),
         signal: abortController.signal,
       });
       if (!response.ok) {
@@ -366,14 +678,11 @@ export function ChatPage() {
   };
 
   const stopChat = () => controller()?.abort();
-  const resetChat = () => {
-    setItems([]);
-    if (currentThreadId()) {
-      navigate("/chat");
-    }
-  };
 
   onMount(load);
+  onCleanup(() => {
+    attachments().forEach(revokeAttachmentPreview);
+  });
 
   return (
     <AppShell
@@ -419,6 +728,14 @@ export function ChatPage() {
                 </Show>
               </div>
               <div class="composer chat-composer">
+                <input
+                  ref={fileInputRef}
+                  class="is-hidden"
+                  type="file"
+                  multiple
+                  accept={ATTACHMENT_ACCEPT}
+                  onChange={(event) => void addFiles(event.currentTarget.files)}
+                />
                 <textarea
                   class="chat-prompt-input"
                   rows={4}
@@ -437,6 +754,47 @@ export function ChatPage() {
                     }
                   }}
                 />
+                <Show when={attachments().length > 0}>
+                  <div class="chat-attachment-list">
+                    <For each={attachments()}>
+                      {(attachment) => (
+                        <div class="chat-attachment-chip">
+                          <Show
+                            when={attachment.kind === "image" && attachment.preview_url}
+                            fallback={
+                              <span class="chat-attachment-icon">
+                                <Show
+                                  when={attachment.kind === "image"}
+                                  fallback={<FileText size={14} />}
+                                >
+                                  <ImageIcon size={14} />
+                                </Show>
+                              </span>
+                            }
+                          >
+                            <img
+                              class="chat-attachment-thumb"
+                              src={attachment.preview_url}
+                              alt=""
+                            />
+                          </Show>
+                          <span class="chat-attachment-name">{attachment.name}</span>
+                          <span class="chat-attachment-size">{formatBytes(attachment.size)}</span>
+                          <button
+                            class="chat-attachment-remove"
+                            type="button"
+                            onClick={() => removeAttachment(attachment.id)}
+                            disabled={streaming()}
+                            title="Remove file"
+                            aria-label={`Remove ${attachment.name}`}
+                          >
+                            <X size={13} />
+                          </button>
+                        </div>
+                      )}
+                    </For>
+                  </div>
+                </Show>
                 <div class="chat-composer-toolbar">
                   <div class="chat-composer-actions">
                     <SelectControl
@@ -452,10 +810,10 @@ export function ChatPage() {
                     <button
                       class="chat-composer-icon"
                       type="button"
-                      onClick={resetChat}
-                      disabled={streaming()}
-                      title={currentThreadId() ? "New chat" : "Clear chat"}
-                      aria-label={currentThreadId() ? "New chat" : "Clear chat"}
+                      onClick={() => fileInputRef?.click()}
+                      disabled={streaming() || threadLoading()}
+                      title="Attach files"
+                      aria-label="Attach files"
                     >
                       <Plus size={18} />
                     </button>
@@ -478,7 +836,7 @@ export function ChatPage() {
                         class="chat-composer-icon"
                         type="button"
                         onClick={sendMessage}
-                        disabled={threadLoading()}
+                        disabled={threadLoading() || (!prompt().trim() && !attachments().length)}
                         title="Send"
                         aria-label="Send"
                       >

@@ -310,6 +310,79 @@ async def test_dashboard_thread_messages_preserve_assistant_text_with_tool_calls
     ]
 
 
+@pytest.mark.asyncio
+async def test_dashboard_thread_messages_hide_raw_image_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
+    from langchain_core.messages import HumanMessage
+
+    class FakeCheckpointer:
+        async def aget_tuple(self, config):
+            assert config == {
+                "configurable": {
+                    "thread_id": "api_dashboard_123",
+                    "checkpoint_ns": "",
+                }
+            }
+            return SimpleNamespace(
+                checkpoint={
+                    "channel_values": {
+                        "messages": [
+                            HumanMessage(
+                                content=[
+                                    {"type": "text", "text": "Review attachments"},
+                                    {
+                                        "type": "text",
+                                        "text": "Attached image: screen.png",
+                                    },
+                                    {
+                                        "type": "image",
+                                        "base64": "raw-image-data",
+                                        "mime_type": "image/png",
+                                    },
+                                ],
+                                id="human-attachment",
+                                additional_kwargs={
+                                    "attachments": [
+                                        {
+                                            "name": "screen.png",
+                                            "mime_type": "image/png",
+                                            "size": 14,
+                                            "kind": "image",
+                                        }
+                                    ]
+                                },
+                            ),
+                        ]
+                    }
+                }
+            )
+
+    monkeypatch.setattr(
+        dashboard_router_module,
+        "_get_checkpointer",
+        lambda: FakeCheckpointer(),
+    )
+
+    messages = await dashboard_router_module._get_thread_messages("api_dashboard_123")
+
+    assert messages == [
+        {
+            "id": "human-attachment",
+            "role": "user",
+            "content": "Review attachments",
+            "attachments": [
+                {
+                    "name": "screen.png",
+                    "mime_type": "image/png",
+                    "size": 14,
+                    "kind": "image",
+                }
+            ],
+        }
+    ]
+    assert "raw-image-data" not in str(messages)
+
+
 def test_dashboard_api_github_returns_repository_bindings(monkeypatch: pytest.MonkeyPatch) -> None:
     dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
 

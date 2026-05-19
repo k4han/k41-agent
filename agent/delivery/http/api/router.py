@@ -49,9 +49,16 @@ def _request_to_run_params(request: ChatRequest) -> dict[str, object]:
         "provider": request.provider,
         "model": request.model,
     }
+    if request.attachments:
+        params["attachments"] = [
+            attachment.model_dump() for attachment in request.attachments
+        ]
     if thread_id:
         params["thread_id"] = thread_id
-    return build_run_params(**params)
+    try:
+        return build_run_params(**params)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/chat", response_model=ChatResponse)

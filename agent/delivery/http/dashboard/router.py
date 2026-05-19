@@ -1130,6 +1130,52 @@ async def _list_threads_from_db(
     return result
 
 
+def _serialize_message_attachments(msg: Any) -> list[dict[str, Any]]:
+    additional_kwargs = getattr(msg, "additional_kwargs", {}) or {}
+    raw_attachments = additional_kwargs.get("attachments")
+    if not isinstance(raw_attachments, list):
+        return []
+
+    attachments = []
+    for attachment in raw_attachments:
+        if not isinstance(attachment, dict):
+            continue
+        attachments.append(
+            {
+                "name": str(attachment.get("name") or ""),
+                "mime_type": str(attachment.get("mime_type") or ""),
+                "size": int(attachment.get("size") or 0),
+                "kind": str(attachment.get("kind") or ""),
+            }
+        )
+    return attachments
+
+
+def _human_content_text(content: Any, *, has_attachments: bool) -> str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return str(content)
+
+    text_parts: list[str] = []
+    for index, part in enumerate(content):
+        if isinstance(part, dict):
+            part_type = str(part.get("type") or "").strip().lower()
+            if part_type == "text":
+                if has_attachments and index > 0:
+                    continue
+                text = part.get("text")
+                if isinstance(text, str) and text:
+                    text_parts.append(text)
+                continue
+            if part_type in {"image", "file", "audio", "video"} and not has_attachments:
+                text_parts.append(f"[Attached {part_type}]")
+            continue
+        text_parts.append(str(part))
+
+    return "\n\n".join(text_parts).strip()
+
+
 async def _get_thread_messages(thread_id: str) -> list[dict[str, Any]]:
     """Get messages from a thread via the checkpointer."""
     from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -1154,14 +1200,14 @@ async def _get_thread_messages(thread_id: str) -> list[dict[str, Any]]:
     for msg in messages:
         entry: dict[str, Any] = {"id": getattr(msg, "id", None)}
         if isinstance(msg, HumanMessage):
-            text_content = msg.content
-            if isinstance(text_content, list):
-                text_content = " ".join(
-                    part.get("text", "") if isinstance(part, dict) else str(part)
-                    for part in text_content
-                )
+            attachments = _serialize_message_attachments(msg)
             entry["role"] = "user"
-            entry["content"] = str(text_content)
+            entry["content"] = _human_content_text(
+                msg.content,
+                has_attachments=bool(attachments),
+            )
+            if attachments:
+                entry["attachments"] = attachments
         elif isinstance(msg, AIMessage):
             from agent.shared.infrastructure.parsing import extract_final_text_content
 

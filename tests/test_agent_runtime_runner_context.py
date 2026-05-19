@@ -1,7 +1,8 @@
+import base64
 from types import SimpleNamespace
 
 import pytest
-from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 
 from agent.modules.agent_runtime import runner as runner_module
 
@@ -95,6 +96,137 @@ async def test_run_agent_passes_model_override_to_context(monkeypatch):
     assert chunks == ["done"]
     assert captured["kwargs"]["context"]["provider"] == "openai-main"
     assert captured["kwargs"]["context"]["model"] == "direct-model"
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_builds_multimodal_user_message(monkeypatch):
+    captured: dict = {}
+
+    class _FakeCatalog:
+        def get_agent(self, name: str):
+            return SimpleNamespace(
+                graph_type="react_agent",
+                max_context_tokens=1234,
+                tools=["list_files"],
+            )
+
+    class _FakeGraph:
+        async def astream(self, payload, **kwargs):
+            captured["payload"] = payload
+            captured["kwargs"] = kwargs
+            yield {"messages": [AIMessage(content="done", id="ai-final")]}
+
+    monkeypatch.setattr(
+        "agent.modules.agents.get_catalog_service",
+        lambda: _FakeCatalog(),
+    )
+    monkeypatch.setattr(runner_module, "get_workflow_graph", lambda name: _FakeGraph())
+    monkeypatch.setattr(runner_module, "make_run_context", lambda **kwargs: kwargs)
+    monkeypatch.setattr(
+        runner_module,
+        "make_run_config",
+        lambda **kwargs: {"configurable": {"thread_id": kwargs["thread_id"]}},
+    )
+
+    attachments = [
+        {
+            "name": "snippet.py",
+            "mime_type": "text/x-python",
+            "size": 1,
+            "kind": "text",
+            "content": "print('hi')",
+        },
+        {
+            "name": "screen.png",
+            "mime_type": "image/png",
+            "size": 1,
+            "kind": "image",
+            "base64": "YWJjZA==",
+        },
+    ]
+
+    events = [
+        event
+        async for event in runner_module.run_agent_stream(
+            user_input="Review attachments",
+            thread_id="thread-1",
+            agent_name="default",
+            attachments=attachments,
+        )
+    ]
+
+    assert events == [{"type": "final", "content": "done"}]
+    user_message = captured["payload"]["messages"][0]
+    assert isinstance(user_message, HumanMessage)
+    assert user_message.content == [
+        {"type": "text", "text": "Review attachments"},
+        {
+            "type": "text",
+            "text": (
+                "Attached text file: snippet.py\n"
+                "MIME type: text/x-python\n"
+                "Size: 11 bytes\n\n"
+                "print('hi')"
+            ),
+        },
+        {
+            "type": "text",
+            "text": "Attached image: screen.png\nMIME type: image/png\nSize: 4 bytes",
+        },
+        {"type": "image", "base64": "YWJjZA==", "mime_type": "image/png"},
+    ]
+    assert user_message.additional_kwargs["attachments"] == [
+        {
+            "name": "snippet.py",
+            "mime_type": "text/x-python",
+            "size": 11,
+            "kind": "text",
+        },
+        {
+            "name": "screen.png",
+            "mime_type": "image/png",
+            "size": 4,
+            "kind": "image",
+        },
+    ]
+
+
+def test_build_run_params_rejects_spoofed_text_attachment_size():
+    with pytest.raises(ValueError, match="too large"):
+        runner_module.build_run_params(
+            platform="api",
+            user_id="alice",
+            user_input="Review this",
+            attachments=[
+                {
+                    "name": "large.txt",
+                    "mime_type": "text/plain",
+                    "size": 1,
+                    "kind": "text",
+                    "content": "a" * (runner_module.MAX_TEXT_ATTACHMENT_BYTES + 1),
+                }
+            ],
+        )
+
+
+def test_build_run_params_rejects_spoofed_image_attachment_size():
+    image_bytes = b"x" * (runner_module.MAX_IMAGE_ATTACHMENT_BYTES + 1)
+
+    with pytest.raises(ValueError, match="too large"):
+        runner_module.build_run_params(
+            platform="api",
+            user_id="alice",
+            user_input="Review this",
+            attachments=[
+                {
+                    "name": "large.png",
+                    "mime_type": "image/png",
+                    "size": 1,
+                    "kind": "image",
+                    "base64": base64.b64encode(image_bytes).decode("ascii"),
+                }
+            ],
+        )
 
 
 @pytest.mark.asyncio

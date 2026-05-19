@@ -1,11 +1,23 @@
+import { FileText, Image as ImageIcon } from "lucide-solid";
+import { For, Show } from "solid-js";
+
 import { formatValue } from "@/lib/utils";
 
 export type TranscriptRole = "user" | "assistant" | "error" | "system";
+
+export type TranscriptAttachment = {
+  name: string;
+  mime_type: string;
+  size: number;
+  kind: "text" | "image";
+  preview_url?: string;
+};
 
 export type TranscriptMessage = {
   type: "message";
   role: TranscriptRole;
   text: string;
+  attachments?: TranscriptAttachment[];
 };
 
 export type TranscriptTool = {
@@ -62,11 +74,63 @@ export function findTranscriptToolTarget<T extends TranscriptItem>(
   return undefined;
 }
 
-export function TranscriptMessageView(props: { role: TranscriptRole; text: string }) {
+function formatAttachmentSize(size: number): string {
+  if (!Number.isFinite(size) || size <= 0) {
+    return "0 B";
+  }
+  if (size < 1024) {
+    return `${size} B`;
+  }
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`;
+  }
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export function TranscriptMessageView(props: {
+  role: TranscriptRole;
+  text: string;
+  attachments?: TranscriptAttachment[];
+}) {
   return (
     <div class={`message ${props.role}`}>
       <div class="message-bubble">
-        {props.text}
+        <Show when={props.text}>
+          <div>{props.text}</div>
+        </Show>
+        <Show when={props.attachments?.length}>
+          <div class="message-attachments">
+            <For each={props.attachments || []}>
+              {(attachment) => (
+                <div class="message-attachment">
+                  <Show
+                    when={attachment.kind === "image" && attachment.preview_url}
+                    fallback={
+                      <span class="message-attachment-icon">
+                        <Show
+                          when={attachment.kind === "image"}
+                          fallback={<FileText size={14} />}
+                        >
+                          <ImageIcon size={14} />
+                        </Show>
+                      </span>
+                    }
+                  >
+                    <img
+                      class="message-attachment-thumb"
+                      src={attachment.preview_url}
+                      alt=""
+                    />
+                  </Show>
+                  <span class="message-attachment-name">{attachment.name}</span>
+                  <span class="message-attachment-meta">
+                    {formatAttachmentSize(attachment.size)}
+                  </span>
+                </div>
+              )}
+            </For>
+          </div>
+        </Show>
       </div>
     </div>
   );
@@ -93,7 +157,11 @@ export function ToolCallDetail(props: {
 
 export function TranscriptItemView(props: { item: TranscriptItem }) {
   return props.item.type === "message" ? (
-    <TranscriptMessageView role={props.item.role} text={props.item.text} />
+    <TranscriptMessageView
+      role={props.item.role}
+      text={props.item.text}
+      attachments={props.item.attachments}
+    />
   ) : (
     <ToolCallDetail
       name={props.item.name}

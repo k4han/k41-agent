@@ -1,3 +1,5 @@
+import base64
+import binascii
 from contextlib import contextmanager
 import logging
 from typing import Any, AsyncGenerator, Iterator
@@ -20,6 +22,12 @@ from agent.modules.workflows import (
 
 logger = logging.getLogger(__name__)
 
+MAX_CHAT_ATTACHMENTS = 5
+MAX_TEXT_ATTACHMENT_BYTES = 100 * 1024
+MAX_IMAGE_ATTACHMENT_BYTES = 5 * 1024 * 1024
+MAX_TOTAL_ATTACHMENT_BYTES = 8 * 1024 * 1024
+DEFAULT_ATTACHMENT_PROMPT = "Please review the attached file(s)."
+
 
 def build_run_params(
     *,
@@ -34,6 +42,7 @@ def build_run_params(
     agent_name: str = "default",
     provider: str | None = None,
     model: str | None = None,
+    attachments: list[Any] | None = None,
 ) -> dict[str, Any]:
     """Build run parameters for agent execution.
 
@@ -51,8 +60,9 @@ def build_run_params(
         agent_name: Agent to use (loads config from catalog)
         provider: Override agent card provider for this run if needed
         model: Override agent card model for this run if needed
+        attachments: Optional files attached to the user message
     """
-    return {
+    params: dict[str, Any] = {
         "user_input": user_input,
         "thread_id": thread_id or SessionManager.make_thread_id(platform, user_id, channel_id),
         "agent_name": agent_name,
@@ -62,6 +72,177 @@ def build_run_params(
         "provider": provider,
         "model": model,
     }
+    normalized_attachments = _normalize_chat_attachments(attachments)
+    if normalized_attachments:
+        params["attachments"] = normalized_attachments
+    return params
+
+
+def _model_dump(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    dump = getattr(value, "model_dump", None)
+    if callable(dump):
+        result = dump()
+        if isinstance(result, dict):
+            return result
+    return {}
+
+
+def _strip_data_url_base64(value: str) -> str:
+    if value.startswith("data:") and "," in value:
+        return value.split(",", 1)[1]
+    return value
+
+
+def _clean_base64(value: str) -> str:
+    return "".join(_strip_data_url_base64(value).split())
+
+
+def _base64_size(value: str) -> int:
+    clean_value = _clean_base64(value)
+    if not clean_value:
+        return 0
+    padding = len(clean_value) - len(clean_value.rstrip("="))
+    return max(0, (len(clean_value) * 3 // 4) - padding)
+
+
+def _decode_image_base64(value: str, *, name: str) -> tuple[str, int]:
+    clean_value = _clean_base64(value)
+    if not clean_value:
+        raise ValueError(f"Image attachment '{name}' is missing data.")
+
+    estimated_size = _base64_size(clean_value)
+    if estimated_size > MAX_IMAGE_ATTACHMENT_BYTES:
+        raise ValueError(f"Image attachment '{name}' is too large.")
+
+    try:
+        decoded = base64.b64decode(clean_value, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError(f"Image attachment '{name}' has invalid data.") from exc
+    size = len(decoded)
+    if size > MAX_IMAGE_ATTACHMENT_BYTES:
+        raise ValueError(f"Image attachment '{name}' is too large.")
+    return clean_value, size
+
+
+def _normalize_chat_attachments(attachments: list[Any] | None) -> list[dict[str, Any]]:
+    if not attachments:
+        return []
+    if len(attachments) > MAX_CHAT_ATTACHMENTS:
+        raise ValueError(f"At most {MAX_CHAT_ATTACHMENTS} files can be attached.")
+
+    total_size = 0
+    normalized: list[dict[str, Any]] = []
+    for index, attachment in enumerate(attachments, start=1):
+        data = _model_dump(attachment)
+        kind = str(data.get("kind") or "").strip().lower()
+        if kind not in {"text", "image"}:
+            raise ValueError("Only text and image attachments are supported.")
+
+        name = str(data.get("name") or "").strip() or f"attachment-{index}"
+        mime_type = str(data.get("mime_type") or "").strip()
+
+        if kind == "text":
+            content = data.get("content")
+            if not isinstance(content, str):
+                raise ValueError(f"Text attachment '{name}' is missing content.")
+            size = len(content.encode("utf-8"))
+            if size > MAX_TEXT_ATTACHMENT_BYTES:
+                raise ValueError(f"Text attachment '{name}' is too large.")
+            normalized.append(
+                {
+                    "name": name,
+                    "mime_type": mime_type or "text/plain",
+                    "size": size,
+                    "kind": "text",
+                    "content": content,
+                }
+            )
+        else:
+            base64_value = data.get("base64")
+            if not isinstance(base64_value, str) or not base64_value.strip():
+                raise ValueError(f"Image attachment '{name}' is missing data.")
+            base64_value, size = _decode_image_base64(base64_value, name=name)
+            normalized.append(
+                {
+                    "name": name,
+                    "mime_type": mime_type or "image/png",
+                    "size": size,
+                    "kind": "image",
+                    "base64": base64_value,
+                }
+            )
+
+        total_size += size
+        if total_size > MAX_TOTAL_ATTACHMENT_BYTES:
+            raise ValueError("Attached files exceed the total payload limit.")
+
+    return normalized
+
+
+def _attachment_metadata(attachments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": attachment["name"],
+            "mime_type": attachment["mime_type"],
+            "size": attachment["size"],
+            "kind": attachment["kind"],
+        }
+        for attachment in attachments
+    ]
+
+
+def _text_attachment_block(attachment: dict[str, Any]) -> dict[str, str]:
+    text = (
+        f"Attached text file: {attachment['name']}\n"
+        f"MIME type: {attachment['mime_type']}\n"
+        f"Size: {attachment['size']} bytes\n\n"
+        f"{attachment['content']}"
+    )
+    return {"type": "text", "text": text}
+
+
+def _image_metadata_block(attachment: dict[str, Any]) -> dict[str, str]:
+    text = (
+        f"Attached image: {attachment['name']}\n"
+        f"MIME type: {attachment['mime_type']}\n"
+        f"Size: {attachment['size']} bytes"
+    )
+    return {"type": "text", "text": text}
+
+
+def _make_user_message(
+    user_input: str,
+    attachments: list[Any] | None = None,
+) -> HumanMessage:
+    normalized_attachments = _normalize_chat_attachments(attachments)
+    if not normalized_attachments:
+        return HumanMessage(content=user_input)
+
+    content_blocks: list[dict[str, str]] = [
+        {
+            "type": "text",
+            "text": user_input.strip() or DEFAULT_ATTACHMENT_PROMPT,
+        }
+    ]
+    for attachment in normalized_attachments:
+        if attachment["kind"] == "text":
+            content_blocks.append(_text_attachment_block(attachment))
+            continue
+        content_blocks.append(_image_metadata_block(attachment))
+        content_blocks.append(
+            {
+                "type": "image",
+                "base64": attachment["base64"],
+                "mime_type": attachment["mime_type"],
+            }
+        )
+
+    return HumanMessage(
+        content=content_blocks,
+        additional_kwargs={"attachments": _attachment_metadata(normalized_attachments)},
+    )
 
 
 async def clear_agent_session(
@@ -178,6 +359,7 @@ async def run_agent(
     allowed_tool_names: list[str] | None = None,
     provider: str | None = None,
     model: str | None = None,
+    attachments: list[Any] | None = None,
 ) -> AsyncGenerator[str, None]:
     """Run a workflow graph and stream assistant chunks.
 
@@ -193,6 +375,7 @@ async def run_agent(
         allowed_tool_names: Override agent's tools if needed
         provider: Override agent card provider for this run if needed
         model: Override agent card model for this run if needed
+        attachments: Optional files attached to the user message
     """
     from agent.modules.agents import get_catalog_service
 
@@ -231,9 +414,10 @@ async def run_agent(
         stream_kwargs["context"] = context
 
     registry = get_active_session_registry()
+    user_message = _make_user_message(user_input, attachments)
     with _track_active_session(thread_id, agent_name) as session_id:
         async for event in graph.astream(
-            {"messages": [HumanMessage(content=user_input)]},
+            {"messages": [user_message]},
             **stream_kwargs,
         ):
             messages = event.get("messages", [])
@@ -257,6 +441,7 @@ async def run_agent_stream(
     allowed_tool_names: list[str] | None = None,
     provider: str | None = None,
     model: str | None = None,
+    attachments: list[Any] | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Run a workflow graph and stream UI events (tool calls and text chunks).
 
@@ -272,6 +457,7 @@ async def run_agent_stream(
         allowed_tool_names: Override agent's tools if needed
         provider: Override agent card provider for this run if needed
         model: Override agent card model for this run if needed
+        attachments: Optional files attached to the user message
     """
     from agent.modules.agents import get_catalog_service
 
@@ -312,9 +498,10 @@ async def run_agent_stream(
         stream_kwargs["context"] = context
 
     registry = get_active_session_registry()
+    user_message = _make_user_message(user_input, attachments)
     with _track_active_session(thread_id, agent_name) as session_id:
         async for event in graph.astream(
-            {"messages": [HumanMessage(content=user_input)]},
+            {"messages": [user_message]},
             **stream_kwargs,
         ):
             stream_mode, event_data = _coerce_stream_event(event)
@@ -381,6 +568,7 @@ async def run_agent_full(
     allowed_tool_names: list[str] | None = None,
     provider: str | None = None,
     model: str | None = None,
+    attachments: list[Any] | None = None,
 ) -> str:
     """Run a workflow graph and return the final assistant response.
 
@@ -399,6 +587,7 @@ async def run_agent_full(
         allowed_tool_names: Override agent's tools if needed
         provider: Override agent card provider for this run if needed
         model: Override agent card model for this run if needed
+        attachments: Optional files attached to the user message
     """
     chunks = []
     async for chunk in run_agent(
@@ -411,6 +600,7 @@ async def run_agent_full(
         allowed_tool_names=allowed_tool_names,
         provider=provider,
         model=model,
+        attachments=attachments,
     ):
         chunks.append(chunk)
     return chunks[-1] if chunks else ""

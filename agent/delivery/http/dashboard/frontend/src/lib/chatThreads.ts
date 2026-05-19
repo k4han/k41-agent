@@ -2,7 +2,7 @@ import {
   createTranscriptTool,
   findTranscriptToolTarget,
 } from "@/components/Transcript";
-import type { TranscriptItem } from "@/components/Transcript";
+import type { TranscriptAttachment, TranscriptItem } from "@/components/Transcript";
 
 export type ThreadSummary = {
   thread_id: string;
@@ -31,6 +31,7 @@ export type ThreadMessage = {
   name?: string;
   tool_call_id?: string;
   tool_calls?: Array<{ id: string; name: string; args: unknown }>;
+  attachments?: TranscriptAttachment[];
 };
 
 export type ThreadMessagesPayload = {
@@ -98,6 +99,7 @@ export function toThreadTranscript(messages: ThreadMessage[]): ThreadTranscriptI
         type: "message",
         role: msg.role,
         text: msg.content,
+        attachments: msg.attachments,
       });
     }
 

@@ -175,6 +175,87 @@ def test_chat_sync_passes_model_override(monkeypatch):
     }
 
 
+def test_chat_events_passes_attachments(monkeypatch):
+    attachments = [
+        {
+            "name": "notes.txt",
+            "mime_type": "text/plain",
+            "size": 12,
+            "kind": "text",
+            "content": "hello world!",
+            "base64": None,
+        },
+        {
+            "name": "diagram.png",
+            "mime_type": "image/png",
+            "size": 4,
+            "kind": "image",
+            "content": None,
+            "base64": "abcd",
+        },
+    ]
+    built_params = {
+        "user_input": "Review these",
+        "thread_id": "api_alice",
+        "agent_name": "default",
+        "workflow": None,
+        "working_dir": None,
+        "max_context_tokens": None,
+        "provider": None,
+        "model": None,
+        "attachments": attachments,
+    }
+
+    def fake_build_run_params(**params):
+        assert params == {
+            "platform": "api",
+            "user_id": "alice",
+            "user_input": "Review these",
+            "workflow": None,
+            "working_dir": None,
+            "agent_name": "default",
+            "provider": None,
+            "model": None,
+            "attachments": attachments,
+        }
+        return dict(built_params)
+
+    async def fake_run_agent_stream(**params):
+        assert params == built_params
+        yield {"type": "final", "content": "attached"}
+
+    monkeypatch.setattr(router_module, "build_run_params", fake_build_run_params)
+    monkeypatch.setattr(router_module, "run_agent_stream", fake_run_agent_stream)
+
+    client = _create_client()
+    response = client.post(
+        "/api/chat/events",
+        json={
+            "message": "Review these",
+            "user_id": "alice",
+            "attachments": [
+                {
+                    "name": "notes.txt",
+                    "mime_type": "text/plain",
+                    "size": 12,
+                    "kind": "text",
+                    "content": "hello world!",
+                },
+                {
+                    "name": "diagram.png",
+                    "mime_type": "image/png",
+                    "size": 4,
+                    "kind": "image",
+                    "base64": "abcd",
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.text == '{"type": "final", "content": "attached"}\n'
+
+
 def test_chat_events_can_resume_existing_thread(monkeypatch):
     built_params = {
         "user_input": "Continue",
