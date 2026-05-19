@@ -84,6 +84,35 @@ a {
   text-decoration: none;
 }
 
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--fg) 22%, transparent) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 18%, transparent);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--fg) 28%, transparent);
+}
+
+::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 .app-layout {
   display: grid;
   grid-template-columns: 264px minmax(0, 1fr);
@@ -1462,7 +1491,9 @@ a {
   display: grid;
   grid-template-columns: 310px minmax(0, 1fr);
   gap: 16px;
-  min-height: calc(100vh - 112px);
+  height: calc(100vh - 114px);
+  height: calc(100dvh - 114px);
+  min-height: 0;
 }
 
 .chat-shell-flat {
@@ -1473,8 +1504,10 @@ a {
 
 .chat-panel {
   display: flex;
-  min-height: calc(100vh - 112px);
+  height: 100%;
+  min-height: 0;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .chat-shell-flat .chat-panel {
@@ -1506,9 +1539,10 @@ a {
 
 .transcript {
   min-height: 0;
-  flex: 1;
+  flex: 1 1 auto;
   overflow-y: auto;
   padding: 18px;
+  scrollbar-gutter: stable;
 }
 
 .chat-shell-flat .transcript {
@@ -1629,11 +1663,14 @@ a {
 }
 
 .composer {
+  flex: 0 0 auto;
   border-top: 1px solid var(--border);
   padding: 14px;
 }
 
 .chat-composer {
+  display: flex;
+  flex-direction: column;
   gap: 12px;
   border: 1px solid var(--border-strong);
   border-radius: 16px;
@@ -2084,7 +2121,7 @@ a {
   }
 
   .chat-panel {
-    min-height: 680px;
+    min-height: 0;
   }
 }
 
