@@ -2,8 +2,11 @@ import { useNavigate, useSearchParams } from "@solidjs/router";
 import {
   Bot,
   FileText,
+  GripVertical,
   Image as ImageIcon,
   MoreHorizontal,
+  PanelRightClose,
+  PanelRightOpen,
   Plus,
   RefreshCw,
   Send,
@@ -22,6 +25,7 @@ import {
   TranscriptItemView,
 } from "@/components/Transcript";
 import { useToast } from "@/components/Toast";
+import { WorkspaceExplorer } from "@/components/WorkspaceExplorer";
 import { apiFetch, readError } from "@/lib/api";
 import {
   threadApiPath,
@@ -50,6 +54,7 @@ type ChatPayload = {
   message: string;
   user_id: string;
   agent_name: string;
+  working_dir?: string;
   provider?: string;
   model?: string;
   thread_id?: string;
@@ -60,12 +65,21 @@ type BackgroundTaskSnapshot = ThreadMessagesPayload & {
   task?: BackgroundTask | null;
   active_session?: ActiveSession | null;
 };
+type DefaultWorkspacePayload = {
+  working_dir: string;
+};
 
 const MAX_ATTACHMENTS = 5;
 const MAX_TEXT_ATTACHMENT_BYTES = 100 * 1024;
 const MAX_IMAGE_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 const MAX_TOTAL_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const DEFAULT_ATTACHMENT_MESSAGE = "Please review the attached file(s).";
+const WORKSPACE_STORAGE_KEY = "kaka-dashboard-working-dir";
+const WORKSPACE_EXPLORER_OPEN_KEY = "kaka-dashboard-workspace-explorer-open";
+const WORKSPACE_EXPLORER_WIDTH_KEY = "kaka-dashboard-workspace-explorer-width";
+const WORKSPACE_EXPLORER_DEFAULT_WIDTH = 560;
+const WORKSPACE_EXPLORER_MIN_WIDTH = 340;
+const WORKSPACE_EXPLORER_MAX_WIDTH = 920;
 const ACTIVE_TASK_STATUSES = new Set(["pending", "running"]);
 const ATTACHMENT_ACCEPT = [
   "image/*",
@@ -229,6 +243,13 @@ export function ChatPage() {
   const [agentName, setAgentName] = createSignal("");
   const [provider, setProvider] = createSignal("default");
   const [model, setModel] = createSignal("");
+  const [workingDir, setWorkingDir] = createSignal("");
+  const [defaultWorkingDir, setDefaultWorkingDir] = createSignal("");
+  const [workspaceExplorerOpen, setWorkspaceExplorerOpen] = createSignal(true);
+  const [workspaceExplorerWidth, setWorkspaceExplorerWidth] = createSignal(
+    WORKSPACE_EXPLORER_DEFAULT_WIDTH,
+  );
+  const [workspaceExplorerResizing, setWorkspaceExplorerResizing] = createSignal(false);
   const [prompt, setPrompt] = createSignal("");
   const [items, setItems] = createSignal<ChatTranscriptItem[]>([]);
   const [streaming, setStreaming] = createSignal(false);
@@ -241,11 +262,13 @@ export function ChatPage() {
   const [attachments, setAttachments] = createSignal<PendingAttachment[]>([]);
   const { showToast } = useToast();
   let transcriptRef: HTMLDivElement | undefined;
+  let chatShellRef: HTMLDivElement | undefined;
   let fileInputRef: HTMLInputElement | undefined;
   let loadedThreadId: string | null = null;
   let threadLoadRequestId = 0;
   let backgroundEventSource: EventSource | null = null;
   let backgroundEventThreadId = "";
+  let stopWorkspaceResize: (() => void) | null = null;
 
   const load = async () => {
     setError("");
@@ -253,6 +276,98 @@ export function ChatPage() {
       setData(await apiFetch<AgentsPayload>("/dashboard-api/agents"));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load chat options");
+    }
+  };
+
+  const setWorkspace = (value: string) => {
+    const nextValue = value.trim();
+    setWorkingDir(nextValue);
+    if (nextValue) {
+      window.localStorage.setItem(WORKSPACE_STORAGE_KEY, nextValue);
+    } else {
+      window.localStorage.removeItem(WORKSPACE_STORAGE_KEY);
+    }
+  };
+
+  const clampWorkspaceExplorerWidth = (
+    width: number,
+    availableWidth = window.innerWidth,
+  ) => {
+    const viewportMax = Math.max(
+      WORKSPACE_EXPLORER_MIN_WIDTH,
+      availableWidth - 436,
+    );
+    const maxWidth = Math.min(WORKSPACE_EXPLORER_MAX_WIDTH, viewportMax);
+    return Math.min(
+      maxWidth,
+      Math.max(WORKSPACE_EXPLORER_MIN_WIDTH, Math.round(width)),
+    );
+  };
+
+  const setExplorerOpen = (next: boolean) => {
+    setWorkspaceExplorerOpen(next);
+    window.localStorage.setItem(WORKSPACE_EXPLORER_OPEN_KEY, next ? "open" : "closed");
+  };
+
+  const toggleWorkspaceExplorer = () => {
+    setExplorerOpen(!workspaceExplorerOpen());
+  };
+
+  const applyWorkspaceExplorerWidth = (width: number, availableWidth?: number) => {
+    const nextWidth = clampWorkspaceExplorerWidth(width, availableWidth);
+    setWorkspaceExplorerWidth(nextWidth);
+    window.localStorage.setItem(WORKSPACE_EXPLORER_WIDTH_KEY, String(nextWidth));
+  };
+
+  const endWorkspaceResize = () => {
+    stopWorkspaceResize?.();
+    stopWorkspaceResize = null;
+    setWorkspaceExplorerResizing(false);
+    document.body.classList.remove("workspace-resizing");
+  };
+
+  const startWorkspaceResize = (event: PointerEvent) => {
+    if (!chatShellRef || !workspaceExplorerOpen()) {
+      return;
+    }
+    event.preventDefault();
+    setWorkspaceExplorerResizing(true);
+    document.body.classList.add("workspace-resizing");
+
+    const move = (moveEvent: PointerEvent) => {
+      const shellRect = chatShellRef?.getBoundingClientRect();
+      if (!shellRect) {
+        return;
+      }
+      applyWorkspaceExplorerWidth(shellRect.right - moveEvent.clientX, shellRect.width);
+    };
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+      stopWorkspaceResize = null;
+      setWorkspaceExplorerResizing(false);
+      document.body.classList.remove("workspace-resizing");
+    };
+
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop);
+    window.addEventListener("pointercancel", stop);
+    stopWorkspaceResize = stop;
+  };
+
+  const loadDefaultWorkspace = async () => {
+    try {
+      const payload = await apiFetch<DefaultWorkspacePayload>("/dashboard-api/workspace/default");
+      const fallback = payload.working_dir || "";
+      setDefaultWorkingDir(fallback);
+      if (!currentThreadId() && !workingDir()) {
+        setWorkspace(window.localStorage.getItem(WORKSPACE_STORAGE_KEY) || fallback);
+      }
+    } catch {
+      if (!currentThreadId() && !workingDir()) {
+        setWorkspace(window.localStorage.getItem(WORKSPACE_STORAGE_KEY) || "");
+      }
     }
   };
 
@@ -360,6 +475,11 @@ export function ChatPage() {
   const applyThreadPayload = (payload: ThreadMessagesPayload) => {
     setThreadData(payload);
     setCurrentThreadId(payload.thread_id);
+    setWorkspace(
+      payload.working_dir
+      || window.localStorage.getItem(WORKSPACE_STORAGE_KEY)
+      || defaultWorkingDir(),
+    );
     setItems(
       toThreadTranscript(payload.messages).map((item) => ({
         ...item,
@@ -390,6 +510,7 @@ export function ChatPage() {
       agent_name: snapshot.agent_name,
       title: snapshot.title,
       kind: snapshot.kind,
+      working_dir: snapshot.working_dir,
     });
     setBackgroundTask(snapshot.task || null);
     setBackgroundSession(snapshot.active_session || null);
@@ -514,6 +635,7 @@ export function ChatPage() {
       setThreadError("");
       setThreadLoading(false);
       setItems([]);
+      setWorkspace(window.localStorage.getItem(WORKSPACE_STORAGE_KEY) || defaultWorkingDir());
       closeBackgroundStream();
       setBackgroundTask(null);
       return;
@@ -634,6 +756,9 @@ export function ChatPage() {
     }
     if (model()) {
       payload.model = model();
+    }
+    if (workingDir().trim()) {
+      payload.working_dir = workingDir().trim();
     }
     if (currentThreadId()) {
       payload.thread_id = currentThreadId();
@@ -810,9 +935,21 @@ export function ChatPage() {
 
   const stopChat = () => controller()?.abort();
 
-  onMount(load);
+  onMount(() => {
+    const savedExplorerOpen = window.localStorage.getItem(WORKSPACE_EXPLORER_OPEN_KEY);
+    setWorkspaceExplorerOpen(savedExplorerOpen !== "closed");
+
+    const savedExplorerWidth = Number(window.localStorage.getItem(WORKSPACE_EXPLORER_WIDTH_KEY));
+    if (Number.isFinite(savedExplorerWidth) && savedExplorerWidth > 0) {
+      setWorkspaceExplorerWidth(clampWorkspaceExplorerWidth(savedExplorerWidth));
+    }
+
+    void load();
+    void loadDefaultWorkspace();
+  });
   onCleanup(() => {
     controller()?.abort();
+    endWorkspaceResize();
     closeBackgroundStream();
     attachments().forEach(revokeAttachmentPreview);
   });
@@ -822,15 +959,35 @@ export function ChatPage() {
       title={currentThreadId() ? "Thread Chat" : "Agent Chat"}
       subtitle={pageSubtitle()}
       actions={
-        <button class="btn" type="button" onClick={load}>
-          <RefreshCw size={14} />
-          Refresh Options
-        </button>
+        <>
+          <button
+            class={`btn btn-icon ${workspaceExplorerOpen() ? "active" : ""}`}
+            type="button"
+            onClick={toggleWorkspaceExplorer}
+            title={workspaceExplorerOpen() ? "Hide workspace explorer" : "Show workspace explorer"}
+            aria-label={
+              workspaceExplorerOpen() ? "Hide workspace explorer" : "Show workspace explorer"
+            }
+            aria-pressed={workspaceExplorerOpen()}
+          >
+            <Show when={workspaceExplorerOpen()} fallback={<PanelRightOpen size={15} />}>
+              <PanelRightClose size={15} />
+            </Show>
+          </button>
+          <button class="btn" type="button" onClick={load}>
+            <RefreshCw size={14} />
+            Refresh Options
+          </button>
+        </>
       }
     >
       <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => (
-          <div class="chat-shell chat-shell-flat">
+          <div
+            ref={chatShellRef}
+            class={`chat-shell chat-shell-resizable ${workspaceExplorerOpen() ? "workspace-open" : "workspace-closed"} ${workspaceExplorerResizing() ? "workspace-resizing" : ""}`}
+            style={`--workspace-explorer-width: ${workspaceExplorerWidth()}px;`}
+          >
             <section class="panel chat-panel">
               <Show when={currentThreadId() || threadError()}>
                 <div class={`thread-banner ${threadError() ? "thread-banner-error" : ""}`}>
@@ -1038,6 +1195,23 @@ export function ChatPage() {
                 </Show>
               </div>
             </section>
+            <div class="workspace-drawer" aria-hidden={!workspaceExplorerOpen()}>
+              <button
+                class="workspace-resize-handle"
+                type="button"
+                onPointerDown={startWorkspaceResize}
+                title="Resize workspace explorer"
+                aria-label="Resize workspace explorer"
+              >
+                <GripVertical size={15} />
+              </button>
+              <WorkspaceExplorer
+                threadId={currentThreadId()}
+                workingDir={workingDir()}
+                disabled={composerDisabled()}
+                onWorkingDirChange={setWorkspace}
+              />
+            </div>
           </div>
         )}
       </DataGate>

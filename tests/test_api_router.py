@@ -23,12 +23,13 @@ def _create_client() -> TestClient:
 
 
 def test_chat_sync_returns_response_payload(monkeypatch):
+    resolved_working_dir = str(router_module.resolve_workspace_root("D:/workspace/sample"))
     built_params = {
         "user_input": "List files",
         "thread_id": "api_alice",
         "agent_name": "default",
         "workflow": "react_agent",
-        "working_dir": "D:/workspace/sample",
+        "working_dir": resolved_working_dir,
         "max_context_tokens": None,
         "provider": None,
         "model": None,
@@ -45,7 +46,7 @@ def test_chat_sync_returns_response_payload(monkeypatch):
             "provider": None,
             "model": None,
         }
-        return dict(built_params)
+        return {**built_params, "working_dir": "D:/workspace/sample"}
 
     async def fake_run_agent_full(**params):
         assert params == built_params
@@ -357,6 +358,53 @@ def test_chat_events_can_create_new_thread(monkeypatch):
         '{"type": "thread_created", "thread_id": "api_dashboard_generated"}\n'
         '{"type": "final", "content": "started"}\n'
     )
+
+
+def test_chat_events_resolves_and_remembers_working_dir(monkeypatch, tmp_path):
+    requested_working_dir = str(tmp_path)
+    resolved_working_dir = str(router_module.resolve_workspace_root(requested_working_dir))
+    remembered: list[tuple[str, str]] = []
+    built_params = {
+        "user_input": "Work here",
+        "thread_id": "api_dashboard_workspace",
+        "agent_name": "default",
+        "workflow": None,
+        "working_dir": requested_working_dir,
+        "max_context_tokens": None,
+        "provider": None,
+        "model": None,
+    }
+
+    def fake_build_run_params(**params):
+        assert params["working_dir"] == requested_working_dir
+        return dict(built_params)
+
+    async def fake_remember_thread_workspace(thread_id: str, working_dir: str):
+        remembered.append((thread_id, working_dir))
+        return working_dir
+
+    async def fake_run_agent_stream(**params):
+        assert params == {**built_params, "working_dir": resolved_working_dir}
+        yield {"type": "final", "content": "done"}
+
+    monkeypatch.setattr(router_module, "build_run_params", fake_build_run_params)
+    monkeypatch.setattr(router_module, "remember_thread_workspace", fake_remember_thread_workspace)
+    monkeypatch.setattr(router_module, "run_agent_stream", fake_run_agent_stream)
+
+    client = _create_client()
+    response = client.post(
+        "/api/chat/events",
+        json={
+            "message": "Work here",
+            "user_id": "dashboard",
+            "thread_id": "api_dashboard_workspace",
+            "working_dir": requested_working_dir,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.text == '{"type": "final", "content": "done"}\n'
+    assert remembered == [("api_dashboard_workspace", resolved_working_dir)]
 
 
 def test_chat_events_streams_tool_calls_as_ndjson(monkeypatch):

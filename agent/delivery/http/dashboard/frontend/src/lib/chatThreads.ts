@@ -43,6 +43,7 @@ export type ThreadMessagesPayload = {
   agent_name?: string;
   title?: string;
   kind?: string;
+  working_dir?: string;
 };
 
 export type ThreadTranscriptItem = TranscriptItem & { key: string };

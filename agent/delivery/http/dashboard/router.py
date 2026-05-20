@@ -41,6 +41,13 @@ from agent.modules.scheduler import (
 )
 from agent.modules.tools import get_default_tool_names
 from agent.modules.users import get_pairing_service
+from agent.modules.workspaces import (
+    get_thread_workspace_dir,
+    get_workspace_changes,
+    get_workspace_diff,
+    list_workspace_tree,
+    resolve_workspace_root,
+)
 from agent.modules.workflows import (
     REACT_AGENT_GRAPH_TYPE,
     ROUTER_GRAPH_TYPE,
@@ -390,6 +397,51 @@ def _is_active_background_task(task: dict[str, Any] | None) -> bool:
     return bool(task and task.get("status") in BACKGROUND_TASK_ACTIVE_STATUSES)
 
 
+async def _workspace_dir_for_thread(thread_id: str) -> str:
+    if thread_id:
+        task = get_background_task_manager().get_by_thread_id(thread_id)
+        task_working_dir = str((task or {}).get("working_dir") or "").strip()
+        if task_working_dir:
+            return str(resolve_workspace_root(task_working_dir))
+
+        try:
+            stored_working_dir = await get_thread_workspace_dir(thread_id)
+        except Exception as exc:
+            logger.debug(
+                "Failed to load workspace for thread %s: %s",
+                thread_id,
+                exc,
+            )
+            stored_working_dir = None
+        if stored_working_dir:
+            return str(resolve_workspace_root(stored_working_dir))
+
+    return str(resolve_workspace_root(None))
+
+
+async def _workspace_dir_from_request(
+    *,
+    thread_id: str | None = None,
+    working_dir: str | None = None,
+) -> str:
+    if working_dir and working_dir.strip():
+        return str(resolve_workspace_root(working_dir))
+    if thread_id and thread_id.strip():
+        return await _workspace_dir_for_thread(thread_id)
+    return str(resolve_workspace_root(None))
+
+
+def _workspace_http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, FileNotFoundError):
+        return HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, (NotADirectoryError, ValueError)):
+        return HTTPException(status_code=400, detail=str(exc))
+    if isinstance(exc, RuntimeError):
+        return HTTPException(status_code=400, detail=str(exc))
+    logger.exception("Unexpected workspace operation failure.")
+    return HTTPException(status_code=500, detail=str(exc))
+
+
 # --- SPA routes -------------------------------------------------------
 
 
@@ -508,6 +560,58 @@ async def get_dashboard_github(request: Request) -> dict[str, Any]:
         "repositories": await service.list_repository_bindings(),
         "agent_names": agent_names,
     }
+
+
+@router.get("/dashboard-api/workspace/default")
+async def get_dashboard_default_workspace() -> dict[str, str]:
+    return {"working_dir": str(resolve_workspace_root(None))}
+
+
+@router.get("/dashboard-api/workspace/tree")
+async def get_dashboard_workspace_tree(
+    thread_id: str | None = Query(default=None),
+    working_dir: str | None = Query(default=None),
+    path: str = Query(default=""),
+) -> dict[str, Any]:
+    try:
+        root = await _workspace_dir_from_request(
+            thread_id=thread_id,
+            working_dir=working_dir,
+        )
+        return list_workspace_tree(working_dir=root, path=path)
+    except Exception as exc:
+        raise _workspace_http_error(exc) from exc
+
+
+@router.get("/dashboard-api/workspace/changes")
+async def get_dashboard_workspace_changes(
+    thread_id: str | None = Query(default=None),
+    working_dir: str | None = Query(default=None),
+) -> dict[str, Any]:
+    try:
+        root = await _workspace_dir_from_request(
+            thread_id=thread_id,
+            working_dir=working_dir,
+        )
+        return get_workspace_changes(root)
+    except Exception as exc:
+        raise _workspace_http_error(exc) from exc
+
+
+@router.get("/dashboard-api/workspace/diff")
+async def get_dashboard_workspace_diff(
+    thread_id: str | None = Query(default=None),
+    working_dir: str | None = Query(default=None),
+    path: str = Query(..., min_length=1),
+) -> dict[str, Any]:
+    try:
+        root = await _workspace_dir_from_request(
+            thread_id=thread_id,
+            working_dir=working_dir,
+        )
+        return get_workspace_diff(working_dir=root, path=path)
+    except Exception as exc:
+        raise _workspace_http_error(exc) from exc
 
 
 @router.post("/dashboard-api/github/sync")
@@ -1289,7 +1393,13 @@ async def get_chat_thread_messages(thread_id: str) -> dict[str, Any]:
 
     metadata = await get_conversation_thread(thread_id)
     parsed = metadata or _parse_thread_id_safe(thread_id)
-    return {"thread_id": thread_id, "messages": messages, **parsed}
+    working_dir = await _workspace_dir_for_thread(thread_id)
+    return {
+        "thread_id": thread_id,
+        "messages": messages,
+        "working_dir": working_dir,
+        **parsed,
+    }
 
 
 @router.patch("/dashboard-api/chat-history/{thread_id:path}")
@@ -1380,7 +1490,13 @@ async def get_background_task_messages(thread_id: str) -> dict[str, Any]:
 
     metadata = await get_conversation_thread(thread_id)
     parsed = metadata or _parse_thread_id_safe(thread_id)
-    return {"thread_id": thread_id, "messages": messages, **parsed}
+    working_dir = await _workspace_dir_for_thread(thread_id)
+    return {
+        "thread_id": thread_id,
+        "messages": messages,
+        "working_dir": working_dir,
+        **parsed,
+    }
 
 
 async def _get_background_task_stream_metadata(
@@ -1429,6 +1545,7 @@ async def _background_task_snapshot(
         "messages": await _get_thread_messages_for_stream(thread_id),
         "task": current_task,
         "active_session": _active_session_for_thread(thread_id),
+        "working_dir": await _workspace_dir_for_thread(thread_id),
         **parsed,
     }
 

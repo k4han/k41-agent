@@ -1,5 +1,9 @@
-import importlib
 from datetime import datetime, timedelta
+import importlib
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -68,6 +72,25 @@ def _create_dashboard_client(channel_manager: ChannelManager) -> TestClient:
     return TestClient(app)
 
 
+def _require_git() -> str:
+    git = shutil.which("git")
+    if git is None:
+        pytest.skip("git is required for workspace diff tests")
+    return git
+
+
+def _run_git(repo: Path, *args: str) -> None:
+    git = _require_git()
+    result = subprocess.run(
+        [git, *args],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
 def test_services_endpoint_returns_runtime_service_snapshot() -> None:
     channel_manager = ChannelManager()
     channel_manager.register("telegram", idle_runner)
@@ -113,6 +136,117 @@ def test_dashboard_api_overview_returns_runtime_snapshot() -> None:
     assert response.json() == {
         "services": [{"name": "telegram", "status": "stopped", "error": None}]
     }
+
+
+def test_dashboard_workspace_default_returns_absolute_path() -> None:
+    client = _create_dashboard_client(ChannelManager())
+
+    response = client.get("/dashboard-api/workspace/default")
+
+    assert response.status_code == 200
+    assert Path(response.json()["working_dir"]).is_absolute()
+
+
+def test_dashboard_workspace_tree_ignores_noisy_directories(tmp_path: Path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").write_text("print('hello')\n", encoding="utf-8")
+    (tmp_path / "node_modules").mkdir()
+    (tmp_path / "node_modules" / "package.js").write_text("ignored\n", encoding="utf-8")
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "HEAD").write_text("ignored\n", encoding="utf-8")
+
+    client = _create_dashboard_client(ChannelManager())
+    response = client.get(
+        "/dashboard-api/workspace/tree",
+        params={"working_dir": str(tmp_path)},
+    )
+
+    assert response.status_code == 200
+    names = [entry["name"] for entry in response.json()["entries"]]
+    assert names == ["src"]
+
+
+def test_dashboard_workspace_tree_blocks_directory_escape(tmp_path: Path) -> None:
+    client = _create_dashboard_client(ChannelManager())
+
+    response = client.get(
+        "/dashboard-api/workspace/tree",
+        params={"working_dir": str(tmp_path), "path": ".."},
+    )
+
+    assert response.status_code == 400
+    assert "escapes workspace" in response.json()["detail"]
+
+
+def test_dashboard_workspace_changes_and_diff_for_git_repo(tmp_path: Path) -> None:
+    _require_git()
+    repo = tmp_path
+    _run_git(repo, "init")
+    _run_git(repo, "config", "user.email", "test@example.com")
+    _run_git(repo, "config", "user.name", "Test User")
+    (repo / "tracked.txt").write_text("before\n", encoding="utf-8")
+    (repo / "deleted.txt").write_text("remove me\n", encoding="utf-8")
+    _run_git(repo, "add", ".")
+    _run_git(repo, "commit", "-m", "initial")
+
+    (repo / "tracked.txt").write_text("after\n", encoding="utf-8")
+    (repo / "deleted.txt").unlink()
+    (repo / "new.txt").write_text("new file\n", encoding="utf-8")
+
+    client = _create_dashboard_client(ChannelManager())
+    response = client.get(
+        "/dashboard-api/workspace/changes",
+        params={"working_dir": str(repo)},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["is_git_repo"] is True
+    statuses = {change["path"]: change["status"] for change in payload["changes"]}
+    assert statuses == {
+        "deleted.txt": "deleted",
+        "new.txt": "untracked",
+        "tracked.txt": "modified",
+    }
+
+    diff_response = client.get(
+        "/dashboard-api/workspace/diff",
+        params={"working_dir": str(repo), "path": "tracked.txt"},
+    )
+    assert diff_response.status_code == 200
+    diff = diff_response.json()["diff"]
+    assert "-before" in diff
+    assert "+after" in diff
+
+    untracked_response = client.get(
+        "/dashboard-api/workspace/diff",
+        params={"working_dir": str(repo), "path": "new.txt"},
+    )
+    assert untracked_response.status_code == 200
+    assert "+++ b/new.txt" in untracked_response.json()["diff"]
+
+
+def test_dashboard_workspace_changes_for_non_git_workspace() -> None:
+    with tempfile.TemporaryDirectory(dir=Path.home()) as temp_dir:
+        workspace = Path(temp_dir)
+        (workspace / "file.txt").write_text("plain\n", encoding="utf-8")
+        client = _create_dashboard_client(ChannelManager())
+
+        changes_response = client.get(
+            "/dashboard-api/workspace/changes",
+            params={"working_dir": str(workspace)},
+        )
+        diff_response = client.get(
+            "/dashboard-api/workspace/diff",
+            params={"working_dir": str(workspace), "path": "file.txt"},
+        )
+
+    assert changes_response.status_code == 200
+    assert changes_response.json()["is_git_repo"] is False
+    assert changes_response.json()["changes"] == []
+    assert diff_response.status_code == 200
+    assert diff_response.json()["is_git_repo"] is False
+    assert "not a Git repository" in diff_response.json()["message"]
 
 
 def test_dashboard_api_renames_chat_thread(monkeypatch: pytest.MonkeyPatch) -> None:

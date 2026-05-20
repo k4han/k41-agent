@@ -1,4 +1,5 @@
 import json
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -22,7 +23,14 @@ from agent.modules.providers import (
     list_providers,
 )
 from agent.modules.users import Platform, get_pairing_service
+from agent.modules.workspaces import (
+    get_thread_workspace_dir,
+    remember_thread_workspace,
+    resolve_workspace_root,
+)
 from agent.modules.workflows import list_registered_workflows
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api",
@@ -61,11 +69,49 @@ def _request_to_run_params(request: ChatRequest) -> dict[str, object]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+async def _apply_workspace_to_run_params(
+    request: ChatRequest,
+    params: dict[str, object],
+) -> None:
+    thread_id = str(params.get("thread_id") or "")
+    if not thread_id:
+        return
+
+    requested_working_dir = request.working_dir.strip() if request.working_dir else ""
+    stored_working_dir = ""
+    if not requested_working_dir and request.thread_id:
+        try:
+            stored_working_dir = await get_thread_workspace_dir(request.thread_id) or ""
+        except Exception as exc:
+            logger.debug(
+                "Failed to load workspace for thread %s: %s",
+                request.thread_id,
+                exc,
+            )
+
+    effective_working_dir = requested_working_dir or stored_working_dir
+    if effective_working_dir:
+        resolved = str(resolve_workspace_root(effective_working_dir))
+        params["working_dir"] = resolved
+    else:
+        resolved = str(resolve_workspace_root(None))
+
+    try:
+        await remember_thread_workspace(thread_id, resolved)
+    except Exception as exc:
+        logger.debug(
+            "Failed to remember workspace for thread %s: %s",
+            thread_id,
+            exc,
+        )
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat_sync(request: ChatRequest):
     """Return the full response for a chat request."""
 
     params = _request_to_run_params(request)
+    await _apply_workspace_to_run_params(request, params)
     response = await run_agent_full(**params)
     return ChatResponse(
         response=response,
@@ -79,6 +125,7 @@ async def chat_stream(request: ChatRequest):
     """Stream the response for a chat request."""
 
     params = _request_to_run_params(request)
+    await _apply_workspace_to_run_params(request, params)
 
     async def event_generator():
         async for chunk in run_agent(**params):
@@ -92,6 +139,7 @@ async def chat_events(request: ChatRequest):
     """Stream UI events for a chat request as newline-delimited JSON."""
 
     params = _request_to_run_params(request)
+    await _apply_workspace_to_run_params(request, params)
     created_thread = bool(request.new_thread and not request.thread_id)
 
     async def event_generator():
