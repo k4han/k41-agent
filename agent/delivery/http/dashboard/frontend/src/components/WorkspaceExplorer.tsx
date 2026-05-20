@@ -1,15 +1,21 @@
 import {
   ChevronDown,
   ChevronRight,
+  Clipboard,
   File,
   Folder,
   GitCompare,
+  MoreHorizontal,
+  Pencil,
   RefreshCw,
+  Trash2,
   X,
 } from "lucide-solid";
-import { createEffect, createMemo, createResource, createSignal, For, Show, untrack } from "solid-js";
+import { createEffect, createMemo, createResource, createSignal, For, onCleanup, Show, untrack } from "solid-js";
 
-import { apiFetch } from "@/lib/api";
+import { Dialog } from "@/components/Dialog";
+import { useToast } from "@/components/Toast";
+import { apiFetch, postJson } from "@/lib/api";
 import { highlightCode, languageFromPath } from "@/lib/codeHighlight";
 import { renderUnifiedDiffHtml } from "@/lib/diffView";
 import { createDarkMode } from "@/lib/theme";
@@ -140,6 +146,36 @@ function FileCodeView(props: { content: string; path: string; dark: boolean }) {
   );
 }
 
+function joinAbsolutePath(root: string, relativePath: string): string {
+  if (!relativePath) {
+    return root;
+  }
+  const useBackslash = /\\/.test(root) && !/\//.test(root);
+  const separator = useBackslash ? "\\" : "/";
+  const trimmedRoot = root.replace(/[\\/]+$/, "");
+  const normalised = relativePath.split(/[\\/]+/).filter(Boolean).join(separator);
+  return `${trimmedRoot}${separator}${normalised}`;
+}
+
+async function writeToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "absolute";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  try {
+    document.execCommand("copy");
+  } finally {
+    document.body.removeChild(textarea);
+  }
+}
+
 export function WorkspaceExplorer(props: {
   threadId: string;
   workingDir: string;
@@ -147,6 +183,7 @@ export function WorkspaceExplorer(props: {
   onWorkingDirChange: (workingDir: string) => void;
 }) {
   const dark = createDarkMode();
+  const { showToast } = useToast();
   const [draftWorkingDir, setDraftWorkingDir] = createSignal(props.workingDir);
   const [entriesByPath, setEntriesByPath] = createSignal<Record<string, WorkspaceTreeEntry[]>>({});
   const [expandedByPath, setExpandedByPath] = createSignal<Record<string, boolean>>({ "": true });
@@ -167,6 +204,13 @@ export function WorkspaceExplorer(props: {
   const [filePayloads, setFilePayloads] = createSignal<Record<string, WorkspaceFilePayload>>({});
   const [fileLoadingByPath, setFileLoadingByPath] = createSignal<Record<string, boolean>>({});
   const [fileErrorByPath, setFileErrorByPath] = createSignal<Record<string, string>>({});
+  const [actionMenuPath, setActionMenuPath] = createSignal<string | null>(null);
+  const [renameTarget, setRenameTarget] = createSignal<WorkspaceTreeEntry | null>(null);
+  const [renameDraft, setRenameDraft] = createSignal("");
+  const [renaming, setRenaming] = createSignal(false);
+  const [deleteTarget, setDeleteTarget] = createSignal<WorkspaceTreeEntry | null>(null);
+  const [deleting, setDeleting] = createSignal(false);
+  const [workspaceRoot, setWorkspaceRoot] = createSignal("");
   let generation = 0;
 
   const rootEntries = () => entriesByPath()[""] || [];
@@ -192,6 +236,9 @@ export function WorkspaceExplorer(props: {
       }
       setEntriesByPath((current) => ({ ...current, [payload.path]: payload.entries }));
       setTreeTruncatedByPath((current) => ({ ...current, [payload.path]: payload.truncated }));
+      if (payload.root) {
+        setWorkspaceRoot(payload.root);
+      }
     } catch (err) {
       if (targetGeneration === generation) {
         setTreeError(err instanceof Error ? err.message : "Failed to load workspace tree");
@@ -346,6 +393,147 @@ export function WorkspaceExplorer(props: {
     }
   };
 
+  const toggleActionMenu = (path: string, event: MouseEvent) => {
+    event.stopPropagation();
+    event.preventDefault();
+    setActionMenuPath(actionMenuPath() === path ? null : path);
+  };
+
+  const closeActionMenu = () => setActionMenuPath(null);
+
+  const requestRename = (entry: WorkspaceTreeEntry, event: MouseEvent) => {
+    event.stopPropagation();
+    closeActionMenu();
+    setRenameTarget(entry);
+    setRenameDraft(entry.name);
+  };
+
+  const cancelRename = () => {
+    setRenameTarget(null);
+    setRenameDraft("");
+  };
+
+  const confirmRename = async () => {
+    const entry = renameTarget();
+    if (!entry) {
+      return;
+    }
+    const nextName = renameDraft().trim();
+    if (!nextName || nextName === entry.name) {
+      cancelRename();
+      return;
+    }
+    setRenaming(true);
+    try {
+      await postJson("/dashboard-api/workspace/rename", {
+        thread_id: props.threadId || null,
+        working_dir: props.workingDir || null,
+        path: entry.path,
+        new_name: nextName,
+      });
+      showToast(`Renamed to ${nextName}`, "success");
+      const openedPath = entry.path;
+      setFileTabs((current) => current.filter((item) => item !== openedPath));
+      setFilePayloads((current) => {
+        const copy = { ...current };
+        delete copy[openedPath];
+        return copy;
+      });
+      if (activeTab() === fileTabId(openedPath)) {
+        setActiveTab("files");
+      }
+      cancelRename();
+      refresh();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Rename failed", "error");
+    } finally {
+      setRenaming(false);
+    }
+  };
+
+  const requestDelete = (entry: WorkspaceTreeEntry, event: MouseEvent) => {
+    event.stopPropagation();
+    closeActionMenu();
+    setDeleteTarget(entry);
+  };
+
+  const cancelDelete = () => setDeleteTarget(null);
+
+  const confirmDelete = async () => {
+    const entry = deleteTarget();
+    if (!entry) {
+      return;
+    }
+    setDeleting(true);
+    try {
+      await postJson("/dashboard-api/workspace/delete", {
+        thread_id: props.threadId || null,
+        working_dir: props.workingDir || null,
+        path: entry.path,
+      });
+      showToast(`Deleted ${entry.name}`, "success");
+      const removedPath = entry.path;
+      setFileTabs((current) => current.filter((item) => item !== removedPath));
+      setFilePayloads((current) => {
+        const copy = { ...current };
+        delete copy[removedPath];
+        return copy;
+      });
+      if (activeTab() === fileTabId(removedPath)) {
+        setActiveTab("files");
+      }
+      setDeleteTarget(null);
+      refresh();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Delete failed", "error");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const copyRelativePath = async (entry: WorkspaceTreeEntry, event: MouseEvent) => {
+    event.stopPropagation();
+    closeActionMenu();
+    try {
+      await writeToClipboard(entry.path);
+      showToast("Copied relative path", "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Copy failed", "error");
+    }
+  };
+
+  const copyAbsolutePath = async (entry: WorkspaceTreeEntry, event: MouseEvent) => {
+    event.stopPropagation();
+    closeActionMenu();
+    const root = workspaceRoot() || props.workingDir;
+    if (!root) {
+      showToast("Workspace root unavailable", "warning");
+      return;
+    }
+    try {
+      await writeToClipboard(joinAbsolutePath(root, entry.path));
+      showToast("Copied absolute path", "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Copy failed", "error");
+    }
+  };
+
+  const handleDocumentClick = (event: MouseEvent) => {
+    if (!actionMenuPath()) {
+      return;
+    }
+    const target = event.target as HTMLElement | null;
+    if (target && target.closest(".workspace-tree-actions")) {
+      return;
+    }
+    closeActionMenu();
+  };
+
+  if (typeof document !== "undefined") {
+    document.addEventListener("click", handleDocumentClick);
+    onCleanup(() => document.removeEventListener("click", handleDocumentClick));
+  }
+
   createEffect(() => {
     setDraftWorkingDir(props.workingDir || "");
   });
@@ -362,37 +550,95 @@ export function WorkspaceExplorer(props: {
     const isOpen = () => Boolean(expandedByPath()[entry().path]);
     const isDirectory = () => entry().kind === "directory";
     const isSelected = () => activeTab() === fileTabId(entry().path);
+    const isMenuOpen = () => actionMenuPath() === entry().path;
 
     return (
       <>
-        <button
-          class={`workspace-tree-row ${isSelected() ? "active" : ""}`}
-          type="button"
+        <div
+          class={`workspace-tree-item ${isMenuOpen() ? "menu-open" : ""}`}
           style={`--depth: ${entryProps.depth};`}
-          title={entry().path}
-          onClick={() => {
-            if (isDirectory()) {
-              toggleDirectory(entry().path);
-            } else {
-              openFile(entry().path);
-            }
-          }}
         >
-          <span class="workspace-tree-caret">
-            <Show when={isDirectory()}>
-              <Show when={isOpen()} fallback={<ChevronRight size={13} />}>
-                <ChevronDown size={13} />
+          <button
+            class={`workspace-tree-row ${isSelected() ? "active" : ""}`}
+            type="button"
+            title={entry().path}
+            onClick={() => {
+              if (isDirectory()) {
+                toggleDirectory(entry().path);
+              } else {
+                openFile(entry().path);
+              }
+            }}
+          >
+            <span class="workspace-tree-caret">
+              <Show when={isDirectory()}>
+                <Show when={isOpen()} fallback={<ChevronRight size={13} />}>
+                  <ChevronDown size={13} />
+                </Show>
               </Show>
+            </span>
+            <span class="workspace-tree-icon">
+              <Show when={isDirectory()} fallback={<File size={14} />}>
+                <Folder size={14} />
+              </Show>
+            </span>
+            <span class="workspace-tree-name">{entry().name}</span>
+            <span class="workspace-tree-meta">{formatFileSize(entry().size)}</span>
+          </button>
+          <div class="workspace-tree-actions">
+            <button
+              class={`workspace-tree-action ${isMenuOpen() ? "active" : ""}`}
+              type="button"
+              title="File actions"
+              aria-label="File actions"
+              aria-haspopup="menu"
+              aria-expanded={isMenuOpen()}
+              onClick={(event) => toggleActionMenu(entry().path, event)}
+            >
+              <MoreHorizontal size={13} />
+            </button>
+            <Show when={isMenuOpen()}>
+              <div class="workspace-tree-menu" role="menu">
+                <button
+                  class="workspace-tree-menu-item"
+                  type="button"
+                  role="menuitem"
+                  onClick={(event) => requestRename(entry(), event)}
+                >
+                  <Pencil size={13} />
+                  <span>Rename</span>
+                </button>
+                <button
+                  class="workspace-tree-menu-item"
+                  type="button"
+                  role="menuitem"
+                  onClick={(event) => void copyRelativePath(entry(), event)}
+                >
+                  <Clipboard size={13} />
+                  <span>Copy path</span>
+                </button>
+                <button
+                  class="workspace-tree-menu-item"
+                  type="button"
+                  role="menuitem"
+                  onClick={(event) => void copyAbsolutePath(entry(), event)}
+                >
+                  <Clipboard size={13} />
+                  <span>Copy absolute path</span>
+                </button>
+                <button
+                  class="workspace-tree-menu-item workspace-tree-menu-danger"
+                  type="button"
+                  role="menuitem"
+                  onClick={(event) => requestDelete(entry(), event)}
+                >
+                  <Trash2 size={13} />
+                  <span>Delete</span>
+                </button>
+              </div>
             </Show>
-          </span>
-          <span class="workspace-tree-icon">
-            <Show when={isDirectory()} fallback={<File size={14} />}>
-              <Folder size={14} />
-            </Show>
-          </span>
-          <span class="workspace-tree-name">{entry().name}</span>
-          <span class="workspace-tree-meta">{formatFileSize(entry().size)}</span>
-        </button>
+          </div>
+        </div>
         <Show when={isDirectory() && isOpen()}>
           <Show when={treeLoadingByPath()[entry().path]}>
             <div class="workspace-tree-status" style={`--depth: ${entryProps.depth + 1};`}>
@@ -656,6 +902,99 @@ export function WorkspaceExplorer(props: {
           </section>
         </Show>
       </div>
+
+      <Dialog
+        open={renameTarget() !== null}
+        title="Rename"
+        onClose={() => {
+          if (!renaming()) {
+            cancelRename();
+          }
+        }}
+        footer={
+          <div class="row-wrap">
+            <button
+              class="btn"
+              type="button"
+              onClick={cancelRename}
+              disabled={renaming()}
+            >
+              Cancel
+            </button>
+            <button
+              class="btn btn-primary"
+              type="button"
+              onClick={() => void confirmRename()}
+              disabled={renaming() || !renameDraft().trim()}
+            >
+              {renaming() ? "Renaming..." : "Rename"}
+            </button>
+          </div>
+        }
+      >
+        <p class="muted" style="margin-bottom: 8px;" title={renameTarget()?.path}>
+          {renameTarget()?.path}
+        </p>
+        <input
+          class="input"
+          value={renameDraft()}
+          placeholder="New name"
+          disabled={renaming()}
+          onInput={(event) => setRenameDraft(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              void confirmRename();
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              cancelRename();
+            }
+          }}
+        />
+      </Dialog>
+
+      <Dialog
+        open={deleteTarget() !== null}
+        title={deleteTarget()?.kind === "directory" ? "Delete folder" : "Delete file"}
+        onClose={() => {
+          if (!deleting()) {
+            cancelDelete();
+          }
+        }}
+        footer={
+          <div class="row-wrap">
+            <button
+              class="btn"
+              type="button"
+              onClick={cancelDelete}
+              disabled={deleting()}
+            >
+              Cancel
+            </button>
+            <button
+              class="btn btn-danger"
+              type="button"
+              onClick={() => void confirmDelete()}
+              disabled={deleting()}
+            >
+              <Trash2 size={14} />
+              {deleting() ? "Deleting..." : "Delete"}
+            </button>
+          </div>
+        }
+      >
+        <p>
+          Are you sure you want to delete{" "}
+          <span class="mono">{deleteTarget()?.path}</span>?
+        </p>
+        <Show when={deleteTarget()?.kind === "directory"}>
+          <p class="muted" style="margin-top: 8px;">
+            All contents inside this folder will be removed.
+          </p>
+        </Show>
+        <p class="muted" style="margin-top: 8px;">This action cannot be undone.</p>
+      </Dialog>
     </aside>
   );
 }

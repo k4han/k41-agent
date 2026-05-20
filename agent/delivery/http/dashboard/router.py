@@ -42,11 +42,13 @@ from agent.modules.scheduler import (
 from agent.modules.tools import get_default_tool_names
 from agent.modules.users import get_pairing_service
 from agent.modules.workspaces import (
+    delete_workspace_entry,
     get_thread_workspace_dir,
     get_workspace_changes,
     get_workspace_diff,
     get_workspace_file,
     list_workspace_tree,
+    rename_workspace_entry,
     resolve_workspace_root,
 )
 from agent.modules.workflows import (
@@ -435,6 +437,8 @@ async def _workspace_dir_from_request(
 def _workspace_http_error(exc: Exception) -> HTTPException:
     if isinstance(exc, FileNotFoundError):
         return HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, FileExistsError):
+        return HTTPException(status_code=409, detail=str(exc))
     if isinstance(exc, (NotADirectoryError, ValueError)):
         return HTTPException(status_code=400, detail=str(exc))
     if isinstance(exc, RuntimeError):
@@ -627,6 +631,51 @@ async def get_dashboard_workspace_file(
             working_dir=working_dir,
         )
         return get_workspace_file(working_dir=root, path=path)
+    except Exception as exc:
+        raise _workspace_http_error(exc) from exc
+
+
+class WorkspaceRenameBody(BaseModel):
+    thread_id: str | None = None
+    working_dir: str | None = None
+    path: str = Field(..., min_length=1)
+    new_name: str = Field(..., min_length=1)
+
+
+@router.post("/dashboard-api/workspace/rename")
+async def rename_dashboard_workspace_entry(
+    body: WorkspaceRenameBody,
+) -> dict[str, Any]:
+    try:
+        root = await _workspace_dir_from_request(
+            thread_id=body.thread_id,
+            working_dir=body.working_dir,
+        )
+        return rename_workspace_entry(
+            working_dir=root,
+            path=body.path,
+            new_name=body.new_name,
+        )
+    except Exception as exc:
+        raise _workspace_http_error(exc) from exc
+
+
+class WorkspaceDeleteBody(BaseModel):
+    thread_id: str | None = None
+    working_dir: str | None = None
+    path: str = Field(..., min_length=1)
+
+
+@router.post("/dashboard-api/workspace/delete")
+async def delete_dashboard_workspace_entry(
+    body: WorkspaceDeleteBody,
+) -> dict[str, Any]:
+    try:
+        root = await _workspace_dir_from_request(
+            thread_id=body.thread_id,
+            working_dir=body.working_dir,
+        )
+        return delete_workspace_entry(working_dir=root, path=body.path)
     except Exception as exc:
         raise _workspace_http_error(exc) from exc
 

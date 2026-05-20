@@ -3,6 +3,7 @@ from __future__ import annotations
 import difflib
 import logging
 import mimetypes
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -244,6 +245,75 @@ def get_workspace_file(*, working_dir: str | None, path: str) -> dict[str, Any]:
         "truncated": truncated,
         "binary": False,
         "message": "File truncated." if truncated else "",
+    }
+
+
+def rename_workspace_entry(
+    *,
+    working_dir: str | None,
+    path: str,
+    new_name: str,
+) -> dict[str, Any]:
+    root = ensure_workspace_directory(working_dir)
+    target = resolve_workspace_child(root, path)
+    relative_path = workspace_relative_path(root, target)
+    if not relative_path:
+        raise ValueError("Cannot rename workspace root.")
+    if not target.exists():
+        raise FileNotFoundError(f"Path does not exist: {path}")
+
+    clean_name = str(new_name or "").strip()
+    if not clean_name:
+        raise ValueError("New name is required.")
+    if clean_name in {".", ".."}:
+        raise ValueError("New name is invalid.")
+    if any(separator in clean_name for separator in ("/", "\\")):
+        raise ValueError("New name must not contain path separators.")
+
+    destination = (target.parent / clean_name).resolve()
+    if destination != root and not destination.is_relative_to(root):
+        raise ValueError("Destination escapes workspace.")
+    if destination == target:
+        return {
+            "root": str(root),
+            "path": relative_path,
+            "new_path": relative_path,
+        }
+    if destination.exists():
+        raise FileExistsError(f"Destination already exists: {clean_name}")
+
+    target.rename(destination)
+    return {
+        "root": str(root),
+        "path": relative_path,
+        "new_path": workspace_relative_path(root, destination),
+    }
+
+
+def delete_workspace_entry(
+    *,
+    working_dir: str | None,
+    path: str,
+) -> dict[str, Any]:
+    root = ensure_workspace_directory(working_dir)
+    target = resolve_workspace_child(root, path)
+    relative_path = workspace_relative_path(root, target)
+    if not relative_path:
+        raise ValueError("Cannot delete workspace root.")
+    if not target.exists():
+        raise FileNotFoundError(f"Path does not exist: {path}")
+
+    if target.is_dir():
+        shutil.rmtree(target)
+        kind = "directory"
+    else:
+        target.unlink()
+        kind = "file"
+
+    return {
+        "root": str(root),
+        "path": relative_path,
+        "kind": kind,
     }
 
 
