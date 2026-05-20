@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import difflib
 import logging
+import mimetypes
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 MAX_TREE_ENTRIES = 500
 MAX_DIFF_CHARS = 200_000
+MAX_FILE_BYTES = 300_000
 MAX_UNTRACKED_FILE_CHARS = 120_000
 GIT_TIMEOUT_SECONDS = 10
 IGNORED_DIR_NAMES = {
@@ -132,6 +134,14 @@ def get_workspace_changes(working_dir: str | None) -> dict[str, Any]:
 
     output = _run_git(_git_status_args(), cwd=root)
     changes = _parse_git_status(output, workspace_root=root, git_root=git_root)
+    for change in changes:
+        additions, deletions = _change_line_stats(
+            change,
+            workspace_root=root,
+            git_root=git_root,
+        )
+        change["additions"] = additions
+        change["deletions"] = deletions
     return {
         "root": str(root),
         "is_git_repo": True,
@@ -193,6 +203,50 @@ def get_workspace_diff(*, working_dir: str | None, path: str) -> dict[str, Any]:
     }
 
 
+def get_workspace_file(*, working_dir: str | None, path: str) -> dict[str, Any]:
+    root = ensure_workspace_directory(working_dir)
+    target = resolve_workspace_child(root, path)
+    relative_path = workspace_relative_path(root, target)
+    if not relative_path:
+        raise ValueError("File path is required.")
+    if not target.exists():
+        raise FileNotFoundError(f"File does not exist: {path}")
+    if not target.is_file():
+        raise ValueError(f"Path is not a file: {path}")
+
+    stat = target.stat()
+    with target.open("rb") as file_handle:
+        raw_content = file_handle.read(MAX_FILE_BYTES + 1)
+
+    truncated = len(raw_content) > MAX_FILE_BYTES
+    if truncated:
+        raw_content = raw_content[:MAX_FILE_BYTES]
+
+    mime_type = mimetypes.guess_type(target.name)[0] or "text/plain"
+    if b"\0" in raw_content:
+        return {
+            "root": str(root),
+            "path": relative_path,
+            "mime_type": mime_type,
+            "size": stat.st_size,
+            "content": "",
+            "truncated": truncated,
+            "binary": True,
+            "message": "Binary files cannot be previewed.",
+        }
+
+    return {
+        "root": str(root),
+        "path": relative_path,
+        "mime_type": mime_type,
+        "size": stat.st_size,
+        "content": raw_content.decode("utf-8", errors="replace"),
+        "truncated": truncated,
+        "binary": False,
+        "message": "File truncated." if truncated else "",
+    }
+
+
 def _run_git(args: list[str], *, cwd: Path) -> str:
     result = subprocess.run(
         ["git", *args],
@@ -235,8 +289,8 @@ def _parse_git_status(
     *,
     workspace_root: Path,
     git_root: Path,
-) -> list[dict[str, str]]:
-    changes: list[dict[str, str]] = []
+) -> list[dict[str, Any]]:
+    changes: list[dict[str, Any]] = []
     items = output.split("\0")
     index = 0
     while index < len(items):
@@ -293,6 +347,59 @@ def _status_label(code: str) -> str:
 
 def _git_relative_path(git_root: Path, target: Path) -> str:
     return target.resolve().relative_to(git_root).as_posix()
+
+
+def _change_line_stats(
+    change: dict[str, Any],
+    *,
+    workspace_root: Path,
+    git_root: Path,
+) -> tuple[int, int]:
+    path = str(change.get("path") or "")
+    if not path:
+        return 0, 0
+
+    if change.get("status") == "untracked":
+        target = resolve_workspace_child(workspace_root, path)
+        return _text_line_count(target), 0
+
+    target = (workspace_root / path).resolve()
+    git_path = _git_relative_path(git_root, target)
+    additions = 0
+    deletions = 0
+    for args in (
+        ["diff", "--numstat", "--cached", "--no-ext-diff", "--", git_path],
+        ["diff", "--numstat", "--no-ext-diff", "--", git_path],
+    ):
+        try:
+            output = _run_git(args, cwd=git_root)
+        except Exception as exc:
+            logger.debug("Failed to compute line stats for %s: %s", path, exc)
+            continue
+        for line in output.splitlines():
+            fields = line.split("\t", 2)
+            if len(fields) < 2:
+                continue
+            if fields[0].isdigit():
+                additions += int(fields[0])
+            if fields[1].isdigit():
+                deletions += int(fields[1])
+    return additions, deletions
+
+
+def _text_line_count(target: Path) -> int:
+    if not target.exists() or not target.is_file():
+        return 0
+    try:
+        with target.open("rb") as file_handle:
+            raw_content = file_handle.read(MAX_UNTRACKED_FILE_CHARS + 1)
+    except OSError as exc:
+        logger.debug("Failed to read file %s for line stats: %s", target, exc)
+        return 0
+    if b"\0" in raw_content:
+        return 0
+    text = raw_content.decode("utf-8", errors="replace")
+    return len(text.splitlines()) or (1 if text else 0)
 
 
 def _build_untracked_diff(target: Path, relative_path: str) -> str:

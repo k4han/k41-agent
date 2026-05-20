@@ -5,10 +5,14 @@ import {
   Folder,
   GitCompare,
   RefreshCw,
+  X,
 } from "lucide-solid";
-import { createEffect, createSignal, For, Show } from "solid-js";
+import { createEffect, createMemo, createResource, createSignal, For, Show, untrack } from "solid-js";
 
 import { apiFetch } from "@/lib/api";
+import { highlightCode, languageFromPath } from "@/lib/codeHighlight";
+import { renderUnifiedDiffHtml } from "@/lib/diffView";
+import { createDarkMode } from "@/lib/theme";
 
 type WorkspaceTreeEntry = {
   name: string;
@@ -28,6 +32,8 @@ type WorkspaceTreePayload = {
 type WorkspaceChange = {
   path: string;
   status: string;
+  additions?: number;
+  deletions?: number;
   old_path?: string;
   index_status?: string;
   working_tree_status?: string;
@@ -49,6 +55,19 @@ type WorkspaceDiffPayload = {
   truncated: boolean;
   message: string;
 };
+
+type WorkspaceFilePayload = {
+  root: string;
+  path: string;
+  mime_type: string;
+  size: number;
+  content: string;
+  truncated: boolean;
+  binary: boolean;
+  message: string;
+};
+
+type WorkspaceTab = "changes" | "files" | `file:${string}`;
 
 function workspaceQuery(threadId: string, workingDir: string, extra?: Record<string, string>) {
   const params = new URLSearchParams();
@@ -77,24 +96,48 @@ function formatFileSize(size: number | null): string {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function diffLineClass(line: string): string {
-  if (line.startsWith("+") && !line.startsWith("+++")) {
-    return "workspace-diff-line added";
-  }
-  if (line.startsWith("-") && !line.startsWith("---")) {
-    return "workspace-diff-line removed";
-  }
-  if (line.startsWith("@@")) {
-    return "workspace-diff-line hunk";
-  }
-  return "workspace-diff-line";
-}
-
 function statusLabel(status: string): string {
   if (!status) {
     return "diff";
   }
   return status.replace("_", " ");
+}
+
+function fileTabId(path: string): WorkspaceTab {
+  return `file:${path}`;
+}
+
+function fileTabPath(tab: WorkspaceTab): string {
+  return tab.startsWith("file:") ? tab.slice("file:".length) : "";
+}
+
+function fileName(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() || path;
+}
+
+function DiffView(props: { diff: string; path: string }) {
+  const html = createMemo(() => renderUnifiedDiffHtml(props.diff, props.path, { sideBySide: true }));
+  return <div class="workspace-diff2html" innerHTML={html()} />;
+}
+
+function FileCodeView(props: { content: string; path: string; dark: boolean }) {
+  const [highlighted] = createResource(
+    () => ({ content: props.content, path: props.path, dark: props.dark }),
+    async ({ content, path, dark }) => {
+      const lang = languageFromPath(path);
+      return highlightCode(content, lang, dark);
+    },
+  );
+  return (
+    <div class="workspace-file-view">
+      <Show
+        when={highlighted()}
+        fallback={<pre class="workspace-file-view-plain">{props.content}</pre>}
+      >
+        <div class="workspace-file-view-shiki" innerHTML={highlighted()} />
+      </Show>
+    </div>
+  );
 }
 
 export function WorkspaceExplorer(props: {
@@ -103,6 +146,7 @@ export function WorkspaceExplorer(props: {
   disabled?: boolean;
   onWorkingDirChange: (workingDir: string) => void;
 }) {
+  const dark = createDarkMode();
   const [draftWorkingDir, setDraftWorkingDir] = createSignal(props.workingDir);
   const [entriesByPath, setEntriesByPath] = createSignal<Record<string, WorkspaceTreeEntry[]>>({});
   const [expandedByPath, setExpandedByPath] = createSignal<Record<string, boolean>>({ "": true });
@@ -114,14 +158,21 @@ export function WorkspaceExplorer(props: {
   const [changesError, setChangesError] = createSignal("");
   const [gitMessage, setGitMessage] = createSignal("");
   const [isGitRepo, setIsGitRepo] = createSignal(true);
-  const [selectedPath, setSelectedPath] = createSignal("");
+  const [expandedChangePath, setExpandedChangePath] = createSignal("");
   const [diffPayload, setDiffPayload] = createSignal<WorkspaceDiffPayload | null>(null);
   const [diffLoading, setDiffLoading] = createSignal(false);
   const [diffError, setDiffError] = createSignal("");
+  const [activeTab, setActiveTab] = createSignal<WorkspaceTab>("changes");
+  const [fileTabs, setFileTabs] = createSignal<string[]>([]);
+  const [filePayloads, setFilePayloads] = createSignal<Record<string, WorkspaceFilePayload>>({});
+  const [fileLoadingByPath, setFileLoadingByPath] = createSignal<Record<string, boolean>>({});
+  const [fileErrorByPath, setFileErrorByPath] = createSignal<Record<string, string>>({});
   let generation = 0;
 
   const rootEntries = () => entriesByPath()[""] || [];
   const canQuery = () => Boolean(props.workingDir.trim() || props.threadId);
+  const activeFilePath = () => fileTabPath(activeTab());
+  const activeFilePayload = () => filePayloads()[activeFilePath()];
 
   const loadTree = async (path = "", targetGeneration = generation) => {
     if (!canQuery()) {
@@ -184,7 +235,7 @@ export function WorkspaceExplorer(props: {
     if (!path || !canQuery()) {
       return;
     }
-    setSelectedPath(path);
+    setExpandedChangePath(path);
     setDiffPayload(null);
     setDiffError("");
     setDiffLoading(true);
@@ -193,16 +244,45 @@ export function WorkspaceExplorer(props: {
       const payload = await apiFetch<WorkspaceDiffPayload>(
         `/dashboard-api/workspace/diff?${query}`,
       );
-      if (targetGeneration === generation && selectedPath() === path) {
+      if (targetGeneration === generation && expandedChangePath() === path) {
         setDiffPayload(payload);
       }
     } catch (err) {
-      if (targetGeneration === generation && selectedPath() === path) {
+      if (targetGeneration === generation && expandedChangePath() === path) {
         setDiffError(err instanceof Error ? err.message : "Failed to load diff");
       }
     } finally {
-      if (targetGeneration === generation && selectedPath() === path) {
+      if (targetGeneration === generation && expandedChangePath() === path) {
         setDiffLoading(false);
+      }
+    }
+  };
+
+  const loadFile = async (path: string, targetGeneration = generation) => {
+    if (!path || !canQuery()) {
+      return;
+    }
+    setFileLoadingByPath((current) => ({ ...current, [path]: true }));
+    setFileErrorByPath((current) => ({ ...current, [path]: "" }));
+    try {
+      const query = workspaceQuery(props.threadId, props.workingDir, { path });
+      const payload = await apiFetch<WorkspaceFilePayload>(
+        `/dashboard-api/workspace/file?${query}`,
+      );
+      if (targetGeneration !== generation) {
+        return;
+      }
+      setFilePayloads((current) => ({ ...current, [path]: payload }));
+    } catch (err) {
+      if (targetGeneration === generation) {
+        setFileErrorByPath((current) => ({
+          ...current,
+          [path]: err instanceof Error ? err.message : "Failed to load file",
+        }));
+      }
+    } finally {
+      if (targetGeneration === generation) {
+        setFileLoadingByPath((current) => ({ ...current, [path]: false }));
       }
     }
   };
@@ -213,9 +293,16 @@ export function WorkspaceExplorer(props: {
     setEntriesByPath({});
     setExpandedByPath({ "": true });
     setTreeTruncatedByPath({});
-    setSelectedPath("");
+    setExpandedChangePath("");
     setDiffPayload(null);
     setDiffError("");
+    setFileTabs([]);
+    setFilePayloads({});
+    setFileLoadingByPath({});
+    setFileErrorByPath({});
+    if (untrack(activeTab).startsWith("file:")) {
+      setActiveTab("changes");
+    }
     void loadTree("", targetGeneration);
     void loadChanges(targetGeneration);
   };
@@ -233,6 +320,32 @@ export function WorkspaceExplorer(props: {
     void loadTree(path);
   };
 
+  const toggleChangeDiff = (path: string) => {
+    if (expandedChangePath() === path) {
+      setExpandedChangePath("");
+      setDiffPayload(null);
+      setDiffError("");
+      return;
+    }
+    void loadDiff(path);
+  };
+
+  const openFile = (path: string) => {
+    setFileTabs((current) => current.includes(path) ? current : [...current, path]);
+    setActiveTab(fileTabId(path));
+    if (!filePayloads()[path] && !fileLoadingByPath()[path]) {
+      void loadFile(path);
+    }
+  };
+
+  const closeFileTab = (path: string, event: MouseEvent) => {
+    event.stopPropagation();
+    setFileTabs((current) => current.filter((item) => item !== path));
+    if (activeTab() === fileTabId(path)) {
+      setActiveTab("files");
+    }
+  };
+
   createEffect(() => {
     setDraftWorkingDir(props.workingDir || "");
   });
@@ -248,7 +361,7 @@ export function WorkspaceExplorer(props: {
     const children = () => entriesByPath()[entry().path] || [];
     const isOpen = () => Boolean(expandedByPath()[entry().path]);
     const isDirectory = () => entry().kind === "directory";
-    const isSelected = () => selectedPath() === entry().path;
+    const isSelected = () => activeTab() === fileTabId(entry().path);
 
     return (
       <>
@@ -261,7 +374,7 @@ export function WorkspaceExplorer(props: {
             if (isDirectory()) {
               toggleDirectory(entry().path);
             } else {
-              void loadDiff(entry().path);
+              openFile(entry().path);
             }
           }}
         >
@@ -336,84 +449,212 @@ export function WorkspaceExplorer(props: {
         </button>
       </div>
 
-      <div class="workspace-explorer-body">
-        <section class="workspace-section">
-          <div class="workspace-section-title">Changed files</div>
-          <Show when={!changesLoading()} fallback={<div class="empty compact">Loading changes...</div>}>
-            <Show when={!changesError()} fallback={<div class="empty compact">{changesError()}</div>}>
-              <Show
-                when={changes().length > 0}
-                fallback={<div class="empty compact">{gitMessage() || "No changed files."}</div>}
+      <div class="workspace-tabs" role="tablist" aria-label="Workspace views">
+        <button
+          class={`workspace-tab ${activeTab() === "changes" ? "active" : ""}`}
+          type="button"
+          role="tab"
+          aria-selected={activeTab() === "changes"}
+          onClick={() => setActiveTab("changes")}
+        >
+          <GitCompare size={13} />
+          <span>Changes</span>
+          <Show when={changes().length > 0}>
+            <span class="workspace-tab-count">{changes().length}</span>
+          </Show>
+        </button>
+        <button
+          class={`workspace-tab ${activeTab() === "files" ? "active" : ""}`}
+          type="button"
+          role="tab"
+          aria-selected={activeTab() === "files"}
+          onClick={() => setActiveTab("files")}
+        >
+          <Folder size={13} />
+          <span>Files</span>
+        </button>
+        <For each={fileTabs()}>
+          {(path) => (
+            <div class={`workspace-tab workspace-file-tab ${activeTab() === fileTabId(path) ? "active" : ""}`}>
+              <button
+                class="workspace-tab-main"
+                type="button"
+                role="tab"
+                aria-selected={activeTab() === fileTabId(path)}
+                title={path}
+                onClick={() => setActiveTab(fileTabId(path))}
               >
-                <div class="workspace-change-list">
-                  <For each={changes()}>
-                    {(change) => (
-                      <button
-                        class={`workspace-change-row ${selectedPath() === change.path ? "active" : ""}`}
-                        type="button"
-                        title={change.path}
-                        onClick={() => void loadDiff(change.path)}
-                      >
-                        <span class={`workspace-change-status ${change.status}`}>
-                          {statusLabel(change.status)}
-                        </span>
-                        <span class="workspace-change-path">{change.path}</span>
-                      </button>
-                    )}
+                <File size={13} />
+                <span>{fileName(path)}</span>
+              </button>
+              <button
+                class="workspace-tab-close"
+                type="button"
+                title="Close file tab"
+                aria-label={`Close ${path}`}
+                onClick={(event) => closeFileTab(path, event)}
+              >
+                <X size={12} />
+              </button>
+            </div>
+          )}
+        </For>
+      </div>
+
+      <div class="workspace-explorer-body">
+        <Show when={activeTab() === "changes"}>
+          <section class="workspace-section workspace-tab-panel" role="tabpanel">
+            <div class="workspace-section-title">Changed files</div>
+            <Show
+              when={!changesLoading()}
+              fallback={<div class="empty compact">Loading changes...</div>}
+            >
+              <Show
+                when={!changesError()}
+                fallback={<div class="empty compact">{changesError()}</div>}
+              >
+                <Show
+                  when={changes().length > 0}
+                  fallback={<div class="empty compact">{gitMessage() || "No changed files."}</div>}
+                >
+                  <div class="workspace-change-list">
+                    <For each={changes()}>
+                      {(change) => (
+                        <div
+                          class={`workspace-change-item ${expandedChangePath() === change.path ? "expanded" : ""}`}
+                        >
+                          <button
+                            class={`workspace-change-row ${expandedChangePath() === change.path ? "active" : ""}`}
+                            type="button"
+                            title={change.path}
+                            aria-expanded={expandedChangePath() === change.path}
+                            onClick={() => toggleChangeDiff(change.path)}
+                          >
+                            <span class="workspace-change-caret">
+                              <Show
+                                when={expandedChangePath() === change.path}
+                                fallback={<ChevronRight size={13} />}
+                              >
+                                <ChevronDown size={13} />
+                              </Show>
+                            </span>
+                            <span class="workspace-change-path">{change.path}</span>
+                            <span class="workspace-change-stats">
+                              <Show when={change.additions !== undefined}>
+                                <span class="workspace-change-additions">
+                                  +{change.additions}
+                                </span>
+                              </Show>
+                              <Show when={change.deletions !== undefined}>
+                                <span class="workspace-change-deletions">
+                                  -{change.deletions}
+                                </span>
+                              </Show>
+                            </span>
+                            <span class={`workspace-change-status ${change.status}`}>
+                              {statusLabel(change.status)}
+                            </span>
+                          </button>
+                          <Show when={expandedChangePath() === change.path}>
+                            <div class="workspace-change-diff">
+                              <Show
+                                when={!diffLoading()}
+                                fallback={<div class="empty compact">Loading diff...</div>}
+                              >
+                                <Show
+                                  when={!diffError()}
+                                  fallback={<div class="empty compact">{diffError()}</div>}
+                                >
+                                  <Show
+                                    when={diffPayload()?.diff}
+                                    fallback={
+                                      <div class="empty compact">
+                                        {diffPayload()?.message || "No diff available."}
+                                      </div>
+                                    }
+                                  >
+                                    <DiffView
+                                      diff={diffPayload()?.diff || ""}
+                                      path={diffPayload()?.path || change.path}
+                                    />
+                                    <Show when={diffPayload()?.truncated}>
+                                      <div class="hint workspace-hint">Diff truncated.</div>
+                                    </Show>
+                                  </Show>
+                                </Show>
+                              </Show>
+                            </div>
+                          </Show>
+                        </div>
+                      )}
+                    </For>
+                  </div>
+                </Show>
+              </Show>
+            </Show>
+            <Show when={!isGitRepo() && !changesLoading()}>
+              <div class="hint workspace-hint">Diff requires a Git workspace.</div>
+            </Show>
+          </section>
+        </Show>
+
+        <Show when={activeTab() === "files"}>
+          <section class="workspace-section workspace-tree-section workspace-tab-panel" role="tabpanel">
+            <div class="workspace-section-title">Files</div>
+            <Show when={!treeError()} fallback={<div class="empty compact">{treeError()}</div>}>
+              <Show
+                when={rootEntries().length > 0}
+                fallback={<div class="empty compact">No files.</div>}
+              >
+                <div class="workspace-tree">
+                  <For each={rootEntries()}>
+                    {(entry) => <TreeEntry entry={entry} depth={0} />}
                   </For>
+                  <Show when={treeTruncatedByPath()[""]}>
+                    <div class="workspace-tree-status" style="--depth: 0;">
+                      Tree truncated
+                    </div>
+                  </Show>
                 </div>
               </Show>
             </Show>
-          </Show>
-          <Show when={!isGitRepo() && !changesLoading()}>
-            <div class="hint workspace-hint">Diff requires a Git workspace.</div>
-          </Show>
-        </section>
+          </section>
+        </Show>
 
-        <section class="workspace-section workspace-tree-section">
-          <div class="workspace-section-title">Files</div>
-          <Show when={!treeError()} fallback={<div class="empty compact">{treeError()}</div>}>
-            <Show when={rootEntries().length > 0} fallback={<div class="empty compact">No files.</div>}>
-              <div class="workspace-tree">
-                <For each={rootEntries()}>
-                  {(entry) => <TreeEntry entry={entry} depth={0} />}
-                </For>
-                <Show when={treeTruncatedByPath()[""]}>
-                  <div class="workspace-tree-status" style="--depth: 0;">
-                    Tree truncated
-                  </div>
-                </Show>
-              </div>
-            </Show>
-          </Show>
-        </section>
-
-        <section class="workspace-section workspace-diff-section">
-          <div class="workspace-section-title">Diff</div>
-          <Show
-            when={selectedPath()}
-            fallback={<div class="empty compact">Select a changed file to view diff.</div>}
-          >
-            <div class="workspace-diff-path" title={selectedPath()}>{selectedPath()}</div>
-            <Show when={!diffLoading()} fallback={<div class="empty compact">Loading diff...</div>}>
-              <Show when={!diffError()} fallback={<div class="empty compact">{diffError()}</div>}>
+        <Show when={activeTab().startsWith("file:")}>
+          <section class="workspace-section workspace-file-panel workspace-tab-panel" role="tabpanel">
+            <div class="workspace-section-title" title={activeFilePath()}>
+              {activeFilePath()}
+            </div>
+            <Show
+              when={!fileLoadingByPath()[activeFilePath()]}
+              fallback={<div class="empty compact">Loading file...</div>}
+            >
+              <Show
+                when={!fileErrorByPath()[activeFilePath()]}
+                fallback={<div class="empty compact">{fileErrorByPath()[activeFilePath()]}</div>}
+              >
                 <Show
-                  when={diffPayload()?.diff}
-                  fallback={<div class="empty compact">{diffPayload()?.message || "No diff available."}</div>}
+                  when={activeFilePayload() && !activeFilePayload()?.binary}
+                  fallback={
+                    <div class="empty compact">
+                      {activeFilePayload()?.message || "File preview is not available."}
+                    </div>
+                  }
                 >
-                  <pre class="workspace-diff">
-                    <For each={(diffPayload()?.diff || "").split("\n")}>
-                      {(line) => <span class={diffLineClass(line)}>{line || " "}</span>}
-                    </For>
-                  </pre>
-                  <Show when={diffPayload()?.truncated}>
-                    <div class="hint workspace-hint">Diff truncated.</div>
+                  <FileCodeView
+                    content={activeFilePayload()?.content || ""}
+                    path={activeFilePath()}
+                    dark={dark()}
+                  />
+                  <Show when={activeFilePayload()?.truncated}>
+                    <div class="hint workspace-hint">File truncated.</div>
                   </Show>
                 </Show>
               </Show>
             </Show>
-          </Show>
-        </section>
+          </section>
+        </Show>
       </div>
     </aside>
   );

@@ -20,3 +20,5 @@ local-dev/
 
 .claude/
 .ruff_cache/
+
+agent/delivery/http/dashboard/static/

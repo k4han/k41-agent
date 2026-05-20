@@ -45,6 +45,7 @@ from agent.modules.workspaces import (
     get_thread_workspace_dir,
     get_workspace_changes,
     get_workspace_diff,
+    get_workspace_file,
     list_workspace_tree,
     resolve_workspace_root,
 )
@@ -610,6 +611,22 @@ async def get_dashboard_workspace_diff(
             working_dir=working_dir,
         )
         return get_workspace_diff(working_dir=root, path=path)
+    except Exception as exc:
+        raise _workspace_http_error(exc) from exc
+
+
+@router.get("/dashboard-api/workspace/file")
+async def get_dashboard_workspace_file(
+    thread_id: str | None = Query(default=None),
+    working_dir: str | None = Query(default=None),
+    path: str = Query(..., min_length=1),
+) -> dict[str, Any]:
+    try:
+        root = await _workspace_dir_from_request(
+            thread_id=thread_id,
+            working_dir=working_dir,
+        )
+        return get_workspace_file(working_dir=root, path=path)
     except Exception as exc:
         raise _workspace_http_error(exc) from exc
 

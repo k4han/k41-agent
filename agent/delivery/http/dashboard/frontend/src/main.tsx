@@ -18,6 +18,7 @@ import {
   SecurityPage,
 } from "@/pages/settings";
 import { TasksPage } from "@/pages/Tasks";
+import "diff2html/bundles/css/diff2html.min.css";
 import "@/styles.css";
 
 function NotFoundPage() {

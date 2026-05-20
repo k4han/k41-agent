@@ -178,6 +178,31 @@ def test_dashboard_workspace_tree_blocks_directory_escape(tmp_path: Path) -> Non
     assert "escapes workspace" in response.json()["detail"]
 
 
+def test_dashboard_workspace_file_reads_text_and_blocks_directory_escape(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").write_text("print('hello')\n", encoding="utf-8")
+    client = _create_dashboard_client(ChannelManager())
+
+    response = client.get(
+        "/dashboard-api/workspace/file",
+        params={"working_dir": str(tmp_path), "path": "src/app.py"},
+    )
+    escape_response = client.get(
+        "/dashboard-api/workspace/file",
+        params={"working_dir": str(tmp_path), "path": "../outside.py"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["path"] == "src/app.py"
+    assert payload["content"].replace("\r\n", "\n") == "print('hello')\n"
+    assert payload["binary"] is False
+    assert escape_response.status_code == 400
+    assert "escapes workspace" in escape_response.json()["detail"]
+
+
 def test_dashboard_workspace_changes_and_diff_for_git_repo(tmp_path: Path) -> None:
     _require_git()
     repo = tmp_path
@@ -207,6 +232,15 @@ def test_dashboard_workspace_changes_and_diff_for_git_repo(tmp_path: Path) -> No
         "deleted.txt": "deleted",
         "new.txt": "untracked",
         "tracked.txt": "modified",
+    }
+    stats = {
+        change["path"]: (change["additions"], change["deletions"])
+        for change in payload["changes"]
+    }
+    assert stats == {
+        "deleted.txt": (0, 1),
+        "new.txt": (1, 0),
+        "tracked.txt": (1, 1),
     }
 
     diff_response = client.get(
