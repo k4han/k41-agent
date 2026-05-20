@@ -1,6 +1,7 @@
 import { FileText, Image as ImageIcon } from "lucide-solid";
 import { For, Show } from "solid-js";
 
+import { Markdown } from "@/components/Markdown";
 import { formatValue } from "@/lib/utils";
 
 export type TranscriptRole = "user" | "assistant" | "error" | "system";
@@ -96,7 +97,12 @@ export function TranscriptMessageView(props: {
     <div class={`message ${props.role}`}>
       <div class="message-bubble">
         <Show when={props.text}>
-          <div>{props.text}</div>
+          <Show
+            when={props.role === "assistant"}
+            fallback={<div class="message-text">{props.text}</div>}
+          >
+            <Markdown text={props.text} class="message-markdown" />
+          </Show>
         </Show>
         <Show when={props.attachments?.length}>
           <div class="message-attachments">

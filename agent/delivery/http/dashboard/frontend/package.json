@@ -11,7 +11,9 @@
   "dependencies": {
     "@solidjs/router": "^0.15.3",
     "diff2html": "^3.4.56",
+    "dompurify": "^3.4.5",
     "lucide-solid": "^0.562.0",
+    "marked": "^18.0.4",
     "shiki": "^4.1.0",
     "solid-js": "^1.9.10"
   },
