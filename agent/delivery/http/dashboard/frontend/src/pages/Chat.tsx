@@ -31,7 +31,6 @@ import {
   threadApiPath,
   toThreadTranscript,
 } from "@/lib/chatThreads";
-import { truncateText } from "@/lib/utils";
 import type { TranscriptAttachment, TranscriptItem } from "@/components/Transcript";
 import type { ThreadMessagesPayload } from "@/lib/chatThreads";
 import type { ActiveSession, AgentCard, AgentsPayload, BackgroundTask } from "@/types";
@@ -385,10 +384,24 @@ export function ChatPage() {
   );
   const pageSubtitle = createMemo(() => (
     currentThreadId()
-      ? `Continue thread ${truncateText(currentThreadId(), 88)}`
+      ? "Continue this thread."
       : "Stream an agent response with visible tool calls."
   ));
   const isBackgroundThread = createMemo(() => threadData()?.kind === "background");
+  const threadStatusVisible = createMemo(() => Boolean(
+    threadError()
+    || isBackgroundThread()
+    || backgroundTask()
+    || backgroundLive()
+    || backgroundSession()
+    || backgroundStreamError(),
+  ));
+  const threadBadgeVisible = createMemo(() => Boolean(
+    isBackgroundThread()
+    || backgroundTask()
+    || backgroundLive()
+    || backgroundSession(),
+  ));
   const backgroundTaskActive = createMemo(() => {
     const task = backgroundTask();
     return Boolean(task && ACTIVE_TASK_STATUSES.has(task.status));
@@ -991,24 +1004,24 @@ export function ChatPage() {
             style={`--workspace-explorer-width: ${workspaceExplorerWidth()}px;`}
           >
             <section class="panel chat-panel">
-              <Show when={currentThreadId() || threadError()}>
+              <Show when={threadStatusVisible()}>
                 <div class={`thread-banner ${threadError() ? "thread-banner-error" : ""}`}>
-                  <div class="row-wrap">
-                    <span class="badge">{threadData()?.platform || "thread"}</span>
-                    <Show when={isBackgroundThread()}>
-                      <span class="badge badge-info">background</span>
-                    </Show>
-                    <Show when={backgroundTask()}>
-                      {(task) => <span class="badge">{task().status}</span>}
-                    </Show>
-                    <Show when={backgroundLive()}>
-                      <span class="badge badge-info">live</span>
-                    </Show>
-                    <Show when={backgroundSession()}>
-                      {(session) => <span class="badge">{session().elapsed_display}</span>}
-                    </Show>
-                    <span class="mono">{truncateText(currentThreadId(), 84)}</span>
-                  </div>
+                  <Show when={threadBadgeVisible()}>
+                    <div class="row-wrap">
+                      <Show when={isBackgroundThread()}>
+                        <span class="badge badge-info">background</span>
+                      </Show>
+                      <Show when={backgroundTask()}>
+                        {(task) => <span class="badge">{task().status}</span>}
+                      </Show>
+                      <Show when={backgroundLive()}>
+                        <span class="badge badge-info">live</span>
+                      </Show>
+                      <Show when={backgroundSession()}>
+                        {(session) => <span class="badge">{session().elapsed_display}</span>}
+                      </Show>
+                    </div>
+                  </Show>
                   <Show when={threadError()}>
                     <span>{threadError()}</span>
                   </Show>

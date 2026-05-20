@@ -67,6 +67,15 @@ const EXTENSION_TO_LANG: Record<string, BundledLanguage> = {
 };
 
 const BUNDLED_LANG_NAMES = new Set(Object.keys(bundledLanguages));
+const LANGUAGE_ALIASES: Record<string, BundledLanguage> = {
+  bash: "shell",
+  js: "javascript",
+  md: "markdown",
+  ps1: "powershell",
+  py: "python",
+  sh: "shell",
+  ts: "typescript",
+};
 
 function getHighlighter(): Promise<Highlighter> {
   if (!highlighterPromise) {
@@ -93,6 +102,15 @@ export function languageFromPath(path: string): BundledLanguage | "text" {
     return candidate;
   }
   return "text";
+}
+
+export function languageFromName(language: string): BundledLanguage | "text" {
+  const normalized = language.trim().toLowerCase();
+  if (!normalized) {
+    return "text";
+  }
+  const candidate = LANGUAGE_ALIASES[normalized] || normalized;
+  return BUNDLED_LANG_NAMES.has(candidate) ? (candidate as BundledLanguage) : "text";
 }
 
 async function ensureLanguageLoaded(
