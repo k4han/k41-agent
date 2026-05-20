@@ -1,4 +1,4 @@
-import { useNavigate, useSearchParams } from "@solidjs/router";
+import { useNavigate, useParams, useSearchParams } from "@solidjs/router";
 import {
   Bot,
   FileText,
@@ -233,7 +233,9 @@ function toPayloadAttachment(attachment: PendingAttachment): ChatAttachmentPaylo
 
 export function ChatPage() {
   const navigate = useNavigate();
+  const params = useParams<{ threadId?: string }>();
   const [searchParams] = useSearchParams();
+  const routeThreadId = () => (params.threadId ? decodeURIComponent(params.threadId) : "");
   const [data, setData] = createSignal<AgentsPayload>();
   const [error, setError] = createSignal("");
   const [threadData, setThreadData] = createSignal<ThreadMessagesPayload>();
@@ -620,7 +622,7 @@ export function ChatPage() {
   };
 
   createEffect(() => {
-    const threadId = String(searchParams.thread || "");
+    const threadId = routeThreadId();
     if (threadId === loadedThreadId) {
       return;
     }
@@ -783,7 +785,7 @@ export function ChatPage() {
       }
       loadedThreadId = threadId;
       setCurrentThreadId(threadId);
-      navigate(`/chat?thread=${encodeURIComponent(threadId)}`, { replace: true });
+      navigate(`/c/${encodeURIComponent(threadId)}`, { replace: true });
       return;
     }
     if (event.type === "message") {

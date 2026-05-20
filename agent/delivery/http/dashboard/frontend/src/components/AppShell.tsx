@@ -25,7 +25,6 @@ import { InlineRenameInput } from "@/components/InlineRenameInput";
 import { apiFetch, deleteJson, patchJson } from "@/lib/api";
 import {
   chatThreadHref,
-  historyThreadHref,
   threadApiPath,
 } from "@/lib/chatThreads";
 import { truncateText } from "@/lib/utils";
@@ -149,9 +148,24 @@ export function AppShell(props: {
     }
   };
 
+  const selectedChatThreadId = () => {
+    const match = location.pathname.match(/^\/c\/(.+)$/);
+    if (!match) {
+      return "";
+    }
+    try {
+      return decodeURIComponent(match[1]);
+    } catch {
+      return match[1];
+    }
+  };
+
   const isActive = (href: string) => {
     if (href === "/") {
       return location.pathname === "/";
+    }
+    if (href === "/chat") {
+      return location.pathname === "/chat";
     }
     return location.pathname.startsWith(href);
   };
@@ -246,19 +260,10 @@ export function AppShell(props: {
     }
   };
 
-  const selectedChatThreadId = () => (
-    location.pathname === "/chat"
-      ? new URLSearchParams(location.search).get("thread") || ""
-      : ""
-  );
   const isHistoryActive = () => (
-    location.pathname.startsWith("/history")
-    || (location.pathname === "/chat" && Boolean(selectedChatThreadId()))
+    location.pathname.startsWith("/history") || Boolean(selectedChatThreadId())
   );
-  const isThreadActive = (threadId: string) => (
-    selectedChatThreadId() === threadId
-    || location.pathname === historyThreadHref(threadId)
-  );
+  const isThreadActive = (threadId: string) => selectedChatThreadId() === threadId;
 
   const setHistoryPanelOpen = (next: boolean) => {
     setHistoryOpen(next);
@@ -442,6 +447,8 @@ export function AppShell(props: {
             {(item) => (
               <A
                 href={item.href}
+                activeClass=""
+                inactiveClass=""
                 class={`nav-link ${isActive(item.href) ? "active" : ""}`}
                 title={item.label}
               >
@@ -474,6 +481,8 @@ export function AppShell(props: {
               >
                 <A
                   href="/history"
+                  activeClass=""
+                  inactiveClass=""
                   class={`nav-history-link ${location.pathname === "/history" ? "active" : ""}`}
                   title="All history"
                 >
@@ -490,6 +499,8 @@ export function AppShell(props: {
                           fallback={
                             <A
                               href={chatThreadHref(thread.thread_id)}
+                              activeClass=""
+                              inactiveClass=""
                               class="nav-history-link"
                               title={`${thread.thread_id} - ${threadMeta(thread)}`}
                             >

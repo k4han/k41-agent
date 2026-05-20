@@ -353,7 +353,7 @@ export function TasksPage() {
                               <Show when={task.thread_id}>
                                 <A
                                   class="btn btn-sm"
-                                  href={`/chat?thread=${encodeURIComponent(task.thread_id)}`}
+                                  href={`/c/${encodeURIComponent(task.thread_id)}`}
                                 >
                                   <MessageSquare size={13} />
                                   {isActive ? "View Live" : "Open Chat"}

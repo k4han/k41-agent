@@ -234,6 +234,7 @@ a {
 }
 
 .nav-link {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 9px;
@@ -315,11 +316,16 @@ a {
 }
 
 .nav-history-link:hover,
-.nav-history-link.active,
-.nav-history-item:hover .nav-history-link,
-.nav-history-item.active .nav-history-link {
+.nav-history-item:hover .nav-history-link {
   background: var(--surface-2);
   color: var(--fg);
+}
+
+.nav-history-link.active,
+.nav-history-item.active .nav-history-link {
+  background: var(--surface-3);
+  color: var(--fg);
+  font-weight: 600;
 }
 
 .nav-history-item-wrapper {
@@ -477,10 +483,26 @@ a {
 
 
 
-.nav-link:hover,
-.nav-link.active {
+.nav-link:hover {
   background: var(--surface-2);
   color: var(--fg);
+}
+
+.nav-link.active {
+  background: var(--surface-3);
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.nav-link.active::before {
+  content: "";
+  position: absolute;
+  top: 7px;
+  bottom: 7px;
+  left: 0;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: var(--accent);
 }
 
 .nav-separator {

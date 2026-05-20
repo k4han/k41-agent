@@ -53,20 +53,7 @@ export function threadApiPath(threadId: string): string {
 }
 
 export function chatThreadHref(threadId: string): string {
-  const params = new URLSearchParams({ thread: threadId });
-  return `/chat?${params.toString()}`;
-}
-
-export function historyThreadHref(threadId: string): string {
-  return `/history/${encodeURIComponent(threadId)}`;
-}
-
-export function decodeThreadRouteParam(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
+  return `/c/${encodeURIComponent(threadId)}`;
 }
 
 export function toThreadTranscript(messages: ThreadMessage[]): ThreadTranscriptItem[] {

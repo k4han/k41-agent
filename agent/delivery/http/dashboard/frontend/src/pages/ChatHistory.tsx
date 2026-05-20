@@ -1,22 +1,20 @@
-import { A, useParams } from "@solidjs/router";
-import { ArrowLeft, MessageSquare, Pencil, RefreshCw, Trash2, User } from "lucide-solid";
-import { createEffect, createMemo, createSignal, For, onMount, Show } from "solid-js";
+import { A } from "@solidjs/router";
+import { MessageSquare, Pencil, RefreshCw, Trash2 } from "lucide-solid";
+import { createSignal, For, onMount, Show } from "solid-js";
 
 import { AppShell } from "@/components/AppShell";
 import { DeleteThreadDialog } from "@/components/DeleteThreadDialog";
 import { InlineRenameInput } from "@/components/InlineRenameInput";
 import { DataGate } from "@/components/State";
-import { TranscriptItemView } from "@/components/Transcript";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, patchJson } from "@/lib/api";
 import {
   chatThreadHref,
-  decodeThreadRouteParam,
   threadApiPath,
   toThreadTranscript,
 } from "@/lib/chatThreads";
 import { truncateText } from "@/lib/utils";
-import type { ThreadListPayload, ThreadMessagesPayload, ThreadSummary } from "@/lib/chatThreads";
+import type { ThreadListPayload, ThreadSummary } from "@/lib/chatThreads";
 
 export function ChatHistoryListPage() {
   const [data, setData] = createSignal<ThreadListPayload>();
@@ -221,151 +219,6 @@ export function ChatHistoryListPage() {
         onClose={cancelDelete}
         onConfirm={() => void confirmDeleteThread()}
       />
-    </AppShell>
-  );
-}
-
-export function ChatHistoryDetailPage() {
-  const params = useParams<{ threadId: string }>();
-  const [data, setData] = createSignal<ThreadMessagesPayload>();
-  const [error, setError] = createSignal("");
-  const [editingDetailTitle, setEditingDetailTitle] = createSignal<string | null>(null);
-  const transcriptItems = createMemo(() => toThreadTranscript(data()?.messages || []));
-  const currentThreadId = createMemo(() => decodeThreadRouteParam(params.threadId || ""));
-
-  const load = async (threadId = currentThreadId()) => {
-    if (!threadId) {
-      return;
-    }
-    setError("");
-    setData(undefined);
-    try {
-      setData(
-        await apiFetch<ThreadMessagesPayload>(
-          threadApiPath(threadId),
-        ),
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load thread");
-    }
-  };
-
-  const startCurrentThreadRename = () => {
-    const threadId = currentThreadId();
-    if (!threadId) {
-      return;
-    }
-    setEditingDetailTitle(data()?.title || threadId);
-  };
-
-  const cancelCurrentThreadRename = () => {
-    setEditingDetailTitle(null);
-  };
-
-  const finishCurrentThreadRename = async () => {
-    const threadId = currentThreadId();
-    const title = editingDetailTitle();
-    if (!threadId || title === null) {
-      return;
-    }
-
-    const trimmedTitle = title.trim();
-    if (!trimmedTitle) {
-      cancelCurrentThreadRename();
-      return;
-    }
-
-    if (trimmedTitle === (data()?.title || threadId).trim()) {
-      cancelCurrentThreadRename();
-      return;
-    }
-
-    try {
-      const updated = await patchJson<ThreadSummary>(
-        threadApiPath(threadId),
-        { title: trimmedTitle },
-      );
-      setData((current) => current ? { ...current, ...updated } : current);
-      cancelCurrentThreadRename();
-      window.dispatchEvent(new CustomEvent("kaka:threads-changed"));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Rename failed");
-    }
-  };
-
-  createEffect(() => {
-    void load(currentThreadId());
-  });
-
-  return (
-    <AppShell
-      title="Thread Detail"
-      subtitle={
-        editingDetailTitle() !== null
-          ? (
-            <InlineRenameInput
-              class="page-subtitle-input"
-              value={editingDetailTitle() || ""}
-              onInput={setEditingDetailTitle}
-              onBlur={() => void finishCurrentThreadRename()}
-              onCancel={cancelCurrentThreadRename}
-            />
-          )
-          : data()?.title || data()?.thread_id || "Loading..."
-      }
-      actions={
-        <div class="row-wrap">
-          <A href="/history" class="btn">
-            <ArrowLeft size={14} />
-            Back
-          </A>
-          <A href={chatThreadHref(currentThreadId())} class="btn btn-primary">
-            <MessageSquare size={14} />
-            Continue Chat
-          </A>
-          <button class="btn" type="button" onClick={startCurrentThreadRename}>
-            <Pencil size={14} />
-            Rename
-          </button>
-          <button class="btn" type="button" onClick={() => void load()}>
-            <RefreshCw size={14} />
-            Refresh
-          </button>
-        </div>
-      }
-    >
-      <DataGate data={data()} error={error()} onRetry={load}>
-        {(payload) => (
-          <div class="stack">
-            <div class="row-wrap">
-              <span class="badge">{payload.platform}</span>
-              <span class="badge">
-                <User size={11} />
-                {payload.user_id}
-              </span>
-              <Show when={payload.channel_id}>
-                <span class="badge">{payload.channel_id}</span>
-              </Show>
-              <span class="badge">{payload.messages.length} messages</span>
-            </div>
-
-            <div class="panel">
-              <div class="history-transcript">
-                <Show
-                  when={transcriptItems().length > 0}
-                  fallback={
-                    <div class="empty">No messages in this thread.</div>
-                  }
-                >
-                  <For each={transcriptItems()}>
-                    {(item) => <TranscriptItemView item={item} />}
-                  </For>
-                </Show>
-              </div>
-            </div>
-          </div>
-        )}
-      </DataGate>
     </AppShell>
   );
 }
