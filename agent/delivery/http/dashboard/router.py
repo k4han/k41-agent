@@ -452,6 +452,7 @@ def _workspace_http_error(exc: Exception) -> HTTPException:
 
 @router.get("/", include_in_schema=False)
 @router.get("/chat", include_in_schema=False)
+@router.get("/c/{thread_id:path}", include_in_schema=False)
 @router.get("/sessions", include_in_schema=False)
 @router.get("/tasks", include_in_schema=False)
 @router.get("/scheduler", include_in_schema=False)

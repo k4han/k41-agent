@@ -124,6 +124,12 @@ def test_dashboard_spa_route_serves_index() -> None:
     assert '<div id="root">' in response.text
     assert "/dashboard-assets/" in response.text
 
+    chat_response = client.get("/c/api_dashboard_123")
+
+    assert chat_response.status_code == 200
+    assert '<div id="root">' in chat_response.text
+    assert "/dashboard-assets/" in chat_response.text
+
 
 def test_dashboard_api_overview_returns_runtime_snapshot() -> None:
     channel_manager = ChannelManager()
