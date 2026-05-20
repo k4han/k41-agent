@@ -523,39 +523,39 @@ async def run_agent_stream(
             if not messages:
                 continue
 
-            last = messages[-1]
-            message_id = getattr(last, "id", None)
-            if message_id:
-                if message_id in seen_ids:
-                    continue
-                seen_ids.add(message_id)
+            for message in messages:
+                message_id = getattr(message, "id", None)
+                if message_id:
+                    if message_id in seen_ids:
+                        continue
+                    seen_ids.add(message_id)
 
-            if isinstance(last, AIMessage):
-                tool_calls = getattr(last, "tool_calls", None)
-                content = extract_final_text_content(getattr(last, "content", None))
-                if content:
-                    registry.update_step(session_id, SESSION_STEP_RESPONDING)
-                    yield {
-                        "type": "final",
-                        "content": content,
-                    }
-                if tool_calls:
-                    for tc in tool_calls:
-                        tool_name = tc.get("name") or "unknown"
-                        registry.add_tool_call(session_id, tool_name)
+                if isinstance(message, AIMessage):
+                    tool_calls = getattr(message, "tool_calls", None)
+                    content = extract_final_text_content(getattr(message, "content", None))
+                    if content:
+                        registry.update_step(session_id, SESSION_STEP_RESPONDING)
                         yield {
-                            "type": "tool_call",
-                            "id": tc.get("id"),
-                            "name": tool_name,
-                            "args": tc.get("args"),
+                            "type": "final",
+                            "content": content,
                         }
-            elif isinstance(last, ToolMessage):
-                yield {
-                    "type": "tool_result",
-                    "tool_call_id": getattr(last, "tool_call_id", None),
-                    "name": getattr(last, "name", None),
-                    "content": extract_final_text_content(getattr(last, "content", None)),
-                }
+                    if tool_calls:
+                        for tc in tool_calls:
+                            tool_name = tc.get("name") or "unknown"
+                            registry.add_tool_call(session_id, tool_name)
+                            yield {
+                                "type": "tool_call",
+                                "id": tc.get("id"),
+                                "name": tool_name,
+                                "args": tc.get("args"),
+                            }
+                elif isinstance(message, ToolMessage):
+                    yield {
+                        "type": "tool_result",
+                        "tool_call_id": getattr(message, "tool_call_id", None),
+                        "name": getattr(message, "name", None),
+                        "content": extract_final_text_content(getattr(message, "content", None)),
+                    }
 
 async def run_agent_full(
     user_input: str,

@@ -23,6 +23,8 @@ def run_bash(
             cwd=safe_working_dir,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=30,
         )
         output = result.stdout or ""
