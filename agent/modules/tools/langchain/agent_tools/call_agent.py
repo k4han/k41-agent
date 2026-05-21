@@ -10,6 +10,7 @@ from langchain_core.tools import InjectedToolArg, tool
 from langgraph.prebuilt import ToolRuntime
 
 from agent.modules.tools.runtime.context import get_context_value
+from agent.modules.workspaces import normalize_workspace_ref
 from agent.shared.infrastructure.parsing import extract_final_text_content
 
 logger = logging.getLogger(__name__)
@@ -51,10 +52,11 @@ async def call_agent(
     )
 
     caller_agent_name = get_context_value(runtime.context, "agent_name", "default")
-    inherited_working_dir = get_context_value(
-        runtime.context,
-        "working_dir",
-        DEFAULT_WORKING_DIR,
+    inherited_workspace = get_context_value(runtime.context, "workspace", None)
+    inherited_working_dir = get_context_value(runtime.context, "working_dir", None)
+    workspace = normalize_workspace_ref(
+        inherited_workspace if inherited_workspace is not None else inherited_working_dir,
+        default_locator=DEFAULT_WORKING_DIR,
     )
     inherited_provider = get_context_value(runtime.context, "provider", None)
     inherited_model = get_context_value(runtime.context, "model", None)
@@ -74,7 +76,7 @@ async def call_agent(
         return f"[error] graph type '{target_config.graph_type}' not registered."
 
     context = make_run_context(
-        working_dir=inherited_working_dir,
+        workspace=workspace,
         max_context_tokens=target_config.max_context_tokens,
         agent_name=sub_agent,
         allowed_tool_names=target_config.tools if target_config.tools else None,

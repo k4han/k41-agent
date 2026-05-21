@@ -91,6 +91,15 @@ def _run_git(repo: Path, *args: str) -> None:
     assert result.returncode == 0, result.stderr or result.stdout
 
 
+def _workspace_payload(path: str | Path) -> dict:
+    return {
+        "backend": "local",
+        "locator": str(path),
+        "label": str(path),
+        "metadata": {},
+    }
+
+
 def test_services_endpoint_returns_runtime_service_snapshot() -> None:
     channel_manager = ChannelManager()
     channel_manager.register("telegram", idle_runner)
@@ -150,7 +159,7 @@ def test_dashboard_workspace_default_returns_absolute_path() -> None:
     response = client.get("/dashboard-api/workspace/default")
 
     assert response.status_code == 200
-    assert Path(response.json()["working_dir"]).is_absolute()
+    assert Path(response.json()["workspace"]["locator"]).is_absolute()
 
 
 def test_dashboard_workspace_resolve_accepts_existing_local_path(tmp_path: Path) -> None:
@@ -158,14 +167,19 @@ def test_dashboard_workspace_resolve_accepts_existing_local_path(tmp_path: Path)
 
     response = client.post(
         "/dashboard-api/workspace/resolve",
-        json={"kind": "local", "working_dir": str(tmp_path)},
+        json={"kind": "local", "workspace": _workspace_payload(tmp_path)},
     )
 
     assert response.status_code == 200
     assert response.json() == {
         "kind": "local",
         "label": str(tmp_path.resolve()),
-        "working_dir": str(tmp_path.resolve()),
+        "workspace": {
+            "backend": "local",
+            "locator": str(tmp_path.resolve()),
+            "label": str(tmp_path.resolve()),
+            "metadata": {},
+        },
     }
 
 
@@ -174,7 +188,7 @@ def test_dashboard_workspace_resolve_rejects_missing_local_path(tmp_path: Path) 
 
     response = client.post(
         "/dashboard-api/workspace/resolve",
-        json={"kind": "local", "working_dir": str(tmp_path / "missing")},
+        json={"kind": "local", "workspace": _workspace_payload(tmp_path / "missing")},
     )
 
     assert response.status_code == 404
@@ -224,7 +238,7 @@ def test_dashboard_workspace_resolve_uses_github_service(
             return {
                 "kind": "github",
                 "label": "owner/repo",
-                "working_dir": str(tmp_path),
+                "workspace": _workspace_payload(tmp_path),
             }
 
     monkeypatch.setattr(
@@ -240,7 +254,7 @@ def test_dashboard_workspace_resolve_uses_github_service(
     )
 
     assert response.status_code == 200
-    assert response.json()["working_dir"] == str(tmp_path)
+    assert response.json()["workspace"]["locator"] == str(tmp_path)
 
 
 @pytest.mark.asyncio
@@ -307,7 +321,7 @@ def test_dashboard_workspace_tree_ignores_noisy_directories(tmp_path: Path) -> N
     client = _create_dashboard_client(ChannelManager())
     response = client.get(
         "/dashboard-api/workspace/tree",
-        params={"working_dir": str(tmp_path)},
+        params={"backend": "local", "locator": str(tmp_path)},
     )
 
     assert response.status_code == 200
@@ -320,7 +334,7 @@ def test_dashboard_workspace_tree_blocks_directory_escape(tmp_path: Path) -> Non
 
     response = client.get(
         "/dashboard-api/workspace/tree",
-        params={"working_dir": str(tmp_path), "path": ".."},
+        params={"backend": "local", "locator": str(tmp_path), "path": ".."},
     )
 
     assert response.status_code == 400
@@ -336,11 +350,11 @@ def test_dashboard_workspace_file_reads_text_and_blocks_directory_escape(
 
     response = client.get(
         "/dashboard-api/workspace/file",
-        params={"working_dir": str(tmp_path), "path": "src/app.py"},
+        params={"backend": "local", "locator": str(tmp_path), "path": "src/app.py"},
     )
     escape_response = client.get(
         "/dashboard-api/workspace/file",
-        params={"working_dir": str(tmp_path), "path": "../outside.py"},
+        params={"backend": "local", "locator": str(tmp_path), "path": "../outside.py"},
     )
 
     assert response.status_code == 200
@@ -370,7 +384,7 @@ def test_dashboard_workspace_changes_and_diff_for_git_repo(tmp_path: Path) -> No
     client = _create_dashboard_client(ChannelManager())
     response = client.get(
         "/dashboard-api/workspace/changes",
-        params={"working_dir": str(repo)},
+        params={"backend": "local", "locator": str(repo)},
     )
 
     assert response.status_code == 200
@@ -394,7 +408,7 @@ def test_dashboard_workspace_changes_and_diff_for_git_repo(tmp_path: Path) -> No
 
     diff_response = client.get(
         "/dashboard-api/workspace/diff",
-        params={"working_dir": str(repo), "path": "tracked.txt"},
+        params={"backend": "local", "locator": str(repo), "path": "tracked.txt"},
     )
     assert diff_response.status_code == 200
     diff = diff_response.json()["diff"]
@@ -403,7 +417,7 @@ def test_dashboard_workspace_changes_and_diff_for_git_repo(tmp_path: Path) -> No
 
     untracked_response = client.get(
         "/dashboard-api/workspace/diff",
-        params={"working_dir": str(repo), "path": "new.txt"},
+        params={"backend": "local", "locator": str(repo), "path": "new.txt"},
     )
     assert untracked_response.status_code == 200
     assert "+++ b/new.txt" in untracked_response.json()["diff"]
@@ -417,11 +431,11 @@ def test_dashboard_workspace_changes_for_non_git_workspace() -> None:
 
         changes_response = client.get(
             "/dashboard-api/workspace/changes",
-            params={"working_dir": str(workspace)},
+            params={"backend": "local", "locator": str(workspace)},
         )
         diff_response = client.get(
             "/dashboard-api/workspace/diff",
-            params={"working_dir": str(workspace), "path": "file.txt"},
+            params={"backend": "local", "locator": str(workspace), "path": "file.txt"},
         )
 
     assert changes_response.status_code == 200
@@ -480,7 +494,7 @@ def test_dashboard_background_task_events_streams_snapshot_and_done(
         "thread_id": thread_id,
         "request": "do work",
         "agent_name": "default",
-        "working_dir": None,
+        "workspace": None,
         "status": "completed",
         "result": "done",
         "error": "",

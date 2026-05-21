@@ -63,14 +63,18 @@ def build_llm_system_prompt(
     *,
     system_prompt_template: str,
     working_dir: str,
+    workspace: str = "",
     agent_name: str,
     tools: Sequence[object] | None,
     catalog: Any,
 ) -> str:
     """Build the final system prompt for llm_node from runtime state."""
     system_prompt = system_prompt_template
-    if working_dir and "{working_dir}" in system_prompt:
-        system_prompt = system_prompt.format(working_dir=working_dir)
+    if "{working_dir}" in system_prompt or "{workspace}" in system_prompt:
+        system_prompt = system_prompt.format(
+            working_dir=working_dir,
+            workspace=workspace or working_dir,
+        )
 
     if _has_tool(tools, "call_agent"):
         system_prompt = (

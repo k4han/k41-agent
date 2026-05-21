@@ -6,7 +6,7 @@ from langgraph.prebuilt import ToolRuntime
 
 from agent.modules.tools.langchain.file_tools.list_files import list_files
 from agent.modules.tools.langchain.registry import get_all_langchain_tools
-from agent.modules.workflows.run_config import WorkflowContext
+from agent.modules.workflows.run_config import make_context
 
 
 def _contains_unparameterized_tool_runtime(annotation: object) -> bool:
@@ -41,7 +41,7 @@ def test_tool_runtime_annotations_are_parameterized() -> None:
 def test_runtime_injected_tool_validation_does_not_warn(tmp_path) -> None:
     runtime = ToolRuntime[Any, Any](
         state={},
-        context=WorkflowContext(
+        context=make_context(
             working_dir=str(tmp_path),
             max_context_tokens=100,
             agent_name="default",

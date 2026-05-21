@@ -8,8 +8,12 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from agent.modules.workflows import DEFAULT_WORKING_DIR
 from agent.modules.workspaces.repository import get_thread_workspace_repository
+from agent.modules.workspaces.refs import (
+    DEFAULT_LOCAL_WORKSPACE,
+    WorkspaceRef,
+    normalize_workspace_ref,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +38,33 @@ IGNORED_DIR_NAMES = {
 }
 
 
+def resolve_workspace_ref(workspace: WorkspaceRef | dict[str, Any] | str | None = None) -> WorkspaceRef:
+    return normalize_workspace_ref(workspace, default_locator=DEFAULT_LOCAL_WORKSPACE)
+
+
+def workspace_ref_from_local_path(
+    working_dir: str | None = None,
+    *,
+    label: str | None = None,
+) -> WorkspaceRef:
+    return normalize_workspace_ref(
+        working_dir,
+        default_locator=DEFAULT_LOCAL_WORKSPACE,
+        label=label,
+    )
+
+
+def get_workspace_backend(workspace: WorkspaceRef | dict[str, Any] | str | None = None):
+    ref = resolve_workspace_ref(workspace)
+    if ref.backend == "local":
+        from agent.modules.workspaces.local_backend import LocalWorkspaceBackend
+
+        return LocalWorkspaceBackend(ref)
+    raise ValueError(f"Unsupported workspace backend: {ref.backend}")
+
+
 def resolve_workspace_root(working_dir: str | None = None) -> Path:
-    source = str(working_dir or "").strip() or DEFAULT_WORKING_DIR
+    source = str(working_dir or "").strip() or DEFAULT_LOCAL_WORKSPACE
     return Path(source).expanduser().resolve()
 
 
@@ -115,19 +144,39 @@ def workspace_relative_path(root: Path, target: Path) -> str:
 
 
 async def remember_thread_workspace(thread_id: str, working_dir: str | None) -> str:
-    root = resolve_workspace_root(working_dir)
+    workspace = resolve_workspace_ref(working_dir)
     await get_thread_workspace_repository().upsert(
         thread_id=thread_id,
-        working_dir=str(root),
+        workspace=workspace,
     )
-    return str(root)
+    return workspace.locator
 
 
-async def get_thread_workspace_dir(thread_id: str) -> str | None:
+async def remember_thread_workspace_ref(
+    thread_id: str,
+    workspace: WorkspaceRef | dict[str, Any] | str | None,
+) -> WorkspaceRef:
+    ref = resolve_workspace_ref(workspace)
+    await get_thread_workspace_repository().upsert(
+        thread_id=thread_id,
+        workspace=ref,
+    )
+    return ref
+
+
+async def get_thread_workspace_ref(thread_id: str) -> WorkspaceRef | None:
     record = await get_thread_workspace_repository().get(thread_id)
     if not record:
         return None
-    return str(record.get("working_dir") or "") or None
+    workspace = record.get("workspace")
+    if not workspace:
+        return None
+    return resolve_workspace_ref(workspace)
+
+
+async def get_thread_workspace_dir(thread_id: str) -> str | None:
+    workspace = await get_thread_workspace_ref(thread_id)
+    return workspace.locator if workspace else None
 
 
 def list_workspace_tree(

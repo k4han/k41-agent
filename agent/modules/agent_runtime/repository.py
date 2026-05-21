@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
 
 from agent.modules.agent_runtime.models import BackgroundTaskRecord
+from agent.modules.workspaces import (
+    DEFAULT_LOCAL_WORKSPACE,
+    WorkspaceRef,
+    normalize_workspace_ref,
+    workspace_ref_from_columns,
+)
 from agent.shared.infrastructure.db.base import utcnow
 from agent.shared.infrastructure.db.session import get_async_session
 
@@ -29,12 +36,13 @@ def _trim(value: str | None, max_length: int) -> str:
 
 
 def serialize_background_task(record: BackgroundTaskRecord) -> dict[str, Any]:
+    workspace = _workspace_from_record(record)
     return {
         "task_id": record.task_id,
         "thread_id": record.thread_id,
         "request": record.request,
         "agent_name": record.agent_name,
-        "working_dir": record.working_dir,
+        "workspace": workspace.model_dump() if workspace else None,
         "notify_platform": record.notify_platform,
         "notify_external_id": record.notify_external_id,
         "notify_channel_id": record.notify_channel_id,
@@ -46,6 +54,18 @@ def serialize_background_task(record: BackgroundTaskRecord) -> dict[str, Any]:
         "completed_at": _timestamp_from_datetime(record.completed_at),
         "updated_at": record.updated_at.isoformat() if record.updated_at else None,
     }
+
+
+def _workspace_from_record(record: BackgroundTaskRecord) -> WorkspaceRef | None:
+    locator = record.workspace_locator or record.working_dir
+    if not locator:
+        return None
+    return workspace_ref_from_columns(
+        backend=record.workspace_backend,
+        locator=locator,
+        label=record.workspace_label,
+        metadata_json=record.workspace_metadata_json,
+    )
 
 
 class BackgroundTaskRepository:
@@ -66,9 +86,18 @@ class BackgroundTaskRepository:
         created_at: float,
         started_at: float | None,
         completed_at: float | None,
+        workspace: WorkspaceRef | dict[str, Any] | str | None = None,
     ) -> dict[str, Any]:
         now = utcnow()
         normalized_task_id = _trim(task_id, 64)
+        workspace_ref = (
+            normalize_workspace_ref(
+                workspace if workspace is not None else working_dir,
+                default_locator=DEFAULT_LOCAL_WORKSPACE,
+            )
+            if workspace is not None or working_dir
+            else None
+        )
         session = await get_async_session()
         async with session:
             stmt = select(BackgroundTaskRecord).where(
@@ -83,7 +112,15 @@ class BackgroundTaskRepository:
             record.thread_id = _trim(thread_id, 512)
             record.request = str(request or "")
             record.agent_name = _trim(agent_name or "default", 255) or "default"
-            record.working_dir = str(working_dir) if working_dir else None
+            record.working_dir = workspace_ref.locator if workspace_ref else None
+            record.workspace_backend = workspace_ref.backend if workspace_ref else None
+            record.workspace_locator = workspace_ref.locator if workspace_ref else None
+            record.workspace_label = workspace_ref.label if workspace_ref else None
+            record.workspace_metadata_json = (
+                json.dumps(workspace_ref.metadata, ensure_ascii=False, sort_keys=True)
+                if workspace_ref
+                else None
+            )
             record.notify_platform = _trim(notify_platform, 50)
             record.notify_external_id = _trim(notify_external_id, 255)
             record.notify_channel_id = _trim(notify_channel_id, 255)

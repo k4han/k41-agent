@@ -16,6 +16,7 @@ from agent.modules.github.config import (
 )
 from agent.modules.github.repository import get_github_repository_store, load_mention_triggers
 from agent.modules.github.workspace import GitHubWorkspaceManager
+from agent.modules.workspaces import workspace_ref_from_local_path
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +94,7 @@ class GitHubAutomationService:
     async def list_repository_bindings(self) -> list[dict[str, Any]]:
         return await self.store.list_bindings()
 
-    async def resolve_repository_workspace(self, repository_id: int) -> dict[str, str]:
+    async def resolve_repository_workspace(self, repository_id: int) -> dict[str, Any]:
         binding = await self.store.get_binding_by_repository_id(repository_id)
         if binding is None:
             raise KeyError(f"GitHub repository '{repository_id}' is not synced.")
@@ -103,10 +104,14 @@ class GitHubAutomationService:
             full_name=binding.full_name,
             token=token,
         )
+        workspace = workspace_ref_from_local_path(
+            str(path.resolve()),
+            label=binding.full_name,
+        )
         return {
             "kind": "github",
             "label": binding.full_name,
-            "working_dir": str(path.resolve()),
+            "workspace": workspace.model_dump(),
         }
 
     async def update_repository_binding(
@@ -303,7 +308,10 @@ class GitHubAutomationService:
         return await manager.submit(
             request=prompt,
             agent_name=agent_name,
-            working_dir=str(prepared.path),
+            workspace=workspace_ref_from_local_path(
+                str(prepared.path),
+                label=binding.full_name,
+            ),
             notify_channel=self._notify_channel_for_binding(binding),
             completion_hook=lambda task: self.publish_task_result(task, context),
         )
@@ -367,7 +375,10 @@ class GitHubAutomationService:
         return await manager.submit(
             request=prompt,
             agent_name=agent_name,
-            working_dir=str(prepared.path),
+            workspace=workspace_ref_from_local_path(
+                str(prepared.path),
+                label=binding.full_name,
+            ),
             notify_channel=self._notify_channel_for_binding(binding),
             completion_hook=lambda task: self.publish_task_result(task, context),
         )

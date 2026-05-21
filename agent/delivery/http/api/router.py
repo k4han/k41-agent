@@ -24,9 +24,9 @@ from agent.modules.providers import (
 )
 from agent.modules.users import Platform, get_pairing_service
 from agent.modules.workspaces import (
-    get_thread_workspace_dir,
-    remember_thread_workspace,
-    resolve_workspace_root,
+    get_thread_workspace_ref,
+    remember_thread_workspace_ref,
+    resolve_workspace_ref,
 )
 from agent.modules.workflows import list_registered_workflows
 
@@ -45,11 +45,11 @@ def _request_to_run_params(request: ChatRequest) -> dict[str, object]:
         request.new_thread
         and not thread_id
         and request.user_id == "dashboard"
-        and not (request.working_dir or "").strip()
+        and request.workspace is None
     ):
         raise HTTPException(
             status_code=400,
-            detail="Dashboard chats require a resolved working directory.",
+            detail="Dashboard chats require a resolved workspace.",
         )
     if request.new_thread and not thread_id:
         thread_id = create_thread_id(
@@ -62,7 +62,7 @@ def _request_to_run_params(request: ChatRequest) -> dict[str, object]:
         "user_id": request.user_id,
         "user_input": request.message,
         "workflow": request.workflow,
-        "working_dir": request.working_dir,
+        "workspace": request.workspace,
         "agent_name": request.agent_name or "default",
         "provider": request.provider,
         "model": request.model,
@@ -87,11 +87,11 @@ async def _apply_workspace_to_run_params(
     if not thread_id:
         return
 
-    requested_working_dir = request.working_dir.strip() if request.working_dir else ""
-    stored_working_dir = ""
-    if not requested_working_dir and request.thread_id:
+    requested_workspace = request.workspace
+    stored_workspace = None
+    if requested_workspace is None and request.thread_id:
         try:
-            stored_working_dir = await get_thread_workspace_dir(request.thread_id) or ""
+            stored_workspace = await get_thread_workspace_ref(request.thread_id)
         except Exception as exc:
             logger.debug(
                 "Failed to load workspace for thread %s: %s",
@@ -99,15 +99,15 @@ async def _apply_workspace_to_run_params(
                 exc,
             )
 
-    effective_working_dir = requested_working_dir or stored_working_dir
-    if effective_working_dir:
-        resolved = str(resolve_workspace_root(effective_working_dir))
-        params["working_dir"] = resolved
+    effective_workspace = requested_workspace or stored_workspace
+    if effective_workspace is not None:
+        resolved = resolve_workspace_ref(effective_workspace)
+        params["workspace"] = resolved
     else:
-        resolved = str(resolve_workspace_root(None))
+        resolved = resolve_workspace_ref(None)
 
     try:
-        await remember_thread_workspace(thread_id, resolved)
+        await remember_thread_workspace_ref(thread_id, resolved)
     except Exception as exc:
         logger.debug(
             "Failed to remember workspace for thread %s: %s",

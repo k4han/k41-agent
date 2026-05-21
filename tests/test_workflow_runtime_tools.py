@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -77,7 +78,7 @@ async def test_call_agent_inherits_parent_runtime_context(monkeypatch):
     assert result == "child complete"
     assert captured["validate_call"] == ("parent-agent", "child-agent")
     assert captured["payload"]["messages"][0].content == "delegate this"
-    assert captured["context"]["working_dir"] == "D:/repo"
+    assert captured["context"]["workspace"].locator == str(Path("D:/repo").resolve())
     assert captured["context"]["agent_name"] == "child-agent"
     assert captured["context"]["allowed_tool_names"] == ["echo"]
     assert captured["context"]["provider"] == "openai-main"
@@ -145,7 +146,7 @@ async def test_call_agent_uses_canonical_default_working_dir(monkeypatch):
     )
 
     assert result == "ok"
-    assert captured["context"]["working_dir"] == DEFAULT_WORKING_DIR
+    assert captured["context"]["workspace"].locator == str(Path(DEFAULT_WORKING_DIR).resolve())
 
 
 @pytest.mark.asyncio

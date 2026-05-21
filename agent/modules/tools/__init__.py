@@ -12,6 +12,7 @@ from langchain_core.tools import BaseTool
 
 from agent.modules.tools.registry_service import get_registry_service
 from agent.modules.tools.runtime.context import get_context_value
+from agent.modules.tools.runtime.path_guard import resolve_safe_path
 
 T = TypeVar("T")
 
@@ -51,4 +52,5 @@ __all__ = [
     "resolve_tools",
     "get_default_tool_names",
     "get_runtime_context_value",
+    "resolve_safe_path",
 ]

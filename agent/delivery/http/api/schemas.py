@@ -2,6 +2,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from agent.modules.workspaces import WorkspaceRef
+
 
 class ChatAttachment(BaseModel):
     name: str
@@ -18,7 +20,7 @@ class ChatRequest(BaseModel):
     thread_id: Optional[str] = None
     new_thread: bool = False
     workflow: Optional[str] = None
-    working_dir: Optional[str] = None
+    workspace: Optional[WorkspaceRef] = None
     agent_name: Optional[str] = None
     provider: Optional[str] = None
     model: Optional[str] = None

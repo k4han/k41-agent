@@ -38,6 +38,7 @@ import {
   toThreadTranscript,
 } from "@/lib/chatThreads";
 import type { TranscriptAttachment, TranscriptItem } from "@/components/Transcript";
+import { localWorkspaceRef } from "@/lib/workspace";
 import type { ThreadMessagesPayload } from "@/lib/chatThreads";
 import type {
   ActiveSession,
@@ -46,6 +47,7 @@ import type {
   BackgroundTask,
   GitHubPayload,
   GitHubRepositoryBinding,
+  WorkspaceRef,
 } from "@/types";
 
 type ChatTranscriptItem = TranscriptItem & { id: number; key?: string };
@@ -66,7 +68,7 @@ type ChatPayload = {
   message: string;
   user_id: string;
   agent_name: string;
-  working_dir?: string;
+  workspace?: WorkspaceRef;
   provider?: string;
   model?: string;
   thread_id?: string;
@@ -78,12 +80,12 @@ type BackgroundTaskSnapshot = ThreadMessagesPayload & {
   active_session?: ActiveSession | null;
 };
 type DefaultWorkspacePayload = {
-  working_dir: string;
+  workspace: WorkspaceRef;
 };
 type WorkspaceResolvePayload = {
   kind: string;
   label: string;
-  working_dir: string;
+  workspace: WorkspaceRef;
 };
 type WorkspaceBrowseEntry = {
   name: string;
@@ -263,7 +265,7 @@ function WorkspaceSelector(props: {
   defaultWorkingDir: string;
   locked: boolean;
   disabled?: boolean;
-  onResolved: (workingDir: string) => void;
+  onResolved: (workspace: WorkspaceRef) => void;
 }) {
   const { showToast } = useToast();
   const [kind, setKind] = createSignal<"local" | "github">("local");
@@ -360,12 +362,12 @@ function WorkspaceSelector(props: {
       const payload = await postJson<WorkspaceResolvePayload>(
         "/dashboard-api/workspace/resolve",
         kind() === "local"
-          ? { kind: "local", working_dir: localDraft().trim() }
+          ? { kind: "local", workspace: localWorkspaceRef(localDraft()) }
           : { kind: "github", repository_id: Number(repositoryId()) },
       );
-      setLocalDraft(payload.working_dir);
-      setResolvedLabel(payload.label || payload.working_dir);
-      props.onResolved(payload.working_dir);
+      setLocalDraft(payload.workspace.locator);
+      setResolvedLabel(payload.label || payload.workspace.label || payload.workspace.locator);
+      props.onResolved(payload.workspace);
       showToast("Workspace selected.", "success");
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Workspace selection failed", "error");
@@ -604,6 +606,7 @@ export function ChatPage() {
   const [provider, setProvider] = createSignal("default");
   const [model, setModel] = createSignal("");
   const [workingDir, setWorkingDir] = createSignal("");
+  const [workspaceRef, setWorkspaceRef] = createSignal<WorkspaceRef | null>(null);
   const [defaultWorkingDir, setDefaultWorkingDir] = createSignal("");
   const [workspaceExplorerOpen, setWorkspaceExplorerOpen] = createSignal(true);
   const [workspaceExplorerWidth, setWorkspaceExplorerWidth] = createSignal(
@@ -639,9 +642,22 @@ export function ChatPage() {
     }
   };
 
-  const setWorkspace = (value: string) => {
-    const nextValue = value.trim();
-    setWorkingDir(nextValue);
+  const setWorkspace = (value: WorkspaceRef | string | null) => {
+    if (!value) {
+      setWorkingDir("");
+      setWorkspaceRef(null);
+      return;
+    }
+
+    if (typeof value === "string") {
+      const nextValue = value.trim();
+      setWorkingDir(nextValue);
+      setWorkspaceRef(localWorkspaceRef(nextValue));
+      return;
+    }
+
+    setWorkingDir(value.locator.trim());
+    setWorkspaceRef(value);
   };
 
   const clampWorkspaceExplorerWidth = (
@@ -714,7 +730,7 @@ export function ChatPage() {
   const loadDefaultWorkspace = async () => {
     try {
       const payload = await apiFetch<DefaultWorkspacePayload>("/dashboard-api/workspace/default");
-      const fallback = payload.working_dir || "";
+      const fallback = payload.workspace?.locator || "";
       setDefaultWorkingDir(fallback);
     } catch {
       setDefaultWorkingDir("");
@@ -844,7 +860,7 @@ export function ChatPage() {
   const applyThreadPayload = (payload: ThreadMessagesPayload) => {
     setThreadData(payload);
     setCurrentThreadId(payload.thread_id);
-    setWorkspace(payload.working_dir || "");
+    setWorkspace(payload.workspace || null);
     setItems(
       toThreadTranscript(payload.messages).map((item) => ({
         ...item,
@@ -875,7 +891,7 @@ export function ChatPage() {
       agent_name: snapshot.agent_name,
       title: snapshot.title,
       kind: snapshot.kind,
-      working_dir: snapshot.working_dir,
+      workspace: snapshot.workspace,
     });
     setBackgroundTask(snapshot.task || null);
     setBackgroundSession(snapshot.active_session || null);
@@ -1000,7 +1016,7 @@ export function ChatPage() {
       setThreadError("");
       setThreadLoading(false);
       setItems([]);
-      setWorkspace("");
+      setWorkspace(null);
       closeBackgroundStream();
       setBackgroundTask(null);
       return;
@@ -1122,8 +1138,9 @@ export function ChatPage() {
     if (model()) {
       payload.model = model();
     }
-    if (workingDir().trim()) {
-      payload.working_dir = workingDir().trim();
+    const workspace = workspaceRef() || localWorkspaceRef(workingDir());
+    if (workspace) {
+      payload.workspace = workspace;
     }
     if (currentThreadId()) {
       payload.thread_id = currentThreadId();

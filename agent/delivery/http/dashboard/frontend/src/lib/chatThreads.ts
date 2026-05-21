@@ -3,6 +3,7 @@ import {
   findTranscriptToolTarget,
 } from "@/components/Transcript";
 import type { TranscriptAttachment, TranscriptItem } from "@/components/Transcript";
+import type { WorkspaceRef } from "@/types";
 
 export type ThreadSummary = {
   thread_id: string;
@@ -43,7 +44,7 @@ export type ThreadMessagesPayload = {
   agent_name?: string;
   title?: string;
   kind?: string;
-  working_dir?: string;
+  workspace?: WorkspaceRef | null;
 };
 
 export type ThreadTranscriptItem = TranscriptItem & { key: string };

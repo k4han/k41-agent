@@ -83,28 +83,16 @@ def test_list_files_blocks_parent_traversal(tmp_path):
 def test_run_bash_uses_safe_resolved_working_dir(monkeypatch, tmp_path):
     sandbox = tmp_path / "sandbox"
     sandbox.mkdir()
-    resolved_dir = str((sandbox / "resolved").resolve())
-    captured: dict[str, str] = {}
+    captured: dict[str, object] = {}
 
-    def _fake_resolve_safe_path(working_dir: str, file_path: str) -> str:
-        captured["resolve_input"] = f"{working_dir}|{file_path}"
-        return resolved_dir
+    class FakeBackend:
+        def execute(self, command: str, *, timeout: int = 30, max_output_chars=None):
+            captured["command"] = command
+            captured["timeout"] = timeout
+            captured["max_output_chars"] = max_output_chars
+            return SimpleNamespace(output="ok")
 
-    def _fake_subprocess_run(
-        command,
-        shell,
-        cwd,
-        capture_output,
-        text,
-        encoding,
-        errors,
-        timeout,
-    ):
-        captured["cwd"] = cwd
-        return SimpleNamespace(stdout="ok", stderr="")
-
-    monkeypatch.setattr(run_bash_module, "resolve_safe_path", _fake_resolve_safe_path)
-    monkeypatch.setattr(run_bash_module.subprocess, "run", _fake_subprocess_run)
+    monkeypatch.setattr(run_bash_module, "get_backend", lambda runtime: FakeBackend())
 
     result = run_bash_module.run_bash.func(
         command="echo ok",
@@ -112,5 +100,6 @@ def test_run_bash_uses_safe_resolved_working_dir(monkeypatch, tmp_path):
     )
 
     assert result == "ok"
-    assert captured["resolve_input"] == f"{sandbox}|."
-    assert captured["cwd"] == resolved_dir
+    assert captured["command"] == "echo ok"
+    assert captured["timeout"] == 30
+    assert captured["max_output_chars"] is None

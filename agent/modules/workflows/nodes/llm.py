@@ -38,6 +38,7 @@ def llm_node(state, runtime: Runtime[WorkflowContext]):
     ctx = runtime.context
     agent_name = ctx.get_agent_name()
     working_dir = ctx.get_working_dir()
+    workspace = ctx.get_workspace()
 
     # Load agent config from catalog
     catalog = get_catalog_service()
@@ -68,6 +69,7 @@ def llm_node(state, runtime: Runtime[WorkflowContext]):
     system_prompt = build_llm_system_prompt(
         system_prompt_template=system_prompt_template,
         working_dir=working_dir,
+        workspace=workspace.display_label(),
         agent_name=agent_name,
         tools=tools,
         catalog=catalog,

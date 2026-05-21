@@ -234,7 +234,8 @@ async def test_issue_label_trigger_submits_agent_task(
     assert result == {"status": "submitted", "task_id": "task-1"}
     submission = task_manager.submissions[0]
     assert submission["agent_name"] == "default"
-    assert submission["working_dir"] == str(tmp_path)
+    assert submission["workspace"].locator == str(tmp_path)
+    assert submission["workspace"].label == "octo/example"
     assert "Fix failing test" in submission["request"]
 
 
@@ -285,7 +286,8 @@ async def test_review_comment_submits_agent_task_on_pr_branch(
     assert workspace.prepared[0]["branch"] == "kaka/default/issue-7-delivery"
     assert workspace.prepared[0]["base_branch"] == "main"
     submission = task_manager.submissions[0]
-    assert submission["working_dir"] == str(tmp_path)
+    assert submission["workspace"].locator == str(tmp_path)
+    assert submission["workspace"].label == "octo/example"
     assert "Review comment:" in submission["request"]
     assert "Please handle the None case here." in submission["request"]
     assert "agent/example.py" in submission["request"]

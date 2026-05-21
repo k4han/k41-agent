@@ -186,10 +186,10 @@ def _build_target_context(runtime_context: WorkflowContext, target_agent: AgentC
     if target_agent is None:
         return runtime_context
 
-    working_dir = runtime_context.get_working_dir()
+    workspace = runtime_context.get_workspace()
     allowed_tool_names = target_agent.tools if target_agent.tools else None
     return make_context(
-        working_dir=working_dir,
+        workspace=workspace,
         max_context_tokens=target_agent.max_context_tokens,
         agent_name=target_agent.name,
         allowed_tool_names=allowed_tool_names,

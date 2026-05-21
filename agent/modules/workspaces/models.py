@@ -7,7 +7,11 @@ class ThreadWorkspace(BaseModel):
     __tablename__ = "thread_workspaces"
 
     thread_id = Column(String(512), nullable=False, index=True)
-    working_dir = Column(Text, nullable=False)
+    working_dir = Column(Text, nullable=True)
+    workspace_backend = Column(String(50), nullable=True)
+    workspace_locator = Column(Text, nullable=True)
+    workspace_label = Column(Text, nullable=True)
+    workspace_metadata_json = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at = Column(
         DateTime(timezone=True),

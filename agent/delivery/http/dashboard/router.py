@@ -42,16 +42,12 @@ from agent.modules.scheduler import (
 from agent.modules.tools import get_default_tool_names
 from agent.modules.users import get_pairing_service
 from agent.modules.workspaces import (
-    delete_workspace_entry,
     ensure_workspace_directory,
-    get_thread_workspace_dir,
-    get_workspace_changes,
-    get_workspace_diff,
-    get_workspace_file,
+    get_thread_workspace_ref,
+    get_workspace_backend,
     list_workspace_directories,
-    list_workspace_tree,
-    rename_workspace_entry,
-    resolve_workspace_root,
+    resolve_workspace_ref,
+    WorkspaceRef,
 )
 from agent.modules.workflows import (
     REACT_AGENT_GRAPH_TYPE,
@@ -402,42 +398,53 @@ def _is_active_background_task(task: dict[str, Any] | None) -> bool:
     return bool(task and task.get("status") in BACKGROUND_TASK_ACTIVE_STATUSES)
 
 
-async def _workspace_dir_for_thread(
+async def _workspace_ref_for_thread(
     thread_id: str,
     *,
     include_default: bool = True,
-) -> str:
+) -> WorkspaceRef | None:
     if thread_id:
         task = get_background_task_manager().get_by_thread_id(thread_id)
-        task_working_dir = str((task or {}).get("working_dir") or "").strip()
-        if task_working_dir:
-            return str(resolve_workspace_root(task_working_dir))
+        task_workspace = (task or {}).get("workspace")
+        if task_workspace:
+            return resolve_workspace_ref(task_workspace)
 
         try:
-            stored_working_dir = await get_thread_workspace_dir(thread_id)
+            stored_workspace = await get_thread_workspace_ref(thread_id)
         except Exception as exc:
             logger.debug(
                 "Failed to load workspace for thread %s: %s",
                 thread_id,
                 exc,
             )
-            stored_working_dir = None
-        if stored_working_dir:
-            return str(resolve_workspace_root(stored_working_dir))
+            stored_workspace = None
+        if stored_workspace:
+            return resolve_workspace_ref(stored_workspace)
 
-    return str(resolve_workspace_root(None)) if include_default else ""
+    return resolve_workspace_ref(None) if include_default else None
 
 
-async def _workspace_dir_from_request(
+async def _workspace_ref_from_request(
     *,
     thread_id: str | None = None,
-    working_dir: str | None = None,
-) -> str:
-    if working_dir and working_dir.strip():
-        return str(resolve_workspace_root(working_dir))
+    workspace: WorkspaceRef | dict[str, Any] | str | None = None,
+    backend: str | None = None,
+    locator: str | None = None,
+) -> WorkspaceRef:
+    if workspace is not None:
+        return resolve_workspace_ref(workspace)
+    if locator and locator.strip():
+        return resolve_workspace_ref(
+            {
+                "backend": (backend or "local").strip() or "local",
+                "locator": locator,
+            }
+        )
     if thread_id and thread_id.strip():
-        return await _workspace_dir_for_thread(thread_id)
-    return str(resolve_workspace_root(None))
+        stored = await _workspace_ref_for_thread(thread_id)
+        if stored is not None:
+            return stored
+    return resolve_workspace_ref(None)
 
 
 def _workspace_http_error(exc: Exception) -> HTTPException:
@@ -575,8 +582,8 @@ async def get_dashboard_github(request: Request) -> dict[str, Any]:
 
 
 @router.get("/dashboard-api/workspace/default")
-async def get_dashboard_default_workspace() -> dict[str, str]:
-    return {"working_dir": str(resolve_workspace_root(None))}
+async def get_dashboard_default_workspace() -> dict[str, Any]:
+    return {"workspace": resolve_workspace_ref(None).model_dump()}
 
 
 @router.get("/dashboard-api/workspace/browse")
@@ -592,15 +599,17 @@ async def browse_dashboard_workspace(
 @router.get("/dashboard-api/workspace/tree")
 async def get_dashboard_workspace_tree(
     thread_id: str | None = Query(default=None),
-    working_dir: str | None = Query(default=None),
+    backend: str | None = Query(default="local"),
+    locator: str | None = Query(default=None),
     path: str = Query(default=""),
 ) -> dict[str, Any]:
     try:
-        root = await _workspace_dir_from_request(
+        workspace = await _workspace_ref_from_request(
             thread_id=thread_id,
-            working_dir=working_dir,
+            backend=backend,
+            locator=locator,
         )
-        return list_workspace_tree(working_dir=root, path=path)
+        return get_workspace_backend(workspace).tree(path)
     except Exception as exc:
         raise _workspace_http_error(exc) from exc
 
@@ -608,14 +617,16 @@ async def get_dashboard_workspace_tree(
 @router.get("/dashboard-api/workspace/changes")
 async def get_dashboard_workspace_changes(
     thread_id: str | None = Query(default=None),
-    working_dir: str | None = Query(default=None),
+    backend: str | None = Query(default="local"),
+    locator: str | None = Query(default=None),
 ) -> dict[str, Any]:
     try:
-        root = await _workspace_dir_from_request(
+        workspace = await _workspace_ref_from_request(
             thread_id=thread_id,
-            working_dir=working_dir,
+            backend=backend,
+            locator=locator,
         )
-        return get_workspace_changes(root)
+        return get_workspace_backend(workspace).changes()
     except Exception as exc:
         raise _workspace_http_error(exc) from exc
 
@@ -623,15 +634,17 @@ async def get_dashboard_workspace_changes(
 @router.get("/dashboard-api/workspace/diff")
 async def get_dashboard_workspace_diff(
     thread_id: str | None = Query(default=None),
-    working_dir: str | None = Query(default=None),
+    backend: str | None = Query(default="local"),
+    locator: str | None = Query(default=None),
     path: str = Query(..., min_length=1),
 ) -> dict[str, Any]:
     try:
-        root = await _workspace_dir_from_request(
+        workspace = await _workspace_ref_from_request(
             thread_id=thread_id,
-            working_dir=working_dir,
+            backend=backend,
+            locator=locator,
         )
-        return get_workspace_diff(working_dir=root, path=path)
+        return get_workspace_backend(workspace).diff(path)
     except Exception as exc:
         raise _workspace_http_error(exc) from exc
 
@@ -639,22 +652,24 @@ async def get_dashboard_workspace_diff(
 @router.get("/dashboard-api/workspace/file")
 async def get_dashboard_workspace_file(
     thread_id: str | None = Query(default=None),
-    working_dir: str | None = Query(default=None),
+    backend: str | None = Query(default="local"),
+    locator: str | None = Query(default=None),
     path: str = Query(..., min_length=1),
 ) -> dict[str, Any]:
     try:
-        root = await _workspace_dir_from_request(
+        workspace = await _workspace_ref_from_request(
             thread_id=thread_id,
-            working_dir=working_dir,
+            backend=backend,
+            locator=locator,
         )
-        return get_workspace_file(working_dir=root, path=path)
+        return get_workspace_backend(workspace).file(path)
     except Exception as exc:
         raise _workspace_http_error(exc) from exc
 
 
 class WorkspaceRenameBody(BaseModel):
     thread_id: str | None = None
-    working_dir: str | None = None
+    workspace: WorkspaceRef | None = None
     path: str = Field(..., min_length=1)
     new_name: str = Field(..., min_length=1)
 
@@ -664,12 +679,11 @@ async def rename_dashboard_workspace_entry(
     body: WorkspaceRenameBody,
 ) -> dict[str, Any]:
     try:
-        root = await _workspace_dir_from_request(
+        workspace = await _workspace_ref_from_request(
             thread_id=body.thread_id,
-            working_dir=body.working_dir,
+            workspace=body.workspace,
         )
-        return rename_workspace_entry(
-            working_dir=root,
+        return get_workspace_backend(workspace).rename(
             path=body.path,
             new_name=body.new_name,
         )
@@ -679,26 +693,39 @@ async def rename_dashboard_workspace_entry(
 
 class WorkspaceDeleteBody(BaseModel):
     thread_id: str | None = None
-    working_dir: str | None = None
+    workspace: WorkspaceRef | None = None
     path: str = Field(..., min_length=1)
 
 
 class WorkspaceResolveBody(BaseModel):
-    kind: str = Field(..., min_length=1)
-    working_dir: str | None = None
+    kind: str | None = None
+    workspace: WorkspaceRef | None = None
+    locator: str | None = None
     repository_id: int | None = None
 
 
 @router.post("/dashboard-api/workspace/resolve")
-async def resolve_dashboard_workspace(body: WorkspaceResolveBody) -> dict[str, str]:
-    kind = body.kind.strip().lower()
+async def resolve_dashboard_workspace(body: WorkspaceResolveBody) -> dict[str, Any]:
+    kind_source = body.kind or (body.workspace.backend if body.workspace else "local")
+    kind = kind_source.strip().lower()
     try:
         if kind == "local":
-            root = ensure_workspace_directory(body.working_dir)
+            ref = resolve_workspace_ref(
+                body.workspace or {"backend": "local", "locator": body.locator}
+            )
+            root = ensure_workspace_directory(ref.locator)
+            workspace = resolve_workspace_ref(
+                {
+                    "backend": "local",
+                    "locator": str(root),
+                    "label": str(root),
+                    "metadata": ref.metadata,
+                }
+            )
             return {
                 "kind": "local",
-                "label": str(root),
-                "working_dir": str(root),
+                "label": workspace.label,
+                "workspace": workspace.model_dump(),
             }
         if kind == "github":
             if body.repository_id is None:
@@ -718,11 +745,11 @@ async def delete_dashboard_workspace_entry(
     body: WorkspaceDeleteBody,
 ) -> dict[str, Any]:
     try:
-        root = await _workspace_dir_from_request(
+        workspace = await _workspace_ref_from_request(
             thread_id=body.thread_id,
-            working_dir=body.working_dir,
+            workspace=body.workspace,
         )
-        return delete_workspace_entry(working_dir=root, path=body.path)
+        return get_workspace_backend(workspace).delete(path=body.path)
     except Exception as exc:
         raise _workspace_http_error(exc) from exc
 
@@ -1506,11 +1533,11 @@ async def get_chat_thread_messages(thread_id: str) -> dict[str, Any]:
 
     metadata = await get_conversation_thread(thread_id)
     parsed = metadata or _parse_thread_id_safe(thread_id)
-    working_dir = await _workspace_dir_for_thread(thread_id, include_default=False)
+    workspace = await _workspace_ref_for_thread(thread_id, include_default=False)
     return {
         "thread_id": thread_id,
         "messages": messages,
-        "working_dir": working_dir,
+        "workspace": workspace.model_dump() if workspace else None,
         **parsed,
     }
 
@@ -1603,11 +1630,11 @@ async def get_background_task_messages(thread_id: str) -> dict[str, Any]:
 
     metadata = await get_conversation_thread(thread_id)
     parsed = metadata or _parse_thread_id_safe(thread_id)
-    working_dir = await _workspace_dir_for_thread(thread_id, include_default=False)
+    workspace = await _workspace_ref_for_thread(thread_id, include_default=False)
     return {
         "thread_id": thread_id,
         "messages": messages,
-        "working_dir": working_dir,
+        "workspace": workspace.model_dump() if workspace else None,
         **parsed,
     }
 
@@ -1653,12 +1680,13 @@ async def _background_task_snapshot(
     if current_task is not None:
         parsed = {**parsed, "kind": THREAD_KIND_BACKGROUND}
 
+    workspace = await _workspace_ref_for_thread(thread_id)
     return {
         "thread_id": thread_id,
         "messages": await _get_thread_messages_for_stream(thread_id),
         "task": current_task,
         "active_session": _active_session_for_thread(thread_id),
-        "working_dir": await _workspace_dir_for_thread(thread_id),
+        "workspace": workspace.model_dump() if workspace else None,
         **parsed,
     }
 

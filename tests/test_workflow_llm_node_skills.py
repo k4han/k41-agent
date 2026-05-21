@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -86,7 +87,7 @@ def test_llm_node_uses_prompt_builder_output_for_system_message(monkeypatch):
     assert captured["provider"] == "provider-x"
     assert [tool.name for tool in captured["tools"]] == ["skill", "read_file"]
     assert builder_calls["system_prompt_template"] == "Agent prompt: {working_dir}"
-    assert builder_calls["working_dir"] == "D:/repo"
+    assert builder_calls["working_dir"] == str(Path("D:/repo").resolve())
     assert builder_calls["agent_name"] == "builder-agent"
     assert [tool.name for tool in builder_calls["tools"]] == ["skill", "read_file"]
 

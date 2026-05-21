@@ -20,6 +20,7 @@ from html import escape as escape_html
 from typing import Any, Awaitable, Callable
 
 from agent.modules.notifications import send_notification as _send_notification
+from agent.modules.workspaces import WorkspaceRef, resolve_workspace_ref
 from agent.modules.workflows import REACT_AGENT_GRAPH_TYPE
 
 logger = logging.getLogger(__name__)
@@ -73,7 +74,7 @@ class BackgroundTask:
     task_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     request: str = ""
     agent_name: str = "default"
-    working_dir: str | None = None
+    workspace: WorkspaceRef | None = None
     notify_channel: NotifyChannel | None = None
     completion_hook: Callable[["BackgroundTask"], Awaitable[None]] | None = field(
         default=None,
@@ -109,7 +110,7 @@ class BackgroundTask:
             "task_id": self.task_id,
             "request": self.request,
             "agent_name": self.agent_name,
-            "working_dir": self.working_dir,
+            "workspace": self.workspace.model_dump() if self.workspace else None,
             "status": self.status.value,
             "result": self.result,
             "error": self.error,
@@ -199,7 +200,11 @@ class BackgroundTaskManager:
             task_id=str(record.get("task_id") or ""),
             request=str(record.get("request") or ""),
             agent_name=str(record.get("agent_name") or "default"),
-            working_dir=record.get("working_dir"),
+            workspace=(
+                resolve_workspace_ref(record.get("workspace"))
+                if record.get("workspace")
+                else None
+            ),
             notify_channel=notify_channel,
             status=status,
             result=str(record.get("result") or ""),
@@ -220,7 +225,8 @@ class BackgroundTaskManager:
             thread_id=task.thread_id,
             request=task.request,
             agent_name=task.agent_name,
-            working_dir=task.working_dir,
+            working_dir=task.workspace.locator if task.workspace else None,
+            workspace=task.workspace,
             notify_platform=notify_channel.platform if notify_channel else "",
             notify_external_id=notify_channel.external_id if notify_channel else "",
             notify_channel_id=notify_channel.channel_id if notify_channel else "",
@@ -236,6 +242,7 @@ class BackgroundTaskManager:
         self,
         request: str,
         agent_name: str = "default",
+        workspace: WorkspaceRef | dict[str, Any] | str | None = None,
         working_dir: str | None = None,
         notify_channel: NotifyChannel | None = None,
         completion_hook: Callable[[BackgroundTask], Awaitable[None]] | None = None,
@@ -249,7 +256,11 @@ class BackgroundTaskManager:
         task = BackgroundTask(
             request=request,
             agent_name=agent_name,
-            working_dir=working_dir,
+            workspace=(
+                resolve_workspace_ref(workspace if workspace is not None else working_dir)
+                if workspace is not None or working_dir
+                else None
+            ),
             notify_channel=notify_channel,
             completion_hook=completion_hook,
         )
@@ -349,7 +360,7 @@ class BackgroundTaskManager:
             user_input=task.request,
             thread_id=task.thread_id,
             agent_name=task.agent_name,
-            working_dir=task.working_dir,
+            workspace=task.workspace,
         ):
             if isinstance(event, dict):
                 event_type = str(event.get("type") or "")

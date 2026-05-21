@@ -21,8 +21,10 @@ from agent.modules.agent_runtime import get_background_task_manager
 from agent.shared.infrastructure.db import Base, load_orm_models
 from agent.shared.infrastructure.db.engine import (
     close_async_engine,
+    get_database_url,
     initialize_async_engine,
 )
+from agent.modules.workspaces import migrate_workspace_tables
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +33,8 @@ async def initialize_persistence() -> None:
     """Initialize SQLAlchemy async engine and LangGraph checkpointer."""
     load_orm_models()
     await initialize_async_engine(metadata=Base.metadata)
+
+    migrate_workspace_tables(get_database_url())
     await initialize_checkpointer()
 
 

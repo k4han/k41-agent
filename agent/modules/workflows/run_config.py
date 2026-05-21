@@ -1,22 +1,49 @@
 from dataclasses import dataclass
-from pathlib import Path
+from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 
+from agent.modules.workspaces import (
+    DEFAULT_LOCAL_WORKSPACE,
+    WorkspaceRef,
+    normalize_workspace_ref,
+)
+
 DEFAULT_MAX_CONTEXT_TOKENS = 50_000
-DEFAULT_WORKING_DIR = str(Path.home() / "kaka-agent")
+DEFAULT_WORKING_DIR = DEFAULT_LOCAL_WORKSPACE
 
 
-@dataclass
+@dataclass(init=False)
 class WorkflowContext:
     """Run-scoped context passed via LangGraph context_schema."""
 
-    working_dir: str
+    workspace: WorkspaceRef
     max_context_tokens: int
     agent_name: str
     allowed_tool_names: list[str]
     provider: str | None = None
     model: str | None = None
+
+    def __init__(
+        self,
+        *,
+        workspace: WorkspaceRef | dict[str, Any] | str | None = None,
+        working_dir: str | None = None,
+        max_context_tokens: int = DEFAULT_MAX_CONTEXT_TOKENS,
+        agent_name: str = "default",
+        allowed_tool_names: list[str] | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+    ) -> None:
+        self.workspace = normalize_workspace_ref(
+            workspace if workspace is not None else working_dir,
+            default_locator=DEFAULT_WORKING_DIR,
+        )
+        self.max_context_tokens = max_context_tokens
+        self.agent_name = agent_name
+        self.allowed_tool_names = list(allowed_tool_names or [])
+        self.provider = provider
+        self.model = model
 
     def get_agent_name(self) -> str:
         """Get agent name from context."""
@@ -32,7 +59,11 @@ class WorkflowContext:
 
     def get_working_dir(self) -> str:
         """Get working directory from context."""
-        return self.working_dir
+        return self.workspace.locator
+
+    def get_workspace(self) -> WorkspaceRef:
+        """Get workspace reference from context."""
+        return self.workspace
 
     def get_allowed_tool_names(self) -> list[str]:
         """Get allowed tool names from context."""
@@ -44,6 +75,7 @@ class WorkflowContext:
 
 
 def make_context(
+    workspace: WorkspaceRef | dict[str, Any] | str | None = None,
     working_dir: str | None = None,
     max_context_tokens: int = DEFAULT_MAX_CONTEXT_TOKENS,
     agent_name: str = "default",
@@ -57,11 +89,13 @@ def make_context(
     if allowed_tool_names is None:
         allowed_tool_names = get_default_tool_names()
 
-    # Allow working_dir override, otherwise use default
-    resolved_dir = working_dir or DEFAULT_WORKING_DIR
+    resolved_workspace = normalize_workspace_ref(
+        workspace if workspace is not None else working_dir,
+        default_locator=DEFAULT_WORKING_DIR,
+    )
 
     return WorkflowContext(
-        working_dir=resolved_dir,
+        workspace=resolved_workspace,
         max_context_tokens=max_context_tokens,
         agent_name=agent_name,
         allowed_tool_names=allowed_tool_names,

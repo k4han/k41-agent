@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -8,7 +9,7 @@ import agent.modules.workflows.graphs.router as router_module
 from agent.modules.workflows.registry import (
     GraphRegistry,
 )
-from agent.modules.workflows.run_config import WorkflowContext
+from agent.modules.workflows.run_config import WorkflowContext, make_context
 
 
 class _FakeChatModel:
@@ -73,6 +74,17 @@ def _make_agent(
         max_context_tokens=max_context_tokens,
         system_prompt=system_prompt,
     )
+
+
+def _runtime_context(**overrides) -> WorkflowContext:
+    defaults = {
+        "agent_name": "orchestrator",
+        "working_dir": "D:/repo",
+        "max_context_tokens": 50_000,
+        "allowed_tool_names": [],
+    }
+    defaults.update(overrides)
+    return make_context(**defaults)
 
 
 class _FakeGraph:
@@ -177,9 +189,7 @@ async def test_router_node_routes_to_selected_sub_agent(
     state = {"messages": [HumanMessage(content="Plan this implementation work")]}
     config = {"configurable": {"thread_id": "thread-1"}}
     runtime = SimpleNamespace(
-        context=WorkflowContext(
-            agent_name="orchestrator",
-            working_dir="D:/repo",
+        context=_runtime_context(
             max_context_tokens=9999,
             allowed_tool_names=["call_agent"],
         )
@@ -196,7 +206,7 @@ async def test_router_node_routes_to_selected_sub_agent(
     assert target_graph.calls[0]["config"] == config
     target_context = target_graph.calls[0]["context"]
     assert target_context.agent_name == "researcher"
-    assert target_context.working_dir == "D:/repo"
+    assert target_context.workspace.locator == str(Path("D:/repo").resolve())
     assert target_context.max_context_tokens == 12000
     assert target_context.allowed_tool_names == ["websearch", "webfetch"]
     assert target_context.provider is None
@@ -249,14 +259,7 @@ async def test_router_node_falls_back_to_first_callable_agent_when_llm_selects_i
 
     state = {"messages": [HumanMessage(content="Break this task into steps")]}
     config = {"configurable": {"thread_id": "thread-1"}}
-    runtime = SimpleNamespace(
-        context=WorkflowContext(
-            agent_name="orchestrator",
-            working_dir="D:/repo",
-            max_context_tokens=50000,
-            allowed_tool_names=[],
-        )
-    )
+    runtime = SimpleNamespace(context=_runtime_context())
 
     # Call both router and execution nodes
     router_result = await router_module.llm_call_router(state, config, runtime)
@@ -312,14 +315,7 @@ async def test_router_node_falls_back_to_default_agent_when_no_callable_sub_agen
 
     state = {"messages": [HumanMessage(content="Plan this implementation work")]}
     config = {"configurable": {"thread_id": "thread-1"}}
-    runtime = SimpleNamespace(
-        context=WorkflowContext(
-            agent_name="orchestrator",
-            working_dir="D:/repo",
-            max_context_tokens=50000,
-            allowed_tool_names=[],
-        )
-    )
+    runtime = SimpleNamespace(context=_runtime_context())
 
     # Call both router and execution nodes
     router_result = await router_module.llm_call_router(state, config, runtime)
@@ -362,14 +358,7 @@ async def test_router_node_omits_context_for_graph_without_context_schema(
 
     state = {"messages": [HumanMessage(content="Plan this implementation work")]}
     config = {"configurable": {"thread_id": "thread-1"}}
-    runtime = SimpleNamespace(
-        context=WorkflowContext(
-            agent_name="orchestrator",
-            working_dir="D:/repo",
-            max_context_tokens=50000,
-            allowed_tool_names=[],
-        )
-    )
+    runtime = SimpleNamespace(context=_runtime_context())
 
     # Call both router and execution nodes
     router_result = await router_module.llm_call_router(state, config, runtime)

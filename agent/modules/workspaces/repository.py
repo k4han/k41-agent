@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from sqlalchemy import select
 
 from agent.modules.workspaces.models import ThreadWorkspace
+from agent.modules.workspaces.refs import (
+    DEFAULT_LOCAL_WORKSPACE,
+    WorkspaceRef,
+    normalize_workspace_ref,
+    workspace_ref_from_columns,
+)
 from agent.shared.infrastructure.db.base import utcnow
 from agent.shared.infrastructure.db.session import get_async_session
 
@@ -14,23 +21,42 @@ def _trim(value: str | None, max_length: int) -> str:
 
 
 def serialize_thread_workspace(record: ThreadWorkspace) -> dict[str, Any]:
+    workspace = _workspace_from_record(record)
     return {
         "thread_id": record.thread_id,
-        "working_dir": record.working_dir,
+        "workspace": workspace.model_dump(),
         "created_at": record.created_at.isoformat() if record.created_at else None,
         "updated_at": record.updated_at.isoformat() if record.updated_at else None,
     }
 
 
+def _workspace_from_record(record: ThreadWorkspace) -> WorkspaceRef:
+    locator = record.workspace_locator or record.working_dir or DEFAULT_LOCAL_WORKSPACE
+    return workspace_ref_from_columns(
+        backend=record.workspace_backend,
+        locator=locator,
+        label=record.workspace_label,
+        metadata_json=record.workspace_metadata_json,
+    )
+
+
 class ThreadWorkspaceRepository:
-    async def upsert(self, *, thread_id: str, working_dir: str) -> dict[str, Any]:
+    async def upsert(
+        self,
+        *,
+        thread_id: str,
+        workspace: WorkspaceRef | dict[str, Any] | str,
+    ) -> dict[str, Any]:
         now = utcnow()
         normalized_thread_id = _trim(thread_id, 512)
-        normalized_working_dir = str(working_dir or "").strip()
+        workspace_ref = normalize_workspace_ref(
+            workspace,
+            default_locator=DEFAULT_LOCAL_WORKSPACE,
+        )
         if not normalized_thread_id:
             raise ValueError("Thread ID is required.")
-        if not normalized_working_dir:
-            raise ValueError("Working directory is required.")
+        if not workspace_ref.locator:
+            raise ValueError("Workspace locator is required.")
 
         session = await get_async_session()
         async with session:
@@ -43,14 +69,22 @@ class ThreadWorkspaceRepository:
             if record is None:
                 record = ThreadWorkspace(
                     thread_id=normalized_thread_id,
-                    working_dir=normalized_working_dir,
+                    working_dir=workspace_ref.locator,
                     created_at=now,
                     updated_at=now,
                 )
                 session.add(record)
             else:
-                record.working_dir = normalized_working_dir
+                record.working_dir = workspace_ref.locator
                 record.updated_at = now
+            record.workspace_backend = workspace_ref.backend
+            record.workspace_locator = workspace_ref.locator
+            record.workspace_label = workspace_ref.label
+            record.workspace_metadata_json = json.dumps(
+                workspace_ref.metadata,
+                ensure_ascii=False,
+                sort_keys=True,
+            )
 
             await session.commit()
             await session.refresh(record)

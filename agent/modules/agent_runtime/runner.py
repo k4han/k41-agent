@@ -20,6 +20,7 @@ from agent.modules.workflows import (
     make_run_config,
     make_run_context,
 )
+from agent.modules.workspaces import WorkspaceRef
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ def build_run_params(
     user_input: str,
     thread_id: str | None = None,
     workflow: str | None = None,
+    workspace: WorkspaceRef | dict[str, Any] | str | None = None,
     working_dir: str | None = None,
     max_context_tokens: int | None = None,
     channel_id: str = "",
@@ -55,7 +57,7 @@ def build_run_params(
         user_input: User message
         thread_id: Existing session thread ID to resume
         workflow: Override agent's graph_type if needed
-        working_dir: Working directory for tools
+        workspace: Workspace reference for tools
         max_context_tokens: Override agent's max_context_tokens if needed
         channel_id: Channel identifier (for multi-channel platforms)
         agent_name: Agent to use (loads config from catalog)
@@ -68,7 +70,7 @@ def build_run_params(
         "thread_id": thread_id or SessionManager.make_thread_id(platform, user_id, channel_id),
         "agent_name": agent_name,
         "workflow": workflow,
-        "working_dir": working_dir,
+        "workspace": workspace if workspace is not None else working_dir,
         "max_context_tokens": max_context_tokens,
         "provider": provider,
         "model": model,
@@ -361,6 +363,7 @@ async def run_agent(
     agent_name: str = "default",
     *,
     workflow: str | None = None,
+    workspace: WorkspaceRef | dict[str, Any] | str | None = None,
     working_dir: str | None = None,
     max_context_tokens: int | None = None,
     allowed_tool_names: list[str] | None = None,
@@ -377,7 +380,7 @@ async def run_agent(
         thread_id: Session thread ID
         agent_name: Agent to use (loads config from catalog)
         workflow: Override agent's graph_type if needed
-        working_dir: Working directory for tools
+        workspace: Workspace reference for tools
         max_context_tokens: Override agent's max_context_tokens if needed
         allowed_tool_names: Override agent's tools if needed
         provider: Override agent card provider for this run if needed
@@ -400,6 +403,7 @@ async def run_agent(
     config = make_run_config(thread_id=thread_id)
 
     context = make_run_context(
+        workspace=workspace,
         working_dir=working_dir,
         max_context_tokens=resolved_max_tokens,
         agent_name=agent_name,
@@ -443,6 +447,7 @@ async def run_agent_stream(
     agent_name: str = "default",
     *,
     workflow: str | None = None,
+    workspace: WorkspaceRef | dict[str, Any] | str | None = None,
     working_dir: str | None = None,
     max_context_tokens: int | None = None,
     allowed_tool_names: list[str] | None = None,
@@ -459,7 +464,7 @@ async def run_agent_stream(
         thread_id: Session thread ID
         agent_name: Agent to use (loads config from catalog)
         workflow: Override agent's graph_type if needed
-        working_dir: Working directory for tools
+        workspace: Workspace reference for tools
         max_context_tokens: Override agent's max_context_tokens if needed
         allowed_tool_names: Override agent's tools if needed
         provider: Override agent card provider for this run if needed
@@ -482,6 +487,7 @@ async def run_agent_stream(
     config = make_run_config(thread_id=thread_id)
 
     context = make_run_context(
+        workspace=workspace,
         working_dir=working_dir,
         max_context_tokens=resolved_max_tokens,
         agent_name=agent_name,
@@ -595,6 +601,7 @@ async def run_agent_full(
     agent_name: str = "default",
     *,
     workflow: str | None = None,
+    workspace: WorkspaceRef | dict[str, Any] | str | None = None,
     working_dir: str | None = None,
     max_context_tokens: int | None = None,
     allowed_tool_names: list[str] | None = None,
@@ -614,7 +621,7 @@ async def run_agent_full(
         thread_id: Session thread ID
         agent_name: Agent to use (loads config from catalog)
         workflow: Override agent's graph_type if needed
-        working_dir: Working directory for tools
+        workspace: Workspace reference for tools
         max_context_tokens: Override agent's max_context_tokens if needed
         allowed_tool_names: Override agent's tools if needed
         provider: Override agent card provider for this run if needed
@@ -627,6 +634,7 @@ async def run_agent_full(
         thread_id=thread_id,
         agent_name=agent_name,
         workflow=workflow,
+        workspace=workspace,
         working_dir=working_dir,
         max_context_tokens=max_context_tokens,
         allowed_tool_names=allowed_tool_names,

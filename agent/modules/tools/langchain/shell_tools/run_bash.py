@@ -4,8 +4,7 @@ from typing import Annotated, Any
 from langchain_core.tools import tool, InjectedToolArg
 from langgraph.prebuilt import ToolRuntime
 
-from agent.modules.tools.langchain.working_dir import get_working_dir
-from agent.modules.tools.runtime.path_guard import resolve_safe_path
+from agent.modules.tools.langchain.working_dir import get_backend
 
 
 @tool
@@ -14,22 +13,8 @@ def run_bash(
     runtime: Annotated[ToolRuntime[Any, Any], InjectedToolArg],
 ) -> str:
     """Run bash command in working directory."""
-    working_dir = get_working_dir(runtime)
     try:
-        safe_working_dir = resolve_safe_path(working_dir, ".")
-        result = subprocess.run(
-            command,
-            shell=True,
-            cwd=safe_working_dir,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=30,
-        )
-        output = result.stdout or ""
-        error = result.stderr or ""
-        return output + (f"\n[stderr]: {error}" if error else "")
+        return get_backend(runtime).execute(command, timeout=30).output
     except ValueError as e:
         return f"[Error] {str(e)}"
     except subprocess.TimeoutExpired:

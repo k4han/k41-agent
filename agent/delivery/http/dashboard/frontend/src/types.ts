@@ -71,11 +71,18 @@ export type AgentsPayload = {
   model_catalog_error: string;
 };
 
+export type WorkspaceRef = {
+  backend: "local";
+  locator: string;
+  label: string;
+  metadata: Record<string, unknown>;
+};
+
 export type BackgroundTask = {
   task_id: string;
   request: string;
   agent_name: string;
-  working_dir: string | null;
+  workspace: WorkspaceRef | null;
   status: string;
   result: string;
   error: string;

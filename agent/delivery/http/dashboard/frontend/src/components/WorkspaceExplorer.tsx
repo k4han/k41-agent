@@ -19,6 +19,8 @@ import { apiFetch, postJson } from "@/lib/api";
 import { highlightCode, languageFromPath } from "@/lib/codeHighlight";
 import { renderUnifiedDiffHtml } from "@/lib/diffView";
 import { createDarkMode } from "@/lib/theme";
+import { localWorkspaceRef } from "@/lib/workspace";
+import type { WorkspaceRef } from "@/types";
 
 type WorkspaceTreeEntry = {
   name: string;
@@ -81,7 +83,8 @@ function workspaceQuery(threadId: string, workingDir: string, extra?: Record<str
     params.set("thread_id", threadId);
   }
   if (workingDir.trim()) {
-    params.set("working_dir", workingDir.trim());
+    params.set("backend", "local");
+    params.set("locator", workingDir.trim());
   }
   Object.entries(extra || {}).forEach(([key, value]) => {
     params.set(key, value);
@@ -427,7 +430,7 @@ export function WorkspaceExplorer(props: {
     try {
       await postJson("/dashboard-api/workspace/rename", {
         thread_id: props.threadId || null,
-        working_dir: props.workingDir || null,
+        workspace: localWorkspaceRef(props.workingDir),
         path: entry.path,
         new_name: nextName,
       });
@@ -468,7 +471,7 @@ export function WorkspaceExplorer(props: {
     try {
       await postJson("/dashboard-api/workspace/delete", {
         thread_id: props.threadId || null,
-        working_dir: props.workingDir || null,
+        workspace: localWorkspaceRef(props.workingDir),
         path: entry.path,
       });
       showToast(`Deleted ${entry.name}`, "success");
