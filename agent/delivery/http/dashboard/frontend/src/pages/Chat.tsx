@@ -626,6 +626,7 @@ export function ChatPage() {
   const { showToast } = useToast();
   let transcriptRef: HTMLDivElement | undefined;
   let chatShellRef: HTMLDivElement | undefined;
+  let chatPromptRef: HTMLTextAreaElement | undefined;
   let fileInputRef: HTMLInputElement | undefined;
   let loadedThreadId: string | null = null;
   let threadLoadRequestId = 0;
@@ -682,6 +683,20 @@ export function ChatPage() {
 
   const toggleWorkspaceExplorer = () => {
     setExplorerOpen(!workspaceExplorerOpen());
+  };
+
+  const resizeChatPromptInput = () => {
+    if (!chatPromptRef) {
+      return;
+    }
+    const computed = window.getComputedStyle(chatPromptRef);
+    const maxHeight = Number.parseFloat(computed.maxHeight);
+    chatPromptRef.style.height = "auto";
+    chatPromptRef.style.height = `${Math.min(
+      chatPromptRef.scrollHeight,
+      Number.isFinite(maxHeight) ? maxHeight : chatPromptRef.scrollHeight,
+    )}px`;
+    chatPromptRef.style.overflowY = chatPromptRef.scrollHeight > maxHeight ? "auto" : "hidden";
   };
 
   const applyWorkspaceExplorerWidth = (width: number, availableWidth?: number) => {
@@ -800,6 +815,11 @@ export function ChatPage() {
     }
     setProvider(card.provider || "default");
     setModel(card.model || "");
+  });
+
+  createEffect(() => {
+    prompt();
+    resizeChatPromptInput();
   });
 
   const scrollToBottom = () => {
@@ -1439,8 +1459,9 @@ export function ChatPage() {
                   onChange={(event) => void addFiles(event.currentTarget.files)}
                 />
                 <textarea
+                  ref={chatPromptRef}
                   class="chat-prompt-input"
-                  rows={4}
+                  rows={1}
                   value={prompt()}
                   disabled={composerDisabled()}
                   placeholder={
@@ -1452,7 +1473,10 @@ export function ChatPage() {
                           ? "Continue this thread..."
                           : "Ask Kaka to build features, fix bugs, or work on your code"
                   }
-                  onInput={(event) => setPrompt(event.currentTarget.value)}
+                  onInput={(event) => {
+                    setPrompt(event.currentTarget.value);
+                    resizeChatPromptInput();
+                  }}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" && !event.ctrlKey && !event.shiftKey) {
                       event.preventDefault();

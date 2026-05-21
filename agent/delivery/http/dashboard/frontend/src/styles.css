@@ -1638,34 +1638,40 @@ a {
 }
 
 .chat-shell-resizable {
-  grid-template-columns: minmax(0, 1fr) 0;
-  gap: 0;
-  width: min(960px, 100%);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0);
+  column-gap: 0;
+  width: 100%;
   margin-inline: auto;
   transition:
     grid-template-columns 180ms ease,
-    width 180ms ease;
+    column-gap 180ms ease;
 }
 
 .chat-shell-resizable.workspace-open {
-  grid-template-columns: minmax(420px, 1fr) minmax(340px, var(--workspace-explorer-width));
-  gap: 16px;
-  width: 100%;
-}
-
-.chat-shell-resizable.workspace-closed {
-  width: 100%;
+  grid-template-columns: minmax(0, 1fr) minmax(0, var(--workspace-explorer-width));
+  column-gap: 16px;
 }
 
 .content:has(.chat-shell-resizable.workspace-open),
 .content:has(.chat-shell-resizable.workspace-closed) {
   width: 100%;
   max-width: none;
-  padding-inline: 16px;
+  padding: 20px 16px 16px;
+}
+
+.content:has(.chat-shell-resizable.workspace-open) .chat-shell-resizable,
+.content:has(.chat-shell-resizable.workspace-closed) .chat-shell-resizable {
+  height: calc(100vh - 94px);
+  height: calc(100dvh - 94px);
 }
 
 .chat-shell-resizable.workspace-resizing {
   transition: none;
+}
+
+.chat-shell-resizable.workspace-open .chat-panel {
+  justify-self: center;
+  width: min(960px, 100%);
 }
 
 .chat-panel {
@@ -2321,13 +2327,17 @@ a {
 }
 
 .chat-prompt-input {
+  --chat-prompt-line-height: 21px;
+
   width: 100%;
-  min-height: 86px;
+  min-height: calc(var(--chat-prompt-line-height) + 4px);
+  max-height: calc((var(--chat-prompt-line-height) * 4) + 4px);
   border: 0;
   outline: none;
   background: transparent;
   color: var(--fg);
-  line-height: 1.5;
+  line-height: var(--chat-prompt-line-height);
+  overflow-y: hidden;
   padding: 2px 1px;
   resize: none;
 }
@@ -2489,10 +2499,8 @@ a {
   opacity: 0;
   overflow: hidden;
   pointer-events: none;
-  transform: translateX(24px);
   transition:
     opacity 180ms ease,
-    transform 180ms ease,
     visibility 180ms ease;
   visibility: hidden;
 }
@@ -2501,7 +2509,6 @@ a {
   opacity: 1;
   overflow: visible;
   pointer-events: auto;
-  transform: translateX(0);
   visibility: visible;
 }
 
