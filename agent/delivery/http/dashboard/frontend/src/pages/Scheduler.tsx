@@ -1,5 +1,5 @@
 import { createSignal, For, onMount, Show } from "solid-js";
-import { Edit3, Play, RefreshCw, Square, Trash2 } from "lucide-solid";
+import { Edit3, Play, Square, Trash2 } from "lucide-solid";
 
 import { AppShell } from "@/components/AppShell";
 import { Dialog } from "@/components/Dialog";
@@ -315,12 +315,6 @@ export function SchedulerPage() {
     <AppShell
       title="Scheduled Tasks"
       subtitle="Create recurring and one-off channel tasks."
-      actions={
-        <button class="btn" type="button" onClick={load}>
-          <RefreshCw size={14} />
-          Refresh
-        </button>
-      }
     >
       <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => {

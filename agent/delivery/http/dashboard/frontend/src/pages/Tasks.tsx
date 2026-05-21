@@ -1,6 +1,6 @@
 import { A } from "@solidjs/router";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import { MessageSquare, Play, RefreshCw, Square, Trash2 } from "lucide-solid";
+import { MessageSquare, Play, Square, Trash2 } from "lucide-solid";
 
 import { AppShell } from "@/components/AppShell";
 import { DataGate } from "@/components/State";
@@ -211,12 +211,6 @@ export function TasksPage() {
     <AppShell
       title="Background Tasks"
       subtitle="Submit long-running agent work and inspect task history."
-      actions={
-        <button class="btn" type="button" onClick={load}>
-          <RefreshCw size={14} />
-          Refresh
-        </button>
-      }
     >
       <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => {

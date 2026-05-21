@@ -1,5 +1,4 @@
 import { createSignal, For, onCleanup, onMount } from "solid-js";
-import { RefreshCw } from "lucide-solid";
 
 import { AppShell } from "@/components/AppShell";
 import { DataGate } from "@/components/State";
@@ -101,12 +100,6 @@ export function SessionsPage() {
     <AppShell
       title="Active Sessions"
       subtitle="Currently running agent sessions."
-      actions={
-        <button class="btn" type="button" onClick={load}>
-          <RefreshCw size={14} />
-          Refresh
-        </button>
-      }
     >
       <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => (

@@ -1,5 +1,5 @@
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
-import { GitPullRequest, RefreshCw, Save } from "lucide-solid";
+import { GitPullRequest, Save } from "lucide-solid";
 
 import { AppShell } from "@/components/AppShell";
 import { DataGate } from "@/components/State";
@@ -122,16 +122,10 @@ export function RepositoriesPage() {
       title="Repositories"
       subtitle="Map GitHub repositories to agents."
       actions={
-        <>
-          <button class="btn" type="button" onClick={load}>
-            <RefreshCw size={14} />
-            Refresh
-          </button>
-          <button class="btn btn-primary" type="button" onClick={sync}>
-            <GitPullRequest size={14} />
-            Sync GitHub
-          </button>
-        </>
+        <button class="btn btn-primary" type="button" onClick={sync}>
+          <GitPullRequest size={14} />
+          Sync GitHub
+        </button>
       }
     >
       <DataGate data={data()} error={error()} onRetry={load}>

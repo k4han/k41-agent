@@ -1,5 +1,5 @@
 import { createSignal, For, onMount, Show } from "solid-js";
-import { Link2, RefreshCw, Trash2 } from "lucide-solid";
+import { Link2, Trash2 } from "lucide-solid";
 
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
@@ -66,16 +66,10 @@ export function ChannelsPage() {
       breadcrumbLabel="Channels"
       contentWidth="wide"
       actions={
-        <>
-          <button class="btn" type="button" onClick={load}>
-            <RefreshCw size={14} />
-            Refresh
-          </button>
-          <button class="btn btn-primary" type="button" onClick={createCode}>
-            <Link2 size={14} />
-            New Pairing Code
-          </button>
-        </>
+        <button class="btn btn-primary" type="button" onClick={createCode}>
+          <Link2 size={14} />
+          New Pairing Code
+        </button>
       }
     >
       <div class="stack">

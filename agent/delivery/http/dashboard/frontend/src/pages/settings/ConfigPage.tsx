@@ -1,5 +1,5 @@
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
-import { RefreshCw, Save, Search } from "lucide-solid";
+import { Save, Search } from "lucide-solid";
 
 import { Dialog } from "@/components/Dialog";
 import { DataGate } from "@/components/State";
@@ -49,21 +49,15 @@ export function ConfigPage() {
       subtitle="Manage channels, database, and security settings."
       breadcrumbLabel="Runtime"
       actions={
-        <>
-          <button class="btn" type="button" onClick={load}>
-            <RefreshCw size={14} />
-            Reload
-          </button>
-          <button
-            class="btn btn-primary"
-            type="button"
-            disabled={pendingChanges().length === 0}
-            onClick={() => setConfirmOpen(true)}
-          >
-            <Save size={14} />
-            Save Changes {pendingChanges().length ? `(${pendingChanges().length})` : ""}
-          </button>
-        </>
+        <button
+          class="btn btn-primary"
+          type="button"
+          disabled={pendingChanges().length === 0}
+          onClick={() => setConfirmOpen(true)}
+        >
+          <Save size={14} />
+          Save Changes {pendingChanges().length ? `(${pendingChanges().length})` : ""}
+        </button>
       }
     >
       <DataGate data={data()} error={error()} onRetry={load}>

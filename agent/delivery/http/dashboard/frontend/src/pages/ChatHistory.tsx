@@ -1,5 +1,5 @@
 import { A } from "@solidjs/router";
-import { MessageSquare, Pencil, RefreshCw, Trash2 } from "lucide-solid";
+import { MessageSquare, Pencil, Trash2 } from "lucide-solid";
 import { createSignal, For, onMount, Show } from "solid-js";
 
 import { AppShell } from "@/components/AppShell";
@@ -117,12 +117,6 @@ export function ChatHistoryListPage() {
     <AppShell
       title="Chat History"
       subtitle="Browse past conversations stored in the checkpoint database."
-      actions={
-        <button class="btn" type="button" onClick={load}>
-          <RefreshCw size={14} />
-          Refresh
-        </button>
-      }
     >
       <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => (

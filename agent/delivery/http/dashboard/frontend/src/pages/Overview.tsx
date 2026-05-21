@@ -1,5 +1,5 @@
-import { createSignal, For, onMount } from "solid-js";
-import { RefreshCw, Square, Play } from "lucide-solid";
+import { createSignal, For, onCleanup, onMount } from "solid-js";
+import { Square, Play } from "lucide-solid";
 
 import { AppShell } from "@/components/AppShell";
 import { DataGate } from "@/components/State";
@@ -14,17 +14,57 @@ type OverviewPayload = {
   services: ServiceStatus[];
 };
 
+const OVERVIEW_POLL_INTERVAL_MS = 10000;
+
 export function OverviewPage() {
   const [data, setData] = createSignal<OverviewPayload>();
   const [error, setError] = createSignal("");
   const { showToast } = useToast();
+  let timer: number | undefined;
+  let loading = false;
+  let disposed = false;
+
+  const clearRefreshTimer = () => {
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+      timer = undefined;
+    }
+  };
+
+  const scheduleRefresh = () => {
+    clearRefreshTimer();
+    if (disposed || document.hidden) {
+      return;
+    }
+
+    timer = window.setTimeout(() => {
+      timer = undefined;
+      void load();
+    }, OVERVIEW_POLL_INTERVAL_MS);
+  };
 
   const load = async () => {
+    if (disposed || loading) {
+      return;
+    }
+
+    loading = true;
+    clearRefreshTimer();
     setError("");
     try {
-      setData(await apiFetch<OverviewPayload>("/dashboard-api/overview"));
+      const payload = await apiFetch<OverviewPayload>("/dashboard-api/overview");
+      if (disposed) {
+        return;
+      }
+
+      setData(payload);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load overview");
+      if (!disposed) {
+        setError(err instanceof Error ? err.message : "Failed to load overview");
+      }
+    } finally {
+      loading = false;
+      scheduleRefresh();
     }
   };
 
@@ -43,12 +83,34 @@ export function OverviewPage() {
       const result = await postJson<OverviewPayload>(`/services/${action}`);
       setData(result);
       showToast("Service state updated.");
+      scheduleRefresh();
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Service action failed", "error");
     }
   };
 
-  onMount(load);
+  const handleVisibilityChange = () => {
+    if (disposed) {
+      return;
+    }
+
+    if (document.hidden) {
+      clearRefreshTimer();
+      return;
+    }
+
+    void load();
+  };
+
+  onMount(() => {
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    void load();
+  });
+  onCleanup(() => {
+    disposed = true;
+    clearRefreshTimer();
+    document.removeEventListener("visibilitychange", handleVisibilityChange);
+  });
 
   return (
     <AppShell
@@ -56,10 +118,6 @@ export function OverviewPage() {
       subtitle="Runtime channels and background services."
       actions={
         <>
-          <button class="btn" type="button" onClick={load}>
-            <RefreshCw size={14} />
-            Refresh
-          </button>
           <button class="btn" type="button" onClick={() => allAction("start-all")}>
             <Play size={14} />
             Start All

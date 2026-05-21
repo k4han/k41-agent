@@ -8,7 +8,6 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Plus,
-  RefreshCw,
   Send,
   Square,
   X,
@@ -988,10 +987,6 @@ export function ChatPage() {
             <Show when={workspaceExplorerOpen()} fallback={<PanelRightOpen size={15} />}>
               <PanelRightClose size={15} />
             </Show>
-          </button>
-          <button class="btn" type="button" onClick={load}>
-            <RefreshCw size={14} />
-            Refresh Options
           </button>
         </>
       }
