@@ -17,6 +17,7 @@ MAX_TREE_ENTRIES = 500
 MAX_DIFF_CHARS = 200_000
 MAX_FILE_BYTES = 300_000
 MAX_UNTRACKED_FILE_CHARS = 120_000
+MAX_DIRECTORY_BROWSE_ENTRIES = 500
 GIT_TIMEOUT_SECONDS = 10
 IGNORED_DIR_NAMES = {
     ".cache",
@@ -45,6 +46,58 @@ def ensure_workspace_directory(working_dir: str | None = None) -> Path:
     if not root.is_dir():
         raise NotADirectoryError(f"Workspace is not a directory: {root}")
     return root
+
+
+def _filesystem_roots() -> list[dict[str, str]]:
+    if Path("C:/").exists():
+        roots = [
+            Path(f"{chr(code)}:/").resolve()
+            for code in range(ord("A"), ord("Z") + 1)
+            if Path(f"{chr(code)}:/").exists()
+        ]
+    else:
+        roots = [Path("/")]
+    return [{"name": str(root), "path": str(root)} for root in roots]
+
+
+def list_workspace_directories(path: str | None = None) -> dict[str, Any]:
+    source = str(path or "").strip()
+    root = Path(source).expanduser().resolve() if source else Path.home().resolve()
+    if not root.exists():
+        raise FileNotFoundError(f"Directory does not exist: {root}")
+    if not root.is_dir():
+        raise NotADirectoryError(f"Path is not a directory: {root}")
+
+    entries: list[dict[str, str]] = []
+    truncated = False
+    try:
+        children = sorted(
+            root.iterdir(),
+            key=lambda item: (not item.is_dir(), item.name.lower()),
+        )
+    except PermissionError as exc:
+        raise ValueError(f"Cannot access directory: {root}") from exc
+
+    for child in children:
+        if len(entries) >= MAX_DIRECTORY_BROWSE_ENTRIES:
+            truncated = True
+            break
+        try:
+            if not child.is_dir():
+                continue
+            resolved = child.resolve()
+        except OSError:
+            continue
+        entries.append({"name": child.name, "path": str(resolved)})
+
+    parent = "" if root.parent == root else str(root.parent)
+    return {
+        "path": str(root),
+        "parent": parent,
+        "entries": entries,
+        "roots": _filesystem_roots(),
+        "truncated": truncated,
+    }
 
 
 def resolve_workspace_child(root: Path, path: str | None = None) -> Path:

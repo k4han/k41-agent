@@ -153,6 +153,149 @@ def test_dashboard_workspace_default_returns_absolute_path() -> None:
     assert Path(response.json()["working_dir"]).is_absolute()
 
 
+def test_dashboard_workspace_resolve_accepts_existing_local_path(tmp_path: Path) -> None:
+    client = _create_dashboard_client(ChannelManager())
+
+    response = client.post(
+        "/dashboard-api/workspace/resolve",
+        json={"kind": "local", "working_dir": str(tmp_path)},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "kind": "local",
+        "label": str(tmp_path.resolve()),
+        "working_dir": str(tmp_path.resolve()),
+    }
+
+
+def test_dashboard_workspace_resolve_rejects_missing_local_path(tmp_path: Path) -> None:
+    client = _create_dashboard_client(ChannelManager())
+
+    response = client.post(
+        "/dashboard-api/workspace/resolve",
+        json={"kind": "local", "working_dir": str(tmp_path / "missing")},
+    )
+
+    assert response.status_code == 404
+    assert "Workspace does not exist" in response.json()["detail"]
+
+
+def test_dashboard_workspace_browse_lists_directories(tmp_path: Path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "README.md").write_text("ignored\n", encoding="utf-8")
+    client = _create_dashboard_client(ChannelManager())
+
+    response = client.get(
+        "/dashboard-api/workspace/browse",
+        params={"path": str(tmp_path)},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["path"] == str(tmp_path.resolve())
+    assert payload["parent"] == str(tmp_path.parent.resolve())
+    assert [entry["name"] for entry in payload["entries"]] == ["docs", "src"]
+    assert payload["roots"]
+
+
+def test_dashboard_workspace_browse_rejects_missing_path(tmp_path: Path) -> None:
+    client = _create_dashboard_client(ChannelManager())
+
+    response = client.get(
+        "/dashboard-api/workspace/browse",
+        params={"path": str(tmp_path / "missing")},
+    )
+
+    assert response.status_code == 404
+    assert "Directory does not exist" in response.json()["detail"]
+
+
+def test_dashboard_workspace_resolve_uses_github_service(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
+
+    class FakeGitHubService:
+        async def resolve_repository_workspace(self, repository_id: int):
+            assert repository_id == 123
+            return {
+                "kind": "github",
+                "label": "owner/repo",
+                "working_dir": str(tmp_path),
+            }
+
+    monkeypatch.setattr(
+        dashboard_router_module,
+        "get_github_automation_service",
+        lambda: FakeGitHubService(),
+    )
+    client = _create_dashboard_client(ChannelManager())
+
+    response = client.post(
+        "/dashboard-api/workspace/resolve",
+        json={"kind": "github", "repository_id": 123},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["working_dir"] == str(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_github_workspace_manager_clones_missing_shared_checkout(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    workspace_module = importlib.import_module("agent.modules.github.workspace")
+    manager = workspace_module.GitHubWorkspaceManager(root=tmp_path)
+    calls: list[dict[str, object]] = []
+
+    async def fake_run_git(args, *, cwd, token=None, capture=False):
+        calls.append({"args": args, "cwd": cwd, "token": token, "capture": capture})
+        if args[0] == "clone":
+            Path(args[-1]).mkdir(parents=True)
+            (Path(args[-1]) / ".git").mkdir()
+        return ""
+
+    monkeypatch.setattr(workspace_module, "_run_git", fake_run_git)
+
+    path = await manager.ensure_shared_checkout(
+        full_name="owner/repo",
+        token="token-1",
+    )
+
+    assert path == tmp_path / "owner" / "repo"
+    assert calls == [
+        {
+            "args": [
+                "clone",
+                "--origin",
+                "origin",
+                "https://github.com/owner/repo.git",
+                str(tmp_path / "owner" / "repo"),
+            ],
+            "cwd": tmp_path / "owner",
+            "token": "token-1",
+            "capture": False,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_github_workspace_manager_rejects_non_git_path(tmp_path: Path) -> None:
+    workspace_module = importlib.import_module("agent.modules.github.workspace")
+    manager = workspace_module.GitHubWorkspaceManager(root=tmp_path)
+    (tmp_path / "owner" / "repo").mkdir(parents=True)
+
+    with pytest.raises(ValueError, match="not a Git repository"):
+        await manager.ensure_shared_checkout(
+            full_name="owner/repo",
+            token="token-1",
+        )
+
+
 def test_dashboard_workspace_tree_ignores_noisy_directories(tmp_path: Path) -> None:
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "app.py").write_text("print('hello')\n", encoding="utf-8")

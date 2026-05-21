@@ -1,13 +1,20 @@
 import { useNavigate, useParams, useSearchParams } from "@solidjs/router";
 import {
+  ArrowUp,
   Bot,
+  CheckCircle2,
+  ChevronRight,
   FileText,
+  FolderOpen,
+  GitBranch,
   GripVertical,
+  HardDrive,
   Image as ImageIcon,
   MoreHorizontal,
   PanelRightClose,
   PanelRightOpen,
   Plus,
+  RefreshCw,
   Send,
   Square,
   X,
@@ -25,14 +32,21 @@ import {
 } from "@/components/Transcript";
 import { useToast } from "@/components/Toast";
 import { WorkspaceExplorer } from "@/components/WorkspaceExplorer";
-import { apiFetch, readError } from "@/lib/api";
+import { apiFetch, postJson, readError } from "@/lib/api";
 import {
   threadApiPath,
   toThreadTranscript,
 } from "@/lib/chatThreads";
 import type { TranscriptAttachment, TranscriptItem } from "@/components/Transcript";
 import type { ThreadMessagesPayload } from "@/lib/chatThreads";
-import type { ActiveSession, AgentCard, AgentsPayload, BackgroundTask } from "@/types";
+import type {
+  ActiveSession,
+  AgentCard,
+  AgentsPayload,
+  BackgroundTask,
+  GitHubPayload,
+  GitHubRepositoryBinding,
+} from "@/types";
 
 type ChatTranscriptItem = TranscriptItem & { id: number; key?: string };
 type ChatAttachmentKind = "text" | "image";
@@ -66,13 +80,28 @@ type BackgroundTaskSnapshot = ThreadMessagesPayload & {
 type DefaultWorkspacePayload = {
   working_dir: string;
 };
+type WorkspaceResolvePayload = {
+  kind: string;
+  label: string;
+  working_dir: string;
+};
+type WorkspaceBrowseEntry = {
+  name: string;
+  path: string;
+};
+type WorkspaceBrowsePayload = {
+  path: string;
+  parent: string;
+  entries: WorkspaceBrowseEntry[];
+  roots: WorkspaceBrowseEntry[];
+  truncated: boolean;
+};
 
 const MAX_ATTACHMENTS = 5;
 const MAX_TEXT_ATTACHMENT_BYTES = 100 * 1024;
 const MAX_IMAGE_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 const MAX_TOTAL_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const DEFAULT_ATTACHMENT_MESSAGE = "Please review the attached file(s).";
-const WORKSPACE_STORAGE_KEY = "kaka-dashboard-working-dir";
 const WORKSPACE_EXPLORER_OPEN_KEY = "kaka-dashboard-workspace-explorer-open";
 const WORKSPACE_EXPLORER_WIDTH_KEY = "kaka-dashboard-workspace-explorer-width";
 const WORKSPACE_EXPLORER_DEFAULT_WIDTH = 560;
@@ -229,6 +258,337 @@ function toPayloadAttachment(attachment: PendingAttachment): ChatAttachmentPaylo
   };
 }
 
+function WorkspaceSelector(props: {
+  workingDir: string;
+  defaultWorkingDir: string;
+  locked: boolean;
+  disabled?: boolean;
+  onResolved: (workingDir: string) => void;
+}) {
+  const { showToast } = useToast();
+  const [kind, setKind] = createSignal<"local" | "github">("local");
+  const [localDraft, setLocalDraft] = createSignal(props.defaultWorkingDir);
+  const [repositories, setRepositories] = createSignal<GitHubRepositoryBinding[]>([]);
+  const [repositoryId, setRepositoryId] = createSignal("");
+  const [repositoriesLoading, setRepositoriesLoading] = createSignal(false);
+  const [repositoriesError, setRepositoriesError] = createSignal("");
+  const [resolving, setResolving] = createSignal(false);
+  const [resolvedLabel, setResolvedLabel] = createSignal("");
+  const [browserOpen, setBrowserOpen] = createSignal(false);
+  const [browsePayload, setBrowsePayload] = createSignal<WorkspaceBrowsePayload | null>(null);
+  const [browseLoading, setBrowseLoading] = createSignal(false);
+  const [browseError, setBrowseError] = createSignal("");
+
+  const repositoryOptions = createMemo(() =>
+    repositories().map((repository) => ({
+      value: String(repository.repository_id),
+      label: repository.full_name,
+    })),
+  );
+
+  const selectedRepository = createMemo(() =>
+    repositories().find((repository) => String(repository.repository_id) === repositoryId()),
+  );
+
+  const resolveDisabled = createMemo(() => {
+    if (props.disabled || resolving()) {
+      return true;
+    }
+    if (kind() === "local") {
+      return !localDraft().trim();
+    }
+    return !repositoryId();
+  });
+
+  const loadRepositories = async () => {
+    setRepositoriesLoading(true);
+    setRepositoriesError("");
+    try {
+      const payload = await apiFetch<GitHubPayload>("/dashboard-api/github");
+      setRepositories(payload.repositories || []);
+      if (!repositoryId() && payload.repositories.length) {
+        setRepositoryId(String(payload.repositories[0].repository_id));
+      }
+    } catch (err) {
+      setRepositoriesError(err instanceof Error ? err.message : "Failed to load repositories");
+    } finally {
+      setRepositoriesLoading(false);
+    }
+  };
+
+  const loadBrowsePath = async (path?: string) => {
+    setBrowseLoading(true);
+    setBrowseError("");
+    try {
+      const query = path?.trim() ? `?path=${encodeURIComponent(path.trim())}` : "";
+      const payload = await apiFetch<WorkspaceBrowsePayload>(
+        `/dashboard-api/workspace/browse${query}`,
+      );
+      setBrowsePayload(payload);
+      setLocalDraft(payload.path);
+    } catch (err) {
+      setBrowseError(err instanceof Error ? err.message : "Failed to browse directories");
+    } finally {
+      setBrowseLoading(false);
+    }
+  };
+
+  const openBrowser = () => {
+    setBrowserOpen(true);
+    void loadBrowsePath(localDraft().trim() || props.defaultWorkingDir);
+  };
+
+  const closeBrowser = () => {
+    setBrowserOpen(false);
+    setBrowseError("");
+  };
+
+  const chooseCurrentBrowsePath = () => {
+    const payload = browsePayload();
+    if (payload?.path) {
+      setLocalDraft(payload.path);
+      closeBrowser();
+    }
+  };
+
+  const resolveWorkspace = async () => {
+    if (resolveDisabled()) {
+      return;
+    }
+    setResolving(true);
+    try {
+      const payload = await postJson<WorkspaceResolvePayload>(
+        "/dashboard-api/workspace/resolve",
+        kind() === "local"
+          ? { kind: "local", working_dir: localDraft().trim() }
+          : { kind: "github", repository_id: Number(repositoryId()) },
+      );
+      setLocalDraft(payload.working_dir);
+      setResolvedLabel(payload.label || payload.working_dir);
+      props.onResolved(payload.working_dir);
+      showToast("Workspace selected.", "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Workspace selection failed", "error");
+    } finally {
+      setResolving(false);
+    }
+  };
+
+  createEffect(() => {
+    if (props.workingDir) {
+      setLocalDraft(props.workingDir);
+    }
+  });
+
+  createEffect(() => {
+    if (!props.workingDir && props.defaultWorkingDir && !localDraft()) {
+      setLocalDraft(props.defaultWorkingDir);
+    }
+  });
+
+  onMount(() => {
+    void loadRepositories();
+  });
+
+  return (
+    <div class={`workspace-selector ${props.locked ? "locked" : ""}`}>
+      <div class="workspace-selector-status">
+        <Show when={props.workingDir || resolvedLabel()} fallback={<FolderOpen size={14} />}>
+          <CheckCircle2 size={14} />
+        </Show>
+        <span title={props.workingDir || resolvedLabel()}>
+          {props.workingDir || resolvedLabel() || "Select a workspace to start"}
+        </span>
+      </div>
+
+      <Show when={!props.locked}>
+        <div class="workspace-selector-controls">
+          <div class="workspace-selector-modes" role="tablist" aria-label="Workspace source">
+            <button
+              class={`workspace-selector-mode ${kind() === "local" ? "active" : ""}`}
+              type="button"
+              disabled={props.disabled || resolving()}
+              onClick={() => setKind("local")}
+              aria-selected={kind() === "local"}
+              role="tab"
+            >
+              <FolderOpen size={14} />
+              <span>Local path</span>
+            </button>
+            <button
+              class={`workspace-selector-mode ${kind() === "github" ? "active" : ""}`}
+              type="button"
+              disabled={props.disabled || resolving()}
+              onClick={() => setKind("github")}
+              aria-selected={kind() === "github"}
+              role="tab"
+            >
+              <GitBranch size={14} />
+              <span>GitHub repo</span>
+            </button>
+          </div>
+
+          <Show
+            when={kind() === "github"}
+            fallback={
+              <div class="workspace-selector-row">
+                <input
+                  class="input workspace-selector-input"
+                  value={localDraft()}
+                  disabled={props.disabled || resolving()}
+                  placeholder="Working directory"
+                  onInput={(event) => setLocalDraft(event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void resolveWorkspace();
+                    }
+                  }}
+                />
+                <button
+                  class="btn btn-sm"
+                  type="button"
+                  disabled={props.disabled || resolving()}
+                  onClick={openBrowser}
+                >
+                  <FolderOpen size={13} />
+                  Browse
+                </button>
+                <button
+                  class="btn btn-sm"
+                  type="button"
+                  disabled={resolveDisabled()}
+                  onClick={() => void resolveWorkspace()}
+                >
+                  <CheckCircle2 size={13} />
+                  Use
+                </button>
+                <Show when={browserOpen()}>
+                  <div class="workspace-browser">
+                    <div class="workspace-browser-header">
+                      <button
+                        class="btn btn-icon"
+                        type="button"
+                        disabled={browseLoading() || !browsePayload()?.parent}
+                        title="Parent directory"
+                        aria-label="Parent directory"
+                        onClick={() => void loadBrowsePath(browsePayload()?.parent)}
+                      >
+                        <ArrowUp size={14} />
+                      </button>
+                      <div class="workspace-browser-path" title={browsePayload()?.path || localDraft()}>
+                        {browsePayload()?.path || localDraft()}
+                      </div>
+                      <button
+                        class="btn btn-icon"
+                        type="button"
+                        disabled={browseLoading()}
+                        title="Refresh directories"
+                        aria-label="Refresh directories"
+                        onClick={() => void loadBrowsePath(browsePayload()?.path || localDraft())}
+                      >
+                        <RefreshCw size={14} />
+                      </button>
+                    </div>
+                    <div class="workspace-browser-roots">
+                      <For each={browsePayload()?.roots || []}>
+                        {(root) => (
+                          <button
+                            class="workspace-browser-root"
+                            type="button"
+                            disabled={browseLoading()}
+                            onClick={() => void loadBrowsePath(root.path)}
+                            title={root.path}
+                          >
+                            <HardDrive size={13} />
+                            <span>{root.name}</span>
+                          </button>
+                        )}
+                      </For>
+                    </div>
+                    <div class="workspace-browser-list">
+                      <Show
+                        when={!browseLoading()}
+                        fallback={<div class="workspace-browser-state">Loading directories...</div>}
+                      >
+                        <Show
+                          when={!browseError()}
+                          fallback={<div class="workspace-browser-state error">{browseError()}</div>}
+                        >
+                          <For
+                            each={browsePayload()?.entries || []}
+                            fallback={<div class="workspace-browser-state">No child directories.</div>}
+                          >
+                            {(entry) => (
+                              <button
+                                class="workspace-browser-item"
+                                type="button"
+                                onClick={() => void loadBrowsePath(entry.path)}
+                                title={entry.path}
+                              >
+                                <FolderOpen size={14} />
+                                <span>{entry.name}</span>
+                                <ChevronRight size={13} />
+                              </button>
+                            )}
+                          </For>
+                          <Show when={browsePayload()?.truncated}>
+                            <div class="workspace-browser-state">Directory list truncated.</div>
+                          </Show>
+                        </Show>
+                      </Show>
+                    </div>
+                    <div class="workspace-browser-footer">
+                      <button class="btn btn-sm" type="button" onClick={closeBrowser}>
+                        Cancel
+                      </button>
+                      <button
+                        class="btn btn-sm btn-primary"
+                        type="button"
+                        disabled={!browsePayload()?.path}
+                        onClick={chooseCurrentBrowsePath}
+                      >
+                        <CheckCircle2 size={13} />
+                        Choose folder
+                      </button>
+                    </div>
+                  </div>
+                </Show>
+              </div>
+            }
+          >
+            <div class="workspace-selector-row">
+              <SelectControl
+                value={repositoryId()}
+                options={repositoryOptions()}
+                disabled={props.disabled || resolving() || repositoriesLoading() || !repositoryOptions().length}
+                onChange={setRepositoryId}
+                ariaLabel="GitHub repository"
+                title={selectedRepository()?.full_name || "Select repository"}
+                icon={<GitBranch size={14} />}
+              />
+              <button
+                class="btn btn-sm"
+                type="button"
+                disabled={resolveDisabled()}
+                onClick={() => void resolveWorkspace()}
+              >
+                <CheckCircle2 size={13} />
+                Use
+              </button>
+            </div>
+            <Show when={repositoriesError() || (!repositoriesLoading() && !repositories().length)}>
+              <div class="hint workspace-selector-hint">
+                {repositoriesError() || "No synced GitHub repositories."}
+              </div>
+            </Show>
+          </Show>
+        </div>
+      </Show>
+    </div>
+  );
+}
+
 export function ChatPage() {
   const navigate = useNavigate();
   const params = useParams<{ threadId?: string }>();
@@ -282,11 +642,6 @@ export function ChatPage() {
   const setWorkspace = (value: string) => {
     const nextValue = value.trim();
     setWorkingDir(nextValue);
-    if (nextValue) {
-      window.localStorage.setItem(WORKSPACE_STORAGE_KEY, nextValue);
-    } else {
-      window.localStorage.removeItem(WORKSPACE_STORAGE_KEY);
-    }
   };
 
   const clampWorkspaceExplorerWidth = (
@@ -361,13 +716,8 @@ export function ChatPage() {
       const payload = await apiFetch<DefaultWorkspacePayload>("/dashboard-api/workspace/default");
       const fallback = payload.working_dir || "";
       setDefaultWorkingDir(fallback);
-      if (!currentThreadId() && !workingDir()) {
-        setWorkspace(window.localStorage.getItem(WORKSPACE_STORAGE_KEY) || fallback);
-      }
     } catch {
-      if (!currentThreadId() && !workingDir()) {
-        setWorkspace(window.localStorage.getItem(WORKSPACE_STORAGE_KEY) || "");
-      }
+      setDefaultWorkingDir("");
     }
   };
 
@@ -384,7 +734,7 @@ export function ChatPage() {
   const pageSubtitle = createMemo(() => (
     currentThreadId()
       ? "Continue this thread."
-      : "Stream an agent response with visible tool calls."
+      : "Choose a workspace, then stream an agent response with visible tool calls."
   ));
   const isBackgroundThread = createMemo(() => threadData()?.kind === "background");
   const threadStatusVisible = createMemo(() => Boolean(
@@ -405,8 +755,13 @@ export function ChatPage() {
     const task = backgroundTask();
     return Boolean(task && ACTIVE_TASK_STATUSES.has(task.status));
   });
-  const composerDisabled = createMemo(() => (
+  const conversationBusy = createMemo(() => (
     streaming() || threadLoading() || backgroundTaskActive() || backgroundLive()
+  ));
+  const workspaceLocked = createMemo(() => Boolean(currentThreadId() && workingDir().trim()));
+  const workspaceMissing = createMemo(() => !workingDir().trim());
+  const composerDisabled = createMemo(() => (
+    conversationBusy() || workspaceMissing()
   ));
 
   createEffect(() => {
@@ -489,11 +844,7 @@ export function ChatPage() {
   const applyThreadPayload = (payload: ThreadMessagesPayload) => {
     setThreadData(payload);
     setCurrentThreadId(payload.thread_id);
-    setWorkspace(
-      payload.working_dir
-      || window.localStorage.getItem(WORKSPACE_STORAGE_KEY)
-      || defaultWorkingDir(),
-    );
+    setWorkspace(payload.working_dir || "");
     setItems(
       toThreadTranscript(payload.messages).map((item) => ({
         ...item,
@@ -649,7 +1000,7 @@ export function ChatPage() {
       setThreadError("");
       setThreadLoading(false);
       setItems([]);
-      setWorkspace(window.localStorage.getItem(WORKSPACE_STORAGE_KEY) || defaultWorkingDir());
+      setWorkspace("");
       closeBackgroundStream();
       setBackgroundTask(null);
       return;
@@ -877,6 +1228,10 @@ export function ChatPage() {
       showToast("No valid agent is available.", "error");
       return;
     }
+    if (!workingDir().trim()) {
+      showToast("Select a workspace before sending.", "warning");
+      return;
+    }
 
     appendItem({
       type: "message",
@@ -1031,7 +1386,22 @@ export function ChatPage() {
                   fallback={
                     <Show
                       when={threadLoading()}
-                      fallback={<div class="empty">Send a message to start a conversation.</div>}
+                      fallback={
+                        <Show
+                          when={!currentThreadId()}
+                          fallback={<div class="empty">Send a message to continue this thread.</div>}
+                        >
+                          <div class="chat-workspace-empty">
+                            <WorkspaceSelector
+                              workingDir={workingDir()}
+                              defaultWorkingDir={defaultWorkingDir()}
+                              locked={false}
+                              disabled={conversationBusy()}
+                              onResolved={setWorkspace}
+                            />
+                          </div>
+                        </Show>
+                      }
                     >
                       <div class="empty">Loading thread...</div>
                     </Show>
@@ -1059,9 +1429,11 @@ export function ChatPage() {
                   placeholder={
                     backgroundTaskActive()
                       ? "Background task is running..."
-                      : currentThreadId()
-                        ? "Continue this thread..."
-                        : "Ask Kaka to build features, fix bugs, or work on your code"
+                      : workspaceMissing()
+                        ? "Select a workspace before sending..."
+                        : currentThreadId()
+                          ? "Continue this thread..."
+                          : "Ask Kaka to build features, fix bugs, or work on your code"
                   }
                   onInput={(event) => setPrompt(event.currentTarget.value)}
                   onKeyDown={(event) => {
@@ -1153,7 +1525,7 @@ export function ChatPage() {
                         class="chat-composer-icon"
                         type="button"
                         onClick={sendMessage}
-                        disabled={threadLoading() || backgroundTaskActive() || backgroundLive() || (!prompt().trim() && !attachments().length)}
+                        disabled={composerDisabled() || (!prompt().trim() && !attachments().length)}
                         title="Send"
                         aria-label="Send"
                       >
@@ -1218,7 +1590,7 @@ export function ChatPage() {
               <WorkspaceExplorer
                 threadId={currentThreadId()}
                 workingDir={workingDir()}
-                disabled={composerDisabled()}
+                disabled={conversationBusy() || !workingDir().trim() || !currentThreadId() || workspaceLocked()}
                 onWorkingDirChange={setWorkspace}
               />
             </div>

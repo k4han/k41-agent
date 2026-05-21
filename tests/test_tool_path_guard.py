@@ -90,7 +90,16 @@ def test_run_bash_uses_safe_resolved_working_dir(monkeypatch, tmp_path):
         captured["resolve_input"] = f"{working_dir}|{file_path}"
         return resolved_dir
 
-    def _fake_subprocess_run(command, shell, cwd, capture_output, text, timeout):
+    def _fake_subprocess_run(
+        command,
+        shell,
+        cwd,
+        capture_output,
+        text,
+        encoding,
+        errors,
+        timeout,
+    ):
         captured["cwd"] = cwd
         return SimpleNamespace(stdout="ok", stderr="")
 

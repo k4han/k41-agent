@@ -23,6 +23,42 @@ class GitHubWorkspaceManager:
     def __init__(self, root: Path = GITHUB_WORKSPACE_ROOT) -> None:
         self.root = root.expanduser()
 
+    def repository_path(self, full_name: str) -> Path:
+        owner, repo = _split_full_name(full_name)
+        return self.root / owner / repo
+
+    async def ensure_shared_checkout(
+        self,
+        *,
+        full_name: str,
+        token: str,
+    ) -> Path:
+        repo_path = self.repository_path(full_name)
+        repo_url = f"https://github.com/{full_name}.git"
+
+        if repo_path.exists() and not (repo_path / ".git").exists():
+            raise ValueError(
+                f"Repository workspace exists but is not a Git repository: {repo_path}"
+            )
+
+        if not repo_path.exists():
+            repo_path.parent.mkdir(parents=True, exist_ok=True)
+            await _run_git(
+                [
+                    "clone",
+                    "--origin",
+                    "origin",
+                    repo_url,
+                    str(repo_path),
+                ],
+                cwd=repo_path.parent,
+                token=token,
+            )
+        else:
+            await _run_git(["remote", "set-url", "origin", repo_url], cwd=repo_path)
+
+        return repo_path
+
     async def prepare(
         self,
         *,

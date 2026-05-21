@@ -31,8 +31,7 @@ render(
       <Router>
         <Route path="/" component={OverviewPage} />
         <Route path="/login" component={LoginPage} />
-        <Route path="/chat" component={ChatPage} />
-        <Route path="/c/:threadId" component={ChatPage} />
+        <Route path={["/chat", "/c/:threadId"]} component={ChatPage} />
         <Route path="/history" component={ChatHistoryListPage} />
         <Route path="/sessions" component={SessionsPage} />
         <Route path="/repositories" component={RepositoriesPage} />

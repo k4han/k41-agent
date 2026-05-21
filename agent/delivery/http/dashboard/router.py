@@ -43,10 +43,12 @@ from agent.modules.tools import get_default_tool_names
 from agent.modules.users import get_pairing_service
 from agent.modules.workspaces import (
     delete_workspace_entry,
+    ensure_workspace_directory,
     get_thread_workspace_dir,
     get_workspace_changes,
     get_workspace_diff,
     get_workspace_file,
+    list_workspace_directories,
     list_workspace_tree,
     rename_workspace_entry,
     resolve_workspace_root,
@@ -400,7 +402,11 @@ def _is_active_background_task(task: dict[str, Any] | None) -> bool:
     return bool(task and task.get("status") in BACKGROUND_TASK_ACTIVE_STATUSES)
 
 
-async def _workspace_dir_for_thread(thread_id: str) -> str:
+async def _workspace_dir_for_thread(
+    thread_id: str,
+    *,
+    include_default: bool = True,
+) -> str:
     if thread_id:
         task = get_background_task_manager().get_by_thread_id(thread_id)
         task_working_dir = str((task or {}).get("working_dir") or "").strip()
@@ -419,7 +425,7 @@ async def _workspace_dir_for_thread(thread_id: str) -> str:
         if stored_working_dir:
             return str(resolve_workspace_root(stored_working_dir))
 
-    return str(resolve_workspace_root(None))
+    return str(resolve_workspace_root(None)) if include_default else ""
 
 
 async def _workspace_dir_from_request(
@@ -573,6 +579,16 @@ async def get_dashboard_default_workspace() -> dict[str, str]:
     return {"working_dir": str(resolve_workspace_root(None))}
 
 
+@router.get("/dashboard-api/workspace/browse")
+async def browse_dashboard_workspace(
+    path: str | None = Query(default=None),
+) -> dict[str, Any]:
+    try:
+        return list_workspace_directories(path)
+    except Exception as exc:
+        raise _workspace_http_error(exc) from exc
+
+
 @router.get("/dashboard-api/workspace/tree")
 async def get_dashboard_workspace_tree(
     thread_id: str | None = Query(default=None),
@@ -665,6 +681,36 @@ class WorkspaceDeleteBody(BaseModel):
     thread_id: str | None = None
     working_dir: str | None = None
     path: str = Field(..., min_length=1)
+
+
+class WorkspaceResolveBody(BaseModel):
+    kind: str = Field(..., min_length=1)
+    working_dir: str | None = None
+    repository_id: int | None = None
+
+
+@router.post("/dashboard-api/workspace/resolve")
+async def resolve_dashboard_workspace(body: WorkspaceResolveBody) -> dict[str, str]:
+    kind = body.kind.strip().lower()
+    try:
+        if kind == "local":
+            root = ensure_workspace_directory(body.working_dir)
+            return {
+                "kind": "local",
+                "label": str(root),
+                "working_dir": str(root),
+            }
+        if kind == "github":
+            if body.repository_id is None:
+                raise ValueError("Repository ID is required.")
+            return await get_github_automation_service().resolve_repository_workspace(
+                body.repository_id,
+            )
+        raise ValueError(f"Unsupported workspace kind: {body.kind}")
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise _workspace_http_error(exc) from exc
 
 
 @router.post("/dashboard-api/workspace/delete")
@@ -1460,7 +1506,7 @@ async def get_chat_thread_messages(thread_id: str) -> dict[str, Any]:
 
     metadata = await get_conversation_thread(thread_id)
     parsed = metadata or _parse_thread_id_safe(thread_id)
-    working_dir = await _workspace_dir_for_thread(thread_id)
+    working_dir = await _workspace_dir_for_thread(thread_id, include_default=False)
     return {
         "thread_id": thread_id,
         "messages": messages,
@@ -1557,7 +1603,7 @@ async def get_background_task_messages(thread_id: str) -> dict[str, Any]:
 
     metadata = await get_conversation_thread(thread_id)
     parsed = metadata or _parse_thread_id_safe(thread_id)
-    working_dir = await _workspace_dir_for_thread(thread_id)
+    working_dir = await _workspace_dir_for_thread(thread_id, include_default=False)
     return {
         "thread_id": thread_id,
         "messages": messages,

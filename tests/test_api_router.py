@@ -304,13 +304,16 @@ def test_chat_events_can_resume_existing_thread(monkeypatch):
     assert response.text == '{"type": "final", "content": "resumed"}\n'
 
 
-def test_chat_events_can_create_new_thread(monkeypatch):
+def test_chat_events_can_create_new_thread(monkeypatch, tmp_path):
+    requested_working_dir = str(tmp_path)
+    resolved_working_dir = str(router_module.resolve_workspace_root(requested_working_dir))
+    remembered: list[tuple[str, str]] = []
     built_params = {
         "user_input": "Start",
         "thread_id": "api_dashboard_generated",
         "agent_name": "default",
         "workflow": None,
-        "working_dir": None,
+        "working_dir": requested_working_dir,
         "max_context_tokens": None,
         "provider": None,
         "model": None,
@@ -328,7 +331,7 @@ def test_chat_events_can_create_new_thread(monkeypatch):
             "user_id": "dashboard",
             "user_input": "Start",
             "workflow": None,
-            "working_dir": None,
+            "working_dir": requested_working_dir,
             "agent_name": "default",
             "provider": None,
             "model": None,
@@ -336,13 +339,43 @@ def test_chat_events_can_create_new_thread(monkeypatch):
         }
         return dict(built_params)
 
+    async def fake_remember_thread_workspace(thread_id: str, working_dir: str):
+        remembered.append((thread_id, working_dir))
+        return working_dir
+
     async def fake_run_agent_stream(**params):
-        assert params == built_params
+        assert params == {**built_params, "working_dir": resolved_working_dir}
         yield {"type": "final", "content": "started"}
 
     monkeypatch.setattr(router_module, "build_run_params", fake_build_run_params)
+    monkeypatch.setattr(router_module, "remember_thread_workspace", fake_remember_thread_workspace)
     monkeypatch.setattr(router_module, "run_agent_stream", fake_run_agent_stream)
 
+    client = _create_client()
+    response = client.post(
+        "/api/chat/events",
+        json={
+            "message": "Start",
+            "user_id": "dashboard",
+            "new_thread": True,
+            "working_dir": requested_working_dir,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.text == (
+        '{"type": "thread_created", "thread_id": "api_dashboard_generated"}\n'
+        '{"type": "final", "content": "started"}\n'
+    )
+    assert remembered == [("api_dashboard_generated", resolved_working_dir)]
+
+
+def test_chat_events_rejects_dashboard_new_thread_without_working_dir(monkeypatch):
+    monkeypatch.setattr(
+        router_module,
+        "create_thread_id",
+        lambda **kwargs: "api_dashboard_generated",
+    )
     client = _create_client()
     response = client.post(
         "/api/chat/events",
@@ -353,11 +386,8 @@ def test_chat_events_can_create_new_thread(monkeypatch):
         },
     )
 
-    assert response.status_code == 200
-    assert response.text == (
-        '{"type": "thread_created", "thread_id": "api_dashboard_generated"}\n'
-        '{"type": "final", "content": "started"}\n'
-    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Dashboard chats require a resolved working directory."
 
 
 def test_chat_events_resolves_and_remembers_working_dir(monkeypatch, tmp_path):

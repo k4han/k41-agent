@@ -14,7 +14,7 @@ def load_orm_models() -> tuple[type[object], ...]:
         GitHubRepositoryBinding,
         GitHubWebhookDelivery,
     )
-    from agent.modules.workspaces.models import ThreadWorkspace
+    from agent.modules.workspaces import ThreadWorkspace
     from agent.modules.users import User
     from agent.shared.infrastructure.db.user_preferences import UserPreferences
 

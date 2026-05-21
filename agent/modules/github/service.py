@@ -81,6 +81,22 @@ class GitHubAutomationService:
     async def list_repository_bindings(self) -> list[dict[str, Any]]:
         return await self.store.list_bindings()
 
+    async def resolve_repository_workspace(self, repository_id: int) -> dict[str, str]:
+        binding = await self.store.get_binding_by_repository_id(repository_id)
+        if binding is None:
+            raise KeyError(f"GitHub repository '{repository_id}' is not synced.")
+
+        token = await self.client.get_installation_token(int(binding.installation_id))
+        path = await self.workspace_manager.ensure_shared_checkout(
+            full_name=binding.full_name,
+            token=token,
+        )
+        return {
+            "kind": "github",
+            "label": binding.full_name,
+            "working_dir": str(path.resolve()),
+        }
+
     async def update_repository_binding(
         self,
         repository_id: int,

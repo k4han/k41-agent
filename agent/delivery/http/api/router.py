@@ -41,6 +41,16 @@ router = APIRouter(
 
 def _request_to_run_params(request: ChatRequest) -> dict[str, object]:
     thread_id = request.thread_id
+    if (
+        request.new_thread
+        and not thread_id
+        and request.user_id == "dashboard"
+        and not (request.working_dir or "").strip()
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Dashboard chats require a resolved working directory.",
+        )
     if request.new_thread and not thread_id:
         thread_id = create_thread_id(
             platform=Platform.API,
