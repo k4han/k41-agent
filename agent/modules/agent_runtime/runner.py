@@ -3,6 +3,7 @@ import binascii
 from contextlib import contextmanager
 import logging
 from typing import Any, AsyncGenerator, Iterator
+from uuid import uuid4
 
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 from agent.shared.infrastructure.parsing import extract_final_text_content
@@ -216,9 +217,10 @@ def _make_user_message(
     user_input: str,
     attachments: list[Any] | None = None,
 ) -> HumanMessage:
+    message_id = f"user-{uuid4()}"
     normalized_attachments = _normalize_chat_attachments(attachments)
     if not normalized_attachments:
-        return HumanMessage(content=user_input)
+        return HumanMessage(content=user_input, id=message_id)
 
     content_blocks: list[dict[str, str]] = [
         {
@@ -241,6 +243,7 @@ def _make_user_message(
 
     return HumanMessage(
         content=content_blocks,
+        id=message_id,
         additional_kwargs={"attachments": _attachment_metadata(normalized_attachments)},
     )
 
@@ -324,6 +327,10 @@ def _extract_message_chunk_content(event: Any) -> str:
     if isinstance(content, list):
         return "".join(extract_part(part) for part in content)
     return extract_part(content)
+
+
+def _message_id(message: Any) -> str:
+    return str(getattr(message, "id", "") or "")
 
 
 @contextmanager
@@ -488,7 +495,7 @@ async def run_agent_stream(
         title=user_input,
     )
 
-    seen_ids = set()
+    seen_ids: set[str] = set()
 
     stream_kwargs: dict[str, Any] = {
         "config": config,
@@ -499,6 +506,8 @@ async def run_agent_stream(
 
     registry = get_active_session_registry()
     user_message = _make_user_message(user_input, attachments)
+    user_message_id = _message_id(user_message)
+    current_user_seen = False
     with _track_active_session(thread_id, agent_name) as session_id:
         async for event in graph.astream(
             {"messages": [user_message]},
@@ -523,8 +532,31 @@ async def run_agent_stream(
             if not messages:
                 continue
 
+            if user_message_id:
+                current_user_index = next(
+                    (
+                        index
+                        for index, message in enumerate(messages)
+                        if _message_id(message) == user_message_id
+                    ),
+                    None,
+                )
+                if current_user_index is not None:
+                    current_user_seen = True
+                    for message in messages[: current_user_index + 1]:
+                        message_id = _message_id(message)
+                        if message_id:
+                            seen_ids.add(message_id)
+                    messages = messages[current_user_index + 1 :]
+                elif not current_user_seen and len(messages) > 1:
+                    for message in messages:
+                        message_id = _message_id(message)
+                        if message_id:
+                            seen_ids.add(message_id)
+                    continue
+
             for message in messages:
-                message_id = getattr(message, "id", None)
+                message_id = _message_id(message)
                 if message_id:
                     if message_id in seen_ids:
                         continue

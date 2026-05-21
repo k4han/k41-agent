@@ -432,6 +432,59 @@ async def test_run_agent_stream_emits_message_chunks_and_final(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_agent_stream_skips_checkpoint_messages_before_current_user(monkeypatch):
+    class _FakeCatalog:
+        def get_agent(self, name: str):
+            return SimpleNamespace(
+                graph_type="react_agent",
+                max_context_tokens=1234,
+                tools=["list_files"],
+            )
+
+    class _FakeGraph:
+        async def astream(self, payload, **kwargs):
+            user_message = payload["messages"][0]
+            checkpoint_messages = [
+                HumanMessage(content="old request", id="old-user"),
+                AIMessage(content="old response", id="old-ai"),
+                user_message,
+            ]
+            yield ("values", {"messages": checkpoint_messages})
+            yield (
+                "values",
+                {
+                    "messages": [
+                        *checkpoint_messages,
+                        AIMessage(content="current response", id="current-ai"),
+                    ]
+                },
+            )
+
+    monkeypatch.setattr(
+        "agent.modules.agents.get_catalog_service",
+        lambda: _FakeCatalog(),
+    )
+    monkeypatch.setattr(runner_module, "get_workflow_graph", lambda name: _FakeGraph())
+    monkeypatch.setattr(runner_module, "make_run_context", lambda **kwargs: kwargs)
+    monkeypatch.setattr(
+        runner_module,
+        "make_run_config",
+        lambda **kwargs: {"configurable": {"thread_id": kwargs["thread_id"]}},
+    )
+
+    events = [
+        event
+        async for event in runner_module.run_agent_stream(
+            user_input="new request",
+            thread_id="thread-1",
+            agent_name="default",
+        )
+    ]
+
+    assert events == [{"type": "final", "content": "current response"}]
+
+
+@pytest.mark.asyncio
 async def test_run_agent_stream_emits_tool_call_and_result(monkeypatch):
     class _FakeCatalog:
         def get_agent(self, name: str):
