@@ -662,23 +662,7 @@ export function WorkspaceExplorer(props: {
   };
 
   return (
-    <aside class="panel workspace-explorer">
-      <div class="workspace-explorer-header">
-        <div class="workspace-explorer-title">
-          <GitCompare size={14} />
-          <span>Workspace Explorer</span>
-        </div>
-        <button
-          class="btn btn-icon"
-          type="button"
-          onClick={refresh}
-          title="Refresh workspace"
-          aria-label="Refresh workspace"
-        >
-          <RefreshCw size={14} />
-        </button>
-      </div>
-
+    <aside class="workspace-explorer">
       <div class="workspace-dir-control">
         <input
           class="input workspace-dir-input"
@@ -693,8 +677,9 @@ export function WorkspaceExplorer(props: {
             }
           }}
         />
-        <button class="btn btn-sm" type="button" onClick={applyWorkingDir} disabled={props.disabled}>
-          Apply
+        <button class="btn btn-sm" type="button" onClick={refresh} disabled={!canQuery()}>
+          <RefreshCw size={13} />
+          <span>Reload</span>
         </button>
       </div>
 
@@ -753,7 +738,6 @@ export function WorkspaceExplorer(props: {
       <div class="workspace-explorer-body">
         <Show when={activeTab() === "changes"}>
           <section class="workspace-section workspace-tab-panel" role="tabpanel">
-            <div class="workspace-section-title">Changed files</div>
             <Show
               when={!changesLoading()}
               fallback={<div class="empty compact">Loading changes...</div>}
@@ -849,7 +833,6 @@ export function WorkspaceExplorer(props: {
 
         <Show when={activeTab() === "files"}>
           <section class="workspace-section workspace-tree-section workspace-tab-panel" role="tabpanel">
-            <div class="workspace-section-title">Files</div>
             <Show when={!treeError()} fallback={<div class="empty compact">{treeError()}</div>}>
               <Show
                 when={rootEntries().length > 0}
@@ -872,9 +855,6 @@ export function WorkspaceExplorer(props: {
 
         <Show when={activeTab().startsWith("file:")}>
           <section class="workspace-section workspace-file-panel workspace-tab-panel" role="tabpanel">
-            <div class="workspace-section-title" title={activeFilePath()}>
-              {activeFilePath()}
-            </div>
             <Show
               when={!fileLoadingByPath()[activeFilePath()]}
               fallback={<div class="empty compact">Loading file...</div>}
