@@ -121,6 +121,22 @@ class GitHubAppClient:
             },
         )
 
+    async def create_pull_request_review_comment_reply(
+        self,
+        *,
+        installation_id: int,
+        full_name: str,
+        pull_request_number: int,
+        comment_id: int,
+        body: str,
+    ) -> dict[str, Any]:
+        token = await self.get_installation_token(installation_id)
+        return await self._post_json(
+            f"/repos/{full_name}/pulls/{pull_request_number}/comments/{comment_id}/replies",
+            token=token,
+            json={"body": body},
+        )
+
     async def _get_all_pages(
         self,
         path: str,

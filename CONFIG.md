@@ -96,7 +96,7 @@ channels:
       - "/kaka"
 ```
 
-GitHub App V1 dùng một app cho toàn instance, không cần `client_secret`. App cần quyền tối thiểu: Metadata read, Issues read/write, Contents read/write, Pull requests read/write. Bật webhook events: `issues`, `issue_comment`, `installation`, `installation_repositories`, `ping`. Webhook URL là `/channels/github/webhook`.
+GitHub App V1 dùng một app cho toàn instance, không cần `client_secret`. App cần quyền tối thiểu: Metadata read, Issues read/write, Contents read/write, Pull requests read/write. Bật webhook events: `issues`, `issue_comment`, `pull_request_review_comment`, `installation`, `installation_repositories`, `ping`. Webhook URL là `/channels/github/webhook`.
 
 ### 4. Chạy
 

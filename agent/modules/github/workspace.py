@@ -95,6 +95,47 @@ class GitHubWorkspaceManager:
 
         return PreparedWorkspace(path=repo_path, branch=safe_branch, base_branch=base_branch)
 
+    async def prepare_existing_branch(
+        self,
+        *,
+        full_name: str,
+        branch: str,
+        base_branch: str,
+        token: str,
+    ) -> PreparedWorkspace:
+        owner, repo = _split_full_name(full_name)
+        repo_path = self.root / owner / repo
+        repo_url = f"https://github.com/{full_name}.git"
+        branch_name = branch.strip()
+        if not branch_name:
+            raise ValueError("Branch name is required.")
+
+        if not (repo_path / ".git").exists():
+            repo_path.parent.mkdir(parents=True, exist_ok=True)
+            await _run_git(
+                [
+                    "clone",
+                    "--origin",
+                    "origin",
+                    repo_url,
+                    str(repo_path),
+                ],
+                cwd=repo_path.parent,
+                token=token,
+            )
+        else:
+            await _run_git(["remote", "set-url", "origin", repo_url], cwd=repo_path)
+
+        await _run_git(["fetch", "--prune", "origin"], cwd=repo_path, token=token)
+        await _run_git(["checkout", "-B", branch_name, f"origin/{branch_name}"], cwd=repo_path)
+        await _run_git(["clean", "-fd"], cwd=repo_path)
+
+        return PreparedWorkspace(
+            path=repo_path,
+            branch=branch_name,
+            base_branch=base_branch or "main",
+        )
+
     async def has_changes(self, path: Path) -> bool:
         result = await _run_git(["status", "--porcelain"], cwd=path, capture=True)
         return bool(result.strip())

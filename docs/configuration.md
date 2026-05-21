@@ -254,9 +254,9 @@ channels:
     webhook_secret: "your-github-webhook-secret"
 ```
 
-App cần quyền Metadata read, Issues read/write, Contents read/write, Pull requests read/write. Bật events `issues`, `issue_comment`, `installation`, `installation_repositories`, `ping`. Endpoint nhận webhook là `/channels/github/webhook`.
+App cần quyền Metadata read, Issues read/write, Contents read/write, Pull requests read/write. Bật events `issues`, `issue_comment`, `pull_request_review_comment`, `installation`, `installation_repositories`, `ping`. Endpoint nhận webhook là `/channels/github/webhook`.
 
-Repo được clone vào `~/kaka-agent/github-workspaces/{owner}/{repo}`. Khi issue/comment được trigger, backend chuẩn bị branch local, chạy agent trong working directory của repo, rồi commit/push/create PR bằng installation token.
+Repo được clone vào `~/kaka-agent/github-workspaces/{owner}/{repo}`. Khi issue/comment được trigger, backend chuẩn bị branch local, chạy agent trong working directory của repo, rồi commit/push/create PR bằng installation token. Khi có `pull_request_review_comment`, backend checkout branch đang mở PR, chạy agent với ngữ cảnh review comment, rồi commit/push lại cùng PR.
 
 ### Database path error
 

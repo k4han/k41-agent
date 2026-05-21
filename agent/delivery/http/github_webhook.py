@@ -43,13 +43,30 @@ async def github_webhook(
 
     try:
         service = get_github_automation_service()
-        return await service.handle_webhook(
+        result = await service.handle_webhook(
             event=event or "",
             delivery_id=delivery_id or "",
             payload=payload,
         )
+        logger.info(
+            "GitHub webhook handled: event=%s delivery=%s action=%s repo=%s status=%s reason=%s",
+            event or "",
+            delivery_id or "",
+            str(payload.get("action") or ""),
+            _repository_full_name(payload),
+            str(result.get("status") or ""),
+            str(result.get("reason") or ""),
+        )
+        return result
     except HTTPException:
         raise
     except Exception as exc:
         logger.exception("GitHub webhook processing failed.")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+def _repository_full_name(payload: dict[str, Any]) -> str:
+    repository = payload.get("repository")
+    if not isinstance(repository, dict):
+        return ""
+    return str(repository.get("full_name") or "")

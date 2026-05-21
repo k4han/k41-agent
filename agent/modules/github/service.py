@@ -19,6 +19,16 @@ from agent.modules.github.workspace import GitHubWorkspaceManager
 
 logger = logging.getLogger(__name__)
 
+SUPPORTED_WEBHOOK_EVENTS = {
+    "issues",
+    "issue_comment",
+    "pull_request_review_comment",
+    "installation",
+    "installation_repositories",
+}
+COMPLETION_OPEN_PULL_REQUEST = "open_pull_request"
+COMPLETION_UPDATE_PULL_REQUEST = "update_pull_request"
+
 
 @dataclass(frozen=True, slots=True)
 class GitHubTaskContext:
@@ -30,6 +40,8 @@ class GitHubTaskContext:
     branch: str
     base_branch: str
     workspace_path: Path
+    completion_mode: str = COMPLETION_OPEN_PULL_REQUEST
+    review_comment_id: int | None = None
 
 
 def verify_webhook_signature(
@@ -131,7 +143,7 @@ class GitHubAutomationService:
         if event == "ping":
             return {"status": "ok", "event": "ping"}
 
-        if event not in {"issues", "issue_comment", "installation", "installation_repositories"}:
+        if event not in SUPPORTED_WEBHOOK_EVENTS:
             return {"status": "ignored", "reason": "unsupported_event"}
 
         action = str(payload.get("action") or "")
@@ -161,10 +173,6 @@ class GitHubAutomationService:
         if str(sender.get("type") or "").lower() == "bot":
             return {"status": "ignored", "reason": "bot_sender"}
 
-        issue = payload.get("issue") or {}
-        if issue.get("pull_request"):
-            return {"status": "ignored", "reason": "pull_request_comment"}
-
         repository_id = repository.get("id")
         if repository_id is None:
             return {"status": "ignored", "reason": "missing_repository"}
@@ -173,17 +181,44 @@ class GitHubAutomationService:
         if binding is None or not binding.enabled:
             return {"status": "ignored", "reason": "repository_not_enabled"}
 
-        if event == "issues" and not self._should_handle_issue_event(action, issue, binding.trigger_label):
-            return {"status": "ignored", "reason": "issue_not_triggered"}
+        if event in {"issues", "issue_comment"}:
+            issue = payload.get("issue") or {}
+            if issue.get("pull_request"):
+                return {"status": "ignored", "reason": "pull_request_comment"}
 
-        if event == "issue_comment" and not self._should_handle_comment_event(action, payload, binding.mention_triggers_json):
-            return {"status": "ignored", "reason": "comment_not_triggered"}
+            if event == "issues" and not self._should_handle_issue_event(action, issue, binding.trigger_label):
+                return {"status": "ignored", "reason": "issue_not_triggered"}
 
-        task_id = await self._submit_task(
+            if event == "issue_comment" and not self._should_handle_comment_event(
+                action,
+                payload,
+                binding.mention_triggers_json,
+            ):
+                return {"status": "ignored", "reason": "comment_not_triggered"}
+
+            task_id = await self._submit_task(
+                payload=payload,
+                binding=binding,
+                event=event,
+                delivery_id=delivery_id,
+            )
+            return {"status": "submitted", "task_id": task_id}
+
+        if not self._should_handle_review_comment_event(action, payload):
+            return {"status": "ignored", "reason": "review_comment_not_triggered"}
+
+        pull_request = payload.get("pull_request") or {}
+        head = pull_request.get("head") or {}
+        if not str(head.get("ref") or ""):
+            return {"status": "ignored", "reason": "missing_pr_branch"}
+        head_repository = head.get("repo") or {}
+        head_repository_full_name = str(head_repository.get("full_name") or binding.full_name)
+        if head_repository_full_name != binding.full_name:
+            return {"status": "ignored", "reason": "fork_pull_request"}
+
+        task_id = await self._submit_review_comment_task(
             payload=payload,
             binding=binding,
-            event=event,
-            delivery_id=delivery_id,
         )
         return {"status": "submitted", "task_id": task_id}
 
@@ -205,6 +240,17 @@ class GitHubAutomationService:
         body = str((payload.get("comment") or {}).get("body") or "").lower()
         triggers = load_mention_triggers(mention_triggers_json)
         return any(trigger.lower() in body for trigger in triggers)
+
+    def _should_handle_review_comment_event(
+        self,
+        action: str,
+        payload: dict[str, Any],
+    ) -> bool:
+        if action != "created":
+            return False
+        comment = payload.get("comment") or {}
+        pull_request = payload.get("pull_request") or {}
+        return bool(comment.get("body") and pull_request.get("number"))
 
     async def _submit_task(
         self,
@@ -254,19 +300,85 @@ class GitHubAutomationService:
         )
 
         manager = get_background_task_manager()
-        notify_channel = None
-        if binding.notify_platform and binding.notify_external_id:
-            notify_channel = NotifyChannel(
-                platform=binding.notify_platform,
-                external_id=binding.notify_external_id,
-                channel_id=binding.notify_channel_id or binding.notify_external_id,
-            )
         return await manager.submit(
             request=prompt,
             agent_name=agent_name,
             working_dir=str(prepared.path),
-            notify_channel=notify_channel,
+            notify_channel=self._notify_channel_for_binding(binding),
             completion_hook=lambda task: self.publish_task_result(task, context),
+        )
+
+    async def _submit_review_comment_task(
+        self,
+        *,
+        payload: dict[str, Any],
+        binding: Any,
+    ) -> str:
+        repository = payload["repository"]
+        pull_request = payload["pull_request"]
+        comment = payload.get("comment") or {}
+        installation = payload.get("installation") or {}
+        installation_id = int(installation.get("id") or binding.installation_id)
+        pull_request_number = int(pull_request["number"])
+        head = pull_request.get("head") or {}
+        base = pull_request.get("base") or {}
+        branch = str(head.get("ref") or "")
+        if not branch:
+            raise ValueError("Pull request head branch is missing.")
+
+        agent_name = resolve_catalog_agent_name(
+            binding.agent_name,
+            self.settings.default_agent,
+            "default",
+        ) or "default"
+
+        token = await self.client.get_installation_token(installation_id)
+        prepared = await self.workspace_manager.prepare_existing_branch(
+            full_name=binding.full_name,
+            branch=branch,
+            base_branch=str(
+                base.get("ref")
+                or binding.default_branch
+                or repository.get("default_branch")
+                or "main"
+            ),
+            token=token,
+        )
+
+        context = GitHubTaskContext(
+            installation_id=installation_id,
+            repository_full_name=binding.full_name,
+            issue_number=pull_request_number,
+            issue_title=str(pull_request.get("title") or ""),
+            issue_url=str(pull_request.get("html_url") or ""),
+            branch=prepared.branch,
+            base_branch=prepared.base_branch,
+            workspace_path=prepared.path,
+            completion_mode=COMPLETION_UPDATE_PULL_REQUEST,
+            review_comment_id=_optional_int(comment.get("id")),
+        )
+        prompt = _build_agent_prompt(
+            event="pull_request_review_comment",
+            payload=payload,
+            context=context,
+        )
+
+        manager = get_background_task_manager()
+        return await manager.submit(
+            request=prompt,
+            agent_name=agent_name,
+            working_dir=str(prepared.path),
+            notify_channel=self._notify_channel_for_binding(binding),
+            completion_hook=lambda task: self.publish_task_result(task, context),
+        )
+
+    def _notify_channel_for_binding(self, binding: Any) -> NotifyChannel | None:
+        if not binding.notify_platform or not binding.notify_external_id:
+            return None
+        return NotifyChannel(
+            platform=binding.notify_platform,
+            external_id=binding.notify_external_id,
+            channel_id=binding.notify_channel_id or binding.notify_external_id,
         )
 
     async def publish_task_result(
@@ -275,19 +387,19 @@ class GitHubAutomationService:
         context: GitHubTaskContext,
     ) -> None:
         token = await self.client.get_installation_token(context.installation_id)
+        completion_mode = getattr(context, "completion_mode", COMPLETION_OPEN_PULL_REQUEST)
         if not await self.workspace_manager.has_changes(context.workspace_path):
-            await self.client.create_issue_comment(
-                installation_id=context.installation_id,
-                full_name=context.repository_full_name,
-                issue_number=context.issue_number,
-                body=(
-                    "Kaka Agent finished running but did not produce any repository changes."
-                ),
+            await self._post_completion_comment(
+                context,
+                body="Kaka Agent finished running but did not produce any repository changes.",
             )
             task.result = f"{task.result}\n\nNo repository changes were produced.".strip()
             return
 
-        commit_message = f"Kaka Agent changes for issue #{context.issue_number}"
+        if completion_mode == COMPLETION_UPDATE_PULL_REQUEST:
+            commit_message = f"Address review feedback on PR #{context.issue_number}"
+        else:
+            commit_message = f"Kaka Agent changes for issue #{context.issue_number}"
         await self.workspace_manager.commit_all(
             path=context.workspace_path,
             message=commit_message,
@@ -297,6 +409,14 @@ class GitHubAutomationService:
             branch=context.branch,
             token=token,
         )
+
+        if completion_mode == COMPLETION_UPDATE_PULL_REQUEST:
+            await self._post_completion_comment(
+                context,
+                body=_review_update_body(task.result),
+            )
+            task.result = f"{task.result}\n\nPull request updated: {context.issue_url}".strip()
+            return
 
         pr = await self.client.create_pull_request(
             installation_id=context.installation_id,
@@ -316,6 +436,31 @@ class GitHubAutomationService:
             )
             task.result = f"{task.result}\n\nPull request: {pr_url}".strip()
 
+    async def _post_completion_comment(
+        self,
+        context: GitHubTaskContext,
+        *,
+        body: str,
+    ) -> None:
+        review_comment_id = getattr(context, "review_comment_id", None)
+        completion_mode = getattr(context, "completion_mode", COMPLETION_OPEN_PULL_REQUEST)
+        if completion_mode == COMPLETION_UPDATE_PULL_REQUEST and review_comment_id:
+            await self.client.create_pull_request_review_comment_reply(
+                installation_id=context.installation_id,
+                full_name=context.repository_full_name,
+                pull_request_number=context.issue_number,
+                comment_id=review_comment_id,
+                body=body,
+            )
+            return
+
+        await self.client.create_issue_comment(
+            installation_id=context.installation_id,
+            full_name=context.repository_full_name,
+            issue_number=context.issue_number,
+            body=body,
+        )
+
 
 def _build_agent_prompt(
     *,
@@ -323,6 +468,9 @@ def _build_agent_prompt(
     payload: dict[str, Any],
     context: GitHubTaskContext,
 ) -> str:
+    if event == "pull_request_review_comment":
+        return _build_review_comment_prompt(payload=payload, context=context)
+
     issue = payload["issue"]
     comment = payload.get("comment") or {}
     comment_body = str(comment.get("body") or "").strip()
@@ -349,6 +497,47 @@ def _build_agent_prompt(
     return "\n".join(lines)
 
 
+def _build_review_comment_prompt(
+    *,
+    payload: dict[str, Any],
+    context: GitHubTaskContext,
+) -> str:
+    comment = payload.get("comment") or {}
+    comment_body = str(comment.get("body") or "").strip()
+    comment_path = str(comment.get("path") or "").strip()
+    comment_line = _optional_int(comment.get("line")) or _optional_int(
+        comment.get("original_line")
+    )
+    diff_hunk = str(comment.get("diff_hunk") or "").strip()
+
+    lines = [
+        f"You are working on GitHub repository {context.repository_full_name}.",
+        f"The local checkout is already on pull request branch {context.branch}.",
+        "Modify files in the current working directory to address the review feedback.",
+        "Do not commit, push, or update the pull request yourself; the backend will do that after you finish.",
+        "",
+        f"Pull request: #{context.issue_number} {context.issue_title}",
+        f"Pull request URL: {context.issue_url}",
+        "",
+        "Review comment:",
+        comment_body or "(empty)",
+        "",
+        "Comment location:",
+        f"File: {comment_path or '(unknown)'}",
+        f"Line: {comment_line if comment_line is not None else '(unknown)'}",
+    ]
+    if diff_hunk:
+        lines.extend(["", "Diff hunk:", diff_hunk])
+    lines.extend(
+        [
+            "",
+            "Before editing, inspect the commented file and nearby code in the checkout.",
+            "When you are done, summarize the implementation and any tests you ran.",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def _pr_title(issue_number: int, issue_title: str) -> str:
     title = issue_title.strip() or "GitHub automation task"
     return f"Fix #{issue_number}: {title}"[:240]
@@ -360,6 +549,22 @@ def _pr_body(context: GitHubTaskContext, result: str) -> str:
         f"Automated changes for {context.issue_url}\n\n"
         f"Agent summary:\n\n{summary}\n"
     )
+
+
+def _review_update_body(result: str) -> str:
+    summary = result.strip()
+    if not summary:
+        return "Kaka Agent pushed updates for this review comment."
+    return f"Kaka Agent pushed updates for this review comment.\n\nAgent summary:\n\n{summary}"
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 _service: GitHubAutomationService | None = None
