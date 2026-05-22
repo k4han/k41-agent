@@ -179,6 +179,16 @@ async def get_thread_workspace_ref(thread_id: str) -> WorkspaceRef | None:
     return resolve_workspace_ref(workspace)
 
 
+async def get_thread_workspace_refs(thread_ids: list[str]) -> dict[str, WorkspaceRef]:
+    records = await get_thread_workspace_repository().list_by_thread_ids(thread_ids)
+    result: dict[str, WorkspaceRef] = {}
+    for thread_id, record in records.items():
+        workspace = record.get("workspace")
+        if workspace:
+            result[thread_id] = resolve_workspace_ref(workspace)
+    return result
+
+
 async def get_thread_workspace_dir(thread_id: str) -> str | None:
     workspace = await get_thread_workspace_ref(thread_id)
     return workspace.locator if workspace else None

@@ -17,12 +17,21 @@ export type ThreadSummary = {
   kind?: string;
   created_at?: string | null;
   updated_at?: string | null;
+  workspace?: WorkspaceRef | null;
+  workspace_key?: string;
+  workspace_label?: string;
 };
 
 export type ThreadListPayload = {
   threads: ThreadSummary[];
   has_more?: boolean;
   next_offset?: number;
+};
+
+export type ThreadWorkspaceGroup = {
+  key: string;
+  label: string;
+  threads: ThreadSummary[];
 };
 
 export type ThreadMessage = {
@@ -55,6 +64,51 @@ export function threadApiPath(threadId: string): string {
 
 export function chatThreadHref(threadId: string): string {
   return `/c/${encodeURIComponent(threadId)}`;
+}
+
+export const NO_WORKSPACE_KEY = "no-workspace";
+export const NO_WORKSPACE_LABEL = "No workspace";
+
+export function threadWorkspaceKey(thread: ThreadSummary): string {
+  if (thread.workspace_key) {
+    return thread.workspace_key;
+  }
+  if (!thread.workspace) {
+    return NO_WORKSPACE_KEY;
+  }
+  return `${thread.workspace.backend}:${thread.workspace.locator}`;
+}
+
+export function threadWorkspaceLabel(thread: ThreadSummary): string {
+  return (
+    thread.workspace_label
+    || thread.workspace?.label
+    || thread.workspace?.locator
+    || NO_WORKSPACE_LABEL
+  );
+}
+
+export function groupThreadsByWorkspace(threads: ThreadSummary[]): ThreadWorkspaceGroup[] {
+  const groups: ThreadWorkspaceGroup[] = [];
+  const groupIndexes = new Map<string, number>();
+
+  threads.forEach((thread) => {
+    const key = threadWorkspaceKey(thread);
+    const existingIndex = groupIndexes.get(key);
+    if (existingIndex !== undefined) {
+      groups[existingIndex].threads.push(thread);
+      return;
+    }
+
+    groupIndexes.set(key, groups.length);
+    groups.push({
+      key,
+      label: threadWorkspaceLabel(thread),
+      threads: [thread],
+    });
+  });
+
+  return groups;
 }
 
 export function toThreadTranscript(messages: ThreadMessage[]): ThreadTranscriptItem[] {

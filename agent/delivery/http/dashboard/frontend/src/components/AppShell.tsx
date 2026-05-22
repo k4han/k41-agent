@@ -7,6 +7,7 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  FolderOpen,
   GitPullRequest,
   History,
   LogOut,
@@ -18,15 +19,17 @@ import {
   Settings,
   Trash2,
 } from "lucide-solid";
-import { createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
+import { createMemo, createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
 
 import { DeleteThreadDialog } from "@/components/DeleteThreadDialog";
 import { InlineRenameInput } from "@/components/InlineRenameInput";
 import { apiFetch, deleteJson, patchJson } from "@/lib/api";
 import {
   chatThreadHref,
+  groupThreadsByWorkspace,
   threadApiPath,
 } from "@/lib/chatThreads";
+import type { ThreadListPayload, ThreadSummary, ThreadWorkspaceGroup } from "@/lib/chatThreads";
 import { truncateText } from "@/lib/utils";
 import { useToast } from "@/components/Toast";
 
@@ -47,26 +50,6 @@ const navItems: NavItem[] = [
 
 const HISTORY_PAGE_SIZE = 20;
 const HISTORY_PANEL_STORAGE_KEY = "kaka-dashboard-history";
-
-type ThreadSummary = {
-  thread_id: string;
-  latest_checkpoint_id: string;
-  checkpoint_count: number;
-  platform: string;
-  user_id: string;
-  channel_id: string;
-  agent_name?: string;
-  title?: string;
-  kind?: string;
-  created_at?: string | null;
-  updated_at?: string | null;
-};
-
-type ThreadListPayload = {
-  threads: ThreadSummary[];
-  has_more?: boolean;
-  next_offset?: number;
-};
 
 type HistoryCache = {
   threads: ThreadSummary[];
@@ -108,6 +91,9 @@ export function AppShell(props: {
   const [historyHasMore, setHistoryHasMore] = createSignal(historyCache.hasMore);
   const [historyLoading, setHistoryLoading] = createSignal(false);
   const [historyMenuThreadId, setHistoryMenuThreadId] = createSignal<string | null>(null);
+  const [collapsedHistoryGroupKeys, setCollapsedHistoryGroupKeys] = createSignal<Set<string>>(
+    new Set(),
+  );
   const [historyNextOffset, setHistoryNextOffset] = createSignal(historyCache.nextOffset);
   const [historyLoaded, setHistoryLoaded] = createSignal(historyCache.loaded);
   const [editingHistoryThreadId, setEditingHistoryThreadId] = createSignal<string | null>(null);
@@ -264,6 +250,21 @@ export function AppShell(props: {
     location.pathname.startsWith("/history") || Boolean(selectedChatThreadId())
   );
   const isThreadActive = (threadId: string) => selectedChatThreadId() === threadId;
+  const historyGroups = createMemo(() => groupThreadsByWorkspace(historyThreads()));
+  const isHistoryGroupExpanded = (group: ThreadWorkspaceGroup) =>
+    !collapsedHistoryGroupKeys().has(group.key);
+  const toggleHistoryWorkspaceGroup = (group: ThreadWorkspaceGroup, event: MouseEvent) => {
+    event.preventDefault();
+    setCollapsedHistoryGroupKeys((current) => {
+      const next = new Set(current);
+      if (next.has(group.key)) {
+        next.delete(group.key);
+      } else {
+        next.add(group.key);
+      }
+      return next;
+    });
+  };
 
   const setHistoryPanelOpen = (next: boolean) => {
     setHistoryOpen(next);
@@ -282,9 +283,11 @@ export function AppShell(props: {
     setHistoryPanelOpen(!historyOpen());
   };
   const threadTitle = (thread: ThreadSummary) => truncateText(thread.title || thread.thread_id, 30);
+  const isBackgroundThread = (thread: ThreadSummary) => thread.kind === "background";
   const threadMeta = (thread: ThreadSummary) => {
     const owner = thread.channel_id || thread.user_id;
     return [
+      isBackgroundThread(thread) ? "background" : "",
       thread.platform,
       thread.agent_name,
       owner ? truncateText(owner, 16) : "",
@@ -488,65 +491,102 @@ export function AppShell(props: {
                 >
                   <span class="nav-history-title">All history</span>
                 </A>
-                <For each={historyThreads()}>
-                  {(thread) => (
-                    <div class="nav-history-item-wrapper">
-                      <div
-                        class={`nav-history-item ${isThreadActive(thread.thread_id) ? "active" : ""} ${editingHistoryThreadId() === thread.thread_id ? "editing" : ""}`}
+                <For each={historyGroups()}>
+                  {(group) => (
+                    <div class="nav-history-workspace">
+                      <button
+                        class="nav-history-workspace-toggle"
+                        type="button"
+                        title={group.label}
+                        aria-expanded={isHistoryGroupExpanded(group)}
+                        onClick={(event) => toggleHistoryWorkspaceGroup(group, event)}
                       >
-                        <Show
-                          when={editingHistoryThreadId() === thread.thread_id}
-                          fallback={
-                            <A
-                              href={chatThreadHref(thread.thread_id)}
-                              activeClass=""
-                              inactiveClass=""
-                              class="nav-history-link"
-                              title={`${thread.thread_id} - ${threadMeta(thread)}`}
-                            >
-                              <span class="nav-history-title">{threadTitle(thread)}</span>
-                            </A>
-                          }
-                        >
-                          <InlineRenameInput
-                            class="nav-history-rename-input"
-                            value={editingHistoryTitle()}
-                            onInput={setEditingHistoryTitle}
-                            onBlur={() => void finishRenameHistoryThread(thread)}
-                            onCancel={cancelRenameHistoryThread}
-                          />
-                        </Show>
-                        <Show when={editingHistoryThreadId() !== thread.thread_id}>
-                          <button
-                            class={`nav-history-action ${historyMenuThreadId() === thread.thread_id ? "active" : ""}`}
-                            type="button"
-                            title="Thread actions"
-                            aria-label="Thread actions"
-                            aria-expanded={historyMenuThreadId() === thread.thread_id}
-                            onClick={(event) => toggleHistoryMenu(thread.thread_id, event)}
+                        <FolderOpen size={13} />
+                        <span class="nav-history-workspace-label">
+                          {truncateText(group.label, 28)}
+                        </span>
+                        <span class="nav-history-workspace-count">{group.threads.length}</span>
+                        <span class="nav-history-workspace-caret">
+                          <Show
+                            when={isHistoryGroupExpanded(group)}
+                            fallback={<ChevronRight size={13} />}
                           >
-                            <MoreHorizontal size={14} />
-                          </button>
-                        </Show>
-                      </div>
-                      <Show when={historyMenuThreadId() === thread.thread_id}>
-                        <div class="nav-history-menu">
-                          <button
-                            class="nav-history-menu-item"
-                            type="button"
-                            onClick={(event) => startRenameHistoryThread(thread, event)}
-                          >
-                            <Pencil size={13} />
-                            <span>Rename</span>
-                          </button>
-                          <button
-                            class="nav-history-menu-item nav-history-menu-danger"
-                            type="button"
-                            onClick={(event) => requestDeleteHistoryThread(thread, event)}
-                          >
-                            <Trash2 size={13} />
-                            <span>Delete</span>
-                          </button>
+                            <ChevronDown size={13} />
+                          </Show>
+                        </span>
+                      </button>
+                      <Show when={isHistoryGroupExpanded(group)}>
+                        <div class="nav-history-workspace-threads">
+                          <For each={group.threads}>
+                            {(thread) => (
+                              <div class="nav-history-item-wrapper">
+                                <div
+                                  class={`nav-history-item ${isThreadActive(thread.thread_id) ? "active" : ""} ${editingHistoryThreadId() === thread.thread_id ? "editing" : ""}`}
+                                >
+                                  <Show
+                                    when={editingHistoryThreadId() === thread.thread_id}
+                                    fallback={
+                                      <A
+                                        href={chatThreadHref(thread.thread_id)}
+                                        activeClass=""
+                                        inactiveClass=""
+                                        class="nav-history-link"
+                                        title={`${thread.thread_id} - ${threadMeta(thread)}`}
+                                      >
+                                        <Show when={isBackgroundThread(thread)}>
+                                          <PlaySquare size={12} class="nav-history-kind-icon" />
+                                        </Show>
+                                        <span class="nav-history-title">{threadTitle(thread)}</span>
+                                        <Show when={isBackgroundThread(thread)}>
+                                          <span class="nav-history-kind-badge">Task</span>
+                                        </Show>
+                                      </A>
+                                    }
+                                  >
+                                    <InlineRenameInput
+                                      class="nav-history-rename-input"
+                                      value={editingHistoryTitle()}
+                                      onInput={setEditingHistoryTitle}
+                                      onBlur={() => void finishRenameHistoryThread(thread)}
+                                      onCancel={cancelRenameHistoryThread}
+                                    />
+                                  </Show>
+                                  <Show when={editingHistoryThreadId() !== thread.thread_id}>
+                                    <button
+                                      class={`nav-history-action ${historyMenuThreadId() === thread.thread_id ? "active" : ""}`}
+                                      type="button"
+                                      title="Thread actions"
+                                      aria-label="Thread actions"
+                                      aria-expanded={historyMenuThreadId() === thread.thread_id}
+                                      onClick={(event) => toggleHistoryMenu(thread.thread_id, event)}
+                                    >
+                                      <MoreHorizontal size={14} />
+                                    </button>
+                                  </Show>
+                                </div>
+                                <Show when={historyMenuThreadId() === thread.thread_id}>
+                                  <div class="nav-history-menu">
+                                    <button
+                                      class="nav-history-menu-item"
+                                      type="button"
+                                      onClick={(event) => startRenameHistoryThread(thread, event)}
+                                    >
+                                      <Pencil size={13} />
+                                      <span>Rename</span>
+                                    </button>
+                                    <button
+                                      class="nav-history-menu-item nav-history-menu-danger"
+                                      type="button"
+                                      onClick={(event) => requestDeleteHistoryThread(thread, event)}
+                                    >
+                                      <Trash2 size={13} />
+                                      <span>Delete</span>
+                                    </button>
+                                  </div>
+                                </Show>
+                              </div>
+                            )}
+                          </For>
                         </div>
                       </Show>
                     </div>

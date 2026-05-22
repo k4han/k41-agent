@@ -105,6 +105,32 @@ class ThreadWorkspaceRepository:
             record = result.scalar_one_or_none()
             return serialize_thread_workspace(record) if record else None
 
+    async def list_by_thread_ids(
+        self,
+        thread_ids: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        normalized_thread_ids = list(
+            dict.fromkeys(
+                thread_id
+                for thread_id in (_trim(thread_id, 512) for thread_id in thread_ids)
+                if thread_id
+            )
+        )
+        if not normalized_thread_ids:
+            return {}
+
+        session = await get_async_session()
+        async with session:
+            result = await session.execute(
+                select(ThreadWorkspace).where(
+                    ThreadWorkspace.thread_id.in_(normalized_thread_ids)
+                )
+            )
+            return {
+                record.thread_id: serialize_thread_workspace(record)
+                for record in result.scalars().all()
+            }
+
 
 _repository: ThreadWorkspaceRepository | None = None
 

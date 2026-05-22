@@ -44,6 +44,7 @@ from agent.modules.users import get_pairing_service
 from agent.modules.workspaces import (
     ensure_workspace_directory,
     get_thread_workspace_ref,
+    get_thread_workspace_refs,
     get_workspace_backend,
     list_workspace_directories,
     resolve_workspace_ref,
@@ -66,6 +67,8 @@ router = APIRouter(tags=["dashboard"], dependencies=[Depends(get_current_admin)]
 logger = logging.getLogger(__name__)
 BACKGROUND_TASK_ACTIVE_STATUSES = {"pending", "running"}
 SSE_HEARTBEAT_SECONDS = 15.0
+NO_WORKSPACE_KEY = "no-workspace"
+NO_WORKSPACE_LABEL = "No workspace"
 
 
 # --- helpers ----------------------------------------------------------
@@ -1376,16 +1379,28 @@ async def _list_threads_from_db(
     offset: int = 0,
 ) -> list[dict[str, Any]]:
     """List user-facing conversation threads from the domain table."""
-    from agent.modules.conversations import list_conversation_threads
+    from agent.modules.conversations import (
+        THREAD_KIND_BACKGROUND,
+        THREAD_KIND_USER,
+        list_conversation_threads,
+    )
 
     try:
-        threads = await list_conversation_threads(limit=limit, offset=offset)
+        threads = await list_conversation_threads(
+            limit=limit,
+            offset=offset,
+            kinds=[THREAD_KIND_USER, THREAD_KIND_BACKGROUND],
+        )
     except Exception as exc:
         logger.warning("Failed to list conversation threads: %s", exc)
         return []
 
     if not threads:
-        return await _list_legacy_threads_from_checkpoints(limit=limit, offset=offset)
+        legacy_threads = await _list_legacy_threads_from_checkpoints(
+            limit=limit,
+            offset=offset,
+        )
+        return await _attach_workspace_summaries(legacy_threads)
 
     result = []
     for thread in threads:
@@ -1394,7 +1409,43 @@ async def _list_threads_from_db(
             **thread,
             **stats,
         })
-    return result
+    return await _attach_workspace_summaries(result)
+
+
+def _workspace_summary(workspace: WorkspaceRef | None) -> dict[str, Any]:
+    if workspace is None:
+        return {
+            "workspace": None,
+            "workspace_key": NO_WORKSPACE_KEY,
+            "workspace_label": NO_WORKSPACE_LABEL,
+        }
+    return {
+        "workspace": workspace.model_dump(),
+        "workspace_key": f"{workspace.backend}:{workspace.locator}",
+        "workspace_label": workspace.display_label(),
+    }
+
+
+async def _attach_workspace_summaries(
+    threads: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not threads:
+        return threads
+
+    thread_ids = [str(thread.get("thread_id") or "") for thread in threads]
+    try:
+        workspaces = await get_thread_workspace_refs(thread_ids)
+    except Exception as exc:
+        logger.warning("Failed to list thread workspaces: %s", exc)
+        workspaces = {}
+
+    return [
+        {
+            **thread,
+            **_workspace_summary(workspaces.get(str(thread.get("thread_id") or ""))),
+        }
+        for thread in threads
+    ]
 
 
 def _serialize_message_attachments(msg: Any) -> list[dict[str, Any]]:
@@ -1557,9 +1608,11 @@ async def rename_chat_thread(
 
     metadata = await rename_conversation_thread(thread_id, title)
     stats = await _get_checkpoint_stats(thread_id)
+    workspace = await _workspace_ref_for_thread(thread_id, include_default=False)
     return {
         **metadata,
         **stats,
+        **_workspace_summary(workspace),
     }
 
 

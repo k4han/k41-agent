@@ -100,6 +100,20 @@ def _workspace_payload(path: str | Path) -> dict:
     }
 
 
+def _conversation_thread(thread_id: str, title: str, *, kind: str = "user") -> dict:
+    return {
+        "thread_id": thread_id,
+        "platform": "api",
+        "user_id": "dashboard",
+        "channel_id": "123",
+        "agent_name": "default",
+        "title": title,
+        "kind": kind,
+        "created_at": None,
+        "updated_at": None,
+    }
+
+
 def test_services_endpoint_returns_runtime_service_snapshot() -> None:
     channel_manager = ChannelManager()
     channel_manager.register("telegram", idle_runner)
@@ -475,6 +489,130 @@ def test_dashboard_submit_background_task_records_default_workspace(
     assert captured["workspace"].locator
 
 
+def test_dashboard_chat_history_returns_workspace_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
+    conversations_module = importlib.import_module("agent.modules.conversations")
+    workspace = dashboard_router_module.resolve_workspace_ref(_workspace_payload(tmp_path))
+    threads = [
+        _conversation_thread("api_dashboard_with", "Thread with workspace"),
+        _conversation_thread(
+            "task_dashboard_without",
+            "Background task without workspace",
+            kind="background",
+        ),
+    ]
+
+    async def fake_list_conversation_threads(
+        limit=None,
+        offset=0,
+        kind=None,
+        kinds=None,
+    ):
+        assert limit is None
+        assert offset == 0
+        assert kind is None
+        assert kinds == ["user", "background"]
+        return threads
+
+    async def fake_get_checkpoint_stats(thread_id: str):
+        return {"latest_checkpoint_id": f"{thread_id}-checkpoint", "checkpoint_count": 2}
+
+    async def fake_get_thread_workspace_refs(thread_ids: list[str]):
+        assert thread_ids == ["api_dashboard_with", "task_dashboard_without"]
+        return {"api_dashboard_with": workspace}
+
+    monkeypatch.setattr(
+        conversations_module,
+        "list_conversation_threads",
+        fake_list_conversation_threads,
+    )
+    monkeypatch.setattr(
+        dashboard_router_module,
+        "_get_checkpoint_stats",
+        fake_get_checkpoint_stats,
+    )
+    monkeypatch.setattr(
+        dashboard_router_module,
+        "get_thread_workspace_refs",
+        fake_get_thread_workspace_refs,
+    )
+
+    client = _create_dashboard_client(ChannelManager())
+    response = client.get("/dashboard-api/chat-history")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["threads"][0]["workspace"] == workspace.model_dump()
+    assert payload["threads"][0]["workspace_key"] == f"local:{workspace.locator}"
+    assert payload["threads"][0]["workspace_label"] == workspace.display_label()
+    assert payload["threads"][1]["kind"] == "background"
+    assert payload["threads"][1]["workspace"] is None
+    assert payload["threads"][1]["workspace_key"] == "no-workspace"
+    assert payload["threads"][1]["workspace_label"] == "No workspace"
+
+
+def test_dashboard_chat_history_pagination_keeps_workspace_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
+    conversations_module = importlib.import_module("agent.modules.conversations")
+
+    async def fake_list_conversation_threads(
+        limit=None,
+        offset=0,
+        kind=None,
+        kinds=None,
+    ):
+        assert limit == 2
+        assert offset == 5
+        assert kind is None
+        assert kinds == ["user", "background"]
+        return [
+            _conversation_thread("api_dashboard_page_1", "Page 1"),
+            _conversation_thread("api_dashboard_page_2", "Page 2"),
+        ]
+
+    async def fake_get_checkpoint_stats(thread_id: str):
+        return {"latest_checkpoint_id": f"{thread_id}-checkpoint", "checkpoint_count": 1}
+
+    async def fake_get_thread_workspace_refs(thread_ids: list[str]):
+        assert thread_ids == ["api_dashboard_page_1", "api_dashboard_page_2"]
+        return {}
+
+    monkeypatch.setattr(
+        conversations_module,
+        "list_conversation_threads",
+        fake_list_conversation_threads,
+    )
+    monkeypatch.setattr(
+        dashboard_router_module,
+        "_get_checkpoint_stats",
+        fake_get_checkpoint_stats,
+    )
+    monkeypatch.setattr(
+        dashboard_router_module,
+        "get_thread_workspace_refs",
+        fake_get_thread_workspace_refs,
+    )
+
+    client = _create_dashboard_client(ChannelManager())
+    response = client.get(
+        "/dashboard-api/chat-history",
+        params={"limit": 1, "offset": 5},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["has_more"] is True
+    assert payload["next_offset"] == 6
+    assert len(payload["threads"]) == 1
+    assert payload["threads"][0]["workspace"] is None
+    assert payload["threads"][0]["workspace_key"] == "no-workspace"
+
+
 def test_dashboard_api_renames_chat_thread(monkeypatch: pytest.MonkeyPatch) -> None:
     dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
     conversations_module = importlib.import_module("agent.modules.conversations")
@@ -498,8 +636,18 @@ def test_dashboard_api_renames_chat_thread(monkeypatch: pytest.MonkeyPatch) -> N
         assert thread_id == "api_dashboard_123"
         return {"latest_checkpoint_id": "ckpt-1", "checkpoint_count": 2}
 
+    async def fake_workspace_ref_for_thread(thread_id: str, include_default: bool = True):
+        assert thread_id == "api_dashboard_123"
+        assert include_default is False
+        return None
+
     monkeypatch.setattr(conversations_module, "rename_conversation_thread", fake_rename)
     monkeypatch.setattr(dashboard_router_module, "_get_checkpoint_stats", fake_stats)
+    monkeypatch.setattr(
+        dashboard_router_module,
+        "_workspace_ref_for_thread",
+        fake_workspace_ref_for_thread,
+    )
 
     client = _create_dashboard_client(ChannelManager())
     response = client.patch(
@@ -510,6 +658,7 @@ def test_dashboard_api_renames_chat_thread(monkeypatch: pytest.MonkeyPatch) -> N
     assert response.status_code == 200
     assert response.json()["title"] == "New title"
     assert response.json()["checkpoint_count"] == 2
+    assert response.json()["workspace_key"] == "no-workspace"
 
 
 def test_dashboard_background_task_events_streams_snapshot_and_done(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from sqlalchemy import func, select
@@ -25,6 +26,26 @@ def serialize_thread(thread: ConversationThread) -> dict[str, Any]:
         "created_at": thread.created_at.isoformat() if thread.created_at else None,
         "updated_at": thread.updated_at.isoformat() if thread.updated_at else None,
     }
+
+
+def _normalize_kind_filters(
+    *,
+    kind: str | None,
+    kinds: Sequence[str] | None,
+) -> list[str] | None:
+    if kinds is None:
+        if not kind:
+            return None
+        return [_trim(kind, 64)]
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in kinds:
+        value = _trim(item, 64)
+        if value and value not in seen:
+            normalized.append(value)
+            seen.add(value)
+    return normalized
 
 
 class ConversationThreadRepository:
@@ -104,12 +125,20 @@ class ConversationThreadRepository:
         limit: int | None = None,
         offset: int = 0,
         kind: str | None = "user",
+        kinds: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
+        kind_filters = _normalize_kind_filters(kind=kind, kinds=kinds)
+        if kind_filters == []:
+            return []
+
         stmt = select(ConversationThread).where(
             ConversationThread.deleted_at.is_(None)
         )
-        if kind:
-            stmt = stmt.where(ConversationThread.kind == kind)
+        if kind_filters:
+            if len(kind_filters) == 1:
+                stmt = stmt.where(ConversationThread.kind == kind_filters[0])
+            else:
+                stmt = stmt.where(ConversationThread.kind.in_(kind_filters))
         stmt = stmt.order_by(
             ConversationThread.updated_at.desc(),
             ConversationThread.id.desc(),
@@ -124,12 +153,24 @@ class ConversationThreadRepository:
             result = await session.execute(stmt)
             return [serialize_thread(thread) for thread in result.scalars().all()]
 
-    async def count(self, *, kind: str | None = "user") -> int:
+    async def count(
+        self,
+        *,
+        kind: str | None = "user",
+        kinds: Sequence[str] | None = None,
+    ) -> int:
+        kind_filters = _normalize_kind_filters(kind=kind, kinds=kinds)
+        if kind_filters == []:
+            return 0
+
         stmt = select(func.count()).select_from(ConversationThread).where(
             ConversationThread.deleted_at.is_(None)
         )
-        if kind:
-            stmt = stmt.where(ConversationThread.kind == kind)
+        if kind_filters:
+            if len(kind_filters) == 1:
+                stmt = stmt.where(ConversationThread.kind == kind_filters[0])
+            else:
+                stmt = stmt.where(ConversationThread.kind.in_(kind_filters))
 
         session = await get_async_session()
         async with session:

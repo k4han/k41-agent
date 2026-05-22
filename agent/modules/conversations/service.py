@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 import uuid
 from typing import Any
 
@@ -77,19 +78,21 @@ async def list_conversation_threads(
     limit: int | None = None,
     offset: int = 0,
     kind: str | None = THREAD_KIND_USER,
+    kinds: Sequence[str] | None = None,
     repository: ConversationThreadRepository | None = None,
 ) -> list[dict[str, Any]]:
     repo = repository or get_conversation_thread_repository()
-    return await repo.list(limit=limit, offset=offset, kind=kind)
+    return await repo.list(limit=limit, offset=offset, kind=kind, kinds=kinds)
 
 
 async def count_conversation_threads(
     *,
     kind: str | None = THREAD_KIND_USER,
+    kinds: Sequence[str] | None = None,
     repository: ConversationThreadRepository | None = None,
 ) -> int:
     repo = repository or get_conversation_thread_repository()
-    return await repo.count(kind=kind)
+    return await repo.count(kind=kind, kinds=kinds)
 
 
 async def get_conversation_thread(
