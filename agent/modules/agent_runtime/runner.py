@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import binascii
 from contextlib import contextmanager
@@ -270,20 +271,92 @@ def _graph_accepts_context(graph: Any) -> bool:
     return context_schema is not None
 
 
+async def _generate_and_update_conversation_title(
+    *,
+    thread_id: str,
+    title: str,
+    attachments: list[Any] | None = None,
+) -> None:
+    try:
+        from agent.modules.conversations import (
+            generate_conversation_title,
+            update_conversation_thread_title_if_current,
+        )
+
+        generated_title = await generate_conversation_title(
+            first_user_message=title,
+            attachments=attachments,
+        )
+        fallback_title = str(title or "").strip()[:255]
+        current_titles = [thread_id]
+        if fallback_title:
+            current_titles.append(fallback_title)
+        await update_conversation_thread_title_if_current(
+            thread_id=thread_id,
+            title=generated_title,
+            current_titles=current_titles,
+        )
+    except Exception as exc:
+        logger.debug(
+            "Failed to update generated conversation title for '%s': %s",
+            thread_id,
+            exc,
+        )
+
+
+def _schedule_conversation_title_generation(
+    *,
+    thread_id: str,
+    title: str,
+    attachments: list[Any] | None = None,
+) -> None:
+    asyncio.create_task(
+        _generate_and_update_conversation_title(
+            thread_id=thread_id,
+            title=title,
+            attachments=attachments,
+        )
+    )
+
+
 async def _record_conversation_thread(
     *,
     thread_id: str,
     agent_name: str,
     title: str = "",
+    attachments: list[Any] | None = None,
 ) -> None:
     try:
-        from agent.modules.conversations import upsert_conversation_thread
+        from agent.modules.conversations import (
+            THREAD_KIND_USER,
+            get_conversation_thread,
+            infer_thread_kind,
+            upsert_conversation_thread,
+        )
+
+        kind = infer_thread_kind(thread_id)
+        resolved_title = title
+        should_generate_title = False
+        if kind == THREAD_KIND_USER:
+            existing = await get_conversation_thread(thread_id)
+            existing_title = str((existing or {}).get("title") or "").strip()
+            if existing_title and existing_title != thread_id:
+                resolved_title = ""
+            else:
+                should_generate_title = True
 
         await upsert_conversation_thread(
             thread_id=thread_id,
             agent_name=agent_name,
-            title=title,
+            title=resolved_title,
+            kind=kind,
         )
+        if should_generate_title:
+            _schedule_conversation_title_generation(
+                thread_id=thread_id,
+                title=title,
+                attachments=attachments,
+            )
     except Exception as exc:
         logger.debug(
             "Failed to record conversation thread '%s': %s",
@@ -415,6 +488,7 @@ async def run_agent(
         thread_id=thread_id,
         agent_name=agent_name,
         title=user_input,
+        attachments=attachments,
     )
 
     stream_kwargs: dict[str, Any] = {
@@ -499,6 +573,7 @@ async def run_agent_stream(
         thread_id=thread_id,
         agent_name=agent_name,
         title=user_input,
+        attachments=attachments,
     )
 
     seen_ids: set[str] = set()

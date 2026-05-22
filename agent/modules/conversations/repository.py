@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from agent.modules.conversations.models import ConversationThread
 from agent.shared.infrastructure.db.base import utcnow
@@ -200,6 +200,51 @@ class ConversationThreadRepository:
             await session.commit()
             await session.refresh(thread)
             return serialize_thread(thread)
+
+    async def update_title_if_current(
+        self,
+        *,
+        thread_id: str,
+        title: str,
+        current_titles: Sequence[str],
+    ) -> dict[str, Any] | None:
+        normalized_title = _trim(title, 255)
+        if not normalized_title:
+            raise ValueError("Thread title cannot be empty.")
+
+        normalized_current_titles = [
+            value
+            for value in {_trim(current_title, 255) for current_title in current_titles}
+            if value
+        ]
+        if not normalized_current_titles:
+            return None
+
+        now = utcnow()
+        session = await get_async_session()
+        async with session:
+            result = await session.execute(
+                update(ConversationThread)
+                .where(
+                    ConversationThread.thread_id == thread_id,
+                    ConversationThread.deleted_at.is_(None),
+                    ConversationThread.title.in_(normalized_current_titles),
+                )
+                .values(title=normalized_title, updated_at=now)
+            )
+            if not result.rowcount:
+                await session.rollback()
+                return None
+
+            await session.commit()
+            refreshed = await session.execute(
+                select(ConversationThread).where(
+                    ConversationThread.thread_id == thread_id,
+                    ConversationThread.deleted_at.is_(None),
+                )
+            )
+            thread = refreshed.scalar_one_or_none()
+            return serialize_thread(thread) if thread else None
 
     async def mark_deleted(self, thread_id: str) -> bool:
         now = utcnow()

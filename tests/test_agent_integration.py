@@ -83,8 +83,9 @@ def test_default_agent_always_available():
         repo = FilesystemAgentRepository(empty_dir)
         agents = repo.load()
 
-        assert len(agents) == 2  # builtin default + scheduler-executor
+        assert len(agents) == 3
         assert "default" in agents
+        assert "conversation-title" in agents
 
         default = agents["default"]
         assert default.name == "default"

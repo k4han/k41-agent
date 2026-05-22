@@ -124,6 +124,18 @@ def test_clone_builtin_rejects_existing_user_override(dashboard_agent_client) ->
     assert second.status_code == 409
 
 
+def test_clone_hidden_builtin_preserves_hidden(dashboard_agent_client) -> None:
+    client, _ = dashboard_agent_client
+
+    response = client.post("/agents/cards/conversation-title/clone")
+
+    assert response.status_code == 200
+    card = response.json()["card"]
+    assert card["hidden"] is True
+    assert card["source"] == "user"
+    assert card["overrides_builtin"] is True
+
+
 def test_agent_card_endpoint_rejects_invalid_router_prompt(
     dashboard_agent_client,
 ) -> None:

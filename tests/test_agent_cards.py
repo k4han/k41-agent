@@ -53,8 +53,12 @@ User default prompt.
     assert cards["default"].source == "user"
     assert cards["default"].editable is True
     assert cards["default"].overrides_builtin is True
+    assert cards["conversation-title"].source == "builtin"
+    assert cards["conversation-title"].editable is False
+    assert cards["conversation-title"].hidden is True
     assert cards["scheduler-executor"].source == "builtin"
     assert cards["scheduler-executor"].editable is False
+    assert cards["scheduler-executor"].hidden is True
 
 
 def test_agent_card_create_update_delete_preserves_sub_agent_semantics(
@@ -94,6 +98,23 @@ def test_clone_builtin_agent_creates_user_override_and_rejects_collision(
 
     with pytest.raises(FileExistsError):
         service.clone_builtin_agent("default")
+
+
+def test_clone_hidden_builtin_agent_preserves_hidden_flag(tmp_path: Path) -> None:
+    service, _ = _make_service(tmp_path / "agents")
+
+    cloned = service.clone_builtin_agent("conversation-title")
+
+    assert cloned.source == "user"
+    assert cloned.overrides_builtin is True
+    assert cloned.hidden is True
+
+    # Verify the hidden flag is persisted in the file
+    from agent.modules.agents.parser import parse_agent_file
+
+    parsed = parse_agent_file(Path(cloned.path))
+    assert parsed is not None
+    assert parsed.hidden is True
 
 
 @pytest.mark.parametrize(

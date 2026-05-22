@@ -752,7 +752,7 @@ export function ChatPage() {
     }
   };
 
-  const validCards = createMemo(() => (data()?.cards || []).filter((card) => card.valid));
+  const validCards = createMemo(() => (data()?.cards || []).filter((card) => card.valid && !card.hidden));
   const agentOptions = createMemo(() =>
     validCards().map((card) => ({
       value: card.name,

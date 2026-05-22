@@ -21,6 +21,7 @@ type AgentForm = {
   model: string;
   tools: string[];
   sub_agents: string[];
+  hidden: boolean;
   max_context_tokens: number;
   system_prompt: string;
 };
@@ -34,6 +35,7 @@ const blankForm = (workflow: string): AgentForm => ({
   model: "",
   tools: [],
   sub_agents: [],
+  hidden: false,
   max_context_tokens: 50000,
   system_prompt: "",
 });
@@ -48,6 +50,7 @@ function cardToForm(card: AgentCard): AgentForm {
     model: card.model || "",
     tools: card.tools || [],
     sub_agents: card.sub_agents || [],
+    hidden: card.hidden || false,
     max_context_tokens: card.max_context_tokens || 50000,
     system_prompt: card.system_prompt || "",
   };
@@ -273,6 +276,9 @@ export function AgentsPage() {
                                 <Show when={card.overrides_builtin}>
                                   <span class="badge badge-warning">override</span>
                                 </Show>
+                                <Show when={card.hidden}>
+                                  <span class="badge badge-info">hidden</span>
+                                </Show>
                               </div>
                             </td>
                             <td>
@@ -308,10 +314,12 @@ export function AgentsPage() {
                             <td>
                               <div class="row-wrap">
                                 <Show when={card.valid}>
-                                  <a class="btn btn-sm" href={`/chat?agent=${encodeURIComponent(card.name)}`}>
-                                    <MessageSquare size={13} />
-                                    Chat
-                                  </a>
+                                  <Show when={!card.hidden}>
+                                    <a class="btn btn-sm" href={`/chat?agent=${encodeURIComponent(card.name)}`}>
+                                      <MessageSquare size={13} />
+                                      Chat
+                                    </a>
+                                  </Show>
                                   <button class="btn btn-sm" type="button" onClick={() => openCard(card, "view")}>
                                     <Eye size={13} />
                                     View
@@ -447,6 +455,18 @@ export function AgentsPage() {
                     disabled={modalMode() === "view"}
                     onInput={(event) => updateForm("max_context_tokens", Number(event.currentTarget.value))}
                   />
+                </div>
+                <div class="field">
+                  <label class="checkbox-row">
+                    <input
+                      type="checkbox"
+                      checked={form().hidden}
+                      disabled={modalMode() === "view"}
+                      onChange={(event) => updateForm("hidden", event.currentTarget.checked)}
+                    />
+                    <span>Hidden from chat picker</span>
+                  </label>
+                  <p class="hint">Hidden agents are not shown in the chat agent dropdown but can still be used internally.</p>
                 </div>
                 <div class="field">
                   <label>Tools</label>

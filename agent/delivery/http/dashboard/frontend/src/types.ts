@@ -37,6 +37,7 @@ export type AgentCard = {
   model: string;
   tools: string[];
   sub_agents: string[] | null;
+  hidden: boolean;
   max_context_tokens: number;
   system_prompt: string;
   source: "builtin" | "user";
@@ -56,6 +57,7 @@ export type AgentConfig = {
   model: string;
   tools: string[];
   sub_agents: string[] | null;
+  hidden: boolean;
   max_context_tokens: number;
   system_prompt: string;
 };

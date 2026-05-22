@@ -189,11 +189,12 @@ class TestFilesystemAgentRepository:
     def test_load_from_directory(self, agents_dir):
         repo = FilesystemAgentRepository(agents_dir)
         agents = repo.load()
-        assert len(agents) == 4  # researcher, coder, + builtin default, scheduler-executor
+        assert len(agents) == 5
         assert "researcher" in agents
         assert "coder" in agents
         assert "default" in agents
         assert "scheduler-executor" in agents
+        assert "conversation-title" in agents
         assert agents["researcher"].graph_type == "react_agent"
         assert agents["default"].name == "default"
 
@@ -201,22 +202,24 @@ class TestFilesystemAgentRepository:
         d = tempfile.mkdtemp()
         repo = FilesystemAgentRepository(d)
         agents = repo.load()
-        assert len(agents) == 2  # builtin default + scheduler-executor
+        assert len(agents) == 3
         assert "default" in agents
+        assert "conversation-title" in agents
         assert agents["default"].display_name == ""
         os.rmdir(d)
 
     def test_load_nonexistent_directory(self):
         repo = FilesystemAgentRepository("/nonexistent/path/12345")
         agents = repo.load()
-        assert len(agents) == 2  # builtin default + scheduler-executor
+        assert len(agents) == 3
         assert "default" in agents
+        assert "conversation-title" in agents
 
     def test_reload(self, agents_dir):
         repo = FilesystemAgentRepository(agents_dir)
         repo.load()
         agents2 = repo.reload()
-        assert len(agents2) == 4  # researcher, coder, + builtin default, scheduler-executor
+        assert len(agents2) == 5
 
 
 # --- service tests ---
@@ -252,7 +255,13 @@ class TestAgentCatalogService:
     def test_list_agents(self):
         agents = self.service.list_agents()
         names = {a.name for a in agents}
-        assert names == {"researcher", "coder", "default", "scheduler-executor"}
+        assert names == {
+            "researcher",
+            "coder",
+            "default",
+            "scheduler-executor",
+            "conversation-title",
+        }
 
     def test_get_callable_agents_none_sub_agents(self):
         """researcher has sub_agents=[] → cannot call anyone."""
@@ -291,4 +300,4 @@ class TestAgentCatalogService:
 
     def test_reload(self):
         agents = self.service.reload_agents()
-        assert len(agents) == 4  # researcher, coder, + builtin default, scheduler-executor
+        assert len(agents) == 5

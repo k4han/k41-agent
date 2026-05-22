@@ -375,6 +375,7 @@ def _agent_config_from_body(body: "AgentCardBody") -> AgentConfig:
         model=body.model.strip(),
         tools=list(body.tools),
         sub_agents=list(body.sub_agents) if body.sub_agents is not None else None,
+        hidden=body.hidden,
         max_context_tokens=body.max_context_tokens,
         system_prompt=body.system_prompt.strip(),
     )
@@ -811,6 +812,7 @@ class AgentCardBody(BaseModel):
     model: str = ""
     tools: list[str] = Field(default_factory=list)
     sub_agents: list[str] | None = None
+    hidden: bool = False
     max_context_tokens: int = 50_000
     system_prompt: str = ""
 

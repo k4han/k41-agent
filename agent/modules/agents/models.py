@@ -18,6 +18,7 @@ class AgentConfig(BaseModel):
     model: str = ""
     tools: list[str] = Field(default_factory=list)
     sub_agents: Optional[list[str]] = None  # None = leaf (no call_agent), list = allowed targets
+    hidden: bool = False
     max_context_tokens: int = 50_000
     system_prompt: str = ""  # Markdown body content (after frontmatter)
 
@@ -33,6 +34,7 @@ class AgentCard(BaseModel):
     model: str = ""
     tools: list[str] = Field(default_factory=list)
     sub_agents: Optional[list[str]] = None
+    hidden: bool = False
     max_context_tokens: int = 50_000
     system_prompt: str = ""
     source: Literal["builtin", "user"]
@@ -62,6 +64,7 @@ class AgentCard(BaseModel):
             model=config.model,
             tools=list(config.tools),
             sub_agents=list(config.sub_agents) if config.sub_agents is not None else None,
+            hidden=config.hidden,
             max_context_tokens=config.max_context_tokens,
             system_prompt=config.system_prompt,
             source=source,
@@ -105,6 +108,7 @@ class AgentCard(BaseModel):
             model=self.model,
             tools=list(self.tools),
             sub_agents=list(self.sub_agents) if self.sub_agents is not None else None,
+            hidden=self.hidden,
             max_context_tokens=self.max_context_tokens,
             system_prompt=self.system_prompt,
         )

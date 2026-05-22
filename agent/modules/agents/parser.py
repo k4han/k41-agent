@@ -127,6 +127,8 @@ def serialize_agent_config(config: AgentConfig) -> str:
     }
     if config.sub_agents is not None:
         data["sub_agents"] = list(config.sub_agents)
+    if config.hidden:
+        data["hidden"] = True
 
     yaml_block = yaml.safe_dump(
         data,
@@ -182,6 +184,8 @@ def _build_agent_config(
     else:
         sub_agents = parse_string_or_list(raw_sub) or []
 
+    hidden = bool(data.get("hidden", False))
+
     # Validate router agent template at parse time
     if graph_type == ROUTER_GRAPH_TYPE and body:
         _validate_router_template(
@@ -200,6 +204,7 @@ def _build_agent_config(
             model=model,
             tools=tools,
             sub_agents=sub_agents,
+            hidden=hidden,
             max_context_tokens=max_context_tokens,
             system_prompt=body,
         )

@@ -4,22 +4,30 @@ from agent.modules.conversations.repository import (
     get_conversation_thread_repository,
 )
 from agent.modules.conversations.service import (
+    CONVERSATION_TITLE_AGENT_NAME,
+    CONVERSATION_TITLE_MAX_CHARS,
+    CONVERSATION_TITLE_TIMEOUT_SECONDS,
     THREAD_KIND_BACKGROUND,
     THREAD_KIND_SCHEDULED,
     THREAD_KIND_SUB_AGENT,
     THREAD_KIND_USER,
     count_conversation_threads,
     create_thread_id,
+    generate_conversation_title,
     get_conversation_thread,
     infer_thread_kind,
     list_conversation_threads,
     mark_conversation_thread_deleted,
     parse_thread_metadata,
     rename_conversation_thread,
+    update_conversation_thread_title_if_current,
     upsert_conversation_thread,
 )
 
 __all__ = [
+    "CONVERSATION_TITLE_AGENT_NAME",
+    "CONVERSATION_TITLE_MAX_CHARS",
+    "CONVERSATION_TITLE_TIMEOUT_SECONDS",
     "ConversationThread",
     "ConversationThreadRepository",
     "THREAD_KIND_BACKGROUND",
@@ -28,6 +36,7 @@ __all__ = [
     "THREAD_KIND_USER",
     "count_conversation_threads",
     "create_thread_id",
+    "generate_conversation_title",
     "get_conversation_thread",
     "get_conversation_thread_repository",
     "infer_thread_kind",
@@ -35,5 +44,6 @@ __all__ = [
     "mark_conversation_thread_deleted",
     "parse_thread_metadata",
     "rename_conversation_thread",
+    "update_conversation_thread_title_if_current",
     "upsert_conversation_thread",
 ]
