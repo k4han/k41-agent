@@ -202,7 +202,7 @@ export function WorkspaceExplorer(props: {
   const [diffPayload, setDiffPayload] = createSignal<WorkspaceDiffPayload | null>(null);
   const [diffLoading, setDiffLoading] = createSignal(false);
   const [diffError, setDiffError] = createSignal("");
-  const [activeTab, setActiveTab] = createSignal<WorkspaceTab>("changes");
+  const [activeTab, setActiveTab] = createSignal<WorkspaceTab>("files");
   const [fileTabs, setFileTabs] = createSignal<string[]>([]);
   const [filePayloads, setFilePayloads] = createSignal<Record<string, WorkspaceFilePayload>>({});
   const [fileLoadingByPath, setFileLoadingByPath] = createSignal<Record<string, boolean>>({});
@@ -351,7 +351,7 @@ export function WorkspaceExplorer(props: {
     setFileLoadingByPath({});
     setFileErrorByPath({});
     if (untrack(activeTab).startsWith("file:")) {
-      setActiveTab("changes");
+      setActiveTab("files");
     }
     void loadTree("", targetGeneration);
     void loadChanges(targetGeneration);
@@ -679,11 +679,21 @@ export function WorkspaceExplorer(props: {
         />
         <button class="btn btn-sm" type="button" onClick={refresh} disabled={!canQuery()}>
           <RefreshCw size={13} />
-          <span>Reload</span>
+          {/* <span>Reloaad</span> */}
         </button>
       </div>
 
       <div class="workspace-tabs" role="tablist" aria-label="Workspace views">
+        <button
+          class={`workspace-tab ${activeTab() === "files" ? "active" : ""}`}
+          type="button"
+          role="tab"
+          aria-selected={activeTab() === "files"}
+          onClick={() => setActiveTab("files")}
+        >
+          <Folder size={13} />
+          <span>Files</span>
+        </button>
         <button
           class={`workspace-tab ${activeTab() === "changes" ? "active" : ""}`}
           type="button"
@@ -696,16 +706,6 @@ export function WorkspaceExplorer(props: {
           <Show when={changes().length > 0}>
             <span class="workspace-tab-count">{changes().length}</span>
           </Show>
-        </button>
-        <button
-          class={`workspace-tab ${activeTab() === "files" ? "active" : ""}`}
-          type="button"
-          role="tab"
-          aria-selected={activeTab() === "files"}
-          onClick={() => setActiveTab("files")}
-        >
-          <Folder size={13} />
-          <span>Files</span>
         </button>
         <For each={fileTabs()}>
           {(path) => (
