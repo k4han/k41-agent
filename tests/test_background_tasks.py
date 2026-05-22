@@ -81,6 +81,38 @@ async def test_background_task_restore_preserves_completed_status(
 
 
 @pytest.mark.asyncio
+async def test_background_task_submit_remembers_thread_workspace(
+    background_task_db,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    import agent.modules.agent_runtime.runner as runner_module
+    from agent.modules.workspaces import get_thread_workspace_ref, workspace_ref_from_local_path
+
+    async def fake_run_agent_stream(**kwargs):
+        yield {"type": "final", "content": "done"}
+
+    monkeypatch.setattr(runner_module, "run_agent_stream", fake_run_agent_stream)
+
+    workspace = workspace_ref_from_local_path(
+        str(tmp_path),
+        label="octo/example",
+        metadata={"source": "github"},
+    )
+    manager = BackgroundTaskManager()
+    task_id = await manager.submit(
+        "do work",
+        agent_name="default",
+        workspace=workspace,
+    )
+    task = await _wait_for_task_status(manager, task_id, "completed")
+    stored_workspace = await get_thread_workspace_ref(task["thread_id"])
+
+    assert stored_workspace is not None
+    assert stored_workspace.model_dump() == workspace.model_dump()
+
+
+@pytest.mark.asyncio
 async def test_background_task_restore_marks_running_records_interrupted(
     background_task_db,
 ) -> None:

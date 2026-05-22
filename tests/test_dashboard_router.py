@@ -554,6 +554,80 @@ def test_dashboard_chat_history_returns_workspace_metadata(
     assert payload["threads"][1]["workspace_label"] == "No workspace"
 
 
+def test_dashboard_chat_history_uses_background_task_workspace_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
+    conversations_module = importlib.import_module("agent.modules.conversations")
+    workspace = dashboard_router_module.resolve_workspace_ref(
+        {
+            **_workspace_payload(tmp_path),
+            "label": "octo/example",
+            "metadata": {"source": "github"},
+        }
+    )
+    threads = [
+        _conversation_thread(
+            "task_dashboard_github",
+            "GitHub task",
+            kind="background",
+        ),
+    ]
+
+    class FakeTaskManager:
+        def get_by_thread_id(self, thread_id: str):
+            assert thread_id == "task_dashboard_github"
+            return {"workspace": workspace.model_dump()}
+
+    async def fake_list_conversation_threads(
+        limit=None,
+        offset=0,
+        kind=None,
+        kinds=None,
+    ):
+        assert kind is None
+        assert kinds == ["user", "background"]
+        return threads
+
+    async def fake_get_checkpoint_stats(thread_id: str):
+        return {"latest_checkpoint_id": f"{thread_id}-checkpoint", "checkpoint_count": 1}
+
+    async def fake_get_thread_workspace_refs(thread_ids: list[str]):
+        assert thread_ids == ["task_dashboard_github"]
+        return {}
+
+    monkeypatch.setattr(
+        conversations_module,
+        "list_conversation_threads",
+        fake_list_conversation_threads,
+    )
+    monkeypatch.setattr(
+        dashboard_router_module,
+        "_get_checkpoint_stats",
+        fake_get_checkpoint_stats,
+    )
+    monkeypatch.setattr(
+        dashboard_router_module,
+        "get_thread_workspace_refs",
+        fake_get_thread_workspace_refs,
+    )
+    monkeypatch.setattr(
+        dashboard_router_module,
+        "get_background_task_manager",
+        lambda: FakeTaskManager(),
+    )
+
+    client = _create_dashboard_client(ChannelManager())
+    response = client.get("/dashboard-api/chat-history")
+
+    assert response.status_code == 200
+    thread = response.json()["threads"][0]
+    assert thread["workspace"] == workspace.model_dump()
+    assert thread["workspace_key"] == f"local:{workspace.locator}"
+    assert thread["workspace_label"] == "octo/example"
+
+
 def test_dashboard_chat_history_pagination_keeps_workspace_fields(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

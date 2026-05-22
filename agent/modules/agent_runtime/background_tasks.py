@@ -20,7 +20,11 @@ from html import escape as escape_html
 from typing import Any, Awaitable, Callable
 
 from agent.modules.notifications import send_notification as _send_notification
-from agent.modules.workspaces import WorkspaceRef, resolve_workspace_ref
+from agent.modules.workspaces import (
+    WorkspaceRef,
+    remember_thread_workspace_ref,
+    resolve_workspace_ref,
+)
 from agent.modules.workflows import REACT_AGENT_GRAPH_TYPE
 
 logger = logging.getLogger(__name__)
@@ -271,6 +275,15 @@ class BackgroundTaskManager:
         from agent.modules.conversations import THREAD_KIND_BACKGROUND, upsert_conversation_thread
 
         await self._persist_task(task)
+        if task.workspace is not None:
+            try:
+                await remember_thread_workspace_ref(task.thread_id, task.workspace)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to remember workspace for background task %s: %s",
+                    task.task_id,
+                    exc,
+                )
         await upsert_conversation_thread(
             thread_id=task.thread_id,
             agent_name=task.agent_name,

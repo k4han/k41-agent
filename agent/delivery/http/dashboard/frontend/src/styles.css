@@ -467,6 +467,11 @@ a {
   box-shadow: var(--shadow);
 }
 
+.nav-history-menu.open-up {
+  top: auto;
+  bottom: calc(100% + 2px);
+}
+
 .nav-history-menu-item {
   display: flex;
   align-items: center;
@@ -509,22 +514,11 @@ a {
 
 .nav-history-kind-icon {
   flex-shrink: 0;
-  color: var(--info);
+  color: var(--muted);
 }
 
-.nav-history-kind-badge {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  min-height: 17px;
-  border: 1px solid color-mix(in srgb, var(--info) 35%, var(--border));
-  border-radius: 999px;
+.nav-history-kind-icon.task {
   color: var(--info);
-  padding: 0 5px;
-  font-size: 10px;
-  font-weight: 650;
-  line-height: 1;
 }
 
 .nav-history-meta,
@@ -3325,10 +3319,13 @@ body.workspace-resizing * {
   white-space: nowrap;
 }
 
-.history-thread-kind {
+.history-thread-icon {
   flex-shrink: 0;
-  min-height: 20px;
-  font-size: 11px;
+  color: var(--muted);
+}
+
+.history-thread-icon.task {
+  color: var(--info);
 }
 
 .inline-rename-input {

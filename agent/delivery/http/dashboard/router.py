@@ -1439,6 +1439,23 @@ async def _attach_workspace_summaries(
         logger.warning("Failed to list thread workspaces: %s", exc)
         workspaces = {}
 
+    workspaces = dict(workspaces)
+    for thread_id in thread_ids:
+        if thread_id in workspaces:
+            continue
+        try:
+            task = get_background_task_manager().get_by_thread_id(thread_id)
+        except Exception as exc:
+            logger.debug(
+                "Failed to load background task workspace for thread %s: %s",
+                thread_id,
+                exc,
+            )
+            continue
+        task_workspace = (task or {}).get("workspace")
+        if task_workspace:
+            workspaces[thread_id] = resolve_workspace_ref(task_workspace)
+
     return [
         {
             **thread,

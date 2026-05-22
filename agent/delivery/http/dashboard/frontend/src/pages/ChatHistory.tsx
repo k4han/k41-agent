@@ -193,18 +193,13 @@ export function ChatHistoryListPage() {
                                       >
                                         <Show
                                           when={isBackgroundThread(thread)}
-                                          fallback={<MessageSquare size={13} />}
+                                          fallback={<MessageSquare size={13} class="history-thread-icon" />}
                                         >
-                                          <PlaySquare size={13} />
+                                          <PlaySquare size={13} class="history-thread-icon task" />
                                         </Show>
                                         <span class="mono">
                                           {truncateText(thread.title || thread.thread_id, 40)}
                                         </span>
-                                        <Show when={isBackgroundThread(thread)}>
-                                          <span class="badge badge-info history-thread-kind">
-                                            Background
-                                          </span>
-                                        </Show>
                                       </A>
                                     }
                                   >

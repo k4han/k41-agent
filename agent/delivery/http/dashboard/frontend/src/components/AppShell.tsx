@@ -50,6 +50,7 @@ const navItems: NavItem[] = [
 
 const HISTORY_PAGE_SIZE = 20;
 const HISTORY_PANEL_STORAGE_KEY = "kaka-dashboard-history";
+const HISTORY_MENU_MIN_SPACE_PX = 78;
 
 type HistoryCache = {
   threads: ThreadSummary[];
@@ -91,6 +92,7 @@ export function AppShell(props: {
   const [historyHasMore, setHistoryHasMore] = createSignal(historyCache.hasMore);
   const [historyLoading, setHistoryLoading] = createSignal(false);
   const [historyMenuThreadId, setHistoryMenuThreadId] = createSignal<string | null>(null);
+  const [historyMenuOpensUp, setHistoryMenuOpensUp] = createSignal(false);
   const [collapsedHistoryGroupKeys, setCollapsedHistoryGroupKeys] = createSignal<Set<string>>(
     new Set(),
   );
@@ -308,7 +310,19 @@ export function AppShell(props: {
     event.preventDefault();
     event.stopPropagation();
     setEditingHistoryThreadId(null);
-    setHistoryMenuThreadId((current) => (current === threadId ? null : threadId));
+    setHistoryMenuThreadId((current) => {
+      if (current === threadId) {
+        setHistoryMenuOpensUp(false);
+        return null;
+      }
+
+      const target = event.currentTarget as HTMLElement;
+      const list = target.closest(".nav-history-list") as HTMLElement | null;
+      const targetRect = target.getBoundingClientRect();
+      const boundaryBottom = list?.getBoundingClientRect().bottom ?? window.innerHeight;
+      setHistoryMenuOpensUp(boundaryBottom - targetRect.bottom < HISTORY_MENU_MIN_SPACE_PX);
+      return threadId;
+    });
   };
   const requestDeleteHistoryThread = (thread: ThreadSummary, event: MouseEvent) => {
     event.preventDefault();
@@ -533,13 +547,13 @@ export function AppShell(props: {
                                         class="nav-history-link"
                                         title={`${thread.thread_id} - ${threadMeta(thread)}`}
                                       >
-                                        <Show when={isBackgroundThread(thread)}>
-                                          <PlaySquare size={12} class="nav-history-kind-icon" />
+                                        <Show
+                                          when={isBackgroundThread(thread)}
+                                          fallback={<MessageSquare size={12} class="nav-history-kind-icon" />}
+                                        >
+                                          <PlaySquare size={12} class="nav-history-kind-icon task" />
                                         </Show>
                                         <span class="nav-history-title">{threadTitle(thread)}</span>
-                                        <Show when={isBackgroundThread(thread)}>
-                                          <span class="nav-history-kind-badge">Task</span>
-                                        </Show>
                                       </A>
                                     }
                                   >
@@ -565,7 +579,7 @@ export function AppShell(props: {
                                   </Show>
                                 </div>
                                 <Show when={historyMenuThreadId() === thread.thread_id}>
-                                  <div class="nav-history-menu">
+                                  <div class={`nav-history-menu ${historyMenuOpensUp() ? "open-up" : ""}`}>
                                     <button
                                       class="nav-history-menu-item"
                                       type="button"
