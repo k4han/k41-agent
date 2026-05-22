@@ -1276,7 +1276,11 @@ a {
 
 .chat-agent-picker .select-control-menu {
   top: auto;
+  right: auto;
   bottom: calc(100% + 6px);
+  left: 0;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 32px));
 }
 
 .select-control-option {
@@ -1288,8 +1292,11 @@ a {
   border-radius: 6px;
   background: transparent;
   color: var(--fg);
+  overflow: hidden;
   padding: 0 9px;
   text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .select-control-option:hover,
@@ -1670,8 +1677,7 @@ a {
 }
 
 .chat-shell-resizable.workspace-open .chat-panel {
-  justify-self: center;
-  width: min(960px, 100%);
+  width: 100%;
 }
 
 .chat-panel {
@@ -1724,6 +1730,10 @@ a {
   padding-inline: 0;
 }
 
+.chat-shell-resizable.workspace-open .transcript > .message,
+.chat-shell-resizable.workspace-open .transcript > .tool-call,
+.chat-shell-resizable.workspace-open .transcript > .empty,
+.chat-shell-resizable.workspace-open .transcript > .chat-workspace-empty,
 .chat-shell-resizable.workspace-closed .transcript > .message,
 .chat-shell-resizable.workspace-closed .transcript > .tool-call,
 .chat-shell-resizable.workspace-closed .transcript > .empty,
@@ -1732,6 +1742,8 @@ a {
   margin-inline: auto;
 }
 
+.chat-shell-resizable.workspace-open .thread-banner,
+.chat-shell-resizable.workspace-open .chat-composer,
 .chat-shell-resizable.workspace-closed .thread-banner,
 .chat-shell-resizable.workspace-closed .chat-composer {
   align-self: center;
