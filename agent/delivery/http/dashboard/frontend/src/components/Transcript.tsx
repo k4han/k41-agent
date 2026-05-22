@@ -92,6 +92,7 @@ export function TranscriptMessageView(props: {
   role: TranscriptRole;
   text: string;
   attachments?: TranscriptAttachment[];
+  deferMermaid?: boolean;
 }) {
   return (
     <div class={`message ${props.role}`}>
@@ -101,7 +102,11 @@ export function TranscriptMessageView(props: {
             when={props.role === "assistant"}
             fallback={<div class="message-text">{props.text}</div>}
           >
-            <Markdown text={props.text} class="message-markdown" />
+            <Markdown
+              text={props.text}
+              class="message-markdown"
+              deferMermaid={props.deferMermaid}
+            />
           </Show>
         </Show>
         <Show when={props.attachments?.length}>
@@ -161,12 +166,13 @@ export function ToolCallDetail(props: {
   );
 }
 
-export function TranscriptItemView(props: { item: TranscriptItem }) {
+export function TranscriptItemView(props: { item: TranscriptItem; deferMermaid?: boolean }) {
   return props.item.type === "message" ? (
     <TranscriptMessageView
       role={props.item.role}
       text={props.item.text}
       attachments={props.item.attachments}
+      deferMermaid={props.deferMermaid}
     />
   ) : (
     <ToolCallDetail

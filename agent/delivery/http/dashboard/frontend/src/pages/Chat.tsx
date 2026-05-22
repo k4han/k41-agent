@@ -1445,7 +1445,12 @@ export function ChatPage() {
                   }
                 >
                   <For each={items()}>
-                    {(item) => <TranscriptItemView item={item} />}
+                    {(item) => (
+                      <TranscriptItemView
+                        item={item}
+                        deferMermaid={streaming() || backgroundLive()}
+                      />
+                    )}
                   </For>
                 </Show>
               </div>
