@@ -33,8 +33,100 @@ type SessionsPayload = {
 const activeTaskStatuses = new Set(["running", "pending"]);
 const TASK_POLL_INTERVAL_MS = 5000;
 
+type TaskMetaItem = {
+  key: string;
+  label: string;
+  value: string;
+  title?: string;
+};
+
 function hasActiveTasks(tasks: BackgroundTask[]): boolean {
   return tasks.some((task) => activeTaskStatuses.has(task.status));
+}
+
+function metadataText(task: BackgroundTask, key: string): string {
+  const value = task.workspace?.metadata?.[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function compactPath(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  const normalized = trimmed.replace(/\\/g, "/").replace(/\/+$/, "");
+  const parts = normalized.split("/").filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
+  }
+  return trimmed;
+}
+
+function repositoryLabel(task: BackgroundTask): string {
+  const repository = metadataText(task, "repository_full_name");
+  if (repository) {
+    return repository;
+  }
+
+  const label = task.workspace?.label?.trim() || "";
+  const locator = task.workspace?.locator?.trim() || "";
+  if (label && label !== locator && /^[^/\\\s]+\/[^/\\\s]+$/.test(label)) {
+    return label;
+  }
+  return "";
+}
+
+function workspaceLabel(task: BackgroundTask): string {
+  const workspace = task.workspace;
+  if (!workspace) {
+    return "";
+  }
+
+  const repo = repositoryLabel(task);
+  const label = workspace.label?.trim() || "";
+  const locator = workspace.locator?.trim() || "";
+  if (label && label !== locator && label !== repo) {
+    return label;
+  }
+  return compactPath(locator || label);
+}
+
+function taskMetaItems(task: BackgroundTask): TaskMetaItem[] {
+  const items: TaskMetaItem[] = [
+    { key: "agent", label: "agent", value: task.agent_name || "default" },
+  ];
+  const repository = repositoryLabel(task);
+  if (repository) {
+    items.push({ key: "repo", label: "repo", value: repository });
+  }
+  const branch = metadataText(task, "branch");
+  if (branch) {
+    items.push({ key: "branch", label: "branch", value: branch });
+  }
+  const workspace = workspaceLabel(task);
+  if (workspace) {
+    items.push({
+      key: "workspace",
+      label: "workspace",
+      value: workspace,
+      title: task.workspace?.locator || workspace,
+    });
+  }
+  if (task.notify_channel) {
+    items.push({
+      key: "notify",
+      label: "notify",
+      value: `${task.notify_channel.platform}:${task.notify_channel.external_id}`,
+    });
+  }
+  items.push({
+    key: "thread",
+    label: "thread",
+    value: truncateText(task.thread_id, 42),
+    title: task.thread_id,
+  });
+  return items;
 }
 
 export function TasksPage() {
@@ -288,8 +380,14 @@ export function TasksPage() {
                               <div>
                                 <div class="mono">#{task.task_id}</div>
                                 <div>{truncateText(task.request, 220)}</div>
-                                <div class="hint">
-                                  {task.agent_name} - {task.thread_id}
+                                <div class="chips">
+                                  <For each={taskMetaItems(task)}>
+                                    {(item) => (
+                                      <span class="chip" title={item.title || item.value}>
+                                        {item.label}: {item.value}
+                                      </span>
+                                    )}
+                                  </For>
                                 </div>
                               </div>
                               <div class="row-wrap">

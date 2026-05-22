@@ -1198,6 +1198,7 @@ async def list_active_sessions() -> dict[str, Any]:
 class SubmitTaskBody(BaseModel):
     request: str
     agent_name: str = "default"
+    workspace: WorkspaceRef | None = None
     notify_platform: str | None = None
     notify_external_id: str | None = None
     notify_channel_id: str | None = None
@@ -1227,6 +1228,7 @@ async def submit_background_task(body: SubmitTaskBody) -> dict[str, Any]:
     task_id = await manager.submit(
         request=body.request.strip(),
         agent_name=body.agent_name,
+        workspace=body.workspace or resolve_workspace_ref(None),
         notify_channel=notify_channel,
     )
     return {"status": "submitted", "task_id": task_id}

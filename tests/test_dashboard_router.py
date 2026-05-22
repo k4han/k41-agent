@@ -446,6 +446,35 @@ def test_dashboard_workspace_changes_for_non_git_workspace() -> None:
     assert "not a Git repository" in diff_response.json()["message"]
 
 
+def test_dashboard_submit_background_task_records_default_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
+    captured = {}
+
+    class FakeManager:
+        async def submit(self, **kwargs):
+            captured.update(kwargs)
+            return "task-1"
+
+    monkeypatch.setattr(
+        dashboard_router_module,
+        "get_background_task_manager",
+        lambda: FakeManager(),
+    )
+
+    client = _create_dashboard_client(ChannelManager())
+    response = client.post(
+        "/tasks",
+        json={"request": "do work", "agent_name": "default"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["task_id"] == "task-1"
+    assert captured["workspace"].backend == "local"
+    assert captured["workspace"].locator
+
+
 def test_dashboard_api_renames_chat_thread(monkeypatch: pytest.MonkeyPatch) -> None:
     dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
     conversations_module = importlib.import_module("agent.modules.conversations")

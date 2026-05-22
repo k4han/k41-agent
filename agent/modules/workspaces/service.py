@@ -46,11 +46,16 @@ def workspace_ref_from_local_path(
     working_dir: str | None = None,
     *,
     label: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> WorkspaceRef:
     return normalize_workspace_ref(
-        working_dir,
+        {
+            "backend": "local",
+            "locator": working_dir,
+            "label": label,
+            "metadata": metadata or {},
+        },
         default_locator=DEFAULT_LOCAL_WORKSPACE,
-        label=label,
     )
 
 

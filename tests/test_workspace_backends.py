@@ -24,6 +24,17 @@ def test_workspace_ref_normalizes_local_path(tmp_path):
     assert resolve_workspace_ref(workspace.model_dump()) == workspace
 
 
+def test_workspace_ref_from_local_path_preserves_metadata(tmp_path):
+    workspace = workspace_ref_from_local_path(
+        str(tmp_path),
+        label="repo",
+        metadata={"source": "github", "branch": "main"},
+    )
+
+    assert workspace.metadata == {"source": "github", "branch": "main"}
+    assert resolve_workspace_ref(workspace.model_dump()) == workspace
+
+
 def test_workspace_ref_normalizes_model_instances(tmp_path):
     raw_workspace = WorkspaceRef(
         backend="local",

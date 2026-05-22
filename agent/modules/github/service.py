@@ -16,7 +16,7 @@ from agent.modules.github.config import (
 )
 from agent.modules.github.repository import get_github_repository_store, load_mention_triggers
 from agent.modules.github.workspace import GitHubWorkspaceManager
-from agent.modules.workspaces import workspace_ref_from_local_path
+from agent.modules.workspaces import WorkspaceRef, workspace_ref_from_local_path
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +55,22 @@ def verify_webhook_signature(
         return False
     expected = "sha256=" + hmac.new(secret.encode("utf-8"), body, sha256).hexdigest()
     return hmac.compare_digest(expected, signature_header)
+
+
+def _github_workspace_ref(context: GitHubTaskContext) -> WorkspaceRef:
+    return workspace_ref_from_local_path(
+        str(context.workspace_path),
+        label=context.repository_full_name,
+        metadata={
+            "source": "github",
+            "repository_full_name": context.repository_full_name,
+            "branch": context.branch,
+            "base_branch": context.base_branch,
+            "issue_number": context.issue_number,
+            "issue_url": context.issue_url,
+            "completion_mode": context.completion_mode,
+        },
+    )
 
 
 class GitHubAutomationService:
@@ -107,6 +123,11 @@ class GitHubAutomationService:
         workspace = workspace_ref_from_local_path(
             str(path.resolve()),
             label=binding.full_name,
+            metadata={
+                "source": "github",
+                "repository_full_name": binding.full_name,
+                "default_branch": binding.default_branch,
+            },
         )
         return {
             "kind": "github",
@@ -308,10 +329,7 @@ class GitHubAutomationService:
         return await manager.submit(
             request=prompt,
             agent_name=agent_name,
-            workspace=workspace_ref_from_local_path(
-                str(prepared.path),
-                label=binding.full_name,
-            ),
+            workspace=_github_workspace_ref(context),
             notify_channel=self._notify_channel_for_binding(binding),
             completion_hook=lambda task: self.publish_task_result(task, context),
         )
@@ -375,10 +393,7 @@ class GitHubAutomationService:
         return await manager.submit(
             request=prompt,
             agent_name=agent_name,
-            workspace=workspace_ref_from_local_path(
-                str(prepared.path),
-                label=binding.full_name,
-            ),
+            workspace=_github_workspace_ref(context),
             notify_channel=self._notify_channel_for_binding(binding),
             completion_hook=lambda task: self.publish_task_result(task, context),
         )
