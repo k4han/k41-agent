@@ -1,15 +1,12 @@
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from langchain_core.messages import AIMessage
 
 import agent.modules.workflows.nodes.tool as tool_node_module
+from agent.modules.tools import get_default_tool_names
 from agent.modules.tools.langchain.agent_tools.call_agent import (
     call_agent,
 )
-from agent.modules.workflows import DEFAULT_WORKING_DIR
-from agent.modules.tools import get_default_tool_names
 
 
 @pytest.mark.asyncio
@@ -31,28 +28,17 @@ async def test_call_agent_inherits_parent_runtime_context(monkeypatch):
                 tools=["echo"],
             )
 
-    class _FakeGraph:
-        async def ainvoke(self, payload, *, config, context):
-            captured["payload"] = payload
-            captured["config"] = config
-            captured["context"] = context
-            return {"messages": [AIMessage(content="child complete")]}
+    async def _fake_run_agent_full(**kwargs):
+        captured["run_kwargs"] = kwargs
+        return "child complete"
 
     monkeypatch.setattr(
         "agent.modules.agents.get_catalog_service",
         lambda: _FakeCatalog(),
     )
     monkeypatch.setattr(
-        "agent.modules.workflows.get_workflow_graph",
-        lambda name: _FakeGraph(),
-    )
-    monkeypatch.setattr(
-        "agent.modules.workflows.make_run_context",
-        lambda **kwargs: kwargs,
-    )
-    monkeypatch.setattr(
-        "agent.modules.workflows.make_run_config",
-        lambda **kwargs: {"configurable": {"thread_id": kwargs["thread_id"]}},
+        "agent.modules.agent_runtime.runner.run_agent_full",
+        _fake_run_agent_full,
     )
 
     runtime = SimpleNamespace(
@@ -77,19 +63,17 @@ async def test_call_agent_inherits_parent_runtime_context(monkeypatch):
 
     assert result == "child complete"
     assert captured["validate_call"] == ("parent-agent", "child-agent")
-    assert captured["payload"]["messages"][0].content == "delegate this"
-    assert captured["context"]["workspace"].locator == str(Path("D:/repo").resolve())
-    assert captured["context"]["agent_name"] == "child-agent"
-    assert captured["context"]["allowed_tool_names"] == ["echo"]
-    assert captured["context"]["provider"] == "openai-main"
-    assert captured["context"]["model"] == "parent-model"
-    assert captured["config"]["configurable"]["thread_id"].startswith(
-        "parent-thread:sub:child-agent:"
-    )
+    run_kwargs = captured["run_kwargs"]
+    assert run_kwargs["user_input"] == "delegate this"
+    assert run_kwargs["agent_name"] == "child-agent"
+    assert run_kwargs["workspace"] == "D:/repo"
+    assert run_kwargs["provider"] == "openai-main"
+    assert run_kwargs["model"] == "parent-model"
+    assert run_kwargs["thread_id"].startswith("parent-thread:sub:child-agent:")
 
 
 @pytest.mark.asyncio
-async def test_call_agent_uses_canonical_default_working_dir(monkeypatch):
+async def test_call_agent_passes_none_workspace_when_unset(monkeypatch):
     captured: dict = {}
 
     class _FakeCatalog:
@@ -106,26 +90,17 @@ async def test_call_agent_uses_canonical_default_working_dir(monkeypatch):
                 tools=["echo"],
             )
 
-    class _FakeGraph:
-        async def ainvoke(self, payload, *, config, context):
-            captured["context"] = context
-            return {"messages": [AIMessage(content="ok")]}
+    async def _fake_run_agent_full(**kwargs):
+        captured["run_kwargs"] = kwargs
+        return "ok"
 
     monkeypatch.setattr(
         "agent.modules.agents.get_catalog_service",
         lambda: _FakeCatalog(),
     )
     monkeypatch.setattr(
-        "agent.modules.workflows.get_workflow_graph",
-        lambda name: _FakeGraph(),
-    )
-    monkeypatch.setattr(
-        "agent.modules.workflows.make_run_context",
-        lambda **kwargs: kwargs,
-    )
-    monkeypatch.setattr(
-        "agent.modules.workflows.make_run_config",
-        lambda **kwargs: {"configurable": {"thread_id": kwargs["thread_id"]}},
+        "agent.modules.agent_runtime.runner.run_agent_full",
+        _fake_run_agent_full,
     )
 
     runtime = SimpleNamespace(
@@ -146,70 +121,11 @@ async def test_call_agent_uses_canonical_default_working_dir(monkeypatch):
     )
 
     assert result == "ok"
-    assert captured["context"]["workspace"].locator == str(Path(DEFAULT_WORKING_DIR).resolve())
+    assert captured["run_kwargs"]["workspace"] is None
 
 
 @pytest.mark.asyncio
-async def test_call_agent_omits_context_for_graph_without_context_schema(monkeypatch):
-    captured: dict = {}
-
-    class _FakeCatalog:
-        def validate_call(self, caller_name: str, target_name: str) -> bool:
-            return True
-
-        def get_agent(self, name: str):
-            if name != "child-agent":
-                return None
-            return SimpleNamespace(
-                graph_type="research_chain",
-                service_type="backend",
-                max_context_tokens=1234,
-                tools=["echo"],
-            )
-
-    class _FakeGraph:
-        context_schema = None
-
-        async def ainvoke(self, payload, *, config, **kwargs):
-            captured["payload"] = payload
-            captured["config"] = config
-            captured["kwargs"] = kwargs
-            return {"messages": [AIMessage(content="ok")]}
-
-    monkeypatch.setattr(
-        "agent.modules.agents.get_catalog_service",
-        lambda: _FakeCatalog(),
-    )
-    monkeypatch.setattr(
-        "agent.modules.workflows.get_workflow_graph",
-        lambda name: _FakeGraph(),
-    )
-    monkeypatch.setattr(
-        "agent.modules.workflows.make_run_context",
-        lambda **kwargs: kwargs,
-    )
-    monkeypatch.setattr(
-        "agent.modules.workflows.make_run_config",
-        lambda **kwargs: {"configurable": {"thread_id": kwargs["thread_id"]}},
-    )
-
-    runtime = SimpleNamespace(
-        context={"agent_name": "parent-agent", "working_dir": "D:/repo"},
-        config={"configurable": {"thread_id": "parent-thread"}},
-    )
-
-    result = await call_agent.coroutine(
-        task="delegate this",
-        sub_agent="child-agent",
-        runtime=runtime,
-    )
-
-    assert result == "ok"
-    assert "context" not in captured["kwargs"]
-
-
-@pytest.mark.asyncio
-async def test_call_agent_extracts_last_text_from_structured_content(monkeypatch):
+async def test_call_agent_returns_empty_response_placeholder(monkeypatch):
     class _FakeCatalog:
         def validate_call(self, caller_name: str, target_name: str) -> bool:
             return True
@@ -224,34 +140,16 @@ async def test_call_agent_extracts_last_text_from_structured_content(monkeypatch
                 tools=["echo"],
             )
 
-    class _FakeGraph:
-        async def ainvoke(self, payload, *, config, context):
-            return {
-                "messages": [
-                    AIMessage(
-                        content=[
-                            {"type": "thinking", "thinking": "internal"},
-                            {"type": "text", "text": "child final response"},
-                        ]
-                    )
-                ]
-            }
+    async def _fake_run_agent_full(**kwargs):
+        return ""
 
     monkeypatch.setattr(
         "agent.modules.agents.get_catalog_service",
         lambda: _FakeCatalog(),
     )
     monkeypatch.setattr(
-        "agent.modules.workflows.get_workflow_graph",
-        lambda name: _FakeGraph(),
-    )
-    monkeypatch.setattr(
-        "agent.modules.workflows.make_run_context",
-        lambda **kwargs: kwargs,
-    )
-    monkeypatch.setattr(
-        "agent.modules.workflows.make_run_config",
-        lambda **kwargs: {"configurable": {"thread_id": kwargs["thread_id"]}},
+        "agent.modules.agent_runtime.runner.run_agent_full",
+        _fake_run_agent_full,
     )
 
     runtime = SimpleNamespace(
@@ -265,7 +163,92 @@ async def test_call_agent_extracts_last_text_from_structured_content(monkeypatch
         runtime=runtime,
     )
 
-    assert result == "child final response"
+    assert result == "(empty response)"
+
+
+@pytest.mark.asyncio
+async def test_call_agent_blocks_when_validate_call_fails(monkeypatch):
+    class _FakeCatalog:
+        def validate_call(self, caller_name: str, target_name: str) -> bool:
+            return False
+
+        def get_agent(self, name: str):
+            return SimpleNamespace(
+                graph_type="react_agent",
+                service_type="backend",
+                max_context_tokens=1234,
+                tools=["echo"],
+            )
+
+    invoked = False
+
+    async def _fake_run_agent_full(**kwargs):
+        nonlocal invoked
+        invoked = True
+        return "should not run"
+
+    monkeypatch.setattr(
+        "agent.modules.agents.get_catalog_service",
+        lambda: _FakeCatalog(),
+    )
+    monkeypatch.setattr(
+        "agent.modules.agent_runtime.runner.run_agent_full",
+        _fake_run_agent_full,
+    )
+
+    runtime = SimpleNamespace(
+        context={"agent_name": "parent-agent"},
+        config={"configurable": {"thread_id": "parent-thread"}},
+    )
+
+    result = await call_agent.coroutine(
+        task="delegate this",
+        sub_agent="child-agent",
+        runtime=runtime,
+    )
+
+    assert result == "[error] not allowed to call agent 'child-agent'."
+    assert invoked is False
+
+
+@pytest.mark.asyncio
+async def test_call_agent_reports_runner_failure(monkeypatch):
+    class _FakeCatalog:
+        def validate_call(self, caller_name: str, target_name: str) -> bool:
+            return True
+
+        def get_agent(self, name: str):
+            return SimpleNamespace(
+                graph_type="react_agent",
+                service_type="backend",
+                max_context_tokens=1234,
+                tools=["echo"],
+            )
+
+    async def _fake_run_agent_full(**kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(
+        "agent.modules.agents.get_catalog_service",
+        lambda: _FakeCatalog(),
+    )
+    monkeypatch.setattr(
+        "agent.modules.agent_runtime.runner.run_agent_full",
+        _fake_run_agent_full,
+    )
+
+    runtime = SimpleNamespace(
+        context={"agent_name": "parent-agent"},
+        config={"configurable": {"thread_id": "parent-thread"}},
+    )
+
+    result = await call_agent.coroutine(
+        task="delegate this",
+        sub_agent="child-agent",
+        runtime=runtime,
+    )
+
+    assert result == "[error] sub-agent 'child-agent' failed: boom"
 
 
 @pytest.mark.asyncio

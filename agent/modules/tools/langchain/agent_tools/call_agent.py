@@ -10,8 +10,6 @@ from langchain_core.tools import InjectedToolArg, tool
 from langgraph.prebuilt import ToolRuntime
 
 from agent.modules.tools.runtime.context import get_context_value
-from agent.modules.workspaces import normalize_workspace_ref
-from agent.shared.infrastructure.parsing import extract_final_text_content
 
 logger = logging.getLogger(__name__)
 
@@ -27,13 +25,6 @@ def _make_subagent_thread_id(runtime: ToolRuntime[Any, Any], sub_agent: str) -> 
     return f"sub_{sub_agent}_{suffix}"
 
 
-def _graph_accepts_context(graph: object) -> bool:
-    context_schema = getattr(graph, "context_schema", Ellipsis)
-    if context_schema is Ellipsis:
-        return True
-    return context_schema is not None
-
-
 @tool
 async def call_agent(
     task: str,
@@ -41,22 +32,14 @@ async def call_agent(
     runtime: Annotated[ToolRuntime[Any, Any], InjectedToolArg],
 ) -> str:
     """Invoke a sub-agent to handle a specific task."""
-    from langchain_core.messages import HumanMessage
-
+    from agent.modules.agent_runtime.runner import run_agent_full
     from agent.modules.agents import get_catalog_service
-    from agent.modules.workflows import (
-        DEFAULT_WORKING_DIR,
-        get_workflow_graph,
-        make_run_config,
-        make_run_context,
-    )
 
     caller_agent_name = get_context_value(runtime.context, "agent_name", "default")
     inherited_workspace = get_context_value(runtime.context, "workspace", None)
     inherited_working_dir = get_context_value(runtime.context, "working_dir", None)
-    workspace = normalize_workspace_ref(
-        inherited_workspace if inherited_workspace is not None else inherited_working_dir,
-        default_locator=DEFAULT_WORKING_DIR,
+    workspace_ref = (
+        inherited_workspace if inherited_workspace is not None else inherited_working_dir
     )
     inherited_provider = get_context_value(runtime.context, "provider", None)
     inherited_model = get_context_value(runtime.context, "model", None)
@@ -66,46 +49,20 @@ async def call_agent(
     if not catalog.validate_call(caller_agent_name, sub_agent):
         return f"[error] not allowed to call agent '{sub_agent}'."
 
-    target_config = catalog.get_agent(sub_agent)
-    if target_config is None:
+    if catalog.get_agent(sub_agent) is None:
         return f"[error] agent config not found for '{sub_agent}'."
 
+    sub_thread_id = _make_subagent_thread_id(runtime, sub_agent)
     try:
-        graph = get_workflow_graph(target_config.graph_type)
-    except ValueError:
-        return f"[error] graph type '{target_config.graph_type}' not registered."
-
-    context = make_run_context(
-        workspace=workspace,
-        max_context_tokens=target_config.max_context_tokens,
-        agent_name=sub_agent,
-        allowed_tool_names=target_config.tools if target_config.tools else None,
-        provider=inherited_provider,
-        model=inherited_model,
-    )
-    config = make_run_config(
-        thread_id=_make_subagent_thread_id(runtime, sub_agent),
-    )
-
-    invoke_kwargs = {
-        "config": config,
-    }
-    if _graph_accepts_context(graph):
-        invoke_kwargs["context"] = context
-
-    try:
-        result = await graph.ainvoke(
-            {"messages": [HumanMessage(content=task)]},
-            **invoke_kwargs,
+        result = await run_agent_full(
+            user_input=task,
+            thread_id=sub_thread_id,
+            agent_name=sub_agent,
+            workspace=workspace_ref,
+            provider=inherited_provider,
+            model=inherited_model,
         )
-        messages = result.get("messages", [])
-        for msg in reversed(messages):
-            if msg.__class__.__name__ != "AIMessage":
-                continue
-            content = extract_final_text_content(getattr(msg, "content", None))
-            if content:
-                return content
-        return "(empty response)"
+        return result or "(empty response)"
     except Exception as e:
         logger.exception(
             "Sub-agent '%s' failed for caller '%s' and task: %s",
