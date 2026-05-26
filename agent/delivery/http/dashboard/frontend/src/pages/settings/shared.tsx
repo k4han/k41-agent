@@ -100,6 +100,16 @@ export function typedValue(info: SettingInfo, raw: unknown): unknown {
   return text;
 }
 
+export function settingsFromPayload(payload: SettingsPayload): Record<string, SettingInfo> {
+  const settings = { ...payload.settings };
+  for (const provider of payload.provider_rows || []) {
+    for (const entry of Object.values(provider.fields)) {
+      settings[entry.key] = entry.info;
+    }
+  }
+  return settings;
+}
+
 // --- Hooks ---------------------------------------------------------------
 
 export function useSettingsData(endpoint: string) {
@@ -113,9 +123,10 @@ export function useSettingsData(endpoint: string) {
     try {
       const payload = await apiFetch<SettingsPayload>(endpoint);
       setData(payload);
+      const settings = settingsFromPayload(payload);
       setDrafts(
         Object.fromEntries(
-          Object.entries(payload.settings).map(([key, info]) => [key, info.value]),
+          Object.entries(settings).map(([key, info]) => [key, info.value]),
         ),
       );
     } catch (err) {
@@ -128,7 +139,7 @@ export function useSettingsData(endpoint: string) {
     if (!payload) {
       return [];
     }
-    return Object.entries(payload.settings)
+    return Object.entries(settingsFromPayload(payload))
       .map(([key, info]) => {
         const next = typedValue({ ...info, key }, drafts()[key]);
         return { key, oldValue: info.value, newValue: next };
@@ -142,11 +153,12 @@ export function useSettingsData(endpoint: string) {
 
   const restoreDraft = (key: string) => {
     const payload = data();
-    if (!payload?.settings[key]) {
+    const settings = payload ? settingsFromPayload(payload) : {};
+    if (!settings[key]) {
       showToast("No server value to restore.", "warning");
       return;
     }
-    const current = payload.settings[key].value ?? null;
+    const current = settings[key].value ?? null;
     setDraft(key, current);
     showToast("Change reverted.", "warning");
   };
@@ -263,6 +275,8 @@ export function SettingRow(props: {
   draft: unknown;
   dirty: boolean;
   trimProviderPrefix?: boolean;
+  actions?: JSX.Element;
+  control?: JSX.Element;
   onChange: (value: unknown) => void;
   onRestore: () => void;
 }) {
@@ -279,13 +293,18 @@ export function SettingRow(props: {
             <Show when={props.dirty}>
               <span class="badge badge-warning">Unsaved</span>
             </Show>
+            <Show when={props.actions}>
+              <div class="setting-inline-actions">{props.actions}</div>
+            </Show>
           </div>
           <Show when={props.info.description}>
             <div class="setting-description">{props.info.description}</div>
           </Show>
         </div>
         <div class="setting-control-panel">
-          <SettingControl info={{ ...props.info, key: props.settingKey }} value={props.draft} onChange={props.onChange} />
+          {props.control || (
+            <SettingControl info={{ ...props.info, key: props.settingKey }} value={props.draft} onChange={props.onChange} />
+          )}
           <Show when={props.dirty}>
             <div class="setting-actions">
               <button class="btn btn-sm" type="button" onClick={props.onRestore}>

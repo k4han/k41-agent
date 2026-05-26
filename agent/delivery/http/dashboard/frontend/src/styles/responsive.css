@@ -153,4 +153,8 @@
   .settings-resource-actions {
     justify-content: flex-start;
   }
+
+  .provider-table-actions {
+    flex-wrap: wrap;
+  }
 }

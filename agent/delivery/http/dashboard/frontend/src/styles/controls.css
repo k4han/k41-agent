@@ -132,6 +132,12 @@
   font-weight: 650;
 }
 
+.setting-inline-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .setting-description {
   max-width: 760px;
   margin-top: 4px;
@@ -249,6 +255,44 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.providers-table td {
+  vertical-align: middle;
+}
+
+.provider-row-dirty td {
+  background: color-mix(in srgb, var(--warning) 5%, transparent);
+}
+
+.provider-name-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 160px;
+}
+
+.provider-table-value {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-table-actions {
+  flex-wrap: nowrap;
+}
+
+.provider-edit-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  padding: 10px 12px;
 }
 
 .change-card {
