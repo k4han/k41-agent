@@ -73,6 +73,18 @@ export type AgentsPayload = {
   model_catalog_error: string;
 };
 
+export type PromptVariable = {
+  name: string;
+  value: string;
+  placeholder: string;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type PromptVariablesPayload = {
+  variables: PromptVariable[];
+};
+
 export type WorkspaceRef = {
   backend: "local";
   locator: string;

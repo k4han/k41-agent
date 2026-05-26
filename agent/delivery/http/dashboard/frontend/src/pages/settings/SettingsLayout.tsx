@@ -2,6 +2,7 @@ import { A, useLocation } from "@solidjs/router";
 import {
   ArrowLeft,
   Bot,
+  Braces,
   ChevronsLeft,
   ChevronsRight,
   Cog,
@@ -24,6 +25,7 @@ const settingsNavItems: SettingsNavItem[] = [
   { href: "/settings/providers", label: "Providers", icon: <Workflow size={15} /> },
   { href: "/settings/channels", label: "Channels", icon: <Network size={15} /> },
   { href: "/settings/agents", label: "Agents", icon: <Users size={15} /> },
+  { href: "/settings/prompt-variables", label: "Prompt Variables", icon: <Braces size={15} /> },
   { href: "/settings/security", label: "Security", icon: <KeyRound size={15} /> },
   { href: "/settings/appearance", label: "Appearance", icon: <Palette size={15} /> },
 ];

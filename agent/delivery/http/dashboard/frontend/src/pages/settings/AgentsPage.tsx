@@ -3,11 +3,12 @@ import { Copy, Edit3, Eye, MessageSquare, Plus, RefreshCw, Trash2 } from "lucide
 
 import { Dialog } from "@/components/Dialog";
 import { ModelPicker } from "@/components/ModelPicker";
+import { PromptVariableTextarea } from "@/components/PromptVariableTextarea";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
 import { statusBadgeClass, truncateText, uniqueSorted } from "@/lib/utils";
-import type { AgentCard, AgentsPayload } from "@/types";
+import type { AgentCard, AgentsPayload, PromptVariable, PromptVariablesPayload } from "@/types";
 
 import { SettingsLayout } from "./SettingsLayout";
 import { SettingsSection } from "./shared";
@@ -63,6 +64,7 @@ export function AgentsPage() {
   const [modalMode, setModalMode] = createSignal<"create" | "edit" | "view" | null>(null);
   const [currentName, setCurrentName] = createSignal("");
   const [form, setForm] = createSignal<AgentForm>(blankForm("react_agent"));
+  const [promptVariables, setPromptVariables] = createSignal<PromptVariable[]>([]);
   const { showToast } = useToast();
 
   const load = async () => {
@@ -71,6 +73,15 @@ export function AgentsPage() {
       setData(await apiFetch<AgentsPayload>("/dashboard-api/agents"));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load agents");
+    }
+  };
+
+  const loadPromptVariables = async () => {
+    try {
+      const payload = await apiFetch<PromptVariablesPayload>("/dashboard-api/prompt-variables");
+      setPromptVariables(payload.variables || []);
+    } catch {
+      setPromptVariables([]);
     }
   };
 
@@ -193,7 +204,10 @@ export function AgentsPage() {
     (data()?.agent_names || []).filter((name) => name !== form().name),
   );
 
-  onMount(load);
+  onMount(() => {
+    load();
+    loadPromptVariables();
+  });
 
   return (
     <SettingsLayout
@@ -506,12 +520,13 @@ export function AgentsPage() {
                 </div>
                 <div class="field">
                   <label>System Prompt</label>
-                  <textarea
-                    class="textarea mono"
+                  <p class="hint">Use prompt variables with double braces, for example <span class="mono">{"{{common_rules}}"}</span>. Type <span class="mono">{"{{"}</span> to see suggestions.</p>
+                  <PromptVariableTextarea
                     rows={12}
                     value={form().system_prompt}
                     disabled={modalMode() === "view"}
-                    onInput={(event) => updateForm("system_prompt", event.currentTarget.value)}
+                    variables={promptVariables()}
+                    onChange={(value) => updateForm("system_prompt", value)}
                   />
                 </div>
               </div>

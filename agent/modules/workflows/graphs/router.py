@@ -30,6 +30,11 @@ from agent.modules.workflows.constants import (
     STRIP_QUOTES,
 )
 from agent.modules.providers import get_chat_model
+from agent.modules.prompt_variables import get_runtime_prompt_variable_values
+from agent.modules.workflows.prompt_builders import (
+    replace_known_prompt_placeholders,
+    resolve_prompt_variables,
+)
 from agent.shared.infrastructure.parsing import safe_str_strip
 
 logger = logging.getLogger(__name__)
@@ -60,6 +65,7 @@ def _build_router_system(
     candidates: dict[str, AgentConfig],
     router_prompt_template: str,
     caller_agent_name: str,
+    prompt_variables: dict[str, str] | None = None,
 ) -> str:
     if not candidates:
         raise RuntimeError("No candidate agents are available for routing.")
@@ -75,16 +81,14 @@ def _build_router_system(
         for name, config in candidates.items()
     )
 
-    try:
-        return template.format(
-            agent_options=agent_options,
-            user_input=user_input,
-            caller_agent_name=caller_agent_name,
-        )
-    except KeyError as exc:
-        raise RuntimeError(
-            f"Router agent '{caller_agent_name}' template references undefined placeholder: {exc}"
-        ) from exc
+    return replace_known_prompt_placeholders(
+        resolve_prompt_variables(template, prompt_variables),
+        {
+            "agent_options": agent_options,
+            "user_input": user_input,
+            "caller_agent_name": caller_agent_name,
+        },
+    )
 
 
 def _normalize_agent_name(raw_value: object) -> str:
@@ -127,6 +131,7 @@ async def _route_agent_name(
     caller_agent_name: str,
     provider: str | None = None,
     model: str | None = None,
+    prompt_variables: dict[str, str] | None = None,
 ) -> str:
     llm = get_chat_model(provider_name=provider, model=model)
     router_system = _build_router_system(
@@ -134,6 +139,7 @@ async def _route_agent_name(
         candidates=candidates,
         router_prompt_template=router_prompt_template,
         caller_agent_name=caller_agent_name,
+        prompt_variables=prompt_variables,
     )
     messages = [
         SystemMessage(content=router_system),
@@ -227,6 +233,7 @@ async def llm_call_router(
 
     selected_agent_name = ""
     if candidates:
+        prompt_variables = await get_runtime_prompt_variable_values()
         selected_agent_name = await _route_agent_name(
             user_input,
             candidates,
@@ -234,6 +241,7 @@ async def llm_call_router(
             caller_agent_name=caller_agent_name,
             provider=provider,
             model=model,
+            prompt_variables=prompt_variables,
         )
 
     target_agent = candidates.get(selected_agent_name)

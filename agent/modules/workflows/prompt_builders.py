@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from typing import Any
 
@@ -25,9 +26,39 @@ SUB_AGENT_EMPTY_PROMPT = (
     "Do not call call_agent unless a callable sub-agent is listed."
 )
 
+_PROMPT_VARIABLE_RE = re.compile(r"\{\{([A-Za-z][A-Za-z0-9_-]{0,63})\}\}")
+
 
 def _has_tool(tools: Sequence[object] | None, tool_name: str) -> bool:
     return any(getattr(tool, "name", "") == tool_name for tool in tools or ())
+
+
+def resolve_prompt_variables(
+    template: str,
+    prompt_variables: dict[str, str] | None,
+) -> str:
+    """Replace {{name}} placeholders with configured prompt variable values."""
+    variables = prompt_variables or {}
+
+    def replace_match(match: re.Match[str]) -> str:
+        name = match.group(1)
+        if name not in variables:
+            return match.group(0)
+        return variables[name]
+
+    return _PROMPT_VARIABLE_RE.sub(replace_match, template)
+
+
+def replace_known_prompt_placeholders(
+    template: str,
+    values: dict[str, str],
+) -> str:
+    """Replace known single-brace placeholders without touching {{variables}}."""
+    resolved = template
+    for name, value in values.items():
+        pattern = re.compile(rf"(?<!\{{)\{{{re.escape(name)}\}}(?!\}})")
+        resolved = pattern.sub(lambda _match, v=value: v, resolved)
+    return resolved
 
 
 def _build_skills_prompt_section() -> str:
@@ -67,14 +98,20 @@ def build_llm_system_prompt(
     agent_name: str,
     tools: Sequence[object] | None,
     catalog: Any,
+    prompt_variables: dict[str, str] | None = None,
 ) -> str:
     """Build the final system prompt for llm_node from runtime state."""
-    system_prompt = system_prompt_template
-    if "{working_dir}" in system_prompt or "{workspace}" in system_prompt:
-        system_prompt = system_prompt.format(
-            working_dir=working_dir,
-            workspace=workspace or working_dir,
-        )
+    system_prompt = resolve_prompt_variables(
+        system_prompt_template,
+        prompt_variables,
+    )
+    system_prompt = replace_known_prompt_placeholders(
+        system_prompt,
+        {
+            "working_dir": working_dir,
+            "workspace": workspace or working_dir,
+        },
+    )
 
     if _has_tool(tools, "call_agent"):
         system_prompt = (
@@ -92,4 +129,6 @@ __all__ = [
     "SUB_AGENT_DISCLOSURE_PROMPT",
     "SUB_AGENT_EMPTY_PROMPT",
     "build_llm_system_prompt",
+    "replace_known_prompt_placeholders",
+    "resolve_prompt_variables",
 ]

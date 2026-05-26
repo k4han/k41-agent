@@ -28,6 +28,39 @@ def test_build_llm_system_prompt_formats_working_dir_without_extra_sections():
     assert prompt == "Base prompt\nWorking directory: D:/repo"
 
 
+def test_build_llm_system_prompt_resolves_prompt_variables_before_runtime_placeholders():
+    prompt = prompt_builders.build_llm_system_prompt(
+        system_prompt_template=(
+            "Base prompt\n"
+            "{{common_rules}}\n"
+            "{{missing_rules}}\n"
+            "Working directory: {working_dir}"
+        ),
+        working_dir="D:/repo",
+        agent_name="default",
+        tools=[SimpleNamespace(name="read_file")],
+        catalog=_FakeCatalog(),
+        prompt_variables={"common_rules": "Use project conventions."},
+    )
+
+    assert "Use project conventions." in prompt
+    assert "{{missing_rules}}" in prompt
+    assert "Working directory: D:/repo" in prompt
+
+
+def test_known_prompt_placeholders_do_not_change_double_brace_variables():
+    prompt = prompt_builders.build_llm_system_prompt(
+        system_prompt_template="{{working_dir}}\n{working_dir}",
+        working_dir="D:/repo",
+        agent_name="default",
+        tools=[SimpleNamespace(name="read_file")],
+        catalog=_FakeCatalog(),
+        prompt_variables={},
+    )
+
+    assert prompt == "{{working_dir}}\nD:/repo"
+
+
 def test_build_llm_system_prompt_injects_skills_section_when_skill_tool_exists(monkeypatch):
     monkeypatch.setattr(
         prompt_builders,

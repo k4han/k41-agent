@@ -14,6 +14,7 @@ def load_orm_models() -> tuple[type[object], ...]:
         GitHubRepositoryBinding,
         GitHubWebhookDelivery,
     )
+    from agent.modules.prompt_variables import PromptVariable
     from agent.modules.workspaces import ThreadWorkspace
     from agent.modules.users import User
     from agent.shared.infrastructure.db.user_preferences import UserPreferences
@@ -29,6 +30,7 @@ def load_orm_models() -> tuple[type[object], ...]:
         GitHubRepositoryBinding,
         GitHubWebhookDelivery,
         ThreadWorkspace,
+        PromptVariable,
     )
 
 

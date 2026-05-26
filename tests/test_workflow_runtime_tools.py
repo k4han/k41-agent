@@ -37,7 +37,7 @@ async def test_call_agent_inherits_parent_runtime_context(monkeypatch):
         lambda: _FakeCatalog(),
     )
     monkeypatch.setattr(
-        "agent.modules.agent_runtime.runner.run_agent_full",
+        "agent.modules.agent_runtime.run_agent_full",
         _fake_run_agent_full,
     )
 
@@ -99,7 +99,7 @@ async def test_call_agent_passes_none_workspace_when_unset(monkeypatch):
         lambda: _FakeCatalog(),
     )
     monkeypatch.setattr(
-        "agent.modules.agent_runtime.runner.run_agent_full",
+        "agent.modules.agent_runtime.run_agent_full",
         _fake_run_agent_full,
     )
 
@@ -148,7 +148,7 @@ async def test_call_agent_returns_empty_response_placeholder(monkeypatch):
         lambda: _FakeCatalog(),
     )
     monkeypatch.setattr(
-        "agent.modules.agent_runtime.runner.run_agent_full",
+        "agent.modules.agent_runtime.run_agent_full",
         _fake_run_agent_full,
     )
 
@@ -192,7 +192,7 @@ async def test_call_agent_blocks_when_validate_call_fails(monkeypatch):
         lambda: _FakeCatalog(),
     )
     monkeypatch.setattr(
-        "agent.modules.agent_runtime.runner.run_agent_full",
+        "agent.modules.agent_runtime.run_agent_full",
         _fake_run_agent_full,
     )
 
@@ -233,7 +233,7 @@ async def test_call_agent_reports_runner_failure(monkeypatch):
         lambda: _FakeCatalog(),
     )
     monkeypatch.setattr(
-        "agent.modules.agent_runtime.runner.run_agent_full",
+        "agent.modules.agent_runtime.run_agent_full",
         _fake_run_agent_full,
     )
 

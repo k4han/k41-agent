@@ -384,3 +384,31 @@ def test_routeable_workflows_excludes_internal_graphs(isolated_registry):
     assert GraphRegistry.routeable_workflows() == {
         "react_agent": "general",
     }
+
+
+def test_router_system_resolves_prompt_variables_without_changing_missing_variables():
+    system_prompt = router_module._build_router_system(
+        user_input="Plan the work",
+        candidates={
+            "researcher": _make_agent(
+                name="researcher",
+                graph_type="react_agent",
+                description="Research specialist",
+            )
+        },
+        router_prompt_template=(
+            "{{router_rules}}\n"
+            "{{missing_rules}}\n"
+            "Candidates:\n{agent_options}\n"
+            "Request: {user_input}\n"
+            "Caller: {caller_agent_name}"
+        ),
+        caller_agent_name="orchestrator",
+        prompt_variables={"router_rules": "Choose the strongest specialist."},
+    )
+
+    assert "Choose the strongest specialist." in system_prompt
+    assert "{{missing_rules}}" in system_prompt
+    assert "- researcher: Research specialist" in system_prompt
+    assert "Request: Plan the work" in system_prompt
+    assert "Caller: orchestrator" in system_prompt

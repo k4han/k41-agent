@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from langchain_core.messages import BaseMessage, SystemMessage
 
 from agent.modules.providers import get_chat_model
+from agent.modules.prompt_variables import get_runtime_prompt_variable_values
 from agent.modules.workflows.message_history import normalize_messages_for_chat_model
 from agent.modules.workflows.prompt_builders import (
     build_llm_system_prompt,
@@ -31,7 +32,7 @@ def _get_default_tools():
     return get_default_tools()
 
 
-def llm_node(state, runtime: Runtime[WorkflowContext]):
+async def llm_node(state, runtime: Runtime[WorkflowContext]):
     """Dynamic node: reads agent_name from context, resolves full config at runtime."""
     from agent.modules.agents import get_catalog_service
 
@@ -66,6 +67,7 @@ def llm_node(state, runtime: Runtime[WorkflowContext]):
     else:
         tools = _resolve_tools(tuple(tool_names))
 
+    prompt_variables = await get_runtime_prompt_variable_values()
     system_prompt = build_llm_system_prompt(
         system_prompt_template=system_prompt_template,
         working_dir=working_dir,
@@ -73,6 +75,7 @@ def llm_node(state, runtime: Runtime[WorkflowContext]):
         agent_name=agent_name,
         tools=tools,
         catalog=catalog,
+        prompt_variables=prompt_variables,
     )
 
     messages: list[BaseMessage] = normalize_messages_for_chat_model(

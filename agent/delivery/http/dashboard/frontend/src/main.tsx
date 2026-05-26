@@ -14,6 +14,7 @@ import {
   AppearancePage,
   ChannelsPage,
   ConfigPage,
+  PromptVariablesPage,
   ProvidersPage,
   SecurityPage,
 } from "@/pages/settings";
@@ -42,6 +43,7 @@ render(
         <Route path="/settings/providers" component={ProvidersPage} />
         <Route path="/settings/channels" component={ChannelsPage} />
         <Route path="/settings/agents" component={AgentsPage} />
+        <Route path="/settings/prompt-variables" component={PromptVariablesPage} />
         <Route path="/settings/security" component={SecurityPage} />
         <Route path="/settings/appearance" component={AppearancePage} />
         {/* Legacy redirects */}

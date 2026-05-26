@@ -27,6 +27,7 @@ export default defineConfig({
       "/services": fastApiTarget,
       "/agents/cards": fastApiTarget,
       "/agents/reload": fastApiTarget,
+      "/prompt-variables": fastApiTarget,
       "/providers/models": fastApiTarget,
       "/channels/pair": fastApiTarget,
       "/channels/identities": fastApiTarget,

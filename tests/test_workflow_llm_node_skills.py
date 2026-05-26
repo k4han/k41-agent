@@ -2,6 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+import pytest
 
 import agent.modules.workflows.nodes.llm as llm_node_module
 from agent.modules.workflows.run_config import WorkflowContext
@@ -29,7 +30,8 @@ def _fake_chat_model_factory(captured: dict):
     return _factory
 
 
-def test_llm_node_uses_prompt_builder_output_for_system_message(monkeypatch):
+@pytest.mark.asyncio
+async def test_llm_node_uses_prompt_builder_output_for_system_message(monkeypatch):
     captured: dict = {}
     builder_calls: dict = {}
 
@@ -67,7 +69,7 @@ def test_llm_node_uses_prompt_builder_output_for_system_message(monkeypatch):
         lambda: _FakeCatalog(),
     )
 
-    result = llm_node_module.llm_node(
+    result = await llm_node_module.llm_node(
         {"messages": [HumanMessage(content="help me")]},
         SimpleNamespace(
             context=WorkflowContext(
@@ -90,9 +92,11 @@ def test_llm_node_uses_prompt_builder_output_for_system_message(monkeypatch):
     assert builder_calls["working_dir"] == str(Path("D:/repo").resolve())
     assert builder_calls["agent_name"] == "builder-agent"
     assert [tool.name for tool in builder_calls["tools"]] == ["skill", "read_file"]
+    assert builder_calls["prompt_variables"] == {}
 
 
-def test_llm_node_prefers_runtime_allowed_tool_names_before_building_prompt(monkeypatch):
+@pytest.mark.asyncio
+async def test_llm_node_prefers_runtime_allowed_tool_names_before_building_prompt(monkeypatch):
     captured: dict = {}
     builder_calls: dict = {}
 
@@ -130,7 +134,7 @@ def test_llm_node_prefers_runtime_allowed_tool_names_before_building_prompt(monk
         lambda: _FakeCatalog(),
     )
 
-    llm_node_module.llm_node(
+    await llm_node_module.llm_node(
         {"messages": [HumanMessage(content="hello")]},
         SimpleNamespace(
             context=WorkflowContext(
@@ -146,7 +150,8 @@ def test_llm_node_prefers_runtime_allowed_tool_names_before_building_prompt(monk
     assert [tool.name for tool in builder_calls["tools"]] == ["call_agent", "skill"]
 
 
-def test_llm_node_normalizes_assistant_string_list_history(monkeypatch):
+@pytest.mark.asyncio
+async def test_llm_node_normalizes_assistant_string_list_history(monkeypatch):
     captured: dict = {}
 
     class _FakeCatalog:
@@ -176,7 +181,7 @@ def test_llm_node_normalizes_assistant_string_list_history(monkeypatch):
 
     original_message = AIMessage(content=["first ", "second"], id="ai-history")
 
-    llm_node_module.llm_node(
+    await llm_node_module.llm_node(
         {
             "messages": [
                 HumanMessage(content="hello"),
@@ -200,7 +205,8 @@ def test_llm_node_normalizes_assistant_string_list_history(monkeypatch):
     assert original_message.content == ["first ", "second"]
 
 
-def test_llm_node_prefers_runtime_model_over_agent_card_model(monkeypatch):
+@pytest.mark.asyncio
+async def test_llm_node_prefers_runtime_model_over_agent_card_model(monkeypatch):
     captured: dict = {}
 
     class _FakeCatalog:
@@ -228,7 +234,7 @@ def test_llm_node_prefers_runtime_model_over_agent_card_model(monkeypatch):
         lambda: _FakeCatalog(),
     )
 
-    llm_node_module.llm_node(
+    await llm_node_module.llm_node(
         {"messages": [HumanMessage(content="hello")]},
         SimpleNamespace(
             context=WorkflowContext(

@@ -32,7 +32,7 @@ async def call_agent(
     runtime: Annotated[ToolRuntime[Any, Any], InjectedToolArg],
 ) -> str:
     """Invoke a sub-agent to handle a specific task."""
-    from agent.modules.agent_runtime.runner import run_agent_full
+    from agent.modules.agent_runtime import run_agent_full
     from agent.modules.agents import get_catalog_service
 
     caller_agent_name = get_context_value(runtime.context, "agent_name", "default")

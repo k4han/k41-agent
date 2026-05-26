@@ -33,6 +33,7 @@ from agent.modules.providers import (
     list_provider_model_catalog,
     list_provider_model_catalogs,
 )
+from agent.modules.prompt_variables import get_prompt_variable_service
 from agent.modules.scheduler import (
     TriggerType,
     execute_scheduled_task,
@@ -365,6 +366,17 @@ def _handle_agent_card_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=500, detail=str(exc))
 
 
+def _handle_prompt_variable_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, FileNotFoundError):
+        return HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, FileExistsError):
+        return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, ValueError):
+        return HTTPException(status_code=400, detail=str(exc))
+    logger.exception("Unexpected prompt variable operation failure.")
+    return HTTPException(status_code=500, detail=str(exc))
+
+
 def _agent_config_from_body(body: "AgentCardBody") -> AgentConfig:
     return AgentConfig(
         name=body.name.strip(),
@@ -480,6 +492,7 @@ def _workspace_http_error(exc: Exception) -> HTTPException:
 @router.get("/settings/providers", include_in_schema=False)
 @router.get("/settings/channels", include_in_schema=False)
 @router.get("/settings/agents", include_in_schema=False)
+@router.get("/settings/prompt-variables", include_in_schema=False)
 @router.get("/settings/security", include_in_schema=False)
 @router.get("/settings/appearance", include_in_schema=False)
 # Legacy routes — SPA handles redirect to /settings/*
@@ -867,6 +880,57 @@ async def reload_agent_cards() -> dict[str, Any]:
     catalog = get_catalog_service()
     catalog.reload_agents()
     return {"status": "reloaded", **await _agent_card_options()}
+
+
+class PromptVariableBody(BaseModel):
+    name: str
+    value: str = ""
+
+
+@router.get("/dashboard-api/prompt-variables")
+async def get_dashboard_prompt_variables() -> dict[str, Any]:
+    service = get_prompt_variable_service()
+    return {"variables": await service.list_variables()}
+
+
+@router.post("/prompt-variables")
+async def create_prompt_variable(body: PromptVariableBody) -> dict[str, Any]:
+    service = get_prompt_variable_service()
+    try:
+        variable = await service.create_variable(
+            name=body.name,
+            value=body.value,
+        )
+    except Exception as exc:
+        raise _handle_prompt_variable_error(exc) from exc
+    return {"status": "created", "variable": variable}
+
+
+@router.put("/prompt-variables/{name}")
+async def update_prompt_variable(
+    name: str,
+    body: PromptVariableBody,
+) -> dict[str, Any]:
+    service = get_prompt_variable_service()
+    try:
+        variable = await service.update_variable(
+            current_name=name,
+            name=body.name,
+            value=body.value,
+        )
+    except Exception as exc:
+        raise _handle_prompt_variable_error(exc) from exc
+    return {"status": "updated", "variable": variable}
+
+
+@router.delete("/prompt-variables/{name}")
+async def delete_prompt_variable(name: str) -> dict[str, str]:
+    service = get_prompt_variable_service()
+    try:
+        await service.delete_variable(name)
+    except Exception as exc:
+        raise _handle_prompt_variable_error(exc) from exc
+    return {"status": "deleted", "name": name}
 
 
 @router.get("/providers/models")
