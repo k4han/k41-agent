@@ -376,3 +376,70 @@ async def test_background_task_completion_notification_preserves_markdown(
     assert sent["external_id"] == "123"
     assert sent["mode"] == "markdown"
     assert "**bold** and `code`" in sent["message"]
+
+
+@pytest.mark.asyncio
+async def test_background_task_injects_telegram_state_without_conversation_or_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    import agent.modules.conversations as conversations_module
+    import agent.modules.workflows as workflows_module
+    import agent.modules.workspaces as workspaces_module
+    from agent.modules.workspaces import workspace_ref_from_local_path
+
+    captured: dict = {}
+
+    class FakeGraph:
+        async def aupdate_state(self, config, values, *, as_node):
+            captured["config"] = config
+            captured["values"] = values
+            captured["as_node"] = as_node
+
+    async def fail_upsert_conversation_thread(**kwargs):
+        raise AssertionError("notification injection must not create a conversation")
+
+    async def fail_remember_thread_workspace_ref(thread_id, workspace):
+        raise AssertionError("notification injection must not change Telegram workspace")
+
+    monkeypatch.setattr(workflows_module, "get_workflow_graph", lambda name: FakeGraph())
+    monkeypatch.setattr(
+        workflows_module,
+        "make_run_config",
+        lambda *, thread_id: {"thread_id": thread_id},
+    )
+    monkeypatch.setattr(
+        conversations_module,
+        "upsert_conversation_thread",
+        fail_upsert_conversation_thread,
+    )
+    monkeypatch.setattr(
+        workspaces_module,
+        "remember_thread_workspace_ref",
+        fail_remember_thread_workspace_ref,
+    )
+
+    workspace = workspace_ref_from_local_path(
+        str(tmp_path),
+        label="octo/example",
+        metadata={"source": "github"},
+    )
+    task = BackgroundTask(
+        request="fix issue",
+        agent_name="default",
+        workspace=workspace,
+        notify_channel=NotifyChannel(
+            platform="telegram",
+            external_id="123",
+            channel_id="456",
+        ),
+        result="done",
+    )
+
+    await BackgroundTaskManager()._inject_into_user_thread(task)
+
+    assert captured["config"] == {"thread_id": "telegram_123_456"}
+    assert captured["as_node"] == "llm"
+    messages = captured["values"]["messages"]
+    assert messages[0].content == "[Background Task]\nfix issue"
+    assert messages[1].content == "done"
