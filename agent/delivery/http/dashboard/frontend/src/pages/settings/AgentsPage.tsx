@@ -1,5 +1,5 @@
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
-import { Copy, Edit3, Eye, MessageSquare, Plus, RefreshCw, Trash2 } from "lucide-solid";
+import { Copy, Edit3, Eye, Plus, RefreshCw, Trash2 } from "lucide-solid";
 
 import { Dialog } from "@/components/Dialog";
 import { ModelPicker } from "@/components/ModelPicker";
@@ -254,10 +254,8 @@ export function AgentsPage() {
                     <thead>
                       <tr>
                         <th>Agent</th>
-                        <th>Source</th>
+                        <th>Description</th>
                         <th>Provider / Model</th>
-                        <th>Tools</th>
-                        <th>Sub-agents</th>
                         <th>Status</th>
                         <th>Actions</th>
                       </tr>
@@ -267,7 +265,7 @@ export function AgentsPage() {
                         each={filteredCards()}
                         fallback={
                           <tr>
-                            <td colSpan={7}>
+                            <td colSpan={5}>
                               <div class="empty">No agent cards found.</div>
                             </td>
                           </tr>
@@ -276,45 +274,26 @@ export function AgentsPage() {
                         {(card) => (
                           <tr>
                             <td>
-                              <div class="mono">{card.name}</div>
-                              <Show when={card.display_name}>
+                              <Show
+                                when={card.display_name}
+                                fallback={<div class="mono">{card.name}</div>}
+                              >
                                 <div>{card.display_name}</div>
-                              </Show>
-                              <Show when={card.description}>
-                                <div class="hint">{truncateText(card.description, 140)}</div>
                               </Show>
                             </td>
                             <td>
-                              <div class="chips">
-                                <span class="badge">{card.source}</span>
-                                <Show when={card.overrides_builtin}>
-                                  <span class="badge badge-warning">override</span>
-                                </Show>
-                                <Show when={card.hidden}>
-                                  <span class="badge badge-info">hidden</span>
-                                </Show>
-                              </div>
+                              <Show
+                                when={card.description}
+                                fallback={<span class="hint">—</span>}
+                              >
+                                {(description) => (
+                                  <div class="hint">{truncateText(description, 160)}</div>
+                                )}
+                              </Show>
                             </td>
                             <td>
                               <div class="chips">
                                 <span class="chip">{`${card.provider || "default"}/${card.model || "provider default"}`}</span>
-                              </div>
-                            </td>
-                            <td>
-                              <div class="chips">
-                                <For each={card.tools} fallback={<span class="chip">default</span>}>
-                                  {(tool) => <span class="chip">{tool}</span>}
-                                </For>
-                              </div>
-                            </td>
-                            <td>
-                              <div class="chips">
-                                <For
-                                  each={card.sub_agents || []}
-                                  fallback={<span class="chip">none selected</span>}
-                                >
-                                  {(agent) => <span class="chip">{agent}</span>}
-                                </For>
                               </div>
                             </td>
                             <td>
@@ -326,14 +305,8 @@ export function AgentsPage() {
                               </Show>
                             </td>
                             <td>
-                              <div class="row-wrap">
+                              <div class="row">
                                 <Show when={card.valid}>
-                                  <Show when={!card.hidden}>
-                                    <a class="btn btn-sm" href={`/chat?agent=${encodeURIComponent(card.name)}`}>
-                                      <MessageSquare size={13} />
-                                      Chat
-                                    </a>
-                                  </Show>
                                   <button class="btn btn-sm" type="button" onClick={() => openCard(card, "view")}>
                                     <Eye size={13} />
                                     View
