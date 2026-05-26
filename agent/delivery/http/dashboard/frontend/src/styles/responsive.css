@@ -140,4 +140,17 @@
     max-height: 100vh;
     border-radius: 0;
   }
+
+  .settings-resource-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .settings-resource-search {
+    width: 100%;
+  }
+
+  .settings-resource-actions {
+    justify-content: flex-start;
+  }
 }

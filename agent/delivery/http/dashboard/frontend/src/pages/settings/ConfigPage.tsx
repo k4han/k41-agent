@@ -1,7 +1,8 @@
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
-import { Save, Search } from "lucide-solid";
+import { Save } from "lucide-solid";
 
 import { Dialog } from "@/components/Dialog";
+import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { DataGate } from "@/components/State";
 import type { SettingInfo } from "@/types";
 
@@ -64,18 +65,11 @@ export function ConfigPage() {
         {(payload) => (
           <div class="stack">
             <div class="stack">
-              <div class="settings-toolbar">
-                <div class="settings-search">
-                  <Search size={15} />
-                  <input
-                    class="input"
-                    type="search"
-                    placeholder="Search settings..."
-                    value={search()}
-                    onInput={(event) => setSearch(event.currentTarget.value)}
-                  />
-                </div>
-              </div>
+              <SettingsResourceToolbar
+                searchValue={search()}
+                searchPlaceholder="Search settings..."
+                onSearchInput={setSearch}
+              />
               <For each={filteredCategories()}>
                 {(group) => (
                   <SettingsSection

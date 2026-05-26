@@ -1,7 +1,8 @@
 import { createMemo, createSignal, For, onMount } from "solid-js";
-import { Save, Search } from "lucide-solid";
+import { Save } from "lucide-solid";
 
 import { Dialog } from "@/components/Dialog";
+import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
@@ -115,18 +116,11 @@ export function ProvidersPage() {
         {(payload) => (
           <div class="stack">
             <div class="stack">
-              <div class="settings-toolbar">
-                <div class="settings-search">
-                  <Search size={15} />
-                  <input
-                    class="input"
-                    type="search"
-                    placeholder="Search providers or settings..."
-                    value={search()}
-                    onInput={(event) => setSearch(event.currentTarget.value)}
-                  />
-                </div>
-              </div>
+              <SettingsResourceToolbar
+                searchValue={search()}
+                searchPlaceholder="Search providers or settings..."
+                onSearchInput={setSearch}
+              />
 
               <For each={filteredCategories()}>
                 {(group) => (

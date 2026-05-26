@@ -1,7 +1,8 @@
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
-import { Copy, Edit3, Plus, RefreshCw, Search, Trash2 } from "lucide-solid";
+import { Copy, Edit3, Plus, RefreshCw, Trash2 } from "lucide-solid";
 
 import { Dialog } from "@/components/Dialog";
+import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
@@ -9,7 +10,6 @@ import { truncateText } from "@/lib/utils";
 import type { PromptVariable, PromptVariablesPayload } from "@/types";
 
 import { SettingsLayout } from "./SettingsLayout";
-import { SettingsSection } from "./shared";
 
 type PromptVariableForm = {
   name: string;
@@ -154,102 +154,94 @@ export function PromptVariablesPage() {
       breadcrumbLabel="Prompt Variables"
       contentWidth="wide"
       actions={
-        <>
-          <button class="btn" type="button" onClick={load}>
-            <RefreshCw size={14} />
-            Reload
-          </button>
-          <button class="btn btn-primary" type="button" onClick={openCreate}>
-            <Plus size={14} />
-            New Variable
-          </button>
-        </>
+        <button class="btn" type="button" onClick={load}>
+          <RefreshCw size={14} />
+          Reload
+        </button>
       }
     >
       <DataGate data={data()} error={error()} onRetry={load}>
         {() => (
           <div class="stack">
-            <SettingsSection title="Variables" description={`${filteredVariables().length} variable${filteredVariables().length === 1 ? "" : "s"}`}>
-              <section class="panel">
-                <div class="panel-body">
-                  <div class="settings-search">
-                    <Search size={15} />
-                    <input
-                      class="input"
-                      type="search"
-                      placeholder="Search prompt variables..."
-                      value={query()}
-                      onInput={(event) => setQuery(event.currentTarget.value)}
-                    />
-                  </div>
-                </div>
-                <div class="table-wrap">
-                  <table class="table">
-                    <thead>
-                      <tr>
-                        <th>Name</th>
-                        <th>Placeholder</th>
-                        <th>Value</th>
-                        <th>Updated</th>
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <For
-                        each={filteredVariables()}
-                        fallback={
-                          <tr>
-                            <td colSpan={5}>
-                              <div class="empty">No prompt variables found.</div>
-                            </td>
-                          </tr>
-                        }
-                      >
-                        {(variable) => (
-                          <tr>
-                            <td>
-                              <div class="mono">{variable.name}</div>
-                            </td>
-                            <td>
-                              <button
-                                class="btn btn-sm"
-                                type="button"
-                                onClick={() => copyPlaceholder(variable.placeholder)}
-                              >
-                                <Copy size={13} />
-                                <span class="mono">{variable.placeholder}</span>
+            <SettingsResourceToolbar
+              searchValue={query()}
+              searchPlaceholder="Search prompt variables..."
+              onSearchInput={setQuery}
+              actions={
+                <button class="btn btn-primary" type="button" onClick={openCreate}>
+                  <Plus size={14} />
+                  New Variable
+                </button>
+              }
+            />
+
+            <section class="panel">
+              <div class="table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Placeholder</th>
+                      <th>Value</th>
+                      <th>Updated</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <For
+                      each={filteredVariables()}
+                      fallback={
+                        <tr>
+                          <td colSpan={5}>
+                            <div class="empty">No prompt variables found.</div>
+                          </td>
+                        </tr>
+                      }
+                    >
+                      {(variable) => (
+                        <tr>
+                          <td>
+                            <div class="mono">{variable.name}</div>
+                          </td>
+                          <td>
+                            <button
+                              class="btn btn-sm"
+                              type="button"
+                              onClick={() => copyPlaceholder(variable.placeholder)}
+                            >
+                              <Copy size={13} />
+                              <span class="mono">{variable.placeholder}</span>
+                            </button>
+                          </td>
+                          <td>
+                            <div class="prompt-variable-preview">
+                              {truncateText(variable.value || "", 180) || "-"}
+                            </div>
+                          </td>
+                          <td>{formatDate(variable.updated_at || variable.created_at)}</td>
+                          <td>
+                            <div class="row-wrap">
+                              <button class="btn btn-sm" type="button" onClick={() => openEdit(variable)}>
+                                <Edit3 size={13} />
+                                Edit
                               </button>
-                            </td>
-                            <td>
-                              <div class="prompt-variable-preview">
-                                {truncateText(variable.value || "", 180) || "-"}
-                              </div>
-                            </td>
-                            <td>{formatDate(variable.updated_at || variable.created_at)}</td>
-                            <td>
-                              <div class="row-wrap">
-                                <button class="btn btn-sm" type="button" onClick={() => openEdit(variable)}>
-                                  <Edit3 size={13} />
-                                  Edit
-                                </button>
-                                <button
-                                  class="btn btn-sm btn-danger"
-                                  type="button"
-                                  onClick={() => deleteVariable(variable.name)}
-                                >
-                                  <Trash2 size={13} />
-                                  Delete
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </For>
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            </SettingsSection>
+                              <button
+                                class="btn btn-sm btn-danger"
+                                type="button"
+                                onClick={() => deleteVariable(variable.name)}
+                              >
+                                <Trash2 size={13} />
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </For>
+                  </tbody>
+                </table>
+              </div>
+            </section>
 
             <Dialog
               open={modalMode() !== null}

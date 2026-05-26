@@ -8,19 +8,20 @@
   border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
 }
 
-.settings-toolbar {
+.settings-resource-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
 
-.settings-search {
+.settings-resource-search {
   position: relative;
-  width: min(520px, 100%);
+  display: block;
+  width: min(448px, 100%);
 }
 
-.settings-search svg {
+.settings-resource-search svg {
   position: absolute;
   top: 50%;
   left: 11px;
@@ -29,8 +30,28 @@
   transform: translateY(-50%);
 }
 
-.settings-search .input {
-  padding-left: 34px;
+.settings-resource-search input {
+  width: 100%;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+  background: var(--surface);
+  color: var(--fg);
+  padding: 0 12px 0 34px;
+}
+
+.settings-resource-search input:focus {
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
+.settings-resource-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .settings-group {

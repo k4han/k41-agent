@@ -4,6 +4,7 @@ import { Copy, Edit3, Eye, Plus, RefreshCw, Trash2 } from "lucide-solid";
 import { Dialog } from "@/components/Dialog";
 import { ModelPicker } from "@/components/ModelPicker";
 import { PromptVariableTextarea } from "@/components/PromptVariableTextarea";
+import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
@@ -11,7 +12,6 @@ import { statusBadgeClass, truncateText, uniqueSorted } from "@/lib/utils";
 import type { AgentCard, AgentsPayload, PromptVariable, PromptVariablesPayload } from "@/types";
 
 import { SettingsLayout } from "./SettingsLayout";
-import { SettingsSection } from "./shared";
 
 type AgentForm = {
   name: string;
@@ -215,126 +215,103 @@ export function AgentsPage() {
       subtitle="Manage Markdown agent cards loaded by the runtime catalog."
       contentWidth="wide"
       actions={
-        <>
-          <button class="btn" type="button" onClick={reloadAgents}>
-            <RefreshCw size={14} />
-            Reload
-          </button>
-          <button class="btn btn-primary" type="button" onClick={openCreate}>
-            <Plus size={14} />
-            New Agent
-          </button>
-        </>
+        <button class="btn" type="button" onClick={reloadAgents}>
+          <RefreshCw size={14} />
+          Reload
+        </button>
       }
     >
       <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => (
           <div class="stack">
-            <SettingsSection title="Catalog" description="Filter runtime agent cards">
-              <section class="panel">
-                <div class="panel-body">
-                  <input
-                    class="input"
-                    type="search"
-                    placeholder="Search agents..."
-                    value={query()}
-                    onInput={(event) => setQuery(event.currentTarget.value)}
-                  />
-                </div>
-              </section>
-            </SettingsSection>
+            <SettingsResourceToolbar
+              searchValue={query()}
+              searchPlaceholder="Search agents..."
+              onSearchInput={setQuery}
+              actions={
+                <button class="btn btn-primary" type="button" onClick={openCreate}>
+                  <Plus size={14} />
+                  New Agent
+                </button>
+              }
+            />
 
-            <SettingsSection
-              title="Agent Cards"
-              description={`${filteredCards().length} agent${filteredCards().length === 1 ? "" : "s"}`}
-            >
-              <section class="panel">
-                <div class="table-wrap">
-                  <table class="table">
-                    <thead>
-                      <tr>
-                        <th>Agent</th>
-                        <th>Description</th>
-                        <th>Provider / Model</th>
-                        <th>Status</th>
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <For
-                        each={filteredCards()}
-                        fallback={
-                          <tr>
-                            <td colSpan={5}>
-                              <div class="empty">No agent cards found.</div>
-                            </td>
-                          </tr>
-                        }
-                      >
-                        {(card) => (
-                          <tr>
-                            <td>
-                              <Show
-                                when={card.display_name}
-                                fallback={<div class="mono">{card.name}</div>}
-                              >
-                                <div>{card.display_name}</div>
-                              </Show>
-                            </td>
-                            <td>
-                              <Show
-                                when={card.description}
-                                fallback={<span class="hint">—</span>}
-                              >
-                                {(description) => (
-                                  <div class="hint">{truncateText(description, 160)}</div>
-                                )}
-                              </Show>
-                            </td>
-                            <td>
-                              <div class="chips">
-                                <span class="chip">{`${card.provider || "default"}/${card.model || "provider default"}`}</span>
-                              </div>
-                            </td>
-                            <td>
-                              <span class={statusBadgeClass(card.valid ? "valid" : "invalid")}>
-                                {card.valid ? "valid" : "invalid"}
-                              </span>
-                              <Show when={!card.valid && card.error}>
-                                <div class="hint">{card.error}</div>
-                              </Show>
-                            </td>
-                            <td>
-                              <div class="row">
-                                <Show when={card.valid}>
-                                  <button class="btn btn-sm" type="button" onClick={() => openCard(card, "view")}>
-                                    <Eye size={13} />
-                                    View
+            <section class="panel">
+              <div class="table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Agent</th>
+                      <th>Description</th>
+                      <th>Provider / Model</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <For
+                      each={filteredCards()}
+                      fallback={
+                        <tr>
+                          <td colSpan={5}>
+                            <div class="empty">No agent cards found.</div>
+                          </td>
+                        </tr>
+                      }
+                    >
+                      {(card) => (
+                        <tr>
+                          <td>
+                            <Show
+                              when={card.display_name}
+                              fallback={<div class="mono">{card.name}</div>}
+                            >
+                              <div>{card.display_name}</div>
+                            </Show>
+                          </td>
+                          <td>
+                            <Show
+                              when={card.description}
+                              fallback={<span class="hint">-</span>}
+                            >
+                              {(description) => (
+                                <div class="hint">{truncateText(description(), 160)}</div>
+                              )}
+                            </Show>
+                          </td>
+                          <td>
+                            <div class="chips">
+                              <span class="chip">{`${card.provider || "default"}/${card.model || "provider default"}`}</span>
+                            </div>
+                          </td>
+                          <td>
+                            <span class={statusBadgeClass(card.valid ? "valid" : "invalid")}>
+                              {card.valid ? "valid" : "invalid"}
+                            </span>
+                            <Show when={!card.valid && card.error}>
+                              <div class="hint">{card.error}</div>
+                            </Show>
+                          </td>
+                          <td>
+                            <div class="row">
+                              <Show when={card.valid}>
+                                <button class="btn btn-sm" type="button" onClick={() => openCard(card, "view")}>
+                                  <Eye size={13} />
+                                  View
+                                </button>
+                                <Show
+                                  when={card.editable}
+                                  fallback={
+                                    <button class="btn btn-sm" type="button" onClick={() => cloneAgent(card.name)}>
+                                      <Copy size={13} />
+                                      Clone
+                                    </button>
+                                  }
+                                >
+                                  <button class="btn btn-sm" type="button" onClick={() => openCard(card, "edit")}>
+                                    <Edit3 size={13} />
+                                    Edit
                                   </button>
-                                  <Show
-                                    when={card.editable}
-                                    fallback={
-                                      <button class="btn btn-sm" type="button" onClick={() => cloneAgent(card.name)}>
-                                        <Copy size={13} />
-                                        Clone
-                                      </button>
-                                    }
-                                  >
-                                    <button class="btn btn-sm" type="button" onClick={() => openCard(card, "edit")}>
-                                      <Edit3 size={13} />
-                                      Edit
-                                    </button>
-                                    <button
-                                      class="btn btn-sm btn-danger"
-                                      type="button"
-                                      onClick={() => deleteAgent(card.name)}
-                                    >
-                                      <Trash2 size={13} />
-                                      Delete
-                                    </button>
-                                  </Show>
-                                </Show>
-                                <Show when={!card.valid && card.editable}>
                                   <button
                                     class="btn btn-sm btn-danger"
                                     type="button"
@@ -344,16 +321,26 @@ export function AgentsPage() {
                                     Delete
                                   </button>
                                 </Show>
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </For>
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            </SettingsSection>
+                              </Show>
+                              <Show when={!card.valid && card.editable}>
+                                <button
+                                  class="btn btn-sm btn-danger"
+                                  type="button"
+                                  onClick={() => deleteAgent(card.name)}
+                                >
+                                  <Trash2 size={13} />
+                                  Delete
+                                </button>
+                              </Show>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </For>
+                  </tbody>
+                </table>
+              </div>
+            </section>
 
             <Dialog
               open={modalMode() !== null}
