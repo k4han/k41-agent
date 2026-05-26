@@ -1,5 +1,5 @@
-import { createMemo, createSignal, For, onMount, Show } from "solid-js";
-import { Copy, Edit3, Plus, RefreshCw, Trash2 } from "lucide-solid";
+import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { Check, Copy, Edit3, Plus, RefreshCw, Trash2 } from "lucide-solid";
 
 import { Dialog } from "@/components/Dialog";
 import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
@@ -46,7 +46,21 @@ export function PromptVariablesPage() {
   const [modalMode, setModalMode] = createSignal<"create" | "edit" | null>(null);
   const [currentName, setCurrentName] = createSignal("");
   const [form, setForm] = createSignal<PromptVariableForm>(blankForm());
+  const [copyingPlaceholder, setCopyingPlaceholder] = createSignal<string | null>(null);
+  const [copiedPlaceholder, setCopiedPlaceholder] = createSignal<string | null>(null);
+  const [copyFailedPlaceholder, setCopyFailedPlaceholder] = createSignal<string | null>(null);
   const { showToast } = useToast();
+
+  let copyStatusResetTimer: number | undefined;
+  let copyGeneration = 0;
+
+  const clearCopyStatusResetTimer = () => {
+    if (copyStatusResetTimer === undefined) {
+      return;
+    }
+    window.clearTimeout(copyStatusResetTimer);
+    copyStatusResetTimer = undefined;
+  };
 
   const load = async () => {
     setError("");
@@ -96,11 +110,37 @@ export function PromptVariablesPage() {
   const closeModal = () => setModalMode(null);
 
   const copyPlaceholder = async (placeholder: string) => {
+    const generation = (copyGeneration += 1);
+    clearCopyStatusResetTimer();
+    setCopyingPlaceholder(placeholder);
+    setCopiedPlaceholder(null);
+    setCopyFailedPlaceholder(null);
     try {
       await navigator.clipboard.writeText(placeholder);
+      if (generation !== copyGeneration) {
+        return;
+      }
+      setCopiedPlaceholder(placeholder);
       showToast("Placeholder copied.");
     } catch {
+      if (generation !== copyGeneration) {
+        return;
+      }
+      setCopyFailedPlaceholder(placeholder);
       showToast("Failed to copy placeholder.", "error");
+    } finally {
+      if (generation !== copyGeneration) {
+        return;
+      }
+      setCopyingPlaceholder(null);
+      copyStatusResetTimer = window.setTimeout(() => {
+        if (generation !== copyGeneration) {
+          return;
+        }
+        setCopiedPlaceholder(null);
+        setCopyFailedPlaceholder(null);
+        copyStatusResetTimer = undefined;
+      }, 2400);
     }
   };
 
@@ -146,6 +186,7 @@ export function PromptVariablesPage() {
   };
 
   onMount(load);
+  onCleanup(clearCopyStatusResetTimer);
 
   return (
     <SettingsLayout
@@ -207,9 +248,31 @@ export function PromptVariablesPage() {
                             <button
                               class="btn btn-sm"
                               type="button"
+                              title={
+                                copiedPlaceholder() === variable.placeholder
+                                  ? "Copied"
+                                  : copyFailedPlaceholder() === variable.placeholder
+                                    ? "Copy failed"
+                                    : "Copy placeholder"
+                              }
+                              aria-label={
+                                copiedPlaceholder() === variable.placeholder
+                                  ? "Copied"
+                                  : "Copy placeholder"
+                              }
+                              disabled={
+                                copyingPlaceholder() === variable.placeholder ||
+                                copiedPlaceholder() === variable.placeholder ||
+                                copyFailedPlaceholder() === variable.placeholder
+                              }
                               onClick={() => copyPlaceholder(variable.placeholder)}
                             >
-                              <Copy size={13} />
+                              <Show
+                                when={copiedPlaceholder() === variable.placeholder}
+                                fallback={<Copy size={13} />}
+                              >
+                                <Check size={13} />
+                              </Show>
                               <span class="mono">{variable.placeholder}</span>
                             </button>
                           </td>
