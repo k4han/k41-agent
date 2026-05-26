@@ -3378,6 +3378,41 @@ body.workspace-resizing * {
   line-height: 1.45;
 }
 
+.task-history-controls {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.task-history-panel {
+  overflow: visible;
+}
+
+.task-history-header {
+  position: sticky;
+  top: 58px;
+  z-index: 12;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: var(--surface);
+}
+
+.task-workspace-filter {
+  width: min(300px, 100%);
+  min-height: 32px;
+  padding-block: 5px;
+}
+
+.task-history-list {
+  overflow: visible;
+}
+
+.task-load-more {
+  align-self: center;
+}
+
 
 .is-hidden {
   display: none;

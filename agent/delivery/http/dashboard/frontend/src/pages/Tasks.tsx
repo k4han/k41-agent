@@ -1,5 +1,5 @@
 import { A } from "@solidjs/router";
-import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { MessageSquare, Play, Square, Trash2 } from "lucide-solid";
 
 import { AppShell } from "@/components/AppShell";
@@ -33,12 +33,22 @@ type SessionsPayload = {
 
 const activeTaskStatuses = new Set(["running", "pending"]);
 const TASK_POLL_INTERVAL_MS = 5000;
+const TASK_PAGE_SIZE = 20;
+const ALL_WORKSPACES_KEY = "all";
+const NO_WORKSPACE_KEY = "no-workspace";
 
 type TaskMetaItem = {
   key: string;
   label: string;
   value: string;
   title?: string;
+};
+
+type TaskWorkspaceOption = {
+  key: string;
+  label: string;
+  title: string;
+  count: number;
 };
 
 function hasActiveTasks(tasks: BackgroundTask[]): boolean {
@@ -77,6 +87,45 @@ function workspaceLabel(task: BackgroundTask): string {
     return workspaceDisplayLabelFromValues(label, locator);
   }
   return formatWorkspaceRoot(locator || label);
+}
+
+function taskWorkspaceKey(task: BackgroundTask): string {
+  if (!task.workspace) {
+    return NO_WORKSPACE_KEY;
+  }
+  return `${task.workspace.backend}:${task.workspace.locator}`;
+}
+
+function taskWorkspaceOptionLabel(task: BackgroundTask): string {
+  return workspaceLabel(task) || "No workspace";
+}
+
+function taskWorkspaceOptionTitle(task: BackgroundTask): string {
+  return task.workspace?.locator || taskWorkspaceOptionLabel(task);
+}
+
+function buildTaskWorkspaceOptions(tasks: BackgroundTask[]): TaskWorkspaceOption[] {
+  const options: TaskWorkspaceOption[] = [];
+  const indexes = new Map<string, number>();
+
+  tasks.forEach((task) => {
+    const key = taskWorkspaceKey(task);
+    const existingIndex = indexes.get(key);
+    if (existingIndex !== undefined) {
+      options[existingIndex].count += 1;
+      return;
+    }
+
+    indexes.set(key, options.length);
+    options.push({
+      key,
+      label: taskWorkspaceOptionLabel(task),
+      title: taskWorkspaceOptionTitle(task),
+      count: 1,
+    });
+  });
+
+  return options;
 }
 
 function taskMetaItems(task: BackgroundTask): TaskMetaItem[] {
@@ -123,10 +172,45 @@ export function TasksPage() {
   const [agentName, setAgentName] = createSignal("default");
   const [notify, setNotify] = createSignal("");
   const [expanded, setExpanded] = createSignal<Record<string, boolean>>({});
+  const [workspaceFilter, setWorkspaceFilter] = createSignal(ALL_WORKSPACES_KEY);
+  const [visibleTaskCount, setVisibleTaskCount] = createSignal(TASK_PAGE_SIZE);
   const { showToast } = useToast();
   let timer: number | undefined;
   let refreshing = false;
   let disposed = false;
+  let previousWorkspaceFilter = workspaceFilter();
+
+  const workspaceOptions = createMemo(() => buildTaskWorkspaceOptions(data()?.tasks ?? []));
+  const filteredTasks = createMemo(() => {
+    const selected = workspaceFilter();
+    const tasks = data()?.tasks ?? [];
+    if (selected === ALL_WORKSPACES_KEY) {
+      return tasks;
+    }
+    return tasks.filter((task) => taskWorkspaceKey(task) === selected);
+  });
+  const visibleTasks = createMemo(() => filteredTasks().slice(0, visibleTaskCount()));
+  const hasMoreVisibleTasks = createMemo(() => visibleTasks().length < filteredTasks().length);
+
+  createEffect(() => {
+    const selected = workspaceFilter();
+    if (selected === ALL_WORKSPACES_KEY) {
+      return;
+    }
+    if (!workspaceOptions().some((option) => option.key === selected)) {
+      setWorkspaceFilter(ALL_WORKSPACES_KEY);
+    }
+  });
+
+  createEffect(() => {
+    const selected = workspaceFilter();
+    if (selected === previousWorkspaceFilter) {
+      return;
+    }
+
+    previousWorkspaceFilter = selected;
+    setVisibleTaskCount(TASK_PAGE_SIZE);
+  });
 
   const clearRefreshTimer = () => {
     if (timer !== undefined) {
@@ -261,6 +345,24 @@ export function TasksPage() {
     setExpanded((current) => ({ ...current, [taskId]: !current[taskId] }));
   };
 
+  const loadMoreVisibleTasks = () => {
+    if (!hasMoreVisibleTasks()) {
+      return;
+    }
+    setVisibleTaskCount((current) => current + TASK_PAGE_SIZE);
+  };
+
+  const handleTaskHistoryWindowScroll = () => {
+    const scrollHeight = Math.max(
+      document.documentElement.scrollHeight,
+      document.body.scrollHeight,
+    );
+    const distanceToBottom = scrollHeight - window.scrollY - window.innerHeight;
+    if (distanceToBottom <= 240) {
+      loadMoreVisibleTasks();
+    }
+  };
+
   const handleVisibilityChange = () => {
     if (disposed) {
       return;
@@ -278,12 +380,14 @@ export function TasksPage() {
 
   onMount(() => {
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("scroll", handleTaskHistoryWindowScroll, { passive: true });
     void load();
   });
   onCleanup(() => {
     disposed = true;
     clearRefreshTimer();
     document.removeEventListener("visibilitychange", handleVisibilityChange);
+    window.removeEventListener("scroll", handleTaskHistoryWindowScroll);
   });
 
   return (
@@ -349,13 +453,35 @@ export function TasksPage() {
                 <MetricCard value={failed} label="Failed or cancelled" />
               </MetricsRow>
 
-              <section class="panel">
-                <div class="panel-header">
+              <section class="panel task-history-panel">
+                <div class="panel-header task-history-header">
                   <div class="panel-title">Task History</div>
-                  <span class="hint">Auto-refresh while active</span>
+                  <div class="task-history-controls">
+                    <Show when={payload.tasks.length > 0}>
+                      <select
+                        class="select task-workspace-filter"
+                        value={workspaceFilter()}
+                        onChange={(event) => setWorkspaceFilter(event.currentTarget.value)}
+                        aria-label="Workspace filter"
+                      >
+                        <option value={ALL_WORKSPACES_KEY}>All workspaces</option>
+                        <For each={workspaceOptions()}>
+                          {(option) => (
+                            <option value={option.key} title={option.title}>
+                              {option.label} ({option.count})
+                            </option>
+                          )}
+                        </For>
+                      </select>
+                    </Show>
+                    <span class="hint">
+                      Showing {visibleTasks().length} of {filteredTasks().length}
+                    </span>
+                    <span class="hint">Auto-refresh while active</span>
+                  </div>
                 </div>
-                <div class="panel-body stack">
-                  <For each={payload.tasks} fallback={<div class="empty">No tasks yet.</div>}>
+                <div class="panel-body stack task-history-list">
+                  <For each={visibleTasks()} fallback={<div class="empty">No tasks yet.</div>}>
                     {(task) => {
                       const isActive = activeTaskStatuses.has(task.status);
                       const hasDetails = Boolean(task.result || task.error);
@@ -474,6 +600,15 @@ export function TasksPage() {
                       );
                     }}
                   </For>
+                  <Show when={hasMoreVisibleTasks()}>
+                    <button
+                      class="btn btn-sm task-load-more"
+                      type="button"
+                      onClick={loadMoreVisibleTasks}
+                    >
+                      Load more
+                    </button>
+                  </Show>
                 </div>
               </section>
             </div>
