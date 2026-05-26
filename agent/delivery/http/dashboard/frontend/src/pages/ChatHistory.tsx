@@ -22,11 +22,14 @@ export function ChatHistoryListPage() {
   const [editingThreadId, setEditingThreadId] = createSignal<string | null>(null);
   const [editingTitle, setEditingTitle] = createSignal("");
   const [deleteTarget, setDeleteTarget] = createSignal<ThreadSummary | null>(null);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = createSignal(false);
   const [deleting, setDeleting] = createSignal(false);
+  const [selectedThreadIds, setSelectedThreadIds] = createSignal<Set<string>>(new Set());
   const [selectedWorkspaceKey, setSelectedWorkspaceKey] = createSignal("all");
   const { showToast } = useToast();
 
   const workspaceGroups = createMemo(() => groupThreadsByWorkspace(data()?.threads || []));
+  const selectedCount = createMemo(() => selectedThreadIds().size);
   const isBackgroundThread = (thread: ThreadSummary) => thread.kind === "background";
   const filteredWorkspaceGroups = createMemo(() => {
     const selected = selectedWorkspaceKey();
@@ -39,7 +42,12 @@ export function ChatHistoryListPage() {
   const load = async () => {
     setError("");
     try {
-      setData(await apiFetch<ThreadListPayload>("/dashboard-api/chat-history"));
+      const payload = await apiFetch<ThreadListPayload>("/dashboard-api/chat-history");
+      setData(payload);
+      setSelectedThreadIds((current) => {
+        const knownIds = new Set(payload.threads.map((thread) => thread.thread_id));
+        return new Set([...current].filter((threadId) => knownIds.has(threadId)));
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load chat history");
     }
@@ -53,6 +61,47 @@ export function ChatHistoryListPage() {
     setDeleteTarget(null);
   };
 
+  const cancelBulkDelete = () => {
+    setBulkDeleteOpen(false);
+  };
+
+  const setThreadSelected = (threadId: string, selected: boolean) => {
+    setSelectedThreadIds((current) => {
+      const next = new Set(current);
+      if (selected) {
+        next.add(threadId);
+      } else {
+        next.delete(threadId);
+      }
+      return next;
+    });
+  };
+
+  const setGroupSelected = (threads: ThreadSummary[], selected: boolean) => {
+    setSelectedThreadIds((current) => {
+      const next = new Set(current);
+      threads.forEach((thread) => {
+        if (selected) {
+          next.add(thread.thread_id);
+        } else {
+          next.delete(thread.thread_id);
+        }
+      });
+      return next;
+    });
+  };
+
+  const isGroupSelected = (threads: ThreadSummary[]) => (
+    threads.length > 0 && threads.every((thread) => selectedThreadIds().has(thread.thread_id))
+  );
+
+  const requestDeleteSelected = () => {
+    if (selectedCount() === 0) {
+      return;
+    }
+    setBulkDeleteOpen(true);
+  };
+
   const confirmDeleteThread = async () => {
     const thread = deleteTarget();
     if (!thread) {
@@ -61,13 +110,54 @@ export function ChatHistoryListPage() {
     setDeleting(true);
     try {
       await deleteJson(threadApiPath(thread.thread_id));
+      setThreadSelected(thread.thread_id, false);
       showToast("Thread deleted.", "success");
       await load();
+      window.dispatchEvent(new CustomEvent("kaka:threads-changed"));
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Delete failed", "error");
     } finally {
       setDeleting(false);
       setDeleteTarget(null);
+    }
+  };
+
+  const confirmDeleteSelected = async () => {
+    const threadIds = [...selectedThreadIds()];
+    if (threadIds.length === 0) {
+      setBulkDeleteOpen(false);
+      return;
+    }
+
+    setDeleting(true);
+    try {
+      const results = await Promise.allSettled(
+        threadIds.map((threadId) => deleteJson(threadApiPath(threadId))),
+      );
+      const failedThreadIds = results.flatMap((result, index) =>
+        result.status === "rejected" ? [threadIds[index]] : [],
+      );
+      const deletedCount = threadIds.length - failedThreadIds.length;
+
+      if (deletedCount > 0) {
+        showToast(
+          `${deletedCount} thread${deletedCount === 1 ? "" : "s"} deleted.`,
+          "success",
+        );
+        window.dispatchEvent(new CustomEvent("kaka:threads-changed"));
+      }
+      if (failedThreadIds.length > 0) {
+        showToast(
+          `${failedThreadIds.length} delete${failedThreadIds.length === 1 ? "" : "s"} failed.`,
+          "error",
+        );
+      }
+
+      setSelectedThreadIds(new Set(failedThreadIds));
+      await load();
+    } finally {
+      setDeleting(false);
+      setBulkDeleteOpen(false);
     }
   };
 
@@ -155,6 +245,30 @@ export function ChatHistoryListPage() {
             fallback={<div class="empty">No conversation threads found.</div>}
           >
             <div class="history-workspace-groups">
+              <Show when={selectedCount() > 0}>
+                <div class="history-bulk-actions panel">
+                  <span class="muted">{selectedCount()} selected</span>
+                  <div class="row-wrap">
+                    <button
+                      class="btn btn-sm"
+                      type="button"
+                      disabled={deleting()}
+                      onClick={() => setSelectedThreadIds(new Set())}
+                    >
+                      Clear
+                    </button>
+                    <button
+                      class="btn btn-sm btn-danger"
+                      type="button"
+                      disabled={deleting()}
+                      onClick={requestDeleteSelected}
+                    >
+                      <Trash2 size={13} />
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </Show>
               <For
                 each={filteredWorkspaceGroups()}
                 fallback={<div class="empty">No conversations in this workspace.</div>}
@@ -172,6 +286,17 @@ export function ChatHistoryListPage() {
                       <table class="table">
                         <thead>
                           <tr>
+                            <th class="history-select-cell">
+                              <input
+                                type="checkbox"
+                                checked={isGroupSelected(group.threads)}
+                                aria-label={`Select ${group.label} threads`}
+                                onChange={(event) => setGroupSelected(
+                                  group.threads,
+                                  event.currentTarget.checked,
+                                )}
+                              />
+                            </th>
                             <th>Thread</th>
                             <th>Platform</th>
                             <th>User</th>
@@ -183,6 +308,17 @@ export function ChatHistoryListPage() {
                           <For each={group.threads}>
                             {(thread) => (
                               <tr>
+                                <td class="history-select-cell">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedThreadIds().has(thread.thread_id)}
+                                    aria-label={`Select ${thread.title || thread.thread_id}`}
+                                    onChange={(event) => setThreadSelected(
+                                      thread.thread_id,
+                                      event.currentTarget.checked,
+                                    )}
+                                  />
+                                </td>
                                 <td>
                                   <Show
                                     when={editingThreadId() === thread.thread_id}
@@ -265,6 +401,14 @@ export function ChatHistoryListPage() {
         deleting={deleting()}
         onClose={cancelDelete}
         onConfirm={() => void confirmDeleteThread()}
+      />
+      <DeleteThreadDialog
+        open={bulkDeleteOpen()}
+        thread={null}
+        threadCount={selectedCount()}
+        deleting={deleting()}
+        onClose={cancelBulkDelete}
+        onConfirm={() => void confirmDeleteSelected()}
       />
     </AppShell>
   );

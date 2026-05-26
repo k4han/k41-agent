@@ -3391,6 +3391,14 @@ body.workspace-resizing * {
   padding-block: 6px;
 }
 
+.history-bulk-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+}
+
 .history-workspace-groups {
   display: grid;
   gap: 16px;
@@ -3430,6 +3438,19 @@ body.workspace-resizing * {
 .history-workspace-heading span {
   color: var(--muted);
   font-size: 12px;
+}
+
+.history-select-cell {
+  width: 42px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.history-select-cell input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
 }
 
 .history-thread-link {
