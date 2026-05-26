@@ -52,7 +52,7 @@ export function ConnectionsPage() {
           <section class="panel">
             <div class="panel-header">
               <div>
-                <div class="panel-title">GitHub App</div>
+                <div class="panel-title">GitHub</div>
                 <div class="hint">Repository automation through GitHub webhooks.</div>
               </div>
               <div class="row-wrap">

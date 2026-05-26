@@ -4,7 +4,6 @@ import { MessageSquare, Play, Square, Trash2 } from "lucide-solid";
 
 import { AppShell } from "@/components/AppShell";
 import { DataGate } from "@/components/State";
-import { MetricCard, MetricsRow } from "@/components/Metrics";
 import { IdentityPicker } from "@/components/IdentityPicker";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
@@ -397,9 +396,6 @@ export function TasksPage() {
     >
       <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => {
-          const active = payload.tasks.filter((task) => activeTaskStatuses.has(task.status)).length;
-          const completed = payload.tasks.filter((task) => task.status === "completed").length;
-          const failed = payload.tasks.filter((task) => ["failed", "cancelled"].includes(task.status)).length;
           const liveSessionsByThread = new Map(
             payload.sessions.map((session) => [session.thread_id, session]),
           );
@@ -446,12 +442,6 @@ export function TasksPage() {
                   </div>
                 </div>
               </section>
-
-              <MetricsRow>
-                <MetricCard value={active} label="Active" />
-                <MetricCard value={completed} label="Completed" />
-                <MetricCard value={failed} label="Failed or cancelled" />
-              </MetricsRow>
 
               <section class="panel task-history-panel">
                 <div class="panel-header task-history-header">

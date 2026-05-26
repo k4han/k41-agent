@@ -4,7 +4,6 @@ import { Edit3, Play, Square, Trash2 } from "lucide-solid";
 import { AppShell } from "@/components/AppShell";
 import { Dialog } from "@/components/Dialog";
 import { DataGate } from "@/components/State";
-import { MetricCard, MetricsRow } from "@/components/Metrics";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
@@ -317,18 +316,9 @@ export function SchedulerPage() {
       subtitle="Create recurring and one-off channel tasks."
     >
       <DataGate data={data()} error={error()} onRetry={load}>
-        {(payload) => {
-          const active = payload.jobs.filter((job) => !job.paused).length;
-          const paused = payload.jobs.filter((job) => job.paused).length;
-          return (
-            <div class="stack">
-              <MetricsRow>
-                <MetricCard value={payload.jobs.length} label="Total jobs" />
-                <MetricCard value={active} label="Active" />
-                <MetricCard value={paused} label="Paused" />
-              </MetricsRow>
-
-              <section class="panel">
+        {(payload) => (
+          <div class="stack">
+            <section class="panel">
                 <div class="panel-header">
                   <div class="panel-title">Create Scheduled Job</div>
                   <span class="hint">{payload.scheduler_timezone}</span>
@@ -516,9 +506,8 @@ export function SchedulerPage() {
                   <TriggerFields form={editForm()} setField={setEditField} />
                 </div>
               </Dialog>
-            </div>
-          );
-        }}
+          </div>
+        )}
       </DataGate>
     </AppShell>
   );

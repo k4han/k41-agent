@@ -2,7 +2,6 @@ import { createSignal, For, onCleanup, onMount } from "solid-js";
 
 import { AppShell } from "@/components/AppShell";
 import { DataGate } from "@/components/State";
-import { MetricCard, MetricsRow } from "@/components/Metrics";
 import { EmptyTableRow } from "@/components/EmptyTableRow";
 import { apiFetch } from "@/lib/api";
 import type { ActiveSession } from "@/types";
@@ -104,17 +103,6 @@ export function SessionsPage() {
       <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => (
           <div class="stack">
-            <MetricsRow>
-              <MetricCard value={payload.count} label="Active sessions" />
-              <MetricCard
-                value={payload.sessions.reduce((total, session) => total + session.tools_called.length, 0)}
-                label="Recorded tool calls"
-              />
-              <MetricCard
-                value={payload.sessions.filter((session) => session.current_step.startsWith("tool:")).length}
-                label="Using tools"
-              />
-            </MetricsRow>
             <section class="panel">
               <div class="table-wrap">
                 <table class="table">

@@ -3,7 +3,6 @@ import { GitPullRequest, Save } from "lucide-solid";
 
 import { AppShell } from "@/components/AppShell";
 import { DataGate } from "@/components/State";
-import { MetricCard, MetricsRow } from "@/components/Metrics";
 import { IdentityPicker } from "@/components/IdentityPicker";
 import { EmptyTableRow } from "@/components/EmptyTableRow";
 import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
@@ -115,7 +114,6 @@ export function RepositoriesPage() {
     }
   };
 
-  const activeCount = createMemo(() => data()?.repositories.filter((repo) => repo.enabled).length || 0);
   const filteredRepositories = createMemo(() => {
     const payload = data();
     if (!payload) {
@@ -156,12 +154,6 @@ export function RepositoriesPage() {
       <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => (
           <div class="stack">
-            <MetricsRow>
-              <MetricCard value={payload.repositories.length} label="Synced repositories" />
-              <MetricCard value={activeCount()} label="Enabled bindings" />
-              <MetricCard value={payload.configured ? "Ready" : "Setup"} label="GitHub App" />
-            </MetricsRow>
-
             <SettingsResourceToolbar
               searchValue={query()}
               searchPlaceholder="Search repositories..."
