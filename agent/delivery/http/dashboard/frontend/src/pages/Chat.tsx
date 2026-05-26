@@ -1569,7 +1569,7 @@ export function ChatPage() {
                       class={`chat-composer-icon ${composerOptionsOpen() ? "active" : ""}`}
                       type="button"
                       onClick={() => setComposerOptionsOpen((current) => !current)}
-                      disabled={composerDisabled()}
+                      disabled={workspaceMissing()}
                       title="Run settings"
                       aria-label="Run settings"
                       aria-expanded={composerOptionsOpen()}
