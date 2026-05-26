@@ -18,6 +18,26 @@ export default defineConfig({
     outDir: "../static",
     emptyOutDir: true,
     sourcemap: false,
+    chunkSizeWarningLimit: 700,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) {
+            return undefined;
+          }
+          if (id.includes("solid-js") || id.includes("@solidjs/router")) {
+            return "solid";
+          }
+          if (id.includes("marked") || id.includes("dompurify")) {
+            return "markdown";
+          }
+          if (id.includes("diff2html")) {
+            return "diff-view";
+          }
+          return undefined;
+        },
+      },
+    },
   },
   server: {
     port: 5173,

@@ -1,26 +1,66 @@
 import { Navigate, Route, Router } from "@solidjs/router";
+import { lazy } from "solid-js";
 import { render } from "solid-js/web";
 
 import { ToastProvider } from "@/components/Toast";
-import { ChatHistoryListPage } from "@/pages/ChatHistory";
-import { ChatPage } from "@/pages/Chat";
-import { LoginPage } from "@/pages/Login";
-import { OverviewPage } from "@/pages/Overview";
-import { RepositoriesPage } from "@/pages/Repositories";
-import { SchedulerPage } from "@/pages/Scheduler";
-import { SessionsPage } from "@/pages/Sessions";
-import {
-  AgentsPage,
-  AppearancePage,
-  ChannelsPage,
-  ConfigPage,
-  PromptVariablesPage,
-  ProvidersPage,
-  SecurityPage,
-} from "@/pages/settings";
-import { TasksPage } from "@/pages/Tasks";
 import "diff2html/bundles/css/diff2html.min.css";
 import "@/styles.css";
+
+const ChatHistoryListPage = lazy(() =>
+  import("@/pages/ChatHistory").then((module) => ({ default: module.ChatHistoryListPage })),
+);
+const ChatPage = lazy(() =>
+  import("@/pages/Chat").then((module) => ({ default: module.ChatPage })),
+);
+const LoginPage = lazy(() =>
+  import("@/pages/Login").then((module) => ({ default: module.LoginPage })),
+);
+const OverviewPage = lazy(() =>
+  import("@/pages/Overview").then((module) => ({ default: module.OverviewPage })),
+);
+const RepositoriesPage = lazy(() =>
+  import("@/pages/Repositories").then((module) => ({ default: module.RepositoriesPage })),
+);
+const SchedulerPage = lazy(() =>
+  import("@/pages/Scheduler").then((module) => ({ default: module.SchedulerPage })),
+);
+const SessionsPage = lazy(() =>
+  import("@/pages/Sessions").then((module) => ({ default: module.SessionsPage })),
+);
+const AgentsPage = lazy(() =>
+  import("@/pages/settings/AgentsPage").then((module) => ({ default: module.AgentsPage })),
+);
+const AppearancePage = lazy(() =>
+  import("@/pages/settings/AppearancePage").then((module) => ({
+    default: module.AppearancePage,
+  })),
+);
+const ChannelsPage = lazy(() =>
+  import("@/pages/settings/ChannelsPage").then((module) => ({
+    default: module.ChannelsPage,
+  })),
+);
+const ConfigPage = lazy(() =>
+  import("@/pages/settings/ConfigPage").then((module) => ({ default: module.ConfigPage })),
+);
+const PromptVariablesPage = lazy(() =>
+  import("@/pages/settings/PromptVariablesPage").then((module) => ({
+    default: module.PromptVariablesPage,
+  })),
+);
+const ProvidersPage = lazy(() =>
+  import("@/pages/settings/ProvidersPage").then((module) => ({
+    default: module.ProvidersPage,
+  })),
+);
+const SecurityPage = lazy(() =>
+  import("@/pages/settings/SecurityPage").then((module) => ({
+    default: module.SecurityPage,
+  })),
+);
+const TasksPage = lazy(() =>
+  import("@/pages/Tasks").then((module) => ({ default: module.TasksPage })),
+);
 
 function NotFoundPage() {
   return <OverviewPage />;
