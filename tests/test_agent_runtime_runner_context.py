@@ -1,4 +1,3 @@
-import asyncio
 import base64
 from types import SimpleNamespace
 
@@ -14,26 +13,16 @@ async def test_record_conversation_thread_schedules_title_generation_for_user_th
     monkeypatch,
 ):
     calls = {}
-    generation_started = asyncio.Event()
-    release_generation = asyncio.Event()
-    title_updated = asyncio.Event()
 
     async def fake_get_conversation_thread(thread_id: str):
         calls["get"] = thread_id
         return None
 
-    async def fake_generate_conversation_title(**kwargs):
-        calls["generate"] = kwargs
-        generation_started.set()
-        await release_generation.wait()
-        return "Debug login issue"
-
     async def fake_upsert_conversation_thread(**kwargs):
         calls["upsert"] = kwargs
 
-    async def fake_update_conversation_thread_title_if_current(**kwargs):
-        calls["update_title"] = kwargs
-        title_updated.set()
+    def fake_schedule_conversation_title_generation(**kwargs):
+        calls["schedule_title"] = kwargs
 
     monkeypatch.setattr(
         conversations_module,
@@ -42,18 +31,13 @@ async def test_record_conversation_thread_schedules_title_generation_for_user_th
     )
     monkeypatch.setattr(
         conversations_module,
-        "generate_conversation_title",
-        fake_generate_conversation_title,
-    )
-    monkeypatch.setattr(
-        conversations_module,
         "upsert_conversation_thread",
         fake_upsert_conversation_thread,
     )
     monkeypatch.setattr(
         conversations_module,
-        "update_conversation_thread_title_if_current",
-        fake_update_conversation_thread_title_if_current,
+        "schedule_conversation_title_generation",
+        fake_schedule_conversation_title_generation,
     )
 
     await runner_module._record_conversation_thread(
@@ -70,36 +54,25 @@ async def test_record_conversation_thread_schedules_title_generation_for_user_th
         "title": "How do I debug this login issue?",
         "kind": "user",
     }
-    await asyncio.wait_for(generation_started.wait(), timeout=1)
-    assert calls["generate"] == {
-        "first_user_message": "How do I debug this login issue?",
-        "attachments": [{"name": "auth.py", "kind": "text"}],
-    }
-    release_generation.set()
-    await asyncio.wait_for(title_updated.wait(), timeout=1)
-    assert calls["update_title"] == {
+    assert calls["schedule_title"] == {
         "thread_id": "api:dashboard:thread-1",
-        "title": "Debug login issue",
-        "current_titles": [
-            "api:dashboard:thread-1",
-            "How do I debug this login issue?",
-        ],
+        "title": "How do I debug this login issue?",
+        "attachments": [{"name": "auth.py", "kind": "text"}],
     }
 
 
 @pytest.mark.asyncio
 async def test_record_conversation_thread_preserves_existing_manual_title(monkeypatch):
-    calls = {"generate": 0}
+    calls = {"schedule_title": 0}
 
     async def fake_get_conversation_thread(thread_id: str):
         return {"thread_id": thread_id, "title": "Manual title"}
 
-    async def fake_generate_conversation_title(**kwargs):
-        calls["generate"] += 1
-        return "Generated title"
-
     async def fake_upsert_conversation_thread(**kwargs):
         calls["upsert"] = kwargs
+
+    def fake_schedule_conversation_title_generation(**kwargs):
+        calls["schedule_title"] += 1
 
     monkeypatch.setattr(
         conversations_module,
@@ -108,13 +81,13 @@ async def test_record_conversation_thread_preserves_existing_manual_title(monkey
     )
     monkeypatch.setattr(
         conversations_module,
-        "generate_conversation_title",
-        fake_generate_conversation_title,
+        "upsert_conversation_thread",
+        fake_upsert_conversation_thread,
     )
     monkeypatch.setattr(
         conversations_module,
-        "upsert_conversation_thread",
-        fake_upsert_conversation_thread,
+        "schedule_conversation_title_generation",
+        fake_schedule_conversation_title_generation,
     )
 
     await runner_module._record_conversation_thread(
@@ -123,7 +96,7 @@ async def test_record_conversation_thread_preserves_existing_manual_title(monkey
         title="New request",
     )
 
-    assert calls["generate"] == 0
+    assert calls["schedule_title"] == 0
     assert calls["upsert"] == {
         "thread_id": "api:dashboard:thread-1",
         "agent_name": "default",
@@ -134,18 +107,17 @@ async def test_record_conversation_thread_preserves_existing_manual_title(monkey
 
 @pytest.mark.asyncio
 async def test_record_conversation_thread_skips_generation_for_background_thread(monkeypatch):
-    calls = {"get": 0, "generate": 0}
+    calls = {"get": 0, "schedule_title": 0}
 
     async def fake_get_conversation_thread(thread_id: str):
         calls["get"] += 1
         return None
 
-    async def fake_generate_conversation_title(**kwargs):
-        calls["generate"] += 1
-        return "Generated title"
-
     async def fake_upsert_conversation_thread(**kwargs):
         calls["upsert"] = kwargs
+
+    def fake_schedule_conversation_title_generation(**kwargs):
+        calls["schedule_title"] += 1
 
     monkeypatch.setattr(
         conversations_module,
@@ -154,13 +126,13 @@ async def test_record_conversation_thread_skips_generation_for_background_thread
     )
     monkeypatch.setattr(
         conversations_module,
-        "generate_conversation_title",
-        fake_generate_conversation_title,
+        "upsert_conversation_thread",
+        fake_upsert_conversation_thread,
     )
     monkeypatch.setattr(
         conversations_module,
-        "upsert_conversation_thread",
-        fake_upsert_conversation_thread,
+        "schedule_conversation_title_generation",
+        fake_schedule_conversation_title_generation,
     )
 
     await runner_module._record_conversation_thread(
@@ -170,7 +142,7 @@ async def test_record_conversation_thread_skips_generation_for_background_thread
     )
 
     assert calls["get"] == 0
-    assert calls["generate"] == 0
+    assert calls["schedule_title"] == 0
     assert calls["upsert"] == {
         "thread_id": "task_dashboard_123",
         "agent_name": "default",

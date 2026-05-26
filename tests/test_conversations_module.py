@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -102,3 +103,53 @@ async def test_generate_conversation_title_falls_back_without_agent(monkeypatch)
     )
 
     assert title == "Plan database migration"
+
+
+@pytest.mark.asyncio
+async def test_schedule_conversation_title_generation_updates_current_title(monkeypatch):
+    calls = {}
+    generation_started = asyncio.Event()
+    release_generation = asyncio.Event()
+
+    async def fake_generate_conversation_title(**kwargs):
+        calls["generate"] = kwargs
+        generation_started.set()
+        await release_generation.wait()
+        return "Debug login issue"
+
+    async def fake_update_conversation_thread_title_if_current(**kwargs):
+        calls["update_title"] = kwargs
+
+    monkeypatch.setattr(
+        conversation_service,
+        "generate_conversation_title",
+        fake_generate_conversation_title,
+    )
+    monkeypatch.setattr(
+        conversation_service,
+        "update_conversation_thread_title_if_current",
+        fake_update_conversation_thread_title_if_current,
+    )
+
+    task = conversation_service.schedule_conversation_title_generation(
+        thread_id="task_dashboard_123",
+        title="How do I debug this login issue?",
+        attachments=[{"name": "auth.py", "kind": "text"}],
+    )
+
+    await asyncio.wait_for(generation_started.wait(), timeout=1)
+    assert calls["generate"] == {
+        "first_user_message": "How do I debug this login issue?",
+        "attachments": [{"name": "auth.py", "kind": "text"}],
+    }
+    release_generation.set()
+    await asyncio.wait_for(task, timeout=1)
+
+    assert calls["update_title"] == {
+        "thread_id": "task_dashboard_123",
+        "title": "Debug login issue",
+        "current_titles": [
+            "task_dashboard_123",
+            "How do I debug this login issue?",
+        ],
+    }

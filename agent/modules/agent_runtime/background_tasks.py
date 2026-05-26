@@ -272,7 +272,11 @@ class BackgroundTaskManager:
             f"{BACKGROUND_THREAD_PREFIX}_dashboard_{task.task_id}"
         )
 
-        from agent.modules.conversations import THREAD_KIND_BACKGROUND, upsert_conversation_thread
+        from agent.modules.conversations import (
+            THREAD_KIND_BACKGROUND,
+            schedule_conversation_title_generation,
+            upsert_conversation_thread,
+        )
 
         await self._persist_task(task)
         if task.workspace is not None:
@@ -289,6 +293,10 @@ class BackgroundTaskManager:
             agent_name=task.agent_name,
             title=task.request,
             kind=THREAD_KIND_BACKGROUND,
+        )
+        schedule_conversation_title_generation(
+            thread_id=task.thread_id,
+            title=task.request,
         )
 
         with self._lock:

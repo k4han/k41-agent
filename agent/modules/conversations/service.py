@@ -136,6 +136,49 @@ async def generate_conversation_title(
         return fallback
 
 
+async def _generate_and_update_conversation_title(
+    *,
+    thread_id: str,
+    title: str,
+    attachments: list[Any] | None = None,
+) -> None:
+    try:
+        generated_title = await generate_conversation_title(
+            first_user_message=title,
+            attachments=attachments,
+        )
+        fallback_title = str(title or "").strip()[:255]
+        current_titles = [thread_id]
+        if fallback_title:
+            current_titles.append(fallback_title)
+        await update_conversation_thread_title_if_current(
+            thread_id=thread_id,
+            title=generated_title,
+            current_titles=current_titles,
+        )
+    except Exception as exc:
+        logger.debug(
+            "Failed to update generated conversation title for '%s': %s",
+            thread_id,
+            exc,
+        )
+
+
+def schedule_conversation_title_generation(
+    *,
+    thread_id: str,
+    title: str,
+    attachments: list[Any] | None = None,
+) -> asyncio.Task[None]:
+    return asyncio.create_task(
+        _generate_and_update_conversation_title(
+            thread_id=thread_id,
+            title=title,
+            attachments=attachments,
+        )
+    )
+
+
 def create_thread_id(
     *,
     platform: str,
@@ -283,6 +326,7 @@ __all__ = [
     "mark_conversation_thread_deleted",
     "parse_thread_metadata",
     "rename_conversation_thread",
+    "schedule_conversation_title_generation",
     "update_conversation_thread_title_if_current",
     "upsert_conversation_thread",
 ]

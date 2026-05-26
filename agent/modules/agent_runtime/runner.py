@@ -1,4 +1,3 @@
-import asyncio
 import base64
 import binascii
 from contextlib import contextmanager
@@ -271,54 +270,6 @@ def _graph_accepts_context(graph: Any) -> bool:
     return context_schema is not None
 
 
-async def _generate_and_update_conversation_title(
-    *,
-    thread_id: str,
-    title: str,
-    attachments: list[Any] | None = None,
-) -> None:
-    try:
-        from agent.modules.conversations import (
-            generate_conversation_title,
-            update_conversation_thread_title_if_current,
-        )
-
-        generated_title = await generate_conversation_title(
-            first_user_message=title,
-            attachments=attachments,
-        )
-        fallback_title = str(title or "").strip()[:255]
-        current_titles = [thread_id]
-        if fallback_title:
-            current_titles.append(fallback_title)
-        await update_conversation_thread_title_if_current(
-            thread_id=thread_id,
-            title=generated_title,
-            current_titles=current_titles,
-        )
-    except Exception as exc:
-        logger.debug(
-            "Failed to update generated conversation title for '%s': %s",
-            thread_id,
-            exc,
-        )
-
-
-def _schedule_conversation_title_generation(
-    *,
-    thread_id: str,
-    title: str,
-    attachments: list[Any] | None = None,
-) -> None:
-    asyncio.create_task(
-        _generate_and_update_conversation_title(
-            thread_id=thread_id,
-            title=title,
-            attachments=attachments,
-        )
-    )
-
-
 async def _record_conversation_thread(
     *,
     thread_id: str,
@@ -331,6 +282,7 @@ async def _record_conversation_thread(
             THREAD_KIND_USER,
             get_conversation_thread,
             infer_thread_kind,
+            schedule_conversation_title_generation,
             upsert_conversation_thread,
         )
 
@@ -352,7 +304,7 @@ async def _record_conversation_thread(
             kind=kind,
         )
         if should_generate_title:
-            _schedule_conversation_title_generation(
+            schedule_conversation_title_generation(
                 thread_id=thread_id,
                 title=title,
                 attachments=attachments,

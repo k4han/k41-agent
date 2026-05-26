@@ -20,6 +20,7 @@ from agent.modules.conversations.service import (
     mark_conversation_thread_deleted,
     parse_thread_metadata,
     rename_conversation_thread,
+    schedule_conversation_title_generation,
     update_conversation_thread_title_if_current,
     upsert_conversation_thread,
 )
@@ -44,6 +45,7 @@ __all__ = [
     "mark_conversation_thread_deleted",
     "parse_thread_metadata",
     "rename_conversation_thread",
+    "schedule_conversation_title_generation",
     "update_conversation_thread_title_if_current",
     "upsert_conversation_thread",
 ]
