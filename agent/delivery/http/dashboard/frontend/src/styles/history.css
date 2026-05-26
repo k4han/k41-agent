@@ -1,0 +1,139 @@
+/* --- Chat history ---------------------------------------------------- */
+
+.history-workspace-filter {
+  width: min(280px, 100%);
+  min-height: 34px;
+  padding-block: 6px;
+}
+
+.history-bulk-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+}
+
+.history-workspace-groups {
+  display: grid;
+  gap: 16px;
+}
+
+.history-workspace-section {
+  overflow: hidden;
+}
+
+.history-workspace-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--border);
+  padding: 12px 14px;
+}
+
+.history-workspace-header svg {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
+.history-workspace-heading {
+  min-width: 0;
+}
+
+.history-workspace-heading h2 {
+  margin: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-workspace-heading span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.history-select-cell {
+  width: 42px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.history-select-cell input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.history-thread-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  min-width: 0;
+  color: var(--fg);
+  transition: color 120ms ease;
+}
+
+.history-thread-link:hover {
+  color: var(--info);
+}
+
+.history-thread-link .mono {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-thread-icon {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
+.history-thread-icon.task {
+  color: var(--info);
+}
+
+.inline-rename-input {
+  width: 100%;
+  min-height: 28px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  outline: none;
+  background: var(--surface);
+  color: var(--fg);
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.inline-rename-input:focus {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
+.history-thread-rename-input {
+  width: min(420px, 100%);
+  min-height: 30px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  outline: none;
+  background: var(--surface);
+  color: var(--fg);
+  padding: 0 8px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+}
+
+.history-thread-rename-input:focus {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
+.history-transcript {
+  max-height: calc(100vh - 250px);
+  overflow-y: auto;
+  padding: 18px;
+}
+

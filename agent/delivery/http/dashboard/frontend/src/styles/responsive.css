@@ -1,0 +1,143 @@
+@media (max-width: 980px) {
+  .app-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: static;
+    height: auto;
+  }
+
+  .nav {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+
+  .nav-link {
+    flex: 0 0 auto;
+  }
+
+  .nav-history-toggle {
+    width: auto;
+  }
+
+  .nav-history-group {
+    flex: 0 0 auto;
+    width: auto;
+  }
+
+  .nav-history-group.open {
+    flex: 0 0 auto;
+  }
+
+  .nav-history-caret {
+    display: none;
+  }
+
+  .nav-history-list {
+    flex: 0 0 auto;
+    width: 220px;
+    max-height: 240px;
+    margin: 4px 0 0;
+  }
+
+  .sidebar-footer {
+    display: none;
+  }
+
+  .brand-collapse-btn {
+    display: none;
+  }
+
+  .nav-label {
+    display: none;
+  }
+
+  .grid-sidebar,
+  .chat-shell,
+  .grid-2,
+  .grid-3,
+  .task-live-grid,
+  .setting-card-main,
+  .change-card {
+    grid-template-columns: 1fr;
+  }
+
+  .setting-actions {
+    justify-content: flex-start;
+  }
+
+  .setting-control-panel {
+    justify-items: stretch;
+  }
+
+  .setting-control-panel .toggle-control {
+    justify-self: start;
+  }
+
+  .nav-section-title {
+    display: none;
+  }
+
+  .chat-panel {
+    min-height: 0;
+  }
+
+  .chat-shell-resizable,
+  .chat-shell-resizable.workspace-open,
+  .chat-shell-resizable.workspace-closed {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    width: 100%;
+    height: auto;
+    min-height: calc(100vh - 114px);
+    min-height: calc(100dvh - 114px);
+  }
+
+  .workspace-drawer {
+    opacity: 1;
+    overflow: visible;
+    pointer-events: auto;
+    transform: none;
+    visibility: visible;
+  }
+
+  .workspace-closed .workspace-drawer {
+    display: none;
+  }
+
+  .workspace-resize-handle {
+    display: none;
+  }
+
+  .workspace-explorer {
+    min-height: 520px;
+  }
+}
+
+@media (max-width: 640px) {
+  .content {
+    padding: 14px;
+  }
+
+  .topbar {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 12px 14px;
+  }
+
+  .split {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .dialog-backdrop {
+    padding: 0;
+  }
+
+  .dialog {
+    width: 100%;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+}

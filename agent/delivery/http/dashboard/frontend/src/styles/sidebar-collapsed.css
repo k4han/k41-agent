@@ -1,0 +1,54 @@
+/* --- Collapsed sidebar ------------------------------------------------- */
+
+.sidebar-collapsed {
+  grid-template-columns: 60px minmax(0, 1fr);
+}
+
+.sidebar-collapsed .brand {
+  justify-content: center;
+  padding: 14px 0;
+}
+
+.sidebar-collapsed .nav {
+  align-items: center;
+  padding: 10px 6px;
+}
+
+.sidebar-collapsed .nav-link {
+  justify-content: center;
+  width: 36px;
+  padding: 0;
+}
+
+.sidebar-collapsed .nav-label {
+  display: none;
+}
+
+.sidebar-collapsed .nav-history-group {
+  display: flex;
+  justify-content: center;
+  width: 36px;
+}
+
+.sidebar-collapsed .nav-history-caret {
+  display: none;
+}
+
+.sidebar-collapsed .nav-section-title {
+  display: none;
+}
+
+.sidebar-collapsed .nav-separator {
+  width: 24px;
+  margin: 6px auto;
+}
+
+.sidebar-collapsed .sidebar-footer {
+  padding: 8px 6px;
+}
+
+.sidebar-collapsed .sidebar-footer-row {
+  flex-direction: column;
+  gap: 8px;
+}
+

@@ -1,0 +1,22 @@
+.composer {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--border);
+  padding: 14px;
+}
+
+.chat-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  background: var(--surface-2);
+  padding: 14px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.06);
+}
+
+.dark .chat-composer {
+  background: #1f1f1f;
+  box-shadow: none;
+}
+
