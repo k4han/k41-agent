@@ -28,6 +28,7 @@ class YamlConfigSource:
     def __init__(self, path: Path | None = None) -> None:
         self._path = path or DEFAULT_CONFIG_PATH
         self._cache: dict[str, Any] | None = None
+        self._cache_mtime_ns: int | None = None
         self._priority = 100  # Middle priority
 
     def get(self, key: str) -> Any | None:
@@ -80,6 +81,7 @@ class YamlConfigSource:
     def reload(self) -> None:
         """Clear cache and reload from file."""
         self._cache = None
+        self._cache_mtime_ns = None
 
     @property
     def priority(self) -> int:
@@ -88,11 +90,19 @@ class YamlConfigSource:
 
     def _load(self) -> dict[str, Any]:
         """Load and cache config from YAML file."""
-        if self._cache is not None:
+        current_mtime_ns = self._current_mtime_ns()
+        if self._cache is not None and self._cache_mtime_ns == current_mtime_ns:
             return self._cache
 
         self._cache = load_flat_config_file(self._path)
+        self._cache_mtime_ns = self._current_mtime_ns()
         return self._cache
+
+    def _current_mtime_ns(self) -> int | None:
+        try:
+            return self._path.stat().st_mtime_ns
+        except FileNotFoundError:
+            return None
 
 
 __all__ = ["DEFAULT_CONFIG_PATH", "YamlConfigSource"]

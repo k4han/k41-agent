@@ -77,6 +77,18 @@ def _resolve_model_options(provider_values: dict[str, Any]) -> tuple[str, ...]:
     return tuple(parse_string_or_list(provider_values.get("models", [])))
 
 
+def _provider_config_fingerprint(
+    flat_config: dict[str, Any],
+) -> tuple[tuple[str, str], ...]:
+    return tuple(
+        sorted(
+            (key, repr(value))
+            for key, value in flat_config.items()
+            if key == "llm.default_provider" or key.startswith("llm.providers.")
+        )
+    )
+
+
 def _resolve_api_key(
     provider_name: str,
     provider_values: dict[str, Any],
@@ -135,7 +147,11 @@ class ConfigProviderRepository:
     """Resolve provider configs from config service."""
 
     def __init__(self) -> None:
-        self._cache: tuple[dict[str, ProviderConfig], str] | None = None
+        self._cache: tuple[
+            dict[str, ProviderConfig],
+            str,
+            tuple[tuple[str, str], ...],
+        ] | None = None
 
     def reload(self) -> None:
         self._cache = None
@@ -187,11 +203,13 @@ class ConfigProviderRepository:
         )
 
     def _load(self) -> tuple[dict[str, ProviderConfig], str]:
-        if self._cache is not None:
-            return self._cache
         config = get_config_service()
+        flat_config = config.get_all()
+        fingerprint = _provider_config_fingerprint(flat_config)
+        if self._cache is not None and self._cache[2] == fingerprint:
+            return self._cache[0], self._cache[1]
 
-        providers = _extract_provider_entries(config.get_all())
+        providers = _extract_provider_entries(flat_config)
         if not providers:
             raise RuntimeError(
                 "No providers configured. "
@@ -211,8 +229,8 @@ class ConfigProviderRepository:
                 f"Default provider {default_provider_name!r} is disabled. "
                 "Set llm.default_provider to an enabled provider."
             )
-        self._cache = (loaded, default_provider_name)
-        return self._cache
+        self._cache = (loaded, default_provider_name, fingerprint)
+        return loaded, default_provider_name
 
     def get_provider(self, name: str) -> ProviderConfig:
         providers, default_provider_name = self._load()

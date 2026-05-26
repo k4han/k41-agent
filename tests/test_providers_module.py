@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import textwrap
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -65,6 +66,14 @@ def _write_config(
 
 def _write_yaml(config_path: Path, content: str) -> None:
     config_path.write_text(textwrap.dedent(content).strip() + "\n", encoding="utf-8")
+
+
+def _bump_mtime(config_path: Path) -> None:
+    stat = config_path.stat()
+    os.utime(
+        config_path,
+        ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000),
+    )
 
 
 # --- Domain ---
@@ -211,6 +220,54 @@ def test_repo_provider_models_from_yaml(monkeypatch: MonkeyPatch, tmp_path: Path
         provider = repo.get_provider("openai-main")
 
         assert provider.models == ("openai-default", "openai-fast")
+
+
+def test_repo_detects_provider_config_file_changes_without_manual_reload(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    _write_yaml(
+        config_path,
+        """
+        llm:
+            default_provider: "openai-main"
+            providers:
+                openai-main:
+                    type: "openai_compatible"
+                    api_key: "openai-key"
+                    default_model: "openai-default"
+                    models:
+                        - "openai-default"
+        """,
+    )
+    _set_config_path(monkeypatch, config_path)
+
+    repo = ConfigProviderRepository()
+
+    assert repo.get_provider("openai-main").models == ("openai-default",)
+
+    _write_yaml(
+        config_path,
+        """
+        llm:
+            default_provider: "openai-main"
+            providers:
+                openai-main:
+                    type: "openai_compatible"
+                    api_key: "openai-key"
+                    default_model: "openai-default"
+                    models:
+                        - "openai-default"
+                        - "openai-fast"
+        """,
+    )
+    _bump_mtime(config_path)
+
+    assert repo.get_provider("openai-main").models == (
+        "openai-default",
+        "openai-fast",
+    )
 
 
 def test_repo_requires_provider_specific_default_model(
