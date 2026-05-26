@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -19,7 +19,40 @@ class WorkspaceRef(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     def display_label(self) -> str:
-        return self.label or self.locator
+        label = self.label.strip()
+        locator = self.locator.strip()
+        if label and not _same_local_path(label, locator):
+            if _is_absolute_local_path(label):
+                return _local_workspace_display_label(label)
+            return label
+        return _local_workspace_display_label(locator or label)
+
+
+def _local_workspace_display_label(value: str) -> str:
+    trimmed = value.strip()
+    normalized = trimmed.replace("\\", "/").rstrip("/")
+    parts = [part for part in normalized.split("/") if part]
+    return f"{parts[-1]}/" if parts else trimmed
+
+
+def _is_absolute_local_path(value: str) -> bool:
+    trimmed = value.strip()
+    return (
+        trimmed.startswith("~")
+        or Path(trimmed).expanduser().is_absolute()
+        or PureWindowsPath(trimmed).is_absolute()
+    )
+
+
+def _same_local_path(left: str, right: str) -> bool:
+    if not left or not right:
+        return False
+    try:
+        left_path = Path(left).expanduser().resolve()
+        right_path = Path(right).expanduser().resolve()
+    except (OSError, RuntimeError):
+        return left == right
+    return left_path == right_path
 
 
 def _model_dump(value: Any) -> dict[str, Any]:

@@ -3,6 +3,7 @@ import {
   findTranscriptToolTarget,
 } from "@/components/Transcript";
 import type { TranscriptAttachment, TranscriptItem } from "@/components/Transcript";
+import { workspaceDisplayLabelFromValues } from "@/lib/workspace";
 import type { WorkspaceRef } from "@/types";
 
 export type ThreadSummary = {
@@ -80,12 +81,14 @@ export function threadWorkspaceKey(thread: ThreadSummary): string {
 }
 
 export function threadWorkspaceLabel(thread: ThreadSummary): string {
-  return (
-    thread.workspace_label
-    || thread.workspace?.label
-    || thread.workspace?.locator
-    || NO_WORKSPACE_LABEL
-  );
+  if (!thread.workspace) {
+    return thread.workspace_label || NO_WORKSPACE_LABEL;
+  }
+  return workspaceDisplayLabelFromValues(
+    thread.workspace_label || thread.workspace.label,
+    thread.workspace.locator,
+    thread.workspace.metadata,
+  ) || NO_WORKSPACE_LABEL;
 }
 
 export function groupThreadsByWorkspace(threads: ThreadSummary[]): ThreadWorkspaceGroup[] {

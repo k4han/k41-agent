@@ -38,7 +38,11 @@ import {
   toThreadTranscript,
 } from "@/lib/chatThreads";
 import type { TranscriptAttachment, TranscriptItem } from "@/components/Transcript";
-import { localWorkspaceRef } from "@/lib/workspace";
+import {
+  localWorkspaceRef,
+  workspaceDisplayLabel,
+  workspaceDisplayLabelFromValues,
+} from "@/lib/workspace";
 import type { ThreadMessagesPayload } from "@/lib/chatThreads";
 import type {
   ActiveSession,
@@ -263,6 +267,7 @@ function toPayloadAttachment(attachment: PendingAttachment): ChatAttachmentPaylo
 function WorkspaceSelector(props: {
   workingDir: string;
   defaultWorkingDir: string;
+  workspace?: WorkspaceRef | null;
   locked: boolean;
   disabled?: boolean;
   onResolved: (workspace: WorkspaceRef) => void;
@@ -290,6 +295,13 @@ function WorkspaceSelector(props: {
 
   const selectedRepository = createMemo(() =>
     repositories().find((repository) => String(repository.repository_id) === repositoryId()),
+  );
+  const workspaceStatusLabel = createMemo(() =>
+    workspaceDisplayLabel(props.workspace)
+    || workspaceDisplayLabelFromValues(resolvedLabel(), props.workingDir || resolvedLabel()),
+  );
+  const workspaceStatusTitle = createMemo(() =>
+    props.workingDir || resolvedLabel() || workspaceStatusLabel(),
   );
 
   const resolveDisabled = createMemo(() => {
@@ -395,11 +407,11 @@ function WorkspaceSelector(props: {
   return (
     <div class={`workspace-selector ${props.locked ? "locked" : ""}`}>
       <div class="workspace-selector-status">
-        <Show when={props.workingDir || resolvedLabel()} fallback={<FolderOpen size={14} />}>
+        <Show when={workspaceStatusLabel()} fallback={<FolderOpen size={14} />}>
           <CheckCircle2 size={14} />
         </Show>
-        <span title={props.workingDir || resolvedLabel()}>
-          {props.workingDir || resolvedLabel() || "Select a workspace to start"}
+        <span title={workspaceStatusTitle()}>
+          {workspaceStatusLabel() || "Select a workspace to start"}
         </span>
       </div>
 
@@ -1432,6 +1444,7 @@ export function ChatPage() {
                             <WorkspaceSelector
                               workingDir={workingDir()}
                               defaultWorkingDir={defaultWorkingDir()}
+                              workspace={workspaceRef()}
                               locked={false}
                               disabled={conversationBusy()}
                               onResolved={setWorkspace}

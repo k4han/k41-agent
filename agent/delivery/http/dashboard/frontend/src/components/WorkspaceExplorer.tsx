@@ -19,7 +19,7 @@ import { apiFetch, postJson } from "@/lib/api";
 import { highlightCode, languageFromPath } from "@/lib/codeHighlight";
 import { renderUnifiedDiffHtml } from "@/lib/diffView";
 import { createDarkMode } from "@/lib/theme";
-import { localWorkspaceRef } from "@/lib/workspace";
+import { formatWorkspaceRoot, localWorkspaceRef } from "@/lib/workspace";
 import type { WorkspaceRef } from "@/types";
 
 type WorkspaceTreeEntry = {
@@ -220,6 +220,8 @@ export function WorkspaceExplorer(props: {
   const canQuery = () => Boolean(props.workingDir.trim() || props.threadId);
   const activeFilePath = () => fileTabPath(activeTab());
   const activeFilePayload = () => filePayloads()[activeFilePath()];
+  const workingDirDisplayValue = () =>
+    props.disabled ? formatWorkspaceRoot(draftWorkingDir()) : draftWorkingDir();
 
   const loadTree = async (path = "", targetGeneration = generation) => {
     if (!canQuery()) {
@@ -666,9 +668,10 @@ export function WorkspaceExplorer(props: {
       <div class="workspace-dir-control">
         <input
           class="input workspace-dir-input"
-          value={draftWorkingDir()}
+          value={workingDirDisplayValue()}
           disabled={props.disabled}
           placeholder="Working directory"
+          title={draftWorkingDir()}
           onInput={(event) => setDraftWorkingDir(event.currentTarget.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter") {

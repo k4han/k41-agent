@@ -10,6 +10,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson } from "@/lib/api";
 import { truncateText } from "@/lib/utils";
+import { formatWorkspaceRoot, workspaceDisplayLabelFromValues } from "@/lib/workspace";
 import type { ActiveSession, AgentConfig, BackgroundTask, Identity } from "@/types";
 
 type TasksPayload = {
@@ -49,20 +50,6 @@ function metadataText(task: BackgroundTask, key: string): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function compactPath(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return "";
-  }
-
-  const normalized = trimmed.replace(/\\/g, "/").replace(/\/+$/, "");
-  const parts = normalized.split("/").filter(Boolean);
-  if (parts.length >= 2) {
-    return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
-  }
-  return trimmed;
-}
-
 function repositoryLabel(task: BackgroundTask): string {
   const repository = metadataText(task, "repository_full_name");
   if (repository) {
@@ -87,9 +74,9 @@ function workspaceLabel(task: BackgroundTask): string {
   const label = workspace.label?.trim() || "";
   const locator = workspace.locator?.trim() || "";
   if (label && label !== locator && label !== repo) {
-    return label;
+    return workspaceDisplayLabelFromValues(label, locator);
   }
-  return compactPath(locator || label);
+  return formatWorkspaceRoot(locator || label);
 }
 
 function taskMetaItems(task: BackgroundTask): TaskMetaItem[] {

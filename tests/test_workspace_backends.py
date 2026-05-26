@@ -24,6 +24,18 @@ def test_workspace_ref_normalizes_local_path(tmp_path):
     assert resolve_workspace_ref(workspace.model_dump()) == workspace
 
 
+def test_workspace_display_label_compacts_local_root(tmp_path):
+    workspace = workspace_ref_from_local_path(str(tmp_path))
+
+    assert workspace.display_label() == f"{tmp_path.name}/"
+
+
+def test_workspace_display_label_keeps_custom_label(tmp_path):
+    workspace = workspace_ref_from_local_path(str(tmp_path), label="octo/example")
+
+    assert workspace.display_label() == "octo/example"
+
+
 def test_workspace_ref_from_local_path_preserves_metadata(tmp_path):
     workspace = workspace_ref_from_local_path(
         str(tmp_path),
