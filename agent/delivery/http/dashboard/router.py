@@ -490,6 +490,7 @@ def _workspace_http_error(exc: Exception) -> HTTPException:
 @router.get("/history/{thread_id:path}", include_in_schema=False)
 @router.get("/settings/config", include_in_schema=False)
 @router.get("/settings/providers", include_in_schema=False)
+@router.get("/settings/connections", include_in_schema=False)
 @router.get("/settings/channels", include_in_schema=False)
 @router.get("/settings/agents", include_in_schema=False)
 @router.get("/settings/prompt-variables", include_in_schema=False)

@@ -7,6 +7,7 @@ import {
   ChevronsRight,
   Cog,
   KeyRound,
+  Link2,
   Network,
   Palette,
   Users,
@@ -23,6 +24,7 @@ type SettingsNavItem = {
 const settingsNavItems: SettingsNavItem[] = [
   { href: "/settings/config", label: "Runtime", icon: <Cog size={15} /> },
   { href: "/settings/providers", label: "Providers", icon: <Workflow size={15} /> },
+  { href: "/settings/connections", label: "Connections", icon: <Link2 size={15} /> },
   { href: "/settings/channels", label: "Channels", icon: <Network size={15} /> },
   { href: "/settings/agents", label: "Agents", icon: <Users size={15} /> },
   { href: "/settings/prompt-variables", label: "Prompt Variables", icon: <Braces size={15} /> },

@@ -1,4 +1,4 @@
-import { createMemo, createSignal, For, onMount, Show } from "solid-js";
+import { createMemo, createSignal, For, onMount } from "solid-js";
 import { GitPullRequest, Save } from "lucide-solid";
 
 import { AppShell } from "@/components/AppShell";
@@ -6,6 +6,7 @@ import { DataGate } from "@/components/State";
 import { MetricCard, MetricsRow } from "@/components/Metrics";
 import { IdentityPicker } from "@/components/IdentityPicker";
 import { EmptyTableRow } from "@/components/EmptyTableRow";
+import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { useToast } from "@/components/Toast";
 import { apiFetch, postJson, putJson } from "@/lib/api";
 import type { GitHubPayload, GitHubRepositoryBinding, Identity } from "@/types";
@@ -43,6 +44,7 @@ export function RepositoriesPage() {
   const [data, setData] = createSignal<GitHubPayload>();
   const [identities, setIdentities] = createSignal<Identity[]>([]);
   const [error, setError] = createSignal("");
+  const [query, setQuery] = createSignal("");
   const [drafts, setDrafts] = createSignal<Record<number, RepositoryDraft>>({});
   const { showToast } = useToast();
 
@@ -114,6 +116,35 @@ export function RepositoriesPage() {
   };
 
   const activeCount = createMemo(() => data()?.repositories.filter((repo) => repo.enabled).length || 0);
+  const filteredRepositories = createMemo(() => {
+    const payload = data();
+    if (!payload) {
+      return [];
+    }
+    const needle = query().trim().toLowerCase();
+    if (!needle) {
+      return payload.repositories;
+    }
+    return payload.repositories.filter((repo) =>
+      [
+        repo.full_name,
+        repo.account_login,
+        repo.default_branch,
+        String(repo.installation_id),
+        repo.private ? "private" : "public",
+        repo.enabled ? "enabled" : "disabled",
+        repo.agent_name,
+        repo.trigger_label,
+        repo.mention_triggers.join(" "),
+        repo.notify_platform,
+        repo.notify_external_id,
+        repo.notify_channel_id,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle),
+    );
+  });
 
   onMount(load);
 
@@ -121,12 +152,6 @@ export function RepositoriesPage() {
     <AppShell
       title="Repositories"
       subtitle="Map GitHub repositories to agents."
-      actions={
-        <button class="btn btn-primary" type="button" onClick={sync}>
-          <GitPullRequest size={14} />
-          Sync GitHub
-        </button>
-      }
     >
       <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => (
@@ -137,30 +162,17 @@ export function RepositoriesPage() {
               <MetricCard value={payload.configured ? "Ready" : "Setup"} label="GitHub App" />
             </MetricsRow>
 
-            <section class="panel">
-              <div class="panel-header">
-                <div class="panel-title">Connection</div>
-              </div>
-              <div class="panel-body stack">
-                <div class="row-wrap">
-                  <span class={payload.enabled ? "badge badge-success" : "badge badge-warning"}>
-                    {payload.enabled ? "enabled" : "disabled"}
-                  </span>
-                  <span class={payload.configured ? "badge badge-success" : "badge badge-warning"}>
-                    {payload.configured ? "configured" : "missing credentials"}
-                  </span>
-                  <Show when={payload.install_url}>
-                    <a class="btn btn-sm" href={payload.install_url} target="_blank" rel="noreferrer">
-                      Install App
-                    </a>
-                  </Show>
-                </div>
-                <div class="field">
-                  <label>Webhook URL</label>
-                  <input class="input mono" readOnly value={payload.webhook_url} />
-                </div>
-              </div>
-            </section>
+            <SettingsResourceToolbar
+              searchValue={query()}
+              searchPlaceholder="Search repositories..."
+              onSearchInput={setQuery}
+              actions={
+                <button class="btn btn-primary" type="button" onClick={sync}>
+                  <GitPullRequest size={14} />
+                  Sync GitHub
+                </button>
+              }
+            />
 
             <section class="panel">
               <div class="table-wrap">
@@ -177,8 +189,13 @@ export function RepositoriesPage() {
                   </thead>
                   <tbody>
                     <For
-                      each={payload.repositories}
-                      fallback={<EmptyTableRow colSpan={6} message="No repositories synced." />}
+                      each={filteredRepositories()}
+                      fallback={
+                        <EmptyTableRow
+                          colSpan={6}
+                          message={query().trim() ? "No repositories found." : "No repositories synced."}
+                        />
+                      }
                     >
                       {(repo) => {
                         const draft = () => drafts()[repo.repository_id] || toDraft(repo);

@@ -153,6 +153,12 @@ def test_dashboard_spa_route_serves_index() -> None:
     assert '<div id="root">' in chat_response.text
     assert "/dashboard-assets/" in chat_response.text
 
+    connections_response = client.get("/settings/connections")
+
+    assert connections_response.status_code == 200
+    assert '<div id="root">' in connections_response.text
+    assert "/dashboard-assets/" in connections_response.text
+
 
 def test_dashboard_api_overview_returns_runtime_snapshot() -> None:
     channel_manager = ChannelManager()

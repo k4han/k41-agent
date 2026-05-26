@@ -1,6 +1,7 @@
 export { AgentsPage } from "./AgentsPage";
 export { AppearancePage } from "./AppearancePage";
 export { ChannelsPage } from "./ChannelsPage";
+export { ConnectionsPage } from "./ConnectionsPage";
 export { ConfigPage } from "./ConfigPage";
 export { PromptVariablesPage } from "./PromptVariablesPage";
 export { ProvidersPage } from "./ProvidersPage";

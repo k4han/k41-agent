@@ -40,6 +40,11 @@ const ChannelsPage = lazy(() =>
     default: module.ChannelsPage,
   })),
 );
+const ConnectionsPage = lazy(() =>
+  import("@/pages/settings/ConnectionsPage").then((module) => ({
+    default: module.ConnectionsPage,
+  })),
+);
 const ConfigPage = lazy(() =>
   import("@/pages/settings/ConfigPage").then((module) => ({ default: module.ConfigPage })),
 );
@@ -81,6 +86,7 @@ render(
         <Route path="/settings" component={() => <Navigate href="/settings/config" />} />
         <Route path="/settings/config" component={ConfigPage} />
         <Route path="/settings/providers" component={ProvidersPage} />
+        <Route path="/settings/connections" component={ConnectionsPage} />
         <Route path="/settings/channels" component={ChannelsPage} />
         <Route path="/settings/agents" component={AgentsPage} />
         <Route path="/settings/prompt-variables" component={PromptVariablesPage} />
