@@ -164,7 +164,7 @@ class TestDashboardSettingsEndpoints:
                 config_path,
                 """
                 llm:
-                  default_provider: ""
+                  default_model: ""
                   providers: {}
                 """,
             )
@@ -207,7 +207,7 @@ class TestDashboardSettingsEndpoints:
                 tmp_path / "config.yaml",
                 """
                 llm:
-                  default_provider: "main"
+                  default_model: "main/gemini-model"
                   providers:
                     main:
                       type: "google"
@@ -234,7 +234,7 @@ class TestDashboardSettingsEndpoints:
                 tmp_path / "config.yaml",
                 """
                 llm:
-                  default_provider: ""
+                  default_model: ""
                   providers: {}
                 """,
             )
@@ -259,7 +259,7 @@ class TestDashboardSettingsEndpoints:
                 config_path,
                 """
                 llm:
-                  default_provider: "main"
+                  default_model: "main/gemini-model"
                   providers:
                     main:
                       type: "google"
@@ -292,7 +292,7 @@ class TestDashboardSettingsEndpoints:
                 tmp_path / "config.yaml",
                 """
                 llm:
-                  default_provider: "main"
+                  default_model: "main/gemini-model"
                   providers:
                     main:
                       type: "google"
@@ -317,7 +317,7 @@ class TestDashboardSettingsEndpoints:
                 tmp_path / "config.yaml",
                 """
                 llm:
-                  default_provider: "main"
+                  default_model: "main/gemini-model"
                   providers:
                     main:
                       type: "google"
@@ -348,7 +348,7 @@ class TestDashboardSettingsEndpoints:
                 tmp_path / "config.yaml",
                 """
                 llm:
-                  default_provider: "main"
+                  default_model: "main/gemini-model"
                   providers:
                     main:
                       type: "google"

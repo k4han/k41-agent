@@ -271,18 +271,27 @@ def _delete_config_tree(service: ConfigService, key: str) -> bool:
     return deleted
 
 
-def _validate_default_provider_update(
+def _validate_default_model_update(
     service: ConfigService,
     values: dict[str, Any | None],
 ) -> None:
-    configured_default = str(service.get("llm.default_provider", "") or "").strip()
-    default_provider = str(values.get("llm.default_provider", configured_default) or "").strip()
-    if not default_provider:
+    configured_default_model = str(service.get("llm.default_model", "") or "").strip()
+    default_model_val = str(values.get("llm.default_model", configured_default_model) or "").strip()
+    if not default_model_val:
         return
 
-    should_validate = "llm.default_provider" in values
-    if not should_validate and configured_default:
-        default_prefix = f"llm.providers.{configured_default}."
+    if "/" in default_model_val:
+        default_provider = default_model_val.split("/", 1)[0].strip()
+    else:
+        default_provider = default_model_val
+
+    should_validate = "llm.default_model" in values
+    if not should_validate and configured_default_model:
+        if "/" in configured_default_model:
+            conf_provider = configured_default_model.split("/", 1)[0].strip()
+        else:
+            conf_provider = configured_default_model
+        default_prefix = f"llm.providers.{conf_provider}."
         should_validate = any(key.startswith(default_prefix) for key in values)
     if not should_validate:
         return
@@ -492,7 +501,19 @@ def _serialize_model_catalog(catalog: Any) -> dict[str, Any]:
 async def _provider_model_options() -> dict[str, Any]:
     try:
         catalogs = await list_provider_model_catalogs()
-        default_catalog = await list_provider_model_catalog()
+        from agent.shared.config import get_config_service
+        config = get_config_service()
+        default_model_setting = config.get_str("llm.default_model", "").strip()
+        default_provider = ""
+        if default_model_setting:
+            if "/" in default_model_setting:
+                default_provider = default_model_setting.split("/", 1)[0].strip()
+            else:
+                default_provider = default_model_setting
+
+        if not default_provider:
+            default_catalog = await list_provider_model_catalog()
+            default_provider = default_catalog.provider
     except Exception as exc:
         logger.warning("Failed to load provider model options: %s", exc)
         return {
@@ -504,7 +525,7 @@ async def _provider_model_options() -> dict[str, Any]:
 
     return {
         "provider_names": sorted(catalog.provider for catalog in catalogs),
-        "default_provider": default_catalog.provider,
+        "default_provider": default_provider,
         "model_catalogs": [_serialize_model_catalog(catalog) for catalog in catalogs],
         "model_catalog_error": "",
     }
@@ -572,7 +593,26 @@ def _settings_payload(request: Request, *, include_provider_settings: bool) -> d
         }
 
     global_settings, provider_settings = _split_provider_settings(settings)
-    default_provider = str(global_settings.get("llm.default_provider", {}).get("value") or "")
+    
+    # Calculate default_provider dynamically from llm.default_model
+    default_model_val = str(global_settings.get("llm.default_model", {}).get("value") or "").strip()
+    if "/" in default_model_val:
+        default_provider = default_model_val.split("/", 1)[0].strip()
+    else:
+        default_provider = default_model_val
+
+    # Construct synthetic llm.default_provider setting info for frontend compatibility
+    global_settings["llm.default_provider"] = {
+        "value": default_provider,
+        "source": global_settings.get("llm.default_model", {}).get("source", "default"),
+        "input_type": "text",
+        "description": "Default provider name derived dynamically from llm.default_model",
+        "category": "llm",
+        "label": "LLM Default Provider",
+    }
+    # Also add it to flat settings dict for consistency
+    settings["llm.default_provider"] = global_settings["llm.default_provider"]
+
     provider_rows = _build_provider_rows(
         provider_settings,
         PROVIDER_SETTING_FIELD_ORDER,

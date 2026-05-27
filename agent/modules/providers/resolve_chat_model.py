@@ -25,6 +25,23 @@ def _parse_temperature(value: str | float | int | None, default: float) -> float
         ) from exc
 
 
+def get_default_llm_settings() -> tuple[str, str]:
+    """Parse llm.default_model into (provider_name, model_name)."""
+    from agent.shared.config import get_config_service
+    config = get_config_service()
+    default_model_setting = config.get_str("llm.default_model", "").strip()
+    if "/" in default_model_setting:
+        provider, model = default_model_setting.split("/", 1)
+        return provider.strip(), model.strip()
+
+    # Fallback for old configs where llm.default_provider is still present
+    old_default_provider = config.get_str("llm.default_provider", "").strip()
+    if old_default_provider and default_model_setting:
+        return old_default_provider, default_model_setting
+
+    return default_model_setting, ""
+
+
 def resolve_chat_model(
     provider_service: ProviderService,
     *,
@@ -42,12 +59,22 @@ def resolve_chat_model(
     """
     config = get_config_service()
 
-    if provider_name:
-        provider_config = provider_service.get_provider(provider_name)
+    default_provider_name, default_model_name = get_default_llm_settings()
+
+    target_provider = provider_name
+    if not target_provider or target_provider.strip().lower() == "default":
+        target_provider = default_provider_name
+
+    if target_provider:
+        provider_config = provider_service.get_provider(target_provider)
     else:
         provider_config = provider_service.get_default_provider()
 
-    resolved_model = (model or provider_config.default_model).strip()
+    target_model = model
+    if not target_model or target_model.strip().lower() == "default":
+        target_model = default_model_name
+
+    resolved_model = (target_model or provider_config.default_model).strip()
     provider_temperature_key = f"llm.providers.{provider_config.name}.temperature"
     configured_temperature = config.get(provider_temperature_key)
     resolved_temperature = _parse_temperature(

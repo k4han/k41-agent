@@ -85,7 +85,7 @@ def _provider_config_fingerprint(
         sorted(
             (key, repr(value))
             for key, value in flat_config.items()
-            if key == "llm.default_provider" or key.startswith("llm.providers.")
+            if key == "llm.default_model" or key.startswith("llm.providers.")
         )
     )
 
@@ -162,7 +162,17 @@ class ConfigProviderRepository:
         providers: dict[str, ProviderConfig],
     ) -> str:
         config = get_config_service()
-        configured_default = config.get_str("llm.default_provider", "").strip()
+        default_model = config.get_str("llm.default_model", "").strip()
+        configured_default = ""
+        if default_model:
+            if "/" in default_model:
+                configured_default = default_model.split("/", 1)[0].strip()
+            else:
+                old_default_provider = config.get_str("llm.default_provider", "").strip()
+                if old_default_provider:
+                    configured_default = old_default_provider
+                else:
+                    configured_default = default_model
 
         if not configured_default:
             if DEFAULT_PROVIDER_NAME in providers:
@@ -193,13 +203,13 @@ class ConfigProviderRepository:
             if len(matched) > 1:
                 names = ", ".join(sorted(matched))
                 raise ValueError(
-                    "Ambiguous llm.default_provider value: "
+                    "Ambiguous llm.default_model value: "
                     f"{configured_default!r} matches multiple configured providers: {names}."
                 )
 
         available = ", ".join(sorted(providers))
         raise ValueError(
-            f"Unknown llm.default_provider value: {configured_default!r}. "
+            f"Unknown provider in llm.default_model: {configured_default!r}. "
             f"Available providers: {available}."
         )
 
@@ -229,7 +239,7 @@ class ConfigProviderRepository:
         if not default_provider.enabled:
             raise RuntimeError(
                 f"Default provider {default_provider_name!r} is disabled. "
-                "Set llm.default_provider to an enabled provider."
+                "Set llm.default_model to a provider/model with an enabled provider."
             )
         self._cache = (loaded, default_provider_name, fingerprint)
         return loaded, default_provider_name

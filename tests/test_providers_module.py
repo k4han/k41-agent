@@ -29,6 +29,11 @@ def _set_config_path(monkeypatch: MonkeyPatch, config_path: Path) -> None:
     import agent.shared.config.service as service_module
     import agent.shared.config.yaml_source as yaml_module
 
+
+def _set_config_path(monkeypatch: MonkeyPatch, config_path: Path) -> None:
+    import agent.shared.config.service as service_module
+    import agent.shared.config.yaml_source as yaml_module
+
     monkeypatch.setattr(service_module, "_config_service", None)
     monkeypatch.setattr(service_module, "_config_sources", None)
     monkeypatch.setattr(yaml_module, "DEFAULT_CONFIG_PATH", config_path)
@@ -48,7 +53,7 @@ def _write_config(
     resolved_default_provider = default_provider or provider_name
     llm_block = [
         "llm:",
-        f"  default_provider: {resolved_default_provider!r}",
+        f"  default_model: {resolved_default_provider}/{default_model}",
         "  providers:",
         f"    {provider_name}:",
         f"      type: {provider_type!r}",
@@ -190,7 +195,7 @@ def test_repo_multi_provider_with_default_provider(monkeypatch: MonkeyPatch, tmp
                 config_path,
                 """
                 llm:
-                    default_provider: "google-main"
+                    default_model: "google-main/google-main-model"
                     providers:
                         openai-main:
                             type: "openai_compatible"
@@ -227,7 +232,7 @@ def test_repo_provider_models_from_yaml(monkeypatch: MonkeyPatch, tmp_path: Path
                 config_path,
                 """
                 llm:
-                    default_provider: "openai-main"
+                    default_model: "openai-main/openai-default"
                     providers:
                         openai-main:
                             type: "openai_compatible"
@@ -255,7 +260,7 @@ def test_repo_detects_provider_config_file_changes_without_manual_reload(
         config_path,
         """
         llm:
-            default_provider: "openai-main"
+            default_model: "openai-main/openai-default"
             providers:
                 openai-main:
                     type: "openai_compatible"
@@ -275,7 +280,7 @@ def test_repo_detects_provider_config_file_changes_without_manual_reload(
         config_path,
         """
         llm:
-            default_provider: "openai-main"
+            default_model: "openai-main/openai-default"
             providers:
                 openai-main:
                     type: "openai_compatible"
@@ -303,8 +308,7 @@ def test_repo_requires_provider_specific_default_model(
                 config_path,
                 """
                 llm:
-                    default_provider: "openai-main"
-                    default_model: "global-model"
+                    default_model: "openai-main/global-model"
                     providers:
                         openai-main:
                             type: "openai_compatible"
@@ -331,8 +335,7 @@ def test_repo_non_default_provider_can_omit_default_model(
                 config_path,
                 """
                 llm:
-                    default_provider: "google-main"
-                    default_model: "global-model"
+                    default_model: "google-main/google-model"
                     providers:
                         openai-main:
                             type: "openai_compatible"
@@ -360,8 +363,7 @@ def test_repo_global_default_model_does_not_override_provider_default_model(
                 config_path,
                 """
                 llm:
-                    default_provider: "google-main"
-                    default_model: "global-model"
+                    default_model: "google-main/google-provider-model"
                     providers:
                         openai-main:
                             type: "openai_compatible"
@@ -387,7 +389,7 @@ def test_repo_default_provider_cannot_be_disabled(monkeypatch: MonkeyPatch, tmp_
                 config_path,
                 """
                 llm:
-                    default_provider: "google-main"
+                    default_model: "google-main/google-model"
                     providers:
                         google-main:
                             type: "google"
@@ -408,7 +410,7 @@ def test_repo_invalid_provider_raises(monkeypatch: MonkeyPatch, tmp_path: Path) 
     _set_config_path(monkeypatch, config_path)
 
     repo = ConfigProviderRepository()
-    with pytest.raises(ValueError, match="llm.default_provider"):
+    with pytest.raises(ValueError, match="llm.default_model"):
         repo.get_default_provider()
 
 
@@ -811,44 +813,44 @@ def test_resolve_chat_model_uses_anthropic_factory(
 
 
 def test_resolve_chat_model_uses_provider_specific_temperature(
-        monkeypatch: MonkeyPatch,
-        tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-        _get_cached_model.cache_clear()
+    _get_cached_model.cache_clear()
 
-        config_path = tmp_path / "config.yaml"
-        _write_yaml(
-                config_path,
-                """
-                llm:
-                    default_provider: "openai-main"
-                    providers:
-                        openai-main:
-                            type: "openai_compatible"
-                            api_key: "openai-key"
-                            default_model: "provider-model"
-                            temperature: 0.2
-                """,
-        )
-        _set_config_path(monkeypatch, config_path)
+    config_path = tmp_path / "config.yaml"
+    _write_yaml(
+        config_path,
+        """
+        llm:
+            default_model: "openai-main/provider-model"
+            providers:
+                openai-main:
+                    type: "openai_compatible"
+                    api_key: "openai-key"
+                    default_model: "provider-model"
+                    temperature: 0.2
+        """,
+    )
+    _set_config_path(monkeypatch, config_path)
 
-        repo = ConfigProviderRepository()
-        service = ProviderService(repository=repo)
+    repo = ConfigProviderRepository()
+    service = ProviderService(repository=repo)
 
-        mock_model = MagicMock()
-        mock_factory = MagicMock()
-        mock_factory.create.return_value = mock_model
+    mock_model = MagicMock()
+    mock_factory = MagicMock()
+    mock_factory.create.return_value = mock_model
 
-        service.register_factory(ProviderType.OPENAI_COMPATIBLE, mock_factory)
+    service.register_factory(ProviderType.OPENAI_COMPATIBLE, mock_factory)
 
-        result = resolve_chat_model(service)
+    result = resolve_chat_model(service)
 
-        assert result is mock_model
-        call_args = mock_factory.create.call_args.args
-        model_config = call_args[1]
-        assert model_config.temperature == 0.2
+    assert result is mock_model
+    call_args = mock_factory.create.call_args.args
+    model_config = call_args[1]
+    assert model_config.temperature == 0.2
 
-        _get_cached_model.cache_clear()
+    _get_cached_model.cache_clear()
 
 
 # --- Application: _parse_temperature ---

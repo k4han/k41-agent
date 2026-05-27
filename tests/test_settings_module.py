@@ -70,7 +70,7 @@ class TestDefaultConfigSource:
             "channels.telegram.enabled",
             "channels.discord.enabled",
             "database.url",
-            "llm.default_provider",
+            "llm.default_model",
         ):
             assert key in all_settings, f"{key} should be in all_settings"
 

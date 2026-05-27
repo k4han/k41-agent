@@ -164,12 +164,14 @@ export function ModelPicker(props: ModelPickerProps) {
         const catalogProvider = provider === "default" ? props.defaultProvider : provider;
         const catalog = props.catalogs.find((item) => item.provider === catalogProvider);
         const models = new Set<string>();
-        catalog?.models.forEach((model) => models.add(model.id));
-        if (catalog?.default_model) {
-          models.add(catalog.default_model);
-        }
-        if (provider === selectedProvider() && props.model) {
-          models.add(props.model);
+        if (provider !== "default") {
+          catalog?.models.forEach((model) => models.add(model.id));
+          if (catalog?.default_model) {
+            models.add(catalog.default_model);
+          }
+          if (provider === selectedProvider() && props.model) {
+            models.add(props.model);
+          }
         }
         const choices: ModelChoice[] = [
           {
@@ -353,7 +355,6 @@ export function ModelPicker(props: ModelPickerProps) {
                         onClick={() => selectChoice(choice)}
                       >
                         <span class="mono">{choice.label}</span>
-                        <span class="hint">{choice.description}</span>
                       </button>
                       <button
                         class={classNames("model-picker-option-star", isFavorite(choice) && "active")}

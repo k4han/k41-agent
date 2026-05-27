@@ -93,7 +93,14 @@ async def delete_dashboard_provider(
     if existing_name is None:
         raise HTTPException(status_code=404, detail=f"Provider not found: {provider_name}.")
 
-    configured_default = str(service.get("llm.default_provider", "") or "").strip()
+    default_model_val = str(service.get("llm.default_model", "") or "").strip()
+    configured_default = ""
+    if default_model_val:
+        if "/" in default_model_val:
+            configured_default = default_model_val.split("/", 1)[0].strip()
+        else:
+            configured_default = default_model_val
+
     if configured_default and _normalize_provider_name(configured_default) == _normalize_provider_name(existing_name):
         raise HTTPException(status_code=400, detail="Default provider cannot be deleted.")
 
@@ -104,13 +111,27 @@ async def delete_dashboard_provider(
     return {"status": "deleted", "name": existing_name}
 
 @router.get("/providers/models")
-async def list_dashboard_provider_models(refresh: bool = False) -> dict[str, Any]:
+async def list_dashboard_provider_models(
+    request: Request,
+    refresh: bool = False,
+) -> dict[str, Any]:
     try:
         catalogs = await list_provider_model_catalogs(include_remote=refresh)
-        default_catalog = await list_provider_model_catalog(include_remote=refresh)
+        service = _get_config_service(request)
+        default_model_val = str(service.get("llm.default_model", "") or "").strip()
+        default_provider = ""
+        if default_model_val:
+            if "/" in default_model_val:
+                default_provider = default_model_val.split("/", 1)[0].strip()
+            else:
+                default_provider = default_model_val
+
+        if not default_provider:
+            default_catalog = await list_provider_model_catalog(include_remote=refresh)
+            default_provider = default_catalog.provider
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
-        "default_provider": default_catalog.provider,
+        "default_provider": default_provider,
         "providers": [_serialize_model_catalog(catalog) for catalog in catalogs],
     }

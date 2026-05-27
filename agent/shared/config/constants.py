@@ -12,7 +12,7 @@ RUNTIME_KEY_PATTERNS = [
     r"^channels\.telegram\.(enabled|bot_token|default_agent|code_agent|research_agent|update_mode|webhook_url|webhook_secret)$",
     r"^channels\.discord\.(enabled|bot_token|default_agent|code_agent|research_agent)$",
     r"^channels\.github\.(enabled|app_id|app_slug|private_key|private_key_path|webhook_secret|default_agent|trigger_label|mention_triggers)$",
-    r"^llm\.default_provider$",
+    r"^llm\.default_model$",
     r"^llm\.providers\.[A-Za-z0-9_-]+\.(provider|type|api_key|base_url|default_model|models|temperature|enabled)$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.(transport|command|args|url|enabled)$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.env\.[A-Za-z0-9_-]+$",
@@ -56,7 +56,7 @@ def _expand_runtime_keys() -> set[str]:
         "mention_triggers",
     ):
         keys.add(f"channels.github.{prop}")
-    keys.add("llm.default_provider")
+    keys.add("llm.default_model")
     keys.add("database.url")
     keys.add("security.jwt_secret")
     return keys
@@ -75,7 +75,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # Database: Empty by default, will use SQLite if not set
     "database.url": "",
     # LLM provider configuration
-    "llm.default_provider": "",
+    "llm.default_model": "",
     # Channel integrations
     "channels.telegram.enabled": True,
     "channels.telegram.update_mode": "polling",
@@ -228,11 +228,11 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "label": "GitHub Mention Triggers",
     },
     # LLM settings
-    "llm.default_provider": {
+    "llm.default_model": {
         "type": "text",
-        "description": "Default provider name used at runtime",
+        "description": "Default provider/model combination used as fallback or default for agentcards (e.g. gemini/gemma-4-31b-it)",
         "category": "llm",
-        "label": "LLM Default Provider",
+        "label": "LLM Default Model",
     },
     # Database settings
     "database.url": {
