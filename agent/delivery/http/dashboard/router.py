@@ -10,6 +10,7 @@ from agent.delivery.http.dashboard.routes import (
     conversations as conversations_routes,
     dashboard as dashboard_routes,
     github as github_routes,
+    mcp as mcp_routes,
     providers as providers_routes,
     scheduler as scheduler_routes,
     sessions as sessions_routes,
@@ -34,6 +35,7 @@ for child_router in (
     sessions_routes.router,
     tasks_routes.router,
     conversations_routes.router,
+    mcp_routes.router,
 ):
     router.include_router(child_router)
 

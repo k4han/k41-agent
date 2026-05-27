@@ -36,6 +36,7 @@ export type AgentCard = {
   provider: string;
   model: string;
   tools: string[];
+  mcp_servers?: string[];
   sub_agents: string[] | null;
   hidden: boolean;
   max_context_tokens: number;
@@ -56,6 +57,7 @@ export type AgentConfig = {
   provider: string;
   model: string;
   tools: string[];
+  mcp_servers?: string[];
   sub_agents: string[] | null;
   hidden: boolean;
   max_context_tokens: number;
@@ -71,6 +73,7 @@ export type AgentsPayload = {
   default_provider: string;
   model_catalogs: ModelCatalog[];
   model_catalog_error: string;
+  mcp_server_options?: string[];
 };
 
 export type PromptVariable = {
@@ -223,4 +226,72 @@ export type GitHubPayload = {
   mention_triggers: string[];
   repositories: GitHubRepositoryBinding[];
   agent_names: string[];
+};
+
+export type McpTransport = "stdio" | "streamable_http";
+
+export type McpEnvField = {
+  key: string;
+  label: string;
+  description: string;
+  required: boolean;
+  secret: boolean;
+};
+
+export type McpPopularServer = {
+  id: string;
+  name: string;
+  description: string;
+  transport: McpTransport;
+  command: string;
+  args: string[];
+  url: string;
+  homepage: string;
+  env_fields: McpEnvField[];
+};
+
+export type McpPopularPayload = {
+  servers: McpPopularServer[];
+};
+
+export type McpToolInfo = {
+  name: string;
+  prefixed_name: string;
+  description: string;
+};
+
+export type McpServerStatus = {
+  name: string;
+  transport: McpTransport;
+  enabled: boolean;
+  loaded: boolean;
+  tool_count: number;
+  tools: McpToolInfo[];
+  error: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
+};
+
+export type McpServersPayload = {
+  servers: McpServerStatus[];
+};
+
+export type McpServerInput = {
+  name: string;
+  transport: McpTransport;
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  url: string;
+  headers: Record<string, string>;
+  enabled: boolean;
+};
+
+export type McpTestResult = {
+  ok: boolean;
+  error: string;
+  tools: McpToolInfo[];
 };

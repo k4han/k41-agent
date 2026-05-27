@@ -125,6 +125,8 @@ def serialize_agent_config(config: AgentConfig) -> str:
         "tools": list(config.tools),
         "max_context_tokens": config.max_context_tokens,
     }
+    if config.mcp_servers is not None:
+        data["mcp_servers"] = list(config.mcp_servers)
     if config.sub_agents is not None:
         data["sub_agents"] = list(config.sub_agents)
     if config.hidden:
@@ -176,6 +178,11 @@ def _build_agent_config(
             f"Agent file {source_label} has invalid 'max_context_tokens'."
         ) from exc
     tools = parse_string_or_list(data.get("tools", []))
+    raw_mcp = data.get("mcp_servers")
+    if raw_mcp is None:
+        mcp_servers = None
+    else:
+        mcp_servers = parse_string_or_list(raw_mcp) or []
 
     # sub_agents: None means leaf (cannot call anyone), list means can call those
     raw_sub = data.get("sub_agents")
@@ -203,6 +210,7 @@ def _build_agent_config(
             provider=provider,
             model=model,
             tools=tools,
+            mcp_servers=mcp_servers,
             sub_agents=sub_agents,
             hidden=hidden,
             max_context_tokens=max_context_tokens,

@@ -6,6 +6,7 @@ __all__ = [
     "conversations",
     "dashboard",
     "github",
+    "mcp",
     "providers",
     "scheduler",
     "sessions",

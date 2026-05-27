@@ -527,11 +527,18 @@ async def _agent_card_options(cards: list[AgentCard] | None = None) -> dict[str,
         agent_names.append(card.name)
         tool_names.update(card.tools)
 
+    try:
+        from agent.modules.mcp import list_mcp_servers
+        mcp_servers = [server.name for server in list_mcp_servers()]
+    except Exception:
+        mcp_servers = []
+
     return {
         "cards": [_serialize_agent_card(card) for card in cards],
         "tools": sorted(tool_names),
         "workflows": workflows,
         "agent_names": sorted(agent_names),
+        "mcp_server_options": mcp_servers,
         **await _provider_model_options(),
     }
 
@@ -616,6 +623,7 @@ def _agent_config_from_body(body: "AgentCardBody") -> AgentConfig:
         provider=body.provider.strip(),
         model=body.model.strip(),
         tools=list(body.tools),
+        mcp_servers=list(body.mcp_servers) if hasattr(body, "mcp_servers") and body.mcp_servers is not None else None,
         sub_agents=list(body.sub_agents) if body.sub_agents is not None else None,
         hidden=body.hidden,
         max_context_tokens=body.max_context_tokens,

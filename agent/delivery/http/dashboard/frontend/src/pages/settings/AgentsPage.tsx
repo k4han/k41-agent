@@ -21,6 +21,7 @@ type AgentForm = {
   provider: string;
   model: string;
   tools: string[];
+  mcp_servers: string[];
   sub_agents: string[];
   hidden: boolean;
   max_context_tokens: number;
@@ -35,6 +36,7 @@ const blankForm = (workflow: string): AgentForm => ({
   provider: "default",
   model: "",
   tools: [],
+  mcp_servers: [],
   sub_agents: [],
   hidden: false,
   max_context_tokens: 50000,
@@ -50,6 +52,7 @@ function cardToForm(card: AgentCard): AgentForm {
     provider: card.provider || "default",
     model: card.model || "",
     tools: card.tools || [],
+    mcp_servers: card.mcp_servers || [],
     sub_agents: card.sub_agents || [],
     hidden: card.hidden || false,
     max_context_tokens: card.max_context_tokens || 50000,
@@ -129,7 +132,7 @@ export function AgentsPage() {
     setForm((current) => ({ ...current, [key]: value }));
   };
 
-  const toggleListValue = (key: "tools" | "sub_agents", value: string, checked: boolean) => {
+  const toggleListValue = (key: "tools" | "sub_agents" | "mcp_servers", value: string, checked: boolean) => {
     setForm((current) => {
       const values = new Set(current[key]);
       if (checked) {
@@ -460,6 +463,26 @@ export function AgentsPage() {
                     </For>
                   </div>
                 </div>
+                <Show when={payload.mcp_server_options && payload.mcp_server_options.length > 0}>
+                  <div class="field">
+                    <label>MCP Servers</label>
+                    <div class="checkbox-grid">
+                      <For each={uniqueSorted([...payload.mcp_server_options!, ...(form().mcp_servers || [])])}>
+                        {(server) => (
+                          <label class="checkbox-row">
+                            <input
+                              type="checkbox"
+                              checked={(form().mcp_servers || []).includes(server)}
+                              disabled={modalMode() === "view"}
+                              onChange={(event) => toggleListValue("mcp_servers", server, event.currentTarget.checked)}
+                            />
+                            <span class="mono">{server}</span>
+                          </label>
+                        )}
+                      </For>
+                    </div>
+                  </div>
+                </Show>
                 <div class="field">
                   <label>Sub-agents</label>
                   <div class="checkbox-grid">
