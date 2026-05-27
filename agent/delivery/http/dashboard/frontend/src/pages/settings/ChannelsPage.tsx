@@ -2,6 +2,8 @@ import { createSignal, For, onMount, Show } from "solid-js";
 import { Link2, Trash2 } from "lucide-solid";
 
 import { DataGate } from "@/components/State";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { EmptyTableRow } from "@/components/EmptyTableRow";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson } from "@/lib/api";
 import type { Identity } from "@/types";
@@ -21,6 +23,7 @@ export function ChannelsPage() {
   const [data, setData] = createSignal<ChannelsPayload>();
   const [error, setError] = createSignal("");
   const [pairing, setPairing] = createSignal<PairingResponse | null>(null);
+  const [unpairTarget, setUnpairTarget] = createSignal<Identity | null>(null);
   const { showToast } = useToast();
 
   const load = async () => {
@@ -41,11 +44,16 @@ export function ChannelsPage() {
     }
   };
 
-  const removeIdentity = async (identity: Identity) => {
+  const requestUnpair = (identity: Identity) => {
     if (identity.id === null) {
       return;
     }
-    if (!window.confirm(`Unpair ${identity.platform}:${identity.external_id}?`)) {
+    setUnpairTarget(identity);
+  };
+
+  const confirmUnpair = async () => {
+    const identity = unpairTarget();
+    if (!identity || identity.id === null) {
       return;
     }
     try {
@@ -54,6 +62,8 @@ export function ChannelsPage() {
       await load();
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to unpair identity", "error");
+    } finally {
+      setUnpairTarget(null);
     }
   };
 
@@ -107,11 +117,7 @@ export function ChannelsPage() {
                     <For
                       each={payload.identities}
                       fallback={
-                        <tr>
-                          <td colSpan={4}>
-                            <div class="empty">No paired identities.</div>
-                          </td>
-                        </tr>
+                        <EmptyTableRow colSpan={4} message="No paired identities." />
                       }
                     >
                       {(identity) => (
@@ -125,7 +131,7 @@ export function ChannelsPage() {
                             <button
                               class="btn btn-sm btn-danger"
                               type="button"
-                              onClick={() => removeIdentity(identity)}
+                              onClick={() => requestUnpair(identity)}
                             >
                               <Trash2 size={13} />
                               Unpair
@@ -141,6 +147,16 @@ export function ChannelsPage() {
           )}
         </DataGate>
       </div>
+
+      <ConfirmDialog
+        open={unpairTarget() !== null}
+        title="Unpair Identity"
+        message={<p>Unpair <span class="mono">{unpairTarget()?.platform}:{unpairTarget()?.external_id}</span>?</p>}
+        confirmLabel="Unpair"
+        confirmVariant="danger"
+        onClose={() => setUnpairTarget(null)}
+        onConfirm={() => void confirmUnpair()}
+      />
     </SettingsLayout>
   );
 }

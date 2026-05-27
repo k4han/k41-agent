@@ -21,7 +21,7 @@ export function ConnectionsPage() {
       breadcrumbLabel="Connections"
       contentWidth="wide"
     >
-      <div class="row-wrap" style={{ "margin-bottom": "16px", gap: "4px" }}>
+      <div class="tab-bar">
         <button
           class={`btn btn-sm ${tab() === "github" ? "btn-primary" : ""}`}
           type="button"

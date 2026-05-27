@@ -1008,3 +1008,67 @@
   font-size: 12px;
 }
 
+/* --- Tab bar --- */
+
+.tab-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+
+/* --- MCP popular server cards --- */
+
+.mcp-popular-card {
+  padding: 12px;
+}
+
+.mcp-popular-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mcp-popular-card-description {
+  margin-bottom: 8px;
+}
+
+.mcp-popular-card-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mcp-popular-card-transport {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+/* --- MCP status cell --- */
+
+.mcp-status-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* --- Utility: chips with top margin --- */
+
+.chips-spaced {
+  margin-top: 6px;
+}
+
+/* --- Utility: row-wrap end-aligned --- */
+
+.row-wrap-end {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+

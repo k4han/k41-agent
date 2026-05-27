@@ -2,6 +2,7 @@ import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { Edit3, Plus, RefreshCw, Save, Star, Trash2 } from "lucide-solid";
 
 import { Dialog } from "@/components/Dialog";
+import { EmptyTableRow } from "@/components/EmptyTableRow";
 import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
@@ -384,13 +385,7 @@ export function ProvidersPage() {
                   <tbody>
                     <For
                       each={filteredProviderRows()}
-                      fallback={
-                        <tr>
-                          <td colSpan={6}>
-                            <div class="empty">No providers found.</div>
-                          </td>
-                        </tr>
-                      }
+                      fallback={<EmptyTableRow colSpan={6} message="No providers found." />}
                     >
                       {(provider) => (
                         <tr

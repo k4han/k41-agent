@@ -195,7 +195,7 @@ export function RepositoriesPage() {
                           <tr>
                             <td>
                               <div class="mono">{repo.full_name}</div>
-                              <div class="chips" style={{ "margin-top": "6px" }}>
+                              <div class="chips chips-spaced">
                                 <span class="chip">{repo.default_branch}</span>
                                 <span class="chip">{repo.private ? "private" : "public"}</span>
                                 <span class="chip">installation {repo.installation_id}</span>

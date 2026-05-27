@@ -2,7 +2,9 @@ import { createSignal, For, onMount, Show } from "solid-js";
 import { Edit3, Play, Square, Trash2 } from "lucide-solid";
 
 import { AppShell } from "@/components/AppShell";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Dialog } from "@/components/Dialog";
+import { EmptyTableRow } from "@/components/EmptyTableRow";
 import { DataGate } from "@/components/State";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
@@ -197,6 +199,7 @@ export function SchedulerPage() {
   const [form, setForm] = createSignal<ScheduleForm>(defaultScheduleForm());
   const [editJob, setEditJob] = createSignal<SchedulerJob | null>(null);
   const [editForm, setEditForm] = createSignal<ScheduleForm>(defaultScheduleForm());
+  const [deleteTarget, setDeleteTarget] = createSignal<SchedulerJob | null>(null);
   const { showToast } = useToast();
 
   const setField = <K extends keyof ScheduleForm>(key: K, value: ScheduleForm[K]) => {
@@ -292,19 +295,32 @@ export function SchedulerPage() {
   };
 
   const jobAction = async (job: SchedulerJob, action: "run" | "pause" | "resume" | "delete") => {
+    if (action === "delete") {
+      setDeleteTarget(job);
+      return;
+    }
     try {
-      if (action === "delete") {
-        if (!window.confirm(`Delete job ${job.id}?`)) {
-          return;
-        }
-        await deleteJson(`/scheduler/jobs/${encodeURIComponent(job.id)}`);
-      } else {
-        await postJson(`/scheduler/jobs/${encodeURIComponent(job.id)}/${action}`);
-      }
+      await postJson(`/scheduler/jobs/${encodeURIComponent(job.id)}/${action}`);
       showToast(`Job ${action} requested.`);
       await load();
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Job action failed", "error");
+    }
+  };
+
+  const confirmDeleteJob = async () => {
+    const job = deleteTarget();
+    if (!job) {
+      return;
+    }
+    try {
+      await deleteJson(`/scheduler/jobs/${encodeURIComponent(job.id)}`);
+      showToast("Job delete requested.");
+      await load();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Job action failed", "error");
+    } finally {
+      setDeleteTarget(null);
     }
   };
 
@@ -393,12 +409,8 @@ export function SchedulerPage() {
                       <For
                         each={payload.jobs}
                         fallback={
-                          <tr>
-                            <td colSpan={6}>
-                              <div class="empty">No scheduled jobs.</div>
-                            </td>
-                          </tr>
-                        }
+                        <EmptyTableRow colSpan={6} message="No scheduled jobs." />
+                      }
                       >
                         {(job) => (
                           <tr>
@@ -506,6 +518,16 @@ export function SchedulerPage() {
                   <TriggerFields form={editForm()} setField={setEditField} />
                 </div>
               </Dialog>
+
+              <ConfirmDialog
+                open={deleteTarget() !== null}
+                title="Delete Job"
+                message={<p>Are you sure you want to delete job <span class="mono">{deleteTarget()?.id}</span>?</p>}
+                confirmLabel="Delete"
+                confirmVariant="danger"
+                onClose={() => setDeleteTarget(null)}
+                onConfirm={() => void confirmDeleteJob()}
+              />
           </div>
         )}
       </DataGate>

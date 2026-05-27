@@ -1,7 +1,9 @@
 import { createSignal, For, onMount, Show } from "solid-js";
 import { Plus, RefreshCw, Trash2 } from "lucide-solid";
 
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DataGate } from "@/components/State";
+import { EmptyTableRow } from "@/components/EmptyTableRow";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
 import type {
@@ -25,6 +27,7 @@ export function McpTab() {
   const [installTarget, setInstallTarget] = createSignal<McpPopularServer | null>(
     null,
   );
+  const [deleteTargetName, setDeleteTargetName] = createSignal<string | null>(null);
   const { showToast } = useToast();
 
   const updateServer = async (payload: McpServerInput) => {
@@ -73,8 +76,13 @@ export function McpTab() {
     }
   };
 
-  const deleteServer = async (name: string) => {
-    if (!window.confirm(`Delete MCP server "${name}"?`)) {
+  const requestDeleteServer = (name: string) => {
+    setDeleteTargetName(name);
+  };
+
+  const confirmDeleteServer = async () => {
+    const name = deleteTargetName();
+    if (!name) {
       return;
     }
     try {
@@ -86,6 +94,8 @@ export function McpTab() {
         err instanceof Error ? err.message : "Failed to delete MCP server.",
         "error",
       );
+    } finally {
+      setDeleteTargetName(null);
     }
   };
 
@@ -124,7 +134,7 @@ export function McpTab() {
 
   return (
     <div class="stack">
-      <div class="row-wrap" style={{ "justify-content": "flex-end" }}>
+      <div class="row-wrap-end">
         <button
           class="btn btn-primary"
           type="button"
@@ -166,14 +176,10 @@ export function McpTab() {
                     <For
                       each={servers()}
                       fallback={
-                        <tr>
-                          <td colSpan={5}>
-                            <div class="empty">
-                              No MCP servers configured yet. Install one from the
-                              catalog below or add a custom server.
-                            </div>
-                          </td>
-                        </tr>
+                        <EmptyTableRow
+                          colSpan={5}
+                          message="No MCP servers configured yet. Install one from the catalog below or add a custom server."
+                        />
                       }
                     >
                       {(server) => (
@@ -197,7 +203,7 @@ export function McpTab() {
                           </td>
                           <td>{server.transport}</td>
                           <td>
-                            <div style={{ display: "flex", "align-items": "center", gap: "10px" }}>
+                            <div class="mcp-status-cell">
                               <button
                                 type="button"
                                 class={`toggle-control ${server.enabled ? "active" : ""}`}
@@ -252,7 +258,7 @@ export function McpTab() {
                               <button
                                 class="btn btn-sm"
                                 type="button"
-                                onClick={(e) => { e.stopPropagation(); deleteServer(server.name); }}
+                                onClick={(e) => { e.stopPropagation(); requestDeleteServer(server.name); }}
                                 title="Delete"
                               >
                                 <Trash2 size={13} />
@@ -278,16 +284,16 @@ export function McpTab() {
                 <div class="grid-3">
                   <For each={popular()}>
                     {(server) => (
-                      <div class="panel" style={{ padding: "12px" }}>
-                        <div class="setting-title" style={{ display: "flex", "align-items": "center", gap: "6px" }}>
+                      <div class="panel mcp-popular-card">
+                        <div class="setting-title mcp-popular-card-title">
                           {getServerIcon(server.name)}
                           {server.name}
                         </div>
-                        <div class="hint" style={{ "margin-bottom": "8px" }}>
+                        <div class="hint mcp-popular-card-description">
                           {server.description}
                         </div>
-                        <div class="row-wrap" style={{ "justify-content": "space-between" }}>
-                          <span class="mono" style={{ "font-size": "11px", display: "flex", "align-items": "center", gap: "6px" }}>
+                        <div class="mcp-popular-card-footer">
+                          <span class="mono mcp-popular-card-transport">
                             {server.transport}
                           </span>
                           <button
@@ -332,6 +338,16 @@ export function McpTab() {
         server={installTarget()}
         onClose={() => setInstallTarget(null)}
         onSubmit={createServer}
+      />
+
+      <ConfirmDialog
+        open={deleteTargetName() !== null}
+        title="Delete MCP Server"
+        message={<p>Are you sure you want to delete MCP server <span class="mono">{deleteTargetName()}</span>?</p>}
+        confirmLabel="Delete"
+        confirmVariant="danger"
+        onClose={() => setDeleteTargetName(null)}
+        onConfirm={() => void confirmDeleteServer()}
       />
     </div>
   );

@@ -1,14 +1,17 @@
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { Copy, Edit3, Eye, Plus, RefreshCw, Trash2 } from "lucide-solid";
 
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Dialog } from "@/components/Dialog";
+import { EmptyTableRow } from "@/components/EmptyTableRow";
 import { ModelPicker } from "@/components/ModelPicker";
 import { PromptVariableTextarea } from "@/components/PromptVariableTextarea";
 import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { DataGate } from "@/components/State";
+import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
-import { statusBadgeClass, truncateText, uniqueSorted } from "@/lib/utils";
+import { truncateText, uniqueSorted } from "@/lib/utils";
 import type { AgentCard, AgentsPayload, PromptVariable, PromptVariablesPayload } from "@/types";
 
 import { SettingsLayout } from "./SettingsLayout";
@@ -68,6 +71,7 @@ export function AgentsPage() {
   const [currentName, setCurrentName] = createSignal("");
   const [form, setForm] = createSignal<AgentForm>(blankForm("react_agent"));
   const [promptVariables, setPromptVariables] = createSignal<PromptVariable[]>([]);
+  const [deleteTargetName, setDeleteTargetName] = createSignal<string | null>(null);
   const { showToast } = useToast();
 
   const load = async () => {
@@ -180,8 +184,13 @@ export function AgentsPage() {
     }
   };
 
-  const deleteAgent = async (name: string) => {
-    if (!window.confirm(`Delete user agent "${name}"?`)) {
+  const requestDeleteAgent = (name: string) => {
+    setDeleteTargetName(name);
+  };
+
+  const confirmDeleteAgent = async () => {
+    const name = deleteTargetName();
+    if (!name) {
       return;
     }
     try {
@@ -190,6 +199,8 @@ export function AgentsPage() {
       await load();
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to delete agent", "error");
+    } finally {
+      setDeleteTargetName(null);
     }
   };
 
@@ -254,13 +265,7 @@ export function AgentsPage() {
                   <tbody>
                     <For
                       each={filteredCards()}
-                      fallback={
-                        <tr>
-                          <td colSpan={5}>
-                            <div class="empty">No agent cards found.</div>
-                          </td>
-                        </tr>
-                      }
+                      fallback={<EmptyTableRow colSpan={5} message="No agent cards found." />}
                     >
                       {(card) => (
                         <tr>
@@ -288,9 +293,7 @@ export function AgentsPage() {
                             </div>
                           </td>
                           <td>
-                            <span class={statusBadgeClass(card.valid ? "valid" : "invalid")}>
-                              {card.valid ? "valid" : "invalid"}
-                            </span>
+                            <StatusBadge status={card.valid ? "valid" : "invalid"} />
                             <Show when={!card.valid && card.error}>
                               <div class="hint">{card.error}</div>
                             </Show>
@@ -318,7 +321,7 @@ export function AgentsPage() {
                                   <button
                                     class="btn btn-sm btn-danger"
                                     type="button"
-                                    onClick={() => deleteAgent(card.name)}
+                                    onClick={() => requestDeleteAgent(card.name)}
                                   >
                                     <Trash2 size={13} />
                                     Delete
@@ -329,7 +332,7 @@ export function AgentsPage() {
                                 <button
                                   class="btn btn-sm btn-danger"
                                   type="button"
-                                  onClick={() => deleteAgent(card.name)}
+                                  onClick={() => requestDeleteAgent(card.name)}
                                 >
                                   <Trash2 size={13} />
                                   Delete
@@ -514,6 +517,16 @@ export function AgentsPage() {
                 </div>
               </div>
             </Dialog>
+
+            <ConfirmDialog
+              open={deleteTargetName() !== null}
+              title="Delete Agent"
+              message={<p>Are you sure you want to delete agent <span class="mono">{deleteTargetName()}</span>?</p>}
+              confirmLabel="Delete"
+              confirmVariant="danger"
+              onClose={() => setDeleteTargetName(null)}
+              onConfirm={() => void confirmDeleteAgent()}
+            />
           </div>
         )}
       </DataGate>
