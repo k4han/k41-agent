@@ -133,3 +133,56 @@ def test_scheduler_job_reference_migration_skips_missing_table():
     engine = create_engine("sqlite:///:memory:")
 
     assert _migrate_legacy_job_references(engine) == 0
+
+
+@pytest.mark.asyncio
+async def test_execute_scheduled_task_uses_scheduled_thread_for_usage(monkeypatch):
+    import agent.modules.conversations as conversations_module
+    from agent.modules.scheduler import service as scheduler_service
+
+    captured: dict = {}
+
+    class FakeGraph:
+        async def aupdate_state(self, config, values, *, as_node):
+            captured["state_config"] = config
+            captured["state_values"] = values
+            captured["state_node"] = as_node
+
+    async def fake_run_agent_full(**kwargs):
+        captured["run"] = kwargs
+        return "done"
+
+    async def fake_upsert_conversation_thread(**kwargs):
+        captured["upsert"] = kwargs
+
+    async def fake_send_notification(*args, **kwargs):
+        captured["notification"] = {"args": args, "kwargs": kwargs}
+        return True
+
+    monkeypatch.setattr(scheduler_service, "run_agent_full", fake_run_agent_full)
+    monkeypatch.setattr(scheduler_service, "get_workflow_graph", lambda name: FakeGraph())
+    monkeypatch.setattr(
+        scheduler_service,
+        "make_run_config",
+        lambda *, thread_id: {"configurable": {"thread_id": thread_id}},
+    )
+    monkeypatch.setattr(scheduler_service, "_send_notification", fake_send_notification)
+    monkeypatch.setattr(
+        conversations_module,
+        "upsert_conversation_thread",
+        fake_upsert_conversation_thread,
+    )
+
+    await scheduler_service.execute_scheduled_task(
+        "telegram",
+        "6197833678",
+        "daily summary",
+    )
+
+    run = captured["run"]
+    assert run["thread_id"].startswith("bg_telegram_6197833678_daily summary_")
+    assert "usage_context" not in run
+    assert captured["state_config"] == {
+        "configurable": {"thread_id": "telegram_6197833678_6197833678"}
+    }
+    assert captured["notification"]["args"][:2] == ("telegram", "6197833678")

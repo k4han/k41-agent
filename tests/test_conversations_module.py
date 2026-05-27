@@ -23,11 +23,20 @@ class _FakeChatModel:
         self.response = response
         self.messages = None
 
-    def invoke(self, messages):
+    async def ainvoke(self, messages, config=None):
         self.messages = messages
         if isinstance(self.response, Exception):
             raise self.response
         return AIMessage(content=self.response)
+
+
+def _fake_resolved_model(model: _FakeChatModel):
+    return SimpleNamespace(
+        model=model,
+        provider_name="resolved-provider",
+        provider_type="openai_compatible",
+        model_name="resolved-model",
+    )
 
 
 def _title_agent_config():
@@ -49,8 +58,8 @@ async def test_generate_conversation_title_uses_builtin_agent_prompt(monkeypatch
     )
     monkeypatch.setattr(
         conversation_service,
-        "get_chat_model",
-        lambda **kwargs: fake_model,
+        "get_resolved_chat_model",
+        lambda **kwargs: _fake_resolved_model(fake_model),
     )
 
     title = await conversation_service.generate_conversation_title(
@@ -79,8 +88,8 @@ async def test_generate_conversation_title_falls_back_on_model_error(monkeypatch
     )
     monkeypatch.setattr(
         conversation_service,
-        "get_chat_model",
-        lambda **kwargs: _FakeChatModel(RuntimeError("boom")),
+        "get_resolved_chat_model",
+        lambda **kwargs: _fake_resolved_model(_FakeChatModel(RuntimeError("boom"))),
     )
 
     title = await conversation_service.generate_conversation_title(
@@ -141,6 +150,7 @@ async def test_schedule_conversation_title_generation_updates_current_title(monk
     assert calls["generate"] == {
         "first_user_message": "How do I debug this login issue?",
         "attachments": [{"name": "auth.py", "kind": "text"}],
+        "thread_id": "task_dashboard_123",
     }
     release_generation.set()
     await asyncio.wait_for(task, timeout=1)

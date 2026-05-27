@@ -17,6 +17,7 @@ from agent.delivery.http.dashboard.routes import (
     settings as settings_routes,
     spa as spa_routes,
     tasks as tasks_routes,
+    usage as usage_routes,
     workspace as workspace_routes,
 )
 
@@ -34,6 +35,7 @@ for child_router in (
     scheduler_routes.router,
     sessions_routes.router,
     tasks_routes.router,
+    usage_routes.router,
     conversations_routes.router,
     mcp_routes.router,
 ):

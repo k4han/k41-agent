@@ -16,8 +16,9 @@ class _FakeChatModel:
         self._captured["tools"] = tools
         return self
 
-    def invoke(self, messages):
+    async def ainvoke(self, messages, config=None):
         self._captured["messages"] = messages
+        self._captured["config"] = config
         return AIMessage(content="ok")
 
 
@@ -25,7 +26,12 @@ def _fake_chat_model_factory(captured: dict):
     def _factory(model: str | None = None, *, provider_name: str | None = None):
         captured["provider"] = provider_name
         captured["model"] = model
-        return _FakeChatModel(captured)
+        return SimpleNamespace(
+            model=_FakeChatModel(captured),
+            provider_name=provider_name or "default",
+            provider_type="openai_compatible",
+            model_name=model or "default-model",
+        )
 
     return _factory
 
@@ -51,7 +57,7 @@ async def test_llm_node_uses_prompt_builder_output_for_system_message(monkeypatc
 
     monkeypatch.setattr(
         llm_node_module,
-        "get_chat_model",
+        "get_resolved_chat_model",
         _fake_chat_model_factory(captured),
     )
     monkeypatch.setattr(
@@ -71,6 +77,7 @@ async def test_llm_node_uses_prompt_builder_output_for_system_message(monkeypatc
 
     result = await llm_node_module.llm_node(
         {"messages": [HumanMessage(content="help me")]},
+        {"configurable": {"thread_id": "thread-1"}},
         SimpleNamespace(
             context=WorkflowContext(
                 agent_name="builder-agent",
@@ -116,7 +123,7 @@ async def test_llm_node_prefers_runtime_allowed_tool_names_before_building_promp
 
     monkeypatch.setattr(
         llm_node_module,
-        "get_chat_model",
+        "get_resolved_chat_model",
         _fake_chat_model_factory(captured),
     )
     monkeypatch.setattr(
@@ -136,6 +143,7 @@ async def test_llm_node_prefers_runtime_allowed_tool_names_before_building_promp
 
     await llm_node_module.llm_node(
         {"messages": [HumanMessage(content="hello")]},
+        {"configurable": {"thread_id": "thread-1"}},
         SimpleNamespace(
             context=WorkflowContext(
                 agent_name="override-agent",
@@ -166,7 +174,7 @@ async def test_llm_node_normalizes_assistant_string_list_history(monkeypatch):
 
     monkeypatch.setattr(
         llm_node_module,
-        "get_chat_model",
+        "get_resolved_chat_model",
         _fake_chat_model_factory(captured),
     )
     monkeypatch.setattr(
@@ -188,6 +196,7 @@ async def test_llm_node_normalizes_assistant_string_list_history(monkeypatch):
                 original_message,
             ]
         },
+        {"configurable": {"thread_id": "thread-1"}},
         SimpleNamespace(
             context=WorkflowContext(
                 agent_name="history-agent",
@@ -221,7 +230,7 @@ async def test_llm_node_prefers_runtime_model_over_agent_card_model(monkeypatch)
 
     monkeypatch.setattr(
         llm_node_module,
-        "get_chat_model",
+        "get_resolved_chat_model",
         _fake_chat_model_factory(captured),
     )
     monkeypatch.setattr(
@@ -236,6 +245,7 @@ async def test_llm_node_prefers_runtime_model_over_agent_card_model(monkeypatch)
 
     await llm_node_module.llm_node(
         {"messages": [HumanMessage(content="hello")]},
+        {"configurable": {"thread_id": "thread-1"}},
         SimpleNamespace(
             context=WorkflowContext(
                 agent_name="override-agent",

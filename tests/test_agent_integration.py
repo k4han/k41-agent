@@ -83,9 +83,10 @@ def test_default_agent_always_available():
         repo = FilesystemAgentRepository(empty_dir)
         agents = repo.load()
 
-        assert len(agents) == 3
+        assert len(agents) == 4
         assert "default" in agents
         assert "conversation-title" in agents
+        assert "github-issue-fixer" in agents
 
         default = agents["default"]
         assert default.name == "default"

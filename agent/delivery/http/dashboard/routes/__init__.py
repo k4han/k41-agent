@@ -13,5 +13,6 @@ __all__ = [
     "settings",
     "spa",
     "tasks",
+    "usage",
     "workspace",
 ]

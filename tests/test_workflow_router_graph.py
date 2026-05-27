@@ -21,9 +21,19 @@ class _FakeChatModel:
         self._captured["schema"] = schema
         return self
 
-    async def ainvoke(self, messages):
+    async def ainvoke(self, messages, config=None):
         self._captured["messages"] = messages
+        self._captured["config"] = config
         return SimpleNamespace(selected_agent=self._selected_agent)
+
+
+def _fake_resolved_model(model: _FakeChatModel):
+    return SimpleNamespace(
+        model=model,
+        provider_name="resolved-provider",
+        provider_type="openai_compatible",
+        model_name="resolved-model",
+    )
 
 
 class _FakeCatalog:
@@ -155,12 +165,12 @@ async def test_router_node_routes_to_selected_sub_agent(
 
     monkeypatch.setattr(
         router_module,
-        "get_chat_model",
-        lambda provider_name=None, model=None: (
+        "get_resolved_chat_model",
+        lambda provider_name=None, model=None: _fake_resolved_model((
             captured.__setitem__("provider", provider_name),
             captured.__setitem__("model", model),
             _FakeChatModel("researcher", captured),
-        )[2],
+        )[2]),
     )
     monkeypatch.setattr(
         router_module,
@@ -235,8 +245,10 @@ async def test_router_node_falls_back_to_first_callable_agent_when_llm_selects_i
 
     monkeypatch.setattr(
         router_module,
-        "get_chat_model",
-        lambda provider_name=None, model=None: _FakeChatModel("outsider", {}),
+        "get_resolved_chat_model",
+        lambda provider_name=None, model=None: _fake_resolved_model(
+            _FakeChatModel("outsider", {})
+        ),
     )
     monkeypatch.setattr(
         router_module,
@@ -291,7 +303,7 @@ async def test_router_node_falls_back_to_default_agent_when_no_callable_sub_agen
 
     monkeypatch.setattr(
         router_module,
-        "get_chat_model",
+        "get_resolved_chat_model",
         lambda provider_name=None, model=None: (_ for _ in ()).throw(
             AssertionError("LLM should not be called")
         ),
@@ -340,8 +352,10 @@ async def test_router_node_omits_context_for_graph_without_context_schema(
 
     monkeypatch.setattr(
         router_module,
-        "get_chat_model",
-        lambda provider_name=None, model=None: _FakeChatModel("legacy-agent", {}),
+        "get_resolved_chat_model",
+        lambda provider_name=None, model=None: _fake_resolved_model(
+            _FakeChatModel("legacy-agent", {})
+        ),
     )
     monkeypatch.setattr(
         router_module,

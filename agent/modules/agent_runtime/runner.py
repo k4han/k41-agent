@@ -20,6 +20,7 @@ from agent.modules.workflows import (
     make_run_config,
     make_run_context,
 )
+from agent.modules.usage import attach_usage_context, build_usage_context
 from agent.modules.workspaces import WorkspaceRef
 
 logger = logging.getLogger(__name__)
@@ -74,6 +75,11 @@ def build_run_params(
         "max_context_tokens": max_context_tokens,
         "provider": provider,
         "model": model,
+        "usage_context": {
+            "platform": str(getattr(platform, "value", platform) or ""),
+            "user_id": str(user_id or ""),
+            "channel_id": str(channel_id or ""),
+        },
     }
     normalized_attachments = _normalize_chat_attachments(attachments)
     if normalized_attachments:
@@ -395,6 +401,7 @@ async def run_agent(
     provider: str | None = None,
     model: str | None = None,
     attachments: list[Any] | None = None,
+    usage_context: dict[str, Any] | None = None,
 ) -> AsyncGenerator[str, None]:
     """Run a workflow graph and stream assistant chunks.
 
@@ -425,7 +432,10 @@ async def run_agent(
     resolved_tools = allowed_tool_names if allowed_tool_names is not None else agent_config.tools
 
     graph = get_workflow_graph(resolved_workflow)
-    config = make_run_config(thread_id=thread_id)
+    config = attach_usage_context(
+        make_run_config(thread_id=thread_id),
+        build_usage_context(thread_id, usage_context),
+    )
 
     context = make_run_context(
         workspace=workspace,
@@ -480,6 +490,7 @@ async def run_agent_stream(
     provider: str | None = None,
     model: str | None = None,
     attachments: list[Any] | None = None,
+    usage_context: dict[str, Any] | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Run a workflow graph and stream UI events (tool calls and text chunks).
 
@@ -510,7 +521,10 @@ async def run_agent_stream(
     resolved_tools = allowed_tool_names if allowed_tool_names is not None else agent_config.tools
 
     graph = get_workflow_graph(resolved_workflow)
-    config = make_run_config(thread_id=thread_id)
+    config = attach_usage_context(
+        make_run_config(thread_id=thread_id),
+        build_usage_context(thread_id, usage_context),
+    )
 
     context = make_run_context(
         workspace=workspace,
@@ -635,6 +649,7 @@ async def run_agent_full(
     provider: str | None = None,
     model: str | None = None,
     attachments: list[Any] | None = None,
+    usage_context: dict[str, Any] | None = None,
 ) -> str:
     """Run a workflow graph and return the final assistant response.
 
@@ -668,6 +683,7 @@ async def run_agent_full(
         provider=provider,
         model=model,
         attachments=attachments,
+        usage_context=usage_context,
     ):
         chunks.append(chunk)
     return chunks[-1] if chunks else ""

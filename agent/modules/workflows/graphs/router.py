@@ -29,7 +29,8 @@ from agent.modules.workflows.constants import (
     STRIP_PREFIXES,
     STRIP_QUOTES,
 )
-from agent.modules.providers import get_chat_model
+from agent.modules.providers import get_resolved_chat_model
+from agent.modules.usage import with_usage_tracking
 from agent.modules.prompt_variables import get_runtime_prompt_variable_values
 from agent.modules.workflows.prompt_builders import (
     replace_known_prompt_placeholders,
@@ -132,8 +133,10 @@ async def _route_agent_name(
     provider: str | None = None,
     model: str | None = None,
     prompt_variables: dict[str, str] | None = None,
+    config: RunnableConfig | None = None,
 ) -> str:
-    llm = get_chat_model(provider_name=provider, model=model)
+    resolved = get_resolved_chat_model(provider_name=provider, model=model)
+    llm = resolved.model
     router_system = _build_router_system(
         user_input=user_input,
         candidates=candidates,
@@ -147,11 +150,22 @@ async def _route_agent_name(
     ]
 
     try:
-        decision = await llm.with_structured_output(_RouteDecision).ainvoke(messages)
+        usage_config = with_usage_tracking(
+            config,
+            agent_name=caller_agent_name,
+            provider_name=resolved.provider_name,
+            model_name=resolved.model_name,
+            call_kind="router",
+            internal=True,
+        )
+        decision = await llm.with_structured_output(_RouteDecision).ainvoke(
+            messages,
+            config=usage_config,
+        )
         return _normalize_agent_name(decision.selected_agent)
     except Exception as exc:
         logger.warning("Structured output failed, falling back to text parsing: %s", exc)
-        response = await llm.ainvoke(messages)
+        response = await llm.ainvoke(messages, config=usage_config)
         content = getattr(response, "content", "")
         return _normalize_agent_name(content if content else "")
 
@@ -242,6 +256,7 @@ async def llm_call_router(
             provider=provider,
             model=model,
             prompt_variables=prompt_variables,
+            config=config,
         )
 
     target_agent = candidates.get(selected_agent_name)

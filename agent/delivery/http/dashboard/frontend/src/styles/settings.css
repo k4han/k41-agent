@@ -72,3 +72,21 @@
   gap: 22px;
 }
 
+.usage-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+}
+
+.usage-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.usage-table td:not(:first-child),
+.usage-table th:not(:first-child) {
+  text-align: right;
+}
+

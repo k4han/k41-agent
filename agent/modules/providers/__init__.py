@@ -5,10 +5,13 @@ Other modules should import from here, not from internal packages.
 
 from langchain_core.language_models import BaseChatModel
 
-from agent.modules.providers.models import ProviderModelCatalog
+from agent.modules.providers.models import ProviderModelCatalog, ResolvedChatModel
 from agent.modules.providers.provider import ProviderConfig
 from agent.modules.providers.service import ProviderService
-from agent.modules.providers.resolve_chat_model import resolve_chat_model
+from agent.modules.providers.resolve_chat_model import (
+    resolve_chat_model,
+    resolve_chat_model_info,
+)
 
 # --- Module-level singleton ---
 
@@ -62,6 +65,22 @@ def get_chat_model(
     )
 
 
+def get_resolved_chat_model(
+    model: str | None = None,
+    temperature: float | None = None,
+    *,
+    provider_name: str | None = None,
+) -> ResolvedChatModel:
+    """Get a cached chat model plus resolved provider/model metadata."""
+    service = _get_provider_service()
+    return resolve_chat_model_info(
+        service,
+        provider_name=provider_name,
+        model=model,
+        temperature=temperature,
+    )
+
+
 def list_providers() -> list[ProviderConfig]:
     service = _get_provider_service()
     return service.list_providers()
@@ -89,9 +108,12 @@ async def list_provider_model_catalogs(
 
 __all__ = [
     "ProviderService",
+    "ResolvedChatModel",
     "get_chat_model",
+    "get_resolved_chat_model",
     "list_provider_model_catalog",
     "list_provider_model_catalogs",
     "list_providers",
     "resolve_chat_model",
+    "resolve_chat_model_info",
 ]

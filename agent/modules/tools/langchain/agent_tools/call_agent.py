@@ -10,6 +10,7 @@ from langchain_core.tools import InjectedToolArg, tool
 from langgraph.prebuilt import ToolRuntime
 
 from agent.modules.tools.runtime.context import get_context_value
+from agent.modules.usage import usage_context_from_config
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,7 @@ async def call_agent(
             workspace=workspace_ref,
             provider=inherited_provider,
             model=inherited_model,
+            usage_context=usage_context_from_config(runtime.config).to_dict(),
         )
         return result or "(empty response)"
     except Exception as e:

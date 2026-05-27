@@ -271,6 +271,11 @@ async def test_tool_node_resolves_runtime_allowed_tools(monkeypatch):
         lambda names: [SimpleNamespace(name=name) for name in names],
     )
 
+    async def _no_mcp_tools():
+        return []
+
+    monkeypatch.setattr(tool_node_module, "get_all_mcp_tools", _no_mcp_tools)
+
     runtime = SimpleNamespace(
         context={"allowed_tool_names": ["echo", "call_agent"]},
     )

@@ -195,6 +195,61 @@ export type SettingsPayload = {
   provider_type_options?: ProviderTypeOption[];
 };
 
+export type UsageSummary = {
+  event_count: number;
+  known_usage_count: number;
+  missing_usage_count: number;
+  internal_event_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+};
+
+export type UsageRow = {
+  platform: string;
+  user_id: string;
+  channel_id: string;
+  identity_label: string;
+  event_count: number;
+  missing_usage_count: number;
+  internal_event_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  last_used_at: string | null;
+};
+
+export type UsageFilterOption = {
+  platform: string;
+  user_id: string;
+  channel_id?: string;
+  label: string;
+};
+
+export type UsagePayload = {
+  summary: UsageSummary;
+  rows: UsageRow[];
+  filters: {
+    platforms: string[];
+    users: UsageFilterOption[];
+    channels: UsageFilterOption[];
+    agents: string[];
+    providers: string[];
+    models: string[];
+  };
+  pagination: {
+    limit: number;
+    offset: number;
+    total: number;
+    has_more: boolean;
+    next_offset: number | null;
+  };
+  range: {
+    start: string;
+    end: string;
+  };
+};
+
 export type GitHubRepositoryBinding = {
   id: number;
   repository_id: number;

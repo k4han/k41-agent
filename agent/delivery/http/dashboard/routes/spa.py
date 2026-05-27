@@ -28,6 +28,7 @@ router = APIRouter()
 @router.get("/settings/prompt-variables", include_in_schema=False)
 @router.get("/settings/security", include_in_schema=False)
 @router.get("/settings/appearance", include_in_schema=False)
+@router.get("/settings/usage", include_in_schema=False)
 # Legacy routes - SPA handles redirect to /settings/*
 @router.get("/channels", include_in_schema=False)
 @router.get("/agents", include_in_schema=False)

@@ -1,0 +1,361 @@
+import { createMemo, createSignal, For, onMount, Show } from "solid-js";
+import { RefreshCw } from "lucide-solid";
+
+import { MetricGrid } from "@/components/Metrics";
+import { DataGate } from "@/components/State";
+import { apiFetch } from "@/lib/api";
+import type { UsagePayload, UsageRow } from "@/types";
+
+import { SettingsLayout } from "./SettingsLayout";
+
+const PAGE_SIZE = 50;
+
+function pad(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+function dateInputValue(date: Date): string {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function defaultStartDate(): string {
+  const date = new Date();
+  date.setDate(date.getDate() - 6);
+  return dateInputValue(date);
+}
+
+function defaultEndDate(): string {
+  return dateInputValue(new Date());
+}
+
+function startIso(value: string): string {
+  return new Date(`${value}T00:00:00`).toISOString();
+}
+
+function endIso(value: string): string {
+  return new Date(`${value}T23:59:59.999`).toISOString();
+}
+
+function formatNumber(value: number): string {
+  return new Intl.NumberFormat().format(value || 0);
+}
+
+function formatDateTime(value: string | null): string {
+  if (!value) {
+    return "-";
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
+function optionKey(parts: Array<string | undefined>): string {
+  return parts.map((part) => part || "").join("\t");
+}
+
+function parseOptionKey(value: string): string[] {
+  return value.split("\t");
+}
+
+function resetOffsetOnChange(setter: (value: string) => void, setOffset: (value: number) => void) {
+  return (value: string) => {
+    setter(value);
+    setOffset(0);
+  };
+}
+
+export function UsagePage() {
+  const [data, setData] = createSignal<UsagePayload>();
+  const [error, setError] = createSignal("");
+  const [startDate, setStartDate] = createSignal(defaultStartDate());
+  const [endDate, setEndDate] = createSignal(defaultEndDate());
+  const [platform, setPlatform] = createSignal("");
+  const [userId, setUserId] = createSignal("");
+  const [channelId, setChannelId] = createSignal("");
+  const [agent, setAgent] = createSignal("");
+  const [provider, setProvider] = createSignal("");
+  const [model, setModel] = createSignal("");
+  const [offset, setOffset] = createSignal(0);
+
+  const load = async () => {
+    setError("");
+    try {
+      const params = new URLSearchParams({
+        start: startIso(startDate()),
+        end: endIso(endDate()),
+        limit: String(PAGE_SIZE),
+        offset: String(offset()),
+      });
+      if (platform()) params.set("platform", platform());
+      if (userId()) params.set("user_id", userId());
+      if (channelId()) params.set("channel_id", channelId());
+      if (agent()) params.set("agent", agent());
+      if (provider()) params.set("provider", provider());
+      if (model()) params.set("model", model());
+      setData(await apiFetch<UsagePayload>(`/dashboard-api/usage?${params.toString()}`));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load usage");
+    }
+  };
+
+  const selectedUser = createMemo(() =>
+    userId() ? optionKey([platform(), userId()]) : optionKey(["", ""]),
+  );
+  const selectedChannel = createMemo(() =>
+    channelId() ? optionKey([platform(), userId(), channelId()]) : optionKey(["", "", ""]),
+  );
+
+  const setSelectedUser = (value: string) => {
+    const [nextPlatform, nextUserId] = parseOptionKey(value);
+    setPlatform(nextPlatform || "");
+    setUserId(nextUserId || "");
+    setChannelId("");
+    setOffset(0);
+  };
+
+  const setSelectedChannel = (value: string) => {
+    const [nextPlatform, nextUserId, nextChannelId] = parseOptionKey(value);
+    setPlatform(nextPlatform || "");
+    setUserId(nextUserId || "");
+    setChannelId(nextChannelId || "");
+    setOffset(0);
+  };
+
+  const clearFilters = () => {
+    setPlatform("");
+    setUserId("");
+    setChannelId("");
+    setAgent("");
+    setProvider("");
+    setModel("");
+    setOffset(0);
+  };
+
+  const nextPage = async () => {
+    const next = data()?.pagination.next_offset;
+    if (next === null || next === undefined) {
+      return;
+    }
+    setOffset(next);
+    await load();
+  };
+
+  const previousPage = async () => {
+    setOffset(Math.max(0, offset() - PAGE_SIZE));
+    await load();
+  };
+
+  onMount(load);
+
+  return (
+    <SettingsLayout
+      title="Usage"
+      subtitle="Inspect token usage by user, channel, provider, model, and agent."
+      breadcrumbLabel="Usage"
+      contentWidth="wide"
+      actions={
+        <button class="btn btn-primary" type="button" onClick={load}>
+          <RefreshCw size={14} />
+          Refresh
+        </button>
+      }
+    >
+      <DataGate data={data()} error={error()} onRetry={load}>
+        {(payload) => (
+          <div class="stack">
+            <MetricGrid
+              items={[
+                { label: "Total tokens", value: formatNumber(payload.summary.total_tokens) },
+                { label: "Input tokens", value: formatNumber(payload.summary.input_tokens) },
+                { label: "Output tokens", value: formatNumber(payload.summary.output_tokens) },
+              ]}
+            />
+            <MetricGrid
+              items={[
+                { label: "LLM calls", value: formatNumber(payload.summary.event_count) },
+                { label: "Missing usage", value: formatNumber(payload.summary.missing_usage_count) },
+                { label: "Internal calls", value: formatNumber(payload.summary.internal_event_count) },
+              ]}
+            />
+
+            <section class="panel">
+              <div class="panel-header">
+                <div class="panel-title">Filters</div>
+                <button class="btn btn-sm" type="button" onClick={clearFilters}>
+                  Clear
+                </button>
+              </div>
+              <div class="panel-body usage-filter-grid">
+                <label class="field">
+                  <span>Start</span>
+                  <input
+                    class="input"
+                    type="date"
+                    value={startDate()}
+                    onInput={(event) => {
+                      setStartDate(event.currentTarget.value);
+                      setOffset(0);
+                    }}
+                  />
+                </label>
+                <label class="field">
+                  <span>End</span>
+                  <input
+                    class="input"
+                    type="date"
+                    value={endDate()}
+                    onInput={(event) => {
+                      setEndDate(event.currentTarget.value);
+                      setOffset(0);
+                    }}
+                  />
+                </label>
+                <label class="field">
+                  <span>Platform</span>
+                  <select
+                    class="select"
+                    value={platform()}
+                    onChange={(event) => {
+                      setPlatform(event.currentTarget.value);
+                      setUserId("");
+                      setChannelId("");
+                      setOffset(0);
+                    }}
+                  >
+                    <option value="">All platforms</option>
+                    <For each={payload.filters.platforms}>
+                      {(item) => <option value={item}>{item}</option>}
+                    </For>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>User</span>
+                  <select class="select" value={selectedUser()} onChange={(event) => setSelectedUser(event.currentTarget.value)}>
+                    <option value={optionKey(["", ""])}>All users</option>
+                    <For each={payload.filters.users}>
+                      {(item) => (
+                        <option value={optionKey([item.platform, item.user_id])}>
+                          {item.label}
+                        </option>
+                      )}
+                    </For>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Channel</span>
+                  <select class="select" value={selectedChannel()} onChange={(event) => setSelectedChannel(event.currentTarget.value)}>
+                    <option value={optionKey(["", "", ""])}>All channels</option>
+                    <For each={payload.filters.channels}>
+                      {(item) => (
+                        <option value={optionKey([item.platform, item.user_id, item.channel_id])}>
+                          {item.label}
+                        </option>
+                      )}
+                    </For>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Agent</span>
+                  <select class="select" value={agent()} onChange={(event) => resetOffsetOnChange(setAgent, setOffset)(event.currentTarget.value)}>
+                    <option value="">All agents</option>
+                    <For each={payload.filters.agents}>
+                      {(item) => <option value={item}>{item}</option>}
+                    </For>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Provider</span>
+                  <select class="select" value={provider()} onChange={(event) => resetOffsetOnChange(setProvider, setOffset)(event.currentTarget.value)}>
+                    <option value="">All providers</option>
+                    <For each={payload.filters.providers}>
+                      {(item) => <option value={item}>{item}</option>}
+                    </For>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Model</span>
+                  <select class="select" value={model()} onChange={(event) => resetOffsetOnChange(setModel, setOffset)(event.currentTarget.value)}>
+                    <option value="">All models</option>
+                    <For each={payload.filters.models}>
+                      {(item) => <option value={item}>{item}</option>}
+                    </For>
+                  </select>
+                </label>
+              </div>
+              <div class="panel-body">
+                <button class="btn" type="button" onClick={load}>
+                  Apply Filters
+                </button>
+              </div>
+            </section>
+
+            <UsageTable rows={payload.rows} />
+
+            <div class="usage-pagination">
+              <span class="hint">
+                Showing {payload.pagination.offset + 1}-
+                {Math.min(payload.pagination.offset + payload.rows.length, payload.pagination.total)} of{" "}
+                {payload.pagination.total}
+              </span>
+              <div class="row-wrap">
+                <button class="btn btn-sm" type="button" disabled={payload.pagination.offset === 0} onClick={previousPage}>
+                  Previous
+                </button>
+                <button class="btn btn-sm" type="button" disabled={!payload.pagination.has_more} onClick={nextPage}>
+                  Next
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </DataGate>
+    </SettingsLayout>
+  );
+}
+
+function UsageTable(props: { rows: UsageRow[] }) {
+  return (
+    <section class="panel">
+      <div class="panel-header">
+        <div class="panel-title">Usage by User and Channel</div>
+      </div>
+      <div class="table-wrap">
+        <table class="table usage-table">
+          <thead>
+            <tr>
+              <th>User / Channel</th>
+              <th>Calls</th>
+              <th>Total</th>
+              <th>Input</th>
+              <th>Output</th>
+              <th>Missing</th>
+              <th>Last used</th>
+            </tr>
+          </thead>
+          <tbody>
+            <For each={props.rows} fallback={<tr><td colSpan={7} class="empty">No usage recorded.</td></tr>}>
+              {(row) => (
+                <tr>
+                  <td>
+                    <div>{row.identity_label}</div>
+                    <div class="mono hint">
+                      {row.platform}:{row.user_id}
+                      <Show when={row.channel_id}>:{row.channel_id}</Show>
+                    </div>
+                  </td>
+                  <td>{formatNumber(row.event_count)}</td>
+                  <td>{formatNumber(row.total_tokens)}</td>
+                  <td>{formatNumber(row.input_tokens)}</td>
+                  <td>{formatNumber(row.output_tokens)}</td>
+                  <td>{formatNumber(row.missing_usage_count)}</td>
+                  <td>{formatDateTime(row.last_used_at)}</td>
+                </tr>
+              )}
+            </For>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}

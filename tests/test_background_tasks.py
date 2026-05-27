@@ -124,6 +124,58 @@ async def test_background_task_submit_remembers_thread_workspace(
 
 
 @pytest.mark.asyncio
+async def test_background_task_usage_context_uses_task_thread_when_notify_channel_set(
+    background_task_db,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agent.modules.agent_runtime.background_tasks as background_tasks_module
+    import agent.modules.agent_runtime.runner as runner_module
+
+    captured: dict = {}
+
+    async def fake_run_agent_stream(**kwargs):
+        captured.update(kwargs)
+        yield {"type": "final", "content": "done"}
+
+    async def fake_send_notification(**kwargs):
+        return True
+
+    async def fake_inject_into_user_thread(task: BackgroundTask) -> None:
+        return None
+
+    monkeypatch.setattr(
+        background_tasks_module,
+        "_send_notification",
+        fake_send_notification,
+    )
+    monkeypatch.setattr(runner_module, "run_agent_stream", fake_run_agent_stream)
+
+    manager = BackgroundTaskManager()
+    monkeypatch.setattr(
+        manager,
+        "_inject_into_user_thread",
+        fake_inject_into_user_thread,
+    )
+    task_id = await manager.submit(
+        "do work",
+        agent_name="default",
+        notify_channel=NotifyChannel(
+            platform="telegram",
+            external_id="6197833678",
+            channel_id="6197833678",
+        ),
+    )
+    task = await _wait_for_task_status(manager, task_id, "completed")
+
+    assert task["thread_id"] == f"task_dashboard_{task_id}"
+    assert captured["usage_context"] == {
+        "platform": "task",
+        "user_id": "dashboard",
+        "channel_id": task_id,
+    }
+
+
+@pytest.mark.asyncio
 async def test_background_task_submit_generates_conversation_title(
     background_task_db,
     monkeypatch: pytest.MonkeyPatch,
@@ -165,6 +217,7 @@ async def test_background_task_submit_generates_conversation_title(
     assert calls["generate"] == {
         "first_user_message": request,
         "attachments": None,
+        "thread_id": task["thread_id"],
     }
 
     release_generation.set()

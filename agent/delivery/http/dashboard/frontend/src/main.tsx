@@ -63,6 +63,9 @@ const SecurityPage = lazy(() =>
     default: module.SecurityPage,
   })),
 );
+const UsagePage = lazy(() =>
+  import("@/pages/settings/UsagePage").then((module) => ({ default: module.UsagePage })),
+);
 const TasksPage = lazy(() =>
   import("@/pages/Tasks").then((module) => ({ default: module.TasksPage })),
 );
@@ -91,6 +94,7 @@ render(
         <Route path="/settings/agents" component={AgentsPage} />
         <Route path="/settings/prompt-variables" component={PromptVariablesPage} />
         <Route path="/settings/security" component={SecurityPage} />
+        <Route path="/settings/usage" component={UsagePage} />
         <Route path="/settings/appearance" component={AppearancePage} />
         {/* Legacy redirects */}
         <Route path="/channels" component={() => <Navigate href="/settings/channels" />} />

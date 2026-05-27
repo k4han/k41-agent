@@ -15,7 +15,12 @@ from agent.modules.conversations.repository import (
     ConversationThreadRepository,
     get_conversation_thread_repository,
 )
-from agent.modules.providers import get_chat_model
+from agent.modules.providers import get_resolved_chat_model
+from agent.modules.usage import (
+    attach_usage_context,
+    build_usage_context,
+    with_usage_tracking,
+)
 from agent.shared.infrastructure.parsing import extract_final_text_content
 
 THREAD_KIND_USER = "user"
@@ -101,6 +106,7 @@ async def generate_conversation_title(
     first_user_message: str,
     attachments: list[Any] | None = None,
     timeout_seconds: float = CONVERSATION_TITLE_TIMEOUT_SECONDS,
+    thread_id: str = "",
 ) -> str:
     fallback = _fallback_conversation_title(first_user_message)
 
@@ -110,10 +116,11 @@ async def generate_conversation_title(
         if agent_config is None:
             return fallback
 
-        llm = get_chat_model(
+        resolved = get_resolved_chat_model(
             provider_name=agent_config.provider,
             model=agent_config.model or None,
         )
+        llm = resolved.model
         messages = [
             SystemMessage(content=agent_config.system_prompt),
             HumanMessage(
@@ -123,8 +130,22 @@ async def generate_conversation_title(
                 )
             ),
         ]
+        config = attach_usage_context(
+            {"configurable": {"thread_id": thread_id}},
+            build_usage_context(thread_id),
+        )
         response = await asyncio.wait_for(
-            asyncio.to_thread(llm.invoke, messages),
+            llm.ainvoke(
+                messages,
+                config=with_usage_tracking(
+                    config,
+                    agent_name=CONVERSATION_TITLE_AGENT_NAME,
+                    provider_name=resolved.provider_name,
+                    model_name=resolved.model_name,
+                    call_kind="conversation_title",
+                    internal=True,
+                ),
+            ),
             timeout=timeout_seconds,
         )
         return _sanitize_generated_title(
@@ -146,6 +167,7 @@ async def _generate_and_update_conversation_title(
         generated_title = await generate_conversation_title(
             first_user_message=title,
             attachments=attachments,
+            thread_id=thread_id,
         )
         fallback_title = str(title or "").strip()[:255]
         current_titles = [thread_id]

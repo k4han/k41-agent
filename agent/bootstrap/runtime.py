@@ -17,6 +17,7 @@ from agent.modules.workflows import (
 )
 from agent.modules.scheduler import initialize_scheduler, stop_scheduler
 from agent.modules.skills import reload_skills
+from agent.modules.usage import prune_usage_events
 from agent.modules.agent_runtime import get_background_task_manager
 from agent.shared.infrastructure.db import Base, load_orm_models
 from agent.shared.infrastructure.db.engine import (
@@ -35,6 +36,7 @@ async def initialize_persistence() -> None:
     await initialize_async_engine(metadata=Base.metadata)
 
     migrate_workspace_tables(get_database_url())
+    await prune_usage_events()
     await initialize_checkpointer()
 
 

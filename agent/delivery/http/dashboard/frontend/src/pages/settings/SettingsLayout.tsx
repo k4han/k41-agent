@@ -1,6 +1,7 @@
 import { A, useLocation } from "@solidjs/router";
 import {
   ArrowLeft,
+  BarChart3,
   Bot,
   Braces,
   ChevronsLeft,
@@ -29,6 +30,7 @@ const settingsNavItems: SettingsNavItem[] = [
   { href: "/settings/agents", label: "Agents", icon: <Users size={15} /> },
   { href: "/settings/prompt-variables", label: "Prompt Variables", icon: <Braces size={15} /> },
   { href: "/settings/security", label: "Security", icon: <KeyRound size={15} /> },
+  { href: "/settings/usage", label: "Usage", icon: <BarChart3 size={15} /> },
   { href: "/settings/appearance", label: "Appearance", icon: <Palette size={15} /> },
 ];
 

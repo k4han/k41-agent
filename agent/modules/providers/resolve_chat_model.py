@@ -5,7 +5,7 @@ from functools import lru_cache
 from langchain_core.language_models import BaseChatModel
 
 from agent.modules.providers.service import ProviderService
-from agent.modules.providers.models import ModelConfig
+from agent.modules.providers.models import ModelConfig, ResolvedChatModel
 from agent.shared.config import get_config_service
 
 
@@ -50,6 +50,23 @@ def resolve_chat_model(
     temperature: float | None = None,
     api_key: str | None = None,
 ) -> BaseChatModel:
+    return resolve_chat_model_info(
+        provider_service,
+        provider_name=provider_name,
+        model=model,
+        temperature=temperature,
+        api_key=api_key,
+    ).model
+
+
+def resolve_chat_model_info(
+    provider_service: ProviderService,
+    *,
+    provider_name: str | None = None,
+    model: str | None = None,
+    temperature: float | None = None,
+    api_key: str | None = None,
+) -> ResolvedChatModel:
     """Resolve and cache a chat model instance.
 
     Resolution order:
@@ -104,13 +121,19 @@ def resolve_chat_model(
 
     factory = provider_service.get_factory(provider_config.provider_type)
 
-    return _get_cached_model(
+    chat_model = _get_cached_model(
         factory=factory,
         provider_type=str(provider_config.provider_type),
         base_url=provider_config.base_url,
         api_key=resolved_api_key,
         model_name=model_config.model_name,
         temperature=model_config.temperature,
+    )
+    return ResolvedChatModel(
+        model=chat_model,
+        provider_name=provider_config.name,
+        provider_type=str(provider_config.provider_type),
+        model_name=model_config.model_name,
     )
 
 

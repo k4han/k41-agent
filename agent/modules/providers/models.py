@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 
+from langchain_core.language_models import BaseChatModel
+
 
 @dataclass(frozen=True, slots=True)
 class ModelConfig:
@@ -31,3 +33,13 @@ class ProviderModelCatalog:
     can_list_models: bool
     models: tuple[ModelOption, ...]
     error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedChatModel:
+    """Chat model instance with the resolved provider and model identity."""
+
+    model: BaseChatModel
+    provider_name: str
+    provider_type: str
+    model_name: str

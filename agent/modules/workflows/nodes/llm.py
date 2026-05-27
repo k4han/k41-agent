@@ -6,9 +6,11 @@ from functools import lru_cache
 from typing import TYPE_CHECKING
 
 from langchain_core.messages import BaseMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
 
 from agent.modules.mcp import get_all_mcp_tools, get_mcp_server_tools
-from agent.modules.providers import get_chat_model
+from agent.modules.providers import get_resolved_chat_model
+from agent.modules.usage import with_usage_tracking
 from agent.modules.prompt_variables import get_runtime_prompt_variable_values
 from agent.modules.workflows.message_history import normalize_messages_for_chat_model
 from agent.modules.workflows.prompt_builders import (
@@ -75,7 +77,7 @@ async def _collect_mcp_tools(
     return [tool for tool in all_mcp if tool.name in wanted]
 
 
-async def llm_node(state, runtime: Runtime[WorkflowContext]):
+async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowContext]):
     """Dynamic node: reads agent_name from context, resolves full config at runtime."""
     from agent.modules.agents import get_catalog_service
 
@@ -86,18 +88,18 @@ async def llm_node(state, runtime: Runtime[WorkflowContext]):
 
     # Load agent config from catalog
     catalog = get_catalog_service()
-    config = catalog.get_agent(agent_name)
+    agent_config = catalog.get_agent(agent_name)
 
     # Fallback to "default" agent if the requested agent is not found.
     # The builtin default is always guaranteed to exist after catalog.load().
-    if config is None:
-        config = catalog.get_agent("default")
+    if agent_config is None:
+        agent_config = catalog.get_agent("default")
 
     # config is guaranteed non-None at this point (builtin default always present).
-    provider = ctx.get_provider() or config.provider
-    model = ctx.get_model() or config.model or None
-    system_prompt_template = config.system_prompt
-    tool_names = config.tools if config.tools else None
+    provider = ctx.get_provider() or agent_config.provider
+    model = ctx.get_model() or agent_config.model or None
+    system_prompt_template = agent_config.system_prompt
+    tool_names = agent_config.tools if agent_config.tools else None
 
     # Override tools if specified in context (for sub-agent calls)
     ctx_tool_names = ctx.get_allowed_tool_names()
@@ -114,7 +116,7 @@ async def llm_node(state, runtime: Runtime[WorkflowContext]):
     mcp_tools = await _collect_mcp_tools(
         tuple(tool_names) if tool_names else None,
         agent_name=agent_name,
-        mcp_servers=config.mcp_servers,
+        mcp_servers=getattr(agent_config, "mcp_servers", None),
     )
     if mcp_tools:
         known_names = {tool.name for tool in tools}
@@ -138,6 +140,16 @@ async def llm_node(state, runtime: Runtime[WorkflowContext]):
         ]
     )
 
-    llm = get_chat_model(provider_name=provider, model=model).bind_tools(tools)
-    response = llm.invoke(messages)
+    resolved = get_resolved_chat_model(provider_name=provider, model=model)
+    llm = resolved.model.bind_tools(tools)
+    response = await llm.ainvoke(
+        messages,
+        config=with_usage_tracking(
+            config,
+            agent_name=agent_name,
+            provider_name=resolved.provider_name,
+            model_name=resolved.model_name,
+            call_kind="agent",
+        ),
+    )
     return {"messages": [response]}

@@ -147,6 +147,26 @@ def _truncate_stored_text(text: str) -> str:
     return text[:MAX_STORED_TEXT_LENGTH] + "\n...[truncated]"
 
 
+def _task_usage_context(task: BackgroundTask) -> dict[str, str]:
+    if task.thread_id:
+        try:
+            from agent.modules.agent_runtime.session import SessionManager
+
+            platform, user_id, channel_id = SessionManager.parse_thread_id(task.thread_id)
+            return {
+                "platform": platform,
+                "user_id": user_id,
+                "channel_id": channel_id,
+            }
+        except ValueError:
+            pass
+    return {
+        "platform": BACKGROUND_THREAD_PREFIX,
+        "user_id": "dashboard",
+        "channel_id": task.task_id,
+    }
+
+
 class BackgroundTaskManager:
     """Thread-safe manager for background agent tasks."""
 
@@ -382,6 +402,7 @@ class BackgroundTaskManager:
             thread_id=task.thread_id,
             agent_name=task.agent_name,
             workspace=task.workspace,
+            usage_context=_task_usage_context(task),
         ):
             if isinstance(event, dict):
                 event_type = str(event.get("type") or "")
