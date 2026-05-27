@@ -14,17 +14,20 @@ from agent.modules.channels import ChannelManager
 @pytest.fixture()
 def dashboard_agent_client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
+    agents_routes_module = importlib.import_module(
+        "agent.delivery.http.dashboard.routes.agents"
+    )
+    shared_routes_module = importlib.import_module(
+        "agent.delivery.http.dashboard.routes.shared"
+    )
 
     repo = FilesystemAgentRepository(tmp_path / "agents")
     repo.load()
     service = AgentCatalogService()
     service._repository = repo
 
-    monkeypatch.setattr(
-        dashboard_router_module,
-        "get_catalog_service",
-        lambda: service,
-    )
+    monkeypatch.setattr(agents_routes_module, "get_catalog_service", lambda: service)
+    monkeypatch.setattr(shared_routes_module, "get_catalog_service", lambda: service)
 
     app = FastAPI()
     app.state.channel_manager = ChannelManager()

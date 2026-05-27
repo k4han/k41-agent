@@ -19,6 +19,41 @@ from agent.delivery.http.dashboard.spa import STATIC_DIR
 from agent.modules.admin_auth import get_current_admin
 from agent.modules.channels import ChannelManager
 
+_DASHBOARD_ROUTE_MODULES = (
+    "agent.delivery.http.dashboard.routes.shared",
+    "agent.delivery.http.dashboard.routes.conversations",
+    "agent.delivery.http.dashboard.routes.scheduler",
+    "agent.delivery.http.dashboard.routes.workspace",
+    "agent.delivery.http.dashboard.routes.tasks",
+    "agent.delivery.http.dashboard.routes.github",
+    "agent.delivery.http.dashboard.routes.dashboard",
+    "agent.delivery.http.dashboard.routes.agents",
+    "agent.delivery.http.dashboard.routes.channels",
+    "agent.delivery.http.dashboard.routes.providers",
+    "agent.delivery.http.dashboard.routes.settings",
+    "agent.delivery.http.dashboard.routes.sessions",
+    "agent.delivery.http.dashboard.routes.spa",
+)
+
+
+def _patch_dashboard_attr(monkeypatch: pytest.MonkeyPatch, name: str, value) -> None:
+    patched = False
+    for mod_name in _DASHBOARD_ROUTE_MODULES:
+        mod = importlib.import_module(mod_name)
+        if hasattr(mod, name):
+            monkeypatch.setattr(mod, name, value)
+            patched = True
+    if not patched:
+        raise AttributeError(f"No dashboard route module exposes {name!r}")
+
+
+def _dashboard_attr(name: str):
+    for mod_name in _DASHBOARD_ROUTE_MODULES:
+        mod = importlib.import_module(mod_name)
+        if hasattr(mod, name):
+            return getattr(mod, name)
+    raise AttributeError(f"No dashboard route module exposes {name!r}")
+
 
 async def idle_runner() -> None:
     return None
@@ -250,7 +285,6 @@ def test_dashboard_workspace_resolve_uses_github_service(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
 
     class FakeGitHubService:
         async def resolve_repository_workspace(self, repository_id: int):
@@ -261,10 +295,7 @@ def test_dashboard_workspace_resolve_uses_github_service(
                 "workspace": _workspace_payload(tmp_path),
             }
 
-    monkeypatch.setattr(
-        dashboard_router_module,
-        "get_github_automation_service",
-        lambda: FakeGitHubService(),
+    _patch_dashboard_attr(monkeypatch, "get_github_automation_service", lambda: FakeGitHubService(),
     )
     client = _create_dashboard_client(ChannelManager())
 
@@ -469,7 +500,6 @@ def test_dashboard_workspace_changes_for_non_git_workspace() -> None:
 def test_dashboard_submit_background_task_records_default_workspace(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
     captured = {}
 
     class FakeManager:
@@ -477,10 +507,7 @@ def test_dashboard_submit_background_task_records_default_workspace(
             captured.update(kwargs)
             return "task-1"
 
-    monkeypatch.setattr(
-        dashboard_router_module,
-        "get_background_task_manager",
-        lambda: FakeManager(),
+    _patch_dashboard_attr(monkeypatch, "get_background_task_manager", lambda: FakeManager(),
     )
 
     client = _create_dashboard_client(ChannelManager())
@@ -499,9 +526,8 @@ def test_dashboard_chat_history_returns_workspace_metadata(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
     conversations_module = importlib.import_module("agent.modules.conversations")
-    workspace = dashboard_router_module.resolve_workspace_ref(_workspace_payload(tmp_path))
+    workspace = _dashboard_attr("resolve_workspace_ref")(_workspace_payload(tmp_path))
     threads = [
         _conversation_thread("api_dashboard_with", "Thread with workspace"),
         _conversation_thread(
@@ -535,16 +561,8 @@ def test_dashboard_chat_history_returns_workspace_metadata(
         "list_conversation_threads",
         fake_list_conversation_threads,
     )
-    monkeypatch.setattr(
-        dashboard_router_module,
-        "_get_checkpoint_stats",
-        fake_get_checkpoint_stats,
-    )
-    monkeypatch.setattr(
-        dashboard_router_module,
-        "get_thread_workspace_refs",
-        fake_get_thread_workspace_refs,
-    )
+    _patch_dashboard_attr(monkeypatch, "_get_checkpoint_stats", fake_get_checkpoint_stats)
+    _patch_dashboard_attr(monkeypatch, "get_thread_workspace_refs", fake_get_thread_workspace_refs)
 
     client = _create_dashboard_client(ChannelManager())
     response = client.get("/dashboard-api/chat-history")
@@ -564,9 +582,8 @@ def test_dashboard_chat_history_uses_background_task_workspace_fallback(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
     conversations_module = importlib.import_module("agent.modules.conversations")
-    workspace = dashboard_router_module.resolve_workspace_ref(
+    workspace = _dashboard_attr("resolve_workspace_ref")(
         {
             **_workspace_payload(tmp_path),
             "label": "octo/example",
@@ -608,20 +625,9 @@ def test_dashboard_chat_history_uses_background_task_workspace_fallback(
         "list_conversation_threads",
         fake_list_conversation_threads,
     )
-    monkeypatch.setattr(
-        dashboard_router_module,
-        "_get_checkpoint_stats",
-        fake_get_checkpoint_stats,
-    )
-    monkeypatch.setattr(
-        dashboard_router_module,
-        "get_thread_workspace_refs",
-        fake_get_thread_workspace_refs,
-    )
-    monkeypatch.setattr(
-        dashboard_router_module,
-        "get_background_task_manager",
-        lambda: FakeTaskManager(),
+    _patch_dashboard_attr(monkeypatch, "_get_checkpoint_stats", fake_get_checkpoint_stats)
+    _patch_dashboard_attr(monkeypatch, "get_thread_workspace_refs", fake_get_thread_workspace_refs)
+    _patch_dashboard_attr(monkeypatch, "get_background_task_manager", lambda: FakeTaskManager(),
     )
 
     client = _create_dashboard_client(ChannelManager())
@@ -637,7 +643,6 @@ def test_dashboard_chat_history_uses_background_task_workspace_fallback(
 def test_dashboard_chat_history_pagination_keeps_workspace_fields(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
     conversations_module = importlib.import_module("agent.modules.conversations")
 
     async def fake_list_conversation_threads(
@@ -667,16 +672,8 @@ def test_dashboard_chat_history_pagination_keeps_workspace_fields(
         "list_conversation_threads",
         fake_list_conversation_threads,
     )
-    monkeypatch.setattr(
-        dashboard_router_module,
-        "_get_checkpoint_stats",
-        fake_get_checkpoint_stats,
-    )
-    monkeypatch.setattr(
-        dashboard_router_module,
-        "get_thread_workspace_refs",
-        fake_get_thread_workspace_refs,
-    )
+    _patch_dashboard_attr(monkeypatch, "_get_checkpoint_stats", fake_get_checkpoint_stats)
+    _patch_dashboard_attr(monkeypatch, "get_thread_workspace_refs", fake_get_thread_workspace_refs)
 
     client = _create_dashboard_client(ChannelManager())
     response = client.get(
@@ -694,7 +691,6 @@ def test_dashboard_chat_history_pagination_keeps_workspace_fields(
 
 
 def test_dashboard_api_renames_chat_thread(monkeypatch: pytest.MonkeyPatch) -> None:
-    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
     conversations_module = importlib.import_module("agent.modules.conversations")
 
     async def fake_rename(thread_id: str, title: str):
@@ -722,12 +718,8 @@ def test_dashboard_api_renames_chat_thread(monkeypatch: pytest.MonkeyPatch) -> N
         return None
 
     monkeypatch.setattr(conversations_module, "rename_conversation_thread", fake_rename)
-    monkeypatch.setattr(dashboard_router_module, "_get_checkpoint_stats", fake_stats)
-    monkeypatch.setattr(
-        dashboard_router_module,
-        "_workspace_ref_for_thread",
-        fake_workspace_ref_for_thread,
-    )
+    _patch_dashboard_attr(monkeypatch, "_get_checkpoint_stats", fake_stats)
+    _patch_dashboard_attr(monkeypatch, "_workspace_ref_for_thread", fake_workspace_ref_for_thread)
 
     client = _create_dashboard_client(ChannelManager())
     response = client.patch(
@@ -744,7 +736,6 @@ def test_dashboard_api_renames_chat_thread(monkeypatch: pytest.MonkeyPatch) -> N
 def test_dashboard_background_task_events_streams_snapshot_and_done(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
     conversations_module = importlib.import_module("agent.modules.conversations")
     thread_id = "task_dashboard_123"
     task = {
@@ -801,25 +792,14 @@ def test_dashboard_background_task_events_streams_snapshot_and_done(
         return [{"id": "ai-1", "role": "assistant", "content": "done"}]
 
     manager = FakeManager()
-    monkeypatch.setattr(
-        dashboard_router_module,
-        "get_background_task_manager",
-        lambda: manager,
-    )
+    _patch_dashboard_attr(monkeypatch, "get_background_task_manager", lambda: manager)
     monkeypatch.setattr(
         conversations_module,
         "get_conversation_thread",
         fake_get_conversation_thread,
     )
-    monkeypatch.setattr(
-        dashboard_router_module,
-        "_get_thread_messages",
-        fake_get_thread_messages,
-    )
-    monkeypatch.setattr(
-        dashboard_router_module,
-        "get_active_session_registry",
-        lambda: SimpleNamespace(list_active=lambda: []),
+    _patch_dashboard_attr(monkeypatch, "_get_thread_messages", fake_get_thread_messages)
+    _patch_dashboard_attr(monkeypatch, "get_active_session_registry", lambda: SimpleNamespace(list_active=lambda: []),
     )
 
     client = _create_dashboard_client(ChannelManager())
@@ -841,7 +821,6 @@ def test_dashboard_background_task_events_streams_snapshot_and_done(
 def test_dashboard_background_task_events_returns_404_for_unknown_thread(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
     conversations_module = importlib.import_module("agent.modules.conversations")
 
     class FakeManager:
@@ -854,10 +833,7 @@ def test_dashboard_background_task_events_returns_404_for_unknown_thread(
     async def fake_get_conversation_thread(thread_id: str):
         return None
 
-    monkeypatch.setattr(
-        dashboard_router_module,
-        "get_background_task_manager",
-        lambda: FakeManager(),
+    _patch_dashboard_attr(monkeypatch, "get_background_task_manager", lambda: FakeManager(),
     )
     monkeypatch.setattr(
         conversations_module,
@@ -881,7 +857,6 @@ def test_dashboard_background_task_events_returns_404_for_unknown_thread(
 async def test_dashboard_delete_chat_thread_deletes_workflow_tree(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
     conversations_module = importlib.import_module("agent.modules.conversations")
     workflows_module = importlib.import_module("agent.modules.workflows")
     calls: list[tuple[str, str]] = []
@@ -904,7 +879,7 @@ async def test_dashboard_delete_chat_thread_deletes_workflow_tree(
         fake_delete_tree,
     )
 
-    result = await dashboard_router_module.delete_chat_thread("api_dashboard_123")
+    result = await _dashboard_attr("delete_chat_thread")("api_dashboard_123")
 
     assert result == {"status": "deleted", "thread_id": "api_dashboard_123"}
     assert calls == [
@@ -917,7 +892,6 @@ async def test_dashboard_delete_chat_thread_deletes_workflow_tree(
 async def test_dashboard_delete_background_task_thread_deletes_workflow_tree(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
     agent_runtime_module = importlib.import_module("agent.modules.agent_runtime")
     conversations_module = importlib.import_module("agent.modules.conversations")
     workflows_module = importlib.import_module("agent.modules.workflows")
@@ -951,7 +925,7 @@ async def test_dashboard_delete_background_task_thread_deletes_workflow_tree(
         fake_delete_tree,
     )
 
-    result = await dashboard_router_module.delete_background_task_thread(
+    result = await _dashboard_attr("delete_background_task_thread")(
         "task_dashboard_123"
     )
 
@@ -967,7 +941,6 @@ async def test_dashboard_delete_background_task_thread_deletes_workflow_tree(
 async def test_dashboard_thread_messages_preserve_assistant_text_with_tool_calls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
     from langchain_core.messages import AIMessage, ToolMessage
 
     class FakeCheckpointer:
@@ -1004,13 +977,10 @@ async def test_dashboard_thread_messages_preserve_assistant_text_with_tool_calls
                 }
             )
 
-    monkeypatch.setattr(
-        dashboard_router_module,
-        "_get_checkpointer",
-        lambda: FakeCheckpointer(),
+    _patch_dashboard_attr(monkeypatch, "_get_checkpointer", lambda: FakeCheckpointer(),
     )
 
-    messages = await dashboard_router_module._get_thread_messages("api_dashboard_123")
+    messages = await _dashboard_attr("_get_thread_messages")("api_dashboard_123")
 
     assert messages == [
         {
@@ -1037,7 +1007,6 @@ async def test_dashboard_thread_messages_preserve_assistant_text_with_tool_calls
 
 @pytest.mark.asyncio
 async def test_dashboard_thread_messages_hide_raw_image_data(monkeypatch: pytest.MonkeyPatch) -> None:
-    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
     from langchain_core.messages import HumanMessage
 
     class FakeCheckpointer:
@@ -1082,13 +1051,10 @@ async def test_dashboard_thread_messages_hide_raw_image_data(monkeypatch: pytest
                 }
             )
 
-    monkeypatch.setattr(
-        dashboard_router_module,
-        "_get_checkpointer",
-        lambda: FakeCheckpointer(),
+    _patch_dashboard_attr(monkeypatch, "_get_checkpointer", lambda: FakeCheckpointer(),
     )
 
-    messages = await dashboard_router_module._get_thread_messages("api_dashboard_123")
+    messages = await _dashboard_attr("_get_thread_messages")("api_dashboard_123")
 
     assert messages == [
         {
@@ -1109,7 +1075,6 @@ async def test_dashboard_thread_messages_hide_raw_image_data(monkeypatch: pytest
 
 
 def test_dashboard_api_github_returns_repository_bindings(monkeypatch: pytest.MonkeyPatch) -> None:
-    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
 
     class FakeService:
         async def list_repository_bindings(self):
@@ -1119,10 +1084,7 @@ def test_dashboard_api_github_returns_repository_bindings(monkeypatch: pytest.Mo
         def list_agent_cards(self):
             return [SimpleNamespace(name="default", valid=True)]
 
-    monkeypatch.setattr(
-        dashboard_router_module,
-        "get_github_settings",
-        lambda: SimpleNamespace(
+    _patch_dashboard_attr(monkeypatch, "get_github_settings", lambda: SimpleNamespace(
             is_configured=True,
             enabled=True,
             app_slug="kaka-agent",
@@ -1131,15 +1093,9 @@ def test_dashboard_api_github_returns_repository_bindings(monkeypatch: pytest.Mo
             mention_triggers=("@kaka-agent", "/kaka"),
         ),
     )
-    monkeypatch.setattr(
-        dashboard_router_module,
-        "get_github_automation_service",
-        lambda: FakeService(),
+    _patch_dashboard_attr(monkeypatch, "get_github_automation_service", lambda: FakeService(),
     )
-    monkeypatch.setattr(
-        dashboard_router_module,
-        "get_catalog_service",
-        lambda: FakeCatalog(),
+    _patch_dashboard_attr(monkeypatch, "get_catalog_service", lambda: FakeCatalog(),
     )
 
     client = _create_dashboard_client(ChannelManager())
@@ -1227,14 +1183,12 @@ def test_login_json_sets_admin_cookie(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.asyncio
 async def test_create_scheduler_job_accepts_relative_trigger(monkeypatch) -> None:
     from agent.modules.scheduler import triggers as trigger_module
-
-    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
     scheduler = FakeScheduler()
     now = datetime(2026, 4, 13, 22, 30, 0, tzinfo=scheduler.timezone)
-    monkeypatch.setattr(dashboard_router_module, "_get_scheduler", lambda: scheduler)
+    _patch_dashboard_attr(monkeypatch, "_get_scheduler", lambda: scheduler)
     monkeypatch.setattr(trigger_module, "_scheduler_now", lambda _: now)
 
-    body = dashboard_router_module.CreateJobBody(
+    body = _dashboard_attr("CreateJobBody")(
         task="eat",
         platform="telegram",
         user_id="123",
@@ -1242,7 +1196,7 @@ async def test_create_scheduler_job_accepts_relative_trigger(monkeypatch) -> Non
         trigger_args={"minutes": 2},
     )
 
-    result = await dashboard_router_module.create_scheduler_job(body)
+    result = await _dashboard_attr("create_scheduler_job")(body)
 
     assert result["status"] == "created"
     assert result["job"]["trigger_type"] == "date"
@@ -1252,7 +1206,6 @@ async def test_create_scheduler_job_accepts_relative_trigger(monkeypatch) -> Non
 
 @pytest.mark.asyncio
 async def test_run_scheduler_job_now_queues_existing_job(monkeypatch) -> None:
-    dashboard_router_module = importlib.import_module("agent.delivery.http.dashboard.router")
     scheduler = FakeScheduler()
     job = FakeJob(
         DateTrigger(),
@@ -1260,13 +1213,13 @@ async def test_run_scheduler_job_now_queues_existing_job(monkeypatch) -> None:
         datetime(2026, 4, 14, 9, 0, 0, tzinfo=scheduler.timezone),
     )
     scheduler.jobs[job.id] = job
-    monkeypatch.setattr(dashboard_router_module, "_get_scheduler", lambda: scheduler)
+    _patch_dashboard_attr(monkeypatch, "_get_scheduler", lambda: scheduler)
 
     background_tasks = BackgroundTasks()
-    result = await dashboard_router_module.run_scheduler_job_now(job.id, background_tasks)
+    result = await _dashboard_attr("run_scheduler_job_now")(job.id, background_tasks)
 
     assert result == {"status": "queued", "job_id": job.id}
     assert len(background_tasks.tasks) == 1
     task = background_tasks.tasks[0]
-    assert task.func is dashboard_router_module.execute_scheduled_task
+    assert task.func is _dashboard_attr("execute_scheduled_task")
     assert task.kwargs == {"platform": "telegram", "user_id": "123", "task": "eat"}
