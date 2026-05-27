@@ -124,6 +124,16 @@ export function McpTab() {
 
   return (
     <div class="stack">
+      <div class="row-wrap" style={{ "justify-content": "flex-end" }}>
+        <button
+          class="btn btn-primary"
+          type="button"
+          onClick={() => setShowCreate(true)}
+        >
+          <Plus size={14} />
+          Add custom server
+        </button>
+      </div>
       <DataGate
         data={loadError() ? undefined : popular()}
         error={loadError()}
@@ -140,128 +150,120 @@ export function McpTab() {
                     <code> mcp__&lt;server&gt;__&lt;tool&gt; </code>prefix.
                   </div>
                 </div>
-                <button
-                  class="btn btn-primary"
-                  type="button"
-                  onClick={() => setShowCreate(true)}
-                >
-                  <Plus size={14} />
-                  Add custom server
-                </button>
               </div>
-              <div class="panel-body stack">
-                <Show
-                  when={servers().length > 0}
-                  fallback={
-                    <div class="empty">
-                      No MCP servers configured yet. Install one from the
-                      catalog below or add a custom server.
-                    </div>
-                  }
-                >
-                  <table class="table">
-                    <thead>
-                      <tr>
-                        <th>Name</th>
-                        <th>Transport</th>
-                        <th>Status</th>
-                        <th>Tools</th>
-                        <th />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <For each={servers()}>
-                        {(server) => (
-                          <tr>
-                            <td class="mono">
-                              <div style={{ display: "flex", "align-items": "center", gap: "8px" }}>
-                                {getServerIcon(server.name)}
-                                <a
-                                  href="javascript:void(0)"
-                                  onClick={() => setSelectedServer(server)}
-                                  style={{
-                                    "font-weight": "600",
-                                    "text-decoration": "none",
-                                    color: "var(--color-primary-light, #0076ff)",
-                                    cursor: "pointer"
-                                  }}
-                                  onMouseEnter={(e) => e.currentTarget.style.textDecoration = "underline"}
-                                  onMouseLeave={(e) => e.currentTarget.style.textDecoration = "none"}
-                                >
-                                  {server.name}
-                                </a>
-                              </div>
-                            </td>
-                            <td>{server.transport}</td>
-                            <td>
-                              <div style={{ display: "flex", "align-items": "center", gap: "10px" }}>
-                                <button
-                                  type="button"
-                                  class={`toggle-control ${server.enabled ? "active" : ""}`}
-                                  onClick={() => toggleServer(server.name, !server.enabled)}
-                                  title={server.enabled ? "Disable server" : "Enable server"}
-                                >
-                                  <div class="toggle-track">
-                                    <div class="toggle-thumb" />
-                                  </div>
-                                </button>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Transport</th>
+                      <th>Status</th>
+                      <th>Tools</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <For
+                      each={servers()}
+                      fallback={
+                        <tr>
+                          <td colSpan={5}>
+                            <div class="empty">
+                              No MCP servers configured yet. Install one from the
+                              catalog below or add a custom server.
+                            </div>
+                          </td>
+                        </tr>
+                      }
+                    >
+                      {(server) => (
+                        <tr
+                          class="provider-table-row"
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => setSelectedServer(server)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              setSelectedServer(server);
+                            }
+                          }}
+                        >
+                          <td>
+                            <div class="provider-name-cell">
+                              {getServerIcon(server.name)}
+                              <span class="setting-title">{server.name}</span>
+                            </div>
+                          </td>
+                          <td>{server.transport}</td>
+                          <td>
+                            <div style={{ display: "flex", "align-items": "center", gap: "10px" }}>
+                              <button
+                                type="button"
+                                class={`toggle-control ${server.enabled ? "active" : ""}`}
+                                onClick={(e) => { e.stopPropagation(); toggleServer(server.name, !server.enabled); }}
+                                title={server.enabled ? "Disable server" : "Enable server"}
+                              >
+                                <div class="toggle-track">
+                                  <div class="toggle-thumb" />
+                                </div>
+                              </button>
+                              <Show
+                                when={server.enabled}
+                                fallback={
+                                  <span class="badge badge-warning">disabled</span>
+                                }
+                              >
                                 <Show
-                                  when={server.enabled}
+                                  when={!server.error}
                                   fallback={
-                                    <span class="badge badge-warning">disabled</span>
+                                    <span
+                                      class="badge badge-danger"
+                                      title={server.error}
+                                    >
+                                      error
+                                    </span>
                                   }
                                 >
-                                  <Show
-                                    when={!server.error}
-                                    fallback={
-                                      <span
-                                        class="badge badge-danger"
-                                        title={server.error}
-                                      >
-                                        error
-                                      </span>
+                                  <span
+                                    class={
+                                      server.loaded
+                                        ? "badge badge-success"
+                                        : "badge"
                                     }
                                   >
-                                    <span
-                                      class={
-                                        server.loaded
-                                          ? "badge badge-success"
-                                          : "badge"
-                                      }
-                                    >
-                                      {server.loaded ? "loaded" : "pending"}
-                                    </span>
-                                  </Show>
+                                    {server.loaded ? "loaded" : "pending"}
+                                  </span>
                                 </Show>
-                              </div>
-                            </td>
-                            <td>{server.tool_count}</td>
-                            <td>
-                              <div class="row-wrap">
-                                <button
-                                  class="btn btn-sm"
-                                  type="button"
-                                  onClick={() => reloadServer(server.name)}
-                                  title="Reload tools"
-                                >
-                                  <RefreshCw size={13} />
-                                </button>
-                                <button
-                                  class="btn btn-sm"
-                                  type="button"
-                                  onClick={() => deleteServer(server.name)}
-                                  title="Delete"
-                                >
-                                  <Trash2 size={13} />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </For>
-                    </tbody>
-                  </table>
-                </Show>
+                              </Show>
+                            </div>
+                          </td>
+                          <td>{server.tool_count}</td>
+                          <td>
+                            <div class="row-wrap">
+                              <button
+                                class="btn btn-sm"
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); reloadServer(server.name); }}
+                                title="Reload tools"
+                              >
+                                <RefreshCw size={13} />
+                              </button>
+                              <button
+                                class="btn btn-sm"
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); deleteServer(server.name); }}
+                                title="Delete"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </For>
+                  </tbody>
+                </table>
               </div>
             </section>
 
