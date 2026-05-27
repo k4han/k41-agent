@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import textwrap
+from pathlib import Path
+
 import pytest
 from fastapi import Request
 
 from agent.shared.config import ConfigService, SettingsSource, SettingsValue
 from agent.shared.config.default_source import DefaultConfigSource
+from agent.shared.config.yaml_source import YamlConfigSource
 
 
 class StubSource:
@@ -34,6 +38,11 @@ class StubSource:
     @property
     def priority(self) -> int:
         return 100
+
+
+def _yaml_config_service(config_path: Path, content: str) -> ConfigService:
+    config_path.write_text(textwrap.dedent(content).strip() + "\n", encoding="utf-8")
+    return ConfigService(sources=[DefaultConfigSource(), YamlConfigSource(path=config_path)])
 
 
 @pytest.fixture()
@@ -94,6 +103,16 @@ class TestDashboardSettingsEndpoints:
                 value="openai_compatible",
                 source=SettingsSource.CONFIG_FILE,
             ),
+            "llm.providers.openai-main.api_key": SettingsValue(
+                key="llm.providers.openai-main.api_key",
+                value="openai-key",
+                source=SettingsSource.CONFIG_FILE,
+            ),
+            "llm.providers.openai-main.base_url": SettingsValue(
+                key="llm.providers.openai-main.base_url",
+                value="https://api.example.com/v1",
+                source=SettingsSource.CONFIG_FILE,
+            ),
             "llm.providers.openai-main.default_model": SettingsValue(
                 key="llm.providers.openai-main.default_model",
                 value="openai-default",
@@ -121,6 +140,231 @@ class TestDashboardSettingsEndpoints:
         assert row["fields"]["models"]["key"] == "llm.providers.openai-main.models"
         assert row["fields"]["models"]["info"]["value"] == "openai-default,openai-fast"
         assert "models" in data["provider_field_order"]
+        assert row["can_set_default"] is True
+        assert data["provider_type_options"][0]["value"] == "google"
+
+    @pytest.mark.parametrize(
+        ("provider_type", "base_url"),
+        [
+            ("google", ""),
+            ("anthropic", ""),
+            ("openai_compatible", "https://api.example.com/v1"),
+        ],
+    )
+    def test_create_provider_saves_expected_fields(
+        self,
+        make_dashboard_client,
+        tmp_path: Path,
+        provider_type: str,
+        base_url: str,
+    ) -> None:
+        config_path = tmp_path / "config.yaml"
+        client = make_dashboard_client(
+            _yaml_config_service(
+                config_path,
+                """
+                llm:
+                  default_provider: ""
+                  providers: {}
+                """,
+            )
+        )
+
+        response = client.post(
+            "/dashboard-api/providers",
+            json={
+                "name": f"{provider_type}-main",
+                "type": provider_type,
+                "api_key": "provider-key",
+                "base_url": base_url,
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["type"] == provider_type
+
+        import yaml
+
+        data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        provider = data["llm"]["providers"][f"{provider_type}-main"]
+        assert provider["type"] == provider_type
+        assert provider["api_key"] == "provider-key"
+        assert provider["default_model"] == ""
+        assert provider["models"] == []
+        assert provider["enabled"] is True
+        if provider_type == "openai_compatible":
+            assert provider["base_url"] == "https://api.example.com/v1"
+        else:
+            assert "base_url" not in provider
+
+    def test_create_provider_rejects_duplicate_name(
+        self,
+        make_dashboard_client,
+        tmp_path: Path,
+    ) -> None:
+        client = make_dashboard_client(
+            _yaml_config_service(
+                tmp_path / "config.yaml",
+                """
+                llm:
+                  default_provider: "main"
+                  providers:
+                    main:
+                      type: "google"
+                      api_key: "key"
+                      default_model: "gemini-model"
+                """,
+            )
+        )
+
+        response = client.post(
+            "/dashboard-api/providers",
+            json={"name": "main", "type": "google", "api_key": "new-key"},
+        )
+
+        assert response.status_code == 409
+
+    def test_create_provider_requires_openai_compatible_base_url(
+        self,
+        make_dashboard_client,
+        tmp_path: Path,
+    ) -> None:
+        client = make_dashboard_client(
+            _yaml_config_service(
+                tmp_path / "config.yaml",
+                """
+                llm:
+                  default_provider: ""
+                  providers: {}
+                """,
+            )
+        )
+
+        response = client.post(
+            "/dashboard-api/providers",
+            json={"name": "custom", "type": "openai_compatible", "api_key": "key"},
+        )
+
+        assert response.status_code == 400
+        assert "Base URL" in response.json()["detail"]
+
+    def test_delete_provider_removes_yaml_block(
+        self,
+        make_dashboard_client,
+        tmp_path: Path,
+    ) -> None:
+        config_path = tmp_path / "config.yaml"
+        client = make_dashboard_client(
+            _yaml_config_service(
+                config_path,
+                """
+                llm:
+                  default_provider: "main"
+                  providers:
+                    main:
+                      type: "google"
+                      api_key: "key"
+                      default_model: "gemini-model"
+                    side:
+                      type: "anthropic"
+                      api_key: "side-key"
+                      default_model: "claude-model"
+                """,
+            )
+        )
+
+        response = client.delete("/dashboard-api/providers/side")
+
+        assert response.status_code == 200
+        import yaml
+
+        data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        assert "side" not in data["llm"]["providers"]
+        assert "main" in data["llm"]["providers"]
+
+    def test_delete_provider_rejects_default_provider(
+        self,
+        make_dashboard_client,
+        tmp_path: Path,
+    ) -> None:
+        client = make_dashboard_client(
+            _yaml_config_service(
+                tmp_path / "config.yaml",
+                """
+                llm:
+                  default_provider: "main"
+                  providers:
+                    main:
+                      type: "google"
+                      api_key: "key"
+                      default_model: "gemini-model"
+                """,
+            )
+        )
+
+        response = client.delete("/dashboard-api/providers/main")
+
+        assert response.status_code == 400
+        assert "Default provider" in response.json()["detail"]
+
+    def test_default_provider_update_requires_default_model(
+        self,
+        make_dashboard_client,
+        tmp_path: Path,
+    ) -> None:
+        client = make_dashboard_client(
+            _yaml_config_service(
+                tmp_path / "config.yaml",
+                """
+                llm:
+                  default_provider: "main"
+                  providers:
+                    main:
+                      type: "google"
+                      api_key: "key"
+                      default_model: "gemini-model"
+                    incomplete:
+                      type: "anthropic"
+                      api_key: "side-key"
+                """,
+            )
+        )
+
+        response = client.put(
+            "/settings/llm.default_provider",
+            json={"value": "incomplete"},
+        )
+
+        assert response.status_code == 400
+        assert "default model" in response.json()["detail"].lower()
+
+    def test_default_provider_cannot_be_disabled_from_settings(
+        self,
+        make_dashboard_client,
+        tmp_path: Path,
+    ) -> None:
+        client = make_dashboard_client(
+            _yaml_config_service(
+                tmp_path / "config.yaml",
+                """
+                llm:
+                  default_provider: "main"
+                  providers:
+                    main:
+                      type: "google"
+                      api_key: "key"
+                      default_model: "gemini-model"
+                """,
+            )
+        )
+
+        response = client.put(
+            "/settings/llm.providers.main.enabled",
+            json={"value": False},
+        )
+
+        assert response.status_code == 400
+        assert "enabled" in response.json()["detail"].lower()
 
     def test_get_settings(self, dashboard_client) -> None:
         resp = dashboard_client.get("/settings")

@@ -261,7 +261,7 @@ _DEFAULT_META: dict[str, Any] = {
 _PROVIDER_SETTING_FIELD_META: dict[str, dict[str, Any]] = {
     "provider": {
         "type": "text",
-        "description": "Provider backend type (openai_compatible or google)",
+        "description": "Provider backend type (openai_compatible, google, or anthropic)",
         "label": "Provider Type",
     },
     "type": {

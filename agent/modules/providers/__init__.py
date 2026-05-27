@@ -18,6 +18,7 @@ _provider_service: ProviderService | None = None
 def _get_provider_service() -> ProviderService:
     global _provider_service
     if _provider_service is None:
+        from agent.modules.providers.anthropic.factory import AnthropicFactory
         from agent.modules.providers.google.factory import GoogleFactory
         from agent.modules.providers.openai_compatible.factory import OpenAICompatibleFactory
         from agent.modules.providers.provider import ProviderType
@@ -29,6 +30,7 @@ def _get_provider_service() -> ProviderService:
             ProviderType.OPENAI_COMPATIBLE, OpenAICompatibleFactory()
         )
         service.register_factory(ProviderType.GOOGLE, GoogleFactory())
+        service.register_factory(ProviderType.ANTHROPIC, AnthropicFactory())
         _provider_service = service
     return _provider_service
 

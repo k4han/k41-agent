@@ -19,6 +19,7 @@ DEFAULT_BASE_URL = ""
 DEFAULT_PROVIDER_NAME = "default"
 
 _PROVIDER_ALIASES: dict[str, ProviderType] = {
+    "anthropic": ProviderType.ANTHROPIC,
     "openai_compatible": ProviderType.OPENAI_COMPATIBLE,
     "google": ProviderType.GOOGLE,
 }
@@ -224,7 +225,8 @@ class ConfigProviderRepository:
             )
 
         default_provider_name = self._resolve_default_provider_name(loaded)
-        if not loaded[default_provider_name].enabled:
+        default_provider = loaded[default_provider_name]
+        if not default_provider.enabled:
             raise RuntimeError(
                 f"Default provider {default_provider_name!r} is disabled. "
                 "Set llm.default_provider to an enabled provider."

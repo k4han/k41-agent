@@ -81,7 +81,6 @@
   background: var(--surface);
 }
 
-.provider-list,
 .change-list {
   display: grid;
   gap: 10px;
@@ -261,6 +260,19 @@
   vertical-align: middle;
 }
 
+.provider-table-row {
+  cursor: pointer;
+}
+
+.provider-table-row:hover td {
+  background: var(--surface-2);
+}
+
+.provider-table-row:focus-visible {
+  outline: 2px solid var(--border-strong);
+  outline-offset: -2px;
+}
+
 .provider-row-dirty td {
   background: color-mix(in srgb, var(--warning) 5%, transparent);
 }
@@ -282,6 +294,7 @@
 
 .provider-table-actions {
   flex-wrap: nowrap;
+  gap: 6px;
 }
 
 .provider-edit-summary {
@@ -293,6 +306,55 @@
   border-radius: var(--radius);
   background: var(--surface-2);
   padding: 10px 12px;
+}
+
+.provider-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.provider-summary-grid > div {
+  display: grid;
+  min-height: 64px;
+  align-content: start;
+  gap: 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  padding: 10px;
+}
+
+.provider-summary-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-type-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.provider-type-option {
+  display: grid;
+  min-height: 96px;
+  align-content: start;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
+  padding: 12px;
+  text-align: left;
+}
+
+.provider-type-option:hover,
+.provider-type-option.active {
+  border-color: color-mix(in srgb, var(--info) 45%, var(--border));
+  background: color-mix(in srgb, var(--info) 8%, var(--surface));
 }
 
 .change-card {

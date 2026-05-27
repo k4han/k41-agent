@@ -22,7 +22,6 @@ from agent.modules.providers.provider import ProviderConfig, ProviderType
 from agent.modules.providers.repository import (
     ConfigProviderRepository,
     DEFAULT_BASE_URL,
-    DEFAULT_MODEL,
 )
 
 
@@ -43,7 +42,7 @@ def _write_config(
     default_provider: str | None = None,
     api_key: str = "test-key",
     base_url: str = DEFAULT_BASE_URL,
-    default_model: str = DEFAULT_MODEL,
+    default_model: str = "test-model",
     temperature: float | None = None,
 ) -> None:
     resolved_default_provider = default_provider or provider_name
@@ -112,7 +111,7 @@ def test_repo_default_provider_from_yaml(monkeypatch: MonkeyPatch, tmp_path: Pat
     assert provider.name == "openai-main"
     assert provider.provider_type == ProviderType.OPENAI_COMPATIBLE
     assert provider.base_url == DEFAULT_BASE_URL
-    assert provider.default_model == DEFAULT_MODEL
+    assert provider.default_model == "test-model"
     assert provider.api_key == "repo-key"
 
     by_alias = repo.get_provider("openai_compatible")
@@ -158,6 +157,31 @@ def test_repo_google_provider_from_yaml(monkeypatch: MonkeyPatch, tmp_path: Path
 
     by_alias = repo.get_provider("google")
     assert by_alias.provider_type == ProviderType.GOOGLE
+
+
+def test_repo_anthropic_provider_from_yaml(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    _write_config(
+        config_path,
+        provider_name="anthropic-main",
+        provider_type="anthropic",
+        default_provider="anthropic-main",
+        api_key="anthropic-key",
+        base_url="https://ignored.example/v1",
+        default_model="claude-model",
+    )
+    _set_config_path(monkeypatch, config_path)
+
+    repo = ConfigProviderRepository()
+    provider = repo.get_default_provider()
+
+    assert provider.provider_type == ProviderType.ANTHROPIC
+    assert provider.default_model == "claude-model"
+    assert provider.base_url == ""
+    assert provider.api_key == "anthropic-key"
+
+    by_alias = repo.get_provider("anthropic")
+    assert by_alias.provider_type == ProviderType.ANTHROPIC
 
 
 def test_repo_multi_provider_with_default_provider(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
@@ -296,6 +320,35 @@ def test_repo_requires_provider_specific_default_model(
 
         assert repo.get_provider("openai-main").default_model == ""
         assert repo.get_provider("google-main").default_model == ""
+
+
+def test_repo_non_default_provider_can_omit_default_model(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+        config_path = tmp_path / "config.yaml"
+        _write_yaml(
+                config_path,
+                """
+                llm:
+                    default_provider: "google-main"
+                    default_model: "global-model"
+                    providers:
+                        openai-main:
+                            type: "openai_compatible"
+                            api_key: "openai-key"
+                        google-main:
+                            type: "google"
+                            api_key: "google-key"
+                            default_model: "google-model"
+                """,
+        )
+        _set_config_path(monkeypatch, config_path)
+
+        repo = ConfigProviderRepository()
+
+        assert repo.get_provider("openai-main").default_model == ""
+        assert repo.get_provider("google-main").default_model == "google-model"
 
 
 def test_repo_global_default_model_does_not_override_provider_default_model(
@@ -712,6 +765,47 @@ def test_resolve_chat_model_uses_google_factory(monkeypatch: MonkeyPatch, tmp_pa
     call_args = google_factory.create.call_args.args
     assert call_args[0].provider_type == ProviderType.GOOGLE
     assert call_args[2] == "google-key"
+
+    _get_cached_model.cache_clear()
+
+
+def test_resolve_chat_model_uses_anthropic_factory(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _get_cached_model.cache_clear()
+
+    config_path = tmp_path / "config.yaml"
+    _write_config(
+        config_path,
+        provider_name="anthropic-main",
+        provider_type="anthropic",
+        default_provider="anthropic-main",
+        api_key="anthropic-key",
+        default_model="claude-model",
+    )
+    _set_config_path(monkeypatch, config_path)
+
+    repo = ConfigProviderRepository()
+    service = ProviderService(repository=repo)
+
+    openai_factory = MagicMock()
+    anthropic_factory = MagicMock()
+    anthropic_model = MagicMock()
+    anthropic_factory.create.return_value = anthropic_model
+
+    service.register_factory(ProviderType.OPENAI_COMPATIBLE, openai_factory)
+    service.register_factory(ProviderType.ANTHROPIC, anthropic_factory)
+
+    result = resolve_chat_model(service)
+
+    assert result is anthropic_model
+    anthropic_factory.create.assert_called_once()
+    openai_factory.create.assert_not_called()
+
+    call_args = anthropic_factory.create.call_args.args
+    assert call_args[0].provider_type == ProviderType.ANTHROPIC
+    assert call_args[2] == "anthropic-key"
 
     _get_cached_model.cache_clear()
 

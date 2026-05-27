@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from datetime import datetime
 from typing import Any
 
@@ -63,6 +64,7 @@ from agent.shared.config import (
     is_runtime_key,
     parse_provider_key,
 )
+from agent.shared.infrastructure.config_file import coerce_bool
 
 router = APIRouter(tags=["dashboard"], dependencies=[Depends(get_current_admin)])
 logger = logging.getLogger(__name__)
@@ -70,6 +72,28 @@ BACKGROUND_TASK_ACTIVE_STATUSES = {"pending", "running"}
 SSE_HEARTBEAT_SECONDS = 15.0
 NO_WORKSPACE_KEY = "no-workspace"
 NO_WORKSPACE_LABEL = "No workspace"
+PROVIDER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
+PROVIDER_TYPE_OPTIONS: list[dict[str, Any]] = [
+    {
+        "value": "google",
+        "label": "Google",
+        "description": "Google Gemini provider",
+        "requires_base_url": False,
+    },
+    {
+        "value": "anthropic",
+        "label": "Anthropic",
+        "description": "Anthropic Claude provider",
+        "requires_base_url": False,
+    },
+    {
+        "value": "openai_compatible",
+        "label": "OpenAI-compatible",
+        "description": "Custom endpoint that implements the OpenAI chat API",
+        "requires_base_url": True,
+    },
+]
+SUPPORTED_PROVIDER_TYPES = {option["value"] for option in PROVIDER_TYPE_OPTIONS}
 
 
 # --- helpers ----------------------------------------------------------
@@ -137,9 +161,192 @@ def _split_provider_settings(
     return global_settings, provider_settings
 
 
+def _normalize_provider_name(value: str) -> str:
+    return value.strip().lower().replace("-", "_")
+
+
+def _provider_type_label(provider_type: str) -> str:
+    for option in PROVIDER_TYPE_OPTIONS:
+        if option["value"] == provider_type:
+            return str(option["label"])
+    return provider_type
+
+
+def _provider_type_requires_base_url(provider_type: str) -> bool:
+    for option in PROVIDER_TYPE_OPTIONS:
+        if option["value"] == provider_type:
+            return bool(option["requires_base_url"])
+    return provider_type == "openai_compatible"
+
+
+def _field_value(
+    fields: dict[str, dict[str, Any]],
+    field_name: str,
+    default: Any = None,
+) -> Any:
+    entry = fields.get(field_name)
+    if not entry:
+        return default
+    value = entry.get("info", {}).get("value", default)
+    return default if value is None else value
+
+
+def _field_text(fields: dict[str, dict[str, Any]], field_name: str) -> str:
+    value = _field_value(fields, field_name, "")
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        return ", ".join(str(item).strip() for item in value if str(item).strip())
+    return str(value).strip()
+
+
+def _provider_entries_from_flat_config(
+    flat_config: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    providers: dict[str, dict[str, Any]] = {}
+    for key, value in flat_config.items():
+        parsed = parse_provider_key(key)
+        if parsed is None:
+            continue
+
+        provider_name, field_name = parsed
+        normalized_name = _normalize_provider_name(provider_name)
+        if not normalized_name:
+            continue
+
+        entry = providers.setdefault(
+            normalized_name,
+            {"name": provider_name},
+        )
+        canonical_field_name = "type" if field_name == "provider" else field_name
+        if field_name == "provider" and "type" in entry:
+            continue
+        entry[canonical_field_name] = value
+
+    return providers
+
+
+def _provider_type_from_body(provider_type: str) -> str:
+    normalized = provider_type.strip().lower().replace("-", "_")
+    if normalized not in SUPPORTED_PROVIDER_TYPES:
+        supported = ", ".join(sorted(SUPPORTED_PROVIDER_TYPES))
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported provider type: {provider_type!r}. Supported values: {supported}.",
+        )
+    return normalized
+
+
+def _validate_provider_name(name: str) -> str:
+    normalized = name.strip()
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Provider name is required.")
+    if normalized.lower() == "default":
+        raise HTTPException(
+            status_code=400,
+            detail="'default' is reserved and cannot be used as a provider name.",
+        )
+    if not PROVIDER_NAME_PATTERN.match(normalized):
+        raise HTTPException(
+            status_code=400,
+            detail="Provider name can only contain letters, numbers, underscores, and hyphens.",
+        )
+    return normalized
+
+
+def _provider_config_name(
+    service: ConfigService,
+    provider_name: str,
+) -> str | None:
+    normalized_name = _normalize_provider_name(provider_name)
+    providers = _provider_entries_from_flat_config(service.get_all())
+    entry = providers.get(normalized_name)
+    if entry is None:
+        return None
+    return str(entry["name"])
+
+
+def _update_config_settings(
+    service: ConfigService,
+    values: dict[str, Any | None],
+    *,
+    require_writable: bool = False,
+) -> None:
+    updated = False
+    for source in service._sources:
+        update_settings = getattr(source, "update_settings", None)
+        if callable(update_settings):
+            update_settings(values)
+            updated = True
+    if require_writable and not updated:
+        raise HTTPException(status_code=503, detail="No writable config source is available.")
+    service.reload()
+
+
+def _delete_config_tree(service: ConfigService, key: str) -> bool:
+    deleted = False
+    for source in service._sources:
+        delete_setting_tree = getattr(source, "delete_setting_tree", None)
+        if callable(delete_setting_tree):
+            deleted = bool(delete_setting_tree(key)) or deleted
+    service.reload()
+    return deleted
+
+
+def _validate_default_provider_update(
+    service: ConfigService,
+    values: dict[str, Any | None],
+) -> None:
+    configured_default = str(service.get("llm.default_provider", "") or "").strip()
+    default_provider = str(values.get("llm.default_provider", configured_default) or "").strip()
+    if not default_provider:
+        return
+
+    should_validate = "llm.default_provider" in values
+    if not should_validate and configured_default:
+        default_prefix = f"llm.providers.{configured_default}."
+        should_validate = any(key.startswith(default_prefix) for key in values)
+    if not should_validate:
+        return
+
+    flat_config = service.get_all()
+    flat_config.update(values)
+    providers = _provider_entries_from_flat_config(flat_config)
+    provider = providers.get(_normalize_provider_name(default_provider))
+    if provider is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown default provider: {default_provider}.",
+        )
+
+    if not coerce_bool(provider.get("enabled", True)):
+        raise HTTPException(
+            status_code=400,
+            detail="Default provider must be enabled.",
+        )
+    if not str(provider.get("api_key") or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Default provider must have an API key.",
+        )
+    if str(provider.get("type") or "").strip() == "openai_compatible" and not str(
+        provider.get("base_url") or ""
+    ).strip():
+        raise HTTPException(
+            status_code=400,
+            detail="OpenAI-compatible default provider must have a base URL.",
+        )
+    if not str(provider.get("default_model") or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Default provider must have a default model.",
+        )
+
+
 def _build_provider_rows(
     settings: dict[str, dict[str, Any]],
     expected_fields: list[str],
+    default_provider: str,
 ) -> list[dict[str, Any]]:
     grouped: dict[str, dict[str, dict[str, Any]]] = {}
     for key, info in settings.items():
@@ -154,6 +361,7 @@ def _build_provider_rows(
         }
 
     provider_rows: list[dict[str, Any]] = []
+    normalized_default_provider = _normalize_provider_name(default_provider)
     for provider_name in sorted(grouped):
         fields = grouped[provider_name]
 
@@ -183,9 +391,47 @@ def _build_provider_rows(
                 "info": synthetic_info,
             }
 
+        provider_type = _field_text(fields, "type") or _field_text(fields, "provider")
+        enabled = coerce_bool(_field_value(fields, "enabled", True))
+        default_model = _field_text(fields, "default_model")
+        api_key_configured = bool(_field_text(fields, "api_key"))
+        base_url_configured = bool(_field_text(fields, "base_url"))
+        requires_base_url = _provider_type_requires_base_url(provider_type)
+        is_default = (
+            bool(normalized_default_provider)
+            and _normalize_provider_name(provider_name) == normalized_default_provider
+        )
+        ready = (
+            enabled
+            and api_key_configured
+            and bool(default_model)
+            and (not requires_base_url or base_url_configured)
+        )
+        default_block_reason = ""
+        if is_default:
+            default_block_reason = "Provider is already default."
+        elif not enabled:
+            default_block_reason = "Enable the provider before making it default."
+        elif not default_model:
+            default_block_reason = "Set a default model before making this provider default."
+        elif requires_base_url and not base_url_configured:
+            default_block_reason = "Set a base URL before making this provider default."
+        elif not api_key_configured:
+            default_block_reason = "Set an API key before making this provider default."
+
         provider_rows.append({
             "name": provider_name,
             "fields": fields,
+            "type": provider_type,
+            "type_label": _provider_type_label(provider_type),
+            "requires_base_url": requires_base_url,
+            "enabled": enabled,
+            "is_default": is_default,
+            "ready": ready,
+            "can_delete": not is_default,
+            "delete_block_reason": "Default provider cannot be deleted." if is_default else "",
+            "can_set_default": ready and not is_default,
+            "default_block_reason": default_block_reason,
         })
 
     return provider_rows
@@ -341,7 +587,12 @@ def _settings_payload(request: Request, *, include_provider_settings: bool) -> d
         }
 
     global_settings, provider_settings = _split_provider_settings(settings)
-    provider_rows = _build_provider_rows(provider_settings, PROVIDER_SETTING_FIELD_ORDER)
+    default_provider = str(global_settings.get("llm.default_provider", {}).get("value") or "")
+    provider_rows = _build_provider_rows(
+        provider_settings,
+        PROVIDER_SETTING_FIELD_ORDER,
+        default_provider,
+    )
     return {
         "active_nav": "providers",
         "page_title": "Provider Configuration",
@@ -352,6 +603,7 @@ def _settings_payload(request: Request, *, include_provider_settings: bool) -> d
         "provider_rows": provider_rows,
         "provider_name_options": [row["name"] for row in provider_rows],
         "provider_field_order": PROVIDER_SETTING_FIELD_ORDER,
+        "provider_type_options": PROVIDER_TYPE_OPTIONS,
     }
 
 
@@ -571,6 +823,75 @@ async def get_dashboard_config(request: Request) -> dict[str, Any]:
 @router.get("/dashboard-api/providers")
 async def get_dashboard_providers(request: Request) -> dict[str, Any]:
     return _settings_payload(request, include_provider_settings=True)
+
+
+class CreateProviderBody(BaseModel):
+    name: str = Field(..., min_length=1)
+    type: str = Field(..., min_length=1)
+    api_key: str = Field(..., min_length=1)
+    base_url: str = ""
+
+
+@router.post("/dashboard-api/providers")
+async def create_dashboard_provider(
+    body: CreateProviderBody,
+    request: Request,
+) -> dict[str, str]:
+    service = _get_config_service(request)
+    provider_name = _validate_provider_name(body.name)
+    provider_type = _provider_type_from_body(body.type)
+
+    providers = _provider_entries_from_flat_config(service.get_all())
+    if _normalize_provider_name(provider_name) in providers:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Provider already exists: {provider_name}.",
+        )
+
+    api_key = body.api_key.strip()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="API key is required.")
+
+    base_url = body.base_url.strip()
+    if provider_type == "openai_compatible" and not base_url:
+        raise HTTPException(
+            status_code=400,
+            detail="Base URL is required for OpenAI-compatible providers.",
+        )
+
+    values: dict[str, Any | None] = {
+        f"llm.providers.{provider_name}.type": provider_type,
+        f"llm.providers.{provider_name}.api_key": api_key,
+        f"llm.providers.{provider_name}.default_model": "",
+        f"llm.providers.{provider_name}.models": [],
+        f"llm.providers.{provider_name}.enabled": True,
+    }
+    if provider_type == "openai_compatible":
+        values[f"llm.providers.{provider_name}.base_url"] = base_url
+
+    _update_config_settings(service, values, require_writable=True)
+    return {"status": "created", "name": provider_name, "type": provider_type}
+
+
+@router.delete("/dashboard-api/providers/{provider_name}")
+async def delete_dashboard_provider(
+    provider_name: str,
+    request: Request,
+) -> dict[str, str]:
+    service = _get_config_service(request)
+    existing_name = _provider_config_name(service, provider_name)
+    if existing_name is None:
+        raise HTTPException(status_code=404, detail=f"Provider not found: {provider_name}.")
+
+    configured_default = str(service.get("llm.default_provider", "") or "").strip()
+    if configured_default and _normalize_provider_name(configured_default) == _normalize_provider_name(existing_name):
+        raise HTTPException(status_code=400, detail="Default provider cannot be deleted.")
+
+    deleted = _delete_config_tree(service, f"llm.providers.{existing_name}")
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Provider not found: {provider_name}.")
+
+    return {"status": "deleted", "name": existing_name}
 
 
 @router.get("/dashboard-api/github")
@@ -1046,6 +1367,7 @@ async def update_setting(
     _ensure_runtime_keys([key])
 
     value = _normalize_setting_value(key, body.value)
+    _validate_default_provider_update(service, {key: value})
     service.update_setting(key, value)
     return {"status": "success", "key": key, "value": value}
 
@@ -1059,10 +1381,8 @@ async def update_settings(body: UpdateSettingsBody, request: Request) -> dict[st
 
     values = _normalize_setting_updates(body.values)
     service = _get_config_service(request)
-    for source in service._sources:
-        if hasattr(source, "update_settings"):
-            source.update_settings(values)
-    service.reload()
+    _validate_default_provider_update(service, values)
+    _update_config_settings(service, values)
 
     return {"status": "success", "updated": list(values.keys())}
 

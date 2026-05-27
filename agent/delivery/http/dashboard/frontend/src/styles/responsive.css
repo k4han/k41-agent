@@ -57,6 +57,8 @@
   .chat-shell,
   .grid-2,
   .grid-3,
+  .provider-summary-grid,
+  .provider-type-grid,
   .task-live-grid,
   .setting-card-main,
   .change-card {
@@ -154,7 +156,4 @@
     justify-content: flex-start;
   }
 
-  .provider-table-actions {
-    flex-wrap: wrap;
-  }
 }

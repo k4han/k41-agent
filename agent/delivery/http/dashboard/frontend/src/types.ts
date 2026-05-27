@@ -160,6 +160,23 @@ export type SourceValue = {
 export type ProviderRow = {
   name: string;
   fields: Record<string, { key: string; info: SettingInfo }>;
+  type: string;
+  type_label: string;
+  requires_base_url: boolean;
+  enabled: boolean;
+  is_default: boolean;
+  ready: boolean;
+  can_delete: boolean;
+  delete_block_reason: string;
+  can_set_default: boolean;
+  default_block_reason: string;
+};
+
+export type ProviderTypeOption = {
+  value: string;
+  label: string;
+  description: string;
+  requires_base_url: boolean;
 };
 
 export type SettingsPayload = {
@@ -172,6 +189,7 @@ export type SettingsPayload = {
   provider_rows?: ProviderRow[];
   provider_name_options?: string[];
   provider_field_order?: string[];
+  provider_type_options?: ProviderTypeOption[];
 };
 
 export type GitHubRepositoryBinding = {

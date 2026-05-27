@@ -174,6 +174,30 @@ class TestYamlConfigSource:
         assert "host" in all_settings
         assert all_settings["channels.telegram.enabled"].value is False
 
+    def test_delete_setting_tree_removes_nested_mapping(self, tmp_path: Path) -> None:
+        from agent.shared.config.yaml_source import YamlConfigSource
+
+        cfg = tmp_path / "config.yml"
+        cfg.write_text(
+            textwrap.dedent("""\
+            llm:
+              providers:
+                main:
+                  type: google
+                side:
+                  type: anthropic
+            """),
+            encoding="utf-8",
+        )
+
+        source = YamlConfigSource(path=cfg)
+
+        assert source.delete_setting_tree("llm.providers.side") is True
+        all_settings = source.get_all_settings_values()
+
+        assert "llm.providers.side.type" not in all_settings
+        assert all_settings["llm.providers.main.type"].value == "google"
+
 
 # =====================================================================
 # ConfigService — precedence merge

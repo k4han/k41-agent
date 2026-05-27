@@ -18,6 +18,30 @@ logger = logging.getLogger(__name__)
 _MISSING = object()
 
 
+def _delete_nested_key(data: dict[str, Any], key: str) -> bool:
+    parts = key.split(".")
+    current: Any = data
+    parents: list[tuple[dict[str, Any], str]] = []
+    for part in parts[:-1]:
+        if not isinstance(current, dict) or part not in current:
+            return False
+        parents.append((current, part))
+        current = current[part]
+
+    if not isinstance(current, dict) or parts[-1] not in current:
+        return False
+
+    del current[parts[-1]]
+
+    for parent, part in reversed(parents):
+        child = parent.get(part)
+        if isinstance(child, dict) and not child:
+            del parent[part]
+            continue
+        break
+    return True
+
+
 class YamlConfigSource:
     """Read configuration from YAML file.
 
@@ -77,6 +101,27 @@ class YamlConfigSource:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
         self.reload()
+
+    def delete_setting_tree(self, key: str) -> bool:
+        import yaml
+
+        try:
+            raw = self._path.read_text(encoding="utf-8")
+            data = yaml.safe_load(raw) or {}
+        except FileNotFoundError:
+            return False
+
+        if not isinstance(data, dict):
+            return False
+
+        deleted = _delete_nested_key(data, key)
+        if not deleted:
+            return False
+
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+        self.reload()
+        return True
 
     def reload(self) -> None:
         """Clear cache and reload from file."""
