@@ -16,6 +16,7 @@ import {
   PanelsTopLeft,
   Pencil,
   PlaySquare,
+  RefreshCw,
   Settings,
   Trash2,
 } from "lucide-solid";
@@ -24,6 +25,7 @@ import { createMemo, createSignal, For, JSX, onCleanup, onMount, Show } from "so
 import { DeleteThreadDialog } from "@/components/DeleteThreadDialog";
 import { InlineRenameInput } from "@/components/InlineRenameInput";
 import { apiFetch, deleteJson, patchJson } from "@/lib/api";
+import type { ActiveSession, WorkspaceRef } from "@/types";
 import {
   chatThreadHref,
   groupThreadsByWorkspace,
@@ -102,7 +104,82 @@ export function AppShell(props: {
   const [editingHistoryTitle, setEditingHistoryTitle] = createSignal("");
   const [deleteTarget, setDeleteTarget] = createSignal<ThreadSummary | null>(null);
   const [deleting, setDeleting] = createSignal(false);
+  const [runningThreadIds, setRunningThreadIds] = createSignal<Set<string>>(new Set());
   let disposed = false;
+
+  const syncActiveSessions = async () => {
+    try {
+      const payload = await apiFetch<{ sessions: ActiveSession[] }>("/dashboard-api/sessions");
+      if (payload && Array.isArray(payload.sessions)) {
+        const activeIds = new Set(payload.sessions.map((s) => s.thread_id));
+        const prev = runningThreadIds();
+        
+        let identical = prev.size === activeIds.size;
+        if (identical) {
+          for (const id of activeIds) {
+            if (!prev.has(id)) {
+              identical = false;
+              break;
+            }
+          }
+        }
+        
+        if (!identical) {
+          setRunningThreadIds(activeIds);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to sync active sessions", err);
+    }
+  };
+
+  const handleThreadStartRunning = (event: Event) => {
+    const customEvent = event as CustomEvent<{
+      threadId: string;
+      title?: string;
+      workspace?: WorkspaceRef | null;
+      agent_name?: string;
+    }>;
+    const { threadId, title, workspace, agent_name } = customEvent.detail;
+    
+    setRunningThreadIds((prev) => {
+      const next = new Set(prev);
+      next.add(threadId);
+      return next;
+    });
+
+    const exists = historyThreads().some((t) => t.thread_id === threadId);
+    if (!exists) {
+      const placeholderThread: ThreadSummary = {
+        thread_id: threadId,
+        title: title || threadId,
+        latest_checkpoint_id: "",
+        channel_id: "",
+        checkpoint_count: 1,
+        platform: "dashboard",
+        user_id: "dashboard",
+        agent_name: agent_name || "default",
+        workspace: workspace || null,
+        kind: "interactive",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      applyHistoryState({
+        threads: [placeholderThread, ...historyThreads()],
+      });
+    }
+  };
+
+  const handleThreadStopRunning = (event: Event) => {
+    const customEvent = event as CustomEvent<{ threadId: string }>;
+    const { threadId } = customEvent.detail;
+    
+    setRunningThreadIds((prev) => {
+      const next = new Set(prev);
+      next.delete(threadId);
+      return next;
+    });
+  };
 
   const applyHistoryState = (next: Partial<HistoryCache>) => {
     if (next.threads !== undefined) {
@@ -416,12 +493,25 @@ export function AppShell(props: {
     }
     document.addEventListener("click", handleClickOutside);
     window.addEventListener("kaka:threads-changed", handleThreadsChanged);
+    window.addEventListener("kaka:thread-start-running", handleThreadStartRunning);
+    window.addEventListener("kaka:thread-stop-running", handleThreadStopRunning);
+
+    void syncActiveSessions();
+    const intervalId = setInterval(() => {
+      void syncActiveSessions();
+    }, 6000);
+
+    onCleanup(() => {
+      clearInterval(intervalId);
+    });
   });
 
   onCleanup(() => {
     disposed = true;
     document.removeEventListener("click", handleClickOutside);
     window.removeEventListener("kaka:threads-changed", handleThreadsChanged);
+    window.removeEventListener("kaka:thread-start-running", handleThreadStartRunning);
+    window.removeEventListener("kaka:thread-stop-running", handleThreadStopRunning);
   });
 
   return (
@@ -535,7 +625,7 @@ export function AppShell(props: {
                             {(thread) => (
                               <div class="nav-history-item-wrapper">
                                 <div
-                                  class={`nav-history-item ${isThreadActive(thread.thread_id) ? "active" : ""} ${editingHistoryThreadId() === thread.thread_id ? "editing" : ""}`}
+                                  class={`nav-history-item ${isThreadActive(thread.thread_id) ? "active" : ""} ${editingHistoryThreadId() === thread.thread_id ? "editing" : ""} ${runningThreadIds().has(thread.thread_id) ? "running" : ""}`}
                                 >
                                   <Show
                                     when={editingHistoryThreadId() === thread.thread_id}
@@ -548,10 +638,17 @@ export function AppShell(props: {
                                         title={`${thread.thread_id} - ${threadMeta(thread)}`}
                                       >
                                         <Show
-                                          when={isBackgroundThread(thread)}
-                                          fallback={<MessageSquare size={12} class="nav-history-kind-icon" />}
+                                          when={runningThreadIds().has(thread.thread_id)}
+                                          fallback={
+                                            <Show
+                                              when={isBackgroundThread(thread)}
+                                              fallback={<MessageSquare size={12} class="nav-history-kind-icon" />}
+                                            >
+                                              <PlaySquare size={12} class="nav-history-kind-icon task" />
+                                            </Show>
+                                          }
                                         >
-                                          <PlaySquare size={12} class="nav-history-kind-icon task" />
+                                          <RefreshCw size={12} class="nav-history-kind-icon spinner-animate" />
                                         </Show>
                                         <span class="nav-history-title">{threadTitle(thread)}</span>
                                       </A>

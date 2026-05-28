@@ -641,3 +641,26 @@
   padding: 20px 24px 36px;
 }
 
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spinner-animate {
+  animation: spin 1.2s linear infinite;
+  color: var(--accent, #0066cc);
+}
+
+.nav-history-item.running .nav-history-link {
+  border-left: 2px solid var(--accent, #0066cc);
+  padding-left: 6px;
+}
+
+.nav-history-item.running.active .nav-history-link {
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface-3));
+}
+
+.nav-history-item.running .nav-history-kind-icon {
+  color: var(--accent, #0066cc);
+}
+

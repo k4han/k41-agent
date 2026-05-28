@@ -56,8 +56,13 @@ import type {
   GitHubRepositoryBinding,
   WorkspaceRef,
 } from "@/types";
-
-type ChatTranscriptItem = TranscriptItem & { id: number; key?: string };
+import {
+  persistedStreams,
+  getOrCreateStreamSignals,
+  cleanupStreamSignals,
+  cleanupStaleStreams,
+  type ChatTranscriptItem,
+} from "@/lib/chatStreamStore";
 type ChatAttachmentKind = "text" | "image";
 type ChatAttachmentPayload = {
   name: string;
@@ -719,9 +724,58 @@ export function ChatPage() {
   );
   const [workspaceExplorerResizing, setWorkspaceExplorerResizing] = createSignal(false);
   const [prompt, setPrompt] = createSignal("");
-  const [items, setItems] = createSignal<ChatTranscriptItem[]>([]);
-  const [streaming, setStreaming] = createSignal(false);
-  const [controller, setController] = createSignal<AbortController | null>(null);
+  const [localItems, setLocalItems] = createSignal<ChatTranscriptItem[]>([]);
+  const [localStreaming, setLocalStreaming] = createSignal(false);
+  const [localController, setLocalController] = createSignal<AbortController | null>(null);
+  const [currentStreamThreadId, setCurrentStreamThreadId] = createSignal<string | null>(null);
+  const items = () => {
+    const tid = currentStreamThreadId();
+    if (tid && persistedStreams.has(tid)) {
+      return persistedStreams.get(tid)!.items[0]();
+    }
+    return localItems();
+  };
+  const setItems = (
+    v: ChatTranscriptItem[] | ((prev: ChatTranscriptItem[]) => ChatTranscriptItem[]),
+    targetThreadId?: string
+  ) => {
+    const tid = targetThreadId || currentStreamThreadId();
+    if (tid && persistedStreams.has(tid)) {
+      persistedStreams.get(tid)!.items[1](v as any);
+      return;
+    }
+    setLocalItems(v as any);
+  };
+  const streaming = () => {
+    const tid = currentStreamThreadId();
+    if (tid && persistedStreams.has(tid)) {
+      return persistedStreams.get(tid)!.streaming[0]();
+    }
+    return localStreaming();
+  };
+  const setStreaming = (v: boolean, targetThreadId?: string) => {
+    const tid = targetThreadId || currentStreamThreadId();
+    if (tid && persistedStreams.has(tid)) {
+      persistedStreams.get(tid)!.streaming[1](v);
+      return;
+    }
+    setLocalStreaming(v);
+  };
+  const controller = () => {
+    const tid = currentStreamThreadId();
+    if (tid && persistedStreams.has(tid)) {
+      return persistedStreams.get(tid)!.controller[0]();
+    }
+    return localController();
+  };
+  const setController = (v: AbortController | null, targetThreadId?: string) => {
+    const tid = targetThreadId || currentStreamThreadId();
+    if (tid && persistedStreams.has(tid)) {
+      persistedStreams.get(tid)!.controller[1](v);
+      return;
+    }
+    setLocalController(v);
+  };
   const [backgroundTask, setBackgroundTask] = createSignal<BackgroundTask | null>(null);
   const [backgroundLive, setBackgroundLive] = createSignal(false);
   const [backgroundStreamError, setBackgroundStreamError] = createSignal("");
@@ -780,6 +834,7 @@ export function ChatPage() {
   let chatPromptRef: HTMLTextAreaElement | undefined;
   let fileInputRef: HTMLInputElement | undefined;
   let loadedThreadId: string | null = null;
+  let isUnmounting = false;
   let threadLoadRequestId = 0;
   let backgroundEventSource: EventSource | null = null;
   let backgroundEventThreadId = "";
@@ -1085,17 +1140,26 @@ export function ChatPage() {
     scrollToBottom(true);
   };
 
-  const appendItem = (item: TranscriptItem, scrollMode: AppendScrollMode = "bottom"): number => {
+  const appendItem = (
+    item: TranscriptItem,
+    scrollMode: AppendScrollMode = "bottom",
+    targetThreadId?: string
+  ): number => {
     const id = nextItemId;
     nextItemId += 1;
-    setItems((current) => [...current, { ...item, id } as ChatTranscriptItem]);
-    if (scrollMode === "turn-start") {
-      setTurnAnchorItemId(id);
-      setTurnAnchorSpacerHeight(0);
-      setAutoScroll(true);
-      scrollToTurnAnchor(id);
-    } else if (scrollMode === "bottom") {
-      scrollToBottom();
+    setItems((current) => [...current, { ...item, id } as ChatTranscriptItem], targetThreadId);
+    
+    // Only scroll if this item is for the active thread
+    const isCurrent = !isUnmounting && (!targetThreadId || targetThreadId === currentThreadId());
+    if (isCurrent) {
+      if (scrollMode === "turn-start") {
+        setTurnAnchorItemId(id);
+        setTurnAnchorSpacerHeight(0);
+        setAutoScroll(true);
+        scrollToTurnAnchor(id);
+      } else if (scrollMode === "bottom") {
+        scrollToBottom();
+      }
     }
     return id;
   };
@@ -1144,12 +1208,15 @@ export function ChatPage() {
     setThreadData(payload);
     setCurrentThreadId(payload.thread_id);
     setWorkspace(payload.workspace || null);
-    setItems(
-      toThreadTranscript(payload.messages).map((item) => ({
-        ...item,
-        id: nextItemId++,
-      })),
-    );
+    // If there's an active persisted stream for this thread, don't overwrite items
+    if (!persistedStreams.has(payload.thread_id)) {
+      setItems(
+        toThreadTranscript(payload.messages).map((item) => ({
+          ...item,
+          id: nextItemId++,
+        })),
+      );
+    }
     setAutoScroll(true);
     scrollToBottom(true);
   };
@@ -1209,6 +1276,7 @@ export function ChatPage() {
         JSON.parse(event.data) as Record<string, unknown>,
         assistantIdRef,
         streamedRef,
+        { id: threadId, message: "" }
       );
     });
     source.addEventListener("task", (event) => {
@@ -1255,8 +1323,11 @@ export function ChatPage() {
     setCurrentThreadId(threadId);
     setThreadData(undefined);
     setThreadError("");
-    setThreadLoading(true);
-    setItems([]);
+    // Don't clear items if there's a persisted stream for this thread
+    if (!persistedStreams.has(threadId)) {
+      setThreadLoading(true);
+      setItems([]);
+    }
     closeBackgroundStream();
     setBackgroundTask(null);
     setAutoScroll(true);
@@ -1281,6 +1352,12 @@ export function ChatPage() {
     } finally {
       if (requestId === threadLoadRequestId) {
         setThreadLoading(false);
+        // If we have a persisted stream, ensure streaming state reflects it
+        if (persistedStreams.has(threadId)) {
+          if (persistedStreams.get(threadId)!.streaming[0]()) {
+            setStreaming(true);
+          }
+        }
       }
     }
   };
@@ -1297,6 +1374,7 @@ export function ChatPage() {
 
     if (!threadId) {
       setCurrentThreadId("");
+      setCurrentStreamThreadId(null);
       setThreadData(undefined);
       setThreadError("");
       setThreadLoading(false);
@@ -1308,21 +1386,42 @@ export function ChatPage() {
       return;
     }
 
+    // If there's a persisted stream for this thread, reconnect to it
+    if (persistedStreams.has(threadId)) {
+      setCurrentStreamThreadId(threadId);
+      setCurrentThreadId(threadId);
+      setThreadLoading(false);
+      // Load thread data from API to get metadata (workspace, etc.)
+      // but items are already being streamed via persisted signals
+      void loadThread(threadId);
+      return;
+    }
+
+    setCurrentStreamThreadId(null);
     void loadThread(threadId);
   });
 
-  const updateMessage = (id: number, chunk: string) => {
+  const updateMessage = (id: number, chunk: string, targetThreadId?: string) => {
     setItems((current) =>
       current.map((item) =>
         item.id === id && item.type === "message"
           ? { ...item, text: item.text + chunk }
           : item,
       ),
+      targetThreadId
     );
-    scrollToBottom();
+    const isCurrent = !isUnmounting && (!targetThreadId || targetThreadId === currentThreadId());
+    if (isCurrent) {
+      scrollToBottom();
+    }
   };
 
-  const updateToolResult = (toolCallId: string, name: string, result: unknown) => {
+  const updateToolResult = (
+    toolCallId: string,
+    name: string,
+    result: unknown,
+    targetThreadId?: string
+  ) => {
     setItems((current) => {
       const target = findTranscriptToolTarget(current, toolCallId, name);
       if (!target) {
@@ -1337,8 +1436,12 @@ export function ChatPage() {
       return current.map((item) =>
         item.id === target.id && item.type === "tool" ? { ...item, result } : item,
       );
-    });
-    scrollToBottom();
+    }, targetThreadId);
+    
+    const isCurrent = !isUnmounting && (!targetThreadId || targetThreadId === currentThreadId());
+    if (isCurrent) {
+      scrollToBottom();
+    }
   };
 
   const addFiles = async (fileList: FileList | null) => {
@@ -1443,6 +1546,7 @@ export function ChatPage() {
     event: Record<string, unknown>,
     assistantIdRef: { id: number | null },
     streamedRef: { received: boolean },
+    streamThreadIdRef: { id: string; message: string }
   ) {
     if (event.type === "thread_created") {
       const threadId = String(event.thread_id || "");
@@ -1451,6 +1555,34 @@ export function ChatPage() {
       }
       loadedThreadId = threadId;
       setCurrentThreadId(threadId);
+
+      // Move persisted stream from pending key to real threadId
+      const oldStreamTid = streamThreadIdRef.id;
+      if (oldStreamTid && oldStreamTid !== threadId && persistedStreams.has(oldStreamTid)) {
+        const signals = persistedStreams.get(oldStreamTid)!;
+        persistedStreams.delete(oldStreamTid);
+        persistedStreams.set(threadId, signals);
+      }
+      streamThreadIdRef.id = threadId;
+      
+      if (currentStreamThreadId() === oldStreamTid || currentStreamThreadId() === threadId) {
+        setCurrentStreamThreadId(threadId);
+      }
+
+      // Dispatch event to indicate the new thread is running
+      if (oldStreamTid !== threadId) {
+        window.dispatchEvent(
+          new CustomEvent("kaka:thread-start-running", {
+            detail: {
+              threadId,
+              title: streamThreadIdRef.message,
+              workspace: workspaceRef() || localWorkspaceRef(workingDir()),
+              agent_name: agentName(),
+            },
+          }),
+        );
+      }
+
       navigate(`/c/${encodeURIComponent(threadId)}`, { replace: true });
       return;
     }
@@ -1460,10 +1592,10 @@ export function ChatPage() {
         return;
       }
       if (assistantIdRef.id === null) {
-        assistantIdRef.id = appendItem({ type: "message", role: "assistant", text: "" });
+        assistantIdRef.id = appendItem({ type: "message", role: "assistant", text: "" }, "bottom", streamThreadIdRef.id);
       }
       streamedRef.received = true;
-      updateMessage(assistantIdRef.id, content);
+      updateMessage(assistantIdRef.id, content, streamThreadIdRef.id);
       return;
     }
     if (event.type === "tool_call") {
@@ -1473,6 +1605,8 @@ export function ChatPage() {
           name: String(event.name || "unknown"),
           args: event.args ?? null,
         }),
+        "bottom",
+        streamThreadIdRef.id
       );
       assistantIdRef.id = null;
       streamedRef.received = false;
@@ -1483,6 +1617,7 @@ export function ChatPage() {
         String(event.tool_call_id || ""),
         String(event.name || "unknown"),
         event.content ?? null,
+        streamThreadIdRef.id
       );
       return;
     }
@@ -1491,7 +1626,7 @@ export function ChatPage() {
         type: "message",
         role: "error",
         text: String(event.content || event.message || "Chat failed"),
-      });
+      }, "bottom", streamThreadIdRef.id);
       return;
     }
     if (event.type === "final") {
@@ -1503,13 +1638,19 @@ export function ChatPage() {
         return;
       }
       if (assistantIdRef.id === null) {
-        assistantIdRef.id = appendItem({ type: "message", role: "assistant", text: "" });
+        assistantIdRef.id = appendItem({ type: "message", role: "assistant", text: "" }, "bottom", streamThreadIdRef.id);
       }
-      updateMessage(assistantIdRef.id, content);
+      updateMessage(assistantIdRef.id, content, streamThreadIdRef.id);
     }
   }
 
   const sendMessage = async () => {
+    isUnmounting = false;
+    cleanupStaleStreams();
+    if (streaming()) {
+      showToast("Wait for the current response to finish.", "warning");
+      return;
+    }
     const selectedAttachments = attachments();
     const attachedFiles = selectedAttachments.map(toPayloadAttachment);
     const message = prompt().trim() || (
@@ -1536,6 +1677,12 @@ export function ChatPage() {
       return;
     }
 
+    const streamThreadIdRef = { id: currentThreadId() || `__pending__${Date.now()}`, message };
+    
+    // Register stream in persisted signals first so that appendItem goes directly to it
+    getOrCreateStreamSignals(streamThreadIdRef.id, items());
+    setCurrentStreamThreadId(streamThreadIdRef.id);
+
     appendItem(
       {
         type: "message",
@@ -1544,12 +1691,28 @@ export function ChatPage() {
         attachments: selectedAttachments.map(toTranscriptAttachment),
       },
       "turn-start",
+      streamThreadIdRef.id
     );
     setPrompt("");
     clearAttachments(selectedAttachments);
     const abortController = new AbortController();
-    setController(abortController);
-    setStreaming(true);
+    setController(abortController, streamThreadIdRef.id);
+    setStreaming(true, streamThreadIdRef.id);
+
+    const startTid = streamThreadIdRef.id;
+    if (startTid && !startTid.startsWith("__pending__")) {
+      window.dispatchEvent(
+        new CustomEvent("kaka:thread-start-running", {
+          detail: {
+            threadId: startTid,
+            title: message,
+            workspace: workspaceRef() || localWorkspaceRef(workingDir()),
+            agent_name: agentName(),
+          },
+        }),
+      );
+    }
+
     const assistantIdRef = { id: null as number | null };
     const streamedRef = { received: false };
 
@@ -1580,37 +1743,61 @@ export function ChatPage() {
           if (!line.trim()) {
             continue;
           }
-          handleEvent(JSON.parse(line) as Record<string, unknown>, assistantIdRef, streamedRef);
+          handleEvent(JSON.parse(line) as Record<string, unknown>, assistantIdRef, streamedRef, streamThreadIdRef);
         }
         if (done) {
           break;
         }
       }
       if (buffer.trim()) {
-        handleEvent(JSON.parse(buffer) as Record<string, unknown>, assistantIdRef, streamedRef);
+        handleEvent(JSON.parse(buffer) as Record<string, unknown>, assistantIdRef, streamedRef, streamThreadIdRef);
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
-        showToast("Response stopped.", "warning");
+        if (!isUnmounting) {
+          showToast("Response stopped.", "warning");
+        }
       } else {
         appendItem({
           type: "message",
           role: "error",
           text: err instanceof Error ? err.message : "Chat failed",
-        });
+        }, "bottom", streamThreadIdRef.id);
       }
     } finally {
-      setStreaming(false);
-      setController(null);
-      if (currentThreadId()) {
-        window.dispatchEvent(new CustomEvent("kaka:threads-changed"));
+      const finishedTid = streamThreadIdRef.id;
+      setStreaming(false, finishedTid);
+      setController(null, finishedTid);
+      
+      // Transfer streamed items to local state before cleaning up persisted signals
+      if (finishedTid) {
+        const isViewing = currentStreamThreadId() === finishedTid;
+        if (persistedStreams.has(finishedTid)) {
+          if (isViewing && !isUnmounting) {
+            setLocalItems(persistedStreams.get(finishedTid)!.items[0]());
+          }
+          cleanupStreamSignals(finishedTid);
+        }
+        if (isViewing) {
+          setCurrentStreamThreadId(null);
+        }
       }
+      if (finishedTid) {
+        window.dispatchEvent(
+          new CustomEvent("kaka:thread-stop-running", {
+            detail: { threadId: finishedTid },
+          }),
+        );
+      }
+      window.dispatchEvent(new CustomEvent("kaka:threads-changed"));
     }
   };
 
   const stopChat = () => controller()?.abort();
 
   onMount(() => {
+    isUnmounting = false;
+    cleanupStaleStreams();
     const savedExplorerOpen = window.localStorage.getItem(WORKSPACE_EXPLORER_OPEN_KEY);
     setWorkspaceExplorerOpen(savedExplorerOpen !== "closed");
 
@@ -1623,7 +1810,12 @@ export function ChatPage() {
     void loadDefaultWorkspace();
   });
   onCleanup(() => {
-    controller()?.abort();
+    isUnmounting = true;
+    // Only abort if there's no persisted stream (allows stream to survive navigation)
+    const activeTid = currentStreamThreadId();
+    if (!activeTid || !persistedStreams.has(activeTid)) {
+      controller()?.abort();
+    }
     endWorkspaceResize();
     closeBackgroundStream();
     attachments().forEach(revokeAttachmentPreview);
@@ -1892,7 +2084,9 @@ export function ChatPage() {
                   onKeyDown={(event) => {
                     if (event.key === "Enter" && !event.ctrlKey && !event.shiftKey) {
                       event.preventDefault();
-                      void sendMessage();
+                      if (!composerDisabled()) {
+                        void sendMessage();
+                      }
                     }
                   }}
                 />
