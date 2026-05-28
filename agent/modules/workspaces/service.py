@@ -63,8 +63,14 @@ def get_workspace_backend(workspace: WorkspaceRef | dict[str, Any] | str | None 
     ref = resolve_workspace_ref(workspace)
     if ref.backend == "local":
         from agent.modules.workspaces.local_backend import LocalWorkspaceBackend
+        from agent.modules.workspaces.virtual_backend import VirtualWorkspaceBackend
 
-        return LocalWorkspaceBackend(ref)
+        local = LocalWorkspaceBackend(ref)
+        try:
+            virtual_name = Path(ref.locator).name or "workspace"
+        except Exception:
+            virtual_name = "workspace"
+        return VirtualWorkspaceBackend(local, virtual_name=virtual_name)
     raise ValueError(f"Unsupported workspace backend: {ref.backend}")
 
 

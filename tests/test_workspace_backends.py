@@ -174,3 +174,35 @@ def test_workspace_migration_backfills_legacy_tables(tmp_path):
     assert task_row.workspace_locator == str(tmp_path / "task")
     assert task_row.workspace_label == str(tmp_path / "task")
     assert json.loads(task_row.workspace_metadata_json) == {}
+
+
+def test_virtual_workspace_backend(tmp_path):
+    from agent.modules.workspaces.virtual_backend import VirtualWorkspaceBackend
+    
+    workspace = workspace_ref_from_local_path(str(tmp_path), label="test-lab")
+    local_backend = LocalWorkspaceBackend(workspace)
+    virtual_backend = VirtualWorkspaceBackend(local_backend, virtual_name="my_space")
+
+    # Test writing file via virtual path
+    result = virtual_backend.write_text("/my_space/src/main.py", "print('hello virtual')")
+    assert result.startswith("[OK] Wrote file: /my_space/src/main.py")
+    
+    # Test file is written to correct physical location
+    physical_file = tmp_path / "src" / "main.py"
+    assert physical_file.exists()
+    assert physical_file.read_text(encoding="utf-8") == "print('hello virtual')"
+
+    # Test reading file via virtual path
+    assert virtual_backend.read_text("/my_space/src/main.py") == "print('hello virtual')"
+
+    # Test list_files returns virtual paths
+    files_list = virtual_backend.list_files("src")
+    assert files_list == "/my_space/src/main.py"
+
+    # Test command translation and path sanitization in output using a Python script that prints absolute path
+    virtual_backend.write_text("/my_space/print_path.py", "import os; print(os.path.abspath('print_path.py'))")
+    exec_result = virtual_backend.execute("python /my_space/print_path.py")
+    
+    # Verify the real path of print_path.py was sanitized and mapped to the virtual path
+    assert "/my_space/print_path.py" in exec_result.output.replace("\\", "/")
+    assert str(tmp_path) not in exec_result.output

@@ -20,6 +20,7 @@ from agent.modules.tools.langchain.utility_tools.echo import echo
 from agent.modules.tools.langchain.utility_tools.get_current_time import (
     get_current_time,
 )
+from agent.modules.tools.langchain.utility_tools.write_todos import write_todos
 from agent.modules.tools.langchain.schedule_tools.schedule import (
     schedule_task,
     list_scheduled_tasks,
@@ -33,6 +34,7 @@ def get_all_langchain_tools() -> list[BaseTool]:
     return [
         get_current_time,
         echo,
+        write_todos,
         skill,
         read_file,
         write_file,
