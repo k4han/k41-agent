@@ -104,7 +104,7 @@ class VirtualWorkspaceBackend:
         res = self.inner_backend.tree(rel_path or None)
         res["root"] = self.virtual_prefix.rstrip("/")
         if "path" in res:
-            res["path"] = self._to_relative_path(res["path"])
+            res["path"] = self._to_virtual_path(res["path"]) if res["path"] else ""
         if "entries" in res:
             for entry in res["entries"]:
                 if "path" in entry:

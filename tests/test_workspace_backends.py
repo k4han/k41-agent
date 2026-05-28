@@ -206,3 +206,23 @@ def test_virtual_workspace_backend(tmp_path):
     # Verify the real path of print_path.py was sanitized and mapped to the virtual path
     assert "/my_space/print_path.py" in exec_result.output.replace("\\", "/")
     assert str(tmp_path) not in exec_result.output
+
+
+def test_virtual_workspace_tree_uses_virtual_path_keys(tmp_path):
+    from agent.modules.workspaces.virtual_backend import VirtualWorkspaceBackend
+
+    workspace = workspace_ref_from_local_path(str(tmp_path), label="test-lab")
+    local_backend = LocalWorkspaceBackend(workspace)
+    virtual_backend = VirtualWorkspaceBackend(local_backend, virtual_name="my_space")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.py").write_text("print('hello')", encoding="utf-8")
+
+    root_tree = virtual_backend.tree()
+
+    assert root_tree["path"] == ""
+    assert root_tree["entries"][0]["path"] == "/my_space/src"
+
+    src_tree = virtual_backend.tree(root_tree["entries"][0]["path"])
+
+    assert src_tree["path"] == "/my_space/src"
+    assert src_tree["entries"][0]["path"] == "/my_space/src/main.py"
