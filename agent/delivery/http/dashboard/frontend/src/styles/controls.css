@@ -879,7 +879,9 @@
 .dialog {
   width: min(720px, 100%);
   max-height: min(86vh, 900px);
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface);
@@ -909,6 +911,8 @@
 
 .dialog-body {
   padding: 14px;
+  overflow-y: auto;
+  flex: 1 1 auto;
 }
 
 .toast-region {
