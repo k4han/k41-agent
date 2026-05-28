@@ -31,7 +31,6 @@ _DASHBOARD_ROUTE_MODULES = (
     "agent.delivery.http.dashboard.routes.channels",
     "agent.delivery.http.dashboard.routes.providers",
     "agent.delivery.http.dashboard.routes.settings",
-    "agent.delivery.http.dashboard.routes.sessions",
     "agent.delivery.http.dashboard.routes.spa",
 )
 

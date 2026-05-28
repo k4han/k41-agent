@@ -9,7 +9,6 @@ __all__ = [
     "mcp",
     "providers",
     "scheduler",
-    "sessions",
     "settings",
     "spa",
     "tasks",

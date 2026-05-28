@@ -24,9 +24,6 @@ const RepositoriesPage = lazy(() =>
 const SchedulerPage = lazy(() =>
   import("@/pages/Scheduler").then((module) => ({ default: module.SchedulerPage })),
 );
-const SessionsPage = lazy(() =>
-  import("@/pages/Sessions").then((module) => ({ default: module.SessionsPage })),
-);
 const AgentsPage = lazy(() =>
   import("@/pages/settings/AgentsPage").then((module) => ({ default: module.AgentsPage })),
 );
@@ -82,7 +79,6 @@ render(
         <Route path="/login" component={LoginPage} />
         <Route path={["/chat", "/c/:threadId"]} component={ChatPage} />
         <Route path="/history" component={ChatHistoryListPage} />
-        <Route path="/sessions" component={SessionsPage} />
         <Route path="/repositories" component={RepositoriesPage} />
         <Route path="/tasks" component={TasksPage} />
         <Route path="/scheduler" component={SchedulerPage} />
