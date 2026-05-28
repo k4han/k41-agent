@@ -135,6 +135,10 @@ def _workspace_payload(path: str | Path) -> dict:
     }
 
 
+def _absolute(path: str | Path) -> str:
+    return str(Path(path).resolve())
+
+
 def _conversation_thread(thread_id: str, title: str, *, kind: str = "user") -> dict:
     return {
         "thread_id": thread_id,
@@ -376,8 +380,11 @@ def test_dashboard_workspace_tree_ignores_noisy_directories(tmp_path: Path) -> N
     )
 
     assert response.status_code == 200
-    names = [entry["name"] for entry in response.json()["entries"]]
+    payload = response.json()
+    assert payload["path"] == _absolute(tmp_path)
+    names = [entry["name"] for entry in payload["entries"]]
     assert names == ["src"]
+    assert payload["entries"][0]["path"] == _absolute(tmp_path / "src")
 
 
 def test_dashboard_workspace_tree_blocks_directory_escape(tmp_path: Path) -> None:
@@ -403,6 +410,14 @@ def test_dashboard_workspace_file_reads_text_and_blocks_directory_escape(
         "/dashboard-api/workspace/file",
         params={"backend": "local", "locator": str(tmp_path), "path": "src/app.py"},
     )
+    absolute_response = client.get(
+        "/dashboard-api/workspace/file",
+        params={
+            "backend": "local",
+            "locator": str(tmp_path),
+            "path": _absolute(tmp_path / "src" / "app.py"),
+        },
+    )
     escape_response = client.get(
         "/dashboard-api/workspace/file",
         params={"backend": "local", "locator": str(tmp_path), "path": "../outside.py"},
@@ -410,11 +425,49 @@ def test_dashboard_workspace_file_reads_text_and_blocks_directory_escape(
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["path"] == "src/app.py"
+    assert payload["path"] == _absolute(tmp_path / "src" / "app.py")
     assert payload["content"].replace("\r\n", "\n") == "print('hello')\n"
     assert payload["binary"] is False
+    assert absolute_response.status_code == 200
+    assert absolute_response.json()["path"] == _absolute(tmp_path / "src" / "app.py")
     assert escape_response.status_code == 400
     assert "escapes workspace" in escape_response.json()["detail"]
+
+
+def test_dashboard_workspace_rename_and_delete_return_absolute_paths(
+    tmp_path: Path,
+) -> None:
+    old_path = tmp_path / "old.txt"
+    new_path = tmp_path / "new.txt"
+    old_path.write_text("rename me\n", encoding="utf-8")
+    client = _create_dashboard_client(ChannelManager())
+
+    rename_response = client.post(
+        "/dashboard-api/workspace/rename",
+        json={
+            "workspace": _workspace_payload(tmp_path),
+            "path": "old.txt",
+            "new_name": "new.txt",
+        },
+    )
+
+    assert rename_response.status_code == 200
+    assert rename_response.json()["path"] == _absolute(old_path)
+    assert rename_response.json()["new_path"] == _absolute(new_path)
+    assert new_path.exists()
+
+    delete_response = client.post(
+        "/dashboard-api/workspace/delete",
+        json={
+            "workspace": _workspace_payload(tmp_path),
+            "path": _absolute(new_path),
+        },
+    )
+
+    assert delete_response.status_code == 200
+    assert delete_response.json()["path"] == _absolute(new_path)
+    assert delete_response.json()["kind"] == "file"
+    assert not new_path.exists()
 
 
 def test_dashboard_workspace_changes_and_diff_for_git_repo(tmp_path: Path) -> None:
@@ -443,18 +496,18 @@ def test_dashboard_workspace_changes_and_diff_for_git_repo(tmp_path: Path) -> No
     assert payload["is_git_repo"] is True
     statuses = {change["path"]: change["status"] for change in payload["changes"]}
     assert statuses == {
-        "deleted.txt": "deleted",
-        "new.txt": "untracked",
-        "tracked.txt": "modified",
+        _absolute(repo / "deleted.txt"): "deleted",
+        _absolute(repo / "new.txt"): "untracked",
+        _absolute(repo / "tracked.txt"): "modified",
     }
     stats = {
         change["path"]: (change["additions"], change["deletions"])
         for change in payload["changes"]
     }
     assert stats == {
-        "deleted.txt": (0, 1),
-        "new.txt": (1, 0),
-        "tracked.txt": (1, 1),
+        _absolute(repo / "deleted.txt"): (0, 1),
+        _absolute(repo / "new.txt"): (1, 0),
+        _absolute(repo / "tracked.txt"): (1, 1),
     }
 
     diff_response = client.get(
@@ -462,15 +515,22 @@ def test_dashboard_workspace_changes_and_diff_for_git_repo(tmp_path: Path) -> No
         params={"backend": "local", "locator": str(repo), "path": "tracked.txt"},
     )
     assert diff_response.status_code == 200
-    diff = diff_response.json()["diff"]
+    diff_payload = diff_response.json()
+    assert diff_payload["path"] == _absolute(repo / "tracked.txt")
+    diff = diff_payload["diff"]
     assert "-before" in diff
     assert "+after" in diff
 
     untracked_response = client.get(
         "/dashboard-api/workspace/diff",
-        params={"backend": "local", "locator": str(repo), "path": "new.txt"},
+        params={
+            "backend": "local",
+            "locator": str(repo),
+            "path": _absolute(repo / "new.txt"),
+        },
     )
     assert untracked_response.status_code == 200
+    assert untracked_response.json()["path"] == _absolute(repo / "new.txt")
     assert "+++ b/new.txt" in untracked_response.json()["diff"]
 
 
@@ -494,6 +554,7 @@ def test_dashboard_workspace_changes_for_non_git_workspace() -> None:
     assert changes_response.json()["changes"] == []
     assert diff_response.status_code == 200
     assert diff_response.json()["is_git_repo"] is False
+    assert diff_response.json()["path"] == _absolute(workspace / "file.txt")
     assert "not a Git repository" in diff_response.json()["message"]
 
 

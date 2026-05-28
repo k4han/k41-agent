@@ -63,14 +63,8 @@ def get_workspace_backend(workspace: WorkspaceRef | dict[str, Any] | str | None 
     ref = resolve_workspace_ref(workspace)
     if ref.backend == "local":
         from agent.modules.workspaces.local_backend import LocalWorkspaceBackend
-        from agent.modules.workspaces.virtual_backend import VirtualWorkspaceBackend
 
-        local = LocalWorkspaceBackend(ref)
-        try:
-            virtual_name = Path(ref.locator).name or "workspace"
-        except Exception:
-            virtual_name = "workspace"
-        return VirtualWorkspaceBackend(local, virtual_name=virtual_name)
+        return LocalWorkspaceBackend(ref)
     raise ValueError(f"Unsupported workspace backend: {ref.backend}")
 
 
@@ -141,11 +135,16 @@ def list_workspace_directories(path: str | None = None) -> dict[str, Any]:
 
 
 def resolve_workspace_child(root: Path, path: str | None = None) -> Path:
-    relative_path = str(path or "").strip()
-    target = (root / relative_path).resolve()
+    raw_path = str(path or "").strip()
+    source = Path(raw_path).expanduser() if raw_path else root
+    target = source.resolve() if source.is_absolute() else (root / source).resolve()
     if target != root and not target.is_relative_to(root):
         raise ValueError("Path escapes workspace.")
     return target
+
+
+def workspace_absolute_path(target: Path) -> str:
+    return str(target.resolve())
 
 
 def workspace_relative_path(root: Path, target: Path) -> str:
@@ -230,7 +229,7 @@ def list_workspace_tree(
         entries.append(
             {
                 "name": child.name,
-                "path": workspace_relative_path(root, child),
+                "path": workspace_absolute_path(child),
                 "kind": "directory" if child.is_dir() else "file",
                 "size": stat.st_size if child.is_file() else None,
                 "modified_at": stat.st_mtime,
@@ -239,7 +238,7 @@ def list_workspace_tree(
 
     return {
         "root": str(root),
-        "path": workspace_relative_path(root, target),
+        "path": workspace_absolute_path(target),
         "entries": entries,
         "truncated": truncated,
     }
@@ -278,6 +277,7 @@ def get_workspace_diff(*, working_dir: str | None, path: str) -> dict[str, Any]:
     root = ensure_workspace_directory(working_dir)
     target = resolve_workspace_child(root, path)
     relative_path = workspace_relative_path(root, target)
+    absolute_path = workspace_absolute_path(target)
     if not relative_path:
         raise ValueError("File path is required.")
 
@@ -285,7 +285,7 @@ def get_workspace_diff(*, working_dir: str | None, path: str) -> dict[str, Any]:
     if git_root is None:
         return {
             "root": str(root),
-            "path": relative_path,
+            "path": absolute_path,
             "is_git_repo": False,
             "status": "",
             "diff": "",
@@ -301,7 +301,7 @@ def get_workspace_diff(*, working_dir: str | None, path: str) -> dict[str, Any]:
             git_root=git_root,
         )
     }
-    change = status_by_path.get(relative_path)
+    change = status_by_path.get(absolute_path)
     status = str(change.get("status") or "") if change else ""
     git_path = _git_relative_path(git_root, target)
 
@@ -318,7 +318,7 @@ def get_workspace_diff(*, working_dir: str | None, path: str) -> dict[str, Any]:
     diff, truncated = _truncate_diff(diff)
     return {
         "root": str(root),
-        "path": relative_path,
+        "path": absolute_path,
         "is_git_repo": True,
         "status": status,
         "diff": diff,
@@ -331,6 +331,7 @@ def get_workspace_file(*, working_dir: str | None, path: str) -> dict[str, Any]:
     root = ensure_workspace_directory(working_dir)
     target = resolve_workspace_child(root, path)
     relative_path = workspace_relative_path(root, target)
+    absolute_path = workspace_absolute_path(target)
     if not relative_path:
         raise ValueError("File path is required.")
     if not target.exists():
@@ -350,7 +351,7 @@ def get_workspace_file(*, working_dir: str | None, path: str) -> dict[str, Any]:
     if b"\0" in raw_content:
         return {
             "root": str(root),
-            "path": relative_path,
+            "path": absolute_path,
             "mime_type": mime_type,
             "size": stat.st_size,
             "content": "",
@@ -361,7 +362,7 @@ def get_workspace_file(*, working_dir: str | None, path: str) -> dict[str, Any]:
 
     return {
         "root": str(root),
-        "path": relative_path,
+        "path": absolute_path,
         "mime_type": mime_type,
         "size": stat.st_size,
         "content": raw_content.decode("utf-8", errors="replace"),
@@ -399,8 +400,8 @@ def rename_workspace_entry(
     if destination == target:
         return {
             "root": str(root),
-            "path": relative_path,
-            "new_path": relative_path,
+            "path": workspace_absolute_path(target),
+            "new_path": workspace_absolute_path(target),
         }
     if destination.exists():
         raise FileExistsError(f"Destination already exists: {clean_name}")
@@ -408,8 +409,8 @@ def rename_workspace_entry(
     target.rename(destination)
     return {
         "root": str(root),
-        "path": relative_path,
-        "new_path": workspace_relative_path(root, destination),
+        "path": workspace_absolute_path(target),
+        "new_path": workspace_absolute_path(destination),
     }
 
 
@@ -435,7 +436,7 @@ def delete_workspace_entry(
 
     return {
         "root": str(root),
-        "path": relative_path,
+        "path": workspace_absolute_path(target),
         "kind": kind,
     }
 
@@ -510,7 +511,7 @@ def _parse_git_status(
 
         status = _status_label(code)
         entry = {
-            "path": workspace_relative_path(workspace_root, absolute_path),
+            "path": workspace_absolute_path(absolute_path),
             "status": status,
             "index_status": code[0],
             "working_tree_status": code[1],
@@ -520,7 +521,7 @@ def _parse_git_status(
             if old_absolute == workspace_root or old_absolute.is_relative_to(
                 workspace_root
             ):
-                entry["old_path"] = workspace_relative_path(workspace_root, old_absolute)
+                entry["old_path"] = workspace_absolute_path(old_absolute)
         changes.append(entry)
 
     return sorted(changes, key=lambda change: change["path"])
@@ -556,7 +557,7 @@ def _change_line_stats(
         target = resolve_workspace_child(workspace_root, path)
         return _text_line_count(target), 0
 
-    target = (workspace_root / path).resolve()
+    target = resolve_workspace_child(workspace_root, path)
     git_path = _git_relative_path(git_root, target)
     additions = 0
     deletions = 0

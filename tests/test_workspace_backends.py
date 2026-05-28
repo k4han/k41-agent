@@ -7,6 +7,7 @@ from sqlalchemy import create_engine, text
 import agent.modules.workspaces.local_backend as local_backend_module
 from agent.modules.workspaces import (
     WorkspaceRef,
+    get_workspace_backend,
     resolve_workspace_ref,
     workspace_ref_from_local_path,
 )
@@ -77,12 +78,14 @@ def test_workspace_ref_normalizes_model_instances(tmp_path):
 def test_local_workspace_backend_file_operations_and_path_guard(tmp_path):
     workspace = workspace_ref_from_local_path(str(tmp_path))
     backend = LocalWorkspaceBackend(workspace)
+    file_path = tmp_path / "src" / "app.py"
 
     result = backend.write_text("src/app.py", "print('hello')\n")
 
-    assert result.startswith("[OK] Wrote file:")
+    assert result == f"[OK] Wrote file: {file_path.resolve()}"
     assert backend.read_text("src/app.py") == "print('hello')\n"
-    assert backend.list_files("src") == "app.py"
+    assert backend.read_text(str(file_path)) == "print('hello')\n"
+    assert backend.list_files("src") == str(file_path.resolve())
     with pytest.raises(ValueError, match="Path escapes working directory"):
         backend.read_text("../secret.txt")
 
@@ -188,53 +191,26 @@ def test_workspace_migration_backfills_legacy_tables(tmp_path):
     assert json.loads(task_row.workspace_metadata_json) == {}
 
 
-def test_virtual_workspace_backend(tmp_path):
-    from agent.modules.workspaces.virtual_backend import VirtualWorkspaceBackend
-    
+def test_get_workspace_backend_returns_physical_local_backend(tmp_path):
     workspace = workspace_ref_from_local_path(str(tmp_path), label="test-lab")
-    local_backend = LocalWorkspaceBackend(workspace)
-    virtual_backend = VirtualWorkspaceBackend(local_backend, virtual_name="my_space")
+    backend = get_workspace_backend(workspace)
 
-    # Test writing file via virtual path
-    result = virtual_backend.write_text("/my_space/src/main.py", "print('hello virtual')")
-    assert result.startswith("[OK] Wrote file: /my_space/src/main.py")
-    
-    # Test file is written to correct physical location
-    physical_file = tmp_path / "src" / "main.py"
-    assert physical_file.exists()
-    assert physical_file.read_text(encoding="utf-8") == "print('hello virtual')"
-
-    # Test reading file via virtual path
-    assert virtual_backend.read_text("/my_space/src/main.py") == "print('hello virtual')"
-
-    # Test list_files returns virtual paths
-    files_list = virtual_backend.list_files("src")
-    assert files_list == "/my_space/src/main.py"
-
-    # Test command translation and path sanitization in output using a Python script that prints absolute path
-    virtual_backend.write_text("/my_space/print_path.py", "import os; print(os.path.abspath('print_path.py'))")
-    exec_result = virtual_backend.execute("python /my_space/print_path.py")
-    
-    # Verify the real path of print_path.py was sanitized and mapped to the virtual path
-    assert "/my_space/print_path.py" in exec_result.output.replace("\\", "/")
-    assert str(tmp_path) not in exec_result.output
+    assert isinstance(backend, LocalWorkspaceBackend)
+    assert not hasattr(backend, "virtual_prefix")
 
 
-def test_virtual_workspace_tree_uses_virtual_path_keys(tmp_path):
-    from agent.modules.workspaces.virtual_backend import VirtualWorkspaceBackend
-
+def test_local_workspace_tree_uses_absolute_path_keys(tmp_path):
     workspace = workspace_ref_from_local_path(str(tmp_path), label="test-lab")
-    local_backend = LocalWorkspaceBackend(workspace)
-    virtual_backend = VirtualWorkspaceBackend(local_backend, virtual_name="my_space")
+    backend = LocalWorkspaceBackend(workspace)
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "main.py").write_text("print('hello')", encoding="utf-8")
 
-    root_tree = virtual_backend.tree()
+    root_tree = backend.tree()
 
-    assert root_tree["path"] == ""
-    assert root_tree["entries"][0]["path"] == "/my_space/src"
+    assert root_tree["path"] == str(tmp_path.resolve())
+    assert root_tree["entries"][0]["path"] == str((tmp_path / "src").resolve())
 
-    src_tree = virtual_backend.tree(root_tree["entries"][0]["path"])
+    src_tree = backend.tree(root_tree["entries"][0]["path"])
 
-    assert src_tree["path"] == "/my_space/src"
-    assert src_tree["entries"][0]["path"] == "/my_space/src/main.py"
+    assert src_tree["path"] == str((tmp_path / "src").resolve())
+    assert src_tree["entries"][0]["path"] == str((tmp_path / "src" / "main.py").resolve())

@@ -29,8 +29,5 @@ def get_backend(runtime: ToolRuntime[Any, Any]):
 
 
 def get_working_dir(runtime: ToolRuntime[Any, Any]) -> str:
-    """Return the virtual path view for prompt/tool compatibility."""
-    backend = get_backend(runtime)
-    if hasattr(backend, "virtual_prefix"):
-        return backend.virtual_prefix.rstrip("/")
+    """Return the physical workspace path for prompt/tool compatibility."""
     return get_workspace(runtime).locator

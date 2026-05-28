@@ -22,6 +22,16 @@ def test_resolve_safe_path_allows_path_inside_working_dir(tmp_path):
     assert resolved == str((sandbox / "nested" / "file.txt").resolve())
 
 
+def test_resolve_safe_path_allows_absolute_path_inside_working_dir(tmp_path):
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    target = sandbox / "nested" / "file.txt"
+
+    resolved = resolve_safe_path(str(sandbox), str(target))
+
+    assert resolved == str(target.resolve())
+
+
 def test_resolve_safe_path_rejects_parent_traversal(tmp_path):
     sandbox = tmp_path / "sandbox"
     sandbox.mkdir()

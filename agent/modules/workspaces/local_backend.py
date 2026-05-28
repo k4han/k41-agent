@@ -44,8 +44,7 @@ class LocalWorkspaceBackend:
                 if len(files) >= MAX_LIST_FILES_ENTRIES:
                     truncated = True
                     break
-                rel_path = os.path.relpath(os.path.join(root, filename), target)
-                files.append(rel_path)
+                files.append(os.path.realpath(os.path.join(root, filename)))
             if truncated:
                 break
         if not files:

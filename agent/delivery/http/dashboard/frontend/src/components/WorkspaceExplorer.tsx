@@ -149,17 +149,6 @@ function FileCodeView(props: { content: string; path: string; dark: boolean }) {
   );
 }
 
-function joinAbsolutePath(root: string, relativePath: string): string {
-  if (!relativePath) {
-    return root;
-  }
-  const useBackslash = /\\/.test(root) && !/\//.test(root);
-  const separator = useBackslash ? "\\" : "/";
-  const trimmedRoot = root.replace(/[\\/]+$/, "");
-  const normalised = relativePath.split(/[\\/]+/).filter(Boolean).join(separator);
-  return `${trimmedRoot}${separator}${normalised}`;
-}
-
 async function writeToClipboard(text: string): Promise<void> {
   if (navigator.clipboard && window.isSecureContext) {
     await navigator.clipboard.writeText(text);
@@ -216,7 +205,10 @@ export function WorkspaceExplorer(props: {
   const [workspaceRoot, setWorkspaceRoot] = createSignal("");
   let generation = 0;
 
-  const rootEntries = () => entriesByPath()[""] || [];
+  const rootPath = () => workspaceRoot() || "";
+  const rootEntries = () => entriesByPath()[rootPath()] || entriesByPath()[""] || [];
+  const rootTreeTruncated = () =>
+    treeTruncatedByPath()[rootPath()] || treeTruncatedByPath()[""] || false;
   const canQuery = () => Boolean(props.workingDir.trim() || props.threadId);
   const activeFilePath = () => fileTabPath(activeTab());
   const activeFilePayload = () => filePayloads()[activeFilePath()];
@@ -345,6 +337,7 @@ export function WorkspaceExplorer(props: {
     setEntriesByPath({});
     setExpandedByPath({ "": true });
     setTreeTruncatedByPath({});
+    setWorkspaceRoot("");
     setExpandedChangePath("");
     setDiffPayload(null);
     setDiffError("");
@@ -496,28 +489,12 @@ export function WorkspaceExplorer(props: {
     }
   };
 
-  const copyRelativePath = async (entry: WorkspaceTreeEntry, event: MouseEvent) => {
+  const copyPath = async (entry: WorkspaceTreeEntry, event: MouseEvent) => {
     event.stopPropagation();
     closeActionMenu();
     try {
       await writeToClipboard(entry.path);
-      showToast("Copied relative path", "success");
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Copy failed", "error");
-    }
-  };
-
-  const copyAbsolutePath = async (entry: WorkspaceTreeEntry, event: MouseEvent) => {
-    event.stopPropagation();
-    closeActionMenu();
-    const root = workspaceRoot() || props.workingDir;
-    if (!root) {
-      showToast("Workspace root unavailable", "warning");
-      return;
-    }
-    try {
-      await writeToClipboard(joinAbsolutePath(root, entry.path));
-      showToast("Copied absolute path", "success");
+      showToast("Copied path", "success");
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Copy failed", "error");
     }
@@ -617,19 +594,10 @@ export function WorkspaceExplorer(props: {
                   class="workspace-tree-menu-item"
                   type="button"
                   role="menuitem"
-                  onClick={(event) => void copyRelativePath(entry(), event)}
+                  onClick={(event) => void copyPath(entry(), event)}
                 >
                   <Clipboard size={13} />
                   <span>Copy path</span>
-                </button>
-                <button
-                  class="workspace-tree-menu-item"
-                  type="button"
-                  role="menuitem"
-                  onClick={(event) => void copyAbsolutePath(entry(), event)}
-                >
-                  <Clipboard size={13} />
-                  <span>Copy absolute path</span>
                 </button>
                 <button
                   class="workspace-tree-menu-item workspace-tree-menu-danger"
@@ -845,7 +813,7 @@ export function WorkspaceExplorer(props: {
                   <For each={rootEntries()}>
                     {(entry) => <TreeEntry entry={entry} depth={0} />}
                   </For>
-                  <Show when={treeTruncatedByPath()[""]}>
+                  <Show when={rootTreeTruncated()}>
                     <div class="workspace-tree-status" style="--depth: 0;">
                       Tree truncated
                     </div>

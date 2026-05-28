@@ -223,3 +223,5 @@ curl -X POST http://localhost:8000/api/chat/stream \
 | `react_agent`    | Hỏi đáp + coding + file/bash + skills | get_current_time, echo, skill, read_file, write_file, run_bash, list_files |
 | `research_chain` | Nghiên cứu, tổng hợp (2 bước)      | (LLM only)                         |
 | `router`         | Tự phân loại → chuyển đúng workflow | (LLM classifier)                   |
+
+Các tool file/bash làm việc trực tiếp với đường dẫn vật lý tuyệt đối của workspace; path tương đối vẫn được chấp nhận nếu nằm trong workspace.
