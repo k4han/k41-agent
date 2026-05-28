@@ -416,6 +416,7 @@ export function AgentsPage() {
                       catalogs={payload.model_catalogs}
                       providerNames={payload.provider_names}
                       defaultProvider={payload.default_provider}
+                      defaultModel={payload.default_model}
                       provider={form().provider}
                       model={form().model}
                       disabled={modalMode() === "view"}

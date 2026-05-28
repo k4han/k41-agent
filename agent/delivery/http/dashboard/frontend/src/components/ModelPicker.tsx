@@ -30,11 +30,13 @@ type ModelPickerProps = {
   catalogs: ModelCatalog[];
   providerNames: string[];
   defaultProvider: string;
+  defaultModel: string;
   provider: string;
   model: string;
   disabled?: boolean;
   dropdownPlacement?: "top" | "bottom";
   onChange: (provider: string, model: string) => void;
+  resolveDefault?: boolean;
 };
 
 function favoriteKey(provider: string, model: string): string {
@@ -45,8 +47,36 @@ function modelLabel(model: string): string {
   return model || "provider default";
 }
 
-function selectionLabel(provider: string, model: string): string {
+function selectionLabel(provider: string, model: string, resolveDefault?: boolean, defaultModel?: string): string {
+  if (resolveDefault && (!model || model === "provider default")) {
+    return `${provider}/${defaultModel || "default model"}`;
+  }
   return `${provider || "default"}/${modelLabel(model)}`;
+}
+
+function resolveModelAndProvider(
+  provider: string,
+  model: string,
+  defaultProvider: string,
+  defaultModel: string,
+  catalogs: ModelCatalog[]
+): { provider: string; model: string } {
+  let resolvedProvider = provider;
+  if (!provider || provider === "default") {
+    resolvedProvider = defaultProvider || "";
+  }
+
+  let resolvedModel = model;
+  if (!model || model === "provider default") {
+    if (!provider || provider === "default") {
+      resolvedModel = defaultModel || "";
+    } else {
+      const catalog = catalogs.find((item) => item.provider === resolvedProvider);
+      resolvedModel = catalog?.default_model || "";
+    }
+  }
+
+  return { provider: resolvedProvider, model: resolvedModel };
 }
 
 function readFavorites(): string[] {
@@ -86,15 +116,18 @@ function orderedProviders(
   catalogs: ModelCatalog[],
   defaultProvider: string,
   selectedProvider: string,
+  resolveDefault?: boolean,
 ): string[] {
   const providers = new Set<string>();
-  providers.add("default");
+  if (!resolveDefault) {
+    providers.add("default");
+  }
   if (defaultProvider) {
     providers.add(defaultProvider);
   }
   providerNames.forEach((provider) => providers.add(provider));
   catalogs.forEach((catalog) => providers.add(catalog.provider));
-  if (selectedProvider) {
+  if (selectedProvider && selectedProvider !== "default") {
     providers.add(selectedProvider);
   }
   return Array.from(providers).sort((left, right) => {
@@ -129,10 +162,32 @@ export function ModelPicker(props: ModelPickerProps) {
   let rootRef: HTMLDivElement | undefined;
   let inputRef: HTMLInputElement | undefined;
 
-  const selectedProvider = createMemo(() => props.provider || "default");
-  const selectedLabel = createMemo(() => selectionLabel(selectedProvider(), props.model || ""));
+  const selectedProvider = createMemo(() => {
+    if (props.resolveDefault) {
+      const { provider } = resolveModelAndProvider(props.provider, props.model, props.defaultProvider, props.defaultModel, props.catalogs);
+      return provider;
+    }
+    return props.provider || "default";
+  });
+
+  const selectedModel = createMemo(() => {
+    if (props.resolveDefault) {
+      const { model } = resolveModelAndProvider(props.provider, props.model, props.defaultProvider, props.defaultModel, props.catalogs);
+      return model;
+    }
+    return props.model || "";
+  });
+
+  const selectedLabel = createMemo(() => {
+    if (props.resolveDefault) {
+      const { provider, model } = resolveModelAndProvider(props.provider, props.model, props.defaultProvider, props.defaultModel, props.catalogs);
+      return `${provider}/${model || "default model"}`;
+    }
+    return selectionLabel(selectedProvider(), props.model || "");
+  });
+
   const selectedFavorite = createMemo(() =>
-    props.model ? favorites().includes(favoriteKey(selectedProvider(), props.model)) : false,
+    selectedModel() ? favorites().includes(favoriteKey(selectedProvider(), selectedModel())) : false,
   );
 
   const isFavorite = (choice: Pick<ModelChoice, "provider" | "model">) =>
@@ -158,6 +213,7 @@ export function ModelPicker(props: ModelPickerProps) {
       props.catalogs,
       props.defaultProvider,
       selectedProvider(),
+      props.resolveDefault,
     );
     return providers
       .map((provider) => {
@@ -169,20 +225,24 @@ export function ModelPicker(props: ModelPickerProps) {
           if (catalog?.default_model) {
             models.add(catalog.default_model);
           }
-          if (provider === selectedProvider() && props.model) {
-            models.add(props.model);
+          if (provider === selectedProvider() && selectedModel()) {
+            models.add(selectedModel());
           }
         }
-        const choices: ModelChoice[] = [
-          {
+        const defaultModelName = catalog?.default_model || "";
+        const choices: ModelChoice[] = [];
+        if (provider === "default") {
+          choices.push({
             provider,
             model: "",
-            label: selectionLabel(provider, ""),
-            description: provider === "default" && props.defaultProvider
-              ? `uses ${props.defaultProvider}`
-              : "provider default",
+            label: selectionLabel(provider, "", props.resolveDefault, props.defaultModel),
+            description: props.defaultProvider
+              ? `uses ${props.defaultProvider}/${props.defaultModel}`
+              : "system default model",
             key: favoriteKey(provider, ""),
-          },
+          });
+        }
+        choices.push(
           ...Array.from(models)
             .sort((left, right) => {
               const leftFavorite = favorites().includes(favoriteKey(provider, left));
@@ -195,11 +255,11 @@ export function ModelPicker(props: ModelPickerProps) {
             .map((model) => ({
               provider,
               model,
-              label: selectionLabel(provider, model),
+              label: selectionLabel(provider, model, props.resolveDefault, defaultModelName),
               description: catalog?.models.find((item) => item.id === model)?.source || "configured model",
               key: favoriteKey(provider, model),
             })),
-        ];
+        );
         return { provider, choices };
       })
       .filter((group) => group.choices.length > 0);
@@ -325,10 +385,10 @@ export function ModelPicker(props: ModelPickerProps) {
         <button
           class={classNames("model-picker-star", selectedFavorite() && "active")}
           type="button"
-          disabled={props.disabled || !props.model}
+          disabled={props.disabled || !selectedModel()}
           title={selectedFavorite() ? "Remove favorite model" : "Add favorite model"}
           aria-pressed={selectedFavorite()}
-          onClick={() => toggleFavorite({ provider: selectedProvider(), model: props.model })}
+          onClick={() => toggleFavorite({ provider: selectedProvider(), model: selectedModel() })}
         >
           <Star size={15} fill={selectedFavorite() ? "currentColor" : "none"} />
         </button>
@@ -345,7 +405,7 @@ export function ModelPicker(props: ModelPickerProps) {
                     <div
                       class={classNames(
                         "model-picker-option",
-                        choice.provider === selectedProvider() && choice.model === props.model && "active",
+                        choice.provider === selectedProvider() && choice.model === selectedModel() && "active",
                       )}
                     >
                       <button

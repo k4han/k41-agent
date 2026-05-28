@@ -2199,10 +2199,12 @@ export function ChatPage() {
                         catalogs={payload.model_catalogs}
                         providerNames={payload.provider_names}
                         defaultProvider={payload.default_provider}
+                        defaultModel={payload.default_model}
                         provider={provider()}
                         model={model()}
                         disabled={composerDisabled()}
                         dropdownPlacement="top"
+                        resolveDefault={true}
                         onChange={(nextProvider, nextModel) => {
                           setProvider(nextProvider);
                           setModel(nextModel);
@@ -2217,7 +2219,18 @@ export function ChatPage() {
                       <p class="hint">{selectedCard()?.description || "No description."}</p>
                       <div class="chips">
                         <span class="chip">{selectedCard()?.graph_type || "default"}</span>
-                        <span class="chip">{provider() || selectedCard()?.provider || "default"}</span>
+                        <span class="chip">
+                          {(() => {
+                            const activeProvider = provider() || selectedCard()?.provider || "default";
+                            const activeModel = model() || selectedCard()?.model || "";
+                            const resolvedProv = activeProvider === "default" ? payload.default_provider : activeProvider;
+                            const catalog = payload.model_catalogs.find((c) => c.provider === resolvedProv);
+                            const resolvedMod = (activeModel === "" || activeModel === "provider default")
+                              ? (activeProvider === "default" ? payload.default_model : (catalog?.default_model || "default"))
+                              : activeModel;
+                            return `${resolvedProv}/${resolvedMod}`;
+                          })()}
+                        </span>
                       </div>
                     </div>
                   </div>

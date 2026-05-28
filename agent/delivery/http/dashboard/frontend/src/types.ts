@@ -71,6 +71,7 @@ export type AgentsPayload = {
   agent_names: string[];
   provider_names: string[];
   default_provider: string;
+  default_model: string;
   model_catalogs: ModelCatalog[];
   model_catalog_error: string;
   mcp_server_options?: string[];

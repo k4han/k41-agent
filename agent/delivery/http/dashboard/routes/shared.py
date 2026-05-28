@@ -505,20 +505,31 @@ async def _provider_model_options() -> dict[str, Any]:
         config = get_config_service()
         default_model_setting = config.get_str("llm.default_model", "").strip()
         default_provider = ""
+        default_model = ""
         if default_model_setting:
             if "/" in default_model_setting:
-                default_provider = default_model_setting.split("/", 1)[0].strip()
+                default_provider, default_model = (
+                    x.strip() for x in default_model_setting.split("/", 1)
+                )
             else:
                 default_provider = default_model_setting
 
         if not default_provider:
             default_catalog = await list_provider_model_catalog()
             default_provider = default_catalog.provider
+
+        if not default_model:
+            matching_catalog = next(
+                (c for c in catalogs if c.provider == default_provider), None
+            )
+            if matching_catalog:
+                default_model = matching_catalog.default_model
     except Exception as exc:
         logger.warning("Failed to load provider model options: %s", exc)
         return {
             "provider_names": [],
             "default_provider": "",
+            "default_model": "",
             "model_catalogs": [],
             "model_catalog_error": str(exc),
         }
@@ -526,6 +537,7 @@ async def _provider_model_options() -> dict[str, Any]:
     return {
         "provider_names": sorted(catalog.provider for catalog in catalogs),
         "default_provider": default_provider,
+        "default_model": default_model,
         "model_catalogs": [_serialize_model_catalog(catalog) for catalog in catalogs],
         "model_catalog_error": "",
     }
