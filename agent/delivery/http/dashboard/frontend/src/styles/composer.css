@@ -20,3 +20,122 @@
   box-shadow: none;
 }
 
+/* Todos Box Styles */
+.chat-todos-box {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+  margin-bottom: 4px;
+}
+
+.chat-todos-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.chat-todos-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chat-todos-toggle-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  transition: transform 150ms ease;
+  flex-shrink: 0;
+}
+
+.chat-todos-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chat-todos-collapsed-text {
+  color: var(--fg);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 480px;
+}
+
+.chat-todos-progress {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.chat-todos-header-right {
+  display: flex;
+  align-items: center;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.chat-todos-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding-left: 22px;
+}
+
+.chat-todo-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--fg);
+}
+
+.chat-todo-item.completed {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+/* Style for status icons */
+.todo-status-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.todo-status-icon.in-progress {
+  border: 1.5px solid var(--primary, #0066cc);
+  border-radius: 50%;
+}
+
+.todo-status-icon.in-progress .todo-status-dot {
+  width: 6px;
+  height: 6px;
+  background-color: var(--primary, #0066cc);
+  border-radius: 50%;
+}
+
+.todo-status-icon.pending {
+  border: 1.5px solid var(--muted, #888);
+  border-radius: 50%;
+}
+
+.todo-status-icon.completed {
+  color: var(--success, #2e7d32);
+}
+
+

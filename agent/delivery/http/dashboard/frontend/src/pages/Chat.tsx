@@ -3,6 +3,7 @@ import {
   ArrowUp,
   Bot,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   FileText,
   FolderOpen,
@@ -725,7 +726,50 @@ export function ChatPage() {
   const [backgroundSession, setBackgroundSession] = createSignal<ActiveSession | null>(null);
   const [composerOptionsOpen, setComposerOptionsOpen] = createSignal(false);
   const [attachments, setAttachments] = createSignal<PendingAttachment[]>([]);
+  const [todosExpanded, setTodosExpanded] = createSignal(true);
   const { showToast } = useToast();
+
+  const filteredItems = createMemo(() =>
+    items().filter((item) => !(item.type === "tool" && item.name === "write_todos"))
+  );
+
+  const currentTodos = createMemo(() => {
+    const allItems = items();
+    for (let i = allItems.length - 1; i >= 0; i--) {
+      const item = allItems[i];
+      if (item.type === "tool" && item.name === "write_todos") {
+        const args = item.args as any;
+        if (args && Array.isArray(args.todos)) {
+          return args.todos as Array<{ content: string; status: "pending" | "in_progress" | "completed" }>;
+        }
+      }
+    }
+    return null;
+  });
+
+  const todoProgress = createMemo(() => {
+    const list = currentTodos();
+    if (!list || list.length === 0) {
+      return { current: 0, total: 0, activeText: "", activeStatus: "pending" };
+    }
+
+    const total = list.length;
+    let activeIdx = list.findIndex((t) => t.status === "in_progress");
+    if (activeIdx === -1) {
+      activeIdx = list.findIndex((t) => t.status === "pending");
+    }
+
+    const current = activeIdx === -1 ? total : activeIdx + 1;
+    let activeText = "";
+    if (activeIdx !== -1) {
+      activeText = list[activeIdx].content;
+    } else if (list.length > 0) {
+      activeText = list[list.length - 1].content;
+    }
+
+    const activeStatus = activeIdx !== -1 ? list[activeIdx].status : "completed";
+    return { current, total, activeText, activeStatus };
+  });
   let transcriptRef: HTMLDivElement | undefined;
   let chatShellRef: HTMLDivElement | undefined;
   let chatPromptRef: HTMLTextAreaElement | undefined;
@@ -1567,7 +1611,7 @@ export function ChatPage() {
                     </Show>
                   }
                 >
-                  <For each={items()}>
+                  <For each={filteredItems()}>
                     {(item) => (
                       <TranscriptItemView
                         item={item}
@@ -1586,6 +1630,122 @@ export function ChatPage() {
                   accept={ATTACHMENT_ACCEPT}
                   onChange={(event) => void addFiles(event.currentTarget.files)}
                 />
+                <Show when={currentTodos() && currentTodos()!.length > 0}>
+                  <div class="chat-todos-box">
+                    <div
+                      class="chat-todos-header"
+                      onClick={() => setTodosExpanded(!todosExpanded())}
+                    >
+                      <div class="chat-todos-header-left">
+                        <span class="chat-todos-toggle-icon">
+                          <Show when={todosExpanded()} fallback={<ChevronRight size={14} />}>
+                            <ChevronDown size={14} />
+                          </Show>
+                        </span>
+
+                        <Show
+                          when={todosExpanded()}
+                          fallback={
+                            <div class="chat-todos-title">
+                              <Show when={todoProgress().activeStatus === "completed"}>
+                                <span class="todo-status-icon completed">
+                                  <svg
+                                    viewBox="0 0 24 24"
+                                    width="14"
+                                    height="14"
+                                    stroke="currentColor"
+                                    stroke-width="3"
+                                    fill="none"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                  >
+                                    <polyline points="20 6 9 17 4 12"></polyline>
+                                  </svg>
+                                </span>
+                              </Show>
+                              <Show when={todoProgress().activeStatus === "in_progress"}>
+                                <span class="todo-status-icon in-progress">
+                                  <span class="todo-status-dot"></span>
+                                </span>
+                              </Show>
+                              <Show when={todoProgress().activeStatus === "pending"}>
+                                <span class="todo-status-icon pending"></span>
+                              </Show>
+
+                              <span class="chat-todos-collapsed-text">
+                                {todoProgress().activeText}
+                              </span>
+                              <span class="chat-todos-progress">
+                                ({todoProgress().current}/{todoProgress().total})
+                              </span>
+                            </div>
+                          }
+                        >
+                          <span class="chat-todos-collapsed-text" style="font-weight: 600;">
+                            Todos ({todoProgress().current}/{todoProgress().total})
+                          </span>
+                        </Show>
+                      </div>
+
+                      <div class="chat-todos-header-right">
+                        <svg
+                          viewBox="0 0 24 24"
+                          width="16"
+                          height="16"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          fill="none"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        >
+                          <line x1="8" y1="6" x2="21" y2="6"></line>
+                          <line x1="8" y1="12" x2="21" y2="12"></line>
+                          <line x1="8" y1="18" x2="21" y2="18"></line>
+                          <path d="M3 6h.01"></path>
+                          <path d="M3 12h.01"></path>
+                          <path d="M3 18h.01"></path>
+                        </svg>
+                      </div>
+                    </div>
+
+                    <Show when={todosExpanded()}>
+                      <div class="chat-todos-list">
+                        <For each={currentTodos()}>
+                          {(todo) => (
+                            <div class={`chat-todo-item ${todo.status}`}>
+                              <Show when={todo.status === "completed"}>
+                                <span class="todo-status-icon completed">
+                                  <svg
+                                    viewBox="0 0 24 24"
+                                    width="14"
+                                    height="14"
+                                    stroke="currentColor"
+                                    stroke-width="3"
+                                    fill="none"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                  >
+                                    <polyline points="20 6 9 17 4 12"></polyline>
+                                  </svg>
+                                </span>
+                              </Show>
+                              <Show when={todo.status === "in_progress"}>
+                                <span class="todo-status-icon in-progress">
+                                  <span class="todo-status-dot"></span>
+                                </span>
+                              </Show>
+                              <Show when={todo.status === "pending"}>
+                                <span class="todo-status-icon pending"></span>
+                              </Show>
+
+                              <span>{todo.content}</span>
+                            </div>
+                          )}
+                        </For>
+                      </div>
+                    </Show>
+                  </div>
+                </Show>
                 <textarea
                   ref={chatPromptRef}
                   class="chat-prompt-input"
