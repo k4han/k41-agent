@@ -82,6 +82,7 @@ type ChatPayload = {
   new_thread?: boolean;
   attachments?: ChatAttachmentPayload[];
 };
+type AppendScrollMode = "bottom" | "turn-start" | "none";
 type BackgroundTaskSnapshot = ThreadMessagesPayload & {
   task?: BackgroundTask | null;
   active_session?: ActiveSession | null;
@@ -729,6 +730,8 @@ export function ChatPage() {
   const [attachments, setAttachments] = createSignal<PendingAttachment[]>([]);
   const [todosExpanded, setTodosExpanded] = createSignal(true);
   const [autoScroll, setAutoScroll] = createSignal(true);
+  const [turnAnchorItemId, setTurnAnchorItemId] = createSignal<number | null>(null);
+  const [turnAnchorSpacerHeight, setTurnAnchorSpacerHeight] = createSignal(0);
   const { showToast } = useToast();
 
   const filteredItems = createMemo(() =>
@@ -990,11 +993,72 @@ export function ChatPage() {
     }
   });
 
+  const clearTurnAnchor = () => {
+    setTurnAnchorItemId(null);
+    setTurnAnchorSpacerHeight(0);
+  };
+
+  const getTranscriptItemElement = (id: number) =>
+    transcriptRef?.querySelector<HTMLElement>(`[data-transcript-item-id="${id}"]`);
+
+  const getTranscriptItemScrollTop = (target: HTMLElement) => {
+    if (!transcriptRef) {
+      return 0;
+    }
+    const transcriptRect = transcriptRef.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    return targetRect.top - transcriptRect.top + transcriptRef.scrollTop;
+  };
+
+  const scrollToTurnAnchor = (id: number) => {
+    window.requestAnimationFrame(() => {
+      if (!transcriptRef) {
+        return;
+      }
+      const target = getTranscriptItemElement(id);
+      if (!target) {
+        return;
+      }
+
+      const targetTop = getTranscriptItemScrollTop(target);
+      const currentSpacerHeight = turnAnchorSpacerHeight();
+      const contentBelowTargetTop =
+        transcriptRef.scrollHeight - currentSpacerHeight - targetTop;
+      const nextSpacerHeight = Math.max(
+        0,
+        Math.ceil(transcriptRef.clientHeight - contentBelowTargetTop),
+      );
+
+      if (Math.abs(nextSpacerHeight - currentSpacerHeight) > 1) {
+        setTurnAnchorSpacerHeight(nextSpacerHeight);
+      }
+
+      window.requestAnimationFrame(() => {
+        if (!transcriptRef) {
+          return;
+        }
+        const updatedTarget = getTranscriptItemElement(id);
+        if (!updatedTarget) {
+          return;
+        }
+        transcriptRef.scrollTop = getTranscriptItemScrollTop(updatedTarget);
+      });
+    });
+  };
+
   const scrollToBottom = (force = false) => {
     if (!autoScroll() && !force) {
       return;
     }
     window.setTimeout(() => {
+      const anchorId = turnAnchorItemId();
+      if (anchorId !== null && !force) {
+        scrollToTurnAnchor(anchorId);
+        return;
+      }
+      if (force) {
+        clearTurnAnchor();
+      }
       if (transcriptRef) {
         transcriptRef.scrollTop = transcriptRef.scrollHeight;
       }
@@ -1016,15 +1080,23 @@ export function ChatPage() {
   };
 
   const handleScrollToBottomClick = () => {
+    clearTurnAnchor();
     setAutoScroll(true);
     scrollToBottom(true);
   };
 
-  const appendItem = (item: TranscriptItem): number => {
+  const appendItem = (item: TranscriptItem, scrollMode: AppendScrollMode = "bottom"): number => {
     const id = nextItemId;
     nextItemId += 1;
     setItems((current) => [...current, { ...item, id } as ChatTranscriptItem]);
-    scrollToBottom();
+    if (scrollMode === "turn-start") {
+      setTurnAnchorItemId(id);
+      setTurnAnchorSpacerHeight(0);
+      setAutoScroll(true);
+      scrollToTurnAnchor(id);
+    } else if (scrollMode === "bottom") {
+      scrollToBottom();
+    }
     return id;
   };
 
@@ -1068,6 +1140,7 @@ export function ChatPage() {
   };
 
   const applyThreadPayload = (payload: ThreadMessagesPayload) => {
+    clearTurnAnchor();
     setThreadData(payload);
     setCurrentThreadId(payload.thread_id);
     setWorkspace(payload.workspace || null);
@@ -1229,6 +1302,7 @@ export function ChatPage() {
       setThreadLoading(false);
       setItems([]);
       setWorkspace(null);
+      clearTurnAnchor();
       closeBackgroundStream();
       setBackgroundTask(null);
       return;
@@ -1462,15 +1536,17 @@ export function ChatPage() {
       return;
     }
 
-    appendItem({
-      type: "message",
-      role: "user",
-      text: message,
-      attachments: selectedAttachments.map(toTranscriptAttachment),
-    });
+    appendItem(
+      {
+        type: "message",
+        role: "user",
+        text: message,
+        attachments: selectedAttachments.map(toTranscriptAttachment),
+      },
+      "turn-start",
+    );
     setPrompt("");
     clearAttachments(selectedAttachments);
-    setAutoScroll(true);
     const abortController = new AbortController();
     setController(abortController);
     setStreaming(true);
@@ -1643,10 +1719,18 @@ export function ChatPage() {
                       {(item) => (
                         <TranscriptItemView
                           item={item}
+                          itemId={item.id}
                           deferMermaid={streaming() || backgroundLive()}
                         />
                       )}
                     </For>
+                    <Show when={turnAnchorSpacerHeight() > 0}>
+                      <div
+                        class="transcript-anchor-spacer"
+                        style={`height: ${turnAnchorSpacerHeight()}px;`}
+                        aria-hidden="true"
+                      />
+                    </Show>
                   </Show>
                 </div>
                 <Show when={!autoScroll()}>

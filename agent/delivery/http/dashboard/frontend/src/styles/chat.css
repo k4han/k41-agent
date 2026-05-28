@@ -178,6 +178,11 @@
   flex-direction: column;
 }
 
+.transcript-anchor-spacer {
+  flex: 0 0 auto;
+  pointer-events: none;
+}
+
 .scroll-to-bottom-btn {
   position: absolute;
   bottom: 16px;

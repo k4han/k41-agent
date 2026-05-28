@@ -93,9 +93,10 @@ export function TranscriptMessageView(props: {
   text: string;
   attachments?: TranscriptAttachment[];
   deferMermaid?: boolean;
+  itemId?: number;
 }) {
   return (
-    <div class={`message ${props.role}`}>
+    <div class={`message ${props.role}`} data-transcript-item-id={props.itemId}>
       <div class="message-bubble">
         <Show when={props.text}>
           <Show
@@ -152,9 +153,14 @@ export function ToolCallDetail(props: {
   args: unknown;
   result: unknown;
   defaultOpen?: boolean;
+  itemId?: number;
 }) {
   return (
-    <details class="tool-call" open={props.defaultOpen ?? false}>
+    <details
+      class="tool-call"
+      open={props.defaultOpen ?? false}
+      data-transcript-item-id={props.itemId}
+    >
       <summary>
         <span class="mono">{props.name || "unknown"}</span>
       </summary>
@@ -166,19 +172,25 @@ export function ToolCallDetail(props: {
   );
 }
 
-export function TranscriptItemView(props: { item: TranscriptItem; deferMermaid?: boolean }) {
+export function TranscriptItemView(props: {
+  item: TranscriptItem;
+  deferMermaid?: boolean;
+  itemId?: number;
+}) {
   return props.item.type === "message" ? (
     <TranscriptMessageView
       role={props.item.role}
       text={props.item.text}
       attachments={props.item.attachments}
       deferMermaid={props.deferMermaid}
+      itemId={props.itemId}
     />
   ) : (
     <ToolCallDetail
       name={props.item.name}
       args={props.item.args}
       result={props.item.result}
+      itemId={props.itemId}
     />
   );
 }
