@@ -32,7 +32,15 @@ def _local_workspace_display_label(value: str) -> str:
     trimmed = value.strip()
     normalized = trimmed.replace("\\", "/").rstrip("/")
     parts = [part for part in normalized.split("/") if part]
-    return f"{parts[-1]}/" if parts else trimmed
+    if not parts:
+        return trimmed
+
+    leaf = parts[-1]
+    start = len(parts) - 1
+    while start > 0 and parts[start - 1].casefold() == leaf.casefold():
+        start -= 1
+    visible_parts = parts[start:] if start < len(parts) - 1 else [leaf]
+    return f"{'/'.join(visible_parts)}/"
 
 
 def _is_absolute_local_path(value: str) -> bool:

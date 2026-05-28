@@ -22,3 +22,5 @@ local-dev/
 .ruff_cache/
 
 agent/delivery/http/dashboard/static/
+
+.vscode

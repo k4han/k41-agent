@@ -30,6 +30,18 @@ def test_workspace_display_label_compacts_local_root(tmp_path):
     assert workspace.display_label() == f"{tmp_path.name}/"
 
 
+def test_workspace_display_label_disambiguates_repeated_local_root(tmp_path):
+    parent = tmp_path / "kaka-agent"
+    nested = parent / "kaka-agent"
+    nested.mkdir(parents=True)
+
+    parent_workspace = workspace_ref_from_local_path(str(parent))
+    nested_workspace = workspace_ref_from_local_path(str(nested))
+
+    assert parent_workspace.display_label() == "kaka-agent/"
+    assert nested_workspace.display_label() == "kaka-agent/kaka-agent/"
+
+
 def test_workspace_display_label_keeps_custom_label(tmp_path):
     workspace = workspace_ref_from_local_path(str(tmp_path), label="octo/example")
 

@@ -19,13 +19,22 @@ function isAbsoluteLocalPath(value: string): boolean {
   );
 }
 
-function pathBaseName(value: string): string {
+function compactPathTail(value: string): string {
   const normalized = normalizePath(value);
   if (!normalized) {
     return "";
   }
   const parts = normalized.split("/").filter(Boolean);
-  return parts[parts.length - 1] || normalized;
+  if (!parts.length) {
+    return "";
+  }
+
+  const leaf = parts[parts.length - 1];
+  let start = parts.length - 1;
+  while (start > 0 && parts[start - 1].toLowerCase() === leaf.toLowerCase()) {
+    start -= 1;
+  }
+  return start < parts.length - 1 ? parts.slice(start).join("/") : leaf;
 }
 
 function metadataText(metadata: Record<string, unknown> | undefined, key: string): string {
@@ -47,8 +56,8 @@ export function localWorkspaceRef(locator: string): WorkspaceRef | null {
 }
 
 export function formatWorkspaceRoot(locator: string): string {
-  const baseName = pathBaseName(locator);
-  return baseName ? `${baseName}/` : locator.trim();
+  const compactTail = compactPathTail(locator);
+  return compactTail ? `${compactTail}/` : locator.trim();
 }
 
 export function workspaceDisplayLabelFromValues(
