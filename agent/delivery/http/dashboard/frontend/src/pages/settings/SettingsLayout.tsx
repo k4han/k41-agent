@@ -82,7 +82,7 @@ export function SettingsLayout(props: {
             </div>
             <div class="brand-text">
               <div class="brand-title">Kaka Dashboard</div>
-              <div class="brand-subtitle">Agent control plane</div>
+              {/* <div class="brand-subtitle">Agent control plane</div> */}
             </div>
             <button
               class="brand-collapse-btn"

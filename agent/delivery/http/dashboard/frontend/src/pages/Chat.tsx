@@ -1,5 +1,6 @@
 import { useNavigate, useParams, useSearchParams } from "@solidjs/router";
 import {
+  ArrowDown,
   ArrowUp,
   Bot,
   CheckCircle2,
@@ -727,6 +728,7 @@ export function ChatPage() {
   const [composerOptionsOpen, setComposerOptionsOpen] = createSignal(false);
   const [attachments, setAttachments] = createSignal<PendingAttachment[]>([]);
   const [todosExpanded, setTodosExpanded] = createSignal(true);
+  const [autoScroll, setAutoScroll] = createSignal(true);
   const { showToast } = useToast();
 
   const filteredItems = createMemo(() =>
@@ -988,12 +990,34 @@ export function ChatPage() {
     }
   });
 
-  const scrollToBottom = () => {
+  const scrollToBottom = (force = false) => {
+    if (!autoScroll() && !force) {
+      return;
+    }
     window.setTimeout(() => {
       if (transcriptRef) {
         transcriptRef.scrollTop = transcriptRef.scrollHeight;
       }
     }, 0);
+  };
+
+  const handleTranscriptScroll = () => {
+    if (!transcriptRef) {
+      return;
+    }
+    const threshold = 50; // px
+    const isAtBottom =
+      transcriptRef.scrollHeight - transcriptRef.scrollTop - transcriptRef.clientHeight < threshold;
+    if (isAtBottom) {
+      setAutoScroll(true);
+    } else {
+      setAutoScroll(false);
+    }
+  };
+
+  const handleScrollToBottomClick = () => {
+    setAutoScroll(true);
+    scrollToBottom(true);
   };
 
   const appendItem = (item: TranscriptItem): number => {
@@ -1053,7 +1077,8 @@ export function ChatPage() {
         id: nextItemId++,
       })),
     );
-    scrollToBottom();
+    setAutoScroll(true);
+    scrollToBottom(true);
   };
 
   const closeBackgroundStream = () => {
@@ -1161,6 +1186,7 @@ export function ChatPage() {
     setItems([]);
     closeBackgroundStream();
     setBackgroundTask(null);
+    setAutoScroll(true);
 
     try {
       const payload = await apiFetch<ThreadMessagesPayload>(threadApiPath(threadId));
@@ -1444,6 +1470,7 @@ export function ChatPage() {
     });
     setPrompt("");
     clearAttachments(selectedAttachments);
+    setAutoScroll(true);
     const abortController = new AbortController();
     setController(abortController);
     setStreaming(true);
@@ -1583,42 +1610,55 @@ export function ChatPage() {
                   </Show>
                 </div>
               </Show>
-              <div class="transcript" ref={transcriptRef}>
-                <Show
-                  when={items().length > 0}
-                  fallback={
-                    <Show
-                      when={threadLoading()}
-                      fallback={
-                        <Show
-                          when={!currentThreadId()}
-                          fallback={<div class="empty">Send a message to continue this thread.</div>}
-                        >
-                          <div class="chat-workspace-empty">
-                            <WorkspaceSelector
-                              workingDir={workingDir()}
-                              defaultWorkingDir={defaultWorkingDir()}
-                              workspace={workspaceRef()}
-                              locked={false}
-                              disabled={conversationBusy()}
-                              onResolved={setWorkspace}
-                            />
-                          </div>
-                        </Show>
-                      }
-                    >
-                      <div class="empty">Loading thread...</div>
-                    </Show>
-                  }
-                >
-                  <For each={filteredItems()}>
-                    {(item) => (
-                      <TranscriptItemView
-                        item={item}
-                        deferMermaid={streaming() || backgroundLive()}
-                      />
-                    )}
-                  </For>
+              <div class="transcript-container">
+                <div class="transcript" ref={transcriptRef} onScroll={handleTranscriptScroll}>
+                  <Show
+                    when={items().length > 0}
+                    fallback={
+                      <Show
+                        when={threadLoading()}
+                        fallback={
+                          <Show
+                            when={!currentThreadId()}
+                            fallback={<div class="empty">Send a message to continue this thread.</div>}
+                          >
+                            <div class="chat-workspace-empty">
+                              <WorkspaceSelector
+                                workingDir={workingDir()}
+                                defaultWorkingDir={defaultWorkingDir()}
+                                workspace={workspaceRef()}
+                                locked={false}
+                                disabled={conversationBusy()}
+                                onResolved={setWorkspace}
+                              />
+                            </div>
+                          </Show>
+                        }
+                      >
+                        <div class="empty">Loading thread...</div>
+                      </Show>
+                    }
+                  >
+                    <For each={filteredItems()}>
+                      {(item) => (
+                        <TranscriptItemView
+                          item={item}
+                          deferMermaid={streaming() || backgroundLive()}
+                        />
+                      )}
+                    </For>
+                  </Show>
+                </div>
+                <Show when={!autoScroll()}>
+                  <button
+                    class="scroll-to-bottom-btn"
+                    type="button"
+                    onClick={handleScrollToBottomClick}
+                    title="Scroll to bottom"
+                    aria-label="Scroll to bottom"
+                  >
+                    <ArrowDown size={18} />
+                  </button>
                 </Show>
               </div>
               <div class="composer chat-composer">
