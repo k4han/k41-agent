@@ -1,9 +1,7 @@
-from __future__ import annotations
-
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
 from langchain_core.messages import ToolMessage
-from langchain_core.tools import InjectedToolArg, tool
+from langchain_core.tools import StructuredTool
 from langgraph.prebuilt import ToolRuntime
 from langgraph.types import Command
 from pydantic import BaseModel, Field
@@ -35,10 +33,16 @@ class WriteTodosInput(BaseModel):
     )
 
 
-@tool(args_schema=WriteTodosInput)
-def write_todos(
+WRITE_TODOS_TOOL_DESCRIPTION = (
+    "Create and manage a structured todo list for the current work session. "
+    "Use this for complex multi-step tasks where progress tracking helps, and "
+    "replace the entire list with the current set of useful todos."
+)
+
+
+def _write_todos(
+    runtime: ToolRuntime[Any, Any],
     todos: list[TodoItem],
-    runtime: Annotated[ToolRuntime[Any, Any], InjectedToolArg],
 ) -> Command[Any]:
     """Create or update the structured todo list for the current work session."""
     normalized_todos = [todo.model_dump() for todo in todos]
@@ -53,3 +57,21 @@ def write_todos(
             ],
         }
     )
+
+
+async def _awrite_todos(
+    runtime: ToolRuntime[Any, Any],
+    todos: list[TodoItem],
+) -> Command[Any]:
+    """Async wrapper for write_todos."""
+    return _write_todos(runtime, todos)
+
+
+write_todos = StructuredTool.from_function(
+    name="write_todos",
+    description=WRITE_TODOS_TOOL_DESCRIPTION,
+    func=_write_todos,
+    coroutine=_awrite_todos,
+    args_schema=WriteTodosInput,
+    infer_schema=False,
+)

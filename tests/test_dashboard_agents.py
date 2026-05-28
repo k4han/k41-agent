@@ -70,6 +70,7 @@ def test_agents_page_serves_spa_and_agent_api_returns_cards(dashboard_agent_clie
     assert any(card["name"] == "default" for card in data["cards"])
     assert "react_agent" in data["workflows"]
     assert "tools" in data
+    assert "write_todos" in data["tools"]
 
     index_response = client.get("/")
     assert index_response.status_code == 200

@@ -26,6 +26,18 @@ SUB_AGENT_EMPTY_PROMPT = (
     "Do not call call_agent unless a callable sub-agent is listed."
 )
 
+WRITE_TODOS_PROMPT = (
+    "The write_todos tool can manage a structured todo list for complex, "
+    "multi-step work.\n"
+    "Use it when tracking progress is useful, especially for tasks with three "
+    "or more meaningful steps, explicit todo requests, or plans that may change "
+    "as you learn more.\n"
+    "Do not use it for trivial or purely conversational requests. When you use "
+    "it, keep exactly the current useful todo list, update statuses as soon as "
+    "work changes, and do not call write_todos multiple times in parallel.\n"
+    "Valid statuses are pending, in_progress, and completed."
+)
+
 _PROMPT_VARIABLE_RE = re.compile(r"\{\{([A-Za-z][A-Za-z0-9_-]{0,63})\}\}")
 
 
@@ -118,6 +130,9 @@ def build_llm_system_prompt(
             f"{system_prompt}{_build_sub_agents_prompt_section(agent_name, catalog)}"
         )
 
+    if _has_tool(tools, "write_todos"):
+        system_prompt = f"{system_prompt}\n\n{WRITE_TODOS_PROMPT}"
+
     if _has_tool(tools, "skill"):
         system_prompt = f"{system_prompt}{_build_skills_prompt_section()}"
 
@@ -128,6 +143,7 @@ __all__ = [
     "SKILLS_DISCLOSURE_PROMPT",
     "SUB_AGENT_DISCLOSURE_PROMPT",
     "SUB_AGENT_EMPTY_PROMPT",
+    "WRITE_TODOS_PROMPT",
     "build_llm_system_prompt",
     "replace_known_prompt_placeholders",
     "resolve_prompt_variables",
