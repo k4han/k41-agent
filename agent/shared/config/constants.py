@@ -88,12 +88,20 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "channels.github.mention_triggers": "@kaka-agent,/kaka",
     # Security
     "persistence.allow_any_path": False,
+    "workspace.root": "~/kaka-agent",
     "security.jwt_secret": "",
 }
 
 
 # Metadata for settings - used by dashboard to render appropriate input types
 SETTING_METADATA: dict[str, dict[str, Any]] = {
+    # Workspace settings
+    "workspace.root": {
+        "type": "text",
+        "description": "Root directory for local workspaces (supports ~)",
+        "category": "general",
+        "label": "Workspace Root",
+    },
     # Channel settings
     "channels.telegram.enabled": {
         "type": "boolean",

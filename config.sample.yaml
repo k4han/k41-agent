@@ -83,3 +83,8 @@ security:
 # Security (optional)
 # persistence:
 #   allow_any_path: false  # Set to true to allow database outside ~/.kaka-agent/
+
+# Workspace settings (optional)
+# workspace:
+#   root: "~/kaka-agent"
+

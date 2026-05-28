@@ -31,7 +31,9 @@ def serialize_thread_workspace(record: ThreadWorkspace) -> dict[str, Any]:
 
 
 def _workspace_from_record(record: ThreadWorkspace) -> WorkspaceRef:
-    locator = record.workspace_locator or record.working_dir or DEFAULT_LOCAL_WORKSPACE
+    from agent.shared.config.service import get_config_service
+    default_locator = str(get_config_service().get_path("workspace.root", "~/kaka-agent"))
+    locator = record.workspace_locator or record.working_dir or default_locator
     return workspace_ref_from_columns(
         backend=record.workspace_backend,
         locator=locator,
@@ -49,9 +51,11 @@ class ThreadWorkspaceRepository:
     ) -> dict[str, Any]:
         now = utcnow()
         normalized_thread_id = _trim(thread_id, 512)
+        from agent.shared.config.service import get_config_service
+        default_locator = str(get_config_service().get_path("workspace.root", "~/kaka-agent"))
         workspace_ref = normalize_workspace_ref(
             workspace,
-            default_locator=DEFAULT_LOCAL_WORKSPACE,
+            default_locator=default_locator,
         )
         if not normalized_thread_id:
             raise ValueError("Thread ID is required.")

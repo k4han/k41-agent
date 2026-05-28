@@ -181,6 +181,43 @@ async def resolve_dashboard_workspace(body: WorkspaceResolveBody) -> dict[str, A
         raise _workspace_http_error(exc) from exc
 
 
+class WorkspaceCreateDirBody(BaseModel):
+    parent_path: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1)
+
+
+@router.post("/dashboard-api/workspace/create-dir")
+async def create_dashboard_workspace_directory(
+    body: WorkspaceCreateDirBody,
+) -> dict[str, Any]:
+    try:
+        from pathlib import Path
+        parent = Path(body.parent_path.strip()).expanduser().resolve()
+        if not parent.exists():
+            raise FileNotFoundError(f"Parent directory does not exist: {parent}")
+        if not parent.is_dir():
+            raise NotADirectoryError(f"Parent path is not a directory: {parent}")
+        
+        clean_name = body.name.strip()
+        if not clean_name or clean_name in {".", ".."}:
+            raise ValueError(f"Invalid directory name: {body.name}")
+        if any(char in clean_name for char in ("/", "\\")):
+            raise ValueError("Directory name cannot contain path separators.")
+            
+        new_dir = parent / clean_name
+        if new_dir.exists():
+            raise FileExistsError(f"Directory already exists: {clean_name}")
+            
+        new_dir.mkdir(parents=False, exist_ok=False)
+        return {
+            "success": True,
+            "path": str(new_dir.resolve()),
+            "name": clean_name,
+        }
+    except Exception as exc:
+        raise _workspace_http_error(exc) from exc
+
+
 @router.post("/dashboard-api/workspace/delete")
 async def delete_dashboard_workspace_entry(
     body: WorkspaceDeleteBody,

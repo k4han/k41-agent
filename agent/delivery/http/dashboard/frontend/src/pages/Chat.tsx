@@ -22,6 +22,7 @@ import {
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 
 import { AppShell } from "@/components/AppShell";
+import { Dialog } from "@/components/Dialog";
 import { ModelPicker } from "@/components/ModelPicker";
 import { SelectControl } from "@/components/SelectControl";
 import { DataGate } from "@/components/State";
@@ -285,6 +286,9 @@ function WorkspaceSelector(props: {
   const [browsePayload, setBrowsePayload] = createSignal<WorkspaceBrowsePayload | null>(null);
   const [browseLoading, setBrowseLoading] = createSignal(false);
   const [browseError, setBrowseError] = createSignal("");
+  const [createFolderOpen, setCreateFolderOpen] = createSignal(false);
+  const [newFolderName, setNewFolderName] = createSignal("");
+  const [createFolderResolving, setCreateFolderResolving] = createSignal(false);
 
   const repositoryOptions = createMemo(() =>
     repositories().map((repository) => ({
@@ -362,6 +366,29 @@ function WorkspaceSelector(props: {
     if (payload?.path) {
       setLocalDraft(payload.path);
       closeBrowser();
+    }
+  };
+
+  const handleCreateFolderSubmit = async () => {
+    const currentPath = browsePayload()?.path || localDraft();
+    const folderName = newFolderName().trim();
+    if (!currentPath || !folderName) {
+      return;
+    }
+    setCreateFolderResolving(true);
+    try {
+      const response = await postJson<{ success: boolean; path: string; name: string }>(
+        "/dashboard-api/workspace/create-dir",
+        { parent_path: currentPath, name: folderName },
+      );
+      showToast(`Folder "${response.name}" created successfully.`, "success");
+      setCreateFolderOpen(false);
+      setNewFolderName("");
+      void loadBrowsePath(currentPath);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to create folder", "error");
+    } finally {
+      setCreateFolderResolving(false);
     }
   };
 
@@ -504,21 +531,34 @@ function WorkspaceSelector(props: {
                         <RefreshCw size={14} />
                       </button>
                     </div>
-                    <div class="workspace-browser-roots">
-                      <For each={browsePayload()?.roots || []}>
-                        {(root) => (
-                          <button
-                            class="workspace-browser-root"
-                            type="button"
-                            disabled={browseLoading()}
-                            onClick={() => void loadBrowsePath(root.path)}
-                            title={root.path}
-                          >
-                            <HardDrive size={13} />
-                            <span>{root.name}</span>
-                          </button>
-                        )}
-                      </For>
+                    <div class="workspace-browser-roots" style="display: flex; align-items: center; justify-content: space-between; overflow: hidden; gap: 8px;">
+                      <div style="display: flex; gap: 6px; overflow-x: auto; flex: 1;">
+                        <For each={browsePayload()?.roots || []}>
+                          {(root) => (
+                            <button
+                              class="workspace-browser-root"
+                              type="button"
+                              disabled={browseLoading()}
+                              onClick={() => void loadBrowsePath(root.path)}
+                              title={root.path}
+                            >
+                              <HardDrive size={13} />
+                              <span>{root.name}</span>
+                            </button>
+                          )}
+                        </For>
+                      </div>
+                      <button
+                        class="btn btn-icon btn-sm"
+                        type="button"
+                        style="flex: 0 0 auto;"
+                        disabled={browseLoading() || !(browsePayload()?.path || localDraft())}
+                        title="Create new folder"
+                        aria-label="Create new folder"
+                        onClick={() => setCreateFolderOpen(true)}
+                      >
+                        <Plus size={14} />
+                      </button>
                     </div>
                     <div class="workspace-browser-list">
                       <Show
@@ -566,6 +606,55 @@ function WorkspaceSelector(props: {
                         Choose folder
                       </button>
                     </div>
+                    <Dialog
+                      open={createFolderOpen()}
+                      title="Create New Folder"
+                      onClose={() => {
+                        setCreateFolderOpen(false);
+                        setNewFolderName("");
+                      }}
+                      footer={
+                        <div class="row-wrap" style="justify-content: flex-end; gap: 8px;">
+                          <button
+                            class="btn"
+                            type="button"
+                            disabled={createFolderResolving()}
+                            onClick={() => {
+                              setCreateFolderOpen(false);
+                              setNewFolderName("");
+                            }}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            class="btn btn-primary"
+                            type="button"
+                            disabled={createFolderResolving() || !newFolderName().trim()}
+                            onClick={handleCreateFolderSubmit}
+                          >
+                            {createFolderResolving() ? "Creating..." : "Create"}
+                          </button>
+                        </div>
+                      }
+                    >
+                      <div class="field" style="display: flex; flex-direction: column; gap: 8px;">
+                        <label style="font-size: 12px; font-weight: 600; color: var(--muted);">Folder Name</label>
+                        <input
+                          class="input"
+                          value={newFolderName()}
+                          disabled={createFolderResolving()}
+                          placeholder="Enter folder name"
+                          onInput={(event) => setNewFolderName(event.currentTarget.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" && newFolderName().trim() && !createFolderResolving()) {
+                              event.preventDefault();
+                              void handleCreateFolderSubmit();
+                            }
+                          }}
+                          ref={(el) => setTimeout(() => el?.focus(), 50)}
+                        />
+                      </div>
+                    </Dialog>
                   </div>
                 </Show>
               </div>
@@ -620,6 +709,7 @@ export function ChatPage() {
   const [workingDir, setWorkingDir] = createSignal("");
   const [workspaceRef, setWorkspaceRef] = createSignal<WorkspaceRef | null>(null);
   const [defaultWorkingDir, setDefaultWorkingDir] = createSignal("");
+  const [defaultWorkspace, setDefaultWorkspace] = createSignal<WorkspaceRef | null>(null);
   const [workspaceExplorerOpen, setWorkspaceExplorerOpen] = createSignal(true);
   const [workspaceExplorerWidth, setWorkspaceExplorerWidth] = createSignal(
     WORKSPACE_EXPLORER_DEFAULT_WIDTH,
@@ -759,8 +849,10 @@ export function ChatPage() {
       const payload = await apiFetch<DefaultWorkspacePayload>("/dashboard-api/workspace/default");
       const fallback = payload.workspace?.locator || "";
       setDefaultWorkingDir(fallback);
+      setDefaultWorkspace(payload.workspace || null);
     } catch {
       setDefaultWorkingDir("");
+      setDefaultWorkspace(null);
     }
   };
 
@@ -832,6 +924,24 @@ export function ChatPage() {
   createEffect(() => {
     prompt();
     resizeChatPromptInput();
+  });
+
+  createEffect(() => {
+    const defWs = defaultWorkspace();
+    if (!currentThreadId() && !workingDir().trim() && defWs) {
+      const autoResolve = async () => {
+        try {
+          const resolved = await postJson<WorkspaceResolvePayload>(
+            "/dashboard-api/workspace/resolve",
+            { kind: defWs.backend || "local", workspace: defWs },
+          );
+          setWorkspace(resolved.workspace);
+        } catch {
+          setWorkspace(defWs);
+        }
+      };
+      void autoResolve();
+    }
   });
 
   const scrollToBottom = () => {
