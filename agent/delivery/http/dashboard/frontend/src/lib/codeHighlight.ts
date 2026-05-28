@@ -48,7 +48,7 @@ type HighlightLanguage = SupportedHighlightLanguage | "text";
 const createDashboardHighlighter = createBundledHighlighter({
   langs: LANGUAGE_LOADERS,
   themes: THEME_LOADERS,
-  engine: createOnigurumaEngine,
+  engine: () => createOnigurumaEngine(import("shiki/wasm")),
 });
 type DashboardHighlighter = Awaited<ReturnType<typeof createDashboardHighlighter>>;
 
