@@ -22,4 +22,4 @@ def test_skill_tool_returns_error_when_not_found(monkeypatch):
 
     result = skills_tool_module.skill.invoke({"name": "missing-skill"})
 
-    assert result == "[error] skill not found"
+    assert result == "[error] not_found: skill not found"

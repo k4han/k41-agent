@@ -10,7 +10,10 @@ import httpx
 from bs4 import BeautifulSoup, SoupStrainer
 from langchain_core.tools import tool
 
+from agent.modules.tools.decorators import register_tool
+from agent.modules.tools.domain import ToolCapability, ToolCategory
 from agent.modules.tools.langchain.web_tools.web_fetch import DEFAULT_HEADERS, _read_limited_response
+from agent.modules.tools.result import ToolError, ToolErrorCode
 
 logger = logging.getLogger(__name__)
 
@@ -103,16 +106,30 @@ def _duckduckgo_search(query: str, num_results: int = 5) -> str:
             if len(results) == num_results:
                 break
         return _format_search_results(results)
-    except httpx.TimeoutException:
-        return "[Error] DuckDuckGo search timed out after 10 seconds."
-    except httpx.HTTPStatusError as e:
-        return f"[Error] DuckDuckGo HTTP {e.response.status_code}: {e.response.reason_phrase}"
-    except httpx.RequestError as e:
-        return f"[Error] DuckDuckGo request failed: {e}"
-    except UnicodeError as e:
-        return f"[Error] DuckDuckGo response decode failed: {e}"
+    except httpx.TimeoutException as exc:
+        raise ToolError(
+            ToolErrorCode.TIMEOUT, "DuckDuckGo search timed out after 10 seconds."
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        raise ToolError(
+            ToolErrorCode.UPSTREAM,
+            f"DuckDuckGo HTTP {exc.response.status_code}: {exc.response.reason_phrase}",
+        ) from exc
+    except httpx.RequestError as exc:
+        raise ToolError(
+            ToolErrorCode.UPSTREAM, f"DuckDuckGo request failed: {exc}"
+        ) from exc
+    except UnicodeError as exc:
+        raise ToolError(
+            ToolErrorCode.UPSTREAM, f"DuckDuckGo response decode failed: {exc}"
+        ) from exc
 
 
+@register_tool(
+    category=ToolCategory.WEB,
+    capabilities=[ToolCapability.NETWORK],
+    tags=["search", "web"],
+)
 @tool
 def web_search(query: str, num_results: int = 5) -> str:
     """Search the web and return a list of results with titles, URLs and snippets."""

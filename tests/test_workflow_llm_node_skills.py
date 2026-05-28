@@ -65,10 +65,14 @@ async def test_llm_node_uses_prompt_builder_output_for_system_message(monkeypatc
         "build_llm_system_prompt",
         _fake_builder,
     )
+    async def _fake_resolve(self, agent_name, *, override_tool_names=None):
+        names = list(override_tool_names) if override_tool_names else []
+        return [SimpleNamespace(name=name) for name in names]
+
     monkeypatch.setattr(
-        llm_node_module,
-        "_resolve_tools",
-        lambda names: [SimpleNamespace(name=name) for name in names],
+        llm_node_module.ToolResolver,
+        "aresolve_for_agent",
+        _fake_resolve,
     )
     monkeypatch.setattr(
         "agent.modules.agents.get_catalog_service",
@@ -131,10 +135,14 @@ async def test_llm_node_prefers_runtime_allowed_tool_names_before_building_promp
         "build_llm_system_prompt",
         _fake_builder,
     )
+    async def _fake_resolve(self, agent_name, *, override_tool_names=None):
+        names = list(override_tool_names) if override_tool_names else []
+        return [SimpleNamespace(name=name) for name in names]
+
     monkeypatch.setattr(
-        llm_node_module,
-        "_resolve_tools",
-        lambda names: [SimpleNamespace(name=name) for name in names],
+        llm_node_module.ToolResolver,
+        "aresolve_for_agent",
+        _fake_resolve,
     )
     monkeypatch.setattr(
         "agent.modules.agents.get_catalog_service",
@@ -177,10 +185,13 @@ async def test_llm_node_normalizes_assistant_string_list_history(monkeypatch):
         "get_resolved_chat_model",
         _fake_chat_model_factory(captured),
     )
+    async def _fake_resolve(self, agent_name, *, override_tool_names=None):
+        return []
+
     monkeypatch.setattr(
-        llm_node_module,
-        "_resolve_tools",
-        lambda names: [],
+        llm_node_module.ToolResolver,
+        "aresolve_for_agent",
+        _fake_resolve,
     )
     monkeypatch.setattr(
         "agent.modules.agents.get_catalog_service",
@@ -233,10 +244,13 @@ async def test_llm_node_prefers_runtime_model_over_agent_card_model(monkeypatch)
         "get_resolved_chat_model",
         _fake_chat_model_factory(captured),
     )
+    async def _fake_resolve(self, agent_name, *, override_tool_names=None):
+        return []
+
     monkeypatch.setattr(
-        llm_node_module,
-        "_resolve_tools",
-        lambda names: [],
+        llm_node_module.ToolResolver,
+        "aresolve_for_agent",
+        _fake_resolve,
     )
     monkeypatch.setattr(
         "agent.modules.agents.get_catalog_service",

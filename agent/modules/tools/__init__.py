@@ -10,8 +10,24 @@ from typing import TypeVar
 
 from langchain_core.tools import BaseTool
 
-from agent.modules.tools.registry_service import get_registry_service
-from agent.modules.tools.runtime.context import get_context_value
+from agent.modules.tools.domain import (
+    ToolCapability,
+    ToolCategory,
+    ToolDescriptor,
+    ToolSource,
+)
+from agent.modules.tools.policy import ToolPolicy
+from agent.modules.tools.registry_service import (
+    ensure_mcp_loaded,
+    get_registry_service,
+)
+from agent.modules.tools.resolver import ToolResolver
+from agent.modules.tools.result import (
+    ToolError,
+    ToolErrorCode,
+    format_tool_error,
+)
+from agent.modules.tools.runtime.context import ToolContext, get_context_value
 from agent.modules.tools.runtime.path_guard import resolve_safe_path
 
 T = TypeVar("T")
@@ -46,11 +62,80 @@ def get_runtime_context_value(runtime_or_context, key: str, default: T) -> T:
     return get_context_value(runtime_or_context, key, default)
 
 
+def get_default_descriptors() -> list[ToolDescriptor]:
+    """Return all descriptors loaded into the registry."""
+    return get_registry_service().get_descriptors()
+
+
+def find_tools(
+    *,
+    category: ToolCategory | None = None,
+    source: ToolSource | None = None,
+    capabilities: Iterable[ToolCapability] | None = None,
+    any_capabilities: Iterable[ToolCapability] | None = None,
+    tags: Iterable[str] | None = None,
+) -> list[BaseTool]:
+    """Filter tools by category / source / capability / tag."""
+    service = get_registry_service()
+    return service.find_tools(
+        category=category,
+        source=source,
+        capabilities=list(capabilities) if capabilities else None,
+        any_capabilities=list(any_capabilities) if any_capabilities else None,
+        tags=list(tags) if tags else None,
+    )
+
+
+def find_descriptors(
+    *,
+    category: ToolCategory | None = None,
+    source: ToolSource | None = None,
+    capabilities: Iterable[ToolCapability] | None = None,
+    any_capabilities: Iterable[ToolCapability] | None = None,
+    tags: Iterable[str] | None = None,
+) -> list[ToolDescriptor]:
+    """Filter descriptors by category / source / capability / tag."""
+    service = get_registry_service()
+    return service.find(
+        category=category,
+        source=source,
+        capabilities=list(capabilities) if capabilities else None,
+        any_capabilities=list(any_capabilities) if any_capabilities else None,
+        tags=list(tags) if tags else None,
+    )
+
+
+def resolve_tools_for_agent(agent_name: str) -> list[BaseTool]:
+    """Synchronously resolve tools (built-in only) for the given agent name."""
+    return ToolResolver().resolve_for_agent(agent_name)
+
+
+async def aresolve_tools_for_agent(agent_name: str) -> list[BaseTool]:
+    """Asynchronously resolve tools (built-in + MCP) for the given agent name."""
+    return await ToolResolver().aresolve_for_agent(agent_name)
+
+
 __all__ = [
-    "get_tool_by_name",
-    "get_default_tools",
-    "resolve_tools",
+    "ToolCapability",
+    "ToolCategory",
+    "ToolContext",
+    "ToolDescriptor",
+    "ToolError",
+    "ToolErrorCode",
+    "ToolPolicy",
+    "ToolResolver",
+    "ToolSource",
+    "aresolve_tools_for_agent",
+    "ensure_mcp_loaded",
+    "find_descriptors",
+    "find_tools",
+    "format_tool_error",
+    "get_default_descriptors",
     "get_default_tool_names",
+    "get_default_tools",
     "get_runtime_context_value",
+    "get_tool_by_name",
     "resolve_safe_path",
+    "resolve_tools",
+    "resolve_tools_for_agent",
 ]

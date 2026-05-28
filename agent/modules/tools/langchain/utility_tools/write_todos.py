@@ -6,6 +6,9 @@ from langgraph.prebuilt import ToolRuntime
 from langgraph.types import Command
 from pydantic import BaseModel, Field
 
+from agent.modules.tools.decorators import register_tool
+from agent.modules.tools.domain import ToolCapability, ToolCategory
+
 
 TodoStatus = Literal["pending", "in_progress", "completed"]
 
@@ -75,3 +78,9 @@ write_todos = StructuredTool.from_function(
     args_schema=WriteTodosInput,
     infer_schema=False,
 )
+
+register_tool(
+    category=ToolCategory.UTILITY,
+    capabilities=[ToolCapability.MUTATES_STATE],
+    tags=["planning", "todo"],
+)(write_todos)

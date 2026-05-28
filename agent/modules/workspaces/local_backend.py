@@ -66,7 +66,7 @@ class LocalWorkspaceBackend:
             os.makedirs(parent, exist_ok=True)
         with open(full_path, "w", encoding="utf-8") as file_handle:
             file_handle.write(content)
-        return f"[OK] Wrote file: {full_path}"
+        return "[OK] Done"
 
     def execute(
         self,

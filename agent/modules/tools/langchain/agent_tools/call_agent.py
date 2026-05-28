@@ -9,6 +9,9 @@ from typing import Annotated, Any
 from langchain_core.tools import InjectedToolArg, tool
 from langgraph.prebuilt import ToolRuntime
 
+from agent.modules.tools.decorators import register_tool
+from agent.modules.tools.domain import ToolCapability, ToolCategory
+from agent.modules.tools.result import ToolError, ToolErrorCode
 from agent.modules.tools.runtime.context import get_context_value
 from agent.modules.usage import usage_context_from_config
 
@@ -26,6 +29,15 @@ def _make_subagent_thread_id(runtime: ToolRuntime[Any, Any], sub_agent: str) -> 
     return f"sub_{sub_agent}_{suffix}"
 
 
+@register_tool(
+    category=ToolCategory.AGENT,
+    capabilities=[
+        ToolCapability.ASYNC_ONLY,
+        ToolCapability.REQUIRES_THREAD,
+        ToolCapability.NETWORK,
+    ],
+    tags=["subagent", "delegation"],
+)
 @tool
 async def call_agent(
     task: str,
@@ -48,10 +60,16 @@ async def call_agent(
     catalog = get_catalog_service()
 
     if not catalog.validate_call(caller_agent_name, sub_agent):
-        return f"[error] not allowed to call agent '{sub_agent}'."
+        raise ToolError(
+            ToolErrorCode.PERMISSION_DENIED,
+            f"not allowed to call agent '{sub_agent}'.",
+        )
 
     if catalog.get_agent(sub_agent) is None:
-        return f"[error] agent config not found for '{sub_agent}'."
+        raise ToolError(
+            ToolErrorCode.NOT_FOUND,
+            f"agent config not found for '{sub_agent}'.",
+        )
 
     sub_thread_id = _make_subagent_thread_id(runtime, sub_agent)
     try:
@@ -72,4 +90,7 @@ async def call_agent(
             caller_agent_name,
             task,
         )
-        return f"[error] sub-agent '{sub_agent}' failed: {e}"
+        raise ToolError(
+            ToolErrorCode.UPSTREAM,
+            f"sub-agent '{sub_agent}' failed: {e}",
+        ) from e

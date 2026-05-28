@@ -214,7 +214,7 @@ async def test_call_agent_blocks_when_validate_call_fails(monkeypatch):
         runtime=runtime,
     )
 
-    assert result == "[error] not allowed to call agent 'child-agent'."
+    assert result == "[error] permission_denied: not allowed to call agent 'child-agent'."
     assert invoked is False
 
 
@@ -255,7 +255,7 @@ async def test_call_agent_reports_runner_failure(monkeypatch):
         runtime=runtime,
     )
 
-    assert result == "[error] sub-agent 'child-agent' failed: boom"
+    assert result == "[error] upstream: sub-agent 'child-agent' failed: boom"
 
 
 @pytest.mark.asyncio
@@ -272,16 +272,16 @@ async def test_tool_node_resolves_runtime_allowed_tools(monkeypatch):
             return {"messages": []}
 
     monkeypatch.setattr(tool_node_module, "ToolNode", _FakeToolNode)
+
+    async def _fake_resolve(self, agent_name, *, override_tool_names=None):
+        names = list(override_tool_names) if override_tool_names else []
+        return [SimpleNamespace(name=name) for name in names]
+
     monkeypatch.setattr(
-        tool_node_module,
-        "resolve_tools",
-        lambda names: [SimpleNamespace(name=name) for name in names],
+        tool_node_module.ToolResolver,
+        "aresolve_for_agent",
+        _fake_resolve,
     )
-
-    async def _no_mcp_tools():
-        return []
-
-    monkeypatch.setattr(tool_node_module, "get_all_mcp_tools", _no_mcp_tools)
 
     runtime = SimpleNamespace(
         context={"allowed_tool_names": ["echo", "call_agent"]},

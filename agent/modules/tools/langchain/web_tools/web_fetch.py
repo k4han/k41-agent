@@ -9,6 +9,10 @@ from bs4 import BeautifulSoup, SoupStrainer
 from langchain_core.tools import tool
 from markdownify import markdownify as md
 
+from agent.modules.tools.decorators import register_tool
+from agent.modules.tools.domain import ToolCapability, ToolCategory
+from agent.modules.tools.result import ToolError, ToolErrorCode
+
 DEFAULT_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -59,6 +63,11 @@ def _read_limited_response(response: httpx.Response) -> bytes:
     return b"".join(chunks)
 
 
+@register_tool(
+    category=ToolCategory.WEB,
+    capabilities=[ToolCapability.NETWORK],
+    tags=["fetch", "web"],
+)
 @tool
 def web_fetch(url: str) -> str:
     """Fetch a web page and return its content as Markdown."""
@@ -79,11 +88,18 @@ def web_fetch(url: str) -> str:
             if "application/json" in content_type or "text/" in content_type:
                 return _truncate_text(text)
             return f"[Info] Non-text content type: {content_type}. Response size: {len(content)} bytes."
-    except httpx.TimeoutException:
-        return "[Error] Request timed out after 30 seconds."
-    except httpx.HTTPStatusError as e:
-        return f"[Error] HTTP {e.response.status_code}: {e.response.reason_phrase}"
-    except httpx.RequestError as e:
-        return f"[Error] Request failed: {e}"
-    except UnicodeError as e:
-        return f"[Error] Failed to decode response: {e}"
+    except httpx.TimeoutException as exc:
+        raise ToolError(
+            ToolErrorCode.TIMEOUT, "Request timed out after 30 seconds."
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        raise ToolError(
+            ToolErrorCode.UPSTREAM,
+            f"HTTP {exc.response.status_code}: {exc.response.reason_phrase}",
+        ) from exc
+    except httpx.RequestError as exc:
+        raise ToolError(ToolErrorCode.UPSTREAM, f"Request failed: {exc}") from exc
+    except UnicodeError as exc:
+        raise ToolError(
+            ToolErrorCode.UPSTREAM, f"Failed to decode response: {exc}"
+        ) from exc
