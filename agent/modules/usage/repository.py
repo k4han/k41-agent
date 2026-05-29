@@ -253,6 +253,324 @@ class LLMUsageRepository:
             await session.commit()
             return int(result.rowcount or 0)
 
+    async def aggregate_by_thread(self, thread_id: str) -> dict[str, Any]:
+        session = await get_async_session()
+        stmt = (
+            select(
+                LLMUsageEvent.model_name,
+                LLMUsageEvent.provider_name,
+                func.count(LLMUsageEvent.id).label("calls"),
+                func.coalesce(func.sum(LLMUsageEvent.input_tokens), 0).label("input_tokens"),
+                func.coalesce(func.sum(LLMUsageEvent.output_tokens), 0).label("output_tokens"),
+                func.coalesce(func.sum(LLMUsageEvent.total_tokens), 0).label("total_tokens"),
+            )
+            .where(
+                (LLMUsageEvent.thread_id == thread_id) | (LLMUsageEvent.root_thread_id == thread_id)
+            )
+            .group_by(LLMUsageEvent.model_name, LLMUsageEvent.provider_name)
+        )
+        async with session:
+            result = await session.execute(stmt)
+            rows = result.all()
+
+        models = []
+        total_tokens = 0
+        input_tokens = 0
+        output_tokens = 0
+
+        for row in rows:
+            t = int(row.total_tokens or 0)
+            i = int(row.input_tokens or 0)
+            o = int(row.output_tokens or 0)
+            total_tokens += t
+            input_tokens += i
+            output_tokens += o
+            models.append({
+                "model": row.model_name,
+                "provider": row.provider_name,
+                "calls": int(row.calls or 0),
+                "input_tokens": i,
+                "output_tokens": o,
+                "total_tokens": t,
+            })
+
+        for m in models:
+            m["percentage"] = round((m["total_tokens"] / total_tokens * 100), 1) if total_tokens > 0 else 0.0
+
+        models.sort(key=lambda x: x["total_tokens"], reverse=True)
+
+        return {
+            "thread_id": thread_id,
+            "total_tokens": total_tokens,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "models": models,
+        }
+
+    async def aggregate_by_workspace(self, backend: str, locator: str) -> dict[str, Any]:
+        from agent.modules.workspaces.models import ThreadWorkspace
+
+        session = await get_async_session()
+        thread_stmt = (
+            select(ThreadWorkspace.thread_id)
+            .where(
+                (ThreadWorkspace.workspace_backend == backend) &
+                (ThreadWorkspace.workspace_locator == locator)
+            )
+        )
+        async with session:
+            thread_result = await session.execute(thread_stmt)
+            thread_ids = [row[0] for row in thread_result.all() if row[0]]
+
+        if not thread_ids:
+            return {
+                "backend": backend,
+                "locator": locator,
+                "total_tokens": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "models": [],
+            }
+
+        stmt = (
+            select(
+                LLMUsageEvent.model_name,
+                LLMUsageEvent.provider_name,
+                func.count(LLMUsageEvent.id).label("calls"),
+                func.coalesce(func.sum(LLMUsageEvent.input_tokens), 0).label("input_tokens"),
+                func.coalesce(func.sum(LLMUsageEvent.output_tokens), 0).label("output_tokens"),
+                func.coalesce(func.sum(LLMUsageEvent.total_tokens), 0).label("total_tokens"),
+            )
+            .where(
+                LLMUsageEvent.thread_id.in_(thread_ids) | LLMUsageEvent.root_thread_id.in_(thread_ids)
+            )
+            .group_by(LLMUsageEvent.model_name, LLMUsageEvent.provider_name)
+        )
+
+        async with session:
+            result = await session.execute(stmt)
+            rows = result.all()
+
+        models = []
+        total_tokens = 0
+        input_tokens = 0
+        output_tokens = 0
+
+        for row in rows:
+            t = int(row.total_tokens or 0)
+            i = int(row.input_tokens or 0)
+            o = int(row.output_tokens or 0)
+            total_tokens += t
+            input_tokens += i
+            output_tokens += o
+            models.append({
+                "model": row.model_name,
+                "provider": row.provider_name,
+                "calls": int(row.calls or 0),
+                "input_tokens": i,
+                "output_tokens": o,
+                "total_tokens": t,
+            })
+
+        for m in models:
+            m["percentage"] = round((m["total_tokens"] / total_tokens * 100), 1) if total_tokens > 0 else 0.0
+
+        models.sort(key=lambda x: x["total_tokens"], reverse=True)
+
+        return {
+            "backend": backend,
+            "locator": locator,
+            "total_tokens": total_tokens,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "models": models,
+        }
+
+    async def aggregate_workspaces(self, query: UsageQuery) -> list[dict[str, Any]]:
+        from agent.modules.workspaces.models import ThreadWorkspace
+
+        session = await get_async_session()
+        stmt = (
+            select(
+                ThreadWorkspace.workspace_backend,
+                ThreadWorkspace.workspace_locator,
+                ThreadWorkspace.workspace_label,
+                func.count(distinct(ThreadWorkspace.thread_id)).label("thread_count"),
+                func.count(LLMUsageEvent.id).label("event_count"),
+                func.coalesce(func.sum(LLMUsageEvent.input_tokens), 0).label("input_tokens"),
+                func.coalesce(func.sum(LLMUsageEvent.output_tokens), 0).label("output_tokens"),
+                func.coalesce(func.sum(LLMUsageEvent.total_tokens), 0).label("total_tokens"),
+                func.max(LLMUsageEvent.created_at).label("last_used_at"),
+            )
+            .join(
+                LLMUsageEvent,
+                (LLMUsageEvent.thread_id == ThreadWorkspace.thread_id) |
+                (LLMUsageEvent.root_thread_id == ThreadWorkspace.thread_id)
+            )
+            .where(*_where_clauses(query))
+            .group_by(
+                ThreadWorkspace.workspace_backend,
+                ThreadWorkspace.workspace_locator,
+                ThreadWorkspace.workspace_label
+            )
+            .order_by(func.coalesce(func.sum(LLMUsageEvent.total_tokens), 0).desc())
+        )
+
+        async with session:
+            result = await session.execute(stmt)
+            workspace_rows = result.all()
+
+        if not workspace_rows:
+            return []
+
+        breakdown_stmt = (
+            select(
+                ThreadWorkspace.workspace_backend,
+                ThreadWorkspace.workspace_locator,
+                LLMUsageEvent.model_name,
+                LLMUsageEvent.provider_name,
+                func.coalesce(func.sum(LLMUsageEvent.total_tokens), 0).label("total_tokens"),
+            )
+            .join(
+                LLMUsageEvent,
+                (LLMUsageEvent.thread_id == ThreadWorkspace.thread_id) |
+                (LLMUsageEvent.root_thread_id == ThreadWorkspace.thread_id)
+            )
+            .where(*_where_clauses(query))
+            .group_by(
+                ThreadWorkspace.workspace_backend,
+                ThreadWorkspace.workspace_locator,
+                LLMUsageEvent.model_name,
+                LLMUsageEvent.provider_name
+            )
+        )
+
+        async with session:
+            breakdown_result = await session.execute(breakdown_stmt)
+            breakdown_rows = breakdown_result.all()
+
+        breakdowns = {}
+        for r in breakdown_rows:
+            key = (r.workspace_backend, r.workspace_locator)
+            if key not in breakdowns:
+                breakdowns[key] = []
+            breakdowns[key].append({
+                "model": r.model_name,
+                "provider": r.provider_name,
+                "total_tokens": int(r.total_tokens or 0)
+            })
+
+        workspaces = []
+        for row in workspace_rows:
+            key = (row.workspace_backend, row.workspace_locator)
+            total = int(row.total_tokens or 0)
+
+            model_details = breakdowns.get(key, [])
+            for md in model_details:
+                md["percentage"] = round((md["total_tokens"] / total * 100), 1) if total > 0 else 0.0
+            model_details.sort(key=lambda x: x["total_tokens"], reverse=True)
+
+            workspaces.append({
+                "backend": row.workspace_backend,
+                "locator": row.workspace_locator,
+                "label": row.workspace_label or row.workspace_locator,
+                "thread_count": int(row.thread_count or 0),
+                "event_count": int(row.event_count or 0),
+                "input_tokens": int(row.input_tokens or 0),
+                "output_tokens": int(row.output_tokens or 0),
+                "total_tokens": total,
+                "last_used_at": _iso(row.last_used_at),
+                "models": model_details
+            })
+
+        return workspaces
+
+    async def aggregate_threads(self, query: UsageQuery) -> list[dict[str, Any]]:
+        from agent.modules.conversations.models import ConversationThread
+
+        session = await get_async_session()
+        stmt = (
+            select(
+                LLMUsageEvent.thread_id,
+                ConversationThread.title,
+                ConversationThread.agent_name,
+                func.count(LLMUsageEvent.id).label("event_count"),
+                func.coalesce(func.sum(LLMUsageEvent.input_tokens), 0).label("input_tokens"),
+                func.coalesce(func.sum(LLMUsageEvent.output_tokens), 0).label("output_tokens"),
+                func.coalesce(func.sum(LLMUsageEvent.total_tokens), 0).label("total_tokens"),
+                func.max(LLMUsageEvent.created_at).label("last_used_at"),
+            )
+            .outerjoin(ConversationThread, LLMUsageEvent.thread_id == ConversationThread.thread_id)
+            .where(*_where_clauses(query))
+            .group_by(
+                LLMUsageEvent.thread_id,
+                ConversationThread.title,
+                ConversationThread.agent_name
+            )
+            .order_by(func.coalesce(func.sum(LLMUsageEvent.total_tokens), 0).desc())
+        )
+
+        async with session:
+            result = await session.execute(stmt)
+            thread_rows = result.all()
+
+        if not thread_rows:
+            return []
+
+        breakdown_stmt = (
+            select(
+                LLMUsageEvent.thread_id,
+                LLMUsageEvent.model_name,
+                LLMUsageEvent.provider_name,
+                func.coalesce(func.sum(LLMUsageEvent.total_tokens), 0).label("total_tokens"),
+            )
+            .where(*_where_clauses(query))
+            .group_by(
+                LLMUsageEvent.thread_id,
+                LLMUsageEvent.model_name,
+                LLMUsageEvent.provider_name
+            )
+        )
+
+        async with session:
+            breakdown_result = await session.execute(breakdown_stmt)
+            breakdown_rows = breakdown_result.all()
+
+        breakdowns = {}
+        for r in breakdown_rows:
+            tid = r.thread_id
+            if tid not in breakdowns:
+                breakdowns[tid] = []
+            breakdowns[tid].append({
+                "model": r.model_name,
+                "provider": r.provider_name,
+                "total_tokens": int(r.total_tokens or 0)
+            })
+
+        threads = []
+        for row in thread_rows:
+            tid = row.thread_id
+            total = int(row.total_tokens or 0)
+
+            model_details = breakdowns.get(tid, [])
+            for md in model_details:
+                md["percentage"] = round((md["total_tokens"] / total * 100), 1) if total > 0 else 0.0
+            model_details.sort(key=lambda x: x["total_tokens"], reverse=True)
+
+            threads.append({
+                "thread_id": tid,
+                "title": row.title or tid,
+                "agent_name": row.agent_name or "unknown",
+                "event_count": int(row.event_count or 0),
+                "input_tokens": int(row.input_tokens or 0),
+                "output_tokens": int(row.output_tokens or 0),
+                "total_tokens": total,
+                "last_used_at": _iso(row.last_used_at),
+                "models": model_details
+            })
+
+        return threads
+
 
 def _where_clauses(query: UsageQuery) -> list[Any]:
     clauses: list[Any] = [

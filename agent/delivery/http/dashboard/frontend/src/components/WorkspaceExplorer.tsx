@@ -10,6 +10,7 @@ import {
   RefreshCw,
   Trash2,
   X,
+  Zap,
 } from "lucide-solid";
 import { createEffect, createMemo, createResource, createSignal, For, onCleanup, Show, untrack } from "solid-js";
 
@@ -20,7 +21,7 @@ import { highlightCode, languageFromPath } from "@/lib/codeHighlight";
 import { renderUnifiedDiffHtml } from "@/lib/diffView";
 import { createDarkMode } from "@/lib/theme";
 import { formatWorkspaceRoot, localWorkspaceRef } from "@/lib/workspace";
-import type { WorkspaceRef } from "@/types";
+import type { WorkspaceRef, WorkspaceUsagePayload } from "@/types";
 
 type WorkspaceTreeEntry = {
   name: string;

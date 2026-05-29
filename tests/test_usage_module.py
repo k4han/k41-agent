@@ -376,3 +376,201 @@ def test_dashboard_usage_endpoint_enriches_identity_labels(monkeypatch: pytest.M
     assert payload["filters"]["users"][0]["label"] == "User #42 · telegram:123"
     assert captured["query"].platform == "telegram"
     assert captured["query"].provider_name == "openai-main"
+
+
+@pytest.mark.asyncio
+async def test_usage_repository_aggregates_by_thread(usage_db) -> None:
+    repository = LLMUsageRepository()
+    now = datetime.now(timezone.utc)
+
+    # Record events for the same thread
+    await repository.record(
+        UsageEventInput(
+            thread_id="test_thread_1",
+            root_thread_id="test_thread_1",
+            platform="telegram",
+            user_id="123",
+            channel_id="456",
+            agent_name="default",
+            provider_name="google",
+            model_name="gemini-1.5-pro",
+            call_kind="agent",
+            internal=False,
+            has_usage_metadata=True,
+            input_tokens=100,
+            output_tokens=50,
+            total_tokens=150,
+            created_at=now,
+        )
+    )
+    # Record sub-thread event for the same root thread
+    await repository.record(
+        UsageEventInput(
+            thread_id="test_thread_1:sub:worker",
+            root_thread_id="test_thread_1",
+            platform="telegram",
+            user_id="123",
+            channel_id="456",
+            agent_name="worker",
+            provider_name="google",
+            model_name="gemini-1.5-flash",
+            call_kind="agent",
+            internal=False,
+            has_usage_metadata=True,
+            input_tokens=200,
+            output_tokens=100,
+            total_tokens=300,
+            created_at=now,
+        )
+    )
+    # Record another thread event (should be ignored)
+    await repository.record(
+        UsageEventInput(
+            thread_id="test_thread_2",
+            root_thread_id="test_thread_2",
+            platform="telegram",
+            user_id="123",
+            channel_id="456",
+            agent_name="default",
+            provider_name="openai",
+            model_name="gpt-4",
+            call_kind="agent",
+            internal=False,
+            has_usage_metadata=True,
+            input_tokens=10,
+            output_tokens=10,
+            total_tokens=20,
+            created_at=now,
+        )
+    )
+
+    data = await repository.aggregate_by_thread("test_thread_1")
+    assert data["thread_id"] == "test_thread_1"
+    assert data["total_tokens"] == 450
+    assert data["input_tokens"] == 300
+    assert data["output_tokens"] == 150
+    assert len(data["models"]) == 2
+
+    # Check order (descending by total_tokens)
+    assert data["models"][0]["model"] == "gemini-1.5-flash"
+    assert data["models"][0]["total_tokens"] == 300
+    assert data["models"][0]["percentage"] == 66.7
+
+    assert data["models"][1]["model"] == "gemini-1.5-pro"
+    assert data["models"][1]["total_tokens"] == 150
+    assert data["models"][1]["percentage"] == 33.3
+
+
+@pytest.mark.asyncio
+async def test_usage_repository_aggregates_by_workspace(usage_db) -> None:
+    from agent.modules.workspaces.models import ThreadWorkspace
+    from agent.shared.infrastructure.db.session import get_async_session
+
+    repository = LLMUsageRepository()
+    now = datetime.now(timezone.utc)
+
+    # Create workspace bindings for thread_1 and thread_2
+    session = await get_async_session()
+    async with session:
+        session.add(
+            ThreadWorkspace(
+                thread_id="workspace_thread_1",
+                workspace_backend="local",
+                workspace_locator="/path/to/project_a",
+                workspace_label="Project A",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.add(
+            ThreadWorkspace(
+                thread_id="workspace_thread_2",
+                workspace_backend="local",
+                workspace_locator="/path/to/project_a",
+                workspace_label="Project A",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.add(
+            ThreadWorkspace(
+                thread_id="workspace_thread_3",
+                workspace_backend="local",
+                workspace_locator="/path/to/project_b",
+                workspace_label="Project B",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        await session.commit()
+
+    # Records for workspace_thread_1
+    await repository.record(
+        UsageEventInput(
+            thread_id="workspace_thread_1",
+            root_thread_id="workspace_thread_1",
+            platform="api",
+            user_id="user1",
+            channel_id="chan1",
+            agent_name="default",
+            provider_name="google",
+            model_name="gemini-1.5-pro",
+            call_kind="agent",
+            internal=False,
+            has_usage_metadata=True,
+            input_tokens=1000,
+            output_tokens=500,
+            total_tokens=1500,
+            created_at=now,
+        )
+    )
+    # Records for workspace_thread_2
+    await repository.record(
+        UsageEventInput(
+            thread_id="workspace_thread_2",
+            root_thread_id="workspace_thread_2",
+            platform="api",
+            user_id="user1",
+            channel_id="chan1",
+            agent_name="default",
+            provider_name="google",
+            model_name="gemini-1.5-pro",
+            call_kind="agent",
+            internal=False,
+            has_usage_metadata=True,
+            input_tokens=2000,
+            output_tokens=1000,
+            total_tokens=3000,
+            created_at=now,
+        )
+    )
+    # Records for workspace_thread_3 (Project B - should be ignored)
+    await repository.record(
+        UsageEventInput(
+            thread_id="workspace_thread_3",
+            root_thread_id="workspace_thread_3",
+            platform="api",
+            user_id="user1",
+            channel_id="chan1",
+            agent_name="default",
+            provider_name="google",
+            model_name="gemini-1.5-pro",
+            call_kind="agent",
+            internal=False,
+            has_usage_metadata=True,
+            input_tokens=5,
+            output_tokens=5,
+            total_tokens=10,
+            created_at=now,
+        )
+    )
+
+    data = await repository.aggregate_by_workspace("local", "/path/to/project_a")
+    assert data["backend"] == "local"
+    assert data["locator"] == "/path/to/project_a"
+    assert data["total_tokens"] == 4500
+    assert data["input_tokens"] == 3000
+    assert data["output_tokens"] == 1500
+    assert len(data["models"]) == 1
+    assert data["models"][0]["model"] == "gemini-1.5-pro"
+    assert data["models"][0]["calls"] == 2

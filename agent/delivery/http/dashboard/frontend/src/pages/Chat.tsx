@@ -20,6 +20,7 @@ import {
   Send,
   Square,
   X,
+  Zap,
 } from "lucide-solid";
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 
@@ -56,6 +57,7 @@ import type {
   GitHubPayload,
   GitHubRepositoryBinding,
   WorkspaceRef,
+  ThreadUsagePayload,
 } from "@/types";
 import {
   persistedStreams,

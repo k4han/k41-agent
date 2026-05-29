@@ -153,10 +153,14 @@ class UsageService:
         await self.prune_old_events()
         summary = await self._repository.summary(query)
         rows, total = await self._repository.grouped_by_identity(query)
+        workspaces = await self._repository.aggregate_workspaces(query)
+        threads = await self._repository.aggregate_threads(query)
         filters = await self._repository.filter_options(query)
         return {
             "summary": summary,
             "rows": rows,
+            "workspaces": workspaces,
+            "threads": threads,
             "filters": filters,
             "pagination": {
                 "limit": query.limit,
@@ -178,6 +182,12 @@ class UsageService:
         except Exception as exc:
             logger.debug("Failed to prune old LLM usage events: %s", exc)
             return 0
+
+    async def get_thread_usage(self, thread_id: str) -> dict[str, Any]:
+        return await self._repository.aggregate_by_thread(thread_id)
+
+    async def get_workspace_usage(self, backend: str, locator: str) -> dict[str, Any]:
+        return await self._repository.aggregate_by_workspace(backend, locator)
 
 
 _service: UsageService | None = None

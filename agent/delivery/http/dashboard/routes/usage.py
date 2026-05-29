@@ -122,4 +122,17 @@ async def get_dashboard_usage(
     return _enrich_usage_payload(payload, await _paired_identities())
 
 
+@router.get("/dashboard-api/usage/thread/{thread_id:path}")
+async def get_thread_usage(thread_id: str) -> dict[str, Any]:
+    return await get_usage_service().get_thread_usage(thread_id)
+
+
+@router.get("/dashboard-api/usage/workspace")
+async def get_workspace_usage(
+    backend: str = Query(default="local"),
+    locator: str = Query(default=""),
+) -> dict[str, Any]:
+    return await get_usage_service().get_workspace_usage(backend, locator)
+
+
 __all__ = ["router"]

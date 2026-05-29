@@ -152,6 +152,33 @@ async def reset_password(new_pass: str) -> None:
     await auth_service.set_admin_password(new_pass)
     click.echo(f"[OK] Admin password reset to: {new_pass}")
 
+
+@cli.command("reset-quota")
+@with_async_db
+async def reset_quota() -> None:
+    """Reset all recorded LLM usage/token logs."""
+    await _perform_reset_quota()
+
+
+@cli.command("resetquota")
+@with_async_db
+async def resetquota() -> None:
+    """Reset all recorded LLM usage/token logs."""
+    await _perform_reset_quota()
+
+
+async def _perform_reset_quota() -> None:
+    from agent.shared.infrastructure.db.session import get_async_session
+    from agent.modules.usage.models import LLMUsageEvent
+    from sqlalchemy import delete
+
+    session = await get_async_session()
+    async with session:
+        result = await session.execute(delete(LLMUsageEvent))
+        await session.commit()
+        row_count = int(result.rowcount or 0)
+    click.echo(f"[OK] Successfully reset usage logs. Deleted {row_count} record(s).")
+
 def main():
     """Entry point for CLI."""
     # Default to serve if no command given

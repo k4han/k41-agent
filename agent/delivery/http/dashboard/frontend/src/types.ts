@@ -227,9 +227,46 @@ export type UsageFilterOption = {
   label: string;
 };
 
+export interface WorkspaceUsageDetail {
+  backend: string;
+  locator: string;
+  label: string;
+  thread_count: number;
+  event_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  last_used_at: string | null;
+  models: {
+    model: string;
+    provider: string;
+    total_tokens: number;
+    percentage: number;
+  }[];
+}
+
+export interface ThreadUsageDetail {
+  thread_id: string;
+  title: string;
+  agent_name: string;
+  event_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  last_used_at: string | null;
+  models: {
+    model: string;
+    provider: string;
+    total_tokens: number;
+    percentage: number;
+  }[];
+}
+
 export type UsagePayload = {
   summary: UsageSummary;
   rows: UsageRow[];
+  workspaces: WorkspaceUsageDetail[];
+  threads: ThreadUsageDetail[];
   filters: {
     platforms: string[];
     users: UsageFilterOption[];
@@ -351,3 +388,30 @@ export type McpTestResult = {
   error: string;
   tools: McpToolInfo[];
 };
+
+export interface ModelUsageDetail {
+  model: string;
+  provider: string;
+  calls: number;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  percentage: number;
+}
+
+export interface ThreadUsagePayload {
+  thread_id: string;
+  total_tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  models: ModelUsageDetail[];
+}
+
+export interface WorkspaceUsagePayload {
+  backend: string;
+  locator: string;
+  total_tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  models: ModelUsageDetail[];
+}
