@@ -48,6 +48,7 @@ def build_run_params(
     provider: str | None = None,
     model: str | None = None,
     attachments: list[Any] | None = None,
+    resume: bool = False,
 ) -> dict[str, Any]:
     """Build run parameters for agent execution.
 
@@ -66,6 +67,7 @@ def build_run_params(
         provider: Override agent card provider for this run if needed
         model: Override agent card model for this run if needed
         attachments: Optional files attached to the user message
+        resume: Request to resume execution from the last checkpoint
     """
     params: dict[str, Any] = {
         "user_input": user_input,
@@ -76,6 +78,7 @@ def build_run_params(
         "max_context_tokens": max_context_tokens,
         "provider": provider,
         "model": model,
+        "resume": resume,
         "usage_context": {
             "platform": str(getattr(platform, "value", platform) or ""),
             "user_id": str(user_id or ""),
@@ -502,6 +505,7 @@ async def run_agent_stream(
     model: str | None = None,
     attachments: list[Any] | None = None,
     usage_context: dict[str, Any] | None = None,
+    resume: bool = False,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Run a workflow graph and stream UI events (tool calls and text chunks).
 
@@ -518,6 +522,7 @@ async def run_agent_stream(
         provider: Override agent card provider for this run if needed
         model: Override agent card model for this run if needed
         attachments: Optional files attached to the user message
+        resume: Request to resume execution from the last checkpoint
     """
     from agent.modules.agents import get_catalog_service
 
@@ -546,14 +551,25 @@ async def run_agent_stream(
         provider=provider,
         model=model,
     )
-    await _record_conversation_thread(
-        thread_id=thread_id,
-        agent_name=agent_name,
-        title=user_input,
-        attachments=attachments,
-    )
+    if not resume:
+        await _record_conversation_thread(
+            thread_id=thread_id,
+            agent_name=agent_name,
+            title=user_input,
+            attachments=attachments,
+        )
 
     seen_ids: set[str] = set()
+    if resume:
+        try:
+            state = await graph.aget_state(config)
+            if state and state.values and "messages" in state.values:
+                for msg in state.values["messages"]:
+                    msg_id = _message_id(msg)
+                    if msg_id:
+                        seen_ids.add(msg_id)
+        except Exception as exc:
+            logger.warning("Failed to fetch historical messages for resume: %s", exc)
 
     stream_kwargs: dict[str, Any] = {
         "config": config,
@@ -563,12 +579,19 @@ async def run_agent_stream(
         stream_kwargs["context"] = context
 
     registry = get_active_session_registry()
-    user_message = _make_user_message(user_input, attachments)
-    user_message_id = _message_id(user_message)
-    current_user_seen = False
+    if resume:
+        input_data = None
+        user_message_id = None
+        current_user_seen = True
+    else:
+        user_message = _make_user_message(user_input, attachments)
+        input_data = {"messages": [user_message]}
+        user_message_id = _message_id(user_message)
+        current_user_seen = False
+
     with _track_active_session(thread_id, agent_name) as session_id:
         async for event in graph.astream(
-            {"messages": [user_message]},
+            input_data,
             **stream_kwargs,
         ):
             stream_mode, event_data = _coerce_stream_event(event)

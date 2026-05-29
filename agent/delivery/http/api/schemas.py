@@ -25,6 +25,7 @@ class ChatRequest(BaseModel):
     provider: Optional[str] = None
     model: Optional[str] = None
     attachments: list[ChatAttachment] = Field(default_factory=list)
+    resume: bool = False
 
 
 class ChatResponse(BaseModel):

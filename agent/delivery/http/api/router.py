@@ -68,6 +68,7 @@ def _request_to_run_params(request: ChatRequest) -> dict[str, object]:
         "agent_name": request.agent_name or "default",
         "provider": request.provider,
         "model": request.model,
+        "resume": request.resume,
     }
     if request.attachments:
         params["attachments"] = [

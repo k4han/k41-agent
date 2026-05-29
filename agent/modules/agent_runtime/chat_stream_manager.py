@@ -10,6 +10,8 @@ import asyncio
 import logging
 from typing import Any, AsyncGenerator
 
+from langgraph.errors import GraphRecursionError
+
 logger = logging.getLogger(__name__)
 
 # Maximum number of events to buffer per session to prevent unbounded memory growth.
@@ -54,6 +56,13 @@ class ChatStreamSession:
             logger.info("Background chat stream task cancelled for thread %s", self.thread_id)
             await self.push_event({"type": "error", "content": "Chat execution stopped."})
             raise
+        except GraphRecursionError as exc:
+            logger.warning("Recursion limit reached for thread %s", self.thread_id)
+            await self.push_event({
+                "type": "error",
+                "code": "recursion_limit_reached",
+                "content": str(exc)
+            })
         except Exception as exc:
             logger.exception("Error running background agent stream for thread %s", self.thread_id)
             await self.push_event({"type": "error", "content": str(exc)})

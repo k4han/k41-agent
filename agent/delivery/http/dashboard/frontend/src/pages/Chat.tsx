@@ -787,6 +787,7 @@ export function ChatPage() {
   const [autoScroll, setAutoScroll] = createSignal(true);
   const [turnAnchorItemId, setTurnAnchorItemId] = createSignal<number | null>(null);
   const [turnAnchorSpacerHeight, setTurnAnchorSpacerHeight] = createSignal(0);
+  const [recursionLimitReached, setRecursionLimitReached] = createSignal(false);
   const { showToast } = useToast();
 
   const filteredItems = createMemo(() =>
@@ -1326,6 +1327,7 @@ export function ChatPage() {
     setCurrentThreadId(threadId);
     setThreadData(undefined);
     setThreadError("");
+    setRecursionLimitReached(window.localStorage.getItem(`kaka:recursion-limit-reached:${threadId}`) === "true");
     // Don't clear items if there's a persisted stream for this thread
     if (!persistedStreams.has(threadId)) {
       setThreadLoading(true);
@@ -1374,6 +1376,7 @@ export function ChatPage() {
     loadedThreadId = threadId;
     threadLoadRequestId += 1;
     clearAllAttachments();
+    setRecursionLimitReached(false);
 
     if (!threadId) {
       setCurrentThreadId("");
@@ -1637,6 +1640,12 @@ export function ChatPage() {
         role: "error",
         text: String(event.content || event.message || "Chat failed"),
       }, "bottom", streamThreadIdRef.id);
+      if (event.code === "recursion_limit_reached") {
+        setRecursionLimitReached(true);
+        if (streamThreadIdRef.id) {
+          window.localStorage.setItem(`kaka:recursion-limit-reached:${streamThreadIdRef.id}`, "true");
+        }
+      }
       return;
     }
     if (event.type === "final") {
@@ -1654,7 +1663,7 @@ export function ChatPage() {
     }
   }
 
-  const sendMessage = async () => {
+  const sendMessage = async (resume = false) => {
     isUnmounting = false;
     cleanupStaleStreams();
     if (streaming()) {
@@ -1663,10 +1672,10 @@ export function ChatPage() {
     }
     const selectedAttachments = attachments();
     const attachedFiles = selectedAttachments.map(toPayloadAttachment);
-    const message = prompt().trim() || (
+    const message = resume ? "" : (prompt().trim() || (
       selectedAttachments.length ? DEFAULT_ATTACHMENT_MESSAGE : ""
-    );
-    if (!message && !selectedAttachments.length) {
+    ));
+    if (!resume && !message && !selectedAttachments.length) {
       showToast("Enter a message or attach a file.", "warning");
       return;
     }
@@ -1687,30 +1696,38 @@ export function ChatPage() {
       return;
     }
 
+    setRecursionLimitReached(false);
+    const activeTid = currentThreadId();
+    if (activeTid) {
+      window.localStorage.removeItem(`kaka:recursion-limit-reached:${activeTid}`);
+    }
+
     const streamThreadIdRef = { id: currentThreadId() || `__pending__${Date.now()}`, message };
     
     // Register stream in persisted signals first so that appendItem goes directly to it
     getOrCreateStreamSignals(streamThreadIdRef.id, items());
     setCurrentStreamThreadId(streamThreadIdRef.id);
 
-    appendItem(
-      {
-        type: "message",
-        role: "user",
-        text: message,
-        attachments: selectedAttachments.map(toTranscriptAttachment),
-      },
-      "turn-start",
-      streamThreadIdRef.id
-    );
-    setPrompt("");
-    clearAttachments(selectedAttachments);
+    if (!resume) {
+      appendItem(
+        {
+          type: "message",
+          role: "user",
+          text: message,
+          attachments: selectedAttachments.map(toTranscriptAttachment),
+        },
+        "turn-start",
+        streamThreadIdRef.id
+      );
+      setPrompt("");
+      clearAttachments(selectedAttachments);
+    }
     const abortController = new AbortController();
     setController(abortController, streamThreadIdRef.id);
     setStreaming(true, streamThreadIdRef.id);
 
     const startTid = streamThreadIdRef.id;
-    if (startTid && !startTid.startsWith("__pending__")) {
+    if (startTid && !startTid.startsWith("__pending__") && !resume) {
       window.dispatchEvent(
         new CustomEvent("kaka:thread-start-running", {
           detail: {
@@ -1727,11 +1744,16 @@ export function ChatPage() {
     const streamedRef = { received: false };
 
     try {
+      const payload = buildPayload(message, resume ? [] : attachedFiles);
+      if (resume) {
+        (payload as any).resume = true;
+        payload.message = "";
+      }
       const response = await fetch("/api/chat/events", {
         method: "POST",
         headers: { "content-type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify(buildPayload(message, attachedFiles)),
+        body: JSON.stringify(payload),
         signal: abortController.signal,
       });
       if (!response.ok) {
@@ -1903,6 +1925,9 @@ export function ChatPage() {
   };
 
   const stopChat = () => controller()?.abort();
+  const handleResume = () => {
+    void sendMessage(true);
+  };
 
   // Listen to centralized session events (event-driven sync)
   const handleSessionStartedOrUpdated = (event: Event) => {
@@ -2249,6 +2274,21 @@ export function ChatPage() {
                         </For>
                       </div>
                     </Show>
+                  </div>
+                </Show>
+                <Show when={recursionLimitReached()}>
+                  <div class="chat-recursion-warning">
+                    <div class="chat-recursion-warning-left">
+                      <span style="font-size: 16px;">⚠️</span>
+                      <span>Agent đã đạt giới hạn bước xử lý mà chưa hoàn thành nhiệm vụ. Bạn có muốn tiếp tục chạy không?</span>
+                    </div>
+                    <button 
+                      class="chat-recursion-warning-btn" 
+                      type="button" 
+                      onClick={handleResume} 
+                    >
+                      Tiếp tục chạy
+                    </button>
                   </div>
                 </Show>
                 <textarea

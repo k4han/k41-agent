@@ -138,4 +138,48 @@
   color: var(--success, #2e7d32);
 }
 
+/* Recursion Limit Warning Banner */
+.chat-recursion-warning {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: rgba(180, 83, 9, 0.08);
+  border: 1px solid var(--warning);
+  border-radius: var(--radius);
+  font-size: 13px;
+  color: var(--fg);
+}
+
+.dark .chat-recursion-warning {
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.chat-recursion-warning-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--warning);
+  font-weight: 500;
+  flex: 1;
+}
+
+.chat-recursion-warning-btn {
+  background-color: var(--warning);
+  border: 1px solid var(--warning);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  flex-shrink: 0;
+  transition: opacity 150ms ease;
+}
+
+.chat-recursion-warning-btn:hover {
+  opacity: 0.9;
+}
+
 

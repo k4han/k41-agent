@@ -110,7 +110,7 @@ def make_context(
 
 def make_config(
     thread_id: str,
-    recursion_limit: int = 100,
+    recursion_limit: int = 5,
 ) -> RunnableConfig:
     """Create runnable config used by checkpointing and recursion control."""
     return {

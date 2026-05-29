@@ -781,3 +781,65 @@ async def test_run_agent_stream_emits_text_attached_to_tool_call(monkeypatch):
         },
         {"type": "final", "content": "done"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_resume(monkeypatch):
+    captured: dict = {}
+
+    class _FakeCatalog:
+        def get_agent(self, name: str):
+            return SimpleNamespace(
+                graph_type="react_agent",
+                max_context_tokens=1234,
+                tools=["list_files"],
+            )
+
+    class _FakeGraph:
+        async def aget_state(self, config):
+            class FakeState:
+                values = {
+                    "messages": [
+                        HumanMessage(content="old-user-message", id="old-user"),
+                        AIMessage(content="old-ai-message", id="old-ai")
+                    ]
+                }
+            return FakeState()
+
+        async def astream(self, payload, **kwargs):
+            captured["payload"] = payload
+            captured["kwargs"] = kwargs
+            # Yield events as if continuing from the previous run
+            yield ("values", {
+                "messages": [
+                    HumanMessage(content="old-user-message", id="old-user"),
+                    AIMessage(content="old-ai-message", id="old-ai"),
+                    AIMessage(content="resumed-ai-message", id="new-ai")
+                ]
+            })
+
+    monkeypatch.setattr(
+        "agent.modules.agents.get_catalog_service",
+        lambda: _FakeCatalog(),
+    )
+    monkeypatch.setattr(runner_module, "get_workflow_graph", lambda name: _FakeGraph())
+    monkeypatch.setattr(runner_module, "make_run_context", lambda **kwargs: kwargs)
+    monkeypatch.setattr(
+        runner_module,
+        "make_run_config",
+        lambda **kwargs: {"configurable": {"thread_id": kwargs["thread_id"]}},
+    )
+
+    events = [
+        event
+        async for event in runner_module.run_agent_stream(
+            user_input="",
+            thread_id="thread-1",
+            agent_name="default",
+            resume=True,
+        )
+    ]
+
+    assert events == [{"type": "final", "content": "resumed-ai-message"}]
+    assert captured["payload"] is None
+
