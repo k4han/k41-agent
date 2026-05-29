@@ -88,3 +88,7 @@ security:
 # workspace:
 #   root: "~/kaka-agent"
 
+# Max recursion limit for LangGraph workflows (default: 100)
+recursion_limit: 100
+
+

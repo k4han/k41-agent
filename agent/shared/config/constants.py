@@ -19,6 +19,7 @@ RUNTIME_KEY_PATTERNS = [
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.headers\.[A-Za-z0-9_-]+$",
     r"^database\.url$",
     r"^security\.jwt_secret$",
+    r"^recursion_limit$",
 ]
 
 
@@ -59,6 +60,7 @@ def _expand_runtime_keys() -> set[str]:
     keys.add("llm.default_model")
     keys.add("database.url")
     keys.add("security.jwt_secret")
+    keys.add("recursion_limit")
     return keys
 
 
@@ -90,6 +92,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "persistence.allow_any_path": False,
     "workspace.root": "~/kaka-agent",
     "security.jwt_secret": "",
+    "recursion_limit": 100,
 }
 
 
@@ -255,6 +258,16 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "description": "Secret key for JWT token signing",
         "category": "security",
         "label": "JWT Secret",
+    },
+    # General / Workflows settings
+    "recursion_limit": {
+        "type": "number",
+        "description": "Max recursion limit for LangGraph workflows",
+        "category": "general",
+        "label": "Recursion Limit",
+        "min": 1,
+        "max": 1000,
+        "step": 1,
     },
 }
 

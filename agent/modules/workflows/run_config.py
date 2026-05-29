@@ -110,12 +110,16 @@ def make_context(
 
 def make_config(
     thread_id: str,
-    recursion_limit: int = 5,
+    recursion_limit: int | None = None,
 ) -> RunnableConfig:
     """Create runnable config used by checkpointing and recursion control."""
+    if recursion_limit is None:
+        from agent.shared.config.service import get_config_service
+        recursion_limit = get_config_service().get_int("recursion_limit", 100)
     return {
         "configurable": {
             "thread_id": thread_id,
         },
         "recursion_limit": recursion_limit,
     }
+

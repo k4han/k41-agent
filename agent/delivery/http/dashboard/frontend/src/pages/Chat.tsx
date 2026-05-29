@@ -2400,7 +2400,7 @@ export function ChatPage() {
                       <button
                         class="chat-composer-icon"
                         type="button"
-                        onClick={sendMessage}
+                        onClick={() => sendMessage()}
                         disabled={composerDisabled() || (!prompt().trim() && !attachments().length)}
                         title="Send"
                         aria-label="Send"
