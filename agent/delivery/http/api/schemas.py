@@ -36,3 +36,7 @@ class ChatResponse(BaseModel):
 class PairingCodeResponse(BaseModel):
     user_id: str
     pairing_code: str
+
+
+class ReconnectRequest(BaseModel):
+    thread_id: str

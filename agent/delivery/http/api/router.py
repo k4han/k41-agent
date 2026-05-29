@@ -9,12 +9,14 @@ from agent.delivery.http.api.schemas import (
     ChatRequest,
     ChatResponse,
     PairingCodeResponse,
+    ReconnectRequest,
 )
 from agent.modules.agent_runtime import (
     build_run_params,
     run_agent,
     run_agent_full,
     run_agent_stream,
+    get_chat_stream_manager,
 )
 from agent.modules.conversations import create_thread_id
 from agent.modules.providers import (
@@ -151,14 +153,40 @@ async def chat_events(request: ChatRequest):
     params = _request_to_run_params(request)
     await _apply_workspace_to_run_params(request, params)
     created_thread = bool(request.new_thread and not request.thread_id)
+    thread_id = str(params["thread_id"])
+
+    manager = get_chat_stream_manager()
+    session = await manager.get_or_create_session(thread_id, params, run_fn=run_agent_stream)
 
     async def event_generator():
         if created_thread:
             yield json.dumps(
-                {"type": "thread_created", "thread_id": params["thread_id"]},
+                {"type": "thread_created", "thread_id": thread_id},
                 ensure_ascii=False,
             ) + "\n"
-        async for event in run_agent_stream(**params):
+        async for event in session.subscribe():
+            yield json.dumps(event, ensure_ascii=False) + "\n"
+
+    return StreamingResponse(event_generator(), media_type="application/x-ndjson")
+
+
+@router.post("/chat/events/reconnect")
+async def chat_events_reconnect(request: ReconnectRequest):
+    """Reconnect and stream UI events for an already running background chat stream."""
+    thread_id = request.thread_id
+    manager = get_chat_stream_manager()
+    session = await manager.get_session(thread_id)
+
+    if not session:
+        # If no active session found (already finished), return empty stream
+        # so client immediately finishes and loads thread history from database
+        async def empty_generator():
+            return
+            yield  # noqa: makes this an async generator
+        return StreamingResponse(empty_generator(), media_type="application/x-ndjson")
+
+    async def event_generator():
+        async for event in session.subscribe():
             yield json.dumps(event, ensure_ascii=False) + "\n"
 
     return StreamingResponse(event_generator(), media_type="application/x-ndjson")

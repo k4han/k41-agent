@@ -24,6 +24,11 @@ from agent.modules.agent_runtime.repository import (
     get_background_task_repository,
 )
 from agent.modules.agent_runtime.session import SessionManager
+from agent.modules.agent_runtime.chat_stream_manager import (
+    ChatStreamManager,
+    ChatStreamSession,
+    get_chat_stream_manager,
+)
 
 __all__ = [
     "ActiveSession",
@@ -44,4 +49,7 @@ __all__ = [
     "run_agent",
     "run_agent_full",
     "run_agent_stream",
+    "ChatStreamManager",
+    "ChatStreamSession",
+    "get_chat_stream_manager",
 ]

@@ -1803,6 +1803,105 @@ export function ChatPage() {
     }
   };
 
+  const reconnectStream = async (threadId: string) => {
+    isUnmounting = false;
+    cleanupStaleStreams();
+    if (streaming()) {
+      return;
+    }
+
+    // Find the last user message and trim all items after it
+    const currentItems = items();
+    const lastUserIndex = currentItems.map(item => item.type === "message" && item.role === "user").lastIndexOf(true);
+    if (lastUserIndex !== -1) {
+      setItems(currentItems.slice(0, lastUserIndex + 1));
+    }
+
+    const streamThreadIdRef = { id: threadId, message: "" };
+    getOrCreateStreamSignals(streamThreadIdRef.id, items());
+    setCurrentStreamThreadId(streamThreadIdRef.id);
+
+    const abortController = new AbortController();
+    setController(abortController, streamThreadIdRef.id);
+    setStreaming(true, streamThreadIdRef.id);
+
+    const assistantIdRef = { id: null as number | null };
+    const streamedRef = { received: false };
+
+    try {
+      const response = await fetch("/api/chat/events/reconnect", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ thread_id: threadId }),
+        signal: abortController.signal,
+      });
+      if (!response.ok) {
+        throw new Error(await readError(response));
+      }
+      if (!response.body) {
+        throw new Error("Streaming response is not available.");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.trim()) {
+            continue;
+          }
+          handleEvent(JSON.parse(line) as Record<string, unknown>, assistantIdRef, streamedRef, streamThreadIdRef);
+        }
+        if (done) {
+          break;
+        }
+      }
+      if (buffer.trim()) {
+        handleEvent(JSON.parse(buffer) as Record<string, unknown>, assistantIdRef, streamedRef, streamThreadIdRef);
+      }
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        // Ignored
+      } else {
+        appendItem({
+          type: "message",
+          role: "error",
+          text: err instanceof Error ? err.message : "Chat reconnection failed",
+        }, "bottom", streamThreadIdRef.id);
+      }
+    } finally {
+      const finishedTid = streamThreadIdRef.id;
+      setStreaming(false, finishedTid);
+      setController(null, finishedTid);
+
+      if (finishedTid) {
+        const isViewing = currentStreamThreadId() === finishedTid;
+        if (persistedStreams.has(finishedTid)) {
+          if (isViewing && !isUnmounting) {
+            setLocalItems(persistedStreams.get(finishedTid)!.items[0]());
+          }
+          cleanupStreamSignals(finishedTid);
+        }
+        if (isViewing) {
+          setCurrentStreamThreadId(null);
+        }
+      }
+      if (finishedTid) {
+        window.dispatchEvent(
+          new CustomEvent("kaka:thread-stop-running", {
+            detail: { threadId: finishedTid },
+          }),
+        );
+      }
+      window.dispatchEvent(new CustomEvent("kaka:threads-changed"));
+    }
+  };
+
   const stopChat = () => controller()?.abort();
 
   // Listen to centralized session events (event-driven sync)
@@ -1833,6 +1932,9 @@ export function ChatPage() {
           const found = payload.sessions.find((s) => s.thread_id === threadId);
           if (threadId === currentThreadId()) {
             setActiveSession(found || null);
+            if (found && !streaming()) {
+              void reconnectStream(threadId);
+            }
           }
         } catch (err) {
           console.error("Failed to fetch initial session details", err);
