@@ -1106,6 +1106,9 @@ export function ChatPage() {
   const composerDisabled = createMemo(() => (
     conversationBusy() || workspaceMissing()
   ));
+  const inputDisabled = createMemo(() => (
+    threadLoading() || workspaceMissing()
+  ));
 
   createEffect(() => {
     const payload = data();
@@ -2396,7 +2399,7 @@ export function ChatPage() {
                   class="chat-prompt-input"
                   rows={1}
                   value={prompt()}
-                  disabled={composerDisabled()}
+                  disabled={inputDisabled()}
                   placeholder={
                     backgroundTaskActive()
                       ? "Background task is running..."
