@@ -28,7 +28,15 @@ export function ChatHistoryListPage() {
   const [selectedWorkspaceKey, setSelectedWorkspaceKey] = createSignal("all");
   const { showToast } = useToast();
 
-  const workspaceGroups = createMemo(() => groupThreadsByWorkspace(data()?.threads || []));
+  const workspaceGroups = createMemo(() => {
+    return groupThreadsByWorkspace(data()?.threads || []).map((group) => {
+      const isRepo = group.threads.some((t) => t.workspace?.metadata?.repository_full_name);
+      return {
+        ...group,
+        isRepo,
+      };
+    });
+  });
   const selectedCount = createMemo(() => selectedThreadIds().size);
   const isBackgroundThread = (thread: ThreadSummary) => thread.kind === "background";
   const filteredWorkspaceGroups = createMemo(() => {
@@ -226,13 +234,16 @@ export function ChatHistoryListPage() {
             onChange={(event) => setSelectedWorkspaceKey(event.currentTarget.value)}
             aria-label="Workspace filter"
           >
-            <option value="all">All workspaces</option>
+            <option value="all">🗂 All workspaces</option>
             <For each={workspaceGroups()}>
-              {(group) => (
-                <option value={group.key}>
-                  {group.label}
-                </option>
-              )}
+              {(group) => {
+                const icon = group.isRepo ? "⎇" : "🗀";
+                return (
+                  <option value={group.key}>
+                    {icon} {group.label}
+                  </option>
+                );
+              }}
             </For>
           </select>
         </Show>

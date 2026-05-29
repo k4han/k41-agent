@@ -30,6 +30,8 @@ import {
   chatThreadHref,
   groupThreadsByWorkspace,
   threadApiPath,
+  threadWorkspaceKey,
+  threadWorkspaceLabel,
 } from "@/lib/chatThreads";
 import type { ThreadListPayload, ThreadSummary, ThreadWorkspaceGroup } from "@/lib/chatThreads";
 import { truncateText } from "@/lib/utils";
@@ -409,6 +411,50 @@ export function AppShell(props: {
   );
   const isThreadActive = (threadId: string) => selectedChatThreadId() === threadId;
   const historyGroups = createMemo(() => groupThreadsByWorkspace(historyThreads()));
+
+  const [selectedWorkspaceFilter, setSelectedWorkspaceFilter] = createSignal<string>(
+    window.localStorage.getItem("kaka-dashboard-workspace-filter") || "all"
+  );
+
+  const runningThreads = createMemo(() => {
+    return historyThreads().filter((t) => runningThreadIds().has(t.thread_id));
+  });
+
+  const nonRunningHistoryGroups = createMemo(() => {
+    const nonRunning = historyThreads().filter((t) => !runningThreadIds().has(t.thread_id));
+    return groupThreadsByWorkspace(nonRunning);
+  });
+
+  const filteredHistoryGroups = createMemo(() => {
+    const filter = selectedWorkspaceFilter();
+    if (filter === "all") {
+      return nonRunningHistoryGroups();
+    }
+    return nonRunningHistoryGroups().filter((group) => group.key === filter);
+  });
+
+  const availableWorkspaces = createMemo(() => {
+    return historyGroups().map((group) => {
+      const isRepo = group.threads.some((t) => t.workspace?.metadata?.repository_full_name);
+      return {
+        key: group.key,
+        label: group.label,
+        isRepo,
+      };
+    });
+  });
+
+  const workspaceRunningCounts = createMemo(() => {
+    const counts = new Map<string, number>();
+    for (const thread of historyThreads()) {
+      if (runningThreadIds().has(thread.thread_id)) {
+        const key = threadWorkspaceKey(thread);
+        counts.set(key, (counts.get(key) || 0) + 1);
+      }
+    }
+    return counts;
+  });
+
   const isHistoryGroupExpanded = (group: ThreadWorkspaceGroup) =>
     !collapsedHistoryGroupKeys().has(group.key);
   const toggleHistoryWorkspaceGroup = (group: ThreadWorkspaceGroup, event: MouseEvent) => {
@@ -440,6 +486,94 @@ export function AppShell(props: {
 
     setHistoryPanelOpen(!historyOpen());
   };
+  const renderHistoryItem = (thread: ThreadSummary) => {
+    return (
+      <div class="nav-history-item-wrapper">
+        <div
+          class={`nav-history-item ${isThreadActive(thread.thread_id) ? "active" : ""} ${editingHistoryThreadId() === thread.thread_id ? "editing" : ""} ${runningThreadIds().has(thread.thread_id) ? "running" : ""}`}
+        >
+          <Show
+            when={editingHistoryThreadId() === thread.thread_id}
+            fallback={
+              <A
+                href={chatThreadHref(thread.thread_id)}
+                activeClass=""
+                inactiveClass=""
+                class="nav-history-link"
+                title={`${thread.thread_id} - ${threadMeta(thread)}`}
+              >
+                <Show
+                  when={runningThreadIds().has(thread.thread_id)}
+                  fallback={
+                    <Show
+                      when={isBackgroundThread(thread)}
+                      fallback={<MessageSquare size={12} class="nav-history-kind-icon" />}
+                    >
+                      <PlaySquare size={12} class="nav-history-kind-icon task" />
+                    </Show>
+                  }
+                >
+                  <RefreshCw size={12} class="nav-history-kind-icon spinner-animate" />
+                </Show>
+                <span class="nav-history-title">{threadTitle(thread)}</span>
+              </A>
+            }
+          >
+            <InlineRenameInput
+              class="nav-history-rename-input"
+              value={editingHistoryTitle()}
+              onInput={setEditingHistoryTitle}
+              onBlur={() => void finishRenameHistoryThread(thread)}
+              onCancel={cancelRenameHistoryThread}
+            />
+          </Show>
+          <Show when={editingHistoryThreadId() !== thread.thread_id}>
+            <button
+              class={`nav-history-action ${historyMenuThreadId() === thread.thread_id ? "active" : ""}`}
+              type="button"
+              title="Thread actions"
+              aria-label="Thread actions"
+              aria-expanded={historyMenuThreadId() === thread.thread_id}
+              onClick={(event) => toggleHistoryMenu(thread.thread_id, event)}
+            >
+              <MoreHorizontal size={14} />
+            </button>
+          </Show>
+        </div>
+        <Show when={historyMenuThreadId() === thread.thread_id}>
+          <div class={`nav-history-menu ${historyMenuOpensUp() ? "open-up" : ""}`}>
+            <Show when={runningThreadIds().has(thread.thread_id)}>
+              <button
+                class="nav-history-menu-item nav-history-menu-danger"
+                type="button"
+                onClick={(event) => stopThreadExecution(thread, event)}
+              >
+                <Square size={13} fill="currentColor" />
+                <span>Stop Execution</span>
+              </button>
+            </Show>
+            <button
+              class="nav-history-menu-item"
+              type="button"
+              onClick={(event) => startRenameHistoryThread(thread, event)}
+            >
+              <Pencil size={13} />
+              <span>Rename</span>
+            </button>
+            <button
+              class="nav-history-menu-item nav-history-menu-danger"
+              type="button"
+              onClick={(event) => requestDeleteHistoryThread(thread, event)}
+            >
+              <Trash2 size={13} />
+              <span>Delete</span>
+            </button>
+          </div>
+        </Show>
+      </div>
+    );
+  };
+
   const threadTitle = (thread: ThreadSummary) => truncateText(thread.title || thread.thread_id, 30);
   const isBackgroundThread = (thread: ThreadSummary) => thread.kind === "background";
   const threadMeta = (thread: ThreadSummary) => {
@@ -596,6 +730,9 @@ export function AppShell(props: {
     if (savedHistoryState === "open" || isHistoryActive()) {
       setHistoryPanelOpen(true);
     }
+    if (!collapsed() && !historyLoaded()) {
+      void loadHistory(true);
+    }
     document.addEventListener("click", handleClickOutside);
     window.addEventListener("kaka:threads-changed", handleThreadsChanged);
     window.addEventListener("kaka:thread-start-running", handleThreadStartRunning);
@@ -666,155 +803,177 @@ export function AppShell(props: {
               </A>
             )}
           </For>
-          <div class={`nav-history-group ${historyOpen() && !collapsed() ? "open" : ""}`}>
-            <button
-              class={`nav-link nav-history-toggle ${isHistoryActive() ? "active" : ""}`}
-              type="button"
-              onClick={toggleHistory}
-              aria-expanded={historyOpen()}
-              title="History"
-            >
-              <History size={15} />
-              <span class="nav-label">History</span>
-              <span class="nav-history-caret">
-                <Show when={historyOpen()} fallback={<ChevronRight size={14} />}>
-                  <ChevronDown size={14} />
-                </Show>
-              </span>
-            </button>
-            <Show when={historyOpen() && !collapsed()}>
+          <Show
+            when={!collapsed()}
+            fallback={
+              <A
+                href="/history"
+                activeClass=""
+                inactiveClass=""
+                class={`nav-link ${location.pathname.startsWith("/history") ? "active" : ""}`}
+                title="History"
+              >
+                <History size={15} />
+              </A>
+            }
+          >
+            <div class="nav-history-group open">
+              <div class="nav-history-filter-container">
+                <select
+                  class="nav-history-filter"
+                  value={selectedWorkspaceFilter()}
+                  onChange={(event) => {
+                    const val = event.currentTarget.value;
+                    setSelectedWorkspaceFilter(val);
+                    window.localStorage.setItem("kaka-dashboard-workspace-filter", val);
+                  }}
+                  aria-label="Filter history by workspace"
+                >
+                  <option value="all">🗂 All Workspaces</option>
+                  <For each={availableWorkspaces()}>
+                    {(ws) => {
+                      const runningCount = workspaceRunningCounts().get(ws.key) || 0;
+                      const icon = ws.isRepo ? "⎇" : "🗀";
+                      const prefix = runningCount > 0 ? "↻ " : "";
+                      const suffix = runningCount > 0 ? ` (${runningCount} running)` : "";
+                      const label = `${prefix}${icon} ${ws.label}${suffix}`;
+                      return <option value={ws.key}>{label}</option>;
+                    }}
+                  </For>
+                </select>
+                <A
+                  href="/history"
+                  class="nav-history-all-btn"
+                  title="View all history"
+                  aria-label="View all history"
+                >
+                  <History size={14} />
+                </A>
+              </div>
+
               <div
                 class="nav-history-list"
                 aria-label="Chat history"
                 onScroll={handleHistoryScroll}
               >
-                <A
-                  href="/history"
-                  activeClass=""
-                  inactiveClass=""
-                  class={`nav-history-link ${location.pathname === "/history" ? "active" : ""}`}
-                  title="All history"
-                >
-                  <span class="nav-history-title">All history</span>
-                </A>
-                <For each={historyGroups()}>
-                  {(group) => (
-                    <div class="nav-history-workspace">
-                      <button
-                        class="nav-history-workspace-toggle"
-                        type="button"
-                        title={group.label}
-                        aria-expanded={isHistoryGroupExpanded(group)}
-                        onClick={(event) => toggleHistoryWorkspaceGroup(group, event)}
-                      >
-                        <FolderOpen size={13} />
-                        <span class="nav-history-workspace-label">
-                          {truncateText(group.label, 28)}
-                        </span>
-                        <span class="nav-history-workspace-count">{group.threads.length}</span>
-                        <span class="nav-history-workspace-caret">
-                          <Show
-                            when={isHistoryGroupExpanded(group)}
-                            fallback={<ChevronRight size={13} />}
+                {/* Global Pinned Running Tasks */}
+                <Show when={runningThreads().length > 0}>
+                  <div class="nav-history-running-section">
+                    <div class="nav-history-running-title">⚡ Running Tasks</div>
+                    <For each={runningThreads()}>
+                      {(thread) => (
+                        <div class="nav-history-item-wrapper">
+                          <div
+                            class={`nav-history-item ${isThreadActive(thread.thread_id) ? "active" : ""} running`}
                           >
-                            <ChevronDown size={13} />
+                            <A
+                              href={chatThreadHref(thread.thread_id)}
+                              activeClass=""
+                              inactiveClass=""
+                              class="nav-history-link"
+                              title={`${thread.thread_id} - ${threadMeta(thread)}`}
+                            >
+                              <RefreshCw size={12} class="nav-history-kind-icon spinner-animate" />
+                              <span class="nav-history-title">
+                                {threadTitle(thread)}
+                              </span>
+                            </A>
+                            <button
+                              class={`nav-history-action ${historyMenuThreadId() === thread.thread_id ? "active" : ""}`}
+                              type="button"
+                              title="Thread actions"
+                              aria-label="Thread actions"
+                              aria-expanded={historyMenuThreadId() === thread.thread_id}
+                              onClick={(event) => toggleHistoryMenu(thread.thread_id, event)}
+                            >
+                              <MoreHorizontal size={14} />
+                            </button>
+                          </div>
+                          <Show when={historyMenuThreadId() === thread.thread_id}>
+                            <div class={`nav-history-menu ${historyMenuOpensUp() ? "open-up" : ""}`}>
+                              <button
+                                class="nav-history-menu-item nav-history-menu-danger"
+                                type="button"
+                                onClick={(event) => stopThreadExecution(thread, event)}
+                              >
+                                <Square size={13} fill="currentColor" />
+                                <span>Stop Execution</span>
+                              </button>
+                              <button
+                                class="nav-history-menu-item"
+                                type="button"
+                                onClick={(event) => startRenameHistoryThread(thread, event)}
+                              >
+                                <Pencil size={13} />
+                                <span>Rename</span>
+                              </button>
+                              <button
+                                class="nav-history-menu-item nav-history-menu-danger"
+                                type="button"
+                                onClick={(event) => requestDeleteHistoryThread(thread, event)}
+                              >
+                                <Trash2 size={13} />
+                                <span>Delete</span>
+                              </button>
+                            </div>
                           </Show>
-                        </span>
-                      </button>
-                      <Show when={isHistoryGroupExpanded(group)}>
-                        <div class="nav-history-workspace-threads">
-                          <For each={group.threads}>
-                            {(thread) => (
-                              <div class="nav-history-item-wrapper">
-                                <div
-                                  class={`nav-history-item ${isThreadActive(thread.thread_id) ? "active" : ""} ${editingHistoryThreadId() === thread.thread_id ? "editing" : ""} ${runningThreadIds().has(thread.thread_id) ? "running" : ""}`}
-                                >
-                                  <Show
-                                    when={editingHistoryThreadId() === thread.thread_id}
-                                    fallback={
-                                      <A
-                                        href={chatThreadHref(thread.thread_id)}
-                                        activeClass=""
-                                        inactiveClass=""
-                                        class="nav-history-link"
-                                        title={`${thread.thread_id} - ${threadMeta(thread)}`}
-                                      >
-                                        <Show
-                                          when={runningThreadIds().has(thread.thread_id)}
-                                          fallback={
-                                            <Show
-                                              when={isBackgroundThread(thread)}
-                                              fallback={<MessageSquare size={12} class="nav-history-kind-icon" />}
-                                            >
-                                              <PlaySquare size={12} class="nav-history-kind-icon task" />
-                                            </Show>
-                                          }
-                                        >
-                                          <RefreshCw size={12} class="nav-history-kind-icon spinner-animate" />
-                                        </Show>
-                                        <span class="nav-history-title">{threadTitle(thread)}</span>
-                                      </A>
-                                    }
-                                  >
-                                    <InlineRenameInput
-                                      class="nav-history-rename-input"
-                                      value={editingHistoryTitle()}
-                                      onInput={setEditingHistoryTitle}
-                                      onBlur={() => void finishRenameHistoryThread(thread)}
-                                      onCancel={cancelRenameHistoryThread}
-                                    />
-                                  </Show>
-                                  <Show when={editingHistoryThreadId() !== thread.thread_id}>
-                                    <button
-                                      class={`nav-history-action ${historyMenuThreadId() === thread.thread_id ? "active" : ""}`}
-                                      type="button"
-                                      title="Thread actions"
-                                      aria-label="Thread actions"
-                                      aria-expanded={historyMenuThreadId() === thread.thread_id}
-                                      onClick={(event) => toggleHistoryMenu(thread.thread_id, event)}
-                                    >
-                                      <MoreHorizontal size={14} />
-                                    </button>
-                                  </Show>
-                                </div>
-                                <Show when={historyMenuThreadId() === thread.thread_id}>
-                                  <div class={`nav-history-menu ${historyMenuOpensUp() ? "open-up" : ""}`}>
-                                    <Show when={runningThreadIds().has(thread.thread_id)}>
-                                      <button
-                                        class="nav-history-menu-item nav-history-menu-danger"
-                                        type="button"
-                                        onClick={(event) => stopThreadExecution(thread, event)}
-                                      >
-                                        <Square size={13} fill="currentColor" />
-                                        <span>Stop Execution</span>
-                                      </button>
-                                    </Show>
-                                    <button
-                                      class="nav-history-menu-item"
-                                      type="button"
-                                      onClick={(event) => startRenameHistoryThread(thread, event)}
-                                    >
-                                      <Pencil size={13} />
-                                      <span>Rename</span>
-                                    </button>
-                                    <button
-                                      class="nav-history-menu-item nav-history-menu-danger"
-                                      type="button"
-                                      onClick={(event) => requestDeleteHistoryThread(thread, event)}
-                                    >
-                                      <Trash2 size={13} />
-                                      <span>Delete</span>
-                                    </button>
-                                  </div>
-                                </Show>
-                              </div>
-                            )}
-                          </For>
                         </div>
-                      </Show>
+                      )}
+                    </For>
+                  </div>
+                </Show>
+
+                {/* Filtered History Group List / Flat list */}
+                <Show
+                  when={selectedWorkspaceFilter() === "all"}
+                  fallback={
+                    <div class="nav-history-flat-threads">
+                      <For each={filteredHistoryGroups()}>
+                        {(group) => (
+                          <For each={group.threads}>
+                            {(thread) => renderHistoryItem(thread)}
+                          </For>
+                        )}
+                      </For>
                     </div>
-                  )}
-                </For>
+                  }
+                >
+                  <For each={filteredHistoryGroups()}>
+                    {(group) => (
+                      <div class="nav-history-workspace">
+                        <button
+                          class="nav-history-workspace-toggle"
+                          type="button"
+                          title={group.label}
+                          aria-expanded={isHistoryGroupExpanded(group)}
+                          onClick={(event) => toggleHistoryWorkspaceGroup(group, event)}
+                        >
+                          <FolderOpen size={13} />
+                          <span class="nav-history-workspace-label">
+                            {truncateText(group.label, 28)}
+                          </span>
+                          <span class="nav-history-workspace-count">{group.threads.length}</span>
+                          <span class="nav-history-workspace-caret">
+                            <Show
+                              when={isHistoryGroupExpanded(group)}
+                              fallback={<ChevronRight size={13} />}
+                            >
+                              <ChevronDown size={13} />
+                            </Show>
+                          </span>
+                        </button>
+                        <Show when={isHistoryGroupExpanded(group)}>
+                          <div class="nav-history-workspace-threads">
+                            <For each={group.threads}>
+                              {(thread) => renderHistoryItem(thread)}
+                            </For>
+                          </div>
+                        </Show>
+                      </div>
+                    )}
+                  </For>
+                </Show>
+
                 <Show when={historyThreads().length === 0 && historyLoading()}>
                   <div class="nav-history-status">Loading...</div>
                 </Show>
@@ -846,8 +1005,8 @@ export function AppShell(props: {
                   </button>
                 </Show>
               </div>
-            </Show>
-          </div>
+            </div>
+          </Show>
         </nav>
         <div class="sidebar-footer">
           <div class="sidebar-footer-row">
