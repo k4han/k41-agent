@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, HTTPException
 
 from agent.modules.admin_auth import get_current_admin
 from agent.delivery.http.dashboard.routes.shared import (
@@ -79,3 +79,58 @@ async def get_dashboard_sessions() -> dict[str, Any]:
     registry = get_active_session_registry()
     sessions = registry.list_active()
     return {"sessions": sessions, "count": len(sessions)}
+
+
+@router.post("/dashboard-api/sessions/stop")
+async def stop_dashboard_session(payload: dict[str, Any]) -> dict[str, Any]:
+    session_id = payload.get("session_id")
+    thread_id = payload.get("thread_id")
+    registry = get_active_session_registry()
+    
+    success = False
+    if session_id:
+        success = registry.cancel_session(session_id)
+    elif thread_id:
+        success = registry.cancel_by_thread(thread_id)
+        
+    if not success:
+        raise HTTPException(status_code=400, detail="No active session found to cancel.")
+        
+    return {"success": success}
+
+
+@router.get("/dashboard-api/sessions/events")
+async def stream_session_events() -> StreamingResponse:
+    from fastapi.responses import StreamingResponse
+    from agent.delivery.http.dashboard.routes.shared import _sse_event, SSE_HEARTBEAT_SECONDS
+    import asyncio
+    
+    registry = get_active_session_registry()
+    queue = registry.subscribe()
+    
+    async def event_generator():
+        try:
+            # Yield initial snapshot first
+            initial_sessions = registry.list_active()
+            yield _sse_event("snapshot", {"sessions": initial_sessions})
+            
+            while True:
+                try:
+                    event = await asyncio.wait_for(
+                        queue.get(),
+                        timeout=SSE_HEARTBEAT_SECONDS,
+                    )
+                    yield _sse_event(event["type"], event["data"])
+                except asyncio.TimeoutError:
+                    yield _sse_event("heartbeat", {})
+        finally:
+            registry.unsubscribe(queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )

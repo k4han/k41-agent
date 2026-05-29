@@ -17,13 +17,14 @@ import {
   PlaySquare,
   RefreshCw,
   Settings,
+  Square,
   Trash2,
 } from "lucide-solid";
 import { createMemo, createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
 
 import { DeleteThreadDialog } from "@/components/DeleteThreadDialog";
 import { InlineRenameInput } from "@/components/InlineRenameInput";
-import { apiFetch, deleteJson, patchJson } from "@/lib/api";
+import { apiFetch, deleteJson, patchJson, postJson } from "@/lib/api";
 import type { ActiveSession, WorkspaceRef } from "@/types";
 import {
   chatThreadHref,
@@ -74,6 +75,7 @@ const historyCache: HistoryCache = {
 
 let historyLoadPromise: Promise<HistoryLoadResult> | null = null;
 let historyLoadKey = "";
+const optimisticLocks = new Map<string, { state: "running" | "stopped"; timestamp: number }>();
 
 export function AppShell(props: {
   title: string;
@@ -102,33 +104,116 @@ export function AppShell(props: {
   const [editingHistoryTitle, setEditingHistoryTitle] = createSignal("");
   const [deleteTarget, setDeleteTarget] = createSignal<ThreadSummary | null>(null);
   const [deleting, setDeleting] = createSignal(false);
-  const [runningThreadIds, setRunningThreadIds] = createSignal<Set<string>>(new Set());
+  const [activeSessions, setActiveSessions] = createSignal<ActiveSession[]>([]);
   let disposed = false;
 
-  const syncActiveSessions = async () => {
-    try {
-      const payload = await apiFetch<{ sessions: ActiveSession[] }>("/dashboard-api/sessions");
-      if (payload && Array.isArray(payload.sessions)) {
-        const activeIds = new Set(payload.sessions.map((s) => s.thread_id));
-        const prev = runningThreadIds();
-        
-        let identical = prev.size === activeIds.size;
-        if (identical) {
-          for (const id of activeIds) {
-            if (!prev.has(id)) {
-              identical = false;
-              break;
-            }
-          }
-        }
-        
-        if (!identical) {
-          setRunningThreadIds(activeIds);
-        }
-      }
-    } catch (err) {
-      console.error("Failed to sync active sessions", err);
+  let sessionEventSource: EventSource | null = null;
+
+  const runningThreadIds = createMemo(() => {
+    const activeIds = new Set<string>();
+    for (const s of activeSessions()) {
+      activeIds.add(s.thread_id);
     }
+    
+    const now = Date.now();
+    for (const [tid, lock] of optimisticLocks.entries()) {
+      if (now - lock.timestamp > 4000) {
+        optimisticLocks.delete(tid);
+        continue;
+      }
+      if (lock.state === "running") {
+        activeIds.add(tid);
+      } else if (lock.state === "stopped") {
+        activeIds.delete(tid);
+      }
+    }
+    return activeIds;
+  });
+
+  const connectSessionEvents = () => {
+    if (disposed) return;
+    if (sessionEventSource) {
+      sessionEventSource.close();
+    }
+    
+    const source = new EventSource("/dashboard-api/sessions/events");
+    sessionEventSource = source;
+    
+    source.addEventListener("snapshot", (event) => {
+      try {
+        const payload = JSON.parse(event.data) as { sessions: ActiveSession[] };
+        if (payload && Array.isArray(payload.sessions)) {
+          setActiveSessions(payload.sessions);
+        }
+      } catch (err) {
+        console.error("Failed to parse sessions snapshot", err);
+      }
+    });
+
+    source.addEventListener("session_started", (event) => {
+      try {
+        const session = JSON.parse(event.data) as ActiveSession;
+        setActiveSessions((prev) => {
+          const exists = prev.some((s) => s.session_id === session.session_id);
+          if (exists) {
+            return prev.map((s) => s.session_id === session.session_id ? session : s);
+          }
+          return [...prev, session];
+        });
+        window.dispatchEvent(new CustomEvent("kaka:session-started", { detail: session }));
+        window.dispatchEvent(
+          new CustomEvent("kaka:thread-start-running", {
+            detail: {
+              threadId: session.thread_id,
+              title: session.current_step,
+              agent_name: session.agent_name,
+            },
+          }),
+        );
+      } catch (err) {
+        console.error("Failed to parse session_started event", err);
+      }
+    });
+
+    source.addEventListener("session_stopped", (event) => {
+      try {
+        const stoppedData = JSON.parse(event.data) as { session_id: string; thread_id: string };
+        setActiveSessions((prev) => prev.filter((s) => s.session_id !== stoppedData.session_id));
+        window.dispatchEvent(new CustomEvent("kaka:session-stopped", { detail: stoppedData }));
+        window.dispatchEvent(
+          new CustomEvent("kaka:thread-stop-running", {
+            detail: { threadId: stoppedData.thread_id },
+          }),
+        );
+      } catch (err) {
+        console.error("Failed to parse session_stopped event", err);
+      }
+    });
+
+    source.addEventListener("session_updated", (event) => {
+      try {
+        const session = JSON.parse(event.data) as ActiveSession;
+        setActiveSessions((prev) => prev.map((s) => s.session_id === session.session_id ? session : s));
+        window.dispatchEvent(new CustomEvent("kaka:session-updated", { detail: session }));
+        window.dispatchEvent(
+          new CustomEvent("kaka:thread-start-running", {
+            detail: {
+              threadId: session.thread_id,
+              title: session.current_step,
+              agent_name: session.agent_name,
+            },
+          }),
+        );
+      } catch (err) {
+        console.error("Failed to parse session_updated event", err);
+      }
+    });
+
+    source.onerror = () => {
+      if (source.readyState === EventSource.CLOSED && !disposed) {
+        setTimeout(connectSessionEvents, 3000);
+      }
+    };
   };
 
   const handleThreadStartRunning = (event: Event) => {
@@ -140,11 +225,9 @@ export function AppShell(props: {
     }>;
     const { threadId, title, workspace, agent_name } = customEvent.detail;
     
-    setRunningThreadIds((prev) => {
-      const next = new Set(prev);
-      next.add(threadId);
-      return next;
-    });
+    optimisticLocks.set(threadId, { state: "running", timestamp: Date.now() });
+    
+    setActiveSessions((prev) => [...prev]);
 
     const exists = historyThreads().some((t) => t.thread_id === threadId);
     if (!exists) {
@@ -172,11 +255,9 @@ export function AppShell(props: {
     const customEvent = event as CustomEvent<{ threadId: string }>;
     const { threadId } = customEvent.detail;
     
-    setRunningThreadIds((prev) => {
-      const next = new Set(prev);
-      next.delete(threadId);
-      return next;
-    });
+    optimisticLocks.set(threadId, { state: "stopped", timestamp: Date.now() });
+    
+    setActiveSessions((prev) => [...prev]);
   };
 
   const applyHistoryState = (next: Partial<HistoryCache>) => {
@@ -410,6 +491,32 @@ export function AppShell(props: {
     setDeleteTarget(null);
   };
 
+  const stopThreadExecution = async (thread: ThreadSummary, event: MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setHistoryMenuThreadId(null);
+    
+    const threadId = thread.thread_id;
+    optimisticLocks.set(threadId, { state: "stopped", timestamp: Date.now() });
+    setActiveSessions((prev) => [...prev]);
+    
+    // Abort locally if viewing
+    window.dispatchEvent(
+      new CustomEvent("kaka:thread-external-abort", {
+        detail: { threadId },
+      }),
+    );
+    
+    try {
+      await postJson("/dashboard-api/sessions/stop", { thread_id: threadId });
+      showToast("Execution stop request sent.", "success");
+    } catch (err) {
+      optimisticLocks.delete(threadId);
+      setActiveSessions((prev) => [...prev]);
+      showToast(err instanceof Error ? err.message : "Failed to stop execution", "error");
+    }
+  };
+
   const confirmDeleteHistoryThread = async () => {
     const thread = deleteTarget();
     if (!thread) {
@@ -494,18 +601,15 @@ export function AppShell(props: {
     window.addEventListener("kaka:thread-start-running", handleThreadStartRunning);
     window.addEventListener("kaka:thread-stop-running", handleThreadStopRunning);
 
-    void syncActiveSessions();
-    const intervalId = setInterval(() => {
-      void syncActiveSessions();
-    }, 6000);
-
-    onCleanup(() => {
-      clearInterval(intervalId);
-    });
+    connectSessionEvents();
   });
 
   onCleanup(() => {
     disposed = true;
+    if (sessionEventSource) {
+      sessionEventSource.close();
+      sessionEventSource = null;
+    }
     document.removeEventListener("click", handleClickOutside);
     window.removeEventListener("kaka:threads-changed", handleThreadsChanged);
     window.removeEventListener("kaka:thread-start-running", handleThreadStartRunning);
@@ -675,6 +779,16 @@ export function AppShell(props: {
                                 </div>
                                 <Show when={historyMenuThreadId() === thread.thread_id}>
                                   <div class={`nav-history-menu ${historyMenuOpensUp() ? "open-up" : ""}`}>
+                                    <Show when={runningThreadIds().has(thread.thread_id)}>
+                                      <button
+                                        class="nav-history-menu-item nav-history-menu-danger"
+                                        type="button"
+                                        onClick={(event) => stopThreadExecution(thread, event)}
+                                      >
+                                        <Square size={13} fill="currentColor" />
+                                        <span>Stop Execution</span>
+                                      </button>
+                                    </Show>
                                     <button
                                       class="nav-history-menu-item"
                                       type="button"

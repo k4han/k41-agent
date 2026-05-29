@@ -780,6 +780,7 @@ export function ChatPage() {
   const [backgroundLive, setBackgroundLive] = createSignal(false);
   const [backgroundStreamError, setBackgroundStreamError] = createSignal("");
   const [backgroundSession, setBackgroundSession] = createSignal<ActiveSession | null>(null);
+  const [activeSession, setActiveSession] = createSignal<ActiveSession | null>(null);
   const [composerOptionsOpen, setComposerOptionsOpen] = createSignal(false);
   const [attachments, setAttachments] = createSignal<PendingAttachment[]>([]);
   const [todosExpanded, setTodosExpanded] = createSignal(true);
@@ -982,13 +983,15 @@ export function ChatPage() {
     || backgroundTask()
     || backgroundLive()
     || backgroundSession()
+    || activeSession()
     || backgroundStreamError(),
   ));
   const threadBadgeVisible = createMemo(() => Boolean(
     isBackgroundThread()
     || backgroundTask()
     || backgroundLive()
-    || backgroundSession(),
+    || backgroundSession()
+    || activeSession(),
   ));
   const backgroundTaskActive = createMemo(() => {
     const task = backgroundTask();
@@ -1553,11 +1556,16 @@ export function ChatPage() {
       if (!threadId) {
         return;
       }
-      loadedThreadId = threadId;
-      setCurrentThreadId(threadId);
+      
+      const oldStreamTid = streamThreadIdRef.id;
+      const isViewingPending = !currentThreadId() || currentThreadId() === oldStreamTid;
+      
+      if (isViewingPending) {
+        loadedThreadId = threadId;
+        setCurrentThreadId(threadId);
+      }
 
       // Move persisted stream from pending key to real threadId
-      const oldStreamTid = streamThreadIdRef.id;
       if (oldStreamTid && oldStreamTid !== threadId && persistedStreams.has(oldStreamTid)) {
         const signals = persistedStreams.get(oldStreamTid)!;
         persistedStreams.delete(oldStreamTid);
@@ -1583,7 +1591,9 @@ export function ChatPage() {
         );
       }
 
-      navigate(`/c/${encodeURIComponent(threadId)}`, { replace: true });
+      if (isViewingPending) {
+        navigate(`/c/${encodeURIComponent(threadId)}`, { replace: true });
+      }
       return;
     }
     if (event.type === "message") {
@@ -1795,6 +1805,60 @@ export function ChatPage() {
 
   const stopChat = () => controller()?.abort();
 
+  // Listen to centralized session events (event-driven sync)
+  const handleSessionStartedOrUpdated = (event: Event) => {
+    const customEvent = event as CustomEvent<ActiveSession>;
+    const session = customEvent.detail;
+    if (session && session.thread_id === currentThreadId()) {
+      setActiveSession(session);
+    }
+  };
+
+  const handleSessionStopped = (event: Event) => {
+    const customEvent = event as CustomEvent<{ session_id: string; thread_id: string }>;
+    const { thread_id } = customEvent.detail;
+    if (thread_id === currentThreadId()) {
+      setActiveSession(null);
+      void loadThread(thread_id);
+    }
+  };
+
+  // Fetch initial active session status from API once when viewing a thread (Fixes Issue 6)
+  createEffect(() => {
+    const threadId = currentThreadId();
+    if (threadId) {
+      const fetchInitialSession = async () => {
+        try {
+          const payload = await apiFetch<{ sessions: ActiveSession[] }>("/dashboard-api/sessions");
+          const found = payload.sessions.find((s) => s.thread_id === threadId);
+          if (threadId === currentThreadId()) {
+            setActiveSession(found || null);
+          }
+        } catch (err) {
+          console.error("Failed to fetch initial session details", err);
+        }
+      };
+      void fetchInitialSession();
+    } else {
+      setActiveSession(null);
+    }
+  });
+
+  const handleExternalAbort = (event: Event) => {
+    const customEvent = event as CustomEvent<{ threadId: string }>;
+    if (customEvent.detail.threadId === currentStreamThreadId() || customEvent.detail.threadId === currentThreadId()) {
+      stopChat();
+    }
+  };
+
+  const handleThreadStopRunningExternal = (event: Event) => {
+    const customEvent = event as CustomEvent<{ threadId: string }>;
+    const stoppedId = customEvent.detail.threadId;
+    if (stoppedId === currentThreadId() && !streaming()) {
+      void loadThread(stoppedId);
+    }
+  };
+
   onMount(() => {
     isUnmounting = false;
     cleanupStaleStreams();
@@ -1806,6 +1870,12 @@ export function ChatPage() {
       setWorkspaceExplorerWidth(clampWorkspaceExplorerWidth(savedExplorerWidth));
     }
 
+    window.addEventListener("kaka:thread-external-abort", handleExternalAbort);
+    window.addEventListener("kaka:thread-stop-running", handleThreadStopRunningExternal);
+    window.addEventListener("kaka:session-started", handleSessionStartedOrUpdated);
+    window.addEventListener("kaka:session-updated", handleSessionStartedOrUpdated);
+    window.addEventListener("kaka:session-stopped", handleSessionStopped);
+
     void load();
     void loadDefaultWorkspace();
   });
@@ -1816,6 +1886,11 @@ export function ChatPage() {
     if (!activeTid || !persistedStreams.has(activeTid)) {
       controller()?.abort();
     }
+    window.removeEventListener("kaka:thread-external-abort", handleExternalAbort);
+    window.removeEventListener("kaka:thread-stop-running", handleThreadStopRunningExternal);
+    window.removeEventListener("kaka:session-started", handleSessionStartedOrUpdated);
+    window.removeEventListener("kaka:session-updated", handleSessionStartedOrUpdated);
+    window.removeEventListener("kaka:session-stopped", handleSessionStopped);
     endWorkspaceResize();
     closeBackgroundStream();
     attachments().forEach(revokeAttachmentPreview);
@@ -1824,7 +1899,35 @@ export function ChatPage() {
   return (
     <AppShell
       title={currentThreadId() ? "Thread Chat" : "Agent Chat"}
-      subtitle={pageSubtitle()}
+      subtitle={
+        <span class="row-wrap" style="gap: 8px; align-items: center; flex-wrap: wrap; display: inline-flex;">
+          <span>{pageSubtitle()}</span>
+          <Show when={threadBadgeVisible()}>
+            <span class="row-wrap" style="gap: 6px; display: inline-flex; align-items: center; margin-left: 8px;">
+              <Show when={isBackgroundThread()}>
+                <span class="badge badge-info" style="font-size: 10px; padding: 2px 6px;">background</span>
+              </Show>
+              <Show when={backgroundTask()}>
+                {(task) => <span class="badge" style="font-size: 10px; padding: 2px 6px;">{task().status}</span>}
+              </Show>
+              <Show when={backgroundLive()}>
+                <span class="badge badge-info" style="font-size: 10px; padding: 2px 6px;">live</span>
+              </Show>
+              <Show when={backgroundSession()}>
+                {(session) => <span class="badge" style="font-size: 10px; padding: 2px 6px;">{session().elapsed_display}</span>}
+              </Show>
+              <Show when={activeSession()}>
+                {(session) => (
+                  <>
+                    <span class="badge badge-warning" style="font-size: 10px; padding: 2px 6px;">running</span>
+                    <span class="badge" style="font-size: 10px; padding: 2px 6px;" title="Elapsed time">{session().elapsed_display}</span>
+                  </>
+                )}
+              </Show>
+            </span>
+          </Show>
+        </span>
+      }
       actions={
         <>
           <button
@@ -1852,24 +1955,8 @@ export function ChatPage() {
             style={`--workspace-explorer-width: ${workspaceExplorerWidth()}px;`}
           >
             <section class="panel chat-panel">
-              <Show when={threadStatusVisible()}>
-                <div class={`thread-banner ${threadError() ? "thread-banner-error" : ""}`}>
-                  <Show when={threadBadgeVisible()}>
-                    <div class="row-wrap">
-                      <Show when={isBackgroundThread()}>
-                        <span class="badge badge-info">background</span>
-                      </Show>
-                      <Show when={backgroundTask()}>
-                        {(task) => <span class="badge">{task().status}</span>}
-                      </Show>
-                      <Show when={backgroundLive()}>
-                        <span class="badge badge-info">live</span>
-                      </Show>
-                      <Show when={backgroundSession()}>
-                        {(session) => <span class="badge">{session().elapsed_display}</span>}
-                      </Show>
-                    </div>
-                  </Show>
+              <Show when={threadError() || backgroundStreamError()}>
+                <div class="thread-banner thread-banner-error">
                   <Show when={threadError()}>
                     <span>{threadError()}</span>
                   </Show>

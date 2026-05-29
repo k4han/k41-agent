@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+import logging
+import os
+import signal
 import threading
 import time
 import uuid
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+current_session_id_var: ContextVar[str | None] = ContextVar("current_session_id", default=None)
 
 MAX_RECORDED_TOOLS = 20
 
@@ -29,6 +37,7 @@ class ActiveSession:
     started_at: float = field(default_factory=time.time)
     current_step: str = SESSION_STEP_INITIALIZING
     tools_called: list[str] = field(default_factory=list)
+    running_pids: set[int] = field(default_factory=set)
 
     def elapsed_seconds(self) -> float:
         return time.time() - self.started_at
@@ -68,33 +77,149 @@ class ActiveSessionRegistry:
 
     def __init__(self) -> None:
         self._sessions: dict[str, ActiveSession] = {}
+        self._tasks: dict[str, Any] = {}
+        self._listeners: set[Any] = set()
         self._lock = threading.Lock()
 
-    def register(self, session: ActiveSession) -> str:
+    def subscribe(self) -> Any:
+        """Subscribe to session events (returns asyncio.Queue)."""
+        import asyncio
+        q = asyncio.Queue()
+        with self._lock:
+            self._listeners.add(q)
+        return q
+
+    def unsubscribe(self, q: Any) -> None:
+        """Unsubscribe from session events."""
+        with self._lock:
+            self._listeners.discard(q)
+
+    def register_pid(self, session_id: str, pid: int) -> None:
+        """Register an OS subprocess PID running under a session."""
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session:
+                session.running_pids.add(pid)
+
+    def unregister_pid(self, session_id: str, pid: int) -> None:
+        """Unregister an OS subprocess PID."""
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session:
+                session.running_pids.discard(pid)
+
+    def _broadcast(self, event_type: str, data: Any) -> None:
+        """Broadcast an event to all async listeners safely across threads."""
+        import asyncio
+        with self._lock:
+            listeners = list(self._listeners)
+        if not listeners:
+            return
+
+        event = {"type": event_type, "data": data}
+
+        def push_to_queues():
+            for q in listeners:
+                try:
+                    q.put_nowait(event)
+                except Exception:
+                    pass
+
+        try:
+            loop = asyncio.get_running_loop()
+            loop.call_soon_threadsafe(push_to_queues)
+        except RuntimeError:
+            # No running loop (e.g. outside asyncio environment)
+            pass
+
+    def register(self, session: ActiveSession, task: Any | None = None) -> str:
         """Register a new active session."""
         with self._lock:
             self._sessions[session.session_id] = session
+            if task is not None:
+                self._tasks[session.session_id] = task
+            session_dict = session.to_dict()
+        self._broadcast("session_started", session_dict)
         return session.session_id
 
     def unregister(self, session_id: str) -> None:
         """Remove a session when it finishes."""
         with self._lock:
+            session = self._sessions.get(session_id)
+            thread_id = session.thread_id if session else ""
             self._sessions.pop(session_id, None)
+            self._tasks.pop(session_id, None)
+        if thread_id:
+            self._broadcast("session_stopped", {"session_id": session_id, "thread_id": thread_id})
+
+    def cancel_session(self, session_id: str) -> bool:
+        """Cancel the asyncio task and kill all running subprocesses associated with this session."""
+        pids_to_kill = set()
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session:
+                pids_to_kill = set(session.running_pids)
+            task = self._tasks.get(session_id)
+            task_cancelled = False
+            if task is not None:
+                try:
+                    task.cancel()
+                    task_cancelled = True
+                except Exception:
+                    pass
+
+        # Kill OS subprocesses outside the lock to prevent deadlock
+        for pid in pids_to_kill:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except Exception as exc:
+                logger.debug("Failed to kill registered subprocess PID %d: %s", pid, exc)
+
+        return task_cancelled
+
+    def cancel_by_thread(self, thread_id: str) -> bool:
+        """Cancel all sessions/tasks and kill their subprocesses associated with a thread_id."""
+        cancelled = False
+        sessions_to_cancel = []
+        with self._lock:
+            for session_id, session in list(self._sessions.items()):
+                if session.thread_id == thread_id:
+                    sessions_to_cancel.append(session_id)
+
+        for session_id in sessions_to_cancel:
+            if self.cancel_session(session_id):
+                cancelled = True
+
+        return cancelled
 
     def update_step(self, session_id: str, step: str) -> None:
         """Update the current processing step of a session."""
         with self._lock:
-            if session := self._sessions.get(session_id):
+            session = self._sessions.get(session_id)
+            if session:
                 if session.current_step != step:
                     session.current_step = step
+                    session_dict = session.to_dict()
+                else:
+                    session_dict = None
+            else:
+                session_dict = None
+        if session_dict:
+            self._broadcast("session_updated", session_dict)
 
     def add_tool_call(self, session_id: str, tool_name: str) -> None:
         """Record a tool call and update the current step."""
         with self._lock:
-            if session := self._sessions.get(session_id):
+            session = self._sessions.get(session_id)
+            if session:
                 session.tools_called.append(tool_name)
                 del session.tools_called[:-MAX_RECORDED_TOOLS]
                 session.current_step = f"{TOOL_STEP_PREFIX}{tool_name}"
+                session_dict = session.to_dict()
+            else:
+                session_dict = None
+        if session_dict:
+            self._broadcast("session_updated", session_dict)
 
     def list_active(self) -> list[dict[str, Any]]:
         """Return all active sessions as serializable dicts."""
@@ -131,4 +256,5 @@ __all__ = [
     "SESSION_STEP_THINKING",
     "TOOL_STEP_PREFIX",
     "get_active_session_registry",
+    "current_session_id_var",
 ]

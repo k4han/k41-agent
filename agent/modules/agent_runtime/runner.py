@@ -13,6 +13,7 @@ from agent.modules.agent_runtime.active_sessions import (
     SESSION_STEP_RESPONDING,
     SESSION_STEP_THINKING,
     get_active_session_registry,
+    current_session_id_var,
 )
 from agent.modules.agent_runtime.session import SessionManager
 from agent.modules.workflows import (
@@ -368,6 +369,7 @@ def _message_id(message: Any) -> str:
 
 @contextmanager
 def _track_active_session(thread_id: str, agent_name: str) -> Iterator[str]:
+    import asyncio
     registry = get_active_session_registry()
     try:
         platform, user_id, channel_id = SessionManager.parse_thread_id(thread_id)
@@ -380,11 +382,20 @@ def _track_active_session(thread_id: str, agent_name: str) -> Iterator[str]:
         channel_id=channel_id,
         agent_name=agent_name,
     )
-    session_id = registry.register(session)
+    
+    current_task = None
+    try:
+        current_task = asyncio.current_task()
+    except RuntimeError:
+        pass
+
+    session_id = registry.register(session, task=current_task)
+    token = current_session_id_var.set(session_id)
     try:
         registry.update_step(session_id, SESSION_STEP_THINKING)
         yield session_id
     finally:
+        current_session_id_var.reset(token)
         registry.unregister(session_id)
 
 

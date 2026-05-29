@@ -74,6 +74,13 @@ class TerminalSessionManager:
             env=safe_env,
         )
 
+        # Register the PID in the active session registry
+        from agent.modules.agent_runtime.active_sessions import current_session_id_var, get_active_session_registry
+        session_id_context = current_session_id_var.get()
+        if session_id_context:
+            registry = get_active_session_registry()
+            registry.register_pid(session_id_context, process.pid)
+
         output_queue: Queue[str] = Queue()
         error_queue: Queue[str] = Queue()
 
@@ -313,6 +320,13 @@ class TerminalSessionManager:
 
         session = self.sessions[session_id]
         session.is_running = False
+
+        # Unregister the PID
+        from agent.modules.agent_runtime.active_sessions import current_session_id_var, get_active_session_registry
+        session_id_context = current_session_id_var.get()
+        if session_id_context:
+            registry = get_active_session_registry()
+            registry.unregister_pid(session_id_context, session.process.pid)
 
         try:
             # Send exit command
