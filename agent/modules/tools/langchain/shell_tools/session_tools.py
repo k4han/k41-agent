@@ -27,8 +27,9 @@ def bash(
     command: str,
     runtime: Annotated[ToolRuntime[Any, Any], InjectedToolArg],
     session_id: str = "default",
-    timeout: float = 5.0,
+    timeout: float = 30.0,
     run_in_background: bool = False,
+    force: bool = False,
 ) -> str:
     """Run a shell command in a persistent terminal session.
 
@@ -38,8 +39,9 @@ def bash(
     Args:
         command: Command to execute in the terminal session.
         session_id: ID of the terminal session. Defaults to 'default'.
-        timeout: Maximum wait time in seconds for the command output.
+        timeout: Maximum wait time in seconds for the command output. Defaults to 30.
         run_in_background: Set to True to run processes in the background without waiting for output.
+        force: Set to True to force execution even when a background process is running in the session.
     """
     try:
         working_dir = get_working_dir(runtime)
@@ -49,6 +51,7 @@ def bash(
             timeout=timeout,
             run_in_background=run_in_background,
             working_dir=working_dir,
+            force=force,
         )
 
         if "error" in res:
@@ -112,6 +115,63 @@ def bash_read_output(
     tags=["shell"],
 )
 @tool
+def bash_send_input(
+    session_id: str,
+    text: str,
+) -> str:
+    """Send text input to stdin of a running process in a terminal session.
+
+    Use this when a running program is waiting for user input (e.g., confirmation prompts,
+    interactive menus, password prompts, or any 'Press Enter to continue' scenarios).
+
+    Args:
+        session_id: ID of the terminal session.
+        text: The text to send as stdin input. A newline is automatically appended.
+    """
+    res = session_manager.send_input(session_id, text)
+    if "error" in res:
+        raise ToolError(ToolErrorCode.EXECUTION_ERROR, res["error"])
+    return f"Sent input to session '{session_id}': {text!r}"
+
+
+@register_tool(
+    category=ToolCategory.SHELL,
+    capabilities=[
+        ToolCapability.EXEC_SHELL,
+    ],
+    tags=["shell"],
+)
+@tool
+def bash_interrupt(
+    session_id: str,
+    signal_type: str = "interrupt",
+) -> str:
+    """Send a signal to interrupt or terminate the running process in a terminal session.
+
+    Use this to cancel a long-running command (like Ctrl+C) or to force-terminate a stuck process.
+
+    Args:
+        session_id: ID of the terminal session.
+        signal_type: Type of signal to send. 'interrupt' sends Ctrl+C (SIGINT),
+            'terminate' sends SIGTERM. Defaults to 'interrupt'.
+    """
+    res = session_manager.send_signal(session_id, signal_type)
+    if "error" in res:
+        raise ToolError(ToolErrorCode.EXECUTION_ERROR, res["error"])
+    return (
+        f"Sent {signal_type} signal to session '{session_id}' "
+        f"(target PID: {res.get('target_pid', 'unknown')})."
+    )
+
+
+@register_tool(
+    category=ToolCategory.SHELL,
+    capabilities=[
+        ToolCapability.EXEC_SHELL,
+    ],
+    tags=["shell"],
+)
+@tool
 def bash_list_sessions() -> str:
     """List all active interactive terminal sessions."""
     sessions = session_manager.list_sessions()
@@ -134,14 +194,33 @@ def bash_list_sessions() -> str:
 )
 @tool
 def bash_close(
-    session_ids: list[str] | None = None,
+    session_ids: str | list[str] | None = None,
 ) -> str:
     """Close one or more active terminal sessions, terminating all child processes.
 
     Args:
-        session_ids: List of session IDs to close. Pass an empty list or None to close all active sessions.
+        session_ids: A single session ID or a list of session IDs to close.
+            Pass None to close all active sessions.
     """
-    ids = session_ids or []
+    import json
+
+    if isinstance(session_ids, str):
+        stripped = session_ids.strip()
+        if stripped.startswith('[') and stripped.endswith(']'):
+            try:
+                parsed = json.loads(stripped)
+                if isinstance(parsed, list):
+                    ids = [str(x).strip() for x in parsed]
+                else:
+                    ids = [stripped]
+            except Exception:
+                ids = [session_ids]
+        elif ',' in stripped:
+            ids = [x.strip() for x in stripped.split(',') if x.strip()]
+        else:
+            ids = [stripped] if stripped else []
+    else:
+        ids = session_ids or []
     if not ids:
         count = len(session_manager.sessions)
         session_manager.close_all_sessions()

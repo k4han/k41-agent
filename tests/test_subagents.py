@@ -40,7 +40,7 @@ name: coder
 display_name: Coder Agent
 graph_type: react_agent
 provider: default
-tools: [read_file, write_file, run_bash, list_files, call_agent]
+tools: [read_file, write_file, bash, list_files, call_agent]
 sub_agents: [researcher]
 max_context_tokens: 50000
 ---

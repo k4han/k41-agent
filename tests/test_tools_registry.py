@@ -182,7 +182,9 @@ class TestBuiltinToolSource:
             "read_file",
             "write_file",
             "list_files",
-            "run_bash",
+            "bash",
+            "bash_send_input",
+            "bash_interrupt",
             "skill",
             "echo",
             "get_current_time",
@@ -200,7 +202,7 @@ class TestBuiltinToolSource:
     def test_descriptors_have_correct_categories(self) -> None:
         by_name = {d.name: d for d in BuiltinToolSource().load()}
         assert by_name["read_file"].category is ToolCategory.FILE
-        assert by_name["run_bash"].category is ToolCategory.SHELL
+        assert by_name["bash"].category is ToolCategory.SHELL
         assert by_name["web_fetch"].category is ToolCategory.WEB
         assert by_name["call_agent"].category is ToolCategory.AGENT
         assert by_name["schedule_task"].category is ToolCategory.SCHEDULE
@@ -210,7 +212,7 @@ class TestBuiltinToolSource:
         by_name = {d.name: d for d in BuiltinToolSource().load()}
         assert ToolCapability.READ_FS in by_name["read_file"].capabilities
         assert ToolCapability.WRITE_FS in by_name["write_file"].capabilities
-        assert ToolCapability.EXEC_SHELL in by_name["run_bash"].capabilities
+        assert ToolCapability.EXEC_SHELL in by_name["bash"].capabilities
         assert ToolCapability.NETWORK in by_name["web_search"].capabilities
         assert ToolCapability.MUTATES_STATE in by_name["write_todos"].capabilities
 
@@ -235,7 +237,7 @@ class TestPublicFacade:
 
     def test_get_default_tool_names_matches_tools(self) -> None:
         names = set(get_default_tool_names())
-        assert {"read_file", "write_file", "run_bash", "web_fetch"}.issubset(names)
+        assert {"read_file", "write_file", "bash", "web_fetch"}.issubset(names)
 
     def test_get_tool_by_name_known(self) -> None:
         t = get_tool_by_name("read_file")

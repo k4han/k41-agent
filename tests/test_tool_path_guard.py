@@ -5,7 +5,6 @@ import pytest
 import agent.modules.tools.langchain.file_tools.list_files as list_files_module
 import agent.modules.tools.langchain.file_tools.read_file as read_file_module
 import agent.modules.tools.langchain.file_tools.write_file as write_file_module
-import agent.modules.tools.langchain.shell_tools.run_bash as run_bash_module
 from agent.modules.tools.runtime.path_guard import resolve_safe_path
 
 
@@ -89,27 +88,3 @@ def test_list_files_blocks_parent_traversal(tmp_path):
 
     assert "Path escapes working directory" in result
 
-
-def test_run_bash_uses_safe_resolved_working_dir(monkeypatch, tmp_path):
-    sandbox = tmp_path / "sandbox"
-    sandbox.mkdir()
-    captured: dict[str, object] = {}
-
-    class FakeBackend:
-        def execute(self, command: str, *, timeout: int = 30, max_output_chars=None):
-            captured["command"] = command
-            captured["timeout"] = timeout
-            captured["max_output_chars"] = max_output_chars
-            return SimpleNamespace(output="ok")
-
-    monkeypatch.setattr(run_bash_module, "get_backend", lambda runtime: FakeBackend())
-
-    result = run_bash_module.run_bash.func(
-        command="echo ok",
-        runtime=_runtime(str(sandbox)),
-    )
-
-    assert result == "ok"
-    assert captured["command"] == "echo ok"
-    assert captured["timeout"] == 30
-    assert captured["max_output_chars"] is None

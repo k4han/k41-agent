@@ -3,19 +3,35 @@
 from __future__ import annotations
 
 import logging
+import os
+import re
 import platform
 import shutil
+import signal
 import subprocess
 import threading
 import time
 import uuid
-from dataclasses import dataclass
+from collections import deque
+from dataclasses import dataclass, field
 from queue import Empty, Queue
 from typing import Any, Dict, List, Optional
 
 from agent.modules.tools.runtime.sandbox import build_safe_env
 
 logger = logging.getLogger(__name__)
+
+# Limits
+MAX_OUTPUT_CHARS = 100_000  # ~100KB max output per command
+MAX_HISTORY_LINES = 500  # Keep last 500 lines of drained output
+
+# ANSI escape code pattern (colors, cursor movement, etc.)
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences from text."""
+    return _ANSI_ESCAPE_RE.sub("", text)
 
 
 @dataclass
@@ -27,6 +43,7 @@ class TerminalSession:
     error_queue: Queue[str]
     is_running: bool = True
     has_background_process: bool = False
+    output_history: deque[str] = field(default_factory=lambda: deque(maxlen=MAX_HISTORY_LINES))
 
 
 class TerminalSessionManager:
@@ -88,7 +105,7 @@ class TerminalSessionManager:
             try:
                 for line in iter(pipe.readline, ""):
                     if line:
-                        queue.put(line.rstrip())
+                        queue.put(_strip_ansi(line.rstrip()))
             except Exception as e:
                 queue.put(f"Error reading output: {str(e)}")
 
@@ -119,7 +136,11 @@ class TerminalSessionManager:
                 # Detect shell type from path
                 is_powershell = "powershell" in shell_cmd[0].lower() or "pwsh" in shell_cmd[0].lower()
                 if is_powershell:
-                    process.stdin.write("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; chcp 65001\n")
+                    process.stdin.write(
+                        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; "
+                        "$PSStyle.OutputRendering = 'PlainText'; "
+                        "chcp 65001\n"
+                    )
                 else:
                     process.stdin.write("chcp 65001\n")
                 process.stdin.flush()
@@ -128,27 +149,38 @@ class TerminalSessionManager:
                 logger.warning(f"Failed to configure terminal encoding to UTF-8: {e}")
 
         # Clear initialization messages
-        self._clear_queues(session)
+        self._drain_queues_to_history(session)
 
         return session_id
 
-    def _clear_queues(self, session: TerminalSession) -> None:
-        """Clear unnecessary initialization messages from queues."""
+    def _drain_queues_to_history(self, session: TerminalSession) -> None:
+        """Move pending queue items to history buffer instead of discarding them."""
         try:
             while not session.output_queue.empty():
-                session.output_queue.get_nowait()
+                line = session.output_queue.get_nowait()
+                session.output_history.append(line)
             while not session.error_queue.empty():
-                session.error_queue.get_nowait()
+                line = session.error_queue.get_nowait()
+                session.output_history.append(f"[stderr] {line}")
         except Empty:
             pass
+
+    @staticmethod
+    def _truncate_output(text: str) -> str:
+        """Truncate output if it exceeds MAX_OUTPUT_CHARS, keeping the tail."""
+        if len(text) <= MAX_OUTPUT_CHARS:
+            return text
+        truncated_chars = len(text) - MAX_OUTPUT_CHARS
+        return f"[...truncated {truncated_chars} characters...]\n{text[-MAX_OUTPUT_CHARS:]}"
 
     def execute_command(
         self,
         session_id: str,
         command: str,
-        timeout: float = 5.0,
+        timeout: float = 30.0,
         run_in_background: bool = False,
         working_dir: str | None = None,
+        force: bool = False,
     ) -> Dict[str, Any]:
         """Execute a command in a session, auto-creating the session if it doesn't exist."""
         if session_id not in self.sessions:
@@ -161,10 +193,10 @@ class TerminalSessionManager:
         if not session.is_running or session.process.poll() is not None:
             return {"error": f"Session {session_id} is no longer active"}
 
-        # Clear any stale outputs from previous commands before executing a new one
-        self._clear_queues(session)
+        # Drain stale outputs to history before executing a new command
+        self._drain_queues_to_history(session)
 
-        # Dynamic check if session has active child processes instead of static flag
+        # Dynamic check if session has active child processes
         import psutil
         try:
             parent = psutil.Process(session.process.pid)
@@ -173,14 +205,18 @@ class TerminalSessionManager:
         except Exception:
             has_active_children = False
 
-        # Update and warn if there is already an active background process
-        if has_active_children:
+        # Warn if there is already an active background process
+        if has_active_children and not force:
             session.has_background_process = True
             return {
-                "warning": f"Session {session_id} has a background process running. Consider creating a new session.",
+                "warning": (
+                    f"Session '{session_id}' has a background process running. "
+                    f"Use force=True to execute anyway, or use bash_interrupt to stop it, "
+                    f"or create a new session."
+                ),
                 "session_id": session_id,
             }
-        else:
+        elif not has_active_children:
             session.has_background_process = False
 
         # Generate a unique sentinel token for synchronous execution
@@ -208,6 +244,7 @@ class TerminalSessionManager:
 
             output_lines = []
             error_lines = []
+            total_output_chars = 0
 
             start_time = time.time()
             last_output_time = start_time
@@ -224,14 +261,19 @@ class TerminalSessionManager:
                     # Quick block to receive outputs responsively without high CPU load
                     line = session.output_queue.get(timeout=0.05)
                     if sentinel_token in line:
-                        got_output = True
                         break  # Sentinel token found, execution is complete
                     
                     # Filter out Windows code page switch messages
                     if "Active code page:" in line:
                         continue
-                        
-                    output_lines.append(line)
+                    
+                    # Track total output size for truncation
+                    total_output_chars += len(line)
+                    if total_output_chars <= MAX_OUTPUT_CHARS:
+                        output_lines.append(line)
+                    elif not output_lines or output_lines[-1] != "[...output truncated...]":
+                        output_lines.append("[...output truncated...]")
+
                     last_output_time = time.time()
                     got_output = True
                 except Empty:
@@ -247,14 +289,16 @@ class TerminalSessionManager:
                 except Empty:
                     pass
 
-                # If no new output within idle_timeout, consider complete
-                if not got_output and (time.time() - last_output_time) > idle_timeout:
+                # Idle timeout: only effective when timeout is large enough
+                if not got_output and timeout >= idle_timeout and (time.time() - last_output_time) > idle_timeout:
                     break
+
+            output_text = self._truncate_output("\n".join(output_lines))
 
             return {
                 "session_id": session_id,
                 "command": command,
-                "output": "\n".join(output_lines),
+                "output": output_text,
                 "stderr": "\n".join(error_lines),
                 "status": "completed",
             }
@@ -272,12 +316,17 @@ class TerminalSessionManager:
         session = self.sessions[session_id]
         output_lines = []
         error_lines = []
+        total_chars = 0
 
         start_time = time.time()
         while time.time() - start_time < timeout:
             try:
                 line = session.output_queue.get(timeout=0.1)
-                output_lines.append(line)
+                total_chars += len(line)
+                if total_chars <= MAX_OUTPUT_CHARS:
+                    output_lines.append(line)
+                elif not output_lines or output_lines[-1] != "[...output truncated...]":
+                    output_lines.append("[...output truncated...]")
             except Empty:
                 pass
 
@@ -295,12 +344,102 @@ class TerminalSessionManager:
             ):
                 break
 
+        output_text = self._truncate_output("\n".join(output_lines))
+
         return {
             "session_id": session_id,
-            "output": "\n".join(output_lines),
+            "output": output_text,
             "stderr": "\n".join(error_lines),
             "is_running": session.process.poll() is None,
         }
+
+    def send_input(self, session_id: str, text: str) -> Dict[str, Any]:
+        """Send text input (stdin) to a running session.
+
+        Args:
+            session_id: The session to send input to.
+            text: The text to write to stdin. A newline is appended automatically.
+
+        Returns:
+            Dict with confirmation or error.
+        """
+        if session_id not in self.sessions:
+            return {"error": f"Session '{session_id}' does not exist"}
+
+        session = self.sessions[session_id]
+
+        if session.process.poll() is not None:
+            return {"error": f"Session '{session_id}' process has terminated"}
+
+        try:
+            if session.process.stdin:
+                session.process.stdin.write(text + "\n")
+                session.process.stdin.flush()
+                return {"status": "sent", "session_id": session_id, "text": text}
+            else:
+                return {"error": f"Session '{session_id}' stdin is not available"}
+        except Exception as e:
+            return {"error": f"Failed to send input: {str(e)}"}
+
+    def send_signal(self, session_id: str, signal_type: str = "interrupt") -> Dict[str, Any]:
+        """Send a signal to the active process in a session.
+
+        Args:
+            session_id: The session to signal.
+            signal_type: 'interrupt' (Ctrl+C / SIGINT) or 'terminate' (SIGTERM).
+
+        Returns:
+            Dict with confirmation or error.
+        """
+        if session_id not in self.sessions:
+            return {"error": f"Session '{session_id}' does not exist"}
+
+        session = self.sessions[session_id]
+
+        if session.process.poll() is not None:
+            return {"error": f"Session '{session_id}' process has already terminated"}
+
+        try:
+            import psutil
+
+            # Find the deepest child process to signal
+            try:
+                parent = psutil.Process(session.process.pid)
+                children = parent.children(recursive=True)
+            except psutil.NoSuchProcess:
+                children = []
+
+            # Target: the deepest child, or the shell process itself
+            target_process = children[-1] if children else session.process
+
+            if signal_type == "interrupt":
+                if platform.system() == "Windows":
+                    # On Windows, send CTRL_C_EVENT to process group
+                    try:
+                        os.kill(session.process.pid, signal.CTRL_C_EVENT)
+                    except Exception:
+                        # Fallback: kill the child process directly
+                        if children:
+                            children[-1].send_signal(signal.CTRL_BREAK_EVENT)
+                else:
+                    target_process.send_signal(signal.SIGINT)
+            elif signal_type == "terminate":
+                if platform.system() == "Windows":
+                    target_process.terminate()
+                else:
+                    target_process.send_signal(signal.SIGTERM)
+            else:
+                return {"error": f"Unknown signal_type: '{signal_type}'. Use 'interrupt' or 'terminate'."}
+
+            return {
+                "status": "signal_sent",
+                "session_id": session_id,
+                "signal_type": signal_type,
+                "target_pid": target_process.pid if hasattr(target_process, "pid") else "unknown",
+            }
+
+        except Exception as e:
+            return {"error": f"Failed to send signal: {str(e)}"}
 
     def list_sessions(self) -> List[Dict[str, Any]]:
         """List all active sessions."""
