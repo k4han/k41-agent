@@ -42,6 +42,7 @@ import {
 } from "@/lib/chatThreads";
 import type { TranscriptAttachment, TranscriptItem } from "@/components/Transcript";
 import {
+  formatWorkspaceRoot,
   localWorkspaceRef,
   workspaceDisplayLabel,
   workspaceDisplayLabelFromValues,
@@ -483,7 +484,7 @@ function WorkspaceSelector(props: {
               <div class="workspace-selector-row">
                 <input
                   class="input workspace-selector-input"
-                  value={localDraft()}
+                  value={formatWorkspaceRoot(localDraft())}
                   disabled={props.disabled || resolving()}
                   placeholder="Working directory"
                   onInput={(event) => setLocalDraft(event.currentTarget.value)}
@@ -526,7 +527,7 @@ function WorkspaceSelector(props: {
                         <ArrowUp size={14} />
                       </button>
                       <div class="workspace-browser-path" title={browsePayload()?.path || localDraft()}>
-                        {browsePayload()?.path || localDraft()}
+                        {formatWorkspaceRoot(browsePayload()?.path || localDraft())}
                       </div>
                       <button
                         class="btn btn-icon"

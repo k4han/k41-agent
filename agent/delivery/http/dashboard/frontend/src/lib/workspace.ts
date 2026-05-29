@@ -56,6 +56,49 @@ export function localWorkspaceRef(locator: string): WorkspaceRef | null {
 }
 
 export function formatWorkspaceRoot(locator: string): string {
+  const trimmed = locator.trim();
+  if (trimmed === "workspace" || trimmed.startsWith("workspace/")) {
+    return trimmed;
+  }
+
+  const normalized = normalizePath(locator);
+  
+  const rootPatterns = [
+    "/kaka-agent/workspace",
+    "~/kaka-agent/workspace",
+    "kaka-agent/workspace"
+  ];
+
+  for (const pattern of rootPatterns) {
+    const idx = normalized.indexOf(pattern);
+    if (idx !== -1) {
+      const remaining = normalized.substring(idx + pattern.length);
+      if (!remaining || remaining === "/") {
+        return "workspace/";
+      }
+      const cleanRemaining = remaining.startsWith("/") ? remaining.substring(1) : remaining;
+      return `workspace/${cleanRemaining}`;
+    }
+  }
+
+  const fallbackPatterns = [
+    "/kaka-agent",
+    "~/kaka-agent",
+    "kaka-agent"
+  ];
+
+  for (const pattern of fallbackPatterns) {
+    const idx = normalized.indexOf(pattern);
+    if (idx !== -1) {
+      const remaining = normalized.substring(idx + pattern.length);
+      if (!remaining || remaining === "/") {
+        return "workspace/";
+      }
+      const cleanRemaining = remaining.startsWith("/") ? remaining.substring(1) : remaining;
+      return `workspace/${cleanRemaining}`;
+    }
+  }
+
   const compactTail = compactPathTail(locator);
   return compactTail ? `${compactTail}/` : locator.trim();
 }
@@ -65,7 +108,7 @@ export function workspaceDisplayLabelFromValues(
   locator: string | undefined,
   metadata?: Record<string, unknown>,
 ): string {
-  const repository = metadataText(metadata, "repository_full_name");
+  const repository = metadataText(metadata, "repository_full_name") || metadataText(metadata, "repository");
   if (repository) {
     return repository;
   }
