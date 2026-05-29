@@ -299,6 +299,67 @@ function WorkspaceSelector(props: {
   const [newFolderName, setNewFolderName] = createSignal("");
   const [createFolderResolving, setCreateFolderResolving] = createSignal(false);
 
+  const pathSegments = createMemo(() => {
+    const currentPath = browsePayload()?.path || localDraft() || "";
+    if (!currentPath) return [];
+
+    const isWindows = currentPath.includes("\\") || Boolean(currentPath.match(/^[a-zA-Z]:/));
+    const separator = isWindows ? "\\" : "/";
+    const parts = currentPath.split(/[\\/]/).filter(Boolean);
+    const segments: { name: string; path: string }[] = [];
+
+    let accumulated = "";
+    if (isWindows && currentPath.match(/^[a-zA-Z]:/)) {
+      const drive = currentPath.split(/[\\/]/)[0];
+      accumulated = drive + separator;
+      segments.push({ name: drive, path: accumulated });
+
+      for (let i = 1; i < parts.length; i++) {
+        accumulated += parts[i] + separator;
+        segments.push({ name: parts[i], path: accumulated });
+      }
+    } else {
+      accumulated = "";
+      for (let i = 0; i < parts.length; i++) {
+        accumulated += "/" + parts[i];
+        segments.push({ name: parts[i], path: accumulated });
+      }
+    }
+
+    if (props.defaultWorkingDir) {
+      const normalize = (p: string) => {
+        let cleaned = p.replace(/[\\/]+/g, "/");
+        if (cleaned.endsWith("/")) {
+          cleaned = cleaned.slice(0, -1);
+        }
+        return isWindows ? cleaned.toLowerCase() : cleaned;
+      };
+
+      const rootPathNormalized = normalize(props.defaultWorkingDir);
+      const filtered = segments.filter((seg) => {
+        const segNormalized = normalize(seg.path);
+        return segNormalized.startsWith(rootPathNormalized);
+      });
+
+      if (filtered.length > 0) {
+        return filtered;
+      }
+    }
+
+    return segments;
+  });
+
+  const filteredEntries = createMemo(() => {
+    const entries = browsePayload()?.entries || [];
+    return entries.filter(
+      (entry) =>
+        !entry.name.startsWith(".") &&
+        entry.name !== "__pycache__" &&
+        entry.name !== "node_modules" &&
+        entry.name !== "venv"
+    );
+  });
+
   const repositoryOptions = createMemo(() =>
     repositories().map((repository) => ({
       value: String(repository.repository_id),
@@ -375,6 +436,7 @@ function WorkspaceSelector(props: {
     if (payload?.path) {
       setLocalDraft(payload.path);
       closeBrowser();
+      void resolveWorkspace(payload.path);
     }
   };
 
@@ -401,8 +463,12 @@ function WorkspaceSelector(props: {
     }
   };
 
-  const resolveWorkspace = async () => {
-    if (resolveDisabled()) {
+  const resolveWorkspace = async (pathOverride?: string) => {
+    const targetPath = pathOverride !== undefined ? pathOverride : localDraft();
+    if (props.disabled || resolving()) {
+      return;
+    }
+    if (kind() === "local" && !targetPath.trim()) {
       return;
     }
     setResolving(true);
@@ -410,7 +476,7 @@ function WorkspaceSelector(props: {
       const payload = await postJson<WorkspaceResolvePayload>(
         "/dashboard-api/workspace/resolve",
         kind() === "local"
-          ? { kind: "local", workspace: localWorkspaceRef(localDraft()) }
+          ? { kind: "local", workspace: localWorkspaceRef(targetPath) }
           : { kind: "github", repository_id: Number(repositoryId()) },
       );
       setLocalDraft(payload.workspace.locator);
@@ -481,31 +547,33 @@ function WorkspaceSelector(props: {
           <Show
             when={kind() === "github"}
             fallback={
-              <div class="workspace-selector-row">
-                <input
-                  class="input workspace-selector-input"
-                  value={formatWorkspaceRoot(localDraft())}
-                  disabled={props.disabled || resolving()}
-                  placeholder="Working directory"
-                  onInput={(event) => setLocalDraft(event.currentTarget.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      void resolveWorkspace();
-                    }
-                  }}
-                />
+              <div class="workspace-selector-row-enhanced">
+                <div class="workspace-input-group">
+                  <input
+                    class="input workspace-selector-input"
+                    value={formatWorkspaceRoot(localDraft())}
+                    disabled={props.disabled || resolving()}
+                    placeholder="Working directory"
+                    onInput={(event) => setLocalDraft(event.currentTarget.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void resolveWorkspace();
+                      }
+                    }}
+                  />
+                  <button
+                    class="workspace-input-btn-browse"
+                    type="button"
+                    title="Browse folder"
+                    disabled={props.disabled || resolving()}
+                    onClick={openBrowser}
+                  >
+                    <FolderOpen size={14} />
+                  </button>
+                </div>
                 <button
-                  class="btn btn-sm"
-                  type="button"
-                  disabled={props.disabled || resolving()}
-                  onClick={openBrowser}
-                >
-                  <FolderOpen size={13} />
-                  Browse
-                </button>
-                <button
-                  class="btn btn-sm"
+                  class="btn btn-sm btn-primary workspace-use-btn"
                   type="button"
                   disabled={resolveDisabled()}
                   onClick={() => void resolveWorkspace()}
@@ -519,15 +587,46 @@ function WorkspaceSelector(props: {
                       <button
                         class="btn btn-icon"
                         type="button"
-                        disabled={browseLoading() || !browsePayload()?.parent}
+                        disabled={
+                          browseLoading() ||
+                          !browsePayload()?.parent ||
+                          (() => {
+                            if (!props.defaultWorkingDir) return false;
+                            const current = browsePayload()?.path || "";
+                            const isWindows = current.includes("\\") || Boolean(current.match(/^[a-zA-Z]:/));
+                            const normalize = (p: string) => {
+                              let cleaned = p.replace(/[\\/]+/g, "/");
+                              if (cleaned.endsWith("/")) cleaned = cleaned.slice(0, -1);
+                              return isWindows ? cleaned.toLowerCase() : cleaned;
+                            };
+                            return normalize(current) === normalize(props.defaultWorkingDir);
+                          })()
+                        }
                         title="Parent directory"
                         aria-label="Parent directory"
                         onClick={() => void loadBrowsePath(browsePayload()?.parent)}
                       >
                         <ArrowUp size={14} />
                       </button>
-                      <div class="workspace-browser-path" title={browsePayload()?.path || localDraft()}>
-                        {formatWorkspaceRoot(browsePayload()?.path || localDraft())}
+                      <div class="workspace-browser-breadcrumbs">
+                        <For each={pathSegments()}>
+                          {(segment, index) => (
+                            <>
+                              <Show when={index() > 0}>
+                                <span class="breadcrumb-separator">/</span>
+                              </Show>
+                              <button
+                                class="breadcrumb-btn"
+                                type="button"
+                                disabled={browseLoading()}
+                                onClick={() => void loadBrowsePath(segment.path)}
+                                title={segment.path}
+                              >
+                                {segment.name}
+                              </button>
+                            </>
+                          )}
+                        </For>
                       </div>
                       <button
                         class="btn btn-icon"
@@ -579,7 +678,7 @@ function WorkspaceSelector(props: {
                           fallback={<div class="workspace-browser-state error">{browseError()}</div>}
                         >
                           <For
-                            each={browsePayload()?.entries || []}
+                            each={filteredEntries()}
                             fallback={<div class="workspace-browser-state">No child directories.</div>}
                           >
                             {(entry) => (

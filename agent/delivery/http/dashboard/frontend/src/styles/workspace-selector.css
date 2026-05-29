@@ -4,7 +4,9 @@
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface);
-  padding: 10px;
+  padding: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  transition: all 0.2s ease;
 }
 
 .workspace-selector.locked {
@@ -31,16 +33,21 @@
 
 .workspace-selector-controls {
   display: grid;
-  gap: 9px;
+  gap: 10px;
 }
 
 .workspace-selector-modes,
-.workspace-selector-row {
+.workspace-selector-row,
+.workspace-selector-row-enhanced {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   min-width: 0;
+}
+
+.workspace-selector-row-enhanced {
+  width: 100%;
 }
 
 .workspace-selector-mode {
@@ -55,12 +62,70 @@
   padding: 0 10px;
   font-size: 12px;
   font-weight: 650;
+  cursor: pointer;
+  transition: all 0.2s ease;
 }
 
 .workspace-selector-mode:hover,
 .workspace-selector-mode.active {
   background: var(--surface-2);
   color: var(--fg);
+  border-color: var(--muted);
+}
+
+/* SLEEK INPUT GROUP */
+.workspace-input-group {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+
+.workspace-selector-input {
+  width: 100%;
+  height: 32px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  padding-right: 36px !important; /* Space for the folder browse button inside input */
+  text-overflow: ellipsis;
+}
+
+.workspace-input-btn-browse {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+
+.workspace-input-btn-browse:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+
+.workspace-input-btn-browse:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.workspace-use-btn {
+  height: 32px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
 }
 
 .workspace-selector-input,
@@ -69,24 +134,33 @@
   flex: 1 1 auto;
 }
 
-.workspace-selector-input {
-  height: 32px;
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 12px;
-}
-
 .workspace-selector-hint {
   font-size: 12px;
 }
 
+/* PREMIUM WORKSPACE BROWSER DROPDOWN/CARD */
 .workspace-browser {
   display: grid;
   flex: 1 0 100%;
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--surface);
+  box-shadow: 0 12px 28px -4px rgba(0, 0, 0, 0.4), 0 8px 12px -6px rgba(0, 0, 0, 0.4);
+  margin-top: 4px;
+  animation: slideDown 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .workspace-browser-header {
@@ -95,7 +169,63 @@
   align-items: center;
   gap: 8px;
   border-bottom: 1px solid var(--border);
-  padding: 7px;
+  padding: 8px 10px;
+  background: var(--surface-2);
+}
+
+/* CLICKABLE BREADCRUMBS */
+.workspace-browser-breadcrumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
+  max-width: 100%;
+  padding-block: 2px;
+}
+
+.workspace-browser-breadcrumbs::-webkit-scrollbar {
+  height: 3px;
+}
+
+.workspace-browser-breadcrumbs::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
+}
+
+.breadcrumb-btn {
+  background: transparent;
+  border: 0;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 550;
+}
+
+.breadcrumb-btn:hover:not(:disabled) {
+  background: var(--surface-3);
+  color: var(--fg);
+}
+
+.breadcrumb-btn:disabled {
+  cursor: not-allowed;
+}
+
+.breadcrumb-separator {
+  color: var(--muted);
+  opacity: 0.4;
+  font-size: 10px;
+  font-weight: bold;
+  user-select: none;
 }
 
 .workspace-browser-path {
@@ -113,7 +243,8 @@
   gap: 6px;
   overflow-x: auto;
   border-bottom: 1px solid var(--border);
-  padding: 7px;
+  padding: 7px 10px;
+  background: var(--surface-2);
 }
 
 .workspace-browser-root {
@@ -128,38 +259,71 @@
   color: var(--muted);
   padding: 0 8px;
   font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
 }
 
 .workspace-browser-root:hover {
-  background: var(--surface-2);
+  background: var(--surface-3);
   color: var(--fg);
+  border-color: var(--muted);
 }
 
 .workspace-browser-list {
-  max-height: 260px;
+  max-height: 280px;
   overflow-y: auto;
-  padding: 5px;
+  padding: 6px;
+}
+
+/* CUSTOM SCROLLBAR FOR BROWSER LIST */
+.workspace-browser-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.workspace-browser-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.workspace-browser-list::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+.workspace-browser-list::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
 }
 
 .workspace-browser-item {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   width: 100%;
-  min-height: 32px;
+  min-height: 34px;
   border: 0;
   border-radius: 6px;
   background: transparent;
   color: var(--fg);
-  padding: 0 8px;
+  padding: 0 10px;
   text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease, padding-left 0.15s ease;
 }
 
 .workspace-browser-item:hover,
 .workspace-browser-item:focus-visible {
   background: var(--surface-2);
+  padding-left: 14px;
   outline: none;
+}
+
+.workspace-browser-item svg {
+  color: var(--muted);
+  transition: color 0.15s ease;
+}
+
+.workspace-browser-item:hover svg {
+  color: var(--fg);
 }
 
 .workspace-browser-item span {
@@ -167,10 +331,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 12px;
 }
 
 .workspace-browser-state {
-  padding: 14px 10px;
+  padding: 20px 10px;
   color: var(--muted);
   font-size: 12px;
   text-align: center;
@@ -185,6 +350,6 @@
   justify-content: flex-end;
   gap: 8px;
   border-top: 1px solid var(--border);
-  padding: 7px;
+  padding: 8px 10px;
+  background: var(--surface-2);
 }
-
