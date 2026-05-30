@@ -912,7 +912,7 @@ export function ChatPage() {
                 attachments={attachments()}
                 attachmentAccept={attachmentAccept()}
                 agentName={agentName()}
-                agentOptions={agentOptions()}
+                agents={validCards()}
                 onAgentChange={setAgentName}
                 selectedCard={selectedCard()}
                 provider={provider()}

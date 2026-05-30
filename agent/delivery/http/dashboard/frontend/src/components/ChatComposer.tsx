@@ -10,10 +10,10 @@ import {
 } from "lucide-solid";
 import { createEffect, createSignal, For, Show, type JSX } from "solid-js";
 
+import { AgentPicker } from "@/components/AgentPicker";
 import { ChatTodos, type TodoProgress } from "@/components/ChatTodos";
 import { ContextWindowIndicator, type ContextWindowData } from "@/components/ContextWindowIndicator";
 import { ModelPicker } from "@/components/ModelPicker";
-import { SelectControl } from "@/components/SelectControl";
 import { formatBytes } from "@/lib/chatAttachments";
 import type { PendingAttachment } from "@/lib/chatTypes";
 import type { AgentCard, AgentsPayload, ModelCatalog } from "@/types";
@@ -35,7 +35,7 @@ export interface ChatComposerProps {
   attachments: PendingAttachment[];
   attachmentAccept: string;
   agentName: string;
-  agentOptions: { value: string; label: string }[];
+  agents: AgentCard[];
   onAgentChange: (name: string) => void;
   selectedCard: AgentCard | undefined;
   provider: string;
@@ -179,15 +179,12 @@ export function ChatComposer(props: ChatComposerProps) {
       />
       <div class="chat-composer-toolbar">
         <div class="chat-composer-actions">
-          <SelectControl
+          <AgentPicker
             class="chat-agent-picker"
             value={props.agentName}
-            options={props.agentOptions}
+            agents={props.agents}
             disabled={props.composerDisabled}
             onChange={props.onAgentChange}
-            ariaLabel="Agent"
-            title={props.selectedCard?.description || "Select agent"}
-            icon={<Bot size={14} />}
           />
           <button
             class="chat-composer-icon"

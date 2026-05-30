@@ -16,6 +16,7 @@ export function SelectControl(props: {
   disabled?: boolean;
   icon?: JSX.Element;
   title?: string;
+  style?: JSX.CSSProperties | string;
 }) {
   const [open, setOpen] = createSignal(false);
   let controlRef: HTMLDivElement | undefined;
@@ -72,6 +73,7 @@ export function SelectControl(props: {
       ref={controlRef}
       class={`select-control ${open() ? "open" : ""} ${props.class || ""}`}
       title={props.title}
+      style={props.style}
     >
       <button
         class={`select-control-trigger ${props.icon ? "select-control-with-icon" : ""}`}

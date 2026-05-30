@@ -2,6 +2,7 @@ import { A } from "@solidjs/router";
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { MessageSquare, Play, Square, Trash2 } from "lucide-solid";
 
+import { AgentPicker } from "@/components/AgentPicker";
 import { AppShell } from "@/components/AppShell";
 import { DataGate } from "@/components/State";
 import { IdentityPicker } from "@/components/IdentityPicker";
@@ -190,6 +191,7 @@ export function TasksPage() {
   });
   const visibleTasks = createMemo(() => filteredTasks().slice(0, visibleTaskCount()));
   const hasMoreVisibleTasks = createMemo(() => visibleTasks().length < filteredTasks().length);
+  const visibleAgents = createMemo(() => (data()?.agents ?? []).filter((agent) => !agent.hidden));
 
   createEffect(() => {
     const selected = workspaceFilter();
@@ -254,8 +256,9 @@ export function TasksPage() {
       }
 
       setData({ ...taskPayload, sessions });
-      if (!taskPayload.agents.some((agent) => agent.name === agentName()) && taskPayload.agents[0]) {
-        setAgentName(taskPayload.agents[0].name);
+      const visible = taskPayload.agents.filter((agent) => !agent.hidden);
+      if (!visible.some((agent) => agent.name === agentName()) && visible[0]) {
+        setAgentName(visible[0].name);
       }
       scheduleRefresh(taskPayload.tasks);
     } catch (err) {
@@ -420,16 +423,13 @@ export function TasksPage() {
                     }}
                   />
                   <div class="row-wrap">
-                    <select
-                      class="select"
+                    <AgentPicker
+                      class="task-agent-picker"
                       style={{ width: "220px" }}
                       value={agentName()}
-                      onChange={(event) => setAgentName(event.currentTarget.value)}
-                    >
-                      <For each={payload.agents}>
-                        {(agent) => <option value={agent.name}>{agent.display_name || agent.name}</option>}
-                      </For>
-                    </select>
+                      agents={visibleAgents()}
+                      onChange={setAgentName}
+                    />
                     <IdentityPicker
                       value={notify()}
                       onChange={setNotify}
