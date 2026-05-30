@@ -54,19 +54,7 @@ type ProviderCreateForm = {
   base_url: string;
 };
 
-// Popular providers IDs for categorization
-const POPULAR_PROVIDERS = [
-  "openai",
-  "anthropic",
-  "google",
-  "deepseek",
-  "groq",
-  "mistral",
-  "togetherai",
-  "fireworks-ai",
-  "cohere",
-  "perplexity"
-];
+// Grouped by connection state instead of static categories
 
 function hasDraftValue(drafts: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(drafts, key);
@@ -328,12 +316,12 @@ export function ProvidersPage() {
     return cards;
   });
 
-  const popularProviderCards = createMemo(() =>
-    providerCards().filter((card) => card.matchesSearch && POPULAR_PROVIDERS.includes(card.id)),
+  const connectedProviderCards = createMemo(() =>
+    providerCards().filter((card) => card.matchesSearch && card.configured),
   );
 
-  const otherProviderCards = createMemo(() =>
-    providerCards().filter((card) => card.matchesSearch && !POPULAR_PROVIDERS.includes(card.id)),
+  const unconnectedProviderCards = createMemo(() =>
+    providerCards().filter((card) => card.matchesSearch && !card.configured),
   );
 
   const selectedProvider = createMemo(() => {
@@ -761,12 +749,12 @@ export function ProvidersPage() {
               }
             />
 
-            {/* Popular Providers Grid */}
-            <Show when={popularProviderCards().length > 0}>
+            {/* Connected Providers Grid */}
+            <Show when={connectedProviderCards().length > 0}>
               <div>
-                <div class="provider-section-title">Popular Providers</div>
+                <div class="provider-section-title">Connected Providers</div>
                 <div class="providers-grid">
-                  <For each={popularProviderCards()}>
+                  <For each={connectedProviderCards()}>
                     {(card) => (
                       <div
                         class={`provider-card ${card.configured ? "card-configured" : ""} ${
@@ -812,12 +800,12 @@ export function ProvidersPage() {
               </div>
             </Show>
 
-            {/* Other Providers Grid */}
-            <Show when={otherProviderCards().length > 0}>
+            {/* Available Providers Grid */}
+            <Show when={unconnectedProviderCards().length > 0}>
               <div>
-                <div class="provider-section-title">Other Providers</div>
+                <div class="provider-section-title">Available Providers</div>
                 <div class="providers-grid">
-                  <For each={otherProviderCards()}>
+                  <For each={unconnectedProviderCards()}>
                     {(card) => (
                       <div
                         class={`provider-card ${card.configured ? "card-configured" : ""} ${
