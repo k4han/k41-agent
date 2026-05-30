@@ -1,6 +1,7 @@
 import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { Check, Copy, Edit3, Plus, RefreshCw, Trash2 } from "lucide-solid";
 
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Dialog } from "@/components/Dialog";
 import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { DataGate } from "@/components/State";
@@ -49,6 +50,7 @@ export function PromptVariablesPage() {
   const [copyingPlaceholder, setCopyingPlaceholder] = createSignal<string | null>(null);
   const [copiedPlaceholder, setCopiedPlaceholder] = createSignal<string | null>(null);
   const [copyFailedPlaceholder, setCopyFailedPlaceholder] = createSignal<string | null>(null);
+  const [deleteTargetName, setDeleteTargetName] = createSignal<string | null>(null);
   const { showToast } = useToast();
 
   let copyStatusResetTimer: number | undefined;
@@ -169,8 +171,9 @@ export function PromptVariablesPage() {
     }
   };
 
-  const deleteVariable = async (name: string) => {
-    if (!window.confirm(`Delete prompt variable "${name}"?`)) {
+  const confirmDeleteVariable = async () => {
+    const name = deleteTargetName();
+    if (!name) {
       return;
     }
     try {
@@ -182,6 +185,8 @@ export function PromptVariablesPage() {
         err instanceof Error ? err.message : "Failed to delete prompt variable",
         "error",
       );
+    } finally {
+      setDeleteTargetName(null);
     }
   };
 
@@ -242,7 +247,12 @@ export function PromptVariablesPage() {
                       {(variable) => (
                         <tr>
                           <td>
-                            <div class="mono">{variable.name}</div>
+                            <div class="row-wrap" style="gap: 0.5rem; align-items: center;">
+                              <div class="mono">{variable.name}</div>
+                              <Show when={variable.is_system}>
+                                <span class="badge" style="background-color: var(--color-bg-subtle, rgba(255,255,255,0.05)); color: var(--color-text-muted, #a6adc8); font-size: 0.7rem; padding: 0.1rem 0.35rem; border-radius: 4px; border: 1px solid var(--color-border, rgba(255,255,255,0.1)); line-height: 1.2;">System</span>
+                              </Show>
+                            </div>
                           </td>
                           <td>
                             <button
@@ -262,8 +272,8 @@ export function PromptVariablesPage() {
                               }
                               disabled={
                                 copyingPlaceholder() === variable.placeholder ||
-                                copiedPlaceholder() === variable.placeholder ||
-                                copyFailedPlaceholder() === variable.placeholder
+                                  copiedPlaceholder() === variable.placeholder ||
+                                  copyFailedPlaceholder() === variable.placeholder
                               }
                               onClick={() => copyPlaceholder(variable.placeholder)}
                             >
@@ -284,18 +294,27 @@ export function PromptVariablesPage() {
                           <td>{formatDate(variable.updated_at || variable.created_at)}</td>
                           <td>
                             <div class="row-wrap">
-                              <button class="btn btn-sm" type="button" onClick={() => openEdit(variable)}>
-                                <Edit3 size={13} />
-                                Edit
-                              </button>
-                              <button
-                                class="btn btn-sm btn-danger"
-                                type="button"
-                                onClick={() => deleteVariable(variable.name)}
+                              <Show
+                                when={!variable.is_system}
+                                fallback={
+                                  <span style="font-size: 0.8rem; font-style: italic; color: var(--color-text-muted, #a6adc8); opacity: 0.7;">
+                                    Read-Only
+                                  </span>
+                                }
                               >
-                                <Trash2 size={13} />
-                                Delete
-                              </button>
+                                <button class="btn btn-sm" type="button" onClick={() => openEdit(variable)}>
+                                  <Edit3 size={13} />
+                                  Edit
+                                </button>
+                                <button
+                                  class="btn btn-sm btn-danger"
+                                  type="button"
+                                  onClick={() => setDeleteTargetName(variable.name)}
+                                >
+                                  <Trash2 size={13} />
+                                  Delete
+                                </button>
+                              </Show>
                             </div>
                           </td>
                         </tr>
@@ -350,6 +369,16 @@ export function PromptVariablesPage() {
                 </div>
               </div>
             </Dialog>
+
+            <ConfirmDialog
+              open={deleteTargetName() !== null}
+              title="Delete Prompt Variable"
+              message={<p>Are you sure you want to delete prompt variable <span class="mono">{deleteTargetName()}</span>?</p>}
+              confirmLabel="Delete"
+              confirmVariant="danger"
+              onClose={() => setDeleteTargetName(null)}
+              onConfirm={() => void confirmDeleteVariable()}
+            />
           </div>
         )}
       </DataGate>

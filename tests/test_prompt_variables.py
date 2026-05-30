@@ -59,7 +59,8 @@ async def test_prompt_variable_service_crud(prompt_variable_db) -> None:
     assert created["placeholder"] == "{{common_rules}}"
 
     listed = await service.list_variables()
-    assert [item["name"] for item in listed] == ["common_rules"]
+    user_listed = [item for item in listed if not item.get("is_system")]
+    assert [item["name"] for item in user_listed] == ["common_rules"]
 
     updated = await service.update_variable(
         current_name="common_rules",
@@ -70,7 +71,9 @@ async def test_prompt_variable_service_crud(prompt_variable_db) -> None:
     assert await service.value_map() == {"shared_rules": "Use project conventions."}
 
     await service.delete_variable("shared_rules")
-    assert await service.list_variables() == []
+    listed = await service.list_variables()
+    user_listed = [item for item in listed if not item.get("is_system")]
+    assert user_listed == []
 
 
 @pytest.mark.asyncio
@@ -93,7 +96,9 @@ async def test_prompt_variable_dashboard_api_crud(prompt_variable_db) -> None:
 
     empty = client.get("/dashboard-api/prompt-variables")
     assert empty.status_code == 200
-    assert empty.json() == {"variables": []}
+    variables = empty.json()["variables"]
+    assert len(variables) == 4
+    assert all(var["is_system"] is True for var in variables)
 
     created = client.post(
         "/prompt-variables",
@@ -118,7 +123,8 @@ async def test_prompt_variable_dashboard_api_crud(prompt_variable_db) -> None:
 
     listed = client.get("/dashboard-api/prompt-variables")
     assert listed.status_code == 200
-    assert [item["name"] for item in listed.json()["variables"]] == ["common_rules_v2"]
+    user_listed = [item for item in listed.json()["variables"] if not item.get("is_system")]
+    assert [item["name"] for item in user_listed] == ["common_rules_v2"]
 
     deleted = client.delete("/prompt-variables/common_rules_v2")
     assert deleted.status_code == 200
@@ -126,3 +132,17 @@ async def test_prompt_variable_dashboard_api_crud(prompt_variable_db) -> None:
 
     missing = client.delete("/prompt-variables/common_rules_v2")
     assert missing.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_system_prompt_variables_read_only(prompt_variable_db) -> None:
+    service = PromptVariableService()
+    
+    with pytest.raises(ValueError, match="reserved system prompt variable"):
+        await service.create_variable(name="current_time", value="custom")
+        
+    with pytest.raises(ValueError, match="reserved system prompt variable"):
+        await service.update_variable(current_name="current_time", name="current_time", value="custom")
+        
+    with pytest.raises(ValueError, match="reserved system prompt variable"):
+        await service.delete_variable("current_time")

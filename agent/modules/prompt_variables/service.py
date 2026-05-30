@@ -20,10 +20,13 @@ def serialize_prompt_variable(record: PromptVariable) -> dict[str, Any]:
         "placeholder": f"{{{{{record.name}}}}}",
         "created_at": record.created_at.isoformat() if record.created_at else None,
         "updated_at": record.updated_at.isoformat() if record.updated_at else None,
+        "is_system": False,
     }
 
 
 class PromptVariableService:
+    SYSTEM_VARIABLE_NAMES = {"current_time", "operating_system", "workspace", "user_name"}
+
     def __init__(self, repository: PromptVariableRepository | None = None) -> None:
         self._repository = repository or PromptVariableRepository()
 
@@ -37,11 +40,64 @@ class PromptVariableService:
                 "Prompt variable name must start with a letter and contain only "
                 "letters, numbers, underscores, or hyphens."
             )
+        if normalized in PromptVariableService.SYSTEM_VARIABLE_NAMES:
+            raise ValueError(f"'{normalized}' is a reserved system prompt variable.")
         return normalized
 
     async def list_variables(self) -> list[dict[str, Any]]:
+        import sys
+        import getpass
+
+        # Get system info
+        os_name = sys.platform
+        if os_name == "win32":
+            os_name = "windows"
+        elif os_name == "darwin":
+            os_name = "macos"
+
+        try:
+            username = getpass.getuser()
+        except Exception:
+            username = "user"
+
+        system_vars = [
+            {
+                "name": "current_time",
+                "value": "(Dynamic datetime resolved at prompt evaluation)",
+                "placeholder": "{{current_time}}",
+                "is_system": True,
+                "created_at": None,
+                "updated_at": None,
+            },
+            {
+                "name": "operating_system",
+                "value": os_name,
+                "placeholder": "{{operating_system}}",
+                "is_system": True,
+                "created_at": None,
+                "updated_at": None,
+            },
+            {
+                "name": "workspace",
+                "value": "(Dynamic path resolved at runtime from agent workspace)",
+                "placeholder": "{{workspace}}",
+                "is_system": True,
+                "created_at": None,
+                "updated_at": None,
+            },
+            {
+                "name": "user_name",
+                "value": username,
+                "placeholder": "{{user_name}}",
+                "is_system": True,
+                "created_at": None,
+                "updated_at": None,
+            },
+        ]
+
         records = await self._repository.list()
-        return [serialize_prompt_variable(record) for record in records]
+        user_vars = [serialize_prompt_variable(record) for record in records]
+        return system_vars + user_vars
 
     async def value_map(self) -> dict[str, str]:
         records = await self._repository.list()
@@ -62,6 +118,10 @@ class PromptVariableService:
         name: str,
         value: str,
     ) -> dict[str, Any]:
+        # Validate current name to prevent modifying system variable if somehow hit
+        if current_name in PromptVariableService.SYSTEM_VARIABLE_NAMES:
+            raise ValueError(f"'{current_name}' is a reserved system prompt variable.")
+        
         normalized_current_name = self.validate_name(current_name)
         normalized_name = self.validate_name(name)
         record = await self._repository.update(
@@ -72,6 +132,9 @@ class PromptVariableService:
         return serialize_prompt_variable(record)
 
     async def delete_variable(self, name: str) -> None:
+        if name in PromptVariableService.SYSTEM_VARIABLE_NAMES:
+            raise ValueError(f"'{name}' is a reserved system prompt variable.")
+        
         normalized_name = self.validate_name(name)
         deleted = await self._repository.delete(normalized_name)
         if not deleted:

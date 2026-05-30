@@ -91,6 +91,7 @@ export type PromptVariable = {
   placeholder: string;
   created_at: string | null;
   updated_at: string | null;
+  is_system?: boolean;
 };
 
 export type PromptVariablesPayload = {

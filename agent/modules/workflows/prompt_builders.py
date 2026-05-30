@@ -102,6 +102,32 @@ def _build_sub_agents_prompt_section(agent_name: str, catalog: Any) -> str:
     return f"\n\n{section}"
 
 
+def get_system_default_variables(working_dir: str = "", workspace: str = "") -> dict[str, str]:
+    import sys
+    import getpass
+    from datetime import datetime
+
+    os_name = sys.platform
+    if os_name == "win32":
+        os_name = "windows"
+    elif os_name == "darwin":
+        os_name = "macos"
+
+    try:
+        username = getpass.getuser()
+    except Exception:
+        username = "user"
+
+    current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    return {
+        "current_time": current_time_str,
+        "operating_system": os_name,
+        "workspace": workspace or working_dir or "",
+        "user_name": username,
+    }
+
+
 def build_llm_system_prompt(
     *,
     system_prompt_template: str,
@@ -113,9 +139,15 @@ def build_llm_system_prompt(
     prompt_variables: dict[str, str] | None = None,
 ) -> str:
     """Build the final system prompt for llm_node from runtime state."""
+    system_defaults = get_system_default_variables(
+        working_dir=working_dir,
+        workspace=workspace or working_dir,
+    )
+    merged_vars = {**system_defaults, **(prompt_variables or {})}
+
     system_prompt = resolve_prompt_variables(
         system_prompt_template,
-        prompt_variables,
+        merged_vars,
     )
     system_prompt = replace_known_prompt_placeholders(
         system_prompt,

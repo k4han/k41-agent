@@ -738,12 +738,33 @@ export function AgentsPage() {
                               <button
                                 type="button"
                                 class="btn btn-sm"
-                                style="justify-content: flex-start; text-align: left; font-family: monospace; font-size: 11px; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; background: var(--surface-2, rgba(255, 255, 255, 0.02)); cursor: pointer; flex: 0 0 auto;"
+                                style={{
+                                  "justify-content": "space-between",
+                                  "text-align": "left",
+                                  "font-family": "monospace",
+                                  "font-size": "11px",
+                                  "width": "100%",
+                                  "overflow": "hidden",
+                                  "text-overflow": "ellipsis",
+                                  "white-space": "nowrap",
+                                  "border": "1px solid var(--border, rgba(255, 255, 255, 0.08))",
+                                  "border-radius": "6px",
+                                  "padding": "6px 10px",
+                                  "background": variable.is_system ? "color-mix(in srgb, var(--accent, #3b82f6) 5%, var(--surface-2, rgba(255, 255, 255, 0.02)))" : "var(--surface-2, rgba(255, 255, 255, 0.02))",
+                                  "cursor": "pointer",
+                                  "flex": "0 0 auto",
+                                  "display": "flex",
+                                  "align-items": "center",
+                                  "gap": "6px"
+                                }}
                                 title={variable.value ? `${variable.name}: ${variable.value}` : variable.name}
                                 disabled={modalMode() === "view"}
                                 onClick={() => handleInsertVariable(variable.name)}
                               >
-                                {`{{${variable.name}}}`}
+                                <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{`{{${variable.name}}}`}</span>
+                                <Show when={variable.is_system}>
+                                  <span style="font-size: 9px; opacity: 0.6; text-transform: uppercase; font-weight: bold; background: rgba(255, 255, 255, 0.08); padding: 1px 4px; border-radius: 3px; border: 1px solid rgba(255, 255, 255, 0.1); flex-shrink: 0;">sys</span>
+                                </Show>
                               </button>
                             )}
                           </For>
