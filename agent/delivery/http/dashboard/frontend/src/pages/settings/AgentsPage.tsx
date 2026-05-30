@@ -73,6 +73,9 @@ export function AgentsPage() {
   const [promptVariables, setPromptVariables] = createSignal<PromptVariable[]>([]);
   const [deleteTargetName, setDeleteTargetName] = createSignal<string | null>(null);
   const { showToast } = useToast();
+  const [activeTab, setActiveTab] = createSignal<"general" | "tools" | "prompt">("general");
+  let textareaRef: HTMLTextAreaElement | undefined;
+  const [initialTools, setInitialTools] = createSignal<string[]>([]);
 
   const load = async () => {
     setError("");
@@ -121,13 +124,37 @@ export function AgentsPage() {
     const payload = data();
     setForm(blankForm(payload?.workflows.includes("react_agent") ? "react_agent" : payload?.workflows[0] || ""));
     setCurrentName("");
+    setActiveTab("general");
+    setInitialTools([]);
     setModalMode("create");
   };
 
   const openCard = (card: AgentCard, mode: "edit" | "view") => {
     setForm(cardToForm(card));
     setCurrentName(card.name);
+    setActiveTab("general");
+    setInitialTools(card.tools || []);
     setModalMode(mode);
+  };
+
+  const handleInsertVariable = (varName: string) => {
+    const textarea = textareaRef;
+    if (!textarea) return;
+
+    const value = form().system_prompt;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const textToInsert = `{{${varName}}}`;
+
+    const nextValue = value.slice(0, start) + textToInsert + value.slice(end);
+    updateForm("system_prompt", nextValue);
+
+    const newCursorPos = start + textToInsert.length;
+
+    queueMicrotask(() => {
+      textarea.focus();
+      textarea.setSelectionRange(newCursorPos, newCursorPos);
+    });
   };
 
   const closeModal = () => setModalMode(null);
@@ -169,7 +196,7 @@ export function AgentsPage() {
       tools: [...group.tools],
     }));
     const known = new Set(groups.flatMap((group) => group.tools));
-    const extras = form().tools.filter((tool) => !known.has(tool) && !tool.startsWith("mcp__"));
+    const extras = initialTools().filter((tool) => !known.has(tool) && !tool.startsWith("mcp__"));
     if (extras.length > 0) {
       const other = groups.find((group) => group.category === "unknown");
       if (other) {
@@ -404,177 +431,329 @@ export function AgentsPage() {
                 </>
               }
             >
-              <div class="stack">
-                <div class="grid-2">
-                  <div class="field">
-                    <label>Name</label>
-                    <input
-                      class="input"
-                      value={form().name}
-                      disabled={modalMode() !== "create"}
-                      onInput={(event) => updateForm("name", event.currentTarget.value)}
-                    />
-                  </div>
-                  <div class="field">
-                    <label>Display Name</label>
-                    <input
-                      class="input"
-                      value={form().display_name}
-                      disabled={modalMode() === "view"}
-                      onInput={(event) => updateForm("display_name", event.currentTarget.value)}
-                    />
-                  </div>
+              <div class="stack" style="height: 560px; display: flex; flex-direction: column;">
+                {/* Tab Bar */}
+                <div class="tab-bar" style="flex: 0 0 auto;">
+                  <button
+                    class={`btn btn-sm ${activeTab() === "general" ? "btn-primary" : ""}`}
+                    type="button"
+                    onClick={() => setActiveTab("general")}
+                  >
+                    General Config
+                  </button>
+                  <button
+                    class={`btn btn-sm ${activeTab() === "tools" ? "btn-primary" : ""}`}
+                    type="button"
+                    onClick={() => setActiveTab("tools")}
+                  >
+                    Capabilities & Tools
+                  </button>
+                  <button
+                    class={`btn btn-sm ${activeTab() === "prompt" ? "btn-primary" : ""}`}
+                    type="button"
+                    onClick={() => setActiveTab("prompt")}
+                  >
+                    System Prompt
+                  </button>
                 </div>
-                <div class="field">
-                  <label>Description</label>
-                  <input
-                    class="input"
-                    value={form().description}
-                    disabled={modalMode() === "view"}
-                    onInput={(event) => updateForm("description", event.currentTarget.value)}
-                  />
-                </div>
-                <div class="grid-2">
-                  <div class="field">
-                    <label>Workflow</label>
-                    <select
-                      class="select"
-                      value={form().graph_type}
-                      disabled={modalMode() === "view"}
-                      onChange={(event) => updateForm("graph_type", event.currentTarget.value)}
-                    >
-                      <For each={payload.workflows}>
-                        {(workflow) => <option value={workflow}>{workflow}</option>}
-                      </For>
-                    </select>
-                  </div>
-                  <div class="field">
-                    <label>Provider / Model</label>
-                    <ModelPicker
-                      catalogs={payload.model_catalogs}
-                      providerNames={payload.provider_names}
-                      defaultProvider={payload.default_provider}
-                      defaultModel={payload.default_model}
-                      provider={form().provider}
-                      model={form().model}
-                      disabled={modalMode() === "view"}
-                      onChange={(provider, model) => {
-                        setForm((current) => ({ ...current, provider, model }));
-                      }}
-                    />
-                  </div>
-                </div>
-                <div class="field">
-                  <label>Context Trim Threshold</label>
-                  <input
-                    class="input"
-                    type="number"
-                    min="1"
-                    value={form().context_trim_threshold}
-                    disabled={modalMode() === "view"}
-                    onInput={(event) => updateForm("context_trim_threshold", Number(event.currentTarget.value))}
-                  />
-                </div>
-                <div class="field">
-                  <label class="checkbox-row">
-                    <input
-                      type="checkbox"
-                      checked={form().hidden}
-                      disabled={modalMode() === "view"}
-                      onChange={(event) => updateForm("hidden", event.currentTarget.checked)}
-                    />
-                    <span>Hidden from chat picker</span>
-                  </label>
-                  <p class="hint">Hidden agents are not shown in the chat agent dropdown but can still be used internally.</p>
-                </div>
-                <div class="field">
-                  <label>Tools</label>
-                  <div class="stack">
-                    <For each={toolGroups()}>
-                      {(group) => {
-                        const allChecked = () =>
-                          group.tools.length > 0 && group.tools.every((tool) => form().tools.includes(tool));
-                        return (
-                          <div class="tool-group">
-                            <label class="checkbox-row tool-group-header">
-                              <input
-                                type="checkbox"
-                                checked={allChecked()}
-                                disabled={modalMode() === "view"}
-                                onChange={(event) => toggleToolGroup(group.tools, event.currentTarget.checked)}
-                              />
-                              <span>{formatToolCategory(group.category)}</span>
-                              <span class="hint">({group.tools.length})</span>
-                            </label>
-                            <div class="checkbox-grid">
-                              <For each={group.tools}>
-                                {(tool) => (
-                                  <label class="checkbox-row">
-                                    <input
-                                      type="checkbox"
-                                      checked={form().tools.includes(tool)}
-                                      disabled={modalMode() === "view"}
-                                      onChange={(event) => toggleListValue("tools", tool, event.currentTarget.checked)}
-                                    />
-                                    <span class="mono">{tool}</span>
-                                  </label>
-                                )}
-                              </For>
-                            </div>
-                          </div>
-                        );
-                      }}
-                    </For>
-                  </div>
-                </div>
-                <Show when={payload.mcp_server_options && payload.mcp_server_options.length > 0}>
-                  <div class="field">
-                    <label>MCP Servers</label>
-                    <div class="checkbox-grid">
-                      <For each={uniqueSorted([...payload.mcp_server_options!, ...(form().mcp_servers || [])])}>
-                        {(server) => (
-                          <label class="checkbox-row">
-                            <input
-                              type="checkbox"
-                              checked={(form().mcp_servers || []).includes(server)}
-                              disabled={modalMode() === "view"}
-                              onChange={(event) => toggleListValue("mcp_servers", server, event.currentTarget.checked)}
-                            />
-                            <span class="mono">{server}</span>
-                          </label>
-                        )}
-                      </For>
-                    </div>
-                  </div>
-                </Show>
-                <div class="field">
-                  <label>Sub-agents</label>
-                  <div class="checkbox-grid">
-                    <For each={uniqueSorted([...subAgentOptions(), ...form().sub_agents])}>
-                      {(agent) => (
+
+                {/* Tab Contents Container */}
+                <div style="flex: 1 1 auto; overflow-y: auto; min-height: 0; padding-right: 4px; display: flex; flex-direction: column;">
+                  {/* Tab Contents */}
+                  <Show when={activeTab() === "general"}>
+                    <div class="stack" style="gap: 16px; padding: 4px 2px;">
+                      <div class="grid-2">
+                        <div class="field">
+                          <label>Name</label>
+                          <input
+                            class="input"
+                            value={form().name}
+                            disabled={modalMode() !== "create"}
+                            onInput={(event) => updateForm("name", event.currentTarget.value)}
+                          />
+                        </div>
+                        <div class="field">
+                          <label>Display Name</label>
+                          <input
+                            class="input"
+                            value={form().display_name}
+                            disabled={modalMode() === "view"}
+                            onInput={(event) => updateForm("display_name", event.currentTarget.value)}
+                          />
+                        </div>
+                      </div>
+                      <div class="field">
+                        <label>Description</label>
+                        <input
+                          class="input"
+                          value={form().description}
+                          disabled={modalMode() === "view"}
+                          onInput={(event) => updateForm("description", event.currentTarget.value)}
+                        />
+                      </div>
+                      <div class="grid-2">
+                        <div class="field">
+                          <label>Workflow</label>
+                          <select
+                            class="select"
+                            value={form().graph_type}
+                            disabled={modalMode() === "view"}
+                            onChange={(event) => updateForm("graph_type", event.currentTarget.value)}
+                          >
+                            <For each={payload.workflows}>
+                              {(workflow) => <option value={workflow}>{workflow}</option>}
+                            </For>
+                          </select>
+                        </div>
+                        <div class="field">
+                          <label>Provider / Model</label>
+                          <ModelPicker
+                            catalogs={payload.model_catalogs}
+                            providerNames={payload.provider_names}
+                            defaultProvider={payload.default_provider}
+                            defaultModel={payload.default_model}
+                            provider={form().provider}
+                            model={form().model}
+                            disabled={modalMode() === "view"}
+                            onChange={(provider, model) => {
+                              setForm((current) => ({ ...current, provider, model }));
+                            }}
+                          />
+                        </div>
+                      </div>
+                      <div class="field">
+                        <label>Context Trim Threshold</label>
+                        <input
+                          class="input"
+                          type="number"
+                          min="1"
+                          value={form().context_trim_threshold}
+                          disabled={modalMode() === "view"}
+                          onInput={(event) => updateForm("context_trim_threshold", Number(event.currentTarget.value))}
+                        />
+                      </div>
+                      <div class="field">
                         <label class="checkbox-row">
                           <input
                             type="checkbox"
-                            checked={form().sub_agents.includes(agent)}
+                            checked={form().hidden}
                             disabled={modalMode() === "view"}
-                            onChange={(event) => toggleListValue("sub_agents", agent, event.currentTarget.checked)}
+                            onChange={(event) => updateForm("hidden", event.currentTarget.checked)}
                           />
-                          <span class="mono">{agent}</span>
+                          <span>Hidden from chat picker</span>
                         </label>
-                      )}
-                    </For>
-                  </div>
-                </div>
-                <div class="field">
-                  <label>System Prompt</label>
-                  <p class="hint">Use prompt variables with double braces, for example <span class="mono">{"{{common_rules}}"}</span>. Type <span class="mono">{"{{"}</span> to see suggestions.</p>
-                  <PromptVariableTextarea
-                    rows={12}
-                    value={form().system_prompt}
-                    disabled={modalMode() === "view"}
-                    variables={promptVariables()}
-                    onChange={(value) => updateForm("system_prompt", value)}
-                  />
+                        <p class="hint">Hidden agents are not shown in the chat agent dropdown but can still be used internally.</p>
+                      </div>
+                    </div>
+                  </Show>
+
+                  <Show when={activeTab() === "tools"}>
+                    <div class="stack" style="gap: 16px; padding: 4px 2px 20px 2px;">
+                      {/* Section 1: Built-in Tools */}
+                      <div class="field">
+                        <label style="color: var(--muted); font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">Built-in Tools</label>
+                        <div class="stack" style="gap: 12px;">
+                          <For each={toolGroups()}>
+                            {(group) => {
+                              const allChecked = () =>
+                                group.tools.length > 0 && group.tools.every((tool) => form().tools.includes(tool));
+                              return (
+                                <div style="border: 1px solid var(--border, rgba(255, 255, 255, 0.08)); border-radius: 8px; padding: 12px; background: var(--surface-2, rgba(255, 255, 255, 0.01)); display: flex; flex-direction: column; gap: 10px;">
+                                  {/* Group Header */}
+                                  <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08)); padding-bottom: 8px;">
+                                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 600; color: var(--fg); font-size: 13px;">
+                                      <input
+                                        type="checkbox"
+                                        checked={allChecked()}
+                                        disabled={modalMode() === "view"}
+                                        onChange={(event) => toggleToolGroup(group.tools, event.currentTarget.checked)}
+                                        style="cursor: pointer;"
+                                      />
+                                      <span>{formatToolCategory(group.category)}</span>
+                                    </label>
+                                    <span class="badge badge-info" style="font-size: 10px; padding: 2px 8px; border-radius: 4px;">{group.tools.length} tools</span>
+                                  </div>
+                                  {/* Cards Grid */}
+                                  <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px;">
+                                    <For each={group.tools}>
+                                      {(tool) => {
+                                        const isChecked = () => form().tools.includes(tool);
+                                        return (
+                                          <label
+                                            style={{
+                                              display: "flex",
+                                              "align-items": "center",
+                                              gap: "8px",
+                                              padding: "8px 10px",
+                                              border: "1px solid",
+                                              "border-radius": "6px",
+                                              background: isChecked() ? "color-mix(in srgb, var(--accent) 8%, var(--surface-2, rgba(255,255,255,0.02)))" : "var(--surface, #181825)",
+                                              "border-color": isChecked() ? "var(--accent, #3b82f6)" : "var(--border, rgba(255, 255, 255, 0.08))",
+                                              cursor: modalMode() === "view" ? "default" : "pointer",
+                                              transition: "all 0.15s ease",
+                                              "user-select": "none"
+                                            }}
+                                          >
+                                            <input
+                                              type="checkbox"
+                                              checked={isChecked()}
+                                              disabled={modalMode() === "view"}
+                                              onChange={(event) => toggleListValue("tools", tool, event.currentTarget.checked)}
+                                              style="margin: 0; cursor: pointer;"
+                                            />
+                                            <span class="mono" style={{
+                                              "font-size": "11px",
+                                              color: isChecked() ? "var(--fg)" : "var(--muted)",
+                                              "font-weight": isChecked() ? "600" : "400",
+                                              "word-break": "break-all"
+                                            }}>{tool}</span>
+                                          </label>
+                                        );
+                                      }}
+                                    </For>
+                                  </div>
+                                </div>
+                              );
+                            }}
+                          </For>
+                        </div>
+                      </div>
+
+                      {/* Section 2: MCP Servers */}
+                      <Show when={payload.mcp_server_options && payload.mcp_server_options.length > 0}>
+                        <div class="field">
+                          <label style="color: var(--muted); font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">MCP Servers</label>
+                          <div style="border: 1px solid var(--border, rgba(255, 255, 255, 0.08)); border-radius: 8px; padding: 12px; background: var(--surface-2, rgba(255, 255, 255, 0.01)); display: flex; flex-direction: column; gap: 10px;">
+                            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px;">
+                              <For each={uniqueSorted([...payload.mcp_server_options!, ...(form().mcp_servers || [])])}>
+                                {(server) => {
+                                  const isChecked = () => (form().mcp_servers || []).includes(server);
+                                  return (
+                                    <label
+                                      style={{
+                                        display: "flex",
+                                        "align-items": "center",
+                                        gap: "8px",
+                                        padding: "8px 10px",
+                                        border: "1px solid",
+                                        "border-radius": "6px",
+                                        background: isChecked() ? "color-mix(in srgb, var(--accent) 8%, var(--surface-2, rgba(255,255,255,0.02)))" : "var(--surface, #181825)",
+                                        "border-color": isChecked() ? "var(--accent, #3b82f6)" : "var(--border, rgba(255, 255, 255, 0.08))",
+                                        cursor: modalMode() === "view" ? "default" : "pointer",
+                                        transition: "all 0.15s ease",
+                                        "user-select": "none"
+                                      }}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={isChecked()}
+                                        disabled={modalMode() === "view"}
+                                        onChange={(event) => toggleListValue("mcp_servers", server, event.currentTarget.checked)}
+                                        style="margin: 0; cursor: pointer;"
+                                      />
+                                      <span class="mono" style={{
+                                        "font-size": "11px",
+                                        color: isChecked() ? "var(--fg)" : "var(--muted)",
+                                        "font-weight": isChecked() ? "600" : "400",
+                                        "word-break": "break-all"
+                                      }}>{server}</span>
+                                    </label>
+                                  );
+                                }}
+                              </For>
+                            </div>
+                          </div>
+                        </div>
+                      </Show>
+
+                      {/* Section 3: Sub-agents */}
+                      <div class="field">
+                        <label style="color: var(--muted); font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">Sub-agents</label>
+                        <div style="border: 1px solid var(--border, rgba(255, 255, 255, 0.08)); border-radius: 8px; padding: 12px; background: var(--surface-2, rgba(255, 255, 255, 0.01)); display: flex; flex-direction: column; gap: 10px;">
+                          <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px;">
+                            <For each={uniqueSorted([...subAgentOptions(), ...form().sub_agents])}>
+                              {(agent) => {
+                                const isChecked = () => form().sub_agents.includes(agent);
+                                return (
+                                  <label
+                                    style={{
+                                      display: "flex",
+                                      "align-items": "center",
+                                      gap: "8px",
+                                      padding: "8px 10px",
+                                      border: "1px solid",
+                                      "border-radius": "6px",
+                                      background: isChecked() ? "color-mix(in srgb, var(--accent) 8%, var(--surface-2, rgba(255,255,255,0.02)))" : "var(--surface, #181825)",
+                                      "border-color": isChecked() ? "var(--accent, #3b82f6)" : "var(--border, rgba(255, 255, 255, 0.08))",
+                                      cursor: modalMode() === "view" ? "default" : "pointer",
+                                      transition: "all 0.15s ease",
+                                      "user-select": "none"
+                                    }}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={isChecked()}
+                                      disabled={modalMode() === "view"}
+                                      onChange={(event) => toggleListValue("sub_agents", agent, event.currentTarget.checked)}
+                                      style="margin: 0; cursor: pointer;"
+                                    />
+                                    <span class="mono" style={{
+                                      "font-size": "11px",
+                                      color: isChecked() ? "var(--fg)" : "var(--muted)",
+                                      "font-weight": isChecked() ? "600" : "400"
+                                    }}>{agent}</span>
+                                  </label>
+                                );
+                              }}
+                            </For>
+                            <Show when={subAgentOptions().length === 0 && form().sub_agents.length === 0}>
+                              <span class="hint" style="grid-column: 1 / -1; text-align: center; padding: 12px 0;">No sub-agents available</span>
+                            </Show>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </Show>
+
+                  <Show when={activeTab() === "prompt"}>
+                    <div style="display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 20px; height: 100%; padding: 4px 2px; min-height: 0; flex: 1 1 auto;">
+                      <div class="field" style="display: flex; flex-direction: column; height: 100%; flex: 1 1 auto; min-height: 0;">
+                        <label style="flex: 0 0 auto;">System Prompt</label>
+                        <p class="hint" style="margin-bottom: 4px; flex: 0 0 auto;">Use prompt variables with double braces, for example <span class="mono">{"{{common_rules}}"}</span>. Type <span class="mono">{"{{"}</span> to see suggestions.</p>
+                        <PromptVariableTextarea
+                          ref={textareaRef}
+                          containerClass="full-height"
+                          value={form().system_prompt}
+                          disabled={modalMode() === "view"}
+                          variables={promptVariables()}
+                          onChange={(value) => updateForm("system_prompt", value)}
+                        />
+                      </div>
+                      <div style="display: flex; flex-direction: column; gap: 8px; border-left: 1px solid var(--border, rgba(255, 255, 255, 0.08)); padding-left: 20px; height: 100%; max-height: 480px;">
+                        <label style="color: var(--muted); font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.05em; flex: 0 0 auto;">Prompt Variables</label>
+                        <p class="hint" style="margin-bottom: 4px; font-size: 11px; flex: 0 0 auto;">Click a variable to insert it at the cursor position.</p>
+                        <div style="display: flex; flex-direction: column; gap: 6px; flex: 1; overflow-y: auto; padding-right: 4px;">
+                          <For each={promptVariables()}>
+                            {(variable) => (
+                              <button
+                                type="button"
+                                class="btn btn-sm"
+                                style="justify-content: flex-start; text-align: left; font-family: monospace; font-size: 11px; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; background: var(--surface-2, rgba(255, 255, 255, 0.02)); cursor: pointer; flex: 0 0 auto;"
+                                title={variable.value ? `${variable.name}: ${variable.value}` : variable.name}
+                                disabled={modalMode() === "view"}
+                                onClick={() => handleInsertVariable(variable.name)}
+                              >
+                                {`{{${variable.name}}}`}
+                              </button>
+                            )}
+                          </For>
+                          <Show when={promptVariables().length === 0}>
+                            <span class="hint" style="text-align: center; padding: 12px 0;">No variables available</span>
+                          </Show>
+                        </div>
+                      </div>
+                    </div>
+                  </Show>
                 </div>
               </div>
             </Dialog>

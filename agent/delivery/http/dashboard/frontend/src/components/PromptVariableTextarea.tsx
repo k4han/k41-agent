@@ -11,6 +11,8 @@ type PromptVariableTextareaProps = {
   rows?: number;
   placeholder?: string;
   class?: string;
+  ref?: HTMLTextAreaElement | ((el: HTMLTextAreaElement) => void);
+  containerClass?: string;
 };
 
 type TriggerState = {
@@ -241,9 +243,16 @@ export function PromptVariableTextarea(props: PromptVariableTextareaProps) {
   });
 
   return (
-    <div class="prompt-variable-textarea" ref={rootRef}>
+    <div class={classNames("prompt-variable-textarea", props.containerClass)} ref={rootRef}>
       <textarea
-        ref={textareaRef}
+        ref={(el) => {
+          textareaRef = el;
+          if (typeof props.ref === "function") {
+            props.ref(el);
+          } else if (props.ref) {
+            (props as any).ref = el;
+          }
+        }}
         class={classNames("textarea mono", props.class)}
         rows={props.rows ?? 12}
         value={props.value}
