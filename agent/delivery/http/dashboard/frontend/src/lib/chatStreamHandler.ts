@@ -1,0 +1,153 @@
+import type { TranscriptItem } from "@/components/Transcript";
+import { createTranscriptTool } from "@/components/Transcript";
+import type { AppendScrollMode } from "@/lib/chatTypes";
+
+// ── Callback interface for stream event handling ──
+
+export interface StreamCallbacks {
+  appendItem: (item: TranscriptItem, mode: AppendScrollMode, threadId?: string) => number;
+  updateMessage: (id: number, chunk: string, threadId?: string) => void;
+  updateToolResult: (toolCallId: string, name: string, result: unknown, threadId?: string) => void;
+  setRecursionLimitReached: (value: boolean) => void;
+  onThreadCreated: (threadId: string, streamThreadIdRef: StreamThreadIdRef) => void;
+}
+
+// ── Mutable refs shared across event handling ──
+
+export type AssistantIdRef = { id: number | null };
+export type StreamedRef = { received: boolean };
+export type StreamThreadIdRef = { id: string; message: string };
+
+// ── Core event handler ──
+
+export function handleStreamEvent(
+  event: Record<string, unknown>,
+  assistantIdRef: AssistantIdRef,
+  streamedRef: StreamedRef,
+  streamThreadIdRef: StreamThreadIdRef,
+  callbacks: StreamCallbacks,
+): void {
+  if (event.type === "thread_created") {
+    const threadId = String(event.thread_id || "");
+    if (!threadId) {
+      return;
+    }
+    callbacks.onThreadCreated(threadId, streamThreadIdRef);
+    return;
+  }
+
+  if (event.type === "message") {
+    const content = String(event.content || "");
+    if (!content) {
+      return;
+    }
+    if (assistantIdRef.id === null) {
+      assistantIdRef.id = callbacks.appendItem(
+        { type: "message", role: "assistant", text: "" },
+        "bottom",
+        streamThreadIdRef.id,
+      );
+    }
+    streamedRef.received = true;
+    callbacks.updateMessage(assistantIdRef.id, content, streamThreadIdRef.id);
+    return;
+  }
+
+  if (event.type === "tool_call") {
+    callbacks.appendItem(
+      createTranscriptTool({
+        toolCallId: String(event.id || ""),
+        name: String(event.name || "unknown"),
+        args: event.args ?? null,
+      }),
+      "bottom",
+      streamThreadIdRef.id,
+    );
+    assistantIdRef.id = null;
+    streamedRef.received = false;
+    return;
+  }
+
+  if (event.type === "tool_result") {
+    callbacks.updateToolResult(
+      String(event.tool_call_id || ""),
+      String(event.name || "unknown"),
+      event.content ?? null,
+      streamThreadIdRef.id,
+    );
+    return;
+  }
+
+  if (event.type === "error") {
+    callbacks.appendItem(
+      {
+        type: "message",
+        role: "error",
+        text: String(event.content || event.message || "Chat failed"),
+      },
+      "bottom",
+      streamThreadIdRef.id,
+    );
+    if (event.code === "recursion_limit_reached") {
+      callbacks.setRecursionLimitReached(true);
+      if (streamThreadIdRef.id) {
+        window.localStorage.setItem(
+          `kaka:recursion-limit-reached:${streamThreadIdRef.id}`,
+          "true",
+        );
+      }
+    }
+    return;
+  }
+
+  if (event.type === "final") {
+    if (streamedRef.received) {
+      return;
+    }
+    const content = String(event.content || "");
+    if (!content) {
+      return;
+    }
+    if (assistantIdRef.id === null) {
+      assistantIdRef.id = callbacks.appendItem(
+        { type: "message", role: "assistant", text: "" },
+        "bottom",
+        streamThreadIdRef.id,
+      );
+    }
+    callbacks.updateMessage(assistantIdRef.id, content, streamThreadIdRef.id);
+  }
+}
+
+// ── NDJSON stream reader ──
+
+export async function readNDJSONStream(
+  body: ReadableStream<Uint8Array>,
+  onEvent: (event: Record<string, unknown>) => void,
+): Promise<void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      if (!line.trim()) {
+        continue;
+      }
+      onEvent(JSON.parse(line) as Record<string, unknown>);
+    }
+
+    if (done) {
+      break;
+    }
+  }
+
+  if (buffer.trim()) {
+    onEvent(JSON.parse(buffer) as Record<string, unknown>);
+  }
+}

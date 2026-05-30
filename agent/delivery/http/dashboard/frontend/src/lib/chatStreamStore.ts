@@ -11,6 +11,14 @@ export type PersistedStreamSignals = {
 
 export const persistedStreams = new Map<string, PersistedStreamSignals>();
 
+let nextItemId = 1;
+
+export function allocItemId(): number {
+  const id = nextItemId;
+  nextItemId += 1;
+  return id;
+}
+
 export function getOrCreateStreamSignals(
   threadId: string,
   initialItems: ChatTranscriptItem[] = []

@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.gzip import GZipMiddleware
 
 from agent.bootstrap.runtime import AppRuntime
 from agent.bootstrap.settings import BootstrapConfig, load_bootstrap_config
@@ -18,7 +18,7 @@ from agent.delivery.http import (
     telegram_webhook_router,
 )
 from agent.delivery.http.dashboard.auth_router import router as auth_router
-from agent.delivery.http.dashboard.spa import STATIC_DIR
+from agent.delivery.http.dashboard.spa import STATIC_DIR, CachedStaticFiles
 from agent.modules.channels import list_channel_statuses
 from agent.shared.config import get_config_service
 
@@ -73,9 +73,10 @@ def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:
     if bootstrap_config.enable_dashboard:
         fastapi_app.include_router(auth_router)
         fastapi_app.include_router(dashboard_router)
+        dashboard_assets_app = CachedStaticFiles(directory=STATIC_DIR, check_dir=False)
         fastapi_app.mount(
             "/dashboard-assets",
-            StaticFiles(directory=STATIC_DIR, check_dir=False),
+            GZipMiddleware(dashboard_assets_app, minimum_size=500),
             name="dashboard-assets",
         )
 
