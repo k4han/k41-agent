@@ -1,6 +1,7 @@
 import { createMemo, createSignal, For, JSX, Show } from "solid-js";
 import { RotateCcw } from "lucide-solid";
 
+import { Dialog } from "@/components/Dialog";
 import { useToast } from "@/components/Toast";
 import { apiFetch, putJson } from "@/lib/api";
 import { formatValue, parseModelList } from "@/lib/utils";
@@ -349,5 +350,47 @@ export function ChangesPreview(props: {
         }}
       </For>
     </div>
+  );
+}
+
+export function SettingsConfirmDialog(props: {
+  open: boolean;
+  saving?: boolean;
+  changes: PendingChange[];
+  settings: Record<string, SettingInfo>;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Dialog
+      open={props.open}
+      title="Confirm Changes"
+      onClose={props.onClose}
+      footer={
+        <>
+          <button
+            class="btn"
+            type="button"
+            disabled={props.saving}
+            onClick={props.onClose}
+          >
+            Cancel
+          </button>
+          <button
+            class="btn btn-primary"
+            type="button"
+            disabled={props.saving}
+            onClick={props.onConfirm}
+          >
+            {props.saving ? "Saving..." : "Confirm Save"}
+          </button>
+        </>
+      }
+    >
+      <div class="stack">
+        <p>You are about to update {props.changes.length} setting{props.changes.length === 1 ? "" : "s"}.</p>
+        <ChangesPreview changes={props.changes} settings={props.settings} />
+      </div>
+    </Dialog>
   );
 }

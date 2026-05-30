@@ -13,6 +13,7 @@ import {
   type PendingChange,
   SettingRow,
   SettingsSection,
+  SettingsConfirmDialog,
   useSettingsData,
 } from "./shared";
 
@@ -98,7 +99,7 @@ export function ConfigPage() {
               </Show>
             </div>
 
-            <ConfirmDialog
+            <SettingsConfirmDialog
               open={confirmOpen()}
               changes={pendingChanges()}
               settings={payload.settings}
@@ -109,36 +110,5 @@ export function ConfigPage() {
         )}
       </DataGate>
     </SettingsLayout>
-  );
-}
-
-function ConfirmDialog(props: {
-  open: boolean;
-  changes: PendingChange[];
-  settings: Record<string, SettingInfo>;
-  onClose: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <Dialog
-      open={props.open}
-      title="Confirm Changes"
-      onClose={props.onClose}
-      footer={
-        <>
-          <button class="btn" type="button" onClick={props.onClose}>
-            Cancel
-          </button>
-          <button class="btn btn-primary" type="button" onClick={props.onConfirm}>
-            Confirm Save
-          </button>
-        </>
-      }
-    >
-      <div class="stack">
-        <p>You are about to update {props.changes.length} setting{props.changes.length === 1 ? "" : "s"}.</p>
-        <ChangesPreview changes={props.changes} settings={props.settings} />
-      </div>
-    </Dialog>
   );
 }

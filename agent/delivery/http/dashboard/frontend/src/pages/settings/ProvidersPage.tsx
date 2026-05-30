@@ -1,6 +1,7 @@
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { Edit3, Plus, RefreshCw, Save, Star, Trash2, Globe, Shield, Coins, Sparkles, Sliders } from "lucide-solid";
 
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Dialog } from "@/components/Dialog";
 import { EmptyTableRow } from "@/components/EmptyTableRow";
 import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
@@ -14,6 +15,7 @@ import {
   ChangesPreview,
   type PendingChange,
   SettingRow,
+  SettingsConfirmDialog,
   settingsFromPayload,
   useSettingsData,
 } from "./shared";
@@ -890,7 +892,7 @@ export function ProvidersPage() {
               onSubmit={createProvider}
             />
 
-            <ConfirmDialog
+            <SettingsConfirmDialog
               open={confirmOpen()}
               saving={savingProvider()}
               changes={changesToConfirm()}
@@ -899,8 +901,12 @@ export function ProvidersPage() {
               onConfirm={saveConfirmedChanges}
             />
 
-            <DeleteProviderDialog
-              provider={deleteTarget()}
+            <ConfirmDialog
+              open={deleteTarget() !== null}
+              title="Delete Provider"
+              message={<p>Are you sure you want to delete provider <span class="mono">{deleteTarget()?.name}</span>?</p>}
+              confirmLabel="Delete"
+              confirmVariant="danger"
               onClose={() => setDeleteTarget(null)}
               onConfirm={deleteProvider}
             />
@@ -1182,63 +1188,6 @@ function AddProviderDialog(props: {
   );
 }
 
-function ConfirmDialog(props: {
-  open: boolean;
-  saving: boolean;
-  changes: PendingChange[];
-  settings: Record<string, SettingInfo>;
-  onClose: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <Dialog
-      open={props.open}
-      title="Confirm Changes"
-      onClose={props.onClose}
-      footer={
-        <>
-          <button class="btn" type="button" disabled={props.saving} onClick={props.onClose}>
-            Cancel
-          </button>
-          <button class="btn btn-primary" type="button" disabled={props.saving} onClick={props.onConfirm}>
-            Confirm Save
-          </button>
-        </>
-      }
-    >
-      <div class="stack">
-        <p>You are about to update {props.changes.length} setting{props.changes.length === 1 ? "" : "s"}.</p>
-        <ChangesPreview changes={props.changes} settings={props.settings} />
-      </div>
-    </Dialog>
-  );
-}
 
-function DeleteProviderDialog(props: {
-  provider: ProviderView | null;
-  onClose: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <Dialog
-      open={props.provider !== null}
-      title="Delete Provider"
-      onClose={props.onClose}
-      footer={
-        <>
-          <button class="btn" type="button" onClick={props.onClose}>
-            Cancel
-          </button>
-          <button class="btn btn-danger" type="button" onClick={props.onConfirm}>
-            <Trash2 size={14} />
-            Delete
-          </button>
-        </>
-      }
-    >
-      <p>
-        Are you sure you want to delete <span class="mono">{props.provider?.name}</span>?
-      </p>
-    </Dialog>
-  );
-}
+
+
