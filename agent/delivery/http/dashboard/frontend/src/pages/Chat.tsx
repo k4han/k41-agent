@@ -811,8 +811,35 @@ export function ChatPage() {
   const [error, setError] = createSignal("");
   const [threadData, setThreadData] = createSignal<ThreadMessagesPayload>();
   const [threadError, setThreadError] = createSignal("");
+  const [threadUsage, setThreadUsage] = createSignal<ThreadUsagePayload | null>(null);
   const [threadLoading, setThreadLoading] = createSignal(false);
   const [currentThreadId, setCurrentThreadId] = createSignal("");
+
+  const fetchThreadUsage = async (threadId: string) => {
+    if (!threadId) {
+      setThreadUsage(null);
+      return;
+    }
+    try {
+      const data = await apiFetch<ThreadUsagePayload>(
+        `/dashboard-api/usage/thread/${encodeURIComponent(threadId)}`
+      );
+      setThreadUsage(data);
+    } catch (err) {
+      console.error("Failed to fetch thread usage:", err);
+    }
+  };
+
+  createEffect(() => {
+    const threadId = currentThreadId();
+    const isStreaming = streaming();
+    if (threadId && !isStreaming) {
+      void fetchThreadUsage(threadId);
+    } else if (!threadId) {
+      setThreadUsage(null);
+    }
+  });
+
   const [agentName, setAgentName] = createSignal("");
   const [provider, setProvider] = createSignal("default");
   const [model, setModel] = createSignal("");
@@ -1074,6 +1101,75 @@ export function ChatPage() {
   const selectedCard = createMemo<AgentCard | undefined>(() =>
     validCards().find((card) => card.name === agentName()),
   );
+
+  const contextWindowData = createMemo(() => {
+    const card = selectedCard();
+    const usage = threadUsage();
+    
+    const maxTokens = card?.max_context_tokens || 292000; //192000
+    const totalTokens = usage?.total_tokens || 0;
+    const inputTokens = usage?.input_tokens || 0;
+    const outputTokens = usage?.output_tokens || 0;
+    
+    // Tỷ lệ % tổng sử dụng
+    const totalPercent = maxTokens > 0 ? Math.min(100, (totalTokens / maxTokens) * 100) : 0;
+    
+    // Ước tính Reserved for response (giả định 8192 tokens hoặc tối đa 4% context window)
+    const reservedTokens = Math.min(8192, Math.floor(maxTokens * 0.04));
+    const reservedPercent = maxTokens > 0 ? (reservedTokens / maxTokens) * 100 : 0;
+    
+    // System Instructions
+    const systemPrompt = card?.system_prompt || "";
+    const systemTokens = Math.max(100, Math.floor(systemPrompt.length / 3.8));
+    const systemPercent = maxTokens > 0 ? (systemTokens / maxTokens) * 100 : 0;
+    
+    // Tool Definitions
+    const tools = card?.tools || [];
+    const toolTokens = tools.length * 420;
+    const toolPercent = maxTokens > 0 ? (toolTokens / maxTokens) * 100 : 0;
+    
+    // Files
+    const fileCount = attachments().length;
+    const fileTokens = fileCount * 1500;
+    const filePercent = maxTokens > 0 ? (fileTokens / maxTokens) * 100 : 0;
+    
+    // Messages (lấy phần còn lại của input tokens)
+    const messagesTokens = Math.max(0, inputTokens - systemTokens - toolTokens - fileTokens);
+    const messagesPercent = maxTokens > 0 ? (messagesTokens / maxTokens) * 100 : 0;
+    
+    // Định dạng số lượng token gọn gàng (K, M)
+    const formatNumber = (num: number): string => {
+      if (num >= 1000000) {
+        return (num / 1000000).toFixed(1).replace(/\.0$/, "") + "M";
+      }
+      if (num >= 1000) {
+        return (num / 1000).toFixed(1).replace(/\.0$/, "") + "K";
+      }
+      return num.toString();
+    };
+    
+    // Làm tròn % hiển thị (tối thiểu 0.1% nếu có token)
+    const formatPercent = (p: number, tokensVal: number): string => {
+      if (tokensVal > 0 && p < 0.1) return "0.1%";
+      return p.toFixed(1).replace(/\.0$/, "") + "%";
+    };
+    
+    return {
+      maxTokens,
+      totalTokens,
+      inputTokens,
+      outputTokens,
+      totalPercent,
+      reservedPercent,
+      systemPercent: formatPercent(systemPercent, systemTokens),
+      toolPercent: formatPercent(toolPercent, toolTokens),
+      messagesPercent: formatPercent(messagesPercent, messagesTokens),
+      filePercent: formatPercent(filePercent, fileTokens),
+      formattedUsed: formatNumber(totalTokens),
+      formattedMax: formatNumber(maxTokens),
+    };
+  });
+
   const pageSubtitle = createMemo(() => (
     currentThreadId()
       ? "Continue this thread."
@@ -2498,6 +2594,92 @@ export function ChatPage() {
                     >
                       <MoreHorizontal size={18} />
                     </button>
+                    <Show when={currentThreadId()}>
+                      <div class="context-window-wrapper">
+                        <button
+                          class="context-window-circle-btn"
+                          type="button"
+                          title="Xem chi tiết Context Window"
+                          aria-label="Xem chi tiết Context Window"
+                        >
+                          <svg width="18" height="18" viewBox="0 0 20 20">
+                            <circle cx="10" cy="10" r="8" fill="none" stroke="rgba(255, 255, 255, 0.15)" stroke-width="2.5" />
+                            <circle
+                              cx="10"
+                              cy="10"
+                              r="8"
+                              fill="none"
+                              stroke={(() => {
+                                const p = contextWindowData().totalPercent;
+                                if (p >= 80) return "var(--danger)";
+                                if (p >= 50) return "var(--warning)";
+                                return "var(--info)";
+                              })()}
+                              stroke-width="2.5"
+                              stroke-dasharray="50.26"
+                              stroke-dashoffset={50.26 - (50.26 * Math.min(100, contextWindowData().totalPercent)) / 100}
+                              stroke-linecap="round"
+                              transform="rotate(-90 10 10)"
+                              style="transition: stroke-dashoffset 0.3s ease, stroke 0.3s ease;"
+                            />
+                          </svg>
+                        </button>
+
+                        <div class="context-window-popover">
+                          <div class="cw-title">Context Window</div>
+                          
+                          <div class="cw-tokens-row">
+                            <span class="cw-tokens-value">
+                              {contextWindowData().formattedUsed} / {contextWindowData().formattedMax} tokens
+                            </span>
+                            <span class="cw-tokens-percent">
+                              {Math.round(contextWindowData().totalPercent)}%
+                            </span>
+                          </div>
+
+                          <div class="cw-progress-container">
+                            <div class="cw-progress-used" style={{ width: `${Math.min(100, contextWindowData().totalPercent)}%` }} />
+                            <div class="cw-progress-reserved" style={{ width: `${Math.min(100 - contextWindowData().totalPercent, contextWindowData().reservedPercent)}%` }} />
+                          </div>
+
+                          <div class="cw-legend">
+                            <div class="cw-legend-stripe" />
+                            <span>Reserved for response</span>
+                          </div>
+
+                          <div class="cw-section-title">System</div>
+                          <div class="cw-row">
+                            <span class="cw-label">System Instructions</span>
+                            <span class="cw-value">{contextWindowData().systemPercent}</span>
+                          </div>
+                          <div class="cw-row">
+                            <span class="cw-label">Tool Definitions</span>
+                            <span class="cw-value">{contextWindowData().toolPercent}</span>
+                          </div>
+
+                          <div class="cw-section-title">User Context</div>
+                          <div class="cw-row">
+                            <span class="cw-label">Messages</span>
+                            <span class="cw-value">{contextWindowData().messagesPercent}</span>
+                          </div>
+                          <div class="cw-row">
+                            <span class="cw-label">Files</span>
+                            <span class="cw-value">{contextWindowData().filePercent}</span>
+                          </div>
+
+                          <button 
+                            class="cw-compact-btn" 
+                            type="button" 
+                            onClick={(e) => {
+                              e.preventDefault();
+                              showToast("Tính năng Compact Conversation đang được phát triển!", "warning");
+                            }}
+                          >
+                            Compact Conversation
+                          </button>
+                        </div>
+                      </div>
+                    </Show>
                   </div>
                   <Show
                     when={streaming()}
