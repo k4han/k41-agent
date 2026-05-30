@@ -106,6 +106,14 @@ async def list_provider_model_catalogs(
     return await service.list_model_catalogs(include_remote=include_remote)
 
 
+from agent.modules.providers.catalog import (
+    load_providers_catalog,
+    get_provider_catalog_entry,
+    update_catalog_from_url,
+    ModelCatalogEntry,
+    ProviderCatalogEntry,
+)
+
 __all__ = [
     "ProviderService",
     "ResolvedChatModel",
@@ -116,4 +124,9 @@ __all__ = [
     "list_providers",
     "resolve_chat_model",
     "resolve_chat_model_info",
+    "load_providers_catalog",
+    "get_provider_catalog_entry",
+    "update_catalog_from_url",
+    "ModelCatalogEntry",
+    "ProviderCatalogEntry",
 ]

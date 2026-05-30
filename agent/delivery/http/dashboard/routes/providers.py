@@ -135,3 +135,12 @@ async def list_dashboard_provider_models(
         "default_provider": default_provider,
         "providers": [_serialize_model_catalog(catalog) for catalog in catalogs],
     }
+
+
+@router.post("/dashboard-api/providers/update-catalog")
+async def update_providers_catalog() -> dict[str, str]:
+    from agent.modules.providers.catalog import update_catalog_from_url
+    success, message = await update_catalog_from_url()
+    if not success:
+        raise HTTPException(status_code=500, detail=message)
+    return {"status": "success", "message": message}

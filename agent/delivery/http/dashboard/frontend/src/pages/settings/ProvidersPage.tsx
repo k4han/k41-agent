@@ -1,5 +1,5 @@
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
-import { Edit3, Plus, RefreshCw, Save, Star, Trash2 } from "lucide-solid";
+import { Edit3, Plus, RefreshCw, Save, Star, Trash2, Globe, Shield, Coins, Sparkles, Sliders } from "lucide-solid";
 
 import { Dialog } from "@/components/Dialog";
 import { EmptyTableRow } from "@/components/EmptyTableRow";
@@ -53,6 +53,20 @@ type ProviderCreateForm = {
   api_key: string;
   base_url: string;
 };
+
+// Popular providers IDs for categorization
+const POPULAR_PROVIDERS = [
+  "openai",
+  "anthropic",
+  "google",
+  "deepseek",
+  "groq",
+  "mistral",
+  "togetherai",
+  "fireworks-ai",
+  "cohere",
+  "perplexity"
+];
 
 function hasDraftValue(drafts: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(drafts, key);
@@ -202,15 +216,20 @@ export function ProvidersPage() {
   const [savingDefaultProvider, setSavingDefaultProvider] = createSignal(false);
   const [savingProvider, setSavingProvider] = createSignal(false);
   const [creatingProvider, setCreatingProvider] = createSignal(false);
+  const [updatingCatalog, setUpdatingCatalog] = createSignal(false);
   const [confirmOpen, setConfirmOpen] = createSignal(false);
   const [changesToConfirm, setChangesToConfirm] = createSignal<PendingChange[]>([]);
   const [deleteTarget, setDeleteTarget] = createSignal<ProviderView | null>(null);
+  const [logoErrors, setLogoErrors] = createSignal<Record<string, boolean>>({});
   const { showToast } = useToast();
 
   const searchNeedle = createMemo(() => search().trim().toLowerCase());
   const dirtyKeys = createMemo(() => new Set(pendingChanges().map((change) => change.key)));
 
   const typeOptions = createMemo(() => providerTypeOptions(data()?.provider_type_options));
+
+  // Catalog items loaded from backend api.json
+  const providersCatalog = createMemo(() => data()?.providers_catalog || {});
 
   const providerRows = createMemo<ProviderView[]>(() => {
     const payload = data();
@@ -228,8 +247,93 @@ export function ProvidersPage() {
     );
   });
 
-  const filteredProviderRows = createMemo(() =>
-    providerRows().filter((provider) => provider.matchesSearch),
+  // Derived catalog cards that represent all possible cards in the grid
+  const providerCards = createMemo(() => {
+    const cat = providersCatalog();
+    const rows = providerRows();
+    const needle = searchNeedle();
+
+    // Map each catalog entry to a card representation
+    const cards = Object.keys(cat).map((id) => {
+      const entry = cat[id];
+      const configured = rows.find((r) => r.name.toLowerCase() === id.toLowerCase());
+
+      const searchable = [
+        entry.id,
+        entry.name,
+        entry.provider_type,
+        ...(entry.models || []).flatMap((m: any) => [m.id, m.name]),
+      ].join(" ").toLowerCase();
+
+      return {
+        id: entry.id,
+        name: entry.name,
+        providerType: entry.provider_type,
+        baseUrl: entry.base_url,
+        envVars: entry.env_vars || [],
+        docUrl: entry.doc_url,
+        defaultModel: configured?.defaultModel || entry.default_model,
+        modelCount: configured?.modelCount || entry.models?.length || 0,
+        configured: !!configured,
+        enabled: configured ? configured.enabled : false,
+        isDefault: configured ? configured.isDefault : false,
+        dirtyCount: configured ? configured.dirtyCount : 0,
+        matchesSearch: !needle || searchable.includes(needle),
+        configuredRow: configured || null,
+        catalogEntry: entry,
+      };
+    });
+
+    // If there are configured rows not in catalog, append them as custom providers
+    rows.forEach((row) => {
+      const alreadyInCatalog = Object.keys(cat).some((id) => id.toLowerCase() === row.name.toLowerCase());
+      if (!alreadyInCatalog) {
+        const searchable = [
+          row.name,
+          row.providerType,
+          row.typeLabel,
+        ].join(" ").toLowerCase();
+
+        cards.push({
+          id: row.name.toLowerCase(),
+          name: row.name,
+          providerType: row.providerType,
+          baseUrl: "",
+          envVars: [],
+          docUrl: "",
+          defaultModel: row.defaultModel,
+          modelCount: row.modelCount,
+          configured: true,
+          enabled: row.enabled,
+          isDefault: row.isDefault,
+          dirtyCount: row.dirtyCount,
+          matchesSearch: !needle || searchable.includes(needle),
+          configuredRow: row,
+          catalogEntry: null,
+        });
+      }
+    });
+
+    // Sort cards: configured/enabled first, then alphabetically
+    cards.sort((a, b) => {
+      if (a.configured !== b.configured) {
+        return a.configured ? -1 : 1;
+      }
+      if (a.enabled !== b.enabled) {
+        return a.enabled ? -1 : 1;
+      }
+      return a.name.localeCompare(b.name);
+    });
+
+    return cards;
+  });
+
+  const popularProviderCards = createMemo(() =>
+    providerCards().filter((card) => card.matchesSearch && POPULAR_PROVIDERS.includes(card.id)),
+  );
+
+  const otherProviderCards = createMemo(() =>
+    providerCards().filter((card) => card.matchesSearch && !POPULAR_PROVIDERS.includes(card.id)),
   );
 
   const selectedProvider = createMemo(() => {
@@ -255,6 +359,19 @@ export function ProvidersPage() {
       }
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to load models", "error");
+    }
+  };
+
+  const syncCatalog = async () => {
+    setUpdatingCatalog(true);
+    try {
+      const res = await postJson<{ status: string; message: string }>("/dashboard-api/providers/update-catalog", {});
+      showToast(res.message, "success");
+      await load();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to sync catalog", "error");
+    } finally {
+      setUpdatingCatalog(false);
     }
   };
 
@@ -342,6 +459,21 @@ export function ProvidersPage() {
     setAddOpen(true);
   };
 
+  const handleCardClick = (card: any) => {
+    if (card.configured) {
+      setSelectedProviderName(card.name);
+    } else {
+      // Setup helper prefilled from catalog
+      setAddForm({
+        name: card.name,
+        type: card.providerType,
+        api_key: "",
+        base_url: card.baseUrl || "",
+      });
+      setAddOpen(true);
+    }
+  };
+
   onMount(load);
 
   return (
@@ -349,123 +481,396 @@ export function ProvidersPage() {
       title="Provider Configuration"
       subtitle="Manage default provider and per-provider LLM credentials/models."
       breadcrumbLabel="Providers"
+      contentWidth="wide"
+      actions={
+        <button
+          class="btn"
+          type="button"
+          disabled={updatingCatalog()}
+          onClick={syncCatalog}
+          title="Sync provider catalog and models list from models.dev"
+        >
+          <RefreshCw size={14} class={updatingCatalog() ? "animate-spin" : ""} />
+          {updatingCatalog() ? "Syncing..." : "Sync Catalog"}
+        </button>
+      }
     >
+      <style>{`
+        .providers-grid {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 20px;
+          margin-top: 15px;
+          margin-bottom: 30px;
+        }
+        @media (max-width: 1200px) {
+          .providers-grid {
+            grid-template-columns: repeat(3, 1fr);
+          }
+        }
+        @media (max-width: 900px) {
+          .providers-grid {
+            grid-template-columns: repeat(2, 1fr);
+          }
+        }
+        @media (max-width: 600px) {
+          .providers-grid {
+            grid-template-columns: repeat(1, 1fr);
+          }
+        }
+        .provider-section-title {
+          font-size: 13px;
+          font-weight: 700;
+          color: var(--muted);
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          margin: 25px 0 15px 0;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .provider-section-title::before {
+          content: "";
+          display: inline-block;
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: var(--accent, #6366f1);
+        }
+        .provider-card {
+          background: rgba(30, 41, 59, 0.45);
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-radius: 12px;
+          padding: 12px 16px;
+          display: flex;
+          flex-direction: row;
+          align-items: center;
+          gap: 12px;
+          min-height: 64px;
+          transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+          cursor: pointer;
+          position: relative;
+          overflow: hidden;
+        }
+        .provider-card:hover {
+          transform: translateY(-2px);
+          border-color: var(--accent, #6366f1);
+          background: rgba(30, 41, 59, 0.65);
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2), 0 0 10px rgba(99, 102, 241, 0.1);
+        }
+        .provider-card.card-configured {
+          border-color: rgba(99, 102, 241, 0.35);
+          background: rgba(99, 102, 241, 0.03);
+        }
+        .provider-card.card-configured:hover {
+          border-color: var(--accent, #6366f1);
+          background: rgba(99, 102, 241, 0.06);
+        }
+        .provider-card.card-enabled {
+          border-color: rgba(16, 185, 129, 0.35);
+          background: rgba(16, 185, 129, 0.03);
+        }
+        .provider-card.card-enabled:hover {
+          border-color: #10b981;
+          background: rgba(16, 185, 129, 0.06);
+        }
+        .logo-wrap {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 38px;
+          height: 38px;
+          border-radius: 8px;
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px solid rgba(255, 255, 255, 0.06);
+          overflow: hidden;
+          padding: 4px;
+          flex-shrink: 0;
+        }
+        .logo-img {
+          width: 100%;
+          height: 100%;
+          object-fit: contain;
+        }
+        .logo-fallback {
+          font-weight: 700;
+          font-size: 16px;
+          color: var(--accent, #6366f1);
+          background: rgba(99, 102, 241, 0.1);
+          width: 100%;
+          height: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 6px;
+        }
+        .card-right {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          min-width: 0;
+          flex: 1;
+        }
+        .card-title {
+          font-size: 13.5px;
+          font-weight: 600;
+          color: var(--fg);
+          line-height: 1.2;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .card-status-row {
+          display: flex;
+          align-items: center;
+        }
+        .status-no-connection {
+          font-size: 11px;
+          font-weight: 500;
+          color: #8a8a8a;
+        }
+        .status-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 2px 8px;
+          border-radius: 9999px;
+          font-size: 10.5px;
+          font-weight: 600;
+        }
+        .status-dot {
+          display: inline-block;
+          width: 5px;
+          height: 5px;
+          border-radius: 50%;
+        }
+        .status-active {
+          background: rgba(16, 185, 129, 0.15);
+          color: #10b981;
+        }
+        .status-active .status-dot {
+          background: #10b981;
+        }
+        .model-spec-section {
+          margin-top: 24px;
+          border-top: 1px solid rgba(255, 255, 255, 0.08);
+          padding-top: 18px;
+        }
+        .model-spec-title {
+          font-size: 13px;
+          font-weight: 700;
+          color: var(--fg);
+          margin-bottom: 12px;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+        .model-spec-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+          gap: 12px;
+          max-height: 260px;
+          overflow-y: auto;
+          padding-right: 4px;
+        }
+        .model-spec-card {
+          background: rgba(255, 255, 255, 0.02);
+          border: 1px solid rgba(255, 255, 255, 0.04);
+          border-radius: 8px;
+          padding: 12px;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+        .model-spec-header {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+        .model-spec-name {
+          font-size: 13px;
+          font-weight: 600;
+          color: var(--fg);
+        }
+        .model-spec-id {
+          font-size: 10px;
+          color: var(--muted);
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .model-spec-badges {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 4px;
+        }
+        .spec-badge {
+          font-size: 9px;
+          font-weight: 600;
+          padding: 1px 6px;
+          border-radius: 4px;
+          text-transform: capitalize;
+        }
+        .spec-badge-context {
+          background: rgba(59, 130, 246, 0.1);
+          color: #60a5fa;
+          border: 1px solid rgba(59, 130, 246, 0.15);
+        }
+        .spec-badge-reasoning {
+          background: rgba(168, 85, 247, 0.1);
+          color: #c084fc;
+          border: 1px solid rgba(168, 85, 247, 0.15);
+        }
+        .spec-badge-tools {
+          background: rgba(234, 179, 8, 0.1);
+          color: #facc15;
+          border: 1px solid rgba(234, 179, 8, 0.15);
+        }
+        .spec-badge-modality {
+          background: rgba(255, 255, 255, 0.04);
+          color: var(--muted);
+          border: 1px solid rgba(255, 255, 255, 0.06);
+        }
+        .model-spec-cost {
+          font-size: 10.5px;
+          color: var(--muted);
+          margin-top: auto;
+          border-top: 1px dashed rgba(255, 255, 255, 0.04);
+          padding-top: 6px;
+        }
+        .cost-number {
+          font-weight: 600;
+          color: var(--fg);
+        }
+      `}</style>
+
       <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => (
           <div class="stack">
             <SettingsResourceToolbar
               searchValue={search()}
-              searchPlaceholder="Search providers..."
+              searchPlaceholder="Search providers and models..."
               onSearchInput={setSearch}
               actions={
                 <button class="btn btn-primary" type="button" onClick={openAddDialog}>
                   <Plus size={15} />
-                  Add Provider
+                  Custom Provider
                 </button>
               }
             />
 
-            <section class="panel">
-              <div class="panel-header">
-                <div class="panel-title">Providers</div>
-                <span class="badge">{filteredProviderRows().length}</span>
-              </div>
-              <div class="table-wrap">
-                <table class="table providers-table">
-                  <thead>
-                    <tr>
-                      <th>Provider</th>
-                      <th>Type</th>
-                      <th>Default Model</th>
-                      <th>Models</th>
-                      <th>Status</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <For
-                      each={filteredProviderRows()}
-                      fallback={<EmptyTableRow colSpan={6} message="No providers found." />}
-                    >
-                      {(provider) => (
-                        <tr
-                          class={`provider-table-row ${provider.dirtyCount ? "provider-row-dirty" : ""}`}
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => setSelectedProviderName(provider.name)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                              event.preventDefault();
-                              setSelectedProviderName(provider.name);
+            {/* Popular Providers Grid */}
+            <Show when={popularProviderCards().length > 0}>
+              <div>
+                <div class="provider-section-title">Popular Providers</div>
+                <div class="providers-grid">
+                  <For each={popularProviderCards()}>
+                    {(card) => (
+                      <div
+                        class={`provider-card ${card.configured ? "card-configured" : ""} ${
+                          card.enabled ? "card-enabled" : ""
+                        }`}
+                        onClick={() => handleCardClick(card)}
+                      >
+                        <div class="logo-wrap">
+                          <Show
+                            when={!logoErrors()[card.id]}
+                            fallback={
+                              <div class="logo-fallback">
+                                {card.name.charAt(0).toUpperCase()}
+                              </div>
                             }
-                          }}
-                        >
-                          <td>
-                            <div class="provider-name-cell">
-                              <span class="setting-title">{provider.name}</span>
-                              <Show when={provider.isDefault}>
-                                <span class="badge badge-info">Default</span>
-                              </Show>
-                              <Show when={provider.dirtyCount > 0}>
-                                <span class="badge badge-warning">{provider.dirtyCount} unsaved</span>
-                              </Show>
-                            </div>
-                          </td>
-                          <td>
-                            <span class="chip">{provider.typeLabel}</span>
-                          </td>
-                          <td>
-                            <Show when={provider.defaultModel} fallback={<span class="hint">Not set</span>}>
-                              <div class="provider-table-value mono">{provider.defaultModel}</div>
+                          >
+                            <img
+                              src={`https://models.dev/logos/${card.id}.svg`}
+                              alt={card.name}
+                              class="logo-img"
+                              onError={() => setLogoErrors((curr) => ({ ...curr, [card.id]: true }))}
+                            />
+                          </Show>
+                        </div>
+                        <div class="card-right">
+                          <div class="card-title">{card.name}</div>
+                          <div class="card-status-row">
+                            <Show
+                              when={card.configured && card.enabled}
+                              fallback={<span class="status-no-connection">No connections</span>}
+                            >
+                              <div class="status-pill status-active">
+                                <span class="status-dot"></span>
+                                1 Connected
+                              </div>
                             </Show>
-                          </td>
-                          <td>
-                            <span class="hint">
-                              {provider.modelCount
-                                ? `${provider.modelCount} model${provider.modelCount === 1 ? "" : "s"}`
-                                : "No models"}
-                            </span>
-                          </td>
-                          <td>
-                            <span class={provider.enabled ? "badge badge-success" : "badge badge-warning"}>
-                              {provider.enabled ? "Enabled" : "Disabled"}
-                            </span>
-                          </td>
-                          <td>
-                            <div class="row-wrap provider-table-actions">
-                              <button
-                                class="btn btn-sm"
-                                type="button"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  setSelectedProviderName(provider.name);
-                                }}
-                              >
-                                <Edit3 size={13} />
-                                Edit
-                              </button>
-                              <button
-                                class="btn btn-sm btn-danger"
-                                type="button"
-                                disabled={!provider.canDelete}
-                                title={provider.deleteBlockReason}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  setDeleteTarget(provider);
-                                }}
-                              >
-                                <Trash2 size={13} />
-                                Delete
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </For>
-                  </tbody>
-                </table>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </For>
+                </div>
               </div>
-            </section>
+            </Show>
+
+            {/* Other Providers Grid */}
+            <Show when={otherProviderCards().length > 0}>
+              <div>
+                <div class="provider-section-title">Other Providers</div>
+                <div class="providers-grid">
+                  <For each={otherProviderCards()}>
+                    {(card) => (
+                      <div
+                        class={`provider-card ${card.configured ? "card-configured" : ""} ${
+                          card.enabled ? "card-enabled" : ""
+                        }`}
+                        onClick={() => handleCardClick(card)}
+                      >
+                        <div class="logo-wrap">
+                          <Show
+                            when={!logoErrors()[card.id]}
+                            fallback={
+                              <div class="logo-fallback">
+                                {card.name.charAt(0).toUpperCase()}
+                              </div>
+                            }
+                          >
+                            <img
+                              src={`https://models.dev/logos/${card.id}.svg`}
+                              alt={card.name}
+                              class="logo-img"
+                              onError={() => setLogoErrors((curr) => ({ ...curr, [card.id]: true }))}
+                            />
+                          </Show>
+                        </div>
+                        <div class="card-right">
+                          <div class="card-title">{card.name}</div>
+                          <div class="card-status-row">
+                            <Show
+                              when={card.configured && card.enabled}
+                              fallback={<span class="status-no-connection">No connections</span>}
+                            >
+                              <div class="status-pill status-active">
+                                <span class="status-dot"></span>
+                                1 Connected
+                              </div>
+                            </Show>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              </div>
+            </Show>
+
+            {/* Empty view */}
+            <Show when={providerCards().filter((card) => card.matchesSearch).length === 0}>
+              <div class="panel empty" style={{ padding: "40px 20px", "text-align": "center" }}>
+                <Globe size={32} class="muted" style={{ "margin-bottom": "10px" }} />
+                <h3>No providers match your search</h3>
+                <p class="hint">Try searching for other brand names or sync the catalog.</p>
+              </div>
+            </Show>
 
             <Show when={selectedProvider()}>
               {(provider) => (
@@ -475,12 +880,14 @@ export function ProvidersPage() {
                   dirtyKeys={dirtyKeys()}
                   savingDefault={savingDefaultProvider()}
                   savingProvider={savingProvider()}
+                  catalog={providersCatalog()}
                   onClose={() => setSelectedProviderName(null)}
                   onSetDefault={() => setDefaultProvider(provider())}
                   onLoadModels={() => loadProviderModels(provider().name)}
                   onSave={() => saveProviderChanges(provider().name)}
                   onChange={(key, value) => setDraft(key, value)}
                   onRestore={(key) => restoreDraft(key)}
+                  onDelete={() => setDeleteTarget(provider())}
                 />
               )}
             </Show>
@@ -522,21 +929,36 @@ function ProviderEditDialog(props: {
   dirtyKeys: Set<string>;
   savingDefault: boolean;
   savingProvider: boolean;
+  catalog: any;
   onClose: () => void;
   onSetDefault: () => void;
   onLoadModels: () => void;
   onSave: () => void;
   onChange: (key: string, value: unknown) => void;
   onRestore: (key: string) => void;
+  onDelete: () => void;
 }) {
+  // Try to find matching catalog item for models metadata
+  const catalogEntry = createMemo(() => {
+    const nameLower = props.provider.name.toLowerCase();
+    const typeLower = props.provider.providerType.toLowerCase();
+    return props.catalog[nameLower] || props.catalog[typeLower] || null;
+  });
+
   return (
     <Dialog
       open
-      title={`Edit ${props.provider.name}`}
+      title={`Configure ${props.provider.name}`}
       wide
       onClose={props.onClose}
       footer={
         <>
+          <Show when={props.provider.canDelete}>
+            <button class="btn btn-danger" type="button" onClick={props.onDelete} style={{ "margin-right": "auto" }}>
+              <Trash2 size={13} />
+              Delete Provider
+            </button>
+          </Show>
           <button class="btn" type="button" onClick={props.onClose}>
             Close
           </button>
@@ -575,6 +997,7 @@ function ProviderEditDialog(props: {
             <span class="badge badge-warning">{props.provider.dirtyCount} unsaved</span>
           </Show>
         </div>
+
         <div class="provider-summary-grid">
           <div>
             <span class="setting-detail-label">Type</span>
@@ -582,16 +1005,16 @@ function ProviderEditDialog(props: {
           </div>
           <div>
             <span class="setting-detail-label">Default Model</span>
-            <span class="provider-summary-value">{props.provider.defaultModel || "Not set"}</span>
+            <span class="provider-summary-value mono">{props.provider.defaultModel || "Not set"}</span>
           </div>
           <div>
-            <span class="setting-detail-label">Models</span>
+            <span class="setting-detail-label">Models List</span>
             <span class="provider-summary-value">{props.provider.modelCount}</span>
           </div>
           <div>
             <span class="setting-detail-label">Status</span>
             <span class={props.provider.enabled ? "badge badge-success" : "badge badge-warning"}>
-              {props.provider.enabled ? "Enabled" : "Disabled"}
+              {props.provider.enabled ? "Active" : "Disabled"}
             </span>
           </div>
         </div>
@@ -609,7 +1032,7 @@ function ProviderEditDialog(props: {
                   entry.key.endsWith(".models") ? (
                     <button class="btn btn-sm" type="button" onClick={props.onLoadModels}>
                       <RefreshCw size={13} />
-                      Load Models
+                      Fetch Active Models
                     </button>
                   ) : undefined
                 }
@@ -619,6 +1042,49 @@ function ProviderEditDialog(props: {
             )}
           </For>
         </div>
+
+        {/* Detailed Model Metadata Section from models.dev */}
+        <Show when={catalogEntry() && catalogEntry().models?.length > 0}>
+          <div class="model-spec-section">
+            <div class="model-spec-title">
+              <Sparkles size={14} style={{ color: "var(--accent, #6366f1)" }} />
+              Model Specifications & Capabilities
+            </div>
+            <div class="model-spec-grid">
+              <For each={catalogEntry().models}>
+                {(model) => (
+                  <div class="model-spec-card">
+                    <div class="model-spec-header">
+                      <span class="model-spec-name">{model.name}</span>
+                      <span class="model-spec-id mono">{model.id}</span>
+                    </div>
+                    <div class="model-spec-badges">
+                      <Show when={model.context_window}>
+                        <span class="spec-badge spec-badge-context">
+                          🧠 {model.context_window >= 1048576 ? `${(model.context_window / 1048576).toFixed(0)}M` : `${(model.context_window / 1024).toFixed(0)}k`} context
+                        </span>
+                      </Show>
+                      <Show when={model.reasoning}>
+                        <span class="spec-badge spec-badge-reasoning">🧠 Reasoning</span>
+                      </Show>
+                      <Show when={model.tool_call}>
+                        <span class="spec-badge spec-badge-tools">🛠️ Tools</span>
+                      </Show>
+                      <For each={model.input_types}>
+                        {(mod) => <span class="spec-badge spec-badge-modality">{mod}</span>}
+                      </For>
+                    </div>
+                    <Show when={model.cost_input !== null && model.cost_input !== undefined}>
+                      <div class="model-spec-cost">
+                        Cost/1M tokens: <span class="cost-number">${model.cost_input}</span> In / <span class="cost-number">${model.cost_output}</span> Out
+                      </div>
+                    </Show>
+                  </div>
+                )}
+              </For>
+            </div>
+          </div>
+        </Show>
       </div>
     </Dialog>
   );
@@ -650,7 +1116,7 @@ function AddProviderDialog(props: {
   return (
     <Dialog
       open={props.open}
-      title="Add Provider"
+      title={`Configure ${props.form.name || "New Provider"}`}
       wide
       onClose={props.onClose}
       footer={
@@ -665,34 +1131,37 @@ function AddProviderDialog(props: {
             onClick={props.onSubmit}
           >
             <Plus size={14} />
-            Add Provider
+            Save & Enable
           </button>
         </>
       }
     >
       <div class="stack">
-        <div class="provider-type-grid">
-          <For each={props.typeOptions}>
-            {(option) => (
-              <button
-                class={`provider-type-option ${props.form.type === option.value ? "active" : ""}`}
-                type="button"
-                onClick={() => props.onChange({ type: option.value, base_url: "" })}
-              >
-                <span class="setting-title">{option.label}</span>
-                <span class="hint">{option.description}</span>
-              </button>
-            )}
-          </For>
-        </div>
+        <Show when={!props.form.name}>
+          <div class="provider-type-grid" style={{ "margin-bottom": "20px" }}>
+            <For each={props.typeOptions}>
+              {(option) => (
+                <button
+                  class={`provider-type-option ${props.form.type === option.value ? "active" : ""}`}
+                  type="button"
+                  onClick={() => props.onChange({ type: option.value, base_url: "" })}
+                >
+                  <span class="setting-title">{option.label}</span>
+                  <span class="hint">{option.description}</span>
+                </button>
+              )}
+            </For>
+          </div>
+        </Show>
 
         <div class="grid-2">
           <label class="field">
-            <span>Provider Name</span>
+            <span>Provider ID</span>
             <input
-              class="input"
+              class="input mono"
               value={props.form.name}
-              placeholder="my-provider"
+              placeholder="e.g. deepseek, groq"
+              disabled={!!props.form.name}
               onInput={(event) => props.onChange({ name: event.currentTarget.value })}
             />
           </label>
@@ -702,13 +1171,13 @@ function AddProviderDialog(props: {
               class="input"
               type="password"
               value={props.form.api_key}
-              placeholder="Required"
+              placeholder="Paste your credentials here"
               onInput={(event) => props.onChange({ api_key: event.currentTarget.value })}
             />
           </label>
         </div>
 
-        <Show when={selectedType()?.requires_base_url}>
+        <Show when={selectedType()?.requires_base_url || props.form.base_url}>
           <label class="field">
             <span>Base URL</span>
             <input

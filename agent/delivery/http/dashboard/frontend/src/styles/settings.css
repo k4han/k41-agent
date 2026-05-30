@@ -36,15 +36,15 @@
 }
 
 .settings-content-narrow {
-  width: min(100%, 560px);
+  width: min(100%, 640px);
 }
 
 .settings-content-medium {
-  width: min(100%, 760px);
+  width: min(100%, 960px);
 }
 
 .settings-content-wide {
-  width: min(100%, 1040px);
+  width: min(100%, 1280px);
 }
 
 .settings-back-link {
@@ -89,4 +89,3 @@
 .usage-table th:not(:first-child) {
   text-align: right;
 }
-

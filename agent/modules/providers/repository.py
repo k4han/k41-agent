@@ -115,19 +115,46 @@ def _build_provider_config(
     provider_key: str,
     provider_values: dict[str, Any],
 ) -> ProviderConfig:
+    from agent.modules.providers.catalog import get_provider_catalog_entry
+
+    catalog_entry = get_provider_catalog_entry(provider_key)
     provider_name = str(provider_values.get("_provider_name", provider_key)).strip() or provider_key
-    provider_type_value = provider_values.get("type") or provider_key
-    provider_type = _resolve_provider_type_for_key(
-        str(provider_type_value),
-        f"llm.providers.{provider_name}.type",
-    )
     enabled = coerce_bool(provider_values.get("enabled", True))
 
-    base_url = str(provider_values.get("base_url", "")).strip()
-    if provider_type == ProviderType.OPENAI_COMPATIBLE:
-        base_url = base_url or DEFAULT_BASE_URL
+    if catalog_entry:
+        type_str = catalog_entry.provider_type
+        if type_str == "google":
+            provider_type = ProviderType.GOOGLE
+        elif type_str == "anthropic":
+            provider_type = ProviderType.ANTHROPIC
+        else:
+            provider_type = ProviderType.OPENAI_COMPATIBLE
+
+        base_url = str(provider_values.get("base_url", "")).strip() or catalog_entry.base_url
+        if provider_type != ProviderType.OPENAI_COMPATIBLE:
+            base_url = ""
+
+        default_model = str(provider_values.get("default_model", "")).strip() or catalog_entry.default_model
+
+        configured_models = _resolve_model_options(provider_values)
+        if not configured_models:
+            models = tuple(m.id for m in catalog_entry.models)
+        else:
+            models = configured_models
     else:
-        base_url = ""
+        provider_type_value = provider_values.get("type") or provider_key
+        provider_type = _resolve_provider_type_for_key(
+            str(provider_type_value),
+            f"llm.providers.{provider_name}.type",
+        )
+        base_url = str(provider_values.get("base_url", "")).strip()
+        if provider_type == ProviderType.OPENAI_COMPATIBLE:
+            base_url = base_url or DEFAULT_BASE_URL
+        else:
+            base_url = ""
+
+        default_model = _resolve_default_model(provider_values)
+        models = _resolve_model_options(provider_values)
 
     return ProviderConfig(
         name=provider_name,
@@ -138,8 +165,8 @@ def _build_provider_config(
             provider_values,
             enabled=enabled,
         ),
-        default_model=_resolve_default_model(provider_values),
-        models=_resolve_model_options(provider_values),
+        default_model=default_model,
+        models=models,
         enabled=enabled,
     )
 

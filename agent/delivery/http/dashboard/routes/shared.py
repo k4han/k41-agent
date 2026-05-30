@@ -630,6 +630,36 @@ def _settings_payload(request: Request, *, include_provider_settings: bool) -> d
         PROVIDER_SETTING_FIELD_ORDER,
         default_provider,
     )
+
+    from agent.modules.providers.catalog import load_providers_catalog
+    catalog = load_providers_catalog()
+    catalog_serialized = {}
+    for pid, entry in catalog.items():
+        catalog_serialized[pid] = {
+            "id": entry.id,
+            "name": entry.name,
+            "provider_type": entry.provider_type,
+            "base_url": entry.base_url,
+            "env_vars": list(entry.env_vars),
+            "doc_url": entry.doc_url,
+            "default_model": entry.default_model,
+            "models": [
+                {
+                    "id": m.id,
+                    "name": m.name,
+                    "context_window": m.context_window,
+                    "max_output": m.max_output,
+                    "input_types": list(m.input_types),
+                    "output_types": list(m.output_types),
+                    "reasoning": m.reasoning,
+                    "tool_call": m.tool_call,
+                    "cost_input": m.cost_input,
+                    "cost_output": m.cost_output,
+                }
+                for m in entry.models
+            ]
+        }
+
     return {
         "active_nav": "providers",
         "page_title": "Provider Configuration",
@@ -641,6 +671,7 @@ def _settings_payload(request: Request, *, include_provider_settings: bool) -> d
         "provider_name_options": [row["name"] for row in provider_rows],
         "provider_field_order": PROVIDER_SETTING_FIELD_ORDER,
         "provider_type_options": PROVIDER_TYPE_OPTIONS,
+        "providers_catalog": catalog_serialized,
     }
 
 

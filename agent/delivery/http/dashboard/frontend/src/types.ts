@@ -194,6 +194,7 @@ export type SettingsPayload = {
   provider_name_options?: string[];
   provider_field_order?: string[];
   provider_type_options?: ProviderTypeOption[];
+  providers_catalog?: Record<string, any>;
 };
 
 export type UsageSummary = {
