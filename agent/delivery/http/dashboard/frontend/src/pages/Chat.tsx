@@ -1172,8 +1172,16 @@ export function ChatPage() {
     const toolTokens = tools.length * 420;
     const toolPercent = maxTokens > 0 ? (toolTokens / maxTokens) * 100 : 0;
     
-    // Files
-    const fileCount = attachments().length;
+    // Files (bao gồm cả file đang đính kèm và file đã gửi trong lịch sử thread)
+    let fileCount = attachments().length;
+    const activeItems = items();
+    if (Array.isArray(activeItems)) {
+      activeItems.forEach((item) => {
+        if (item.type === "message" && Array.isArray(item.attachments)) {
+          fileCount += item.attachments.length;
+        }
+      });
+    }
     const fileTokens = fileCount * 1500;
     const filePercent = maxTokens > 0 ? (fileTokens / maxTokens) * 100 : 0;
     
@@ -2551,34 +2559,6 @@ export function ChatPage() {
                     </button>
                   </div>
                 </Show>
-                <textarea
-                  ref={chatPromptRef}
-                  class="chat-prompt-input"
-                  rows={1}
-                  value={prompt()}
-                  disabled={inputDisabled()}
-                  placeholder={
-                    backgroundTaskActive()
-                      ? "Background task is running..."
-                      : workspaceMissing()
-                        ? "Select a workspace before sending..."
-                        : currentThreadId()
-                          ? "Continue this thread..."
-                          : "Ask Kaka to build features, fix bugs, or work on your code"
-                  }
-                  onInput={(event) => {
-                    setPrompt(event.currentTarget.value);
-                    resizeChatPromptInput();
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" && !event.ctrlKey && !event.shiftKey) {
-                      event.preventDefault();
-                      if (!composerDisabled()) {
-                        void sendMessage();
-                      }
-                    }
-                  }}
-                />
                 <Show when={attachments().length > 0}>
                   <div class="chat-attachment-list">
                     <For each={attachments()}>
@@ -2620,6 +2600,34 @@ export function ChatPage() {
                     </For>
                   </div>
                 </Show>
+                <textarea
+                  ref={chatPromptRef}
+                  class="chat-prompt-input"
+                  rows={1}
+                  value={prompt()}
+                  disabled={inputDisabled()}
+                  placeholder={
+                    backgroundTaskActive()
+                      ? "Background task is running..."
+                      : workspaceMissing()
+                        ? "Select a workspace before sending..."
+                        : currentThreadId()
+                          ? "Continue this thread..."
+                          : "Ask Kaka to build features, fix bugs, or work on your code"
+                  }
+                  onInput={(event) => {
+                    setPrompt(event.currentTarget.value);
+                    resizeChatPromptInput();
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.ctrlKey && !event.shiftKey) {
+                      event.preventDefault();
+                      if (!composerDisabled()) {
+                        void sendMessage();
+                      }
+                    }
+                  }}
+                />
                 <div class="chat-composer-toolbar">
                   <div class="chat-composer-actions">
                     <SelectControl
