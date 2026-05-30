@@ -97,9 +97,6 @@ export function AppShell(props: {
   const [historyLoading, setHistoryLoading] = createSignal(false);
   const [historyMenuThreadId, setHistoryMenuThreadId] = createSignal<string | null>(null);
   const [historyMenuOpensUp, setHistoryMenuOpensUp] = createSignal(false);
-  const [collapsedHistoryGroupKeys, setCollapsedHistoryGroupKeys] = createSignal<Set<string>>(
-    new Set(),
-  );
   const [historyNextOffset, setHistoryNextOffset] = createSignal(historyCache.nextOffset);
   const [historyLoaded, setHistoryLoaded] = createSignal(historyCache.loaded);
   const [editingHistoryThreadId, setEditingHistoryThreadId] = createSignal<string | null>(null);
@@ -420,17 +417,13 @@ export function AppShell(props: {
     return historyThreads().filter((t) => runningThreadIds().has(t.thread_id));
   });
 
-  const nonRunningHistoryGroups = createMemo(() => {
-    const nonRunning = historyThreads().filter((t) => !runningThreadIds().has(t.thread_id));
-    return groupThreadsByWorkspace(nonRunning);
-  });
-
-  const filteredHistoryGroups = createMemo(() => {
+  const filteredThreads = createMemo(() => {
     const filter = selectedWorkspaceFilter();
+    const nonRunning = historyThreads().filter((t) => !runningThreadIds().has(t.thread_id));
     if (filter === "all") {
-      return nonRunningHistoryGroups();
+      return nonRunning;
     }
-    return nonRunningHistoryGroups().filter((group) => group.key === filter);
+    return nonRunning.filter((t) => threadWorkspaceKey(t) === filter);
   });
 
   const availableWorkspaces = createMemo(() => {
@@ -455,20 +448,7 @@ export function AppShell(props: {
     return counts;
   });
 
-  const isHistoryGroupExpanded = (group: ThreadWorkspaceGroup) =>
-    !collapsedHistoryGroupKeys().has(group.key);
-  const toggleHistoryWorkspaceGroup = (group: ThreadWorkspaceGroup, event: MouseEvent) => {
-    event.preventDefault();
-    setCollapsedHistoryGroupKeys((current) => {
-      const next = new Set(current);
-      if (next.has(group.key)) {
-        next.delete(group.key);
-      } else {
-        next.add(group.key);
-      }
-      return next;
-    });
-  };
+
 
   const setHistoryPanelOpen = (next: boolean) => {
     setHistoryOpen(next);
@@ -923,56 +903,12 @@ export function AppShell(props: {
                   </div>
                 </Show>
 
-                {/* Filtered History Group List / Flat list */}
-                <Show
-                  when={selectedWorkspaceFilter() === "all"}
-                  fallback={
-                    <div class="nav-history-flat-threads">
-                      <For each={filteredHistoryGroups()}>
-                        {(group) => (
-                          <For each={group.threads}>
-                            {(thread) => renderHistoryItem(thread)}
-                          </For>
-                        )}
-                      </For>
-                    </div>
-                  }
-                >
-                  <For each={filteredHistoryGroups()}>
-                    {(group) => (
-                      <div class="nav-history-workspace">
-                        <button
-                          class="nav-history-workspace-toggle"
-                          type="button"
-                          title={group.label}
-                          aria-expanded={isHistoryGroupExpanded(group)}
-                          onClick={(event) => toggleHistoryWorkspaceGroup(group, event)}
-                        >
-                          <FolderOpen size={13} />
-                          <span class="nav-history-workspace-label">
-                            {truncateText(group.label, 28)}
-                          </span>
-                          <span class="nav-history-workspace-count">{group.threads.length}</span>
-                          <span class="nav-history-workspace-caret">
-                            <Show
-                              when={isHistoryGroupExpanded(group)}
-                              fallback={<ChevronRight size={13} />}
-                            >
-                              <ChevronDown size={13} />
-                            </Show>
-                          </span>
-                        </button>
-                        <Show when={isHistoryGroupExpanded(group)}>
-                          <div class="nav-history-workspace-threads">
-                            <For each={group.threads}>
-                              {(thread) => renderHistoryItem(thread)}
-                            </For>
-                          </div>
-                        </Show>
-                      </div>
-                    )}
+                {/* Filtered Flat History List */}
+                <div class="nav-history-flat-threads">
+                  <For each={filteredThreads()}>
+                    {(thread) => renderHistoryItem(thread)}
                   </For>
-                </Show>
+                </div>
 
                 <Show when={historyThreads().length === 0 && historyLoading()}>
                   <div class="nav-history-status">Loading...</div>
