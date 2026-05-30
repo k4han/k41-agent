@@ -66,9 +66,15 @@ export type AgentConfig = {
   system_prompt: string;
 };
 
+export type ToolGroup = {
+  category: string;
+  tools: string[];
+};
+
 export type AgentsPayload = {
   cards: AgentCard[];
   tools: string[];
+  tool_groups?: ToolGroup[];
   workflows: string[];
   agent_names: string[];
   provider_names: string[];

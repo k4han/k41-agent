@@ -23,7 +23,7 @@ from agent.modules.providers import (
     list_provider_model_catalogs,
 )
 from agent.modules.scheduler import get_scheduler
-from agent.modules.tools import get_default_tool_names
+from agent.modules.tools import ToolSource, find_descriptors
 from agent.modules.users import get_pairing_service
 from agent.modules.workflows import (
     REACT_AGENT_GRAPH_TYPE,
@@ -547,6 +547,36 @@ async def _provider_model_options() -> dict[str, Any]:
     }
 
 
+_TOOL_CATEGORY_ORDER = (
+    "file",
+    "shell",
+    "web",
+    "schedule",
+    "agent",
+    "skill",
+    "utility",
+    "unknown",
+)
+
+
+def _build_tool_groups(
+    tool_names: set[str],
+    tool_categories: dict[str, str],
+) -> list[dict[str, Any]]:
+    grouped: dict[str, list[str]] = {}
+    for name in tool_names:
+        category = tool_categories.get(name, "unknown")
+        grouped.setdefault(category, []).append(name)
+
+    ordered_categories = [c for c in _TOOL_CATEGORY_ORDER if c in grouped]
+    ordered_categories += sorted(c for c in grouped if c not in _TOOL_CATEGORY_ORDER)
+
+    return [
+        {"category": category, "tools": sorted(grouped[category])}
+        for category in ordered_categories
+    ]
+
+
 async def _agent_card_options(cards: list[AgentCard] | None = None) -> dict[str, Any]:
     catalog = get_catalog_service()
     cards = cards if cards is not None else catalog.list_agent_cards()
@@ -556,13 +586,19 @@ async def _agent_card_options(cards: list[AgentCard] | None = None) -> dict[str,
         if workflow_name not in workflows:
             workflows.append(workflow_name)
 
-    tool_names = set(get_default_tool_names())
+    builtin_descriptors = find_descriptors(source=ToolSource.BUILTIN)
+    tool_categories = {desc.name: desc.category.value for desc in builtin_descriptors}
+    tool_names = set(tool_categories)
     agent_names = []
     for card in cards:
         if not card.valid:
             continue
         agent_names.append(card.name)
-        tool_names.update(card.tools)
+        tool_names.update(
+            name for name in card.tools if not name.startswith("mcp__")
+        )
+
+    tool_groups = _build_tool_groups(tool_names, tool_categories)
 
     try:
         from agent.modules.mcp import list_mcp_servers
@@ -573,6 +609,7 @@ async def _agent_card_options(cards: list[AgentCard] | None = None) -> dict[str,
     return {
         "cards": [_serialize_agent_card(card) for card in cards],
         "tools": sorted(tool_names),
+        "tool_groups": tool_groups,
         "workflows": workflows,
         "agent_names": sorted(agent_names),
         "mcp_server_options": mcp_servers,

@@ -38,6 +38,34 @@
   font-size: 12px;
 }
 
+.tool-group {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.tool-group .checkbox-grid {
+  border: none;
+  border-radius: 0;
+}
+
+.tool-group-header {
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  color: var(--fg);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+}
+
+.tool-group-header .hint {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
 .code-block {
   max-height: 360px;
   overflow: auto;

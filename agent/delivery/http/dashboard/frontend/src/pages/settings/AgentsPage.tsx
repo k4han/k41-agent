@@ -148,6 +148,44 @@ export function AgentsPage() {
     });
   };
 
+  const toggleToolGroup = (tools: string[], checked: boolean) => {
+    setForm((current) => {
+      const values = new Set(current.tools);
+      for (const tool of tools) {
+        if (checked) {
+          values.add(tool);
+        } else {
+          values.delete(tool);
+        }
+      }
+      return { ...current, tools: Array.from(values).sort() };
+    });
+  };
+
+  const toolGroups = createMemo(() => {
+    const payload = data();
+    const groups = (payload?.tool_groups || []).map((group) => ({
+      category: group.category,
+      tools: [...group.tools],
+    }));
+    const known = new Set(groups.flatMap((group) => group.tools));
+    const extras = form().tools.filter((tool) => !known.has(tool) && !tool.startsWith("mcp__"));
+    if (extras.length > 0) {
+      const other = groups.find((group) => group.category === "unknown");
+      if (other) {
+        other.tools = uniqueSorted([...other.tools, ...extras]);
+      } else {
+        groups.push({ category: "unknown", tools: uniqueSorted(extras) });
+      }
+    }
+    return groups;
+  });
+
+  const formatToolCategory = (category: string) =>
+    category === "unknown"
+      ? "Other"
+      : category.charAt(0).toUpperCase() + category.slice(1);
+
   const saveAgent = async () => {
     const payload = form();
     if (!/^[A-Za-z0-9_-]+$/.test(payload.name)) {
@@ -451,19 +489,41 @@ export function AgentsPage() {
                 </div>
                 <div class="field">
                   <label>Tools</label>
-                  <div class="checkbox-grid">
-                    <For each={uniqueSorted([...payload.tools, ...form().tools])}>
-                      {(tool) => (
-                        <label class="checkbox-row">
-                          <input
-                            type="checkbox"
-                            checked={form().tools.includes(tool)}
-                            disabled={modalMode() === "view"}
-                            onChange={(event) => toggleListValue("tools", tool, event.currentTarget.checked)}
-                          />
-                          <span class="mono">{tool}</span>
-                        </label>
-                      )}
+                  <div class="stack">
+                    <For each={toolGroups()}>
+                      {(group) => {
+                        const allChecked = () =>
+                          group.tools.length > 0 && group.tools.every((tool) => form().tools.includes(tool));
+                        return (
+                          <div class="tool-group">
+                            <label class="checkbox-row tool-group-header">
+                              <input
+                                type="checkbox"
+                                checked={allChecked()}
+                                disabled={modalMode() === "view"}
+                                onChange={(event) => toggleToolGroup(group.tools, event.currentTarget.checked)}
+                              />
+                              <span>{formatToolCategory(group.category)}</span>
+                              <span class="hint">({group.tools.length})</span>
+                            </label>
+                            <div class="checkbox-grid">
+                              <For each={group.tools}>
+                                {(tool) => (
+                                  <label class="checkbox-row">
+                                    <input
+                                      type="checkbox"
+                                      checked={form().tools.includes(tool)}
+                                      disabled={modalMode() === "view"}
+                                      onChange={(event) => toggleListValue("tools", tool, event.currentTarget.checked)}
+                                    />
+                                    <span class="mono">{tool}</span>
+                                  </label>
+                                )}
+                              </For>
+                            </div>
+                          </div>
+                        );
+                      }}
                     </For>
                   </div>
                 </div>
