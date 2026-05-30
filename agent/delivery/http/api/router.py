@@ -219,6 +219,10 @@ def _serialize_model_catalog(catalog) -> dict[str, object]:
                 "id": option.id,
                 "label": option.label,
                 "source": option.source,
+                "context_window": option.context_window,
+                "input_types": list(option.input_types)
+                if option.input_types is not None
+                else None,
             }
             for option in catalog.models
         ],

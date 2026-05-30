@@ -18,6 +18,7 @@ export type ModelOption = {
   label: string;
   source: string;
   context_window?: number;
+  input_types?: string[] | null;
 };
 
 export type ModelCatalog = {

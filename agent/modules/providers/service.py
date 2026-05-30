@@ -122,11 +122,13 @@ def _merge_model_options(
         if normalized and normalized not in options:
             entry = model_entries.get(normalized)
             context_window = entry.context_window if entry else None
+            input_types = entry.input_types if entry else None
             options[normalized] = ModelOption(
                 id=normalized,
                 label=normalized,
                 source=source,
                 context_window=context_window,
+                input_types=input_types,
             )
 
     for model_id in remote_models:

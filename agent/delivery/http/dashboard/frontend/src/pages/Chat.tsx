@@ -56,6 +56,7 @@ import type {
   BackgroundTask,
   GitHubPayload,
   GitHubRepositoryBinding,
+  ModelOption,
   WorkspaceRef,
   ThreadUsagePayload,
 } from "@/types";
@@ -1102,6 +1103,34 @@ export function ChatPage() {
     validCards().find((card) => card.name === agentName()),
   );
 
+  const selectedModelOption = createMemo<ModelOption | undefined>(() => {
+    const payload = data();
+    if (!payload) return undefined;
+    const card = selectedCard();
+    const activeProvider = provider() || card?.provider || "default";
+    const activeModel = model() || card?.model || "";
+    const resolvedProv = activeProvider === "default" ? payload.default_provider : activeProvider;
+    const catalog = payload.model_catalogs?.find((c) => c.provider === resolvedProv);
+    const resolvedMod = (activeModel === "" || activeModel === "provider default")
+      ? (activeProvider === "default" ? payload.default_model : (catalog?.default_model || "default"))
+      : activeModel;
+    return catalog?.models?.find((m) => m.id === resolvedMod);
+  });
+
+  const modelSupportsImage = createMemo(() => {
+    const option = selectedModelOption();
+    if (!option || option.input_types == null) return true;
+    return option.input_types.includes("image");
+  });
+
+  const attachmentAccept = createMemo(() =>
+    modelSupportsImage()
+      ? ATTACHMENT_ACCEPT
+      : ATTACHMENT_ACCEPT.split(",")
+          .filter((entry) => entry.trim() !== "image/*")
+          .join(","),
+  );
+
   const contextWindowData = createMemo(() => {
     const card = selectedCard();
     const usage = threadUsage();
@@ -1415,6 +1444,17 @@ export function ChatPage() {
     resetFileInput();
   };
 
+  createEffect(() => {
+    if (modelSupportsImage()) {
+      return;
+    }
+    const images = attachments().filter((item) => item.kind === "image");
+    if (images.length) {
+      clearAttachments(images);
+      showToast("Removed image attachments: the selected model does not support images.", "warning");
+    }
+  });
+
   const removeAttachment = (id: number) => {
     const target = attachments().find((attachment) => attachment.id === id);
     if (!target) {
@@ -1684,6 +1724,10 @@ export function ChatPage() {
       const kind = attachmentKind(file);
       if (!kind) {
         showToast(`Unsupported file type: ${file.name}`, "warning");
+        continue;
+      }
+      if (kind === "image" && !modelSupportsImage()) {
+        showToast("This model does not support images. Only text files can be attached.", "warning");
         continue;
       }
 
@@ -2373,7 +2417,7 @@ export function ChatPage() {
                   class="is-hidden"
                   type="file"
                   multiple
-                  accept={ATTACHMENT_ACCEPT}
+                  accept={attachmentAccept()}
                   onChange={(event) => void addFiles(event.currentTarget.files)}
                 />
                 <Show when={currentTodos() && currentTodos()!.length > 0}>

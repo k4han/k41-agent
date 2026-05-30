@@ -526,8 +526,20 @@ def test_provider_models_endpoint_refreshes_and_serializes_catalog(monkeypatch):
         "default_model": "openai-default",
         "can_list_models": True,
         "models": [
-            {"id": "openai-live", "label": "openai-live", "source": "live"},
-            {"id": "openai-config", "label": "openai-config", "source": "config"},
+            {
+                "id": "openai-live",
+                "label": "openai-live",
+                "source": "live",
+                "context_window": None,
+                "input_types": None,
+            },
+            {
+                "id": "openai-config",
+                "label": "openai-config",
+                "source": "config",
+                "context_window": None,
+                "input_types": None,
+            },
         ],
         "error": None,
     }
