@@ -27,7 +27,7 @@ type AgentForm = {
   mcp_servers: string[];
   sub_agents: string[];
   hidden: boolean;
-  max_context_tokens: number;
+  context_trim_threshold: number;
   system_prompt: string;
 };
 
@@ -42,7 +42,7 @@ const blankForm = (workflow: string): AgentForm => ({
   mcp_servers: [],
   sub_agents: [],
   hidden: false,
-  max_context_tokens: 50000,
+  context_trim_threshold: 50000,
   system_prompt: "",
 });
 
@@ -58,7 +58,7 @@ function cardToForm(card: AgentCard): AgentForm {
     mcp_servers: card.mcp_servers || [],
     sub_agents: card.sub_agents || [],
     hidden: card.hidden || false,
-    max_context_tokens: card.max_context_tokens || 50000,
+    context_trim_threshold: card.context_trim_threshold || 50000,
     system_prompt: card.system_prompt || "",
   };
 }
@@ -427,14 +427,14 @@ export function AgentsPage() {
                   </div>
                 </div>
                 <div class="field">
-                  <label>Max Context Tokens</label>
+                  <label>Context Trim Threshold</label>
                   <input
                     class="input"
                     type="number"
                     min="1"
-                    value={form().max_context_tokens}
+                    value={form().context_trim_threshold}
                     disabled={modalMode() === "view"}
-                    onInput={(event) => updateForm("max_context_tokens", Number(event.currentTarget.value))}
+                    onInput={(event) => updateForm("context_trim_threshold", Number(event.currentTarget.value))}
                   />
                 </div>
                 <div class="field">

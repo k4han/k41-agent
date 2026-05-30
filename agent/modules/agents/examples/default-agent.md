@@ -9,7 +9,7 @@ tools:
   - "read_file"
   - "write_file"
   - "search_files"
-max_context_tokens: 50000
+context_trim_threshold: 50000
 ---
 
 # System Prompt

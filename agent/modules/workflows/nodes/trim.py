@@ -17,7 +17,7 @@ def _safe_positive_int(value, default_value: int) -> int:
 
 
 def make_prepare_context_node(
-    default_max_context_tokens: int = 50_000,
+    default_context_trim_threshold: int = 50_000,
     token_counter: Callable[[list[BaseMessage]], int] | None = None,
 ):
     """
@@ -31,12 +31,16 @@ def make_prepare_context_node(
             return {}
 
         max_context_value = get_runtime_context_value(
-            runtime.context, "max_context_tokens", None
+            runtime.context, "context_trim_threshold", None
         )
+        if max_context_value is None:
+            max_context_value = get_runtime_context_value(
+                runtime.context, "max_context_tokens", None
+            )
 
         max_context_tokens = _safe_positive_int(
             max_context_value,
-            default_max_context_tokens,
+            default_context_trim_threshold,
         )
         counter = token_counter or count_tokens_approximately
         total_tokens = counter(messages)

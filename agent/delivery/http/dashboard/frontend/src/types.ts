@@ -17,6 +17,7 @@ export type ModelOption = {
   id: string;
   label: string;
   source: string;
+  context_window?: number;
 };
 
 export type ModelCatalog = {
@@ -39,7 +40,7 @@ export type AgentCard = {
   mcp_servers?: string[];
   sub_agents: string[] | null;
   hidden: boolean;
-  max_context_tokens: number;
+  context_trim_threshold: number;
   system_prompt: string;
   source: "builtin" | "user";
   path: string;
@@ -60,7 +61,7 @@ export type AgentConfig = {
   mcp_servers?: string[];
   sub_agents: string[] | null;
   hidden: boolean;
-  max_context_tokens: number;
+  context_trim_threshold: number;
   system_prompt: string;
 };
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Literal, Optional, Any
 
 from pydantic import BaseModel, Field
 
@@ -20,8 +20,15 @@ class AgentConfig(BaseModel):
     mcp_servers: Optional[list[str]] = None
     sub_agents: Optional[list[str]] = None  # None = leaf (no call_agent), list = allowed targets
     hidden: bool = False
-    max_context_tokens: int = 50_000
+    context_trim_threshold: int = 50_000
+    max_context_tokens: Optional[int] = None
     system_prompt: str = ""  # Markdown body content (after frontmatter)
+
+    def __init__(self, **data: Any) -> None:
+        if "max_context_tokens" in data and "context_trim_threshold" not in data:
+            data["context_trim_threshold"] = data["max_context_tokens"]
+        super().__init__(**data)
+        object.__setattr__(self, "max_context_tokens", self.context_trim_threshold)
 
 
 class AgentCard(BaseModel):
@@ -37,7 +44,8 @@ class AgentCard(BaseModel):
     mcp_servers: Optional[list[str]] = None
     sub_agents: Optional[list[str]] = None
     hidden: bool = False
-    max_context_tokens: int = 50_000
+    context_trim_threshold: int = 50_000
+    max_context_tokens: Optional[int] = None
     system_prompt: str = ""
     source: Literal["builtin", "user"]
     path: str
@@ -45,6 +53,12 @@ class AgentCard(BaseModel):
     overrides_builtin: bool = False
     valid: bool = True
     error: str = ""
+
+    def __init__(self, **data: Any) -> None:
+        if "max_context_tokens" in data and "context_trim_threshold" not in data:
+            data["context_trim_threshold"] = data["max_context_tokens"]
+        super().__init__(**data)
+        object.__setattr__(self, "max_context_tokens", self.context_trim_threshold)
 
     @classmethod
     def from_config(
@@ -68,7 +82,7 @@ class AgentCard(BaseModel):
             mcp_servers=list(config.mcp_servers) if config.mcp_servers is not None else None,
             sub_agents=list(config.sub_agents) if config.sub_agents is not None else None,
             hidden=config.hidden,
-            max_context_tokens=config.max_context_tokens,
+            context_trim_threshold=config.context_trim_threshold,
             system_prompt=config.system_prompt,
             source=source,
             path=path,
@@ -113,6 +127,6 @@ class AgentCard(BaseModel):
             mcp_servers=list(self.mcp_servers) if self.mcp_servers is not None else None,
             sub_agents=list(self.sub_agents) if self.sub_agents is not None else None,
             hidden=self.hidden,
-            max_context_tokens=self.max_context_tokens,
+            context_trim_threshold=self.context_trim_threshold,
             system_prompt=self.system_prompt,
         )

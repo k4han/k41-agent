@@ -1105,8 +1105,23 @@ export function ChatPage() {
   const contextWindowData = createMemo(() => {
     const card = selectedCard();
     const usage = threadUsage();
+    const payload = data();
     
-    const maxTokens = card?.max_context_tokens || 292000; //192000
+    let maxTokens = 128000;
+    if (payload) {
+      const activeProvider = provider() || card?.provider || "default";
+      const activeModel = model() || card?.model || "";
+      const resolvedProv = activeProvider === "default" ? payload.default_provider : activeProvider;
+      const catalog = payload.model_catalogs?.find((c) => c.provider === resolvedProv);
+      const resolvedMod = (activeModel === "" || activeModel === "provider default")
+        ? (activeProvider === "default" ? payload.default_model : (catalog?.default_model || "default"))
+        : activeModel;
+      const modelOption = catalog?.models?.find((m) => m.id === resolvedMod);
+      if (modelOption && typeof modelOption.context_window === "number") {
+        maxTokens = modelOption.context_window;
+      }
+    }
+
     const totalTokens = usage?.total_tokens || 0;
     const inputTokens = usage?.input_tokens || 0;
     const outputTokens = usage?.output_tokens || 0;

@@ -17,7 +17,7 @@ def _apply_removals(messages, updates):
 
 
 def test_prepare_context_trims_to_token_budget():
-    node = make_prepare_context_node(default_max_context_tokens=21, token_counter=len)
+    node = make_prepare_context_node(default_context_trim_threshold=21, token_counter=len)
 
     messages = []
     for idx in range(12):
@@ -27,7 +27,7 @@ def test_prepare_context_trims_to_token_budget():
 
     result = node(
         {"messages": messages},
-        SimpleNamespace(context={"max_context_tokens": 21}),
+        SimpleNamespace(context={"context_trim_threshold": 21}),
     )
 
     updates = result["messages"]
@@ -41,7 +41,7 @@ def test_prepare_context_trims_to_token_budget():
 
 
 def test_prepare_context_removes_non_human_prefix_when_needed():
-    node = make_prepare_context_node(default_max_context_tokens=10, token_counter=len)
+    node = make_prepare_context_node(default_context_trim_threshold=10, token_counter=len)
 
     messages = [
         AIMessage(content="prefix-ai", id="a-prefix"),
@@ -52,7 +52,7 @@ def test_prepare_context_removes_non_human_prefix_when_needed():
 
     result = node(
         {"messages": messages},
-        SimpleNamespace(context={"max_context_tokens": 10}),
+        SimpleNamespace(context={"context_trim_threshold": 10}),
     )
 
     updates = result["messages"]
@@ -64,7 +64,7 @@ def test_prepare_context_removes_non_human_prefix_when_needed():
 
 
 def test_prepare_context_noop_when_window_is_already_valid():
-    node = make_prepare_context_node(default_max_context_tokens=10, token_counter=len)
+    node = make_prepare_context_node(default_context_trim_threshold=10, token_counter=len)
 
     messages = [
         HumanMessage(content="user-1", id="h-1"),
@@ -74,7 +74,7 @@ def test_prepare_context_noop_when_window_is_already_valid():
 
     result = node(
         {"messages": messages},
-        SimpleNamespace(context={"max_context_tokens": 10}),
+        SimpleNamespace(context={"context_trim_threshold": 10}),
     )
 
     assert result == {}

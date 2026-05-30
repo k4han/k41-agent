@@ -126,10 +126,10 @@ def test_clone_hidden_builtin_agent_preserves_hidden_flag(tmp_path: Path) -> Non
                 name="bad-tokens",
                 graph_type="react_agent",
                 provider="default",
-                max_context_tokens=0,
+                context_trim_threshold=0,
                 system_prompt="Prompt",
             ),
-            "max_context_tokens",
+            "context_trim_threshold",
         ),
         (
             AgentConfig(

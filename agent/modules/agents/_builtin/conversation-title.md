@@ -8,7 +8,7 @@ model: ""
 hidden: true
 tools:
   - "echo"
-max_context_tokens: 2000
+context_trim_threshold: 2000
 ---
 
 You generate concise conversation titles.

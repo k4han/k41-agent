@@ -491,6 +491,7 @@ def _serialize_model_catalog(catalog: Any) -> dict[str, Any]:
                 "id": option.id,
                 "label": option.label,
                 "source": option.source,
+                "context_window": option.context_window,
             }
             for option in catalog.models
         ],

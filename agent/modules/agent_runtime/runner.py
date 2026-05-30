@@ -42,7 +42,8 @@ def build_run_params(
     workflow: str | None = None,
     workspace: WorkspaceRef | dict[str, Any] | str | None = None,
     working_dir: str | None = None,
-    max_context_tokens: int | None = None,
+    context_trim_threshold: int | None = None,
+    max_context_tokens: int | None = None,  # Backward compatibility
     channel_id: str = "",
     agent_name: str = "default",
     provider: str | None = None,
@@ -61,7 +62,8 @@ def build_run_params(
         thread_id: Existing session thread ID to resume
         workflow: Override agent's graph_type if needed
         workspace: Workspace reference for tools
-        max_context_tokens: Override agent's max_context_tokens if needed
+        context_trim_threshold: Override agent's context_trim_threshold if needed
+        max_context_tokens: Override agent's context_trim_threshold if needed (legacy)
         channel_id: Channel identifier (for multi-channel platforms)
         agent_name: Agent to use (loads config from catalog)
         provider: Override agent card provider for this run if needed
@@ -75,6 +77,7 @@ def build_run_params(
         "agent_name": agent_name,
         "workflow": workflow,
         "workspace": workspace if workspace is not None else working_dir,
+        "context_trim_threshold": context_trim_threshold,
         "max_context_tokens": max_context_tokens,
         "provider": provider,
         "model": model,
@@ -410,7 +413,8 @@ async def run_agent(
     workflow: str | None = None,
     workspace: WorkspaceRef | dict[str, Any] | str | None = None,
     working_dir: str | None = None,
-    max_context_tokens: int | None = None,
+    context_trim_threshold: int | None = None,
+    max_context_tokens: int | None = None,  # Backward compatibility
     allowed_tool_names: list[str] | None = None,
     provider: str | None = None,
     model: str | None = None,
@@ -427,7 +431,8 @@ async def run_agent(
         agent_name: Agent to use (loads config from catalog)
         workflow: Override agent's graph_type if needed
         workspace: Workspace reference for tools
-        max_context_tokens: Override agent's max_context_tokens if needed
+        context_trim_threshold: Override agent's context_trim_threshold if needed
+        max_context_tokens: Override agent's context_trim_threshold if needed (legacy)
         allowed_tool_names: Override agent's tools if needed
         provider: Override agent card provider for this run if needed
         model: Override agent card model for this run if needed
@@ -442,7 +447,14 @@ async def run_agent(
 
     # Resolve: explicit params > agent config
     resolved_workflow = workflow or agent_config.graph_type
-    resolved_max_tokens = max_context_tokens or agent_config.max_context_tokens
+    config_threshold = getattr(
+        agent_config, "context_trim_threshold", None
+    ) or getattr(agent_config, "max_context_tokens", None)
+    resolved_threshold = (
+        context_trim_threshold
+        if context_trim_threshold is not None
+        else (max_context_tokens or config_threshold)
+    )
     resolved_tools = allowed_tool_names if allowed_tool_names is not None else agent_config.tools
 
     graph = get_workflow_graph(resolved_workflow)
@@ -454,7 +466,8 @@ async def run_agent(
     context = make_run_context(
         workspace=workspace,
         working_dir=working_dir,
-        max_context_tokens=resolved_max_tokens,
+        context_trim_threshold=resolved_threshold,
+        max_context_tokens=resolved_threshold,
         agent_name=agent_name,
         allowed_tool_names=resolved_tools or None,
         provider=provider,
@@ -499,7 +512,8 @@ async def run_agent_stream(
     workflow: str | None = None,
     workspace: WorkspaceRef | dict[str, Any] | str | None = None,
     working_dir: str | None = None,
-    max_context_tokens: int | None = None,
+    context_trim_threshold: int | None = None,
+    max_context_tokens: int | None = None,  # Backward compatibility
     allowed_tool_names: list[str] | None = None,
     provider: str | None = None,
     model: str | None = None,
@@ -517,7 +531,8 @@ async def run_agent_stream(
         agent_name: Agent to use (loads config from catalog)
         workflow: Override agent's graph_type if needed
         workspace: Workspace reference for tools
-        max_context_tokens: Override agent's max_context_tokens if needed
+        context_trim_threshold: Override agent's context_trim_threshold if needed
+        max_context_tokens: Override agent's context_trim_threshold if needed (legacy)
         allowed_tool_names: Override agent's tools if needed
         provider: Override agent card provider for this run if needed
         model: Override agent card model for this run if needed
@@ -533,7 +548,14 @@ async def run_agent_stream(
 
     # Resolve: explicit params > agent config
     resolved_workflow = workflow or agent_config.graph_type
-    resolved_max_tokens = max_context_tokens or agent_config.max_context_tokens
+    config_threshold = getattr(
+        agent_config, "context_trim_threshold", None
+    ) or getattr(agent_config, "max_context_tokens", None)
+    resolved_threshold = (
+        context_trim_threshold
+        if context_trim_threshold is not None
+        else (max_context_tokens or config_threshold)
+    )
     resolved_tools = allowed_tool_names if allowed_tool_names is not None else agent_config.tools
 
     graph = get_workflow_graph(resolved_workflow)
@@ -545,7 +567,8 @@ async def run_agent_stream(
     context = make_run_context(
         workspace=workspace,
         working_dir=working_dir,
-        max_context_tokens=resolved_max_tokens,
+        context_trim_threshold=resolved_threshold,
+        max_context_tokens=resolved_threshold,
         agent_name=agent_name,
         allowed_tool_names=resolved_tools or None,
         provider=provider,
@@ -678,7 +701,8 @@ async def run_agent_full(
     workflow: str | None = None,
     workspace: WorkspaceRef | dict[str, Any] | str | None = None,
     working_dir: str | None = None,
-    max_context_tokens: int | None = None,
+    context_trim_threshold: int | None = None,
+    max_context_tokens: int | None = None,  # Backward compatibility
     allowed_tool_names: list[str] | None = None,
     provider: str | None = None,
     model: str | None = None,
@@ -698,7 +722,8 @@ async def run_agent_full(
         agent_name: Agent to use (loads config from catalog)
         workflow: Override agent's graph_type if needed
         workspace: Workspace reference for tools
-        max_context_tokens: Override agent's max_context_tokens if needed
+        context_trim_threshold: Override agent's context_trim_threshold if needed
+        max_context_tokens: Override agent's context_trim_threshold if needed (legacy)
         allowed_tool_names: Override agent's tools if needed
         provider: Override agent card provider for this run if needed
         model: Override agent card model for this run if needed
@@ -712,6 +737,7 @@ async def run_agent_full(
         workflow=workflow,
         workspace=workspace,
         working_dir=working_dir,
+        context_trim_threshold=context_trim_threshold,
         max_context_tokens=max_context_tokens,
         allowed_tool_names=allowed_tool_names,
         provider=provider,

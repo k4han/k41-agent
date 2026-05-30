@@ -123,7 +123,7 @@ def serialize_agent_config(config: AgentConfig) -> str:
         "provider": config.provider,
         "model": config.model,
         "tools": list(config.tools),
-        "max_context_tokens": config.max_context_tokens,
+        "context_trim_threshold": config.context_trim_threshold,
     }
     if config.mcp_servers is not None:
         data["mcp_servers"] = list(config.mcp_servers)
@@ -171,11 +171,16 @@ def _build_agent_config(
     display_name = str(data.get("display_name", ""))
     description = str(data.get("description", ""))
     model = str(data.get("model", "")).strip()
+
+    raw_threshold = data.get("context_trim_threshold")
+    if raw_threshold is None:
+        raw_threshold = data.get("max_context_tokens")
+
     try:
-        max_context_tokens = int(data.get("max_context_tokens", 50_000))
+        context_trim_threshold = int(raw_threshold if raw_threshold is not None else 50_000)
     except (TypeError, ValueError) as exc:
         raise AgentMarkdownError(
-            f"Agent file {source_label} has invalid 'max_context_tokens'."
+            f"Agent file {source_label} has invalid 'context_trim_threshold'."
         ) from exc
     tools = parse_string_or_list(data.get("tools", []))
     raw_mcp = data.get("mcp_servers")
@@ -213,7 +218,7 @@ def _build_agent_config(
             mcp_servers=mcp_servers,
             sub_agents=sub_agents,
             hidden=hidden,
-            max_context_tokens=max_context_tokens,
+            context_trim_threshold=context_trim_threshold,
             system_prompt=body,
         )
     except Exception as exc:

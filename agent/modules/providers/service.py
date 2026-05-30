@@ -76,6 +76,7 @@ class ProviderService:
             default_model=provider.default_model,
             can_list_models=can_list_models,
             models=_merge_model_options(
+                provider_name=provider.name,
                 remote_models=remote_models,
                 configured_models=list(provider.models),
                 default_model=provider.default_model,
@@ -104,19 +105,28 @@ class ProviderService:
 
 def _merge_model_options(
     *,
+    provider_name: str,
     remote_models: list[str],
     configured_models: list[str],
     default_model: str,
 ) -> tuple[ModelOption, ...]:
+    from agent.modules.providers.catalog import get_provider_catalog_entry
+
+    catalog_entry = get_provider_catalog_entry(provider_name)
+    model_entries = {m.id: m for m in catalog_entry.models} if catalog_entry else {}
+
     options: dict[str, ModelOption] = {}
 
     def add(model_id: str, source: str) -> None:
         normalized = model_id.strip()
         if normalized and normalized not in options:
+            entry = model_entries.get(normalized)
+            context_window = entry.context_window if entry else None
             options[normalized] = ModelOption(
                 id=normalized,
                 label=normalized,
                 source=source,
+                context_window=context_window,
             )
 
     for model_id in remote_models:

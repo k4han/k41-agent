@@ -9,7 +9,7 @@ tools:
   - "webfetch"
   - "list_files"
   - "read_file"
-max_context_tokens: 50000
+context_trim_threshold: 50000
 ---
 
 # System Prompt

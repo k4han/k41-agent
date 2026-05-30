@@ -21,6 +21,7 @@ class ModelOption:
     id: str
     label: str
     source: str
+    context_window: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

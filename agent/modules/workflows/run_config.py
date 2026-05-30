@@ -9,7 +9,7 @@ from agent.modules.workspaces import (
     normalize_workspace_ref,
 )
 
-DEFAULT_MAX_CONTEXT_TOKENS = 50_000
+DEFAULT_CONTEXT_TRIM_THRESHOLD = 50_000
 DEFAULT_WORKING_DIR = DEFAULT_LOCAL_WORKSPACE
 
 
@@ -18,7 +18,7 @@ class WorkflowContext:
     """Run-scoped context passed via LangGraph context_schema."""
 
     workspace: WorkspaceRef
-    max_context_tokens: int
+    context_trim_threshold: int
     agent_name: str
     allowed_tool_names: list[str]
     provider: str | None = None
@@ -29,7 +29,8 @@ class WorkflowContext:
         *,
         workspace: WorkspaceRef | dict[str, Any] | str | None = None,
         working_dir: str | None = None,
-        max_context_tokens: int = DEFAULT_MAX_CONTEXT_TOKENS,
+        context_trim_threshold: int | None = None,
+        max_context_tokens: int | None = None,  # Backward compatibility
         agent_name: str = "default",
         allowed_tool_names: list[str] | None = None,
         provider: str | None = None,
@@ -41,7 +42,11 @@ class WorkflowContext:
             workspace if workspace is not None else working_dir,
             default_locator=default_locator,
         )
-        self.max_context_tokens = max_context_tokens
+        self.context_trim_threshold = (
+            context_trim_threshold 
+            if context_trim_threshold is not None 
+            else (max_context_tokens if max_context_tokens is not None else DEFAULT_CONTEXT_TRIM_THRESHOLD)
+        )
         self.agent_name = agent_name
         self.allowed_tool_names = list(allowed_tool_names or [])
         self.provider = provider
@@ -71,15 +76,25 @@ class WorkflowContext:
         """Get allowed tool names from context."""
         return self.allowed_tool_names
 
+    def get_context_trim_threshold(self) -> int:
+        """Get context trim threshold from context."""
+        return self.context_trim_threshold
+
     def get_max_context_tokens(self) -> int:
-        """Get max context tokens from context."""
-        return self.max_context_tokens
+        """Get max context tokens from context (backward compatibility)."""
+        return self.context_trim_threshold
+
+    @property
+    def max_context_tokens(self) -> int:
+        """Get max context tokens property (backward compatibility)."""
+        return self.context_trim_threshold
 
 
 def make_context(
     workspace: WorkspaceRef | dict[str, Any] | str | None = None,
     working_dir: str | None = None,
-    max_context_tokens: int = DEFAULT_MAX_CONTEXT_TOKENS,
+    context_trim_threshold: int | None = None,
+    max_context_tokens: int | None = None,  # Backward compatibility
     agent_name: str = "default",
     allowed_tool_names: list[str] | None = None,
     provider: str | None = None,
@@ -100,6 +115,7 @@ def make_context(
 
     return WorkflowContext(
         workspace=resolved_workspace,
+        context_trim_threshold=context_trim_threshold,
         max_context_tokens=max_context_tokens,
         agent_name=agent_name,
         allowed_tool_names=allowed_tool_names,
