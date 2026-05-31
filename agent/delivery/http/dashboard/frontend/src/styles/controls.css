@@ -1029,6 +1029,214 @@
   margin-bottom: 16px;
 }
 
+/* --- Agent card dialog --- */
+
+.dialog:has(.agent-card-dialog-content) .dialog-body {
+  overflow: hidden;
+}
+
+.agent-card-dialog-content {
+  display: flex;
+  height: min(560px, calc(86vh - 148px));
+  min-height: 0;
+  flex-direction: column;
+}
+
+/* --- Agent card tool configuration --- */
+
+.agent-config-tools {
+  display: grid;
+  gap: 14px;
+  padding: 4px 2px 20px;
+}
+
+.agent-config-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.agent-config-stat {
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--info) 7%, var(--surface)),
+    var(--surface)
+  );
+  padding: 12px;
+}
+
+.agent-config-stat span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.agent-config-stat strong {
+  color: var(--fg);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.agent-config-section {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.agent-config-section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-2) 58%, var(--surface));
+  padding: 14px;
+}
+
+.agent-config-section-header h3 {
+  margin: 2px 0 3px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.agent-config-eyebrow {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.agent-config-section-body {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.agent-config-group {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  padding: 10px;
+}
+
+.agent-config-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.agent-config-group-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.agent-config-group-toggle:has(input:disabled) {
+  cursor: default;
+}
+
+.agent-config-option-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 8px;
+}
+
+.agent-config-option {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 9px 10px;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    color 120ms ease;
+}
+
+.agent-config-option:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+}
+
+.agent-config-option.active {
+  border-color: var(--border);
+  background: var(--surface);
+  box-shadow: none;
+}
+
+.agent-config-option.read-only {
+  cursor: default;
+}
+
+.agent-config-option.read-only:hover {
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.agent-config-option.read-only.active:hover {
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.agent-config-option input,
+.agent-config-group-toggle input {
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.agent-config-option-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.agent-config-option.active .agent-config-option-text {
+  color: var(--muted);
+  font-weight: inherit;
+}
+
+.agent-config-empty {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--muted);
+  padding: 18px;
+  text-align: center;
+  font-size: 12px;
+}
+
+@media (max-width: 720px) {
+  .agent-config-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-config-section-header {
+    flex-direction: column;
+  }
+}
+
 /* --- MCP popular server cards --- */
 
 .mcp-popular-card {

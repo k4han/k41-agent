@@ -283,6 +283,17 @@ export function AgentsPage() {
   const subAgentOptions = createMemo(() =>
     (data()?.agent_names || []).filter((name) => name !== form().name),
   );
+  const mcpServerOptions = createMemo(() =>
+    uniqueSorted([...(data()?.mcp_server_options || []), ...(form().mcp_servers || [])]),
+  );
+  const subAgentConfigOptions = createMemo(() =>
+    uniqueSorted([...subAgentOptions(), ...form().sub_agents]),
+  );
+  const totalBuiltInTools = createMemo(() =>
+    toolGroups().reduce((total, group) => total + group.tools.length, 0),
+  );
+  const optionCardClass = (checked: boolean) =>
+    `agent-config-option ${checked ? "active" : ""} ${modalMode() === "view" ? "read-only" : ""}`;
 
   onMount(() => {
     load();
@@ -432,7 +443,7 @@ export function AgentsPage() {
                 </>
               }
             >
-              <div class="stack" style="height: 560px; display: flex; flex-direction: column;">
+              <div class="stack agent-card-dialog-content">
                 {/* Tab Bar */}
                 <div class="tab-bar" style="flex: 0 0 auto;">
                   <button
@@ -546,65 +557,67 @@ export function AgentsPage() {
                   </Show>
 
                   <Show when={activeTab() === "tools"}>
-                    <div class="stack" style="gap: 16px; padding: 4px 2px 20px 2px;">
-                      {/* Section 1: Built-in Tools */}
-                      <div class="field">
-                        <label style="color: var(--muted); font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">Built-in Tools</label>
-                        <div class="stack" style="gap: 12px;">
-                          <For each={toolGroups()}>
+                    <div class="agent-config-tools">
+                      <div class="agent-config-summary">
+                        <div class="agent-config-stat">
+                          <span>Built-in tools</span>
+                          <strong>{form().tools.length}/{totalBuiltInTools()}</strong>
+                        </div>
+                        <div class="agent-config-stat">
+                          <span>MCP servers</span>
+                          <strong>{form().mcp_servers.length}/{mcpServerOptions().length}</strong>
+                        </div>
+                        <div class="agent-config-stat">
+                          <span>Sub-agents</span>
+                          <strong>{form().sub_agents.length}/{subAgentConfigOptions().length}</strong>
+                        </div>
+                      </div>
+
+                      <section class="agent-config-section">
+                        <div class="agent-config-section-header">
+                          <div>
+                            <div class="agent-config-eyebrow">Capabilities</div>
+                            <h3>Built-in Tools</h3>
+                            <p class="hint">Enable bundled tools by category for this agent card.</p>
+                          </div>
+                          <span class="badge badge-info">{form().tools.length} selected</span>
+                        </div>
+                        <div class="agent-config-section-body">
+                          <For
+                            each={toolGroups()}
+                            fallback={<div class="agent-config-empty">No built-in tools available</div>}
+                          >
                             {(group) => {
+                              const checkedCount = () => group.tools.filter((tool) => form().tools.includes(tool)).length;
                               const allChecked = () =>
-                                group.tools.length > 0 && group.tools.every((tool) => form().tools.includes(tool));
+                                group.tools.length > 0 && checkedCount() === group.tools.length;
                               return (
-                                <div style="border: 1px solid var(--border, rgba(255, 255, 255, 0.08)); border-radius: 8px; padding: 12px; background: var(--surface-2, rgba(255, 255, 255, 0.01)); display: flex; flex-direction: column; gap: 10px;">
-                                  {/* Group Header */}
-                                  <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08)); padding-bottom: 8px;">
-                                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 600; color: var(--fg); font-size: 13px;">
+                                <div class="agent-config-group">
+                                  <div class="agent-config-group-header">
+                                    <label class="agent-config-group-toggle">
                                       <input
                                         type="checkbox"
                                         checked={allChecked()}
                                         disabled={modalMode() === "view"}
                                         onChange={(event) => toggleToolGroup(group.tools, event.currentTarget.checked)}
-                                        style="cursor: pointer;"
                                       />
                                       <span>{formatToolCategory(group.category)}</span>
                                     </label>
-                                    <span class="badge badge-info" style="font-size: 10px; padding: 2px 8px; border-radius: 4px;">{group.tools.length} tools</span>
+                                    <span class="badge">{checkedCount()}/{group.tools.length}</span>
                                   </div>
-                                  {/* Cards Grid */}
-                                  <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px;">
+                                  <div class="agent-config-option-grid">
                                     <For each={group.tools}>
                                       {(tool) => {
                                         const isChecked = () => form().tools.includes(tool);
                                         return (
-                                          <label
-                                            style={{
-                                              display: "flex",
-                                              "align-items": "center",
-                                              gap: "8px",
-                                              padding: "8px 10px",
-                                              border: "1px solid",
-                                              "border-radius": "6px",
-                                              background: isChecked() ? "color-mix(in srgb, var(--accent) 8%, var(--surface-2, rgba(255,255,255,0.02)))" : "var(--surface, #181825)",
-                                              "border-color": isChecked() ? "var(--accent, #3b82f6)" : "var(--border, rgba(255, 255, 255, 0.08))",
-                                              cursor: modalMode() === "view" ? "default" : "pointer",
-                                              transition: "all 0.15s ease",
-                                              "user-select": "none"
-                                            }}
-                                          >
+                                          <label class={optionCardClass(isChecked())}>
                                             <input
                                               type="checkbox"
                                               checked={isChecked()}
                                               disabled={modalMode() === "view"}
                                               onChange={(event) => toggleListValue("tools", tool, event.currentTarget.checked)}
-                                              style="margin: 0; cursor: pointer;"
                                             />
-                                            <span class="mono" style={{
-                                              "font-size": "11px",
-                                              color: isChecked() ? "var(--fg)" : "var(--muted)",
-                                              "font-weight": isChecked() ? "600" : "400",
-                                              "word-break": "break-all"
-                                            }}>{tool}</span>
+                                            <span class="agent-config-option-text mono">{tool}</span>
                                           </label>
                                         );
                                       }}
@@ -615,101 +628,76 @@ export function AgentsPage() {
                             }}
                           </For>
                         </div>
-                      </div>
+                      </section>
 
-                      {/* Section 2: MCP Servers */}
-                      <Show when={payload.mcp_server_options && payload.mcp_server_options.length > 0}>
-                        <div class="field">
-                          <label style="color: var(--muted); font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">MCP Servers</label>
-                          <div style="border: 1px solid var(--border, rgba(255, 255, 255, 0.08)); border-radius: 8px; padding: 12px; background: var(--surface-2, rgba(255, 255, 255, 0.01)); display: flex; flex-direction: column; gap: 10px;">
-                            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px;">
-                              <For each={uniqueSorted([...payload.mcp_server_options!, ...(form().mcp_servers || [])])}>
+                      <Show when={mcpServerOptions().length > 0}>
+                        <section class="agent-config-section">
+                          <div class="agent-config-section-header">
+                            <div>
+                              <div class="agent-config-eyebrow">External context</div>
+                              <h3>MCP Servers</h3>
+                              <p class="hint">Connect this agent to configured MCP server toolsets.</p>
+                            </div>
+                            <span class="badge badge-info">{form().mcp_servers.length} selected</span>
+                          </div>
+                          <div class="agent-config-section-body">
+                            <div class="agent-config-option-grid">
+                              <For each={mcpServerOptions()}>
                                 {(server) => {
-                                  const isChecked = () => (form().mcp_servers || []).includes(server);
+                                  const isChecked = () => form().mcp_servers.includes(server);
                                   return (
-                                    <label
-                                      style={{
-                                        display: "flex",
-                                        "align-items": "center",
-                                        gap: "8px",
-                                        padding: "8px 10px",
-                                        border: "1px solid",
-                                        "border-radius": "6px",
-                                        background: isChecked() ? "color-mix(in srgb, var(--accent) 8%, var(--surface-2, rgba(255,255,255,0.02)))" : "var(--surface, #181825)",
-                                        "border-color": isChecked() ? "var(--accent, #3b82f6)" : "var(--border, rgba(255, 255, 255, 0.08))",
-                                        cursor: modalMode() === "view" ? "default" : "pointer",
-                                        transition: "all 0.15s ease",
-                                        "user-select": "none"
-                                      }}
-                                    >
+                                    <label class={optionCardClass(isChecked())}>
                                       <input
                                         type="checkbox"
                                         checked={isChecked()}
                                         disabled={modalMode() === "view"}
                                         onChange={(event) => toggleListValue("mcp_servers", server, event.currentTarget.checked)}
-                                        style="margin: 0; cursor: pointer;"
                                       />
-                                      <span class="mono" style={{
-                                        "font-size": "11px",
-                                        color: isChecked() ? "var(--fg)" : "var(--muted)",
-                                        "font-weight": isChecked() ? "600" : "400",
-                                        "word-break": "break-all"
-                                      }}>{server}</span>
+                                      <span class="agent-config-option-text mono">{server}</span>
                                     </label>
                                   );
                                 }}
                               </For>
                             </div>
                           </div>
-                        </div>
+                        </section>
                       </Show>
 
-                      {/* Section 3: Sub-agents */}
-                      <div class="field">
-                        <label style="color: var(--muted); font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">Sub-agents</label>
-                        <div style="border: 1px solid var(--border, rgba(255, 255, 255, 0.08)); border-radius: 8px; padding: 12px; background: var(--surface-2, rgba(255, 255, 255, 0.01)); display: flex; flex-direction: column; gap: 10px;">
-                          <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px;">
-                            <For each={uniqueSorted([...subAgentOptions(), ...form().sub_agents])}>
-                              {(agent) => {
-                                const isChecked = () => form().sub_agents.includes(agent);
-                                return (
-                                  <label
-                                    style={{
-                                      display: "flex",
-                                      "align-items": "center",
-                                      gap: "8px",
-                                      padding: "8px 10px",
-                                      border: "1px solid",
-                                      "border-radius": "6px",
-                                      background: isChecked() ? "color-mix(in srgb, var(--accent) 8%, var(--surface-2, rgba(255,255,255,0.02)))" : "var(--surface, #181825)",
-                                      "border-color": isChecked() ? "var(--accent, #3b82f6)" : "var(--border, rgba(255, 255, 255, 0.08))",
-                                      cursor: modalMode() === "view" ? "default" : "pointer",
-                                      transition: "all 0.15s ease",
-                                      "user-select": "none"
-                                    }}
-                                  >
-                                    <input
-                                      type="checkbox"
-                                      checked={isChecked()}
-                                      disabled={modalMode() === "view"}
-                                      onChange={(event) => toggleListValue("sub_agents", agent, event.currentTarget.checked)}
-                                      style="margin: 0; cursor: pointer;"
-                                    />
-                                    <span class="mono" style={{
-                                      "font-size": "11px",
-                                      color: isChecked() ? "var(--fg)" : "var(--muted)",
-                                      "font-weight": isChecked() ? "600" : "400"
-                                    }}>{agent}</span>
-                                  </label>
-                                );
-                              }}
-                            </For>
-                            <Show when={subAgentOptions().length === 0 && form().sub_agents.length === 0}>
-                              <span class="hint" style="grid-column: 1 / -1; text-align: center; padding: 12px 0;">No sub-agents available</span>
-                            </Show>
+                      <section class="agent-config-section">
+                        <div class="agent-config-section-header">
+                          <div>
+                            <div class="agent-config-eyebrow">Delegation</div>
+                            <h3>Sub-agents</h3>
+                            <p class="hint">Allow this agent to route work to other agent cards.</p>
                           </div>
+                          <span class="badge badge-info">{form().sub_agents.length} selected</span>
                         </div>
-                      </div>
+                        <div class="agent-config-section-body">
+                          <Show
+                            when={subAgentConfigOptions().length > 0}
+                            fallback={<div class="agent-config-empty">No sub-agents available</div>}
+                          >
+                            <div class="agent-config-option-grid">
+                              <For each={subAgentConfigOptions()}>
+                                {(agent) => {
+                                  const isChecked = () => form().sub_agents.includes(agent);
+                                  return (
+                                    <label class={optionCardClass(isChecked())}>
+                                      <input
+                                        type="checkbox"
+                                        checked={isChecked()}
+                                        disabled={modalMode() === "view"}
+                                        onChange={(event) => toggleListValue("sub_agents", agent, event.currentTarget.checked)}
+                                      />
+                                      <span class="agent-config-option-text mono">{agent}</span>
+                                    </label>
+                                  );
+                                }}
+                              </For>
+                            </div>
+                          </Show>
+                        </div>
+                      </section>
                     </div>
                   </Show>
 
