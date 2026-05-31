@@ -1,8 +1,9 @@
-import { createMemo, createSignal, For, onMount, Show } from "solid-js";
+import { createMemo, createSignal, onMount, Show } from "solid-js";
 import { Edit3, Plus, RefreshCw, Trash2 } from "lucide-solid";
 
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { CopyButton } from "@/components/CopyButton";
+import { DashboardTable } from "@/components/DashboardTable";
 import { Dialog } from "@/components/Dialog";
 import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { DataGate } from "@/components/State";
@@ -173,89 +174,75 @@ export function PromptVariablesPage() {
             />
 
             <section class="panel">
-              <div class="table-wrap">
-                <table class="table">
-                  <thead>
-                    <tr>
-                      <th>Name</th>
-                      <th>Placeholder</th>
-                      <th>Value</th>
-                      <th>Updated</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <For
-                      each={filteredVariables()}
-                      fallback={
-                        <tr>
-                          <td colSpan={5}>
-                            <div class="empty">No prompt variables found.</div>
-                          </td>
-                        </tr>
-                      }
-                    >
-                      {(variable) => (
-                        <tr>
-                          <td>
-                            <div class="row-wrap" style="gap: 0.5rem; align-items: center;">
-                              <div class="mono">{variable.name}</div>
-                              <Show when={variable.is_system}>
-                                <span class="badge" style="background-color: var(--color-bg-subtle, rgba(255,255,255,0.05)); color: var(--color-text-muted, #a6adc8); font-size: 0.7rem; padding: 0.1rem 0.35rem; border-radius: 4px; border: 1px solid var(--color-border, rgba(255,255,255,0.1)); line-height: 1.2;">System</span>
-                              </Show>
-                            </div>
-                          </td>
-                          <td>
-                            <CopyButton
-                              value={variable.placeholder}
-                              class="btn btn-sm"
-                              title="Copy placeholder"
-                              ariaLabel="Copy placeholder"
-                              successMessage="Placeholder copied."
-                              failureMessage="Failed to copy placeholder."
-                              showIcon
-                              iconSize={13}
-                            >
-                              <span class="mono">{variable.placeholder}</span>
-                            </CopyButton>
-                          </td>
-                          <td>
-                            <div class="prompt-variable-preview">
-                              {truncateText(variable.value || "", 180) || "-"}
-                            </div>
-                          </td>
-                          <td>{formatDate(variable.updated_at || variable.created_at)}</td>
-                          <td>
-                            <div class="row-wrap">
-                              <Show
-                                when={!variable.is_system}
-                                fallback={
-                                  <span style="font-size: 0.8rem; font-style: italic; color: var(--color-text-muted, #a6adc8); opacity: 0.7;">
-                                    Read-Only
-                                  </span>
-                                }
-                              >
-                                <button class="btn btn-sm" type="button" onClick={() => openEdit(variable)}>
-                                  <Edit3 size={13} />
-                                  Edit
-                                </button>
-                                <button
-                                  class="btn btn-sm btn-danger"
-                                  type="button"
-                                  onClick={() => setDeleteTargetName(variable.name)}
-                                >
-                                  <Trash2 size={13} />
-                                  Delete
-                                </button>
-                              </Show>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </For>
-                  </tbody>
-                </table>
-              </div>
+              <DashboardTable
+                columns={[
+                  { header: "Name" },
+                  { header: "Placeholder" },
+                  { header: "Value" },
+                  { header: "Updated" },
+                  { header: "Actions" },
+                ]}
+                rows={filteredVariables()}
+                emptyMessage="No prompt variables found."
+              >
+                {(variable) => (
+                  <tr>
+                    <td>
+                      <div class="row-wrap" style="gap: 0.5rem; align-items: center;">
+                        <div class="mono">{variable.name}</div>
+                        <Show when={variable.is_system}>
+                          <span class="badge" style="background-color: var(--color-bg-subtle, rgba(255,255,255,0.05)); color: var(--color-text-muted, #a6adc8); font-size: 0.7rem; padding: 0.1rem 0.35rem; border-radius: 4px; border: 1px solid var(--color-border, rgba(255,255,255,0.1)); line-height: 1.2;">System</span>
+                        </Show>
+                      </div>
+                    </td>
+                    <td>
+                      <CopyButton
+                        value={variable.placeholder}
+                        class="btn btn-sm"
+                        title="Copy placeholder"
+                        ariaLabel="Copy placeholder"
+                        successMessage="Placeholder copied."
+                        failureMessage="Failed to copy placeholder."
+                        showIcon
+                        iconSize={13}
+                      >
+                        <span class="mono">{variable.placeholder}</span>
+                      </CopyButton>
+                    </td>
+                    <td>
+                      <div class="prompt-variable-preview">
+                        {truncateText(variable.value || "", 180) || "-"}
+                      </div>
+                    </td>
+                    <td>{formatDate(variable.updated_at || variable.created_at)}</td>
+                    <td>
+                      <div class="row-wrap">
+                        <Show
+                          when={!variable.is_system}
+                          fallback={
+                            <span style="font-size: 0.8rem; font-style: italic; color: var(--color-text-muted, #a6adc8); opacity: 0.7;">
+                              Read-Only
+                            </span>
+                          }
+                        >
+                          <button class="btn btn-sm" type="button" onClick={() => openEdit(variable)}>
+                            <Edit3 size={13} />
+                            Edit
+                          </button>
+                          <button
+                            class="btn btn-sm btn-danger"
+                            type="button"
+                            onClick={() => setDeleteTargetName(variable.name)}
+                          >
+                            <Trash2 size={13} />
+                            Delete
+                          </button>
+                        </Show>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </DashboardTable>
             </section>
 
             <Dialog

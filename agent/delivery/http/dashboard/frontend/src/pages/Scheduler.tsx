@@ -3,8 +3,8 @@ import { Edit3, Play, Square, Trash2 } from "lucide-solid";
 
 import { AppShell } from "@/components/AppShell";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { DashboardTable } from "@/components/DashboardTable";
 import { Dialog } from "@/components/Dialog";
-import { EmptyTableRow } from "@/components/EmptyTableRow";
 import { SelectControl } from "@/components/SelectControl";
 import { DataGate } from "@/components/State";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -410,71 +410,61 @@ export function SchedulerPage() {
                 <div class="panel-header">
                   <div class="panel-title">All Scheduled Jobs</div>
                 </div>
-                <div class="table-wrap">
-                  <table class="table">
-                    <thead>
-                      <tr>
-                        <th>Job</th>
-                        <th>Target</th>
-                        <th>Trigger</th>
-                        <th>Next Run</th>
-                        <th>Status</th>
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <For
-                        each={payload.jobs}
-                        fallback={
-                        <EmptyTableRow colSpan={6} message="No scheduled jobs." />
-                      }
-                      >
-                        {(job) => (
-                          <tr>
-                            <td>
-                              <div>{job.task}</div>
-                              <div class="mono hint">{job.id}</div>
-                            </td>
-                            <td>
-                              <span class="badge">{job.platform}</span>
-                              <div class="mono hint">{job.user_id}</div>
-                            </td>
-                            <td><span class="chip">{job.trigger_type}</span></td>
-                            <td>{job.next_run_time || "-"}</td>
-                            <td><StatusBadge status={job.paused ? "paused" : "active"} /></td>
-                            <td>
-                              <div class="row-wrap">
-                                <button class="btn btn-sm" type="button" onClick={() => openEdit(job)}>
-                                  <Edit3 size={13} />
-                                  Edit
-                                </button>
-                                <button class="btn btn-sm" type="button" onClick={() => jobAction(job, "run")}>
-                                  <Play size={13} />
-                                  Run
-                                </button>
-                                {job.paused ? (
-                                  <button class="btn btn-sm" type="button" onClick={() => jobAction(job, "resume")}>
-                                    <Play size={13} />
-                                    Resume
-                                  </button>
-                                ) : (
-                                  <button class="btn btn-sm btn-warning" type="button" onClick={() => jobAction(job, "pause")}>
-                                    <Square size={13} />
-                                    Pause
-                                  </button>
-                                )}
-                                <button class="btn btn-sm btn-danger" type="button" onClick={() => jobAction(job, "delete")}>
-                                  <Trash2 size={13} />
-                                  Delete
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </For>
-                    </tbody>
-                  </table>
-                </div>
+                <DashboardTable
+                  columns={[
+                    { header: "Job" },
+                    { header: "Target" },
+                    { header: "Trigger" },
+                    { header: "Next Run" },
+                    { header: "Status" },
+                    { header: "Actions" },
+                  ]}
+                  rows={payload.jobs}
+                  emptyMessage="No scheduled jobs."
+                >
+                  {(job) => (
+                    <tr>
+                      <td>
+                        <div>{job.task}</div>
+                        <div class="mono hint">{job.id}</div>
+                      </td>
+                      <td>
+                        <span class="badge">{job.platform}</span>
+                        <div class="mono hint">{job.user_id}</div>
+                      </td>
+                      <td><span class="chip">{job.trigger_type}</span></td>
+                      <td>{job.next_run_time || "-"}</td>
+                      <td><StatusBadge status={job.paused ? "paused" : "active"} /></td>
+                      <td>
+                        <div class="row-wrap">
+                          <button class="btn btn-sm" type="button" onClick={() => openEdit(job)}>
+                            <Edit3 size={13} />
+                            Edit
+                          </button>
+                          <button class="btn btn-sm" type="button" onClick={() => jobAction(job, "run")}>
+                            <Play size={13} />
+                            Run
+                          </button>
+                          {job.paused ? (
+                            <button class="btn btn-sm" type="button" onClick={() => jobAction(job, "resume")}>
+                              <Play size={13} />
+                              Resume
+                            </button>
+                          ) : (
+                            <button class="btn btn-sm btn-warning" type="button" onClick={() => jobAction(job, "pause")}>
+                              <Square size={13} />
+                              Pause
+                            </button>
+                          )}
+                          <button class="btn btn-sm btn-danger" type="button" onClick={() => jobAction(job, "delete")}>
+                            <Trash2 size={13} />
+                            Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </DashboardTable>
               </section>
 
               <Dialog

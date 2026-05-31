@@ -2,8 +2,8 @@ import { createSignal, For, onMount, Show } from "solid-js";
 import { Plus, RefreshCw, Trash2 } from "lucide-solid";
 
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { DashboardTable } from "@/components/DashboardTable";
 import { DataGate } from "@/components/State";
-import { EmptyTableRow } from "@/components/EmptyTableRow";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
 import type {
@@ -161,116 +161,103 @@ export function McpTab() {
                   </div>
                 </div>
               </div>
-              <div class="table-wrap">
-                <table class="table">
-                  <thead>
-                    <tr>
-                      <th>Name</th>
-                      <th>Transport</th>
-                      <th>Status</th>
-                      <th>Tools</th>
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <For
-                      each={servers()}
-                      fallback={
-                        <EmptyTableRow
-                          colSpan={5}
-                          message="No MCP servers configured yet. Install one from the catalog below or add a custom server."
-                        />
+              <DashboardTable
+                columns={[
+                  { header: "Name" },
+                  { header: "Transport" },
+                  { header: "Status" },
+                  { header: "Tools" },
+                  {},
+                ]}
+                rows={servers()}
+                emptyMessage="No MCP servers configured yet. Install one from the catalog below or add a custom server."
+              >
+                {(server) => (
+                  <tr
+                    class="provider-table-row"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setSelectedServer(server)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setSelectedServer(server);
                       }
-                    >
-                      {(server) => (
-                        <tr
-                          class="provider-table-row"
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => setSelectedServer(server)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                              event.preventDefault();
-                              setSelectedServer(server);
-                            }
-                          }}
+                    }}
+                  >
+                    <td>
+                      <div class="provider-name-cell">
+                        {getServerIcon(server.name)}
+                        <span class="setting-title">{server.name}</span>
+                      </div>
+                    </td>
+                    <td>{server.transport}</td>
+                    <td>
+                      <div class="mcp-status-cell">
+                        <button
+                          type="button"
+                          class={`toggle-control ${server.enabled ? "active" : ""}`}
+                          onClick={(e) => { e.stopPropagation(); toggleServer(server.name, !server.enabled); }}
+                          title={server.enabled ? "Disable server" : "Enable server"}
                         >
-                          <td>
-                            <div class="provider-name-cell">
-                              {getServerIcon(server.name)}
-                              <span class="setting-title">{server.name}</span>
-                            </div>
-                          </td>
-                          <td>{server.transport}</td>
-                          <td>
-                            <div class="mcp-status-cell">
-                              <button
-                                type="button"
-                                class={`toggle-control ${server.enabled ? "active" : ""}`}
-                                onClick={(e) => { e.stopPropagation(); toggleServer(server.name, !server.enabled); }}
-                                title={server.enabled ? "Disable server" : "Enable server"}
+                          <div class="toggle-track">
+                            <div class="toggle-thumb" />
+                          </div>
+                        </button>
+                        <Show
+                          when={server.enabled}
+                          fallback={
+                            <span class="badge badge-warning">disabled</span>
+                          }
+                        >
+                          <Show
+                            when={!server.error}
+                            fallback={
+                              <span
+                                class="badge badge-danger"
+                                title={server.error}
                               >
-                                <div class="toggle-track">
-                                  <div class="toggle-thumb" />
-                                </div>
-                              </button>
-                              <Show
-                                when={server.enabled}
-                                fallback={
-                                  <span class="badge badge-warning">disabled</span>
-                                }
-                              >
-                                <Show
-                                  when={!server.error}
-                                  fallback={
-                                    <span
-                                      class="badge badge-danger"
-                                      title={server.error}
-                                    >
-                                      error
-                                    </span>
-                                  }
-                                >
-                                  <span
-                                    class={
-                                      server.loaded
-                                        ? "badge badge-success"
-                                        : "badge"
-                                    }
-                                  >
-                                    {server.loaded ? "loaded" : "pending"}
-                                  </span>
-                                </Show>
-                              </Show>
-                            </div>
-                          </td>
-                          <td>{server.tool_count}</td>
-                          <td>
-                            <div class="row-wrap">
-                              <button
-                                class="btn btn-sm"
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); reloadServer(server.name); }}
-                                title="Reload tools"
-                              >
-                                <RefreshCw size={13} />
-                              </button>
-                              <button
-                                class="btn btn-sm"
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); requestDeleteServer(server.name); }}
-                                title="Delete"
-                              >
-                                <Trash2 size={13} />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </For>
-                  </tbody>
-                </table>
-              </div>
+                                error
+                              </span>
+                            }
+                          >
+                            <span
+                              class={
+                                server.loaded
+                                  ? "badge badge-success"
+                                  : "badge"
+                              }
+                            >
+                              {server.loaded ? "loaded" : "pending"}
+                            </span>
+                          </Show>
+                        </Show>
+                      </div>
+                    </td>
+                    <td>{server.tool_count}</td>
+                    <td>
+                      <div class="row-wrap">
+                        <button
+                          class="btn btn-sm"
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); reloadServer(server.name); }}
+                          title="Reload tools"
+                        >
+                          <RefreshCw size={13} />
+                        </button>
+                        <button
+                          class="btn btn-sm"
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); requestDeleteServer(server.name); }}
+                          title="Delete"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </DashboardTable>
             </section>
 
             <section class="panel">

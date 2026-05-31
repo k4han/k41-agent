@@ -1,11 +1,11 @@
-import { createMemo, createSignal, For, onMount } from "solid-js";
+import { createMemo, createSignal, onMount } from "solid-js";
 import { GitPullRequest, Save } from "lucide-solid";
 
 import { AppShell } from "@/components/AppShell";
+import { DashboardTable } from "@/components/DashboardTable";
 import { DataGate } from "@/components/State";
 import { IdentityPicker } from "@/components/IdentityPicker";
 import { SelectControl } from "@/components/SelectControl";
-import { EmptyTableRow } from "@/components/EmptyTableRow";
 import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { useToast } from "@/components/Toast";
 import { apiFetch, postJson, putJson } from "@/lib/api";
@@ -168,95 +168,82 @@ export function RepositoriesPage() {
             />
 
             <section class="panel">
-              <div class="table-wrap">
-                <table class="table">
-                  <thead>
+              <DashboardTable
+                columns={[
+                  { header: "Repository" },
+                  { header: "Enabled" },
+                  { header: "Agent" },
+                  { header: "Triggers" },
+                  { header: "Notification" },
+                  { header: "Actions" },
+                ]}
+                rows={filteredRepositories()}
+                emptyMessage={query().trim() ? "No repositories found." : "No repositories synced."}
+              >
+                {(repo) => {
+                  const draft = () => drafts()[repo.repository_id] || toDraft(repo);
+                  return (
                     <tr>
-                      <th>Repository</th>
-                      <th>Enabled</th>
-                      <th>Agent</th>
-                      <th>Triggers</th>
-                      <th>Notification</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <For
-                      each={filteredRepositories()}
-                      fallback={
-                        <EmptyTableRow
-                          colSpan={6}
-                          message={query().trim() ? "No repositories found." : "No repositories synced."}
+                      <td>
+                        <div class="mono">{repo.full_name}</div>
+                        <div class="chips chips-spaced">
+                          <span class="chip">{repo.default_branch}</span>
+                          <span class="chip">{repo.private ? "private" : "public"}</span>
+                          <span class="chip">installation {repo.installation_id}</span>
+                        </div>
+                      </td>
+                      <td>
+                        <label class="checkbox-row">
+                          <input
+                            type="checkbox"
+                            checked={draft().enabled}
+                            onChange={(event) => updateDraft(repo, "enabled", event.currentTarget.checked)}
+                          />
+                          <span>{draft().enabled ? "enabled" : "disabled"}</span>
+                        </label>
+                      </td>
+                      <td>
+                        <SelectControl
+                          class="table-select"
+                          value={draft().agent_name}
+                          options={[...new Set([repo.agent_name, payload.default_agent, ...payload.agent_names].filter(Boolean))].map((agent) => ({ value: agent, label: agent }))}
+                          onChange={(value) => updateDraft(repo, "agent_name", value)}
+                          ariaLabel="Agent"
                         />
-                      }
-                    >
-                      {(repo) => {
-                        const draft = () => drafts()[repo.repository_id] || toDraft(repo);
-                        return (
-                          <tr>
-                            <td>
-                              <div class="mono">{repo.full_name}</div>
-                              <div class="chips chips-spaced">
-                                <span class="chip">{repo.default_branch}</span>
-                                <span class="chip">{repo.private ? "private" : "public"}</span>
-                                <span class="chip">installation {repo.installation_id}</span>
-                              </div>
-                            </td>
-                            <td>
-                              <label class="checkbox-row">
-                                <input
-                                  type="checkbox"
-                                  checked={draft().enabled}
-                                  onChange={(event) => updateDraft(repo, "enabled", event.currentTarget.checked)}
-                                />
-                                <span>{draft().enabled ? "enabled" : "disabled"}</span>
-                              </label>
-                            </td>
-                            <td>
-                              <SelectControl
-                                class="table-select"
-                                value={draft().agent_name}
-                                options={[...new Set([repo.agent_name, payload.default_agent, ...payload.agent_names].filter(Boolean))].map((agent) => ({ value: agent, label: agent }))}
-                                onChange={(value) => updateDraft(repo, "agent_name", value)}
-                                ariaLabel="Agent"
-                              />
-                            </td>
-                            <td>
-                              <div class="stack">
-                                <input
-                                  class="input"
-                                  value={draft().trigger_label}
-                                  placeholder={payload.trigger_label}
-                                  onInput={(event) => updateDraft(repo, "trigger_label", event.currentTarget.value)}
-                                />
-                                <input
-                                  class="input"
-                                  value={draft().mention_triggers_text}
-                                  placeholder={payload.mention_triggers.join(", ")}
-                                  onInput={(event) => updateDraft(repo, "mention_triggers_text", event.currentTarget.value)}
-                                />
-                              </div>
-                            </td>
-                            <td>
-                              <IdentityPicker
-                                value={draft().notify_identity}
-                                onChange={(value) => updateDraft(repo, "notify_identity", value)}
-                                identities={identities()}
-                              />
-                            </td>
-                            <td>
-                              <button class="btn btn-sm" type="button" onClick={() => save(repo)}>
-                                <Save size={13} />
-                                Save
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      }}
-                    </For>
-                  </tbody>
-                </table>
-              </div>
+                      </td>
+                      <td>
+                        <div class="stack">
+                          <input
+                            class="input"
+                            value={draft().trigger_label}
+                            placeholder={payload.trigger_label}
+                            onInput={(event) => updateDraft(repo, "trigger_label", event.currentTarget.value)}
+                          />
+                          <input
+                            class="input"
+                            value={draft().mention_triggers_text}
+                            placeholder={payload.mention_triggers.join(", ")}
+                            onInput={(event) => updateDraft(repo, "mention_triggers_text", event.currentTarget.value)}
+                          />
+                        </div>
+                      </td>
+                      <td>
+                        <IdentityPicker
+                          value={draft().notify_identity}
+                          onChange={(value) => updateDraft(repo, "notify_identity", value)}
+                          identities={identities()}
+                        />
+                      </td>
+                      <td>
+                        <button class="btn btn-sm" type="button" onClick={() => save(repo)}>
+                          <Save size={13} />
+                          Save
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                }}
+              </DashboardTable>
             </section>
           </div>
         )}

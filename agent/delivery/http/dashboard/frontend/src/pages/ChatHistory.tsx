@@ -3,6 +3,7 @@ import { FolderOpen, MessageSquare, Pencil, PlaySquare, Trash2 } from "lucide-so
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 
 import { AppShell } from "@/components/AppShell";
+import { DashboardTable } from "@/components/DashboardTable";
 import { DeleteThreadDialog } from "@/components/DeleteThreadDialog";
 import { InlineRenameInput } from "@/components/InlineRenameInput";
 import { SelectControl } from "@/components/SelectControl";
@@ -293,111 +294,108 @@ export function ChatHistoryListPage() {
                         <span>{group.threads.length} threads</span>
                       </div>
                     </div>
-                    <div class="table-wrap">
-                      <table class="table">
-                        <thead>
-                          <tr>
-                            <th class="history-select-cell">
-                              <input
-                                type="checkbox"
-                                checked={isGroupSelected(group.threads)}
-                                aria-label={`Select ${group.label} threads`}
-                                onChange={(event) => setGroupSelected(
-                                  group.threads,
-                                  event.currentTarget.checked,
-                                )}
-                              />
-                            </th>
-                            <th>Thread</th>
-                            <th>Platform</th>
-                            <th>User</th>
-                            <th>Steps</th>
-                            <th />
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <For each={group.threads}>
-                            {(thread) => (
-                              <tr>
-                                <td class="history-select-cell">
-                                  <input
-                                    type="checkbox"
-                                    checked={selectedThreadIds().has(thread.thread_id)}
-                                    aria-label={`Select ${thread.title || thread.thread_id}`}
-                                    onChange={(event) => setThreadSelected(
-                                      thread.thread_id,
-                                      event.currentTarget.checked,
-                                    )}
-                                  />
-                                </td>
-                                <td>
+                    <DashboardTable
+                      columns={[
+                        {
+                          class: "history-select-cell",
+                          header: (
+                            <input
+                              type="checkbox"
+                              checked={isGroupSelected(group.threads)}
+                              aria-label={`Select ${group.label} threads`}
+                              onChange={(event) => setGroupSelected(
+                                group.threads,
+                                event.currentTarget.checked,
+                              )}
+                            />
+                          ),
+                        },
+                        { header: "Thread" },
+                        { header: "Platform" },
+                        { header: "User" },
+                        { header: "Steps" },
+                        {},
+                      ]}
+                      rows={group.threads}
+                    >
+                      {(thread) => (
+                        <tr>
+                          <td class="history-select-cell">
+                            <input
+                              type="checkbox"
+                              checked={selectedThreadIds().has(thread.thread_id)}
+                              aria-label={`Select ${thread.title || thread.thread_id}`}
+                              onChange={(event) => setThreadSelected(
+                                thread.thread_id,
+                                event.currentTarget.checked,
+                              )}
+                            />
+                          </td>
+                          <td>
+                            <Show
+                              when={editingThreadId() === thread.thread_id}
+                              fallback={
+                                <A
+                                  href={chatThreadHref(thread.thread_id)}
+                                  class="history-thread-link"
+                                >
                                   <Show
-                                    when={editingThreadId() === thread.thread_id}
-                                    fallback={
-                                      <A
-                                        href={chatThreadHref(thread.thread_id)}
-                                        class="history-thread-link"
-                                      >
-                                        <Show
-                                          when={isBackgroundThread(thread)}
-                                          fallback={<MessageSquare size={13} class="history-thread-icon" />}
-                                        >
-                                          <PlaySquare size={13} class="history-thread-icon task" />
-                                        </Show>
-                                        <span class="mono">
-                                          {truncateText(thread.title || thread.thread_id, 40)}
-                                        </span>
-                                      </A>
-                                    }
+                                    when={isBackgroundThread(thread)}
+                                    fallback={<MessageSquare size={13} class="history-thread-icon" />}
                                   >
-                                    <InlineRenameInput
-                                      class="history-thread-rename-input"
-                                      value={editingTitle()}
-                                      onInput={setEditingTitle}
-                                      onBlur={() => void finishRenameThread(thread)}
-                                      onCancel={cancelRenameThread}
-                                    />
+                                    <PlaySquare size={13} class="history-thread-icon task" />
                                   </Show>
-                                </td>
-                                <td>
-                                  <span class="badge">{thread.platform}</span>
-                                </td>
-                                <td>
-                                  <span class="muted">{truncateText(thread.user_id, 24)}</span>
-                                </td>
-                                <td>
-                                  <span class="muted">{thread.checkpoint_count}</span>
-                                </td>
-                                <td>
-                                  <div class="row-wrap">
-                                    <A
-                                      href={chatThreadHref(thread.thread_id)}
-                                      class="btn btn-sm"
-                                    >
-                                      Chat
-                                    </A>
-                                    <button
-                                      class="btn btn-sm"
-                                      type="button"
-                                      onClick={() => startRenameThread(thread)}
-                                    >
-                                      <Pencil size={12} />
-                                    </button>
-                                    <button
-                                      class="btn btn-sm btn-danger"
-                                      type="button"
-                                      onClick={() => requestDeleteThread(thread)}
-                                    >
-                                      <Trash2 size={12} />
-                                    </button>
-                                  </div>
-                                </td>
-                              </tr>
-                            )}
-                          </For>
-                        </tbody>
-                      </table>
-                    </div>
+                                  <span class="mono">
+                                    {truncateText(thread.title || thread.thread_id, 40)}
+                                  </span>
+                                </A>
+                              }
+                            >
+                              <InlineRenameInput
+                                class="history-thread-rename-input"
+                                value={editingTitle()}
+                                onInput={setEditingTitle}
+                                onBlur={() => void finishRenameThread(thread)}
+                                onCancel={cancelRenameThread}
+                              />
+                            </Show>
+                          </td>
+                          <td>
+                            <span class="badge">{thread.platform}</span>
+                          </td>
+                          <td>
+                            <span class="muted">{truncateText(thread.user_id, 24)}</span>
+                          </td>
+                          <td>
+                            <span class="muted">{thread.checkpoint_count}</span>
+                          </td>
+                          <td>
+                            <div class="row-wrap">
+                              <A
+                                href={chatThreadHref(thread.thread_id)}
+                                class="btn btn-sm"
+                              >
+                                Chat
+                              </A>
+                              <button
+                                class="btn btn-sm"
+                                type="button"
+                                onClick={() => startRenameThread(thread)}
+                              >
+                                <Pencil size={12} />
+                              </button>
+                              <button
+                                class="btn btn-sm btn-danger"
+                                type="button"
+                                onClick={() => requestDeleteThread(thread)}
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </DashboardTable>
                   </section>
                 )}
               </For>

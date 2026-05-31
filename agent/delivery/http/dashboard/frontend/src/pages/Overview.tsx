@@ -1,11 +1,11 @@
-import { createSignal, For, onCleanup, onMount } from "solid-js";
+import { createSignal, onCleanup, onMount } from "solid-js";
 import { Square, Play } from "lucide-solid";
 
 import { AppShell } from "@/components/AppShell";
+import { DashboardTable } from "@/components/DashboardTable";
 import { DataGate } from "@/components/State";
 import { MetricCard, MetricsRow } from "@/components/Metrics";
 import { StatusBadge } from "@/components/StatusBadge";
-import { EmptyTableRow } from "@/components/EmptyTableRow";
 import { useToast } from "@/components/Toast";
 import { apiFetch, postJson } from "@/lib/api";
 import type { ServiceStatus } from "@/types";
@@ -148,53 +148,45 @@ export function OverviewPage() {
               <div class="panel-header">
                 <div class="panel-title">Services</div>
               </div>
-              <div class="table-wrap">
-                <table class="table">
-                  <thead>
-                    <tr>
-                      <th>Name</th>
-                      <th>Status</th>
-                      <th>Error</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <For
-                      each={payload.services}
-                      fallback={<EmptyTableRow colSpan={4} message="No services registered." />}
-                    >
-                      {(service) => (
-                        <tr>
-                          <td class="mono">{service.name}</td>
-                          <td>
-                            <StatusBadge status={service.status} />
-                          </td>
-                          <td class="muted">{service.error || "-"}</td>
-                          <td>
-                            {service.status === "running" ? (
-                              <button
-                                class="btn btn-sm btn-warning"
-                                type="button"
-                                onClick={() => serviceAction(service.name, "stop")}
-                              >
-                                Stop
-                              </button>
-                            ) : (
-                              <button
-                                class="btn btn-sm"
-                                type="button"
-                                onClick={() => serviceAction(service.name, "start")}
-                              >
-                                Start
-                              </button>
-                            )}
-                          </td>
-                        </tr>
+              <DashboardTable
+                columns={[
+                  { header: "Name" },
+                  { header: "Status" },
+                  { header: "Error" },
+                  { header: "Actions" },
+                ]}
+                rows={payload.services}
+                emptyMessage="No services registered."
+              >
+                {(service) => (
+                  <tr>
+                    <td class="mono">{service.name}</td>
+                    <td>
+                      <StatusBadge status={service.status} />
+                    </td>
+                    <td class="muted">{service.error || "-"}</td>
+                    <td>
+                      {service.status === "running" ? (
+                        <button
+                          class="btn btn-sm btn-warning"
+                          type="button"
+                          onClick={() => serviceAction(service.name, "stop")}
+                        >
+                          Stop
+                        </button>
+                      ) : (
+                        <button
+                          class="btn btn-sm"
+                          type="button"
+                          onClick={() => serviceAction(service.name, "start")}
+                        >
+                          Start
+                        </button>
                       )}
-                    </For>
-                  </tbody>
-                </table>
-              </div>
+                    </td>
+                  </tr>
+                )}
+              </DashboardTable>
             </section>
           </div>
         )}

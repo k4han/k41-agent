@@ -1,6 +1,7 @@
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { RefreshCw } from "lucide-solid";
 
+import { DashboardTable } from "@/components/DashboardTable";
 import { MetricGrid } from "@/components/Metrics";
 import { SelectControl } from "@/components/SelectControl";
 import { DataGate } from "@/components/State";
@@ -460,42 +461,38 @@ function UsageTable(props: { rows: UsageRow[]; displayTimezone?: string }) {
       <div class="panel-header">
         <div class="panel-title">Usage by User and Channel</div>
       </div>
-      <div class="table-wrap">
-        <table class="table usage-table">
-          <thead>
-            <tr>
-              <th>User / Channel</th>
-              <th>Calls</th>
-              <th>Total</th>
-              <th>Input</th>
-              <th>Output</th>
-              <th>Missing</th>
-              <th>Last used</th>
-            </tr>
-          </thead>
-          <tbody>
-            <For each={props.rows} fallback={<tr><td colSpan={7} class="empty">No usage recorded.</td></tr>}>
-              {(row) => (
-                <tr>
-                  <td>
-                    <div>{row.identity_label}</div>
-                    <div class="mono hint">
-                      {row.platform}:{row.user_id}
-                      <Show when={row.channel_id}>:{row.channel_id}</Show>
-                    </div>
-                  </td>
-                  <td>{formatNumber(row.event_count)}</td>
-                  <td>{formatNumber(row.total_tokens)}</td>
-                  <td>{formatNumber(row.input_tokens)}</td>
-                  <td>{formatNumber(row.output_tokens)}</td>
-                  <td>{formatNumber(row.missing_usage_count)}</td>
-                  <td>{formatDateTime(row.last_used_at, props.displayTimezone)}</td>
-                </tr>
-              )}
-            </For>
-          </tbody>
-        </table>
-      </div>
+      <DashboardTable
+        columns={[
+          { header: "User / Channel" },
+          { header: "Calls" },
+          { header: "Total" },
+          { header: "Input" },
+          { header: "Output" },
+          { header: "Missing" },
+          { header: "Last used" },
+        ]}
+        rows={props.rows}
+        tableClass="usage-table"
+        emptyMessage="No usage recorded."
+      >
+        {(row) => (
+          <tr>
+            <td>
+              <div>{row.identity_label}</div>
+              <div class="mono hint">
+                {row.platform}:{row.user_id}
+                <Show when={row.channel_id}>:{row.channel_id}</Show>
+              </div>
+            </td>
+            <td>{formatNumber(row.event_count)}</td>
+            <td>{formatNumber(row.total_tokens)}</td>
+            <td>{formatNumber(row.input_tokens)}</td>
+            <td>{formatNumber(row.output_tokens)}</td>
+            <td>{formatNumber(row.missing_usage_count)}</td>
+            <td>{formatDateTime(row.last_used_at, props.displayTimezone)}</td>
+          </tr>
+        )}
+      </DashboardTable>
     </section>
   );
 }
@@ -506,72 +503,68 @@ function WorkspaceUsageTable(props: { list: WorkspaceUsageDetail[]; displayTimez
       <div class="panel-header">
         <div class="panel-title">Usage by Workspace / Project</div>
       </div>
-      <div class="table-wrap">
-        <table class="table usage-table">
-          <thead>
-            <tr>
-              <th style="width: 30%;">Workspace Directory</th>
-              <th style="width: 10%;">Threads</th>
-              <th style="width: 10%;">Calls</th>
-              <th style="width: 15%;">Total Tokens</th>
-              <th style="width: 20%;">Model Breakdown</th>
-              <th style="width: 15%;">Last used</th>
-            </tr>
-          </thead>
-          <tbody>
-            <For each={props.list} fallback={<tr><td colSpan={6} class="empty">No workspace usage recorded.</td></tr>}>
-              {(row) => (
-                <tr>
-                  <td>
-                    <div style="font-weight: 600; color: #fff;">{row.label}</div>
-                    <div class="mono hint" style="font-size: 10px; color: #888; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 280px;" title={row.locator}>
-                      {row.backend}:{row.locator}
-                    </div>
-                  </td>
-                  <td>{formatNumber(row.thread_count)}</td>
-                  <td>{formatNumber(row.event_count)}</td>
-                  <td>
-                    <div style="font-weight: 600; color: #3b82f6;">{formatNumber(row.total_tokens)}</div>
-                    <div class="hint" style="font-size: 10px; color: #888;">In: {formatNumber(row.input_tokens)} / Out: {formatNumber(row.output_tokens)}</div>
-                  </td>
-                  <td>
-                    <div class="stack" style="gap: 4px; padding: 4px 0;">
-                      <div class="row-wrap" style="height: 4px; border-radius: 2px; overflow: hidden; background: rgba(255, 255, 255, 0.08); gap: 1px; width: 100%;">
-                        <For each={row.models}>
-                          {(item, index) => {
-                            const colors = ["#3b82f6", "#10b981", "#8b5cf6", "#f59e0b", "#ec4899"];
-                            const color = colors[index() % colors.length];
-                            return (
-                              <div
-                                style={`width: ${item.percentage}%; background-color: ${color}; height: 100%;`}
-                                title={`${item.model}: ${item.percentage}%`}
-                              />
-                            );
-                          }}
-                        </For>
+      <DashboardTable
+        columns={[
+          { header: "Workspace Directory", style: "width: 30%;" },
+          { header: "Threads", style: "width: 10%;" },
+          { header: "Calls", style: "width: 10%;" },
+          { header: "Total Tokens", style: "width: 15%;" },
+          { header: "Model Breakdown", style: "width: 20%;" },
+          { header: "Last used", style: "width: 15%;" },
+        ]}
+        rows={props.list}
+        tableClass="usage-table"
+        emptyMessage="No workspace usage recorded."
+      >
+        {(row) => (
+          <tr>
+            <td>
+              <div style="font-weight: 600; color: #fff;">{row.label}</div>
+              <div class="mono hint" style="font-size: 10px; color: #888; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 280px;" title={row.locator}>
+                {row.backend}:{row.locator}
+              </div>
+            </td>
+            <td>{formatNumber(row.thread_count)}</td>
+            <td>{formatNumber(row.event_count)}</td>
+            <td>
+              <div style="font-weight: 600; color: #3b82f6;">{formatNumber(row.total_tokens)}</div>
+              <div class="hint" style="font-size: 10px; color: #888;">In: {formatNumber(row.input_tokens)} / Out: {formatNumber(row.output_tokens)}</div>
+            </td>
+            <td>
+              <div class="stack" style="gap: 4px; padding: 4px 0;">
+                <div class="row-wrap" style="height: 4px; border-radius: 2px; overflow: hidden; background: rgba(255, 255, 255, 0.08); gap: 1px; width: 100%;">
+                  <For each={row.models}>
+                    {(item, index) => {
+                      const colors = ["#3b82f6", "#10b981", "#8b5cf6", "#f59e0b", "#ec4899"];
+                      const color = colors[index() % colors.length];
+                      return (
+                        <div
+                          style={`width: ${item.percentage}%; background-color: ${color}; height: 100%;`}
+                          title={`${item.model}: ${item.percentage}%`}
+                        />
+                      );
+                    }}
+                  </For>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 2px; font-size: 10px; color: #aaa;">
+                  <For each={row.models.slice(0, 3)}>
+                    {(item) => (
+                      <div class="row-wrap" style="justify-content: space-between;">
+                        <span style="text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 120px;" title={item.model}>{item.model}</span>
+                        <span style="font-weight: 600;">{item.percentage}%</span>
                       </div>
-                      <div style="display: flex; flex-direction: column; gap: 2px; font-size: 10px; color: #aaa;">
-                        <For each={row.models.slice(0, 3)}>
-                          {(item) => (
-                            <div class="row-wrap" style="justify-content: space-between;">
-                              <span style="text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 120px;" title={item.model}>{item.model}</span>
-                              <span style="font-weight: 600;">{item.percentage}%</span>
-                            </div>
-                          )}
-                        </For>
-                        <Show when={row.models.length > 3}>
-                          <div style="color: #666; font-size: 9px;">+ {row.models.length - 3} more models</div>
-                        </Show>
-                      </div>
-                    </div>
-                  </td>
-                  <td>{formatDateTime(row.last_used_at, props.displayTimezone)}</td>
-                </tr>
-              )}
-            </For>
-          </tbody>
-        </table>
-      </div>
+                    )}
+                  </For>
+                  <Show when={row.models.length > 3}>
+                    <div style="color: #666; font-size: 9px;">+ {row.models.length - 3} more models</div>
+                  </Show>
+                </div>
+              </div>
+            </td>
+            <td>{formatDateTime(row.last_used_at, props.displayTimezone)}</td>
+          </tr>
+        )}
+      </DashboardTable>
     </section>
   );
 }
@@ -597,74 +590,68 @@ function ThreadUsageTable(props: {
           />
         </label>
       </div>
-      <div class="table-wrap">
-        <table class="table usage-table">
-          <thead>
-            <tr>
-              <th style="width: 30%;">Conversation Thread</th>
-              <th style="width: 10%;">Agent</th>
-              {/* <th style="width: 8%;">Threads</th> */}
-              <th style="width: 10%;">Calls</th>
-              <th style="width: 15%;">Total Tokens</th>
-              <th style="width: 20%;">Model Breakdown</th>
-              <th style="width: 15%;">Last used</th>
-            </tr>
-          </thead>
-          <tbody>
-            <For each={props.list} fallback={<tr><td colSpan={7} class="empty">No conversation usage recorded.</td></tr>}>
-              {(row) => (
-                <tr>
-                  <td>
-                    <div style="font-weight: 600; color: #fff; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 250px;" title={row.title}>
-                      {row.title}
-                    </div>
-                    <div class="mono hint" style="font-size: 10px; color: #888;">{row.thread_id}</div>
-                  </td>
-                  <td><span class="badge" style="font-size: 10px; padding: 2px 6px;">{row.agent_name}</span></td>
-                  {/* <td>{formatNumber(row.thread_count || 1)}</td> */}
-                  <td>{formatNumber(row.event_count)}</td>
-                  <td>
-                    <div style="font-weight: 600; color: #3b82f6;">{formatNumber(row.total_tokens)}</div>
-                    <div class="hint" style="font-size: 10px; color: #888;">In: {formatNumber(row.input_tokens)} / Out: {formatNumber(row.output_tokens)}</div>
-                  </td>
-                  <td>
-                    <div class="stack" style="gap: 4px; padding: 4px 0;">
-                      <div class="row-wrap" style="height: 4px; border-radius: 2px; overflow: hidden; background: rgba(255, 255, 255, 0.08); gap: 1px; width: 100%;">
-                        <For each={row.models}>
-                          {(item, index) => {
-                            const colors = ["#3b82f6", "#10b981", "#8b5cf6", "#f59e0b", "#ec4899"];
-                            const color = colors[index() % colors.length];
-                            return (
-                              <div
-                                style={`width: ${item.percentage}%; background-color: ${color}; height: 100%;`}
-                                title={`${item.model}: ${item.percentage}%`}
-                              />
-                            );
-                          }}
-                        </For>
+      <DashboardTable
+        columns={[
+          { header: "Conversation Thread", style: "width: 30%;" },
+          { header: "Agent", style: "width: 10%;" },
+          { header: "Calls", style: "width: 10%;" },
+          { header: "Total Tokens", style: "width: 15%;" },
+          { header: "Model Breakdown", style: "width: 20%;" },
+          { header: "Last used", style: "width: 15%;" },
+        ]}
+        rows={props.list}
+        tableClass="usage-table"
+        emptyMessage="No conversation usage recorded."
+      >
+        {(row) => (
+          <tr>
+            <td>
+              <div style="font-weight: 600; color: #fff; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 250px;" title={row.title}>
+                {row.title}
+              </div>
+              <div class="mono hint" style="font-size: 10px; color: #888;">{row.thread_id}</div>
+            </td>
+            <td><span class="badge" style="font-size: 10px; padding: 2px 6px;">{row.agent_name}</span></td>
+            <td>{formatNumber(row.event_count)}</td>
+            <td>
+              <div style="font-weight: 600; color: #3b82f6;">{formatNumber(row.total_tokens)}</div>
+              <div class="hint" style="font-size: 10px; color: #888;">In: {formatNumber(row.input_tokens)} / Out: {formatNumber(row.output_tokens)}</div>
+            </td>
+            <td>
+              <div class="stack" style="gap: 4px; padding: 4px 0;">
+                <div class="row-wrap" style="height: 4px; border-radius: 2px; overflow: hidden; background: rgba(255, 255, 255, 0.08); gap: 1px; width: 100%;">
+                  <For each={row.models}>
+                    {(item, index) => {
+                      const colors = ["#3b82f6", "#10b981", "#8b5cf6", "#f59e0b", "#ec4899"];
+                      const color = colors[index() % colors.length];
+                      return (
+                        <div
+                          style={`width: ${item.percentage}%; background-color: ${color}; height: 100%;`}
+                          title={`${item.model}: ${item.percentage}%`}
+                        />
+                      );
+                    }}
+                  </For>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 2px; font-size: 10px; color: #aaa;">
+                  <For each={row.models.slice(0, 3)}>
+                    {(item) => (
+                      <div class="row-wrap" style="justify-content: space-between;">
+                        <span style="text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 120px;" title={item.model}>{item.model}</span>
+                        <span style="font-weight: 600;">{item.percentage}%</span>
                       </div>
-                      <div style="display: flex; flex-direction: column; gap: 2px; font-size: 10px; color: #aaa;">
-                        <For each={row.models.slice(0, 3)}>
-                          {(item) => (
-                            <div class="row-wrap" style="justify-content: space-between;">
-                              <span style="text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 120px;" title={item.model}>{item.model}</span>
-                              <span style="font-weight: 600;">{item.percentage}%</span>
-                            </div>
-                          )}
-                        </For>
-                        <Show when={row.models.length > 3}>
-                          <div style="color: #666; font-size: 9px;">+ {row.models.length - 3} more models</div>
-                        </Show>
-                      </div>
-                    </div>
-                  </td>
-                  <td>{formatDateTime(row.last_used_at, props.displayTimezone)}</td>
-                </tr>
-              )}
-            </For>
-          </tbody>
-        </table>
-      </div>
+                    )}
+                  </For>
+                  <Show when={row.models.length > 3}>
+                    <div style="color: #666; font-size: 9px;">+ {row.models.length - 3} more models</div>
+                  </Show>
+                </div>
+              </div>
+            </td>
+            <td>{formatDateTime(row.last_used_at, props.displayTimezone)}</td>
+          </tr>
+        )}
+      </DashboardTable>
     </section>
   );
 }

@@ -2,8 +2,8 @@ import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { Copy, Edit3, Eye, Plus, RefreshCw, Trash2 } from "lucide-solid";
 
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { DashboardTable } from "@/components/DashboardTable";
 import { Dialog } from "@/components/Dialog";
-import { EmptyTableRow } from "@/components/EmptyTableRow";
 import { ModelPicker } from "@/components/ModelPicker";
 import { PromptVariableTextarea } from "@/components/PromptVariableTextarea";
 import { SelectControl } from "@/components/SelectControl";
@@ -328,101 +328,93 @@ export function AgentsPage() {
             />
 
             <section class="panel">
-              <div class="table-wrap">
-                <table class="table">
-                  <thead>
-                    <tr>
-                      <th>Agent</th>
-                      <th>Description</th>
-                      <th>Provider / Model</th>
-                      <th>Status</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <For
-                      each={filteredCards()}
-                      fallback={<EmptyTableRow colSpan={5} message="No agent cards found." />}
-                    >
-                      {(card) => (
-                        <tr>
-                          <td>
-                            <Show
-                              when={card.display_name}
-                              fallback={<div class="mono">{card.name}</div>}
+              <DashboardTable
+                columns={[
+                  { header: "Agent" },
+                  { header: "Description" },
+                  { header: "Provider / Model" },
+                  { header: "Status" },
+                  { header: "Actions" },
+                ]}
+                rows={filteredCards()}
+                emptyMessage="No agent cards found."
+              >
+                {(card) => (
+                  <tr>
+                    <td>
+                      <Show
+                        when={card.display_name}
+                        fallback={<div class="mono">{card.name}</div>}
+                      >
+                        <div>{card.display_name}</div>
+                      </Show>
+                    </td>
+                    <td>
+                      <Show
+                        when={card.description}
+                        fallback={<span class="hint">-</span>}
+                      >
+                        {(description) => (
+                          <div class="hint">{truncateText(description(), 160)}</div>
+                        )}
+                      </Show>
+                    </td>
+                    <td>
+                      <div class="chips">
+                        <span class="chip">{`${card.provider || "default"}/${card.model || "provider default"}`}</span>
+                      </div>
+                    </td>
+                    <td>
+                      <StatusBadge status={card.valid ? "valid" : "invalid"} />
+                      <Show when={!card.valid && card.error}>
+                        <div class="hint">{card.error}</div>
+                      </Show>
+                    </td>
+                    <td>
+                      <div class="row">
+                        <Show when={card.valid}>
+                          <button class="btn btn-sm" type="button" onClick={() => openCard(card, "view")}>
+                            <Eye size={13} />
+                            View
+                          </button>
+                          <Show
+                            when={card.editable}
+                            fallback={
+                              <button class="btn btn-sm" type="button" onClick={() => cloneAgent(card.name)}>
+                                <Copy size={13} />
+                                Clone
+                              </button>
+                            }
+                          >
+                            <button class="btn btn-sm" type="button" onClick={() => openCard(card, "edit")}>
+                              <Edit3 size={13} />
+                              Edit
+                            </button>
+                            <button
+                              class="btn btn-sm btn-danger"
+                              type="button"
+                              onClick={() => requestDeleteAgent(card.name)}
                             >
-                              <div>{card.display_name}</div>
-                            </Show>
-                          </td>
-                          <td>
-                            <Show
-                              when={card.description}
-                              fallback={<span class="hint">-</span>}
-                            >
-                              {(description) => (
-                                <div class="hint">{truncateText(description(), 160)}</div>
-                              )}
-                            </Show>
-                          </td>
-                          <td>
-                            <div class="chips">
-                              <span class="chip">{`${card.provider || "default"}/${card.model || "provider default"}`}</span>
-                            </div>
-                          </td>
-                          <td>
-                            <StatusBadge status={card.valid ? "valid" : "invalid"} />
-                            <Show when={!card.valid && card.error}>
-                              <div class="hint">{card.error}</div>
-                            </Show>
-                          </td>
-                          <td>
-                            <div class="row">
-                              <Show when={card.valid}>
-                                <button class="btn btn-sm" type="button" onClick={() => openCard(card, "view")}>
-                                  <Eye size={13} />
-                                  View
-                                </button>
-                                <Show
-                                  when={card.editable}
-                                  fallback={
-                                    <button class="btn btn-sm" type="button" onClick={() => cloneAgent(card.name)}>
-                                      <Copy size={13} />
-                                      Clone
-                                    </button>
-                                  }
-                                >
-                                  <button class="btn btn-sm" type="button" onClick={() => openCard(card, "edit")}>
-                                    <Edit3 size={13} />
-                                    Edit
-                                  </button>
-                                  <button
-                                    class="btn btn-sm btn-danger"
-                                    type="button"
-                                    onClick={() => requestDeleteAgent(card.name)}
-                                  >
-                                    <Trash2 size={13} />
-                                    Delete
-                                  </button>
-                                </Show>
-                              </Show>
-                              <Show when={!card.valid && card.editable}>
-                                <button
-                                  class="btn btn-sm btn-danger"
-                                  type="button"
-                                  onClick={() => requestDeleteAgent(card.name)}
-                                >
-                                  <Trash2 size={13} />
-                                  Delete
-                                </button>
-                              </Show>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </For>
-                  </tbody>
-                </table>
-              </div>
+                              <Trash2 size={13} />
+                              Delete
+                            </button>
+                          </Show>
+                        </Show>
+                        <Show when={!card.valid && card.editable}>
+                          <button
+                            class="btn btn-sm btn-danger"
+                            type="button"
+                            onClick={() => requestDeleteAgent(card.name)}
+                          >
+                            <Trash2 size={13} />
+                            Delete
+                          </button>
+                        </Show>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </DashboardTable>
             </section>
 
             <Dialog

@@ -4,7 +4,6 @@ import { Check, Copy, Edit3, Plus, RefreshCw, Save, Search, Star, Trash2, Globe,
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { CopyButton } from "@/components/CopyButton";
 import { Dialog } from "@/components/Dialog";
-import { EmptyTableRow } from "@/components/EmptyTableRow";
 import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";

@@ -1,9 +1,9 @@
-import { createSignal, For, onMount, Show } from "solid-js";
+import { createSignal, onMount, Show } from "solid-js";
 import { Link2, Trash2 } from "lucide-solid";
 
 import { DataGate } from "@/components/State";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { EmptyTableRow } from "@/components/EmptyTableRow";
+import { DashboardTable } from "@/components/DashboardTable";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson } from "@/lib/api";
 import type { Identity } from "@/types";
@@ -103,46 +103,36 @@ export function ChannelsPage() {
               <div class="panel-header">
                 <div class="panel-title">Paired Identities</div>
               </div>
-              <div class="table-wrap">
-                <table class="table">
-                  <thead>
-                    <tr>
-                      <th>Platform</th>
-                      <th>External ID</th>
-                      <th>User ID</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <For
-                      each={payload.identities}
-                      fallback={
-                        <EmptyTableRow colSpan={4} message="No paired identities." />
-                      }
-                    >
-                      {(identity) => (
-                        <tr>
-                          <td>
-                            <span class="badge">{identity.platform}</span>
-                          </td>
-                          <td class="mono">{identity.external_id}</td>
-                          <td class="mono">{identity.user_id ?? "-"}</td>
-                          <td>
-                            <button
-                              class="btn btn-sm btn-danger"
-                              type="button"
-                              onClick={() => requestUnpair(identity)}
-                            >
-                              <Trash2 size={13} />
-                              Unpair
-                            </button>
-                          </td>
-                        </tr>
-                      )}
-                    </For>
-                  </tbody>
-                </table>
-              </div>
+              <DashboardTable
+                columns={[
+                  { header: "Platform" },
+                  { header: "External ID" },
+                  { header: "User ID" },
+                  { header: "Actions" },
+                ]}
+                rows={payload.identities}
+                emptyMessage="No paired identities."
+              >
+                {(identity) => (
+                  <tr>
+                    <td>
+                      <span class="badge">{identity.platform}</span>
+                    </td>
+                    <td class="mono">{identity.external_id}</td>
+                    <td class="mono">{identity.user_id ?? "-"}</td>
+                    <td>
+                      <button
+                        class="btn btn-sm btn-danger"
+                        type="button"
+                        onClick={() => requestUnpair(identity)}
+                      >
+                        <Trash2 size={13} />
+                        Unpair
+                      </button>
+                    </td>
+                  </tr>
+                )}
+              </DashboardTable>
             </section>
           )}
         </DataGate>
