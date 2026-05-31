@@ -110,7 +110,7 @@ LLM sẽ tự động gọi:
 - `bash_list_sessions` - List all active terminal sessions
 - `bash_close` - Close active terminal sessions
 
-> **Session behavior:** `bash` tools maintain state across calls (same `session_id`). `cd`, environment variables, and background processes persist between invocations. Use different `session_id` values to fully isolate tasks.
+> **Session behavior:** `bash` tools maintain state across calls with the same `session_id` inside the same conversation thread. `cd`, environment variables, and background processes persist between invocations in that thread, while a new thread gets an isolated shell session even when it also uses `session_id="default"`. Use different `session_id` values to isolate separate shell contexts within one thread.
 
 ### Agent
 - `call_agent` - Call sub-agents

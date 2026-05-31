@@ -224,6 +224,6 @@ curl -X POST http://localhost:8000/api/chat/stream \
 | `research_chain` | Nghiên cứu, tổng hợp (2 bước)      | (LLM only)                         |
 | `router`         | Tự phân loại → chuyển đúng workflow | (LLM classifier)                   |
 
-> **Chú ý về `bash` tools:** Các tool `bash`, `bash_send_input`, `bash_interrupt` hoạt động theo **session** (mặc định `session_id="default"`). Điều này có nghĩa là trạng thái terminal được giữ nguyên qua nhiều lần gọi: `cd` thay đổi thư mục hiện tại, biến môi trường được set tồn tại đến lần gọi sau, và tiến trình nền vẫn chạy. Nếu muốn cô lập hoàn toàn, agent cần chỉ định `session_id` khác nhau cho từng tác vụ độc lập.
+> **Chú ý về `bash` tools:** Các tool `bash`, `bash_send_input`, `bash_interrupt` hoạt động theo **session trong từng conversation thread** (mặc định `session_id="default"`). Trong cùng một thread, trạng thái terminal được giữ nguyên qua nhiều lần gọi: `cd` thay đổi thư mục hiện tại, biến môi trường được set tồn tại đến lần gọi sau, và tiến trình nền vẫn chạy. Thread mới sẽ có shell session riêng dù dùng cùng `session_id`; nếu muốn tách thêm bên trong cùng một thread, agent có thể chỉ định `session_id` khác.
 
 Các tool file/bash làm việc trực tiếp với đường dẫn vật lý tuyệt đối của workspace; path tương đối vẫn được chấp nhận nếu nằm trong workspace.

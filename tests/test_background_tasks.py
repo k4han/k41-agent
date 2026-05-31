@@ -1,4 +1,5 @@
 import asyncio
+import importlib
 import time
 
 import pytest
@@ -333,11 +334,22 @@ async def test_background_task_remove_is_persisted(
         yield {"type": "final", "content": "done"}
 
     deleted_thread_ids: list[str] = []
+    closed_thread_ids: list[str] = []
+
+    shell_manager_module = importlib.import_module(
+        "agent.modules.tools.langchain.shell_tools.session_manager"
+    )
+
+    class FakeSessionManager:
+        def close_thread_sessions(self, thread_id: str) -> int:
+            closed_thread_ids.append(thread_id)
+            return 1
 
     async def fake_delete_workflow_thread_tree(thread_id: str) -> None:
         deleted_thread_ids.append(thread_id)
 
     monkeypatch.setattr(runner_module, "run_agent_stream", fake_run_agent_stream)
+    monkeypatch.setattr(shell_manager_module, "session_manager", FakeSessionManager())
     monkeypatch.setattr(
         workflows_module,
         "delete_workflow_thread_tree",
@@ -355,6 +367,7 @@ async def test_background_task_remove_is_persisted(
 
     assert restored.get(task_id) is None
     assert restored.list_all() == []
+    assert closed_thread_ids == [task["thread_id"]]
     assert deleted_thread_ids == [task["thread_id"]]
 
 

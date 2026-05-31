@@ -14,6 +14,7 @@ from agent.modules.agent_runtime.active_sessions import (
     SESSION_STEP_THINKING,
     get_active_session_registry,
     current_session_id_var,
+    current_thread_id_var,
 )
 from agent.modules.agent_runtime.session import SessionManager
 from agent.modules.workflows import (
@@ -273,10 +274,12 @@ async def clear_agent_session(
     channel_id: str = "",
 ) -> None:
     """Clear the session history (checkpoint thread) for a specific user and channel."""
-    from agent.modules.workflows import delete_workflow_thread
+    from agent.modules.tools.langchain.shell_tools.session_manager import session_manager
+    from agent.modules.workflows import delete_workflow_thread_tree
 
     thread_id = SessionManager.make_thread_id(platform, user_id, channel_id)
-    await delete_workflow_thread(thread_id)
+    session_manager.close_thread_sessions(thread_id)
+    await delete_workflow_thread_tree(thread_id)
 
 
 def _graph_accepts_context(graph: Any) -> bool:
@@ -482,12 +485,14 @@ def _track_active_session(thread_id: str, agent_name: str) -> Iterator[str]:
         pass
 
     session_id = registry.register(session, task=current_task)
-    token = current_session_id_var.set(session_id)
+    session_token = current_session_id_var.set(session_id)
+    thread_token = current_thread_id_var.set(thread_id)
     try:
         registry.update_step(session_id, SESSION_STEP_THINKING)
         yield session_id
     finally:
-        current_session_id_var.reset(token)
+        current_thread_id_var.reset(thread_token)
+        current_session_id_var.reset(session_token)
         registry.unregister(session_id)
 
 

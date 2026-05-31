@@ -15,6 +15,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 current_session_id_var: ContextVar[str | None] = ContextVar("current_session_id", default=None)
+current_thread_id_var: ContextVar[str | None] = ContextVar("current_thread_id", default=None)
 
 MAX_RECORDED_TOOLS = 20
 
@@ -257,4 +258,5 @@ __all__ = [
     "TOOL_STEP_PREFIX",
     "get_active_session_registry",
     "current_session_id_var",
+    "current_thread_id_var",
 ]

@@ -1,6 +1,7 @@
 from agent.modules.agent_runtime.active_sessions import (
     ActiveSession,
     ActiveSessionRegistry,
+    current_thread_id_var,
     get_active_session_registry,
 )
 from agent.modules.agent_runtime.runner import (
@@ -44,6 +45,7 @@ __all__ = [
     "TaskStatus",
     "build_run_params",
     "clear_agent_session",
+    "current_thread_id_var",
     "get_active_session_registry",
     "get_background_task_manager",
     "get_background_task_repository",

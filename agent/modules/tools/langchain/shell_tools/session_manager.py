@@ -37,6 +37,7 @@ def _strip_ansi(text: str) -> str:
 @dataclass
 class TerminalSession:
     session_id: str
+    scope_id: str | None
     working_dir: str
     process: subprocess.Popen
     output_queue: Queue[str]
@@ -52,9 +53,34 @@ class TerminalSessionManager:
     def __init__(self) -> None:
         self.sessions: Dict[str, TerminalSession] = {}
 
-    def create_session(self, working_dir: str, session_name: Optional[str] = None) -> str:
+    @staticmethod
+    def _normalize_scope_id(scope_id: str | None) -> str | None:
+        normalized = str(scope_id or "").strip()
+        return normalized or None
+
+    @classmethod
+    def _session_key(cls, session_id: str, scope_id: str | None = None) -> str:
+        scope = cls._normalize_scope_id(scope_id)
+        if scope is None:
+            return session_id
+        return f"{scope}\x1f{session_id}"
+
+    @staticmethod
+    def _is_thread_tree_scope(scope_id: str | None, thread_id: str) -> bool:
+        if not scope_id:
+            return False
+        return scope_id == thread_id or scope_id.startswith(f"{thread_id}:sub:")
+
+    def create_session(
+        self,
+        working_dir: str,
+        session_name: Optional[str] = None,
+        scope_id: str | None = None,
+    ) -> str:
         """Create a new terminal session with a specific working directory."""
         session_id = session_name or f"term_{uuid.uuid4().hex[:8]}"
+        normalized_scope_id = self._normalize_scope_id(scope_id)
+        session_key = self._session_key(session_id, normalized_scope_id)
 
         # Determine the appropriate shell command with optimized config
         if platform.system() == "Windows":
@@ -119,13 +145,14 @@ class TerminalSessionManager:
 
         session = TerminalSession(
             session_id=session_id,
+            scope_id=normalized_scope_id,
             working_dir=working_dir,
             process=process,
             output_queue=output_queue,
             error_queue=error_queue,
         )
 
-        self.sessions[session_id] = session
+        self.sessions[session_key] = session
 
         # Wait a bit for terminal to initialize
         time.sleep(0.2)
@@ -181,14 +208,16 @@ class TerminalSessionManager:
         run_in_background: bool = False,
         working_dir: str | None = None,
         force: bool = False,
+        scope_id: str | None = None,
     ) -> Dict[str, Any]:
         """Execute a command in a session, auto-creating the session if it doesn't exist."""
-        if session_id not in self.sessions:
+        session_key = self._session_key(session_id, scope_id)
+        if session_key not in self.sessions:
             if working_dir is None:
                 return {"error": f"Session {session_id} does not exist and no working_dir provided"}
-            self.create_session(working_dir, session_id)
+            self.create_session(working_dir, session_id, scope_id=scope_id)
 
-        session = self.sessions[session_id]
+        session = self.sessions[session_key]
 
         if not session.is_running or session.process.poll() is not None:
             return {"error": f"Session {session_id} is no longer active"}
@@ -307,13 +336,17 @@ class TerminalSessionManager:
             return {"error": str(e)}
 
     def get_session_output(
-        self, session_id: str, timeout: float = 1.0
+        self,
+        session_id: str,
+        timeout: float = 1.0,
+        scope_id: str | None = None,
     ) -> Dict[str, Any]:
         """Get output from background process running in a session."""
-        if session_id not in self.sessions:
+        session_key = self._session_key(session_id, scope_id)
+        if session_key not in self.sessions:
             return {"error": f"Session {session_id} does not exist"}
 
-        session = self.sessions[session_id]
+        session = self.sessions[session_key]
         output_lines = []
         error_lines = []
         total_chars = 0
@@ -353,7 +386,12 @@ class TerminalSessionManager:
             "is_running": session.process.poll() is None,
         }
 
-    def send_input(self, session_id: str, text: str) -> Dict[str, Any]:
+    def send_input(
+        self,
+        session_id: str,
+        text: str,
+        scope_id: str | None = None,
+    ) -> Dict[str, Any]:
         """Send text input (stdin) to a running session.
 
         Args:
@@ -363,10 +401,11 @@ class TerminalSessionManager:
         Returns:
             Dict with confirmation or error.
         """
-        if session_id not in self.sessions:
+        session_key = self._session_key(session_id, scope_id)
+        if session_key not in self.sessions:
             return {"error": f"Session '{session_id}' does not exist"}
 
-        session = self.sessions[session_id]
+        session = self.sessions[session_key]
 
         if session.process.poll() is not None:
             return {"error": f"Session '{session_id}' process has terminated"}
@@ -381,7 +420,12 @@ class TerminalSessionManager:
         except Exception as e:
             return {"error": f"Failed to send input: {str(e)}"}
 
-    def send_signal(self, session_id: str, signal_type: str = "interrupt") -> Dict[str, Any]:
+    def send_signal(
+        self,
+        session_id: str,
+        signal_type: str = "interrupt",
+        scope_id: str | None = None,
+    ) -> Dict[str, Any]:
         """Send a signal to the active process in a session.
 
         Args:
@@ -391,10 +435,11 @@ class TerminalSessionManager:
         Returns:
             Dict with confirmation or error.
         """
-        if session_id not in self.sessions:
+        session_key = self._session_key(session_id, scope_id)
+        if session_key not in self.sessions:
             return {"error": f"Session '{session_id}' does not exist"}
 
-        session = self.sessions[session_id]
+        session = self.sessions[session_key]
 
         if session.process.poll() is not None:
             return {"error": f"Session '{session_id}' process has already terminated"}
@@ -441,23 +486,31 @@ class TerminalSessionManager:
         except Exception as e:
             return {"error": f"Failed to send signal: {str(e)}"}
 
-    def list_sessions(self) -> List[Dict[str, Any]]:
+    def list_sessions(self, scope_id: str | None = None) -> List[Dict[str, Any]]:
         """List all active sessions."""
+        normalized_scope_id = self._normalize_scope_id(scope_id)
         return [
             {
-                "session_id": sid,
+                "session_id": s.session_id,
+                "scope_id": s.scope_id,
                 "working_dir": s.working_dir,
                 "is_running": s.process.poll() is None,
             }
-            for sid, s in self.sessions.items()
+            for s in self.sessions.values()
+            if normalized_scope_id is None or s.scope_id == normalized_scope_id
         ]
 
-    def close_session(self, session_id: str) -> bool:
+    def close_session(self, session_id: str, scope_id: str | None = None) -> bool:
         """Close terminal session and kill all child processes."""
-        if session_id not in self.sessions:
+        session_key = self._session_key(session_id, scope_id)
+        return self._close_session_by_key(session_key)
+
+    def _close_session_by_key(self, session_key: str) -> bool:
+        """Close terminal session by internal key and kill all child processes."""
+        if session_key not in self.sessions:
             return False
 
-        session = self.sessions[session_id]
+        session = self.sessions[session_key]
         session.is_running = False
 
         # Unregister the PID
@@ -530,14 +583,35 @@ class TerminalSessionManager:
             except Exception:
                 pass
 
-        if session_id in self.sessions:
-            del self.sessions[session_id]
+        if session_key in self.sessions:
+            del self.sessions[session_key]
         return True
 
-    def close_all_sessions(self) -> None:
-        """Close all sessions."""
-        for session_id in list(self.sessions.keys()):
-            self.close_session(session_id)
+    def close_all_sessions(self, scope_id: str | None = None) -> int:
+        """Close all sessions, optionally limited to one thread scope."""
+        normalized_scope_id = self._normalize_scope_id(scope_id)
+        session_keys = [
+            key
+            for key, session in self.sessions.items()
+            if normalized_scope_id is None or session.scope_id == normalized_scope_id
+        ]
+        for session_key in session_keys:
+            self._close_session_by_key(session_key)
+        return len(session_keys)
+
+    def close_thread_sessions(self, thread_id: str) -> int:
+        """Close sessions for a thread and its sub-agent child threads."""
+        normalized_thread_id = str(thread_id or "").strip()
+        if not normalized_thread_id:
+            return 0
+        session_keys = [
+            key
+            for key, session in self.sessions.items()
+            if self._is_thread_tree_scope(session.scope_id, normalized_thread_id)
+        ]
+        for session_key in session_keys:
+            self._close_session_by_key(session_key)
+        return len(session_keys)
 
 
 # Global singleton instance

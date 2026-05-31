@@ -918,8 +918,16 @@ async def test_dashboard_delete_chat_thread_deletes_workflow_tree(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     conversations_module = importlib.import_module("agent.modules.conversations")
+    shell_manager_module = importlib.import_module(
+        "agent.modules.tools.langchain.shell_tools.session_manager"
+    )
     workflows_module = importlib.import_module("agent.modules.workflows")
     calls: list[tuple[str, str]] = []
+
+    class FakeSessionManager:
+        def close_thread_sessions(self, thread_id: str) -> int:
+            calls.append(("close_shell", thread_id))
+            return 1
 
     async def fake_mark_deleted(thread_id: str) -> bool:
         calls.append(("mark_deleted", thread_id))
@@ -933,6 +941,7 @@ async def test_dashboard_delete_chat_thread_deletes_workflow_tree(
         "mark_conversation_thread_deleted",
         fake_mark_deleted,
     )
+    monkeypatch.setattr(shell_manager_module, "session_manager", FakeSessionManager())
     monkeypatch.setattr(
         workflows_module,
         "delete_workflow_thread_tree",
@@ -943,6 +952,7 @@ async def test_dashboard_delete_chat_thread_deletes_workflow_tree(
 
     assert result == {"status": "deleted", "thread_id": "api_dashboard_123"}
     assert calls == [
+        ("close_shell", "api_dashboard_123"),
         ("mark_deleted", "api_dashboard_123"),
         ("delete_tree", "api_dashboard_123"),
     ]
@@ -954,8 +964,16 @@ async def test_dashboard_delete_background_task_thread_deletes_workflow_tree(
 ) -> None:
     agent_runtime_module = importlib.import_module("agent.modules.agent_runtime")
     conversations_module = importlib.import_module("agent.modules.conversations")
+    shell_manager_module = importlib.import_module(
+        "agent.modules.tools.langchain.shell_tools.session_manager"
+    )
     workflows_module = importlib.import_module("agent.modules.workflows")
     calls: list[tuple[str, str]] = []
+
+    class FakeSessionManager:
+        def close_thread_sessions(self, thread_id: str) -> int:
+            calls.append(("close_shell", thread_id))
+            return 1
 
     class FakeBackgroundTaskRepository:
         async def mark_deleted_by_thread_id(self, thread_id: str) -> bool:
@@ -979,6 +997,7 @@ async def test_dashboard_delete_background_task_thread_deletes_workflow_tree(
         "mark_conversation_thread_deleted",
         fake_mark_deleted,
     )
+    monkeypatch.setattr(shell_manager_module, "session_manager", FakeSessionManager())
     monkeypatch.setattr(
         workflows_module,
         "delete_workflow_thread_tree",
@@ -991,6 +1010,7 @@ async def test_dashboard_delete_background_task_thread_deletes_workflow_tree(
 
     assert result == {"status": "deleted", "thread_id": "task_dashboard_123"}
     assert calls == [
+        ("close_shell", "task_dashboard_123"),
         ("mark_task_deleted", "task_dashboard_123"),
         ("mark_thread_deleted", "task_dashboard_123"),
         ("delete_tree", "task_dashboard_123"),

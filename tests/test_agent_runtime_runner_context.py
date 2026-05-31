@@ -1,4 +1,5 @@
 import base64
+import importlib
 from types import SimpleNamespace
 
 import pytest
@@ -6,6 +7,43 @@ from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, Too
 
 import agent.modules.conversations as conversations_module
 from agent.modules.agent_runtime import runner as runner_module
+
+
+@pytest.mark.asyncio
+async def test_clear_agent_session_closes_shell_sessions_and_deletes_thread_tree(
+    monkeypatch,
+):
+    shell_manager_module = importlib.import_module(
+        "agent.modules.tools.langchain.shell_tools.session_manager"
+    )
+    workflows_module = importlib.import_module("agent.modules.workflows")
+    calls = []
+
+    class FakeSessionManager:
+        def close_thread_sessions(self, thread_id: str) -> int:
+            calls.append(("close_shell", thread_id))
+            return 1
+
+    async def fake_delete_workflow_thread_tree(thread_id: str):
+        calls.append(("delete_tree", thread_id))
+
+    monkeypatch.setattr(shell_manager_module, "session_manager", FakeSessionManager())
+    monkeypatch.setattr(
+        workflows_module,
+        "delete_workflow_thread_tree",
+        fake_delete_workflow_thread_tree,
+    )
+
+    await runner_module.clear_agent_session(
+        platform="api",
+        user_id="dashboard",
+        channel_id="thread-1",
+    )
+
+    assert calls == [
+        ("close_shell", "api_dashboard_thread-1"),
+        ("delete_tree", "api_dashboard_thread-1"),
+    ]
 
 
 @pytest.mark.asyncio

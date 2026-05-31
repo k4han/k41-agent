@@ -9,8 +9,19 @@ from pydantic import BaseModel, Field
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCapability, ToolCategory
 from agent.modules.tools.langchain.working_dir import get_working_dir
+from agent.modules.tools.runtime.context import ToolContext
 from agent.modules.tools.result import ToolError, ToolErrorCode
 from agent.modules.tools.langchain.shell_tools.session_manager import session_manager
+from agent.modules.agent_runtime.active_sessions import current_thread_id_var
+
+
+def _scope_id_from_runtime(runtime: ToolRuntime[Any, Any]) -> str | None:
+    context = ToolContext.from_runtime(runtime)
+    return context.thread_id or current_thread_id_var.get()
+
+
+def _current_scope_id() -> str | None:
+    return current_thread_id_var.get()
 
 
 class BashInput(BaseModel):
@@ -19,18 +30,19 @@ class BashInput(BaseModel):
     command: str = Field(
         description=(
             "Command to execute inside the persistent shell process for session_id. "
-            "Shell state is preserved across calls to the same session_id: if an earlier "
-            "command ran 'cd subdir', the next command in that same session starts there. "
-            "Use a different session_id when you need an isolated current directory, "
-            "environment, or running process context."
+            "Shell state is preserved across calls to the same session_id within the "
+            "same conversation thread: if an earlier command ran 'cd subdir', the next "
+            "command in that same thread/session starts there. Use a different "
+            "session_id when you need another isolated shell inside the same thread."
         ),
     )
     session_id: str = Field(
         default="default",
         description=(
             "Persistent terminal session identifier. Calls with the same session_id share "
-            "one shell process and therefore keep current directory changes, environment "
-            "variables, shell state, and background processes. Defaults to 'default'."
+            "one shell process within the current conversation thread and therefore keep "
+            "current directory changes, environment variables, shell state, and background "
+            "processes. Defaults to 'default'."
         ),
     )
     timeout: float = Field(
@@ -141,6 +153,7 @@ def bash(
     """
     try:
         working_dir = get_working_dir(runtime)
+        scope_id = _scope_id_from_runtime(runtime)
         res = session_manager.execute_command(
             session_id=session_id,
             command=command,
@@ -148,6 +161,7 @@ def bash(
             run_in_background=run_in_background,
             working_dir=working_dir,
             force=force,
+            scope_id=scope_id,
         )
 
         if "error" in res:
@@ -189,7 +203,8 @@ def bash_read_output(
         session_id: ID of the active terminal session.
         timeout: Time in seconds to wait for new output.
     """
-    res = session_manager.get_session_output(session_id, timeout)
+    scope_id = _current_scope_id()
+    res = session_manager.get_session_output(session_id, timeout, scope_id=scope_id)
     if "error" in res:
         raise ToolError(ToolErrorCode.NOT_FOUND, res["error"])
 
@@ -224,7 +239,8 @@ def bash_send_input(
         session_id: ID of the terminal session.
         text: The text to send as stdin input. A newline is automatically appended.
     """
-    res = session_manager.send_input(session_id, text)
+    scope_id = _current_scope_id()
+    res = session_manager.send_input(session_id, text, scope_id=scope_id)
     if "error" in res:
         raise ToolError(ToolErrorCode.EXECUTION_ERROR, res["error"])
     return f"Sent input to session '{session_id}': {text!r}"
@@ -251,7 +267,8 @@ def bash_interrupt(
         signal_type: Type of signal to send. 'interrupt' sends Ctrl+C (SIGINT),
             'terminate' sends SIGTERM. Defaults to 'interrupt'.
     """
-    res = session_manager.send_signal(session_id, signal_type)
+    scope_id = _current_scope_id()
+    res = session_manager.send_signal(session_id, signal_type, scope_id=scope_id)
     if "error" in res:
         raise ToolError(ToolErrorCode.EXECUTION_ERROR, res["error"])
     return (
@@ -270,14 +287,17 @@ def bash_interrupt(
 @tool
 def bash_list_sessions() -> str:
     """List all active interactive terminal sessions."""
-    sessions = session_manager.list_sessions()
+    scope_id = _current_scope_id()
+    sessions = session_manager.list_sessions(scope_id=scope_id)
     if not sessions:
         return "No active terminal sessions."
 
     result = "Active terminal sessions:\n"
     for s in sessions:
         status = "✓ Running" if s["is_running"] else "✗ Stopped"
-        result += f"  • {s['session_id']} - {s['working_dir']} [{status}]\n"
+        scope = s.get("scope_id")
+        scope_display = f" ({scope})" if scope_id is None and scope else ""
+        result += f"  • {s['session_id']}{scope_display} - {s['working_dir']} [{status}]\n"
     return result
 
 
@@ -317,15 +337,19 @@ def bash_close(
             ids = [stripped] if stripped else []
     else:
         ids = session_ids or []
+    scope_id = _current_scope_id()
     if not ids:
-        count = len(session_manager.sessions)
-        session_manager.close_all_sessions()
+        if scope_id is None:
+            count = len(session_manager.sessions)
+        else:
+            count = len(session_manager.list_sessions(scope_id=scope_id))
+        session_manager.close_all_sessions(scope_id=scope_id)
         return f"Closed all {count} session(s)."
 
     closed = []
     not_found = []
     for sid in ids:
-        if session_manager.close_session(sid):
+        if session_manager.close_session(sid, scope_id=scope_id):
             closed.append(sid)
         else:
             not_found.append(sid)
