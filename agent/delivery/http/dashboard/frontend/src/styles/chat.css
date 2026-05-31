@@ -37,8 +37,8 @@
 
 .content:has(.chat-shell-resizable.workspace-open) .chat-shell-resizable,
 .content:has(.chat-shell-resizable.workspace-closed) .chat-shell-resizable {
-  height: calc(100vh - 94px);
-  height: calc(100dvh - 94px);
+  height: calc(100vh - 96px);
+  height: calc(100dvh - 96px);
 }
 
 .chat-shell-resizable.workspace-resizing {
