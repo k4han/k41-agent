@@ -39,14 +39,30 @@ export type ThreadMessage = {
   id: string | null;
   role: "user" | "assistant" | "tool" | "system";
   content: string;
+  message_index?: number;
+  source_checkpoint_id?: string;
+  parent_checkpoint_id?: string;
+  branch?: ThreadMessageBranch;
   name?: string;
   tool_call_id?: string;
   tool_calls?: Array<{ id: string; name: string; args: unknown }>;
   attachments?: TranscriptAttachment[];
 };
 
+export type ThreadMessageBranchOption = {
+  checkpoint_id: string;
+  message: string;
+};
+
+export type ThreadMessageBranch = {
+  current: number;
+  total: number;
+  options: ThreadMessageBranchOption[];
+};
+
 export type ThreadMessagesPayload = {
   thread_id: string;
+  active_checkpoint_id?: string;
   messages: ThreadMessage[];
   platform: string;
   user_id: string;
@@ -59,8 +75,12 @@ export type ThreadMessagesPayload = {
 
 export type ThreadTranscriptItem = TranscriptItem & { key: string };
 
-export function threadApiPath(threadId: string): string {
-  return `/dashboard-api/chat-history/${encodeURIComponent(threadId)}`;
+export function threadApiPath(threadId: string, checkpointId?: string): string {
+  const path = `/dashboard-api/chat-history/${encodeURIComponent(threadId)}`;
+  if (!checkpointId) {
+    return path;
+  }
+  return `${path}?checkpoint_id=${encodeURIComponent(checkpointId)}`;
 }
 
 export function chatThreadHref(threadId: string): string {
@@ -145,6 +165,10 @@ export function toThreadTranscript(messages: ThreadMessage[]): ThreadTranscriptI
         type: "message",
         role: msg.role,
         text: msg.content,
+        messageIndex: msg.message_index,
+        sourceCheckpointId: msg.source_checkpoint_id,
+        parentCheckpointId: msg.parent_checkpoint_id,
+        branch: msg.branch,
         attachments: msg.attachments,
       });
     }

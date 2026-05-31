@@ -8,12 +8,14 @@ from agent.modules.admin_auth import get_current_admin
 from agent.delivery.http.api.schemas import (
     ChatRequest,
     ChatResponse,
+    EditChatRequest,
     PairingCodeResponse,
     ReconnectRequest,
 )
 from agent.modules.agent_runtime import (
     build_run_params,
     run_agent,
+    run_agent_edit_stream,
     run_agent_full,
     run_agent_stream,
     get_chat_stream_manager,
@@ -70,6 +72,8 @@ def _request_to_run_params(request: ChatRequest) -> dict[str, object]:
         "model": request.model,
         "resume": request.resume,
     }
+    if request.checkpoint_id:
+        params["checkpoint_id"] = request.checkpoint_id
     if request.attachments:
         params["attachments"] = [
             attachment.model_dump() for attachment in request.attachments
@@ -165,6 +169,45 @@ async def chat_events(request: ChatRequest):
                 {"type": "thread_created", "thread_id": thread_id},
                 ensure_ascii=False,
             ) + "\n"
+        async for event in session.subscribe():
+            yield json.dumps(event, ensure_ascii=False) + "\n"
+
+    return StreamingResponse(event_generator(), media_type="application/x-ndjson")
+
+
+@router.post("/chat/events/edit")
+async def chat_events_edit(request: EditChatRequest):
+    """Fork a thread from an edited user message and stream UI events."""
+    if not request.message.strip():
+        raise HTTPException(status_code=400, detail="Edited message cannot be empty.")
+
+    try:
+        params = build_run_params(
+            platform=Platform.API,
+            user_id=request.user_id,
+            user_input=request.message,
+            thread_id=request.thread_id,
+            workflow=request.workflow,
+            workspace=request.workspace,
+            agent_name=request.agent_name or "default",
+            provider=request.provider,
+            model=request.model,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    params["message_index"] = request.message_index
+    params["source_checkpoint_id"] = request.source_checkpoint_id
+    await _apply_workspace_to_run_params(request, params)
+
+    manager = get_chat_stream_manager()
+    session = await manager.get_or_create_session(
+        request.thread_id,
+        params,
+        run_fn=run_agent_edit_stream,
+    )
+
+    async def event_generator():
         async for event in session.subscribe():
             yield json.dumps(event, ensure_ascii=False) + "\n"
 

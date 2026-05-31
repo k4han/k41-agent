@@ -35,6 +35,7 @@ export type ChatPayload = {
   model?: string;
   thread_id?: string;
   new_thread?: boolean;
+  checkpoint_id?: string;
   attachments?: ChatAttachmentPayload[];
 };
 

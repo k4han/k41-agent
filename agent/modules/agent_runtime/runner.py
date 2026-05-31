@@ -50,6 +50,7 @@ def build_run_params(
     model: str | None = None,
     attachments: list[Any] | None = None,
     resume: bool = False,
+    checkpoint_id: str | None = None,
 ) -> dict[str, Any]:
     """Build run parameters for agent execution.
 
@@ -88,6 +89,8 @@ def build_run_params(
             "channel_id": str(channel_id or ""),
         },
     }
+    if checkpoint_id:
+        params["checkpoint_id"] = checkpoint_id
     normalized_attachments = _normalize_chat_attachments(attachments)
     if normalized_attachments:
         params["attachments"] = normalized_attachments
@@ -373,6 +376,89 @@ def _message_id(message: Any) -> str:
     return str(getattr(message, "id", "") or "")
 
 
+def _configurable(config: dict[str, Any]) -> dict[str, Any]:
+    configurable = config.setdefault("configurable", {})
+    if not isinstance(configurable, dict):
+        configurable = {}
+        config["configurable"] = configurable
+    return configurable
+
+
+def _config_checkpoint_id(config: dict[str, Any] | None) -> str:
+    if not isinstance(config, dict):
+        return ""
+    configurable = config.get("configurable", {})
+    if not isinstance(configurable, dict):
+        return ""
+    return str(configurable.get("checkpoint_id", "") or "")
+
+
+def _config_with_checkpoint(config: dict[str, Any], checkpoint_id: str | None) -> dict[str, Any]:
+    if not checkpoint_id:
+        return config
+    next_config = {**config, "configurable": dict(config.get("configurable", {}))}
+    _configurable(next_config)["checkpoint_id"] = checkpoint_id
+    _configurable(next_config).setdefault("checkpoint_ns", "")
+    return next_config
+
+
+def _run_config_from_checkpoint(
+    *,
+    base_config: dict[str, Any],
+    checkpoint_config: dict[str, Any],
+) -> dict[str, Any]:
+    next_config = {**base_config, "configurable": dict(base_config.get("configurable", {}))}
+    checkpoint_configurable = checkpoint_config.get("configurable", {})
+    if isinstance(checkpoint_configurable, dict):
+        _configurable(next_config).update(checkpoint_configurable)
+    return next_config
+
+
+def _replace_human_message_text(message: HumanMessage, text: str) -> HumanMessage:
+    content = message.content
+    if isinstance(content, list):
+        next_content: list[Any] = []
+        replaced = False
+        for part in content:
+            if (
+                not replaced
+                and isinstance(part, dict)
+                and str(part.get("type") or "").strip().lower() == "text"
+            ):
+                next_content.append({**part, "text": text})
+                replaced = True
+                continue
+            next_content.append(part)
+        if not replaced:
+            next_content.insert(0, {"type": "text", "text": text})
+        return message.model_copy(update={"content": next_content})
+    return message.model_copy(update={"content": text})
+
+
+async def _find_message_source_state(
+    graph: Any,
+    *,
+    config: dict[str, Any],
+    source_checkpoint_id: str,
+    message_index: int,
+):
+    async for state in graph.aget_state_history(config):
+        if _config_checkpoint_id(getattr(state, "config", None)) != source_checkpoint_id:
+            continue
+        messages = (getattr(state, "values", {}) or {}).get("messages", [])
+        if message_index >= len(messages):
+            raise ValueError("Message index is outside the checkpoint state.")
+        message = messages[message_index]
+        if not isinstance(message, HumanMessage):
+            raise ValueError("Only user messages can be edited.")
+        parent_config = getattr(state, "parent_config", None)
+        if not parent_config:
+            raise ValueError("Cannot edit the first checkpoint in a thread.")
+        return state, message
+
+    raise ValueError("Source checkpoint was not found.")
+
+
 @contextmanager
 def _track_active_session(thread_id: str, agent_name: str) -> Iterator[str]:
     import asyncio
@@ -420,6 +506,7 @@ async def run_agent(
     model: str | None = None,
     attachments: list[Any] | None = None,
     usage_context: dict[str, Any] | None = None,
+    checkpoint_id: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """Run a workflow graph and stream assistant chunks.
 
@@ -462,6 +549,7 @@ async def run_agent(
         make_run_config(thread_id=thread_id),
         build_usage_context(thread_id, usage_context),
     )
+    config = _config_with_checkpoint(config, checkpoint_id)
 
     context = make_run_context(
         workspace=workspace,
@@ -520,6 +608,7 @@ async def run_agent_stream(
     attachments: list[Any] | None = None,
     usage_context: dict[str, Any] | None = None,
     resume: bool = False,
+    checkpoint_id: str | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Run a workflow graph and stream UI events (tool calls and text chunks).
 
@@ -563,6 +652,7 @@ async def run_agent_stream(
         make_run_config(thread_id=thread_id),
         build_usage_context(thread_id, usage_context),
     )
+    config = _config_with_checkpoint(config, checkpoint_id)
 
     context = make_run_context(
         workspace=workspace,
@@ -574,7 +664,7 @@ async def run_agent_stream(
         provider=provider,
         model=model,
     )
-    if not resume:
+    if not resume and not checkpoint_id:
         await _record_conversation_thread(
             thread_id=thread_id,
             agent_name=agent_name,
@@ -693,6 +783,181 @@ async def run_agent_stream(
                         "content": extract_final_text_content(getattr(message, "content", None)),
                     }
 
+
+async def run_agent_edit_stream(
+    user_input: str,
+    thread_id: str,
+    agent_name: str = "default",
+    *,
+    message_index: int,
+    source_checkpoint_id: str,
+    workflow: str | None = None,
+    workspace: WorkspaceRef | dict[str, Any] | str | None = None,
+    working_dir: str | None = None,
+    context_trim_threshold: int | None = None,
+    max_context_tokens: int | None = None,
+    allowed_tool_names: list[str] | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    usage_context: dict[str, Any] | None = None,
+    resume: bool = False,
+) -> AsyncGenerator[dict[str, Any], None]:
+    """Fork a thread from the checkpoint before a user message and stream the result."""
+    from agent.modules.agents import get_catalog_service
+
+    edited_text = user_input.strip()
+    if not edited_text:
+        raise ValueError("Edited message cannot be empty.")
+
+    catalog = get_catalog_service()
+    agent_config = catalog.get_agent(agent_name)
+    if agent_config is None:
+        raise ValueError(f"Agent '{agent_name}' not found in catalog")
+
+    resolved_workflow = workflow or agent_config.graph_type
+    config_threshold = getattr(
+        agent_config, "context_trim_threshold", None
+    ) or getattr(agent_config, "max_context_tokens", None)
+    resolved_threshold = (
+        context_trim_threshold
+        if context_trim_threshold is not None
+        else (max_context_tokens or config_threshold)
+    )
+    resolved_tools = allowed_tool_names if allowed_tool_names is not None else agent_config.tools
+
+    graph = get_workflow_graph(resolved_workflow)
+    base_config = attach_usage_context(
+        make_run_config(thread_id=thread_id),
+        build_usage_context(thread_id, usage_context),
+    )
+
+    source_state, original_message = await _find_message_source_state(
+        graph,
+        config=base_config,
+        source_checkpoint_id=source_checkpoint_id,
+        message_index=message_index,
+    )
+    edited_message = _replace_human_message_text(original_message, edited_text)
+    config = _run_config_from_checkpoint(
+        base_config=base_config,
+        checkpoint_config=source_state.parent_config,
+    )
+
+    context = make_run_context(
+        workspace=workspace,
+        working_dir=working_dir,
+        context_trim_threshold=resolved_threshold,
+        max_context_tokens=resolved_threshold,
+        agent_name=agent_name,
+        allowed_tool_names=resolved_tools or None,
+        provider=provider,
+        model=model,
+    )
+
+    seen_ids: set[str] = set()
+    parent_values = getattr(source_state, "parent_config", None)
+    if parent_values:
+        try:
+            parent_state = await graph.aget_state(config)
+            if parent_state and parent_state.values and "messages" in parent_state.values:
+                for msg in parent_state.values["messages"]:
+                    msg_id = _message_id(msg)
+                    if msg_id:
+                        seen_ids.add(msg_id)
+        except Exception as exc:
+            logger.warning("Failed to fetch parent messages for edit: %s", exc)
+
+    stream_kwargs: dict[str, Any] = {
+        "config": config,
+        "stream_mode": ["messages", "values"],
+    }
+    if _graph_accepts_context(graph):
+        stream_kwargs["context"] = context
+
+    registry = get_active_session_registry()
+    user_message_id = _message_id(edited_message)
+    current_user_seen = False
+
+    with _track_active_session(thread_id, agent_name) as session_id:
+        async for event in graph.astream(
+            {"messages": [edited_message]},
+            **stream_kwargs,
+        ):
+            stream_mode, event_data = _coerce_stream_event(event)
+            if stream_mode == "messages":
+                content = _extract_message_chunk_content(event_data)
+                if content:
+                    registry.update_step(session_id, SESSION_STEP_RESPONDING)
+                    yield {
+                        "type": "message",
+                        "content": content,
+                    }
+                continue
+
+            if stream_mode != "values":
+                continue
+
+            event = event_data
+            messages = event.get("messages", [])
+            if not messages:
+                continue
+
+            current_user_index = next(
+                (
+                    index
+                    for index, message in enumerate(messages)
+                    if _message_id(message) == user_message_id
+                ),
+                None,
+            )
+            if current_user_index is not None:
+                current_user_seen = True
+                for message in messages[: current_user_index + 1]:
+                    message_id = _message_id(message)
+                    if message_id:
+                        seen_ids.add(message_id)
+                messages = messages[current_user_index + 1 :]
+            elif not current_user_seen and len(messages) > 1:
+                for message in messages:
+                    message_id = _message_id(message)
+                    if message_id:
+                        seen_ids.add(message_id)
+                continue
+
+            for message in messages:
+                message_id = _message_id(message)
+                if message_id:
+                    if message_id in seen_ids:
+                        continue
+                    seen_ids.add(message_id)
+
+                if isinstance(message, AIMessage):
+                    tool_calls = getattr(message, "tool_calls", None)
+                    content = extract_final_text_content(getattr(message, "content", None))
+                    if content:
+                        registry.update_step(session_id, SESSION_STEP_RESPONDING)
+                        yield {
+                            "type": "final",
+                            "content": content,
+                        }
+                    if tool_calls:
+                        for tc in tool_calls:
+                            tool_name = tc.get("name") or "unknown"
+                            registry.add_tool_call(session_id, tool_name)
+                            yield {
+                                "type": "tool_call",
+                                "id": tc.get("id"),
+                                "name": tool_name,
+                                "args": tc.get("args"),
+                            }
+                elif isinstance(message, ToolMessage):
+                    yield {
+                        "type": "tool_result",
+                        "tool_call_id": getattr(message, "tool_call_id", None),
+                        "name": getattr(message, "name", None),
+                        "content": extract_final_text_content(getattr(message, "content", None)),
+                    }
+
 async def run_agent_full(
     user_input: str,
     thread_id: str,
@@ -708,6 +973,7 @@ async def run_agent_full(
     model: str | None = None,
     attachments: list[Any] | None = None,
     usage_context: dict[str, Any] | None = None,
+    checkpoint_id: str | None = None,
 ) -> str:
     """Run a workflow graph and return the final assistant response.
 
@@ -744,6 +1010,7 @@ async def run_agent_full(
         model=model,
         attachments=attachments,
         usage_context=usage_context,
+        checkpoint_id=checkpoint_id,
     ):
         chunks.append(chunk)
     return chunks[-1] if chunks else ""

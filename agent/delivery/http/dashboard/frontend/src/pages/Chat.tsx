@@ -15,6 +15,7 @@ import { useToast } from "@/components/Toast";
 import { WorkspaceExplorer } from "@/components/WorkspaceExplorer";
 import type { TodoProgress } from "@/components/ChatTodos";
 import { apiFetch, postJson, readError } from "@/lib/api";
+import { writeToClipboard } from "@/lib/utils";
 import {
   threadApiPath,
   toThreadTranscript,
@@ -77,6 +78,7 @@ export function ChatPage() {
   const [threadError, setThreadError] = createSignal("");
   const [threadLoading, setThreadLoading] = createSignal(false);
   const [currentThreadId, setCurrentThreadId] = createSignal("");
+  const [activeCheckpointId, setActiveCheckpointId] = createSignal("");
 
   const [agentName, setAgentName] = createSignal("");
   const [provider, setProvider] = createSignal("default");
@@ -268,6 +270,7 @@ export function ChatPage() {
     scroll.clearTurnAnchor();
     setThreadData(payload);
     setCurrentThreadId(payload.thread_id);
+    setActiveCheckpointId(payload.active_checkpoint_id || "");
     setWorkspace(payload.workspace || null);
     if (!persistedStreams.has(payload.thread_id)) {
       setItems(
@@ -361,7 +364,7 @@ export function ChatPage() {
     threadLoading() || workspaceMissing()
   ));
 
-  const loadThread = async (threadId: string) => {
+  const loadThread = async (threadId: string, checkpointId = "") => {
     const requestId = threadLoadRequestId + 1;
     threadLoadRequestId = requestId;
     setCurrentThreadId(threadId);
@@ -377,7 +380,9 @@ export function ChatPage() {
     scroll.setAutoScroll(true);
 
     try {
-      const payload = await apiFetch<ThreadMessagesPayload>(threadApiPath(threadId));
+      const payload = await apiFetch<ThreadMessagesPayload>(
+        threadApiPath(threadId, checkpointId),
+      );
       if (requestId !== threadLoadRequestId) {
         return;
       }
@@ -402,6 +407,19 @@ export function ChatPage() {
           }
         }
       }
+    }
+  };
+
+  const refreshThread = async (threadId: string, checkpointId = "") => {
+    try {
+      const payload = await apiFetch<ThreadMessagesPayload>(
+        threadApiPath(threadId, checkpointId),
+      );
+      if (payload.thread_id === currentThreadId()) {
+        applyThreadPayload(payload);
+      }
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to refresh thread", "error");
     }
   };
 
@@ -459,6 +477,7 @@ export function ChatPage() {
     if (!threadId) {
       setCurrentThreadId("");
       setCurrentStreamThreadId(null);
+      setActiveCheckpointId("");
       setThreadData(undefined);
       setThreadError("");
       setThreadLoading(false);
@@ -615,6 +634,8 @@ export function ChatPage() {
       if (resume) {
         (payload as any).resume = true;
         payload.message = "";
+      } else if (currentThreadId() && activeCheckpointId()) {
+        payload.checkpoint_id = activeCheckpointId();
       }
       const response = await fetch("/api/chat/events", {
         method: "POST",
@@ -672,6 +693,9 @@ export function ChatPage() {
         );
       }
       window.dispatchEvent(new CustomEvent("kaka:threads-changed"));
+      if (finishedTid && !isUnmounting && currentThreadId() === finishedTid) {
+        void refreshThread(finishedTid);
+      }
     }
   };
 
@@ -760,6 +784,154 @@ export function ChatPage() {
   const stopChat = () => controller()?.abort();
   const handleResume = () => {
     void sendMessage(true);
+  };
+
+  const handleCopyMessage = async (text: string) => {
+    try {
+      await writeToClipboard(text);
+      showToast("Message copied.", "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Copy failed", "error");
+    }
+  };
+
+  const handleBranchSelect = (checkpointId: string) => {
+    const threadId = currentThreadId();
+    if (!threadId || !checkpointId || checkpointId === activeCheckpointId() || conversationBusy()) {
+      return;
+    }
+    void loadThread(threadId, checkpointId);
+  };
+
+  const handleEditMessage = async (payload: {
+    itemId?: number;
+    messageIndex: number;
+    sourceCheckpointId: string;
+    text: string;
+  }) => {
+    const threadId = currentThreadId();
+    const nextText = payload.text.trim();
+    if (!threadId || !nextText) {
+      return;
+    }
+    if (conversationBusy()) {
+      showToast("Wait for the current response to finish.", "warning");
+      return;
+    }
+    if (!agentName()) {
+      showToast("No valid agent is available.", "error");
+      return;
+    }
+
+    isUnmounting = false;
+    cleanupStaleStreams();
+    setRecursionLimitReached(false);
+    window.localStorage.removeItem(`kaka:recursion-limit-reached:${threadId}`);
+
+    const currentItems = items();
+    const itemIndex = currentItems.findIndex((item) => item.id === payload.itemId);
+    const nextItems = itemIndex === -1
+      ? currentItems
+      : [
+          ...currentItems.slice(0, itemIndex),
+          {
+            ...currentItems[itemIndex],
+            text: nextText,
+          },
+        ];
+    setItems(nextItems);
+
+    const streamThreadIdRef: StreamThreadIdRef = { id: threadId, message: nextText };
+    getOrCreateStreamSignals(streamThreadIdRef.id, nextItems);
+    setCurrentStreamThreadId(streamThreadIdRef.id);
+
+    const abortController = new AbortController();
+    setController(abortController, streamThreadIdRef.id);
+    setStreaming(true, streamThreadIdRef.id);
+
+    window.dispatchEvent(
+      new CustomEvent("kaka:thread-start-running", {
+        detail: {
+          threadId,
+          title: nextText,
+          workspace: workspaceRef() || localWorkspaceRef(workingDir()),
+          agent_name: agentName(),
+        },
+      }),
+    );
+
+    const assistantIdRef: AssistantIdRef = { id: null };
+    const streamedRef: StreamedRef = { received: false };
+
+    try {
+      const response = await fetch("/api/chat/events/edit", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          message: nextText,
+          user_id: "dashboard",
+          thread_id: threadId,
+          message_index: payload.messageIndex,
+          source_checkpoint_id: payload.sourceCheckpointId,
+          agent_name: agentName(),
+          provider: provider(),
+          model: model(),
+          workspace: workspaceRef() || localWorkspaceRef(workingDir()),
+        }),
+        signal: abortController.signal,
+      });
+      if (!response.ok) {
+        throw new Error(await readError(response));
+      }
+      if (!response.body) {
+        throw new Error("Streaming response is not available.");
+      }
+
+      await readNDJSONStream(
+        response.body,
+        makeEventHandler(assistantIdRef, streamedRef, streamThreadIdRef),
+      );
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        if (!isUnmounting) {
+          showToast("Response stopped.", "warning");
+        }
+      } else {
+        appendItem({
+          type: "message",
+          role: "error",
+          text: err instanceof Error ? err.message : "Chat edit failed",
+        }, "bottom", streamThreadIdRef.id);
+      }
+    } finally {
+      const finishedTid = streamThreadIdRef.id;
+      markLocalStreamFinished(finishedTid);
+      setStreaming(false, finishedTid);
+      setController(null, finishedTid);
+
+      if (finishedTid) {
+        const isViewing = currentStreamThreadId() === finishedTid;
+        if (persistedStreams.has(finishedTid)) {
+          if (isViewing && !isUnmounting) {
+            setLocalItems(persistedStreams.get(finishedTid)!.items[0]());
+          }
+          cleanupStreamSignals(finishedTid);
+        }
+        if (isViewing) {
+          setCurrentStreamThreadId(null);
+        }
+      }
+      window.dispatchEvent(
+        new CustomEvent("kaka:thread-stop-running", {
+          detail: { threadId: finishedTid },
+        }),
+      );
+      window.dispatchEvent(new CustomEvent("kaka:threads-changed"));
+      if (finishedTid && !isUnmounting && currentThreadId() === finishedTid) {
+        void refreshThread(finishedTid);
+      }
+    }
   };
 
   const handleSessionStartedOrUpdated = (event: Event) => {
@@ -915,6 +1087,9 @@ export function ChatPage() {
                 workspace={workspaceRef()}
                 conversationBusy={conversationBusy()}
                 onWorkspaceResolved={setWorkspace}
+                onCopyMessage={(text) => void handleCopyMessage(text)}
+                onEditMessage={(payload) => void handleEditMessage(payload)}
+                onBranchSelect={handleBranchSelect}
               />
               <ChatComposer
                 prompt={prompt()}

@@ -19,6 +19,7 @@ class ChatRequest(BaseModel):
     user_id: str = "anonymous"
     thread_id: Optional[str] = None
     new_thread: bool = False
+    checkpoint_id: Optional[str] = None
     workflow: Optional[str] = None
     workspace: Optional[WorkspaceRef] = None
     agent_name: Optional[str] = None
@@ -41,3 +42,16 @@ class PairingCodeResponse(BaseModel):
 
 class ReconnectRequest(BaseModel):
     thread_id: str
+
+
+class EditChatRequest(BaseModel):
+    message: str = Field(min_length=1)
+    user_id: str = "anonymous"
+    thread_id: str = Field(min_length=1)
+    message_index: int = Field(ge=0)
+    source_checkpoint_id: str = Field(min_length=1)
+    workflow: Optional[str] = None
+    workspace: Optional[WorkspaceRef] = None
+    agent_name: Optional[str] = None
+    provider: Optional[str] = None
+    model: Optional[str] = None

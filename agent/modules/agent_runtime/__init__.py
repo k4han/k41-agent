@@ -7,6 +7,7 @@ from agent.modules.agent_runtime.runner import (
     build_run_params,
     clear_agent_session,
     run_agent,
+    run_agent_edit_stream,
     run_agent_full,
     run_agent_stream,
 )
@@ -47,6 +48,7 @@ __all__ = [
     "get_background_task_manager",
     "get_background_task_repository",
     "run_agent",
+    "run_agent_edit_stream",
     "run_agent_full",
     "run_agent_stream",
     "ChatStreamManager",

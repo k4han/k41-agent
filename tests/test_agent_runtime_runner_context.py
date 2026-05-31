@@ -843,3 +843,94 @@ async def test_run_agent_stream_resume(monkeypatch):
     assert events == [{"type": "final", "content": "resumed-ai-message"}]
     assert captured["payload"] is None
 
+
+@pytest.mark.asyncio
+async def test_run_agent_edit_stream_forks_from_parent_and_preserves_attachments(
+    monkeypatch,
+):
+    captured: dict = {}
+    original_message = HumanMessage(
+        content=[
+            {"type": "text", "text": "Review this"},
+            {"type": "text", "text": "Attached text file: notes.txt\n\nold"},
+        ],
+        id="user-1",
+        additional_kwargs={
+            "attachments": [
+                {
+                    "name": "notes.txt",
+                    "mime_type": "text/plain",
+                    "size": 3,
+                    "kind": "text",
+                }
+            ]
+        },
+    )
+
+    class _FakeCatalog:
+        def get_agent(self, name: str):
+            return SimpleNamespace(
+                graph_type="react_agent",
+                max_context_tokens=1234,
+                tools=["list_files"],
+            )
+
+    class _FakeGraph:
+        async def aget_state_history(self, config):
+            yield SimpleNamespace(
+                config={
+                    "configurable": {
+                        "thread_id": "thread-1",
+                        "checkpoint_id": "source-1",
+                    }
+                },
+                parent_config={
+                    "configurable": {
+                        "thread_id": "thread-1",
+                        "checkpoint_id": "parent-1",
+                    }
+                },
+                values={"messages": [original_message]},
+            )
+
+        async def aget_state(self, config):
+            captured["state_config"] = config
+            return SimpleNamespace(values={"messages": []})
+
+        async def astream(self, payload, **kwargs):
+            captured["payload"] = payload
+            captured["kwargs"] = kwargs
+            edited = payload["messages"][0]
+            yield ("values", {"messages": [edited, AIMessage(content="edited response", id="ai-1")]})
+
+    monkeypatch.setattr(
+        "agent.modules.agents.get_catalog_service",
+        lambda: _FakeCatalog(),
+    )
+    monkeypatch.setattr(runner_module, "get_workflow_graph", lambda name: _FakeGraph())
+    monkeypatch.setattr(runner_module, "make_run_context", lambda **kwargs: kwargs)
+    monkeypatch.setattr(
+        runner_module,
+        "make_run_config",
+        lambda **kwargs: {"configurable": {"thread_id": kwargs["thread_id"]}},
+    )
+
+    events = [
+        event
+        async for event in runner_module.run_agent_edit_stream(
+            user_input="Updated request",
+            thread_id="thread-1",
+            agent_name="default",
+            message_index=0,
+            source_checkpoint_id="source-1",
+        )
+    ]
+
+    assert events == [{"type": "final", "content": "edited response"}]
+    assert captured["kwargs"]["config"]["configurable"]["checkpoint_id"] == "parent-1"
+    edited_message = captured["payload"]["messages"][0]
+    assert edited_message.id == "user-1"
+    assert edited_message.content[0]["text"] == "Updated request"
+    assert edited_message.content[1]["text"] == "Attached text file: notes.txt\n\nold"
+    assert edited_message.additional_kwargs == original_message.additional_kwargs
+

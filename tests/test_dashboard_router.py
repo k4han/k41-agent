@@ -997,6 +997,270 @@ async def test_dashboard_delete_background_task_thread_deletes_workflow_tree(
     ]
 
 
+def _checkpoint_tuple(
+    checkpoint_id: str,
+    parent_id: str | None,
+    messages: list,
+    *,
+    ts: str,
+):
+    return SimpleNamespace(
+        config={
+            "configurable": {
+                "thread_id": "api_dashboard_123",
+                "checkpoint_ns": "",
+                "checkpoint_id": checkpoint_id,
+            }
+        },
+        parent_config={
+            "configurable": {
+                "thread_id": "api_dashboard_123",
+                "checkpoint_ns": "",
+                "checkpoint_id": parent_id,
+            }
+        }
+        if parent_id
+        else None,
+        checkpoint={
+            "id": checkpoint_id,
+            "ts": ts,
+            "channel_values": {"messages": messages},
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_dashboard_thread_messages_include_checkpoint_branch_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    checkpoints = [
+        _checkpoint_tuple("c0", None, [], ts="2026-01-01T00:00:00Z"),
+        _checkpoint_tuple(
+            "c1",
+            "c0",
+            [HumanMessage(content="original", id="h1")],
+            ts="2026-01-01T00:00:01Z",
+        ),
+        _checkpoint_tuple(
+            "c2",
+            "c1",
+            [
+                HumanMessage(content="original", id="h1"),
+                AIMessage(content="first", id="a1"),
+            ],
+            ts="2026-01-01T00:00:02Z",
+        ),
+        _checkpoint_tuple(
+            "c3",
+            "c0",
+            [HumanMessage(content="edited", id="h1")],
+            ts="2026-01-01T00:00:03Z",
+        ),
+        _checkpoint_tuple(
+            "c4",
+            "c3",
+            [
+                HumanMessage(content="edited", id="h1"),
+                AIMessage(content="second", id="a2"),
+            ],
+            ts="2026-01-01T00:00:04Z",
+        ),
+    ]
+
+    class FakeCheckpointer:
+        async def aget_tuple(self, config):
+            checkpoint_id = config["configurable"].get("checkpoint_id") or "c4"
+            return next(
+                checkpoint
+                for checkpoint in checkpoints
+                if checkpoint.config["configurable"]["checkpoint_id"] == checkpoint_id
+            )
+
+        async def alist(self, config):
+            for checkpoint in reversed(checkpoints):
+                yield checkpoint
+
+    _patch_dashboard_attr(monkeypatch, "_get_checkpointer", lambda: FakeCheckpointer())
+
+    messages, active_checkpoint_id = await _dashboard_attr("_get_thread_messages_payload")(
+        "api_dashboard_123",
+        include_branch_metadata=True,
+    )
+
+    assert active_checkpoint_id == "c4"
+    user_message = messages[0]
+    assert user_message["content"] == "edited"
+    assert user_message["message_index"] == 0
+    assert user_message["source_checkpoint_id"] == "c3"
+    assert user_message["parent_checkpoint_id"] == "c0"
+    assert user_message["branch"] == {
+        "current": 2,
+        "total": 2,
+        "options": [
+            {"checkpoint_id": "c2", "message": "original"},
+            {"checkpoint_id": "c4", "message": "edited"},
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_dashboard_thread_messages_can_load_specific_checkpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    checkpoints = [
+        _checkpoint_tuple("c0", None, [], ts="2026-01-01T00:00:00Z"),
+        _checkpoint_tuple(
+            "c1",
+            "c0",
+            [HumanMessage(content="original", id="h1")],
+            ts="2026-01-01T00:00:01Z",
+        ),
+        _checkpoint_tuple(
+            "c2",
+            "c1",
+            [
+                HumanMessage(content="original", id="h1"),
+                AIMessage(content="first", id="a1"),
+            ],
+            ts="2026-01-01T00:00:02Z",
+        ),
+        _checkpoint_tuple(
+            "c3",
+            "c0",
+            [HumanMessage(content="edited", id="h1")],
+            ts="2026-01-01T00:00:03Z",
+        ),
+        _checkpoint_tuple(
+            "c4",
+            "c3",
+            [
+                HumanMessage(content="edited", id="h1"),
+                AIMessage(content="second", id="a2"),
+            ],
+            ts="2026-01-01T00:00:04Z",
+        ),
+    ]
+
+    class FakeCheckpointer:
+        async def aget_tuple(self, config):
+            checkpoint_id = config["configurable"].get("checkpoint_id") or "c4"
+            return next(
+                checkpoint
+                for checkpoint in checkpoints
+                if checkpoint.config["configurable"]["checkpoint_id"] == checkpoint_id
+            )
+
+        async def alist(self, config):
+            for checkpoint in reversed(checkpoints):
+                yield checkpoint
+
+    _patch_dashboard_attr(monkeypatch, "_get_checkpointer", lambda: FakeCheckpointer())
+
+    messages, active_checkpoint_id = await _dashboard_attr("_get_thread_messages_payload")(
+        "api_dashboard_123",
+        checkpoint_id="c2",
+        include_branch_metadata=True,
+    )
+
+    assert active_checkpoint_id == "c2"
+    assert messages[0]["content"] == "original"
+    assert messages[0]["branch"]["current"] == 1
+    assert messages[1]["content"] == "first"
+
+
+@pytest.mark.asyncio
+async def test_dashboard_branch_metadata_only_marks_changed_user_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    first_user = HumanMessage(content="first", id="h1")
+    first_ai = AIMessage(content="first response", id="a1")
+    checkpoints = [
+        _checkpoint_tuple("c0", None, [], ts="2026-01-01T00:00:00Z"),
+        _checkpoint_tuple("c1", "c0", [first_user], ts="2026-01-01T00:00:01Z"),
+        _checkpoint_tuple("c2", "c1", [first_user, first_ai], ts="2026-01-01T00:00:02Z"),
+        _checkpoint_tuple(
+            "c3",
+            "c2",
+            [
+                first_user,
+                first_ai,
+                HumanMessage(content="second original", id="h2"),
+            ],
+            ts="2026-01-01T00:00:03Z",
+        ),
+        _checkpoint_tuple(
+            "c4",
+            "c3",
+            [
+                first_user,
+                first_ai,
+                HumanMessage(content="second original", id="h2"),
+                AIMessage(content="old second response", id="a2"),
+            ],
+            ts="2026-01-01T00:00:04Z",
+        ),
+        _checkpoint_tuple(
+            "c5",
+            "c2",
+            [
+                first_user,
+                first_ai,
+                HumanMessage(content="second edited", id="h2"),
+            ],
+            ts="2026-01-01T00:00:05Z",
+        ),
+        _checkpoint_tuple(
+            "c6",
+            "c5",
+            [
+                first_user,
+                first_ai,
+                HumanMessage(content="second edited", id="h2"),
+                AIMessage(content="new second response", id="a3"),
+            ],
+            ts="2026-01-01T00:00:06Z",
+        ),
+    ]
+
+    class FakeCheckpointer:
+        async def aget_tuple(self, config):
+            checkpoint_id = config["configurable"].get("checkpoint_id") or "c6"
+            return next(
+                checkpoint
+                for checkpoint in checkpoints
+                if checkpoint.config["configurable"]["checkpoint_id"] == checkpoint_id
+            )
+
+        async def alist(self, config):
+            for checkpoint in reversed(checkpoints):
+                yield checkpoint
+
+    _patch_dashboard_attr(monkeypatch, "_get_checkpointer", lambda: FakeCheckpointer())
+
+    messages, _ = await _dashboard_attr("_get_thread_messages_payload")(
+        "api_dashboard_123",
+        include_branch_metadata=True,
+    )
+
+    assert messages[0]["content"] == "first"
+    assert "branch" not in messages[0]
+    assert messages[2]["content"] == "second edited"
+    assert messages[2]["branch"] == {
+        "current": 2,
+        "total": 2,
+        "options": [
+            {"checkpoint_id": "c4", "message": "second original"},
+            {"checkpoint_id": "c6", "message": "second edited"},
+        ],
+    }
+
+
 @pytest.mark.asyncio
 async def test_dashboard_thread_messages_preserve_assistant_text_with_tool_calls(
     monkeypatch: pytest.MonkeyPatch,
