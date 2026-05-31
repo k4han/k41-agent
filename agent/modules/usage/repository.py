@@ -272,6 +272,7 @@ class LLMUsageRepository:
         async with session:
             result = await session.execute(stmt)
             rows = result.all()
+            latest_event = await self._latest_context_event(session, thread_id)
 
         models = []
         total_tokens = 0
@@ -304,8 +305,49 @@ class LLMUsageRepository:
             "total_tokens": total_tokens,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
+            "current_context_tokens": (
+                int(latest_event.input_tokens or 0) if latest_event else 0
+            ),
+            "latest_input_tokens": int(latest_event.input_tokens or 0) if latest_event else 0,
+            "latest_output_tokens": (
+                int(latest_event.output_tokens or 0) if latest_event else 0
+            ),
+            "latest_total_tokens": int(latest_event.total_tokens or 0) if latest_event else 0,
+            "latest_model": latest_event.model_name if latest_event else "",
+            "latest_provider": latest_event.provider_name if latest_event else "",
+            "latest_used_at": _iso(latest_event.created_at) if latest_event else None,
             "models": models,
         }
+
+    async def _latest_context_event(self, session: Any, thread_id: str) -> LLMUsageEvent | None:
+        common_clauses = [
+            LLMUsageEvent.internal.is_(False),
+            LLMUsageEvent.has_usage_metadata.is_(True),
+            LLMUsageEvent.input_tokens.is_not(None),
+        ]
+        order_by = (LLMUsageEvent.created_at.desc(), LLMUsageEvent.id.desc())
+
+        exact_result = await session.execute(
+            select(LLMUsageEvent)
+            .where(LLMUsageEvent.thread_id == thread_id, *common_clauses)
+            .order_by(*order_by)
+            .limit(1)
+        )
+        exact_event = exact_result.scalars().first()
+        if exact_event is not None:
+            return exact_event
+
+        root_result = await session.execute(
+            select(LLMUsageEvent)
+            .where(
+                (LLMUsageEvent.thread_id == thread_id)
+                | (LLMUsageEvent.root_thread_id == thread_id),
+                *common_clauses,
+            )
+            .order_by(*order_by)
+            .limit(1)
+        )
+        return root_result.scalars().first()
 
     async def aggregate_by_workspace(self, backend: str, locator: str) -> dict[str, Any]:
         from agent.modules.workspaces.models import ThreadWorkspace

@@ -414,6 +414,13 @@ export interface ThreadUsagePayload {
   total_tokens: number;
   input_tokens: number;
   output_tokens: number;
+  current_context_tokens?: number;
+  latest_input_tokens?: number;
+  latest_output_tokens?: number;
+  latest_total_tokens?: number;
+  latest_model?: string;
+  latest_provider?: string;
+  latest_used_at?: string | null;
   models: ModelUsageDetail[];
 }
 

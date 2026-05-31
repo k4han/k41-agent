@@ -462,6 +462,100 @@ async def test_usage_repository_aggregates_by_thread(usage_db) -> None:
 
 
 @pytest.mark.asyncio
+async def test_usage_repository_thread_current_context_uses_latest_external_prompt(usage_db) -> None:
+    repository = LLMUsageRepository()
+    now = datetime.now(timezone.utc)
+
+    await repository.record(
+        UsageEventInput(
+            thread_id="context_thread",
+            root_thread_id="context_thread",
+            platform="dashboard",
+            user_id="admin",
+            channel_id="admin",
+            agent_name="default",
+            provider_name="test",
+            model_name="test-model",
+            call_kind="agent",
+            internal=False,
+            has_usage_metadata=True,
+            input_tokens=60_000,
+            output_tokens=500,
+            total_tokens=60_500,
+            created_at=now,
+        )
+    )
+    await repository.record(
+        UsageEventInput(
+            thread_id="context_thread",
+            root_thread_id="context_thread",
+            platform="dashboard",
+            user_id="admin",
+            channel_id="admin",
+            agent_name="default",
+            provider_name="test",
+            model_name="test-model",
+            call_kind="agent",
+            internal=False,
+            has_usage_metadata=True,
+            input_tokens=88_000,
+            output_tokens=700,
+            total_tokens=88_700,
+            created_at=now + timedelta(seconds=1),
+        )
+    )
+    await repository.record(
+        UsageEventInput(
+            thread_id="context_thread:sub:worker",
+            root_thread_id="context_thread",
+            platform="dashboard",
+            user_id="admin",
+            channel_id="admin",
+            agent_name="worker",
+            provider_name="test",
+            model_name="worker-model",
+            call_kind="agent",
+            internal=False,
+            has_usage_metadata=True,
+            input_tokens=120_000,
+            output_tokens=100,
+            total_tokens=120_100,
+            created_at=now + timedelta(seconds=2),
+        )
+    )
+    await repository.record(
+        UsageEventInput(
+            thread_id="context_thread",
+            root_thread_id="context_thread",
+            platform="dashboard",
+            user_id="admin",
+            channel_id="admin",
+            agent_name="conversation-title",
+            provider_name="test",
+            model_name="title-model",
+            call_kind="conversation_title",
+            internal=True,
+            has_usage_metadata=True,
+            input_tokens=5,
+            output_tokens=5,
+            total_tokens=10,
+            created_at=now + timedelta(seconds=3),
+        )
+    )
+
+    data = await repository.aggregate_by_thread("context_thread")
+
+    assert data["input_tokens"] == 268_005
+    assert data["current_context_tokens"] == 88_000
+    assert data["latest_input_tokens"] == 88_000
+    assert data["latest_output_tokens"] == 700
+    assert data["latest_total_tokens"] == 88_700
+    assert data["latest_model"] == "test-model"
+    assert data["latest_provider"] == "test"
+    assert data["latest_used_at"] is not None
+
+
+@pytest.mark.asyncio
 async def test_usage_repository_aggregates_by_workspace(usage_db) -> None:
     from agent.modules.workspaces.models import ThreadWorkspace
     from agent.shared.infrastructure.db.session import get_async_session
