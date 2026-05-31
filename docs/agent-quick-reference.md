@@ -102,8 +102,15 @@ LLM sẽ tự động gọi:
 - `websearch` - Search the web
 - `webfetch` - Fetch web content
 
-### System
-- `run_command` - Execute shell commands
+### Shell (Session-based)
+- `bash` - Execute shell commands in a persistent terminal session
+- `bash_send_input` - Send input to an interactive running process
+- `bash_interrupt` - Interrupt or terminate a running process
+- `bash_read_output` - Read output from a background process
+- `bash_list_sessions` - List all active terminal sessions
+- `bash_close` - Close active terminal sessions
+
+> **Session behavior:** `bash` tools maintain state across calls (same `session_id`). `cd`, environment variables, and background processes persist between invocations. Use different `session_id` values to fully isolate tasks.
 
 ### Agent
 - `call_agent` - Call sub-agents

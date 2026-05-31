@@ -1,17 +1,110 @@
 """Session-based shell tools for executing commands and managing persistent terminal sessions."""
 
-from __future__ import annotations
+from typing import Any
 
-from typing import Annotated, Any
-
-from langchain_core.tools import tool, InjectedToolArg
+from langchain_core.tools import tool
 from langgraph.prebuilt import ToolRuntime
+from pydantic import BaseModel, Field
 
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCapability, ToolCategory
 from agent.modules.tools.langchain.working_dir import get_working_dir
 from agent.modules.tools.result import ToolError, ToolErrorCode
 from agent.modules.tools.langchain.shell_tools.session_manager import session_manager
+
+
+class BashInput(BaseModel):
+    """Input schema for executing commands in persistent shell sessions."""
+
+    command: str = Field(
+        description=(
+            "Command to execute inside the persistent shell process for session_id. "
+            "Shell state is preserved across calls to the same session_id: if an earlier "
+            "command ran 'cd subdir', the next command in that same session starts there. "
+            "Use a different session_id when you need an isolated current directory, "
+            "environment, or running process context."
+        ),
+    )
+    session_id: str = Field(
+        default="default",
+        description=(
+            "Persistent terminal session identifier. Calls with the same session_id share "
+            "one shell process and therefore keep current directory changes, environment "
+            "variables, shell state, and background processes. Defaults to 'default'."
+        ),
+    )
+    timeout: float = Field(
+        default=30.0,
+        description="Maximum wait time in seconds for command output.",
+    )
+    run_in_background: bool = Field(
+        default=False,
+        description=(
+            "Run the command without waiting for completion. Read later output from the "
+            "same session_id with bash_read_output."
+        ),
+    )
+    force: bool = Field(
+        default=False,
+        description=(
+            "Force execution even when the same session already has a background process running."
+        ),
+    )
+
+
+class BashReadOutputInput(BaseModel):
+    """Input schema for reading background output from a shell session."""
+
+    session_id: str = Field(
+        description=(
+            "Persistent terminal session identifier to read from. Use the same session_id "
+            "that started the background command."
+        ),
+    )
+    timeout: float = Field(
+        default=1.0,
+        description="Time in seconds to wait for new output from the session.",
+    )
+
+
+class BashSendInputInput(BaseModel):
+    """Input schema for sending stdin to a shell session."""
+
+    session_id: str = Field(
+        description=(
+            "Persistent terminal session identifier. Input is sent to the process running "
+            "inside this existing session."
+        ),
+    )
+    text: str = Field(
+        description="Text to send as stdin input. A newline is automatically appended.",
+    )
+
+
+class BashInterruptInput(BaseModel):
+    """Input schema for interrupting a shell session."""
+
+    session_id: str = Field(
+        description="Persistent terminal session identifier to interrupt or terminate.",
+    )
+    signal_type: str = Field(
+        default="interrupt",
+        description=(
+            "Signal type to send. Use 'interrupt' for Ctrl+C/SIGINT or 'terminate' for SIGTERM."
+        ),
+    )
+
+
+class BashCloseInput(BaseModel):
+    """Input schema for closing persistent shell sessions."""
+
+    session_ids: str | list[str] | None = Field(
+        default=None,
+        description=(
+            "Session ID, list of session IDs, JSON array string, comma-separated IDs, "
+            "or None to close all persistent terminal sessions."
+        ),
+    )
 
 
 @register_tool(
@@ -22,10 +115,10 @@ from agent.modules.tools.langchain.shell_tools.session_manager import session_ma
     ],
     tags=["shell"],
 )
-@tool
+@tool(args_schema=BashInput)
 def bash(
     command: str,
-    runtime: Annotated[ToolRuntime[Any, Any], InjectedToolArg],
+    runtime: ToolRuntime[Any, Any],
     session_id: str = "default",
     timeout: float = 30.0,
     run_in_background: bool = False,
@@ -33,12 +126,15 @@ def bash(
 ) -> str:
     """Run a shell command in a persistent terminal session.
 
-    A session is auto-created if it doesn't exist. This tool supports maintaining state
-    across multiple calls (e.g. current directory changes, environment variables, background processes).
+    A session is auto-created if it doesn't exist. Each ``session_id`` maps to one
+    long-lived shell process, so calls to the same session preserve shell state
+    across turns. For example, after running ``cd src`` in session ``default``,
+    the next ``bash`` call with ``session_id="default"`` starts in ``src``.
 
     Args:
         command: Command to execute in the terminal session.
-        session_id: ID of the terminal session. Defaults to 'default'.
+        session_id: ID of the terminal session. Calls with the same ID share current
+            directory, environment variables, shell state, and background processes.
         timeout: Maximum wait time in seconds for the command output. Defaults to 30.
         run_in_background: Set to True to run processes in the background without waiting for output.
         force: Set to True to force execution even when a background process is running in the session.
@@ -82,7 +178,7 @@ def bash(
     ],
     tags=["shell"],
 )
-@tool
+@tool(args_schema=BashReadOutputInput)
 def bash_read_output(
     session_id: str,
     timeout: float = 1.0,
@@ -114,7 +210,7 @@ def bash_read_output(
     ],
     tags=["shell"],
 )
-@tool
+@tool(args_schema=BashSendInputInput)
 def bash_send_input(
     session_id: str,
     text: str,
@@ -141,7 +237,7 @@ def bash_send_input(
     ],
     tags=["shell"],
 )
-@tool
+@tool(args_schema=BashInterruptInput)
 def bash_interrupt(
     session_id: str,
     signal_type: str = "interrupt",
@@ -192,7 +288,7 @@ def bash_list_sessions() -> str:
     ],
     tags=["shell"],
 )
-@tool
+@tool(args_schema=BashCloseInput)
 def bash_close(
     session_ids: str | list[str] | None = None,
 ) -> str:
