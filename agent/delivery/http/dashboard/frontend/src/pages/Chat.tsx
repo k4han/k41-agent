@@ -95,6 +95,7 @@ export function ChatPage() {
   let loadedThreadId: string | null = null;
   let isUnmounting = false;
   let threadLoadRequestId = 0;
+  let latestLocalStreamFinish: { threadId: string; finishedAt: number } | null = null;
 
   const scroll = useChatScroll(() => transcriptRef);
   const {
@@ -322,6 +323,7 @@ export function ChatPage() {
     appendItem,
     updateMessage,
     updateToolResult,
+    onError: (message) => showToast(message, "error"),
     setRecursionLimitReached: (v) => setRecursionLimitReached(v),
     onThreadCreated,
   };
@@ -515,6 +517,20 @@ export function ChatPage() {
     handleStreamEvent(event, assistantIdRef, streamedRef, streamThreadIdRef, streamCallbacks);
   };
 
+  const markLocalStreamFinished = (threadId: string) => {
+    latestLocalStreamFinish = { threadId, finishedAt: Date.now() };
+  };
+
+  const shouldSkipStopReload = (threadId: string) => {
+    if (streaming() || currentStreamThreadId() === threadId) {
+      return true;
+    }
+    if (!latestLocalStreamFinish || latestLocalStreamFinish.threadId !== threadId) {
+      return false;
+    }
+    return Date.now() - latestLocalStreamFinish.finishedAt < 5000;
+  };
+
   const sendMessage = async (resume = false) => {
     isUnmounting = false;
     cleanupStaleStreams();
@@ -632,6 +648,7 @@ export function ChatPage() {
       }
     } finally {
       const finishedTid = streamThreadIdRef.id;
+      markLocalStreamFinished(finishedTid);
       setStreaming(false, finishedTid);
       setController(null, finishedTid);
 
@@ -713,6 +730,7 @@ export function ChatPage() {
       }
     } finally {
       const finishedTid = streamThreadIdRef.id;
+      markLocalStreamFinished(finishedTid);
       setStreaming(false, finishedTid);
       setController(null, finishedTid);
 
@@ -757,6 +775,9 @@ export function ChatPage() {
     const { thread_id } = customEvent.detail;
     if (thread_id === currentThreadId()) {
       setActiveSession(null);
+      if (shouldSkipStopReload(thread_id)) {
+        return;
+      }
       void loadThread(thread_id);
     }
   };
@@ -794,7 +815,7 @@ export function ChatPage() {
   const handleThreadStopRunningExternal = (event: Event) => {
     const customEvent = event as CustomEvent<{ threadId: string }>;
     const stoppedId = customEvent.detail.threadId;
-    if (stoppedId === currentThreadId() && !streaming()) {
+    if (stoppedId === currentThreadId() && !shouldSkipStopReload(stoppedId)) {
       void loadThread(stoppedId);
     }
   };

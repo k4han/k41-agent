@@ -96,7 +96,11 @@ export function TranscriptMessageView(props: {
   itemId?: number;
 }) {
   return (
-    <div class={`message ${props.role}`} data-transcript-item-id={props.itemId}>
+    <div
+      class={`message ${props.role}`}
+      data-transcript-item-id={props.itemId}
+      role={props.role === "error" ? "alert" : undefined}
+    >
       <div class="message-bubble">
         <Show when={props.text}>
           <Show

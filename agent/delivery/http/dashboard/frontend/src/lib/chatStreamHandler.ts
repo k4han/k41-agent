@@ -8,6 +8,7 @@ export interface StreamCallbacks {
   appendItem: (item: TranscriptItem, mode: AppendScrollMode, threadId?: string) => number;
   updateMessage: (id: number, chunk: string, threadId?: string) => void;
   updateToolResult: (toolCallId: string, name: string, result: unknown, threadId?: string) => void;
+  onError?: (message: string, code?: string) => void;
   setRecursionLimitReached: (value: boolean) => void;
   onThreadCreated: (threadId: string, streamThreadIdRef: StreamThreadIdRef) => void;
 }
@@ -79,15 +80,18 @@ export function handleStreamEvent(
   }
 
   if (event.type === "error") {
+    const errorMessage = String(event.content || event.message || "Chat failed");
+    const errorCode = typeof event.code === "string" ? event.code : undefined;
     callbacks.appendItem(
       {
         type: "message",
         role: "error",
-        text: String(event.content || event.message || "Chat failed"),
+        text: errorMessage,
       },
       "bottom",
       streamThreadIdRef.id,
     );
+    callbacks.onError?.(errorMessage, errorCode);
     if (event.code === "recursion_limit_reached") {
       callbacks.setRecursionLimitReached(true);
       if (streamThreadIdRef.id) {

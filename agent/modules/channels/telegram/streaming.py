@@ -1,9 +1,11 @@
 import logging
+import asyncio
 import time
 from collections import deque
 from collections.abc import Sequence
 
 from agent.modules.channels.telegram.sender import send_telegram_response
+from agent.shared.infrastructure.errors import classify_agent_error
 
 logger = logging.getLogger(__name__)
 
@@ -38,35 +40,50 @@ async def handle_streaming_response(message, params) -> None:
     final_response = ""
     last_status_edit_at = 0.0
 
-    async for event in run_agent_stream(**params):
-        if event["type"] == "tool_call":
-            tool_name = event["name"]
-            args = event.get("args", {})
-            arg_str = str(args) if args else ""
-            if len(arg_str) > 50:
-                arg_str = arg_str[:47] + "..."
+    try:
+        async for event in run_agent_stream(**params):
+            if event["type"] == "tool_call":
+                tool_name = event["name"]
+                args = event.get("args", {})
+                arg_str = str(args) if args else ""
+                if len(arg_str) > 50:
+                    arg_str = arg_str[:47] + "..."
 
-            tools_called.append(f"{tool_name}({arg_str})")
-            total_tool_calls += 1
+                tools_called.append(f"{tool_name}({arg_str})")
+                total_tool_calls += 1
 
-            now = time.monotonic()
-            should_edit = (
-                total_tool_calls == 1
-                or now - last_status_edit_at >= STATUS_EDIT_INTERVAL_SECONDS
-            )
-            if not should_edit:
-                continue
+                now = time.monotonic()
+                should_edit = (
+                    total_tool_calls == 1
+                    or now - last_status_edit_at >= STATUS_EDIT_INTERVAL_SECONDS
+                )
+                if not should_edit:
+                    continue
 
-            new_text = _format_status_text(tools_called, total_tool_calls)
+                new_text = _format_status_text(tools_called, total_tool_calls)
 
-            try:
-                await status_msg.edit_text(new_text)
-                last_status_edit_at = now
-            except Exception as e:
-                logger.warning("Failed to edit status message: %s", e)
+                try:
+                    await status_msg.edit_text(new_text)
+                    last_status_edit_at = now
+                except Exception as e:
+                    logger.warning("Failed to edit status message: %s", e)
 
-        elif event["type"] == "final":
-            final_response = event["content"]
+            elif event["type"] == "final":
+                final_response = event["content"]
+    except asyncio.CancelledError:
+        raise
+    except BaseException as exc:
+        logger.exception("Agent stream failed for Telegram message.")
+        agent_error = classify_agent_error(exc)
+        await send_telegram_response(
+            message,
+            status_msg,
+            agent_error.message,
+            mode="plain",
+        )
+        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            raise
+        return
 
     await send_telegram_response(
         message,

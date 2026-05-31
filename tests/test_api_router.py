@@ -1,4 +1,5 @@
 import importlib
+import json
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -61,6 +62,7 @@ def test_chat_sync_returns_response_payload(monkeypatch):
             "agent_name": "default",
             "provider": None,
             "model": None,
+            "resume": False,
         }
         return {**built_params, "workspace": params["workspace"]}
 
@@ -112,6 +114,7 @@ def test_chat_sync_prefers_agent_name_over_workflow(monkeypatch):
             "agent_name": "research-agent",
             "provider": None,
             "model": None,
+            "resume": False,
         }
         return dict(built_params)
 
@@ -163,6 +166,7 @@ def test_chat_sync_passes_model_override(monkeypatch):
             "agent_name": "default",
             "provider": "openai-main",
             "model": "direct-model",
+            "resume": False,
         }
         return dict(built_params)
 
@@ -234,6 +238,7 @@ def test_chat_events_passes_attachments(monkeypatch):
             "provider": None,
             "model": None,
             "attachments": attachments,
+            "resume": False,
         }
         return dict(built_params)
 
@@ -296,6 +301,7 @@ def test_chat_events_can_resume_existing_thread(monkeypatch):
             "provider": None,
             "model": None,
             "thread_id": "telegram_123_456",
+            "resume": False,
         }
         return dict(built_params)
 
@@ -353,6 +359,7 @@ def test_chat_events_can_create_new_thread(monkeypatch, tmp_path):
             "provider": None,
             "model": None,
             "thread_id": "api_dashboard_generated",
+            "resume": False,
         }
         return dict(built_params)
 
@@ -493,6 +500,46 @@ def test_chat_events_streams_tool_calls_as_ndjson(monkeypatch):
         '{"type": "tool_result", "tool_call_id": "call-1", "name": "list_files", "content": "README.md"}\n'
         '{"type": "final", "content": "done"}\n'
     )
+
+
+def test_chat_events_streams_classified_agent_errors(monkeypatch):
+    built_params = {
+        "user_input": "Use a busy model",
+        "thread_id": "api_alice",
+        "agent_name": "default",
+        "workflow": None,
+        "workspace": None,
+        "max_context_tokens": None,
+        "provider": None,
+        "model": None,
+    }
+
+    class FakeRateLimitError(Exception):
+        status_code = 429
+
+    def fake_build_run_params(**params):
+        return dict(built_params)
+
+    async def fake_run_agent_stream(**params):
+        assert params == built_params
+        raise FakeRateLimitError("429 too many requests")
+        yield  # pragma: no cover - makes this an async generator
+
+    monkeypatch.setattr(router_module, "build_run_params", fake_build_run_params)
+    monkeypatch.setattr(router_module, "run_agent_stream", fake_run_agent_stream)
+
+    client = _create_client()
+    response = client.post(
+        "/api/chat/events",
+        json={"message": "Use a busy model", "user_id": "alice"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/x-ndjson")
+    event = json.loads(response.text)
+    assert event["type"] == "error"
+    assert event["code"] == "rate_limit"
+    assert "rate limiting" in event["content"]
 
 
 def test_provider_models_endpoint_refreshes_and_serializes_catalog(monkeypatch):

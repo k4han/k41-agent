@@ -12,6 +12,11 @@ from typing import Any, AsyncGenerator
 
 from langgraph.errors import GraphRecursionError
 
+from agent.shared.infrastructure.errors import (
+    classify_agent_error,
+    find_exception as _find_exception,
+)
+
 logger = logging.getLogger(__name__)
 
 # Maximum number of events to buffer per session to prevent unbounded memory growth.
@@ -56,16 +61,27 @@ class ChatStreamSession:
             logger.info("Background chat stream task cancelled for thread %s", self.thread_id)
             await self.push_event({"type": "error", "content": "Chat execution stopped."})
             raise
-        except GraphRecursionError as exc:
-            logger.warning("Recursion limit reached for thread %s", self.thread_id)
-            await self.push_event({
-                "type": "error",
-                "code": "recursion_limit_reached",
-                "content": str(exc)
-            })
-        except Exception as exc:
-            logger.exception("Error running background agent stream for thread %s", self.thread_id)
-            await self.push_event({"type": "error", "content": str(exc)})
+        except BaseException as exc:
+            recursion_exc = _find_exception(exc, GraphRecursionError)
+            if recursion_exc is not None:
+                logger.warning("Recursion limit reached for thread %s", self.thread_id)
+                await self.push_event({
+                    "type": "error",
+                    "code": "recursion_limit_reached",
+                    "content": str(recursion_exc),
+                })
+            else:
+                logger.exception(
+                    "Error running background agent stream for thread %s", self.thread_id
+                )
+                agent_error = classify_agent_error(exc)
+                await self.push_event({
+                    "type": "error",
+                    "code": agent_error.code,
+                    "content": agent_error.message,
+                })
+            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                raise
         finally:
             self.done = True
             # Wait for a grace period so reconnecting clients can consume buffered events.

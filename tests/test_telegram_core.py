@@ -202,6 +202,29 @@ async def test_telegram_streaming_edits_status_and_sends_final(monkeypatch) -> N
 
 
 @pytest.mark.asyncio
+async def test_telegram_streaming_reports_provider_error(monkeypatch) -> None:
+    import agent.modules.agent_runtime as runtime
+    from agent.modules.channels.telegram.streaming import handle_streaming_response
+
+    class FakeRateLimitError(Exception):
+        status_code = 429
+
+    async def failing_run_agent_stream(**params):
+        raise FakeRateLimitError("429 too many requests")
+        yield  # pragma: no cover - makes this an async generator
+
+    monkeypatch.setattr(runtime, "run_agent_stream", failing_run_agent_stream)
+
+    message = DummyMessage("hello")
+    await handle_streaming_response(message, {"user_input": "hello"})
+
+    status_message = message.sent_messages[0]
+    assert status_message.edits
+    error_text = status_message.edits[-1][0]
+    assert "rate limiting" in error_text.lower()
+
+
+@pytest.mark.asyncio
 async def test_telegram_notification_uses_chunked_sender() -> None:
     from agent.modules.notifications.service import send_notification, set_telegram_bot
     from agent.modules.users import Platform

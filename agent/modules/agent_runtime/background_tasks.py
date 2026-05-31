@@ -363,16 +363,28 @@ class BackgroundTaskManager:
             task.error = "Task was cancelled."
             self._publish_agent_event(task, {"type": "error", "content": task.error})
             logger.info("Background task %s was cancelled.", task.task_id)
-        except Exception as exc:
+        except BaseException as exc:
+            from agent.shared.infrastructure.errors import classify_agent_error
+
+            agent_error = classify_agent_error(exc)
             task.status = TaskStatus.FAILED
-            task.error = _truncate_stored_text(str(exc))
-            self._publish_agent_event(task, {"type": "error", "content": task.error})
+            task.error = _truncate_stored_text(agent_error.message)
+            self._publish_agent_event(
+                task,
+                {
+                    "type": "error",
+                    "code": agent_error.code,
+                    "content": agent_error.message,
+                },
+            )
             logger.error(
                 "Background task %s failed: %s",
                 task.task_id,
                 exc,
                 exc_info=True,
             )
+            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                raise
         finally:
             task.completed_at = time.time()
 

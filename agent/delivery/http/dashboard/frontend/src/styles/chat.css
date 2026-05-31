@@ -164,6 +164,12 @@
   white-space: normal;
 }
 
+.message.error .message-bubble {
+  border-color: color-mix(in srgb, var(--danger) 50%, var(--border));
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+  color: var(--danger);
+}
+
 .message-text {
   white-space: pre-wrap;
   word-break: break-word;
