@@ -5,11 +5,12 @@ import { MetricGrid } from "@/components/Metrics";
 import { SelectControl } from "@/components/SelectControl";
 import { DataGate } from "@/components/State";
 import { apiFetch } from "@/lib/api";
-import type { UsagePayload, UsageRow } from "@/types";
+import type { ThreadUsageDetail, UsagePayload, UsageRow, WorkspaceUsageDetail } from "@/types";
 
 import { SettingsLayout } from "./SettingsLayout";
 
 const PAGE_SIZE = 50;
+type UsageTab = "users" | "workspaces" | "threads";
 
 function pad(value: number): string {
   return String(value).padStart(2, "0");
@@ -41,14 +42,25 @@ function formatNumber(value: number): string {
   return new Intl.NumberFormat().format(value || 0);
 }
 
-function formatDateTime(value: string | null): string {
+function formatDateTime(value: string | null, timeZone?: string): string {
   if (!value) {
     return "-";
   }
-  return new Intl.DateTimeFormat(undefined, {
+  const options: Intl.DateTimeFormatOptions = {
     dateStyle: "medium",
     timeStyle: "short",
-  }).format(new Date(value));
+  };
+  if (timeZone) {
+    options.timeZone = timeZone;
+  }
+  try {
+    return new Intl.DateTimeFormat(undefined, options).format(new Date(value));
+  } catch {
+    return new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(new Date(value));
+  }
 }
 
 function optionKey(parts: Array<string | undefined>): string {
@@ -66,6 +78,31 @@ function resetOffsetOnChange(setter: (value: string) => void, setOffset: (value:
   };
 }
 
+function paginationStart(payload: UsagePayload): number {
+  return payload.pagination.total > 0 ? payload.pagination.offset + 1 : 0;
+}
+
+function paginationEnd(payload: UsagePayload): number {
+  return Math.min(payload.pagination.offset + payload.rows.length, payload.pagination.total);
+}
+
+function threadSearchText(row: ThreadUsageDetail): string {
+  return [
+    row.thread_id,
+    row.title,
+    row.agent_name,
+    ...row.models.flatMap((item) => [item.provider, item.model]),
+  ].join(" ").toLowerCase();
+}
+
+function filterThreads(rows: ThreadUsageDetail[], query: string): ThreadUsageDetail[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) {
+    return rows;
+  }
+  return rows.filter((row) => threadSearchText(row).includes(normalizedQuery));
+}
+
 export function UsagePage() {
   const [data, setData] = createSignal<UsagePayload>();
   const [error, setError] = createSignal("");
@@ -77,17 +114,21 @@ export function UsagePage() {
   const [agent, setAgent] = createSignal("");
   const [provider, setProvider] = createSignal("");
   const [model, setModel] = createSignal("");
+  const [callKind, setCallKind] = createSignal("");
+  const [internalFilter, setInternalFilter] = createSignal("");
+  const [threadSearch, setThreadSearch] = createSignal("");
   const [offset, setOffset] = createSignal(0);
-  const [activeTab, setActiveTab] = createSignal<"users" | "workspaces" | "threads">("users");
+  const [activeTab, setActiveTab] = createSignal<UsageTab>("users");
 
-  const load = async () => {
+  const load = async (nextOffset = offset(), nextView: UsageTab = activeTab()) => {
     setError("");
     try {
       const params = new URLSearchParams({
         start: startIso(startDate()),
         end: endIso(endDate()),
         limit: String(PAGE_SIZE),
-        offset: String(offset()),
+        offset: String(nextOffset),
+        view: nextView,
       });
       if (platform()) params.set("platform", platform());
       if (userId()) params.set("user_id", userId());
@@ -95,6 +136,8 @@ export function UsagePage() {
       if (agent()) params.set("agent", agent());
       if (provider()) params.set("provider", provider());
       if (model()) params.set("model", model());
+      if (callKind()) params.set("call_kind", callKind());
+      if (internalFilter()) params.set("internal", internalFilter());
       setData(await apiFetch<UsagePayload>(`/dashboard-api/usage?${params.toString()}`));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load usage");
@@ -131,6 +174,8 @@ export function UsagePage() {
     setAgent("");
     setProvider("");
     setModel("");
+    setCallKind("");
+    setInternalFilter("");
     setOffset(0);
   };
 
@@ -140,12 +185,22 @@ export function UsagePage() {
       return;
     }
     setOffset(next);
-    await load();
+    await load(next);
   };
 
   const previousPage = async () => {
-    setOffset(Math.max(0, offset() - PAGE_SIZE));
-    await load();
+    const previous = Math.max(0, offset() - PAGE_SIZE);
+    setOffset(previous);
+    await load(previous);
+  };
+
+  const switchTab = (tab: UsageTab) => {
+    const scrollY = window.scrollY;
+    setActiveTab(tab);
+    window.requestAnimationFrame(() => window.scrollTo({ top: scrollY }));
+    void load(tab === "users" ? offset() : 0, tab).finally(() => {
+      window.requestAnimationFrame(() => window.scrollTo({ top: scrollY }));
+    });
   };
 
   onMount(load);
@@ -157,13 +212,13 @@ export function UsagePage() {
       breadcrumbLabel="Usage"
       contentWidth="wide"
       actions={
-        <button class="btn btn-primary" type="button" onClick={load}>
+        <button class="btn btn-primary" type="button" onClick={() => load()}>
           <RefreshCw size={14} />
           Refresh
         </button>
       }
     >
-      <DataGate data={data()} error={error()} onRetry={load}>
+      <DataGate data={data()} error={error()} onRetry={() => load()}>
         {(payload) => (
           <div class="stack">
             <MetricGrid
@@ -296,9 +351,34 @@ export function UsagePage() {
                     ariaLabel="Model"
                   />
                 </label>
+                <label class="field">
+                  <span>Call kind</span>
+                  <SelectControl
+                    value={callKind()}
+                    options={[
+                      { value: "", label: "All call kinds" },
+                      ...(payload.filters.call_kinds || []).map((item) => ({ value: item, label: item })),
+                    ]}
+                    onChange={resetOffsetOnChange(setCallKind, setOffset)}
+                    ariaLabel="Call kind"
+                  />
+                </label>
+                <label class="field">
+                  <span>Scope</span>
+                  <SelectControl
+                    value={internalFilter()}
+                    options={[
+                      { value: "", label: "All calls" },
+                      { value: "false", label: "User-visible only" },
+                      { value: "true", label: "Internal only" },
+                    ]}
+                    onChange={resetOffsetOnChange(setInternalFilter, setOffset)}
+                    ariaLabel="Scope"
+                  />
+                </label>
               </div>
               <div class="panel-body">
-                <button class="btn" type="button" onClick={load}>
+                <button class="btn" type="button" onClick={() => load()}>
                   Apply Filters
                 </button>
               </div>
@@ -309,7 +389,7 @@ export function UsagePage() {
                 class={`workspace-tab ${activeTab() === "users" ? "active" : ""}`}
                 type="button"
                 role="tab"
-                onClick={() => setActiveTab("users")}
+                onClick={() => switchTab("users")}
                 style={`padding: 10px 16px; font-weight: 500; font-size: 13px; color: ${activeTab() === "users" ? "var(--color-primary, #3b82f6)" : "#888"}; border-bottom: 2px solid ${activeTab() === "users" ? "var(--color-primary, #3b82f6)" : "transparent"}; background: none; border-top: none; border-left: none; border-right: none; cursor: pointer; transition: all 0.2s;`}
               >
                 User & Channel
@@ -318,7 +398,7 @@ export function UsagePage() {
                 class={`workspace-tab ${activeTab() === "workspaces" ? "active" : ""}`}
                 type="button"
                 role="tab"
-                onClick={() => setActiveTab("workspaces")}
+                onClick={() => switchTab("workspaces")}
                 style={`padding: 10px 16px; font-weight: 500; font-size: 13px; color: ${activeTab() === "workspaces" ? "var(--color-primary, #3b82f6)" : "#888"}; border-bottom: 2px solid ${activeTab() === "workspaces" ? "var(--color-primary, #3b82f6)" : "transparent"}; background: none; border-top: none; border-left: none; border-right: none; cursor: pointer; transition: all 0.2s;`}
               >
                 Workspaces
@@ -327,7 +407,7 @@ export function UsagePage() {
                 class={`workspace-tab ${activeTab() === "threads" ? "active" : ""}`}
                 type="button"
                 role="tab"
-                onClick={() => setActiveTab("threads")}
+                onClick={() => switchTab("threads")}
                 style={`padding: 10px 16px; font-weight: 500; font-size: 13px; color: ${activeTab() === "threads" ? "var(--color-primary, #3b82f6)" : "#888"}; border-bottom: 2px solid ${activeTab() === "threads" ? "var(--color-primary, #3b82f6)" : "transparent"}; background: none; border-top: none; border-left: none; border-right: none; cursor: pointer; transition: all 0.2s;`}
               >
                 Conversations / Threads
@@ -335,30 +415,38 @@ export function UsagePage() {
             </div>
 
             <Show when={activeTab() === "users"}>
-              <UsageTable rows={payload.rows} />
+              <UsageTable rows={payload.rows} displayTimezone={payload.display_timezone} />
             </Show>
             <Show when={activeTab() === "workspaces"}>
-              <WorkspaceUsageTable list={payload.workspaces || []} />
+              <WorkspaceUsageTable
+                list={payload.workspaces || []}
+                displayTimezone={payload.display_timezone}
+              />
             </Show>
             <Show when={activeTab() === "threads"}>
-              <ThreadUsageTable list={payload.threads || []} />
+              <ThreadUsageTable
+                list={filterThreads(payload.threads || [], threadSearch())}
+                search={threadSearch()}
+                onSearch={setThreadSearch}
+                displayTimezone={payload.display_timezone}
+              />
             </Show>
 
-            <div class="usage-pagination">
-              <span class="hint">
-                Showing {payload.pagination.offset + 1}-
-                {Math.min(payload.pagination.offset + payload.rows.length, payload.pagination.total)} of{" "}
-                {payload.pagination.total}
-              </span>
-              <div class="row-wrap">
-                <button class="btn btn-sm" type="button" disabled={payload.pagination.offset === 0} onClick={previousPage}>
-                  Previous
-                </button>
-                <button class="btn btn-sm" type="button" disabled={!payload.pagination.has_more} onClick={nextPage}>
-                  Next
-                </button>
+            <Show when={activeTab() === "users"}>
+              <div class="usage-pagination">
+                <span class="hint">
+                  Showing {paginationStart(payload)}-{paginationEnd(payload)} of {payload.pagination.total}
+                </span>
+                <div class="row-wrap">
+                  <button class="btn btn-sm" type="button" disabled={payload.pagination.offset === 0} onClick={previousPage}>
+                    Previous
+                  </button>
+                  <button class="btn btn-sm" type="button" disabled={!payload.pagination.has_more} onClick={nextPage}>
+                    Next
+                  </button>
+                </div>
               </div>
-            </div>
+            </Show>
           </div>
         )}
       </DataGate>
@@ -366,7 +454,7 @@ export function UsagePage() {
   );
 }
 
-function UsageTable(props: { rows: UsageRow[] }) {
+function UsageTable(props: { rows: UsageRow[]; displayTimezone?: string }) {
   return (
     <section class="panel">
       <div class="panel-header">
@@ -401,7 +489,7 @@ function UsageTable(props: { rows: UsageRow[] }) {
                   <td>{formatNumber(row.input_tokens)}</td>
                   <td>{formatNumber(row.output_tokens)}</td>
                   <td>{formatNumber(row.missing_usage_count)}</td>
-                  <td>{formatDateTime(row.last_used_at)}</td>
+                  <td>{formatDateTime(row.last_used_at, props.displayTimezone)}</td>
                 </tr>
               )}
             </For>
@@ -412,9 +500,7 @@ function UsageTable(props: { rows: UsageRow[] }) {
   );
 }
 
-import type { WorkspaceUsageDetail, ThreadUsageDetail } from "@/types";
-
-function WorkspaceUsageTable(props: { list: WorkspaceUsageDetail[] }) {
+function WorkspaceUsageTable(props: { list: WorkspaceUsageDetail[]; displayTimezone?: string }) {
   return (
     <section class="panel">
       <div class="panel-header">
@@ -424,12 +510,12 @@ function WorkspaceUsageTable(props: { list: WorkspaceUsageDetail[] }) {
         <table class="table usage-table">
           <thead>
             <tr>
-              <th style="width: 35%;">Workspace Directory</th>
+              <th style="width: 30%;">Workspace Directory</th>
               <th style="width: 10%;">Threads</th>
               <th style="width: 10%;">Calls</th>
               <th style="width: 15%;">Total Tokens</th>
               <th style="width: 20%;">Model Breakdown</th>
-              <th style="width: 10%;">Last used</th>
+              <th style="width: 15%;">Last used</th>
             </tr>
           </thead>
           <tbody>
@@ -479,7 +565,7 @@ function WorkspaceUsageTable(props: { list: WorkspaceUsageDetail[] }) {
                       </div>
                     </div>
                   </td>
-                  <td>{formatDateTime(row.last_used_at)}</td>
+                  <td>{formatDateTime(row.last_used_at, props.displayTimezone)}</td>
                 </tr>
               )}
             </For>
@@ -490,26 +576,42 @@ function WorkspaceUsageTable(props: { list: WorkspaceUsageDetail[] }) {
   );
 }
 
-function ThreadUsageTable(props: { list: ThreadUsageDetail[] }) {
+function ThreadUsageTable(props: {
+  list: ThreadUsageDetail[];
+  search: string;
+  onSearch: (value: string) => void;
+  displayTimezone?: string;
+}) {
   return (
     <section class="panel">
       <div class="panel-header">
         <div class="panel-title">Usage by Conversation / Thread</div>
+        <label class="field" style="min-width: 260px; margin: 0;">
+          <span>Search thread</span>
+          <input
+            class="input"
+            type="search"
+            value={props.search}
+            placeholder="Title, thread id, agent, or model"
+            onInput={(event) => props.onSearch(event.currentTarget.value)}
+          />
+        </label>
       </div>
       <div class="table-wrap">
         <table class="table usage-table">
           <thead>
             <tr>
-              <th style="width: 35%;">Conversation Thread</th>
+              <th style="width: 30%;">Conversation Thread</th>
               <th style="width: 10%;">Agent</th>
+              {/* <th style="width: 8%;">Threads</th> */}
               <th style="width: 10%;">Calls</th>
               <th style="width: 15%;">Total Tokens</th>
               <th style="width: 20%;">Model Breakdown</th>
-              <th style="width: 10%;">Last used</th>
+              <th style="width: 15%;">Last used</th>
             </tr>
           </thead>
           <tbody>
-            <For each={props.list} fallback={<tr><td colSpan={6} class="empty">No conversation usage recorded.</td></tr>}>
+            <For each={props.list} fallback={<tr><td colSpan={7} class="empty">No conversation usage recorded.</td></tr>}>
               {(row) => (
                 <tr>
                   <td>
@@ -519,6 +621,7 @@ function ThreadUsageTable(props: { list: ThreadUsageDetail[] }) {
                     <div class="mono hint" style="font-size: 10px; color: #888;">{row.thread_id}</div>
                   </td>
                   <td><span class="badge" style="font-size: 10px; padding: 2px 6px;">{row.agent_name}</span></td>
+                  {/* <td>{formatNumber(row.thread_count || 1)}</td> */}
                   <td>{formatNumber(row.event_count)}</td>
                   <td>
                     <div style="font-weight: 600; color: #3b82f6;">{formatNumber(row.total_tokens)}</div>
@@ -555,7 +658,7 @@ function ThreadUsageTable(props: { list: ThreadUsageDetail[] }) {
                       </div>
                     </div>
                   </td>
-                  <td>{formatDateTime(row.last_used_at)}</td>
+                  <td>{formatDateTime(row.last_used_at, props.displayTimezone)}</td>
                 </tr>
               )}
             </For>

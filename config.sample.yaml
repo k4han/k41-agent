@@ -88,6 +88,11 @@ security:
 # workspace:
 #   root: "~/kaka-agent"
 
+# Dashboard display settings (optional)
+# Use an IANA timezone name such as "Asia/Bangkok".
+display:
+  timezone: "Asia/Ho_Chi_Minh"
+
 # Max recursion limit for LangGraph workflows (default: 100)
 recursion_limit: 100
 

@@ -45,6 +45,8 @@ class UsageQuery:
     agent_name: str = ""
     provider_name: str = ""
     model_name: str = ""
+    call_kind: str = ""
+    internal: bool | None = None
     limit: int = 50
     offset: int = 0
 
@@ -61,6 +63,13 @@ def _json_or_none(value: dict[str, Any] | None) -> str | None:
 
 def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
+
+
+def _root_thread_expr() -> Any:
+    return func.coalesce(
+        func.nullif(LLMUsageEvent.root_thread_id, ""),
+        LLMUsageEvent.thread_id,
+    )
 
 
 class LLMUsageRepository:
@@ -200,6 +209,7 @@ class LLMUsageRepository:
             agents = await _distinct_strings(session, LLMUsageEvent.agent_name, clauses)
             providers = await _distinct_strings(session, LLMUsageEvent.provider_name, clauses)
             models = await _distinct_strings(session, LLMUsageEvent.model_name, clauses)
+            call_kinds = await _distinct_strings(session, LLMUsageEvent.call_kind, clauses)
 
             user_rows = (
                 await session.execute(
@@ -232,6 +242,7 @@ class LLMUsageRepository:
             "agents": agents,
             "providers": providers,
             "models": models,
+            "call_kinds": call_kinds,
             "users": [
                 {"platform": row[0], "user_id": row[1]}
                 for row in user_rows
@@ -531,25 +542,30 @@ class LLMUsageRepository:
         from agent.modules.conversations.models import ConversationThread
 
         session = await get_async_session()
+        thread_id_expr = _root_thread_expr()
         stmt = (
             select(
-                LLMUsageEvent.thread_id,
+                thread_id_expr.label("thread_id"),
                 ConversationThread.title,
                 ConversationThread.agent_name,
+                func.count(distinct(LLMUsageEvent.thread_id)).label("thread_count"),
                 func.count(LLMUsageEvent.id).label("event_count"),
                 func.coalesce(func.sum(LLMUsageEvent.input_tokens), 0).label("input_tokens"),
                 func.coalesce(func.sum(LLMUsageEvent.output_tokens), 0).label("output_tokens"),
                 func.coalesce(func.sum(LLMUsageEvent.total_tokens), 0).label("total_tokens"),
                 func.max(LLMUsageEvent.created_at).label("last_used_at"),
             )
-            .outerjoin(ConversationThread, LLMUsageEvent.thread_id == ConversationThread.thread_id)
+            .outerjoin(ConversationThread, thread_id_expr == ConversationThread.thread_id)
             .where(*_where_clauses(query))
             .group_by(
-                LLMUsageEvent.thread_id,
+                thread_id_expr,
                 ConversationThread.title,
-                ConversationThread.agent_name
+                ConversationThread.agent_name,
             )
-            .order_by(func.coalesce(func.sum(LLMUsageEvent.total_tokens), 0).desc())
+            .order_by(
+                func.max(LLMUsageEvent.created_at).desc(),
+                func.coalesce(func.sum(LLMUsageEvent.total_tokens), 0).desc(),
+            )
         )
 
         async with session:
@@ -561,16 +577,16 @@ class LLMUsageRepository:
 
         breakdown_stmt = (
             select(
-                LLMUsageEvent.thread_id,
+                thread_id_expr.label("thread_id"),
                 LLMUsageEvent.model_name,
                 LLMUsageEvent.provider_name,
                 func.coalesce(func.sum(LLMUsageEvent.total_tokens), 0).label("total_tokens"),
             )
             .where(*_where_clauses(query))
             .group_by(
-                LLMUsageEvent.thread_id,
+                thread_id_expr,
                 LLMUsageEvent.model_name,
-                LLMUsageEvent.provider_name
+                LLMUsageEvent.provider_name,
             )
         )
 
@@ -603,12 +619,13 @@ class LLMUsageRepository:
                 "thread_id": tid,
                 "title": row.title or tid,
                 "agent_name": row.agent_name or "unknown",
+                "thread_count": int(row.thread_count or 0),
                 "event_count": int(row.event_count or 0),
                 "input_tokens": int(row.input_tokens or 0),
                 "output_tokens": int(row.output_tokens or 0),
                 "total_tokens": total,
                 "last_used_at": _iso(row.last_used_at),
-                "models": model_details
+                "models": model_details,
             })
 
         return threads
@@ -631,6 +648,10 @@ def _where_clauses(query: UsageQuery) -> list[Any]:
         clauses.append(LLMUsageEvent.provider_name == query.provider_name)
     if query.model_name:
         clauses.append(LLMUsageEvent.model_name == query.model_name)
+    if query.call_kind:
+        clauses.append(LLMUsageEvent.call_kind == query.call_kind)
+    if query.internal is not None:
+        clauses.append(LLMUsageEvent.internal.is_(query.internal))
     return clauses
 
 

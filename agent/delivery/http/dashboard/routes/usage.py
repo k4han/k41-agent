@@ -101,6 +101,9 @@ async def get_dashboard_usage(
     agent: str = "",
     provider: str = "",
     model: str = "",
+    call_kind: str = "",
+    internal: bool | None = Query(default=None),
+    view: str = "all",
     limit: int = DEFAULT_USAGE_LIMIT,
     offset: int = 0,
 ) -> dict[str, Any]:
@@ -115,10 +118,12 @@ async def get_dashboard_usage(
         agent_name=agent,
         provider_name=provider,
         model_name=model,
+        call_kind=call_kind,
+        internal=internal,
         limit=limit,
         offset=offset,
     )
-    payload = await get_usage_service().dashboard_payload(query)
+    payload = await get_usage_service().dashboard_payload(query, view=view)
     return _enrich_usage_payload(payload, await _paired_identities())
 
 

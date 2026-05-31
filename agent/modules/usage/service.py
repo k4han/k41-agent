@@ -4,12 +4,14 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from agent.modules.usage.repository import (
     LLMUsageRepository,
     UsageEventInput,
     UsageQuery,
 )
+from agent.shared.config.service import get_config_service
 from agent.shared.infrastructure.db.base import utcnow
 
 logger = logging.getLogger(__name__)
@@ -18,6 +20,9 @@ USAGE_RETENTION_DAYS = 90
 DEFAULT_USAGE_LIMIT = 50
 MAX_USAGE_LIMIT = 200
 USAGE_CONTEXT_METADATA_KEY = "usage_context"
+USAGE_DASHBOARD_VIEWS = {"all", "users", "workspaces", "threads"}
+DISPLAY_TIMEZONE_CONFIG_KEY = "display.timezone"
+DEFAULT_DISPLAY_TIMEZONE = "UTC"
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +114,8 @@ def normalize_usage_query(
     agent_name: str = "",
     provider_name: str = "",
     model_name: str = "",
+    call_kind: str = "",
+    internal: bool | None = None,
     limit: int = DEFAULT_USAGE_LIMIT,
     offset: int = 0,
 ) -> UsageQuery:
@@ -121,6 +128,8 @@ def normalize_usage_query(
         agent_name=agent_name.strip(),
         provider_name=provider_name.strip(),
         model_name=model_name.strip(),
+        call_kind=call_kind.strip(),
+        internal=internal,
         limit=max(1, min(int(limit or DEFAULT_USAGE_LIMIT), MAX_USAGE_LIMIT)),
         offset=max(0, int(offset or 0)),
     )
@@ -139,6 +148,45 @@ def _parse_thread_id(thread_id: str) -> tuple[str, str, str] | None:
     return parts[0], parts[1], parts[2] if len(parts) == 3 else ""
 
 
+def _resolve_display_timezone() -> tuple[str, ZoneInfo]:
+    configured = get_config_service().get_str(
+        DISPLAY_TIMEZONE_CONFIG_KEY,
+        DEFAULT_DISPLAY_TIMEZONE,
+    ).strip() or DEFAULT_DISPLAY_TIMEZONE
+    try:
+        return configured, ZoneInfo(configured)
+    except ZoneInfoNotFoundError:
+        logger.warning(
+            "Invalid display timezone '%s'; falling back to %s.",
+            configured,
+            DEFAULT_DISPLAY_TIMEZONE,
+        )
+        return DEFAULT_DISPLAY_TIMEZONE, ZoneInfo(DEFAULT_DISPLAY_TIMEZONE)
+
+
+def _parse_datetime_value(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _localize_iso_datetime(value: Any, tz: ZoneInfo) -> str | None:
+    if not value:
+        return None
+    try:
+        parsed = _parse_datetime_value(str(value))
+    except ValueError:
+        return str(value)
+    return parsed.astimezone(tz).isoformat()
+
+
+def _localize_last_used(rows: list[dict[str, Any]], tz: ZoneInfo) -> None:
+    for row in rows:
+        if "last_used_at" in row:
+            row["last_used_at"] = _localize_iso_datetime(row.get("last_used_at"), tz)
+
+
 class UsageService:
     def __init__(self, repository: LLMUsageRepository | None = None) -> None:
         self._repository = repository or LLMUsageRepository()
@@ -149,18 +197,36 @@ class UsageService:
         except Exception as exc:
             logger.debug("Failed to record LLM usage event: %s", exc)
 
-    async def dashboard_payload(self, query: UsageQuery) -> dict[str, Any]:
+    async def dashboard_payload(self, query: UsageQuery, view: str = "all") -> dict[str, Any]:
         await self.prune_old_events()
+        normalized_view = view if view in USAGE_DASHBOARD_VIEWS else "all"
+        display_timezone, display_zone = _resolve_display_timezone()
         summary = await self._repository.summary(query)
-        rows, total = await self._repository.grouped_by_identity(query)
-        workspaces = await self._repository.aggregate_workspaces(query)
-        threads = await self._repository.aggregate_threads(query)
+        if normalized_view in {"all", "users"}:
+            rows, total = await self._repository.grouped_by_identity(query)
+        else:
+            rows, total = [], 0
+        workspaces = (
+            await self._repository.aggregate_workspaces(query)
+            if normalized_view in {"all", "workspaces"}
+            else []
+        )
+        threads = (
+            await self._repository.aggregate_threads(query)
+            if normalized_view in {"all", "threads"}
+            else []
+        )
+        _localize_last_used(rows, display_zone)
+        _localize_last_used(workspaces, display_zone)
+        _localize_last_used(threads, display_zone)
         filters = await self._repository.filter_options(query)
         return {
             "summary": summary,
             "rows": rows,
             "workspaces": workspaces,
             "threads": threads,
+            "view": normalized_view,
+            "display_timezone": display_timezone,
             "filters": filters,
             "pagination": {
                 "limit": query.limit,

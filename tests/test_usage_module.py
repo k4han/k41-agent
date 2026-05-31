@@ -17,6 +17,7 @@ from agent.modules.channels import ChannelManager
 from agent.modules.usage import (
     LLMUsageRepository,
     LLMUsageCallback,
+    UsageService,
     UsageEventInput,
     UsageQuery,
     build_usage_context,
@@ -243,7 +244,22 @@ async def test_usage_repository_aggregates_by_user_channel(usage_db) -> None:
     assert rows[0]["total_tokens"] == 30
     assert rows[0]["missing_usage_count"] == 1
     assert "openai-main" in options["providers"]
+    assert "router" in options["call_kinds"]
     assert {"platform": "telegram", "user_id": "123"} in options["users"]
+
+    internal_query = UsageQuery(
+        start=now - timedelta(minutes=1),
+        end=now + timedelta(minutes=1),
+        call_kind="router",
+        internal=True,
+    )
+    internal_summary = await repository.summary(internal_query)
+    internal_rows, internal_total = await repository.grouped_by_identity(internal_query)
+
+    assert internal_summary["event_count"] == 1
+    assert internal_summary["total_tokens"] == 7
+    assert internal_total == 1
+    assert internal_rows[0]["platform"] == "discord"
 
 
 @pytest.mark.asyncio
@@ -280,6 +296,148 @@ async def test_usage_repository_prunes_old_events(usage_db) -> None:
     assert rows[0]["total_tokens"] == 1
 
 
+@pytest.mark.asyncio
+async def test_usage_service_dashboard_payload_loads_only_requested_view() -> None:
+    now = datetime.now(timezone.utc)
+    calls: list[str] = []
+
+    class FakeRepository:
+        async def prune_before(self, cutoff):
+            calls.append("prune")
+            return 0
+
+        async def summary(self, query):
+            calls.append("summary")
+            return {
+                "event_count": 1,
+                "known_usage_count": 1,
+                "missing_usage_count": 0,
+                "internal_event_count": 0,
+                "input_tokens": 10,
+                "output_tokens": 20,
+                "total_tokens": 30,
+            }
+
+        async def grouped_by_identity(self, query):
+            raise AssertionError("user rows should not be loaded for workspace view")
+
+        async def aggregate_workspaces(self, query):
+            calls.append("workspaces")
+            return [{"backend": "local", "locator": "/repo"}]
+
+        async def aggregate_threads(self, query):
+            raise AssertionError("threads should not be loaded for workspace view")
+
+        async def filter_options(self, query):
+            calls.append("filters")
+            return {
+                "platforms": [],
+                "users": [],
+                "channels": [],
+                "agents": [],
+                "providers": [],
+                "models": [],
+                "call_kinds": [],
+            }
+
+    payload = await UsageService(FakeRepository()).dashboard_payload(
+        UsageQuery(start=now - timedelta(minutes=1), end=now + timedelta(minutes=1)),
+        view="workspaces",
+    )
+
+    assert calls == ["prune", "summary", "workspaces", "filters"]
+    assert payload["view"] == "workspaces"
+    assert payload["rows"] == []
+    assert payload["workspaces"] == [{"backend": "local", "locator": "/repo"}]
+    assert payload["threads"] == []
+    assert payload["pagination"]["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_usage_service_dashboard_payload_uses_configured_display_timezone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agent.modules.usage.service as service_module
+
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    class FakeConfig:
+        def get_str(self, key: str, default: str = "") -> str:
+            assert key == "display.timezone"
+            return "Asia/Bangkok"
+
+    class FakeRepository:
+        async def prune_before(self, cutoff):
+            return 0
+
+        async def summary(self, query):
+            return {
+                "event_count": 1,
+                "known_usage_count": 1,
+                "missing_usage_count": 0,
+                "internal_event_count": 0,
+                "input_tokens": 10,
+                "output_tokens": 20,
+                "total_tokens": 30,
+            }
+
+        async def grouped_by_identity(self, query):
+            return [
+                {
+                    "platform": "api",
+                    "user_id": "dashboard",
+                    "channel_id": "thread",
+                    "event_count": 1,
+                    "missing_usage_count": 0,
+                    "internal_event_count": 0,
+                    "input_tokens": 10,
+                    "output_tokens": 20,
+                    "total_tokens": 30,
+                    "last_used_at": "2026-01-01T00:00:00+00:00",
+                }
+            ], 1
+
+        async def aggregate_workspaces(self, query):
+            return [
+                {
+                    "backend": "local",
+                    "locator": "/repo",
+                    "last_used_at": "2026-01-01T00:00:00+00:00",
+                }
+            ]
+
+        async def aggregate_threads(self, query):
+            return [
+                {
+                    "thread_id": "thread",
+                    "last_used_at": "2026-01-01T00:00:00+00:00",
+                }
+            ]
+
+        async def filter_options(self, query):
+            return {
+                "platforms": [],
+                "users": [],
+                "channels": [],
+                "agents": [],
+                "providers": [],
+                "models": [],
+                "call_kinds": [],
+            }
+
+    monkeypatch.setattr(service_module, "get_config_service", lambda: FakeConfig())
+
+    payload = await UsageService(FakeRepository()).dashboard_payload(
+        UsageQuery(start=now - timedelta(minutes=1), end=now + timedelta(minutes=1)),
+        view="all",
+    )
+
+    assert payload["display_timezone"] == "Asia/Bangkok"
+    assert payload["rows"][0]["last_used_at"] == "2026-01-01T07:00:00+07:00"
+    assert payload["workspaces"][0]["last_used_at"] == "2026-01-01T07:00:00+07:00"
+    assert payload["threads"][0]["last_used_at"] == "2026-01-01T07:00:00+07:00"
+
+
 def test_dashboard_usage_endpoint_enriches_identity_labels(monkeypatch: pytest.MonkeyPatch) -> None:
     route_module = __import__(
         "agent.delivery.http.dashboard.routes.usage",
@@ -288,8 +446,9 @@ def test_dashboard_usage_endpoint_enriches_identity_labels(monkeypatch: pytest.M
     captured: dict = {}
 
     class FakeUsageService:
-        async def dashboard_payload(self, query):
+        async def dashboard_payload(self, query, view="all"):
             captured["query"] = query
+            captured["view"] = view
             return {
                 "summary": {
                     "event_count": 1,
@@ -323,6 +482,7 @@ def test_dashboard_usage_endpoint_enriches_identity_labels(monkeypatch: pytest.M
                     "agents": ["default"],
                     "providers": ["openai-main"],
                     "models": ["gpt-test"],
+                    "call_kinds": ["agent"],
                 },
                 "pagination": {
                     "limit": 50,
@@ -367,6 +527,9 @@ def test_dashboard_usage_endpoint_enriches_identity_labels(monkeypatch: pytest.M
             "user_id": "123",
             "channel_id": "456",
             "provider": "openai-main",
+            "call_kind": "agent",
+            "internal": "false",
+            "view": "users",
         },
     )
 
@@ -376,6 +539,9 @@ def test_dashboard_usage_endpoint_enriches_identity_labels(monkeypatch: pytest.M
     assert payload["filters"]["users"][0]["label"] == "User #42 · telegram:123"
     assert captured["query"].platform == "telegram"
     assert captured["query"].provider_name == "openai-main"
+    assert captured["query"].call_kind == "agent"
+    assert captured["query"].internal is False
+    assert captured["view"] == "users"
 
 
 @pytest.mark.asyncio
@@ -553,6 +719,105 @@ async def test_usage_repository_thread_current_context_uses_latest_external_prom
     assert data["latest_model"] == "test-model"
     assert data["latest_provider"] == "test"
     assert data["latest_used_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_usage_repository_aggregate_threads_groups_subagents_by_root(usage_db) -> None:
+    from agent.modules.conversations.models import ConversationThread
+    from agent.shared.infrastructure.db.session import get_async_session
+
+    repository = LLMUsageRepository()
+    now = datetime.now(timezone.utc)
+
+    session = await get_async_session()
+    async with session:
+        session.add(
+            ConversationThread(
+                thread_id="root_thread",
+                platform="api",
+                user_id="dashboard",
+                channel_id="root_thread",
+                agent_name="default",
+                title="Root conversation",
+                kind="user",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        await session.commit()
+
+    await repository.record(
+        UsageEventInput(
+            thread_id="root_thread",
+            root_thread_id="root_thread",
+            platform="api",
+            user_id="dashboard",
+            channel_id="root_thread",
+            agent_name="default",
+            provider_name="google",
+            model_name="gemini-1.5-pro",
+            call_kind="agent",
+            internal=False,
+            has_usage_metadata=True,
+            input_tokens=100,
+            output_tokens=50,
+            total_tokens=150,
+            created_at=now,
+        )
+    )
+    await repository.record(
+        UsageEventInput(
+            thread_id="root_thread:sub:worker:abc12345",
+            root_thread_id="root_thread",
+            platform="api",
+            user_id="dashboard",
+            channel_id="root_thread",
+            agent_name="worker",
+            provider_name="google",
+            model_name="gemini-1.5-flash",
+            call_kind="agent",
+            internal=False,
+            has_usage_metadata=True,
+            input_tokens=200,
+            output_tokens=100,
+            total_tokens=300,
+            created_at=now + timedelta(seconds=1),
+        )
+    )
+    await repository.record(
+        UsageEventInput(
+            thread_id="other_thread",
+            root_thread_id="other_thread",
+            platform="api",
+            user_id="dashboard",
+            channel_id="other_thread",
+            agent_name="default",
+            provider_name="openai",
+            model_name="gpt-test",
+            call_kind="agent",
+            internal=False,
+            has_usage_metadata=True,
+            input_tokens=500,
+            output_tokens=500,
+            total_tokens=1000,
+            created_at=now,
+        )
+    )
+
+    rows = await repository.aggregate_threads(
+        UsageQuery(start=now - timedelta(minutes=1), end=now + timedelta(minutes=1))
+    )
+
+    assert rows[0]["thread_id"] == "root_thread"
+    assert rows[0]["title"] == "Root conversation"
+    assert rows[0]["agent_name"] == "default"
+    assert rows[0]["thread_count"] == 2
+    assert rows[0]["event_count"] == 2
+    assert rows[0]["total_tokens"] == 450
+    assert [model["model"] for model in rows[0]["models"]] == [
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+    ]
 
 
 @pytest.mark.asyncio

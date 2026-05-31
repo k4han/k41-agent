@@ -259,6 +259,7 @@ export interface ThreadUsageDetail {
   thread_id: string;
   title: string;
   agent_name: string;
+  thread_count?: number;
   event_count: number;
   input_tokens: number;
   output_tokens: number;
@@ -277,6 +278,8 @@ export type UsagePayload = {
   rows: UsageRow[];
   workspaces: WorkspaceUsageDetail[];
   threads: ThreadUsageDetail[];
+  view?: "all" | "users" | "workspaces" | "threads";
+  display_timezone?: string;
   filters: {
     platforms: string[];
     users: UsageFilterOption[];
@@ -284,6 +287,7 @@ export type UsagePayload = {
     agents: string[];
     providers: string[];
     models: string[];
+    call_kinds: string[];
   };
   pagination: {
     limit: number;

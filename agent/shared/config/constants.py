@@ -18,6 +18,7 @@ RUNTIME_KEY_PATTERNS = [
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.env\.[A-Za-z0-9_-]+$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.headers\.[A-Za-z0-9_-]+$",
     r"^database\.url$",
+    r"^display\.timezone$",
     r"^security\.jwt_secret$",
     r"^recursion_limit$",
 ]
@@ -59,6 +60,7 @@ def _expand_runtime_keys() -> set[str]:
         keys.add(f"channels.github.{prop}")
     keys.add("llm.default_model")
     keys.add("database.url")
+    keys.add("display.timezone")
     keys.add("security.jwt_secret")
     keys.add("recursion_limit")
     return keys
@@ -91,6 +93,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # Security
     "persistence.allow_any_path": False,
     "workspace.root": "~/kaka-agent",
+    "display.timezone": "UTC",
     "security.jwt_secret": "",
     "recursion_limit": 100,
 }
@@ -251,6 +254,13 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "description": "Database connection URL (e.g., postgresql+asyncpg://user:password@host:5432/dbname)",
         "category": "database",
         "label": "Database URL",
+    },
+    # Display settings
+    "display.timezone": {
+        "type": "text",
+        "description": "IANA timezone used to display dashboard timestamps (e.g. Asia/Bangkok)",
+        "category": "general",
+        "label": "Display Timezone",
     },
     # Security settings
     "security.jwt_secret": {
