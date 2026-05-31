@@ -138,8 +138,10 @@
 
 .task-workspace-filter {
   width: min(300px, 100%);
+}
+
+.task-workspace-filter .select-control-trigger {
   min-height: 32px;
-  padding-block: 5px;
 }
 
 .task-history-list {

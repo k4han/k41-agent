@@ -2,8 +2,10 @@
 
 .history-workspace-filter {
   width: min(280px, 100%);
+}
+
+.history-workspace-filter .select-control-trigger {
   min-height: 34px;
-  padding-block: 6px;
 }
 
 .history-bulk-actions {

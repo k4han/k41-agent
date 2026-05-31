@@ -6,6 +6,7 @@ import { AgentPicker } from "@/components/AgentPicker";
 import { AppShell } from "@/components/AppShell";
 import { DataGate } from "@/components/State";
 import { IdentityPicker } from "@/components/IdentityPicker";
+import { SelectControl } from "@/components/SelectControl";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson } from "@/lib/api";
@@ -181,6 +182,14 @@ export function TasksPage() {
   let previousWorkspaceFilter = workspaceFilter();
 
   const workspaceOptions = createMemo(() => buildTaskWorkspaceOptions(data()?.tasks ?? []));
+  const workspaceFilterOptions = createMemo(() => [
+    { value: ALL_WORKSPACES_KEY, label: "All workspaces" },
+    ...workspaceOptions().map((option) => ({
+      value: option.key,
+      label: `${option.label} (${option.count})`,
+      title: option.title,
+    })),
+  ]);
   const filteredTasks = createMemo(() => {
     const selected = workspaceFilter();
     const tasks = data()?.tasks ?? [];
@@ -448,21 +457,13 @@ export function TasksPage() {
                   <div class="panel-title">Task History</div>
                   <div class="task-history-controls">
                     <Show when={payload.tasks.length > 0}>
-                      <select
-                        class="select task-workspace-filter"
+                      <SelectControl
+                        class="task-workspace-filter"
                         value={workspaceFilter()}
-                        onChange={(event) => setWorkspaceFilter(event.currentTarget.value)}
-                        aria-label="Workspace filter"
-                      >
-                        <option value={ALL_WORKSPACES_KEY}>All workspaces</option>
-                        <For each={workspaceOptions()}>
-                          {(option) => (
-                            <option value={option.key} title={option.title}>
-                              {option.label} ({option.count})
-                            </option>
-                          )}
-                        </For>
-                      </select>
+                        options={workspaceFilterOptions()}
+                        onChange={setWorkspaceFilter}
+                        ariaLabel="Workspace filter"
+                      />
                     </Show>
                     <span class="hint">
                       Showing {visibleTasks().length} of {filteredTasks().length}

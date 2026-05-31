@@ -5,6 +5,7 @@ export type SelectControlOption = {
   value: string;
   label: string;
   disabled?: boolean;
+  title?: string;
 };
 
 export function SelectControl(props: {
@@ -101,6 +102,7 @@ export function SelectControl(props: {
                 disabled={option.disabled}
                 role="option"
                 aria-selected={option.value === props.value}
+                title={option.title || option.label}
                 onClick={() => selectOption(option)}
               >
                 {option.label}

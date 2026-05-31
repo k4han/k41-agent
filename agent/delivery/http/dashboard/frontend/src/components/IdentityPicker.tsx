@@ -1,4 +1,6 @@
-import { For } from "solid-js";
+import { createMemo, type JSX } from "solid-js";
+
+import { SelectControl, type SelectControlOption } from "@/components/SelectControl";
 import type { Identity } from "@/types";
 
 export function IdentityPicker(props: {
@@ -7,22 +9,27 @@ export function IdentityPicker(props: {
   identities: Identity[];
   emptyLabel?: string;
   disabled?: boolean;
+  class?: string;
+  style?: JSX.CSSProperties | string;
+  ariaLabel?: string;
 }) {
+  const options = createMemo<SelectControlOption[]>(() => [
+    { value: "", label: props.emptyLabel || "No notification" },
+    ...props.identities.map((identity) => ({
+      value: `${identity.platform}:${identity.external_id}`,
+      label: `${identity.platform} - ${identity.external_id}`,
+    })),
+  ]);
+
   return (
-    <select
-      class="select"
+    <SelectControl
+      class={props.class}
+      style={props.style}
       value={props.value}
-      onChange={(event) => props.onChange(event.currentTarget.value)}
+      options={options()}
+      onChange={props.onChange}
       disabled={props.disabled}
-    >
-      <option value="">{props.emptyLabel || "No notification"}</option>
-      <For each={props.identities}>
-        {(identity) => (
-          <option value={`${identity.platform}:${identity.external_id}`}>
-            {identity.platform} - {identity.external_id}
-          </option>
-        )}
-      </For>
-    </select>
+      ariaLabel={props.ariaLabel || "Notification identity"}
+    />
   );
 }

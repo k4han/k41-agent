@@ -445,18 +445,18 @@
 .nav-history-filter {
   flex: 1;
   min-width: 0;
+}
+
+.nav-history-filter .select-control-trigger {
   min-height: 34px;
   background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--fg);
-  padding: 4px 8px;
   font-size: 14px;
   font-weight: 600;
-  outline: none;
-  cursor: pointer;
-  font-family: inherit;
-  transition: border-color 120ms ease;
+}
+
+.nav-history-filter .select-control-trigger:hover {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
 }
 
 .nav-history-all-btn {
@@ -483,7 +483,8 @@
   border-color: var(--border-strong);
 }
 
-.nav-history-filter:focus {
+.nav-history-filter .select-control.open .select-control-trigger,
+.nav-history-filter .select-control-trigger:focus-visible {
   border-color: var(--muted);
 }
 

@@ -5,6 +5,7 @@ import { AppShell } from "@/components/AppShell";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Dialog } from "@/components/Dialog";
 import { EmptyTableRow } from "@/components/EmptyTableRow";
+import { SelectControl } from "@/components/SelectControl";
 import { DataGate } from "@/components/State";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
@@ -347,31 +348,47 @@ export function SchedulerPage() {
                   <div class="grid-2">
                     <div class="field">
                       <label>Target User</label>
-                      <select class="select" value={form().identity} onChange={(event) => setField("identity", event.currentTarget.value)}>
-                        <For each={payload.identities}>
-                          {(identity) => <option value={`${identity.platform}:${identity.external_id}`}>{identity.platform} - {identity.external_id}</option>}
-                        </For>
-                        <option value="__manual__">Enter manually</option>
-                      </select>
+                      <SelectControl
+                        value={form().identity}
+                        options={[
+                          ...payload.identities.map((identity) => ({
+                            value: `${identity.platform}:${identity.external_id}`,
+                            label: `${identity.platform} - ${identity.external_id}`,
+                          })),
+                          { value: "__manual__", label: "Enter manually" },
+                        ]}
+                        onChange={(value) => setField("identity", value)}
+                        ariaLabel="Target User"
+                      />
                     </div>
                     <div class="field">
                       <label>Schedule</label>
-                      <select class="select" value={form().trigger_type} onChange={(event) => setField("trigger_type", event.currentTarget.value as TriggerType)}>
-                        <option value="date">Run once at a time</option>
-                        <option value="relative">Run once after a delay</option>
-                        <option value="interval">Run every interval</option>
-                        <option value="cron">Cron schedule</option>
-                      </select>
+                      <SelectControl
+                        value={form().trigger_type}
+                        options={[
+                          { value: "date", label: "Run once at a time" },
+                          { value: "relative", label: "Run once after a delay" },
+                          { value: "interval", label: "Run every interval" },
+                          { value: "cron", label: "Cron schedule" },
+                        ]}
+                        onChange={(value) => setField("trigger_type", value as TriggerType)}
+                        ariaLabel="Schedule"
+                      />
                     </div>
                   </div>
                   <Show when={form().identity === "__manual__"}>
                     <div class="grid-2">
                       <div class="field">
                         <label>Platform</label>
-                        <select class="select" value={form().platform} onChange={(event) => setField("platform", event.currentTarget.value)}>
-                          <option value="telegram">telegram</option>
-                          <option value="discord">discord</option>
-                        </select>
+                        <SelectControl
+                          value={form().platform}
+                          options={[
+                            { value: "telegram", label: "telegram" },
+                            { value: "discord", label: "discord" },
+                          ]}
+                          onChange={(value) => setField("platform", value)}
+                          ariaLabel="Platform"
+                        />
                       </div>
                       <div class="field">
                         <label>User ID</label>
@@ -483,31 +500,47 @@ export function SchedulerPage() {
                   <div class="grid-2">
                     <div class="field">
                       <label>Target User</label>
-                      <select class="select" value={editForm().identity} onChange={(event) => setEditField("identity", event.currentTarget.value)}>
-                        <For each={data()?.identities || []}>
-                          {(identity) => <option value={`${identity.platform}:${identity.external_id}`}>{identity.platform} - {identity.external_id}</option>}
-                        </For>
-                        <option value="__manual__">Enter manually</option>
-                      </select>
+                      <SelectControl
+                        value={editForm().identity}
+                        options={[
+                          ...(data()?.identities || []).map((identity) => ({
+                            value: `${identity.platform}:${identity.external_id}`,
+                            label: `${identity.platform} - ${identity.external_id}`,
+                          })),
+                          { value: "__manual__", label: "Enter manually" },
+                        ]}
+                        onChange={(value) => setEditField("identity", value)}
+                        ariaLabel="Target User"
+                      />
                     </div>
                     <div class="field">
                       <label>Schedule</label>
-                      <select class="select" value={editForm().trigger_type} onChange={(event) => setEditField("trigger_type", event.currentTarget.value as TriggerType)}>
-                        <option value="date">Run once at a time</option>
-                        <option value="relative">Run once after a delay</option>
-                        <option value="interval">Run every interval</option>
-                        <option value="cron">Cron schedule</option>
-                      </select>
+                      <SelectControl
+                        value={editForm().trigger_type}
+                        options={[
+                          { value: "date", label: "Run once at a time" },
+                          { value: "relative", label: "Run once after a delay" },
+                          { value: "interval", label: "Run every interval" },
+                          { value: "cron", label: "Cron schedule" },
+                        ]}
+                        onChange={(value) => setEditField("trigger_type", value as TriggerType)}
+                        ariaLabel="Schedule"
+                      />
                     </div>
                   </div>
                   <Show when={editForm().identity === "__manual__"}>
                     <div class="grid-2">
                       <div class="field">
                         <label>Platform</label>
-                        <select class="select" value={editForm().platform} onChange={(event) => setEditField("platform", event.currentTarget.value)}>
-                          <option value="telegram">telegram</option>
-                          <option value="discord">discord</option>
-                        </select>
+                        <SelectControl
+                          value={editForm().platform}
+                          options={[
+                            { value: "telegram", label: "telegram" },
+                            { value: "discord", label: "discord" },
+                          ]}
+                          onChange={(value) => setEditField("platform", value)}
+                          ariaLabel="Platform"
+                        />
                       </div>
                       <div class="field">
                         <label>User ID</label>

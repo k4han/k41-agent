@@ -5,6 +5,7 @@ import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { AppShell } from "@/components/AppShell";
 import { DeleteThreadDialog } from "@/components/DeleteThreadDialog";
 import { InlineRenameInput } from "@/components/InlineRenameInput";
+import { SelectControl } from "@/components/SelectControl";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, patchJson } from "@/lib/api";
@@ -37,6 +38,16 @@ export function ChatHistoryListPage() {
       };
     });
   });
+  const workspaceFilterOptions = createMemo(() => [
+    { value: "all", label: "🗂 All workspaces" },
+    ...workspaceGroups().map((group) => {
+      const icon = group.isRepo ? "⎇" : "🗀";
+      return {
+        value: group.key,
+        label: `${icon} ${group.label}`,
+      };
+    }),
+  ]);
   const selectedCount = createMemo(() => selectedThreadIds().size);
   const isBackgroundThread = (thread: ThreadSummary) => thread.kind === "background";
   const filteredWorkspaceGroups = createMemo(() => {
@@ -228,24 +239,13 @@ export function ChatHistoryListPage() {
       subtitle="Browse past conversations stored in the checkpoint database."
       actions={
         <Show when={(data()?.threads.length || 0) > 0}>
-          <select
-            class="select history-workspace-filter"
+          <SelectControl
+            class="history-workspace-filter"
             value={selectedWorkspaceKey()}
-            onChange={(event) => setSelectedWorkspaceKey(event.currentTarget.value)}
-            aria-label="Workspace filter"
-          >
-            <option value="all">🗂 All workspaces</option>
-            <For each={workspaceGroups()}>
-              {(group) => {
-                const icon = group.isRepo ? "⎇" : "🗀";
-                return (
-                  <option value={group.key}>
-                    {icon} {group.label}
-                  </option>
-                );
-              }}
-            </For>
-          </select>
+            options={workspaceFilterOptions()}
+            onChange={setSelectedWorkspaceKey}
+            ariaLabel="Workspace filter"
+          />
         </Show>
       }
     >

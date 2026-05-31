@@ -2,6 +2,7 @@ import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { RefreshCw } from "lucide-solid";
 
 import { MetricGrid } from "@/components/Metrics";
+import { SelectControl } from "@/components/SelectControl";
 import { DataGate } from "@/components/State";
 import { apiFetch } from "@/lib/api";
 import type { UsagePayload, UsageRow } from "@/types";
@@ -214,74 +215,86 @@ export function UsagePage() {
                 </label>
                 <label class="field">
                   <span>Platform</span>
-                  <select
-                    class="select"
+                  <SelectControl
                     value={platform()}
-                    onChange={(event) => {
-                      setPlatform(event.currentTarget.value);
+                    options={[
+                      { value: "", label: "All platforms" },
+                      ...payload.filters.platforms.map((item) => ({ value: item, label: item })),
+                    ]}
+                    onChange={(value) => {
+                      setPlatform(value);
                       setUserId("");
                       setChannelId("");
                       setOffset(0);
                     }}
-                  >
-                    <option value="">All platforms</option>
-                    <For each={payload.filters.platforms}>
-                      {(item) => <option value={item}>{item}</option>}
-                    </For>
-                  </select>
+                    ariaLabel="Platform"
+                  />
                 </label>
                 <label class="field">
                   <span>User</span>
-                  <select class="select" value={selectedUser()} onChange={(event) => setSelectedUser(event.currentTarget.value)}>
-                    <option value={optionKey(["", ""])}>All users</option>
-                    <For each={payload.filters.users}>
-                      {(item) => (
-                        <option value={optionKey([item.platform, item.user_id])}>
-                          {item.label}
-                        </option>
-                      )}
-                    </For>
-                  </select>
+                  <SelectControl
+                    value={selectedUser()}
+                    options={[
+                      { value: optionKey(["", ""]), label: "All users" },
+                      ...payload.filters.users.map((item) => ({
+                        value: optionKey([item.platform, item.user_id]),
+                        label: item.label,
+                      })),
+                    ]}
+                    onChange={setSelectedUser}
+                    ariaLabel="User"
+                  />
                 </label>
                 <label class="field">
                   <span>Channel</span>
-                  <select class="select" value={selectedChannel()} onChange={(event) => setSelectedChannel(event.currentTarget.value)}>
-                    <option value={optionKey(["", "", ""])}>All channels</option>
-                    <For each={payload.filters.channels}>
-                      {(item) => (
-                        <option value={optionKey([item.platform, item.user_id, item.channel_id])}>
-                          {item.label}
-                        </option>
-                      )}
-                    </For>
-                  </select>
+                  <SelectControl
+                    value={selectedChannel()}
+                    options={[
+                      { value: optionKey(["", "", ""]), label: "All channels" },
+                      ...payload.filters.channels.map((item) => ({
+                        value: optionKey([item.platform, item.user_id, item.channel_id]),
+                        label: item.label,
+                      })),
+                    ]}
+                    onChange={setSelectedChannel}
+                    ariaLabel="Channel"
+                  />
                 </label>
                 <label class="field">
                   <span>Agent</span>
-                  <select class="select" value={agent()} onChange={(event) => resetOffsetOnChange(setAgent, setOffset)(event.currentTarget.value)}>
-                    <option value="">All agents</option>
-                    <For each={payload.filters.agents}>
-                      {(item) => <option value={item}>{item}</option>}
-                    </For>
-                  </select>
+                  <SelectControl
+                    value={agent()}
+                    options={[
+                      { value: "", label: "All agents" },
+                      ...payload.filters.agents.map((item) => ({ value: item, label: item })),
+                    ]}
+                    onChange={resetOffsetOnChange(setAgent, setOffset)}
+                    ariaLabel="Agent"
+                  />
                 </label>
                 <label class="field">
                   <span>Provider</span>
-                  <select class="select" value={provider()} onChange={(event) => resetOffsetOnChange(setProvider, setOffset)(event.currentTarget.value)}>
-                    <option value="">All providers</option>
-                    <For each={payload.filters.providers}>
-                      {(item) => <option value={item}>{item}</option>}
-                    </For>
-                  </select>
+                  <SelectControl
+                    value={provider()}
+                    options={[
+                      { value: "", label: "All providers" },
+                      ...payload.filters.providers.map((item) => ({ value: item, label: item })),
+                    ]}
+                    onChange={resetOffsetOnChange(setProvider, setOffset)}
+                    ariaLabel="Provider"
+                  />
                 </label>
                 <label class="field">
                   <span>Model</span>
-                  <select class="select" value={model()} onChange={(event) => resetOffsetOnChange(setModel, setOffset)(event.currentTarget.value)}>
-                    <option value="">All models</option>
-                    <For each={payload.filters.models}>
-                      {(item) => <option value={item}>{item}</option>}
-                    </For>
-                  </select>
+                  <SelectControl
+                    value={model()}
+                    options={[
+                      { value: "", label: "All models" },
+                      ...payload.filters.models.map((item) => ({ value: item, label: item })),
+                    ]}
+                    onChange={resetOffsetOnChange(setModel, setOffset)}
+                    ariaLabel="Model"
+                  />
                 </label>
               </div>
               <div class="panel-body">

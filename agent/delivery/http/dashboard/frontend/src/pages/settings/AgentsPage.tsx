@@ -6,6 +6,7 @@ import { Dialog } from "@/components/Dialog";
 import { EmptyTableRow } from "@/components/EmptyTableRow";
 import { ModelPicker } from "@/components/ModelPicker";
 import { PromptVariableTextarea } from "@/components/PromptVariableTextarea";
+import { SelectControl } from "@/components/SelectControl";
 import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { DataGate } from "@/components/State";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -494,16 +495,13 @@ export function AgentsPage() {
                       <div class="grid-2">
                         <div class="field">
                           <label>Workflow</label>
-                          <select
-                            class="select"
+                          <SelectControl
                             value={form().graph_type}
+                            options={payload.workflows.map((workflow) => ({ value: workflow, label: workflow }))}
                             disabled={modalMode() === "view"}
-                            onChange={(event) => updateForm("graph_type", event.currentTarget.value)}
-                          >
-                            <For each={payload.workflows}>
-                              {(workflow) => <option value={workflow}>{workflow}</option>}
-                            </For>
-                          </select>
+                            onChange={(value) => updateForm("graph_type", value)}
+                            ariaLabel="Workflow"
+                          />
                         </div>
                         <div class="field">
                           <label>Provider / Model</label>

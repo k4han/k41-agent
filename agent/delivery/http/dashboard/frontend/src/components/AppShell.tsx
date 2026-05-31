@@ -24,6 +24,7 @@ import { createMemo, createSignal, For, JSX, onCleanup, onMount, Show } from "so
 
 import { DeleteThreadDialog } from "@/components/DeleteThreadDialog";
 import { InlineRenameInput } from "@/components/InlineRenameInput";
+import { SelectControl } from "@/components/SelectControl";
 import { apiFetch, deleteJson, patchJson, postJson } from "@/lib/api";
 import type { ActiveSession, WorkspaceRef } from "@/types";
 import {
@@ -448,7 +449,24 @@ export function AppShell(props: {
     return counts;
   });
 
+  const historyWorkspaceFilterOptions = createMemo(() => [
+    { value: "all", label: "🗂 All Workspaces" },
+    ...availableWorkspaces().map((ws) => {
+      const runningCount = workspaceRunningCounts().get(ws.key) || 0;
+      const icon = ws.isRepo ? "⎇" : "🗀";
+      const prefix = runningCount > 0 ? "↻ " : "";
+      const suffix = runningCount > 0 ? ` (${runningCount} running)` : "";
+      return {
+        value: ws.key,
+        label: `${prefix}${icon} ${ws.label}${suffix}`,
+      };
+    }),
+  ]);
 
+  const updateSelectedWorkspaceFilter = (value: string) => {
+    setSelectedWorkspaceFilter(value);
+    window.localStorage.setItem("kaka-dashboard-workspace-filter", value);
+  };
 
   const setHistoryPanelOpen = (next: boolean) => {
     setHistoryOpen(next);
@@ -799,28 +817,13 @@ export function AppShell(props: {
           >
             <div class="nav-history-group open">
               <div class="nav-history-filter-container">
-                <select
+                <SelectControl
                   class="nav-history-filter"
                   value={selectedWorkspaceFilter()}
-                  onChange={(event) => {
-                    const val = event.currentTarget.value;
-                    setSelectedWorkspaceFilter(val);
-                    window.localStorage.setItem("kaka-dashboard-workspace-filter", val);
-                  }}
-                  aria-label="Filter history by workspace"
-                >
-                  <option value="all">🗂 All Workspaces</option>
-                  <For each={availableWorkspaces()}>
-                    {(ws) => {
-                      const runningCount = workspaceRunningCounts().get(ws.key) || 0;
-                      const icon = ws.isRepo ? "⎇" : "🗀";
-                      const prefix = runningCount > 0 ? "↻ " : "";
-                      const suffix = runningCount > 0 ? ` (${runningCount} running)` : "";
-                      const label = `${prefix}${icon} ${ws.label}${suffix}`;
-                      return <option value={ws.key}>{label}</option>;
-                    }}
-                  </For>
-                </select>
+                  options={historyWorkspaceFilterOptions()}
+                  onChange={updateSelectedWorkspaceFilter}
+                  ariaLabel="Filter history by workspace"
+                />
                 <A
                   href="/history"
                   class="nav-history-all-btn"

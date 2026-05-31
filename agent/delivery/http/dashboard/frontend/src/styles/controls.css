@@ -639,6 +639,14 @@
   font-weight: 620;
 }
 
+.field .select-control {
+  width: 100%;
+}
+
+.table .select-control.table-select {
+  min-width: 140px;
+}
+
 .model-picker {
   position: relative;
 }

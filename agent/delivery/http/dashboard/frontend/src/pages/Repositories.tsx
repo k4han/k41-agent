@@ -4,6 +4,7 @@ import { GitPullRequest, Save } from "lucide-solid";
 import { AppShell } from "@/components/AppShell";
 import { DataGate } from "@/components/State";
 import { IdentityPicker } from "@/components/IdentityPicker";
+import { SelectControl } from "@/components/SelectControl";
 import { EmptyTableRow } from "@/components/EmptyTableRow";
 import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { useToast } from "@/components/Toast";
@@ -212,15 +213,13 @@ export function RepositoriesPage() {
                               </label>
                             </td>
                             <td>
-                              <select
-                                class="select"
+                              <SelectControl
+                                class="table-select"
                                 value={draft().agent_name}
-                                onChange={(event) => updateDraft(repo, "agent_name", event.currentTarget.value)}
-                              >
-                                <For each={[...new Set([repo.agent_name, payload.default_agent, ...payload.agent_names].filter(Boolean))]}>
-                                  {(agent) => <option value={agent}>{agent}</option>}
-                                </For>
-                              </select>
+                                options={[...new Set([repo.agent_name, payload.default_agent, ...payload.agent_names].filter(Boolean))].map((agent) => ({ value: agent, label: agent }))}
+                                onChange={(value) => updateDraft(repo, "agent_name", value)}
+                                ariaLabel="Agent"
+                              />
                             </td>
                             <td>
                               <div class="stack">

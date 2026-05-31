@@ -1,6 +1,7 @@
 import { createSignal, For, Show } from "solid-js";
 
 import { Dialog } from "@/components/Dialog";
+import { SelectControl } from "@/components/SelectControl";
 import { useToast } from "@/components/Toast";
 import { postJson } from "@/lib/api";
 import type {
@@ -273,16 +274,15 @@ export function McpServerDialog(props: {
             </div>
             <div class="field">
               <label>Transport</label>
-              <select
-                class="input"
+              <SelectControl
                 value={transport()}
-                onChange={(event) =>
-                  setTransport(event.currentTarget.value as McpTransport)
-                }
-              >
-                <option value="stdio">stdio (command)</option>
-                <option value="streamable_http">HTTP (URL)</option>
-              </select>
+                options={[
+                  { value: "stdio", label: "stdio (command)" },
+                  { value: "streamable_http", label: "HTTP (URL)" },
+                ]}
+                onChange={(value) => setTransport(value as McpTransport)}
+                ariaLabel="Transport"
+              />
             </div>
           </div>
 
