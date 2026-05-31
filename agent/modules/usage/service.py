@@ -2,17 +2,20 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from agent.modules.usage.repository import (
     LLMUsageRepository,
     UsageEventInput,
     UsageQuery,
 )
-from agent.shared.config.service import get_config_service
 from agent.shared.infrastructure.db.base import utcnow
+from agent.shared.timezone import (
+    ensure_aware_utc,
+    localize_iso_datetime,
+    resolve_display_timezone,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +24,6 @@ DEFAULT_USAGE_LIMIT = 50
 MAX_USAGE_LIMIT = 200
 USAGE_CONTEXT_METADATA_KEY = "usage_context"
 USAGE_DASHBOARD_VIEWS = {"all", "users", "workspaces", "threads"}
-DISPLAY_TIMEZONE_CONFIG_KEY = "display.timezone"
-DEFAULT_DISPLAY_TIMEZONE = "UTC"
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,8 +121,8 @@ def normalize_usage_query(
     offset: int = 0,
 ) -> UsageQuery:
     return UsageQuery(
-        start=_ensure_aware_utc(start),
-        end=_ensure_aware_utc(end),
+        start=ensure_aware_utc(start),
+        end=ensure_aware_utc(end),
         platform=platform.strip(),
         user_id=user_id.strip(),
         channel_id=channel_id.strip(),
@@ -135,12 +136,6 @@ def normalize_usage_query(
     )
 
 
-def _ensure_aware_utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
-
-
 def _parse_thread_id(thread_id: str) -> tuple[str, str, str] | None:
     parts = str(thread_id or "").split("_", 2)
     if len(parts) < 2:
@@ -148,43 +143,10 @@ def _parse_thread_id(thread_id: str) -> tuple[str, str, str] | None:
     return parts[0], parts[1], parts[2] if len(parts) == 3 else ""
 
 
-def _resolve_display_timezone() -> tuple[str, ZoneInfo]:
-    configured = get_config_service().get_str(
-        DISPLAY_TIMEZONE_CONFIG_KEY,
-        DEFAULT_DISPLAY_TIMEZONE,
-    ).strip() or DEFAULT_DISPLAY_TIMEZONE
-    try:
-        return configured, ZoneInfo(configured)
-    except ZoneInfoNotFoundError:
-        logger.warning(
-            "Invalid display timezone '%s'; falling back to %s.",
-            configured,
-            DEFAULT_DISPLAY_TIMEZONE,
-        )
-        return DEFAULT_DISPLAY_TIMEZONE, ZoneInfo(DEFAULT_DISPLAY_TIMEZONE)
-
-
-def _parse_datetime_value(value: str) -> datetime:
-    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed
-
-
-def _localize_iso_datetime(value: Any, tz: ZoneInfo) -> str | None:
-    if not value:
-        return None
-    try:
-        parsed = _parse_datetime_value(str(value))
-    except ValueError:
-        return str(value)
-    return parsed.astimezone(tz).isoformat()
-
-
-def _localize_last_used(rows: list[dict[str, Any]], tz: ZoneInfo) -> None:
+def _localize_last_used(rows: list[dict[str, Any]], tz: Any) -> None:
     for row in rows:
         if "last_used_at" in row:
-            row["last_used_at"] = _localize_iso_datetime(row.get("last_used_at"), tz)
+            row["last_used_at"] = localize_iso_datetime(row.get("last_used_at"), tz)
 
 
 class UsageService:
@@ -200,7 +162,7 @@ class UsageService:
     async def dashboard_payload(self, query: UsageQuery, view: str = "all") -> dict[str, Any]:
         await self.prune_old_events()
         normalized_view = view if view in USAGE_DASHBOARD_VIEWS else "all"
-        display_timezone, display_zone = _resolve_display_timezone()
+        display_timezone, display_zone = resolve_display_timezone()
         summary = await self._repository.summary(query)
         if normalized_view in {"all", "users"}:
             rows, total = await self._repository.grouped_by_identity(query)

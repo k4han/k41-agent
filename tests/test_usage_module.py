@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 import pytest_asyncio
@@ -361,11 +362,6 @@ async def test_usage_service_dashboard_payload_uses_configured_display_timezone(
 
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
-    class FakeConfig:
-        def get_str(self, key: str, default: str = "") -> str:
-            assert key == "display.timezone"
-            return "Asia/Bangkok"
-
     class FakeRepository:
         async def prune_before(self, cutoff):
             return 0
@@ -425,7 +421,11 @@ async def test_usage_service_dashboard_payload_uses_configured_display_timezone(
                 "call_kinds": [],
             }
 
-    monkeypatch.setattr(service_module, "get_config_service", lambda: FakeConfig())
+    monkeypatch.setattr(
+        service_module,
+        "resolve_display_timezone",
+        lambda: ("Asia/Bangkok", ZoneInfo("Asia/Bangkok")),
+    )
 
     payload = await UsageService(FakeRepository()).dashboard_payload(
         UsageQuery(start=now - timedelta(minutes=1), end=now + timedelta(minutes=1)),
@@ -511,6 +511,11 @@ def test_dashboard_usage_endpoint_enriches_identity_labels(monkeypatch: pytest.M
 
     monkeypatch.setattr(route_module, "get_usage_service", lambda: FakeUsageService())
     monkeypatch.setattr(route_module, "_paired_identities", fake_paired_identities)
+    monkeypatch.setattr(
+        route_module,
+        "resolve_display_timezone",
+        lambda: ("Asia/Bangkok", ZoneInfo("Asia/Bangkok")),
+    )
 
     app = FastAPI()
     app.state.channel_manager = ChannelManager()
@@ -530,6 +535,8 @@ def test_dashboard_usage_endpoint_enriches_identity_labels(monkeypatch: pytest.M
             "call_kind": "agent",
             "internal": "false",
             "view": "users",
+            "start": "2026-01-01",
+            "end": "2026-01-01",
         },
     )
 
@@ -542,6 +549,8 @@ def test_dashboard_usage_endpoint_enriches_identity_labels(monkeypatch: pytest.M
     assert captured["query"].call_kind == "agent"
     assert captured["query"].internal is False
     assert captured["view"] == "users"
+    assert captured["query"].start.isoformat() == "2025-12-31T17:00:00+00:00"
+    assert captured["query"].end.isoformat() == "2026-01-01T16:59:59.999000+00:00"
 
 
 @pytest.mark.asyncio

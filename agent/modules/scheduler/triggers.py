@@ -3,13 +3,18 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any, Literal
 
+from agent.shared.timezone import resolve_display_timezone
+
 TriggerType = Literal["date", "relative", "interval", "cron"]
 APSchedulerTriggerType = Literal["date", "interval", "cron"]
 INTERVAL_TRIGGER_FIELDS = ("weeks", "days", "hours", "minutes", "seconds")
 
 
 def _scheduler_timezone(scheduler: Any) -> Any:
-    return getattr(scheduler, "timezone", None) or datetime.now().astimezone().tzinfo
+    if timezone := getattr(scheduler, "timezone", None):
+        return timezone
+    _, display_zone = resolve_display_timezone()
+    return display_zone
 
 
 def _scheduler_now(scheduler: Any) -> datetime:

@@ -8,7 +8,7 @@ from agent.modules.tools.domain import ToolCategory
 @tool
 def get_current_time() -> str:
     """Return current time with timezone."""
-    from datetime import datetime
+    from agent.shared.timezone import display_now
 
-    now = datetime.now().astimezone()
+    now = display_now()
     return now.strftime("%Y-%m-%d %H:%M:%S %Z (UTC%z)")

@@ -4,7 +4,6 @@ import uuid
 from html import escape as escape_html
 from typing import Any, Optional
 
-import tzlocal
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from sqlalchemy import create_engine, text
@@ -17,6 +16,7 @@ from agent.shared.infrastructure.db.engine import (
     get_database_url,
     _normalize_url_to_sync,
 )
+from agent.shared.timezone import resolve_display_timezone
 from langchain_core.messages import AIMessage, HumanMessage
 
 AGENT_NAME = "scheduler-executor"
@@ -157,14 +157,17 @@ async def initialize_scheduler():
     _sync_engine = create_engine(sync_url, echo=False, pool_size=2, max_overflow=0)
     _migrate_legacy_job_references(_sync_engine)
 
-    local_tz = tzlocal.get_localzone()
+    timezone_name, scheduler_tz = resolve_display_timezone()
 
     _scheduler = AsyncIOScheduler(
         jobstores={"default": SQLAlchemyJobStore(engine=_sync_engine)},
-        timezone=local_tz,
+        timezone=scheduler_tz,
     )
     _scheduler.start()
-    logger.info(f"Background scheduler initialized and started. Timezone: {local_tz}")
+    logger.info(
+        "Background scheduler initialized and started. Timezone: %s",
+        timezone_name,
+    )
 
 
 async def stop_scheduler():

@@ -2,19 +2,37 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Query
 
 from agent.delivery.http.dashboard.routes.shared import _paired_identities
 from agent.modules.usage import DEFAULT_USAGE_LIMIT, get_usage_service, normalize_usage_query
+from agent.shared.timezone import resolve_display_timezone
 
 
 router = APIRouter()
 
 
-def _parse_datetime(value: str | None, default: datetime) -> datetime:
+def _parse_datetime(
+    value: str | None,
+    default: datetime,
+    display_zone: ZoneInfo,
+    *,
+    end_of_day: bool = False,
+) -> datetime:
     if not value:
         return default
+    if len(value) == 10:
+        hour, minute, second, microsecond = (23, 59, 59, 999000) if end_of_day else (0, 0, 0, 0)
+        parsed = datetime.fromisoformat(value).replace(
+            hour=hour,
+            minute=minute,
+            second=second,
+            microsecond=microsecond,
+            tzinfo=display_zone,
+        )
+        return parsed.astimezone(timezone.utc)
     normalized = value.replace("Z", "+00:00")
     parsed = datetime.fromisoformat(normalized)
     if parsed.tzinfo is None:
@@ -107,11 +125,12 @@ async def get_dashboard_usage(
     limit: int = DEFAULT_USAGE_LIMIT,
     offset: int = 0,
 ) -> dict[str, Any]:
+    _, display_zone = resolve_display_timezone()
     now = datetime.now(timezone.utc)
     default_start = now - timedelta(days=7)
     query = normalize_usage_query(
-        start=_parse_datetime(start, default_start),
-        end=_parse_datetime(end, now),
+        start=_parse_datetime(start, default_start, display_zone),
+        end=_parse_datetime(end, now, display_zone, end_of_day=True),
         platform=platform,
         user_id=user_id,
         channel_id=channel_id,

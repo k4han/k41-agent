@@ -60,10 +60,10 @@ class ScheduleTaskInput(BaseModel):
     trigger_args: dict = Field(
         ...,
         description="""Arguments for the chosen trigger type.
-- For 'date': {"run_date": "YYYY-MM-DD HH:MM:SS"} (Local timezone).
+- For 'date': {"run_date": "YYYY-MM-DD HH:MM:SS"} (Configured display timezone).
 - For 'relative': {"minutes": 2}, {"hours": 1}, {"days": 1} for one-time delays from now.
 - For 'interval': e.g., {"minutes": 10}, {"hours": 1}, {"days": 1} for recurring schedules.
-- For 'cron': e.g., {"hour": "2", "minute": "0"} for 2:00 AM daily, {"day_of_week": "mon-fri", "hour": "9"} (Local timezone).""",
+- For 'cron': e.g., {"hour": "2", "minute": "0"} for 2:00 AM daily, {"day_of_week": "mon-fri", "hour": "9"} (Configured display timezone).""",
     )
 
 

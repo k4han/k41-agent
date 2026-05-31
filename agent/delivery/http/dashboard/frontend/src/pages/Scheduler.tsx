@@ -10,7 +10,7 @@ import { DataGate } from "@/components/State";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
-import { dateTimeLocal, triggerArgsFromDateInput } from "@/lib/utils";
+import { dateTimeInTimeZone, triggerArgsFromDateInput } from "@/lib/utils";
 import type { Identity, SchedulerJob } from "@/types";
 
 type SchedulerPayload = {
@@ -40,7 +40,7 @@ type ScheduleForm = {
   cron_day_of_week: string;
 };
 
-const defaultScheduleForm = (): ScheduleForm => {
+const defaultScheduleForm = (timeZone?: string): ScheduleForm => {
   const date = new Date(Date.now() + 15 * 60 * 1000);
   return {
     task: "",
@@ -48,7 +48,7 @@ const defaultScheduleForm = (): ScheduleForm => {
     platform: "telegram",
     user_id: "",
     trigger_type: "date",
-    run_date: dateTimeLocal(date),
+    run_date: dateTimeInTimeZone(date, timeZone),
     weeks: "",
     days: "",
     hours: "",
@@ -217,6 +217,7 @@ export function SchedulerPage() {
       setData(payload);
       setForm((current) => ({
         ...current,
+        run_date: current.task ? current.run_date : defaultScheduleForm(payload.scheduler_timezone).run_date,
         identity: current.identity || (payload.identities[0] ? `${payload.identities[0].platform}:${payload.identities[0].external_id}` : "__manual__"),
       }));
     } catch (err) {
@@ -236,7 +237,7 @@ export function SchedulerPage() {
         trigger_args: triggerArgs(current),
       });
       showToast("Job created.");
-      setForm(defaultScheduleForm());
+      setForm(defaultScheduleForm(data()?.scheduler_timezone));
       await load();
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to create job", "error");
@@ -258,7 +259,7 @@ export function SchedulerPage() {
       platform: job.platform,
       user_id: job.user_id,
       trigger_type: (job.trigger_type || "date") as TriggerType,
-      run_date: (args.run_date as string) || dateTimeLocal(new Date()),
+      run_date: (args.run_date as string) || dateTimeInTimeZone(new Date(), data()?.scheduler_timezone),
       weeks: String(args.weeks ?? ""),
       days: String(args.days ?? ""),
       hours: String(args.hours ?? ""),

@@ -31,14 +31,6 @@ function defaultEndDate(): string {
   return dateInputValue(new Date());
 }
 
-function startIso(value: string): string {
-  return new Date(`${value}T00:00:00`).toISOString();
-}
-
-function endIso(value: string): string {
-  return new Date(`${value}T23:59:59.999`).toISOString();
-}
-
 function formatNumber(value: number): string {
   return new Intl.NumberFormat().format(value || 0);
 }
@@ -125,8 +117,8 @@ export function UsagePage() {
     setError("");
     try {
       const params = new URLSearchParams({
-        start: startIso(startDate()),
-        end: endIso(endDate()),
+        start: startDate(),
+        end: endDate(),
         limit: String(PAGE_SIZE),
         offset: String(nextOffset),
         view: nextView,

@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+DISPLAY_TIMEZONE_CONFIG_KEY = "display.timezone"
+DEFAULT_DISPLAY_TIMEZONE = "UTC"
 
 # Runtime configuration key patterns
 # These patterns define which keys can be updated at runtime
@@ -18,7 +20,7 @@ RUNTIME_KEY_PATTERNS = [
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.env\.[A-Za-z0-9_-]+$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.headers\.[A-Za-z0-9_-]+$",
     r"^database\.url$",
-    r"^display\.timezone$",
+    rf"^{re.escape(DISPLAY_TIMEZONE_CONFIG_KEY)}$",
     r"^security\.jwt_secret$",
     r"^recursion_limit$",
 ]
@@ -60,7 +62,7 @@ def _expand_runtime_keys() -> set[str]:
         keys.add(f"channels.github.{prop}")
     keys.add("llm.default_model")
     keys.add("database.url")
-    keys.add("display.timezone")
+    keys.add(DISPLAY_TIMEZONE_CONFIG_KEY)
     keys.add("security.jwt_secret")
     keys.add("recursion_limit")
     return keys
@@ -93,7 +95,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # Security
     "persistence.allow_any_path": False,
     "workspace.root": "~/kaka-agent",
-    "display.timezone": "UTC",
+    DISPLAY_TIMEZONE_CONFIG_KEY: DEFAULT_DISPLAY_TIMEZONE,
     "security.jwt_secret": "",
     "recursion_limit": 100,
 }
@@ -256,7 +258,7 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "label": "Database URL",
     },
     # Display settings
-    "display.timezone": {
+    DISPLAY_TIMEZONE_CONFIG_KEY: {
         "type": "text",
         "description": "IANA timezone used to display dashboard timestamps (e.g. Asia/Bangkok)",
         "category": "general",
@@ -428,6 +430,8 @@ def get_channel_enabled_key(channel_name: str) -> str:
 
 __all__ = [
     "DEFAULT_CONFIG",
+    "DEFAULT_DISPLAY_TIMEZONE",
+    "DISPLAY_TIMEZONE_CONFIG_KEY",
     "RUNTIME_KEY_PATTERNS",
     "is_runtime_key",
     "KNOWN_RUNTIME_KEYS",

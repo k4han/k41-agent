@@ -86,6 +86,31 @@ export function dateTimeLocal(date: Date): string {
   ].join("");
 }
 
+export function dateTimeInTimeZone(date: Date, timeZone?: string): string {
+  if (!timeZone || timeZone === "local time") {
+    return dateTimeLocal(date);
+  }
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(date);
+    const values = Object.fromEntries(
+      parts
+        .filter((part) => part.type !== "literal")
+        .map((part) => [part.type, part.value]),
+    );
+    return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}`;
+  } catch {
+    return dateTimeLocal(date);
+  }
+}
+
 export function triggerArgsFromDateInput(value: string): { run_date: string } | null {
   if (!value) {
     return null;

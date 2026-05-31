@@ -105,7 +105,8 @@ def _build_sub_agents_prompt_section(agent_name: str, catalog: Any) -> str:
 def get_system_default_variables(working_dir: str = "", workspace: str = "") -> dict[str, str]:
     import sys
     import getpass
-    from datetime import datetime
+
+    from agent.shared.timezone import display_now
 
     os_name = sys.platform
     if os_name == "win32":
@@ -118,7 +119,7 @@ def get_system_default_variables(working_dir: str = "", workspace: str = "") -> 
     except Exception:
         username = "user"
 
-    current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    current_time_str = display_now().strftime("%Y-%m-%d %H:%M:%S %Z (UTC%z)")
 
     return {
         "current_time": current_time_str,

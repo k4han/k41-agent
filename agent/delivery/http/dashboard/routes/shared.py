@@ -43,6 +43,7 @@ from agent.shared.config import (
     parse_provider_key,
 )
 from agent.shared.infrastructure.config_file import coerce_bool
+from agent.shared.timezone import resolve_display_timezone
 
 if TYPE_CHECKING:
     from agent.delivery.http.dashboard.routes.agents import AgentCardBody
@@ -841,6 +842,7 @@ def _serialize_job(job: Job) -> dict[str, Any]:
     trigger_type = type(job.trigger).__name__.lower().replace("trigger", "")
     trigger_args: dict[str, Any] = {}
     trigger = job.trigger
+    _, display_zone = resolve_display_timezone()
     for attr in ["run_date", "weeks", "days", "hours", "minutes", "seconds",
                  "minute", "hour", "day", "month", "day_of_week"]:
         if hasattr(trigger, attr):
@@ -851,7 +853,7 @@ def _serialize_job(job: Job) -> dict[str, Any]:
         from datetime import datetime
         run_date = getattr(trigger, "run_date")
         if isinstance(run_date, datetime):
-            trigger_args["run_date"] = run_date.strftime("%Y-%m-%dT%H:%M")
+            trigger_args["run_date"] = run_date.astimezone(display_zone).strftime("%Y-%m-%dT%H:%M")
     return {
         "id": job.id,
         "task": job.kwargs.get("task", "Unknown"),
@@ -860,7 +862,7 @@ def _serialize_job(job: Job) -> dict[str, Any]:
         "trigger_type": trigger_type,
         "trigger_args": trigger_args,
         "next_run_time": (
-            job.next_run_time.strftime("%Y-%m-%d %H:%M:%S %Z")
+            job.next_run_time.astimezone(display_zone).strftime("%Y-%m-%d %H:%M:%S %Z")
             if job.next_run_time
             else None
         ),
