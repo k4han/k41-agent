@@ -335,6 +335,7 @@ export function WorkspaceExplorer(props: {
   const refresh = () => {
     generation += 1;
     const targetGeneration = generation;
+    const savedExpanded = { ...untrack(expandedByPath) };
     setEntriesByPath({});
     setExpandedByPath({ "": true });
     setTreeTruncatedByPath({});
@@ -349,7 +350,19 @@ export function WorkspaceExplorer(props: {
     if (untrack(activeTab).startsWith("file:")) {
       setActiveTab("files");
     }
-    void loadTree("", targetGeneration);
+    const reloadWithExpansion = async () => {
+      await loadTree("", targetGeneration);
+      if (targetGeneration !== generation) return;
+      const paths = Object.keys(savedExpanded).filter((p) => p !== "" && savedExpanded[p]);
+      for (const path of paths) {
+        if (targetGeneration !== generation) return;
+        await loadTree(path, targetGeneration);
+      }
+      if (targetGeneration === generation) {
+        setExpandedByPath(savedExpanded);
+      }
+    };
+    void reloadWithExpansion();
     void loadChanges(targetGeneration);
   };
 
