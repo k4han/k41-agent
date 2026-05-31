@@ -54,6 +54,7 @@ type ProviderCreateForm = {
   type: string;
   api_key: string;
   base_url: string;
+  isCustom?: boolean;
 };
 
 // Grouped by connection state instead of static categories
@@ -445,7 +446,7 @@ export function ProvidersPage() {
   };
 
   const openAddDialog = () => {
-    setAddForm({ name: "", type: "google", api_key: "", base_url: "" });
+    setAddForm({ name: "", type: "google", api_key: "", base_url: "", isCustom: true });
     setAddOpen(true);
   };
 
@@ -459,6 +460,7 @@ export function ProvidersPage() {
         type: card.providerType,
         api_key: "",
         base_url: card.baseUrl || "",
+        isCustom: false,
       });
       setAddOpen(true);
     }
@@ -1131,7 +1133,7 @@ function AddProviderDialog(props: {
       }
     >
       <div class="stack">
-        <Show when={!props.form.name}>
+        <Show when={props.form.isCustom}>
           <div class="provider-type-grid" style={{ "margin-bottom": "20px" }}>
             <For each={props.typeOptions}>
               {(option) => (
@@ -1155,7 +1157,7 @@ function AddProviderDialog(props: {
               class="input mono"
               value={props.form.name}
               placeholder="e.g. deepseek, groq"
-              disabled={!!props.form.name}
+              disabled={!props.form.isCustom}
               onInput={(event) => props.onChange({ name: event.currentTarget.value })}
             />
           </label>
