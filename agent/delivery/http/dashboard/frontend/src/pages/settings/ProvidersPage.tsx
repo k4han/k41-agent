@@ -1,7 +1,8 @@
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
-import { Edit3, Plus, RefreshCw, Save, Star, Trash2, Globe, Shield, Coins, Sparkles, Sliders } from "lucide-solid";
+import { Check, Copy, Edit3, Plus, RefreshCw, Save, Search, Star, Trash2, Globe, Shield, Coins, Sparkles, Sliders } from "lucide-solid";
 
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { CopyButton } from "@/components/CopyButton";
 import { Dialog } from "@/components/Dialog";
 import { EmptyTableRow } from "@/components/EmptyTableRow";
 import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
@@ -650,14 +651,36 @@ export function ProvidersPage() {
           border-top: 1px solid rgba(255, 255, 255, 0.08);
           padding-top: 18px;
         }
+        .model-spec-toolbar {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          margin-bottom: 12px;
+        }
         .model-spec-title {
           font-size: 13px;
           font-weight: 700;
           color: var(--fg);
-          margin-bottom: 12px;
           display: flex;
           align-items: center;
           gap: 6px;
+        }
+        .model-spec-search {
+          position: relative;
+          display: flex;
+          align-items: center;
+          width: min(100%, 280px);
+        }
+        .model-spec-search svg {
+          position: absolute;
+          left: 10px;
+          color: var(--muted);
+          pointer-events: none;
+        }
+        .model-spec-search .input {
+          width: 100%;
+          padding-left: 32px;
         }
         .model-spec-grid {
           display: grid;
@@ -676,15 +699,38 @@ export function ProvidersPage() {
           flex-direction: column;
           gap: 8px;
         }
+        .model-spec-button {
+          color: inherit;
+          cursor: pointer;
+          font: inherit;
+          text-align: left;
+        }
+        .model-spec-button:hover {
+          border-color: rgba(99, 102, 241, 0.35);
+          background: rgba(99, 102, 241, 0.05);
+        }
+        .model-spec-button:focus-visible {
+          outline: 2px solid var(--border-strong);
+          outline-offset: 2px;
+        }
         .model-spec-header {
-          display: flex;
-          flex-direction: column;
-          gap: 2px;
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          gap: 2px 8px;
+        }
+        .model-spec-copy {
+          grid-row: 1 / span 2;
+          grid-column: 2;
+          align-self: center;
+          color: var(--muted);
         }
         .model-spec-name {
           font-size: 13px;
           font-weight: 600;
           color: var(--fg);
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
         .model-spec-id {
           font-size: 10px;
@@ -735,6 +781,22 @@ export function ProvidersPage() {
         .cost-number {
           font-weight: 600;
           color: var(--fg);
+        }
+        .model-spec-empty {
+          grid-column: 1 / -1;
+          padding: 24px 12px;
+          color: var(--muted);
+          font-size: 12px;
+          text-align: center;
+        }
+        @media (max-width: 640px) {
+          .model-spec-toolbar {
+            align-items: stretch;
+            flex-direction: column;
+          }
+          .model-spec-search {
+            width: 100%;
+          }
         }
       `}</style>
 
@@ -940,6 +1002,27 @@ function ProviderEditDialog(props: {
     const typeLower = props.provider.providerType.toLowerCase();
     return props.catalog[nameLower] || props.catalog[typeLower] || null;
   });
+  const [modelSearch, setModelSearch] = createSignal("");
+  const filteredModels = createMemo(() => {
+    const models = catalogEntry()?.models || [];
+    const needle = modelSearch().trim().toLowerCase();
+    if (!needle) {
+      return models;
+    }
+    return models.filter((model: any) => {
+      const searchable = [
+        model.name,
+        model.id,
+        ...(model.input_types || []),
+        ...(model.output_types || []),
+        model.reasoning ? "reasoning" : "",
+        model.tool_call ? "tools tool calling" : "",
+      ]
+        .join(" ")
+        .toLowerCase();
+      return searchable.includes(needle);
+    });
+  });
 
   return (
     <Dialog
@@ -1023,6 +1106,7 @@ function ProviderEditDialog(props: {
                 info={entry.info}
                 draft={props.drafts[entry.key]}
                 dirty={props.dirtyKeys.has(entry.key)}
+                showDescription={false}
                 trimProviderPrefix
                 actions={
                   entry.key.endsWith(".models") ? (
@@ -1042,40 +1126,67 @@ function ProviderEditDialog(props: {
         {/* Detailed Model Metadata Section from models.dev */}
         <Show when={catalogEntry() && catalogEntry().models?.length > 0}>
           <div class="model-spec-section">
-            <div class="model-spec-title">
-              <Sparkles size={14} style={{ color: "var(--accent, #6366f1)" }} />
-              Model Specifications & Capabilities
+            <div class="model-spec-toolbar">
+              <div class="model-spec-title">
+                <Sparkles size={14} style={{ color: "var(--accent, #6366f1)" }} />
+                Model Specifications & Capabilities
+              </div>
+              <label class="model-spec-search">
+                <Search size={14} />
+                <input
+                  class="input"
+                  type="search"
+                  aria-label="Search models"
+                  value={modelSearch()}
+                  placeholder="Search models..."
+                  onInput={(event) => setModelSearch(event.currentTarget.value)}
+                />
+              </label>
             </div>
             <div class="model-spec-grid">
-              <For each={catalogEntry().models}>
+              <For each={filteredModels()} fallback={<div class="model-spec-empty">No models match your search.</div>}>
                 {(model) => (
-                  <div class="model-spec-card">
-                    <div class="model-spec-header">
-                      <span class="model-spec-name">{model.name}</span>
-                      <span class="model-spec-id mono">{model.id}</span>
-                    </div>
-                    <div class="model-spec-badges">
-                      <Show when={model.context_window}>
-                        <span class="spec-badge spec-badge-context">
-                          🧠 {model.context_window >= 1048576 ? `${(model.context_window / 1048576).toFixed(0)}M` : `${(model.context_window / 1024).toFixed(0)}k`} context
-                        </span>
-                      </Show>
-                      <Show when={model.reasoning}>
-                        <span class="spec-badge spec-badge-reasoning">🧠 Reasoning</span>
-                      </Show>
-                      <Show when={model.tool_call}>
-                        <span class="spec-badge spec-badge-tools">🛠️ Tools</span>
-                      </Show>
-                      <For each={model.input_types}>
-                        {(mod) => <span class="spec-badge spec-badge-modality">{mod}</span>}
-                      </For>
-                    </div>
-                    <Show when={model.cost_input !== null && model.cost_input !== undefined}>
-                      <div class="model-spec-cost">
-                        Cost/1M tokens: <span class="cost-number">${model.cost_input}</span> In / <span class="cost-number">${model.cost_output}</span> Out
-                      </div>
-                    </Show>
-                  </div>
+                  <CopyButton
+                    value={String(model.id || model.name || "")}
+                    class="model-spec-card model-spec-button"
+                    ariaLabel={`Copy model ID ${model.id || model.name}`}
+                    title={`Copy ${model.id || model.name}`}
+                    successMessage="Model ID copied."
+                    failureMessage="Could not copy model ID."
+                  >
+                    {(state) => (
+                      <>
+                        <div class="model-spec-header">
+                          <span class="model-spec-name">{model.name}</span>
+                          <span class="model-spec-id mono">{model.id}</span>
+                          <Show when={state.copied()} fallback={<Copy size={13} class="model-spec-copy" aria-hidden="true" />}>
+                            <Check size={13} class="model-spec-copy" aria-hidden="true" />
+                          </Show>
+                        </div>
+                        <div class="model-spec-badges">
+                          <Show when={model.context_window}>
+                            <span class="spec-badge spec-badge-context">
+                              🧠 {model.context_window >= 1048576 ? `${(model.context_window / 1048576).toFixed(0)}M` : `${(model.context_window / 1024).toFixed(0)}k`} context
+                            </span>
+                          </Show>
+                          <Show when={model.reasoning}>
+                            <span class="spec-badge spec-badge-reasoning">🧠 Reasoning</span>
+                          </Show>
+                          <Show when={model.tool_call}>
+                            <span class="spec-badge spec-badge-tools">🛠️ Tools</span>
+                          </Show>
+                          <For each={model.input_types}>
+                            {(mod) => <span class="spec-badge spec-badge-modality">{mod}</span>}
+                          </For>
+                        </div>
+                        <Show when={model.cost_input !== null && model.cost_input !== undefined}>
+                          <div class="model-spec-cost">
+                            Cost/1M tokens: <span class="cost-number">${model.cost_input}</span> In / <span class="cost-number">${model.cost_output}</span> Out
+                          </div>
+                        </Show>
+                      </>
+                    )}
+                  </CopyButton>
                 )}
               </For>
             </div>
@@ -1141,9 +1252,9 @@ function AddProviderDialog(props: {
                   class={`provider-type-option ${props.form.type === option.value ? "active" : ""}`}
                   type="button"
                   onClick={() => props.onChange({ type: option.value, base_url: "" })}
+                  title={option.description}
                 >
                   <span class="setting-title">{option.label}</span>
-                  <span class="hint">{option.description}</span>
                 </button>
               )}
             </For>
@@ -1189,7 +1300,3 @@ function AddProviderDialog(props: {
     </Dialog>
   );
 }
-
-
-
-

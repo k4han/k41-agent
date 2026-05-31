@@ -340,9 +340,8 @@
 
 .provider-type-option {
   display: grid;
-  min-height: 96px;
-  align-content: start;
-  gap: 6px;
+  min-height: 50px;
+  align-content: center;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);

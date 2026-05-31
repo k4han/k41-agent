@@ -23,7 +23,6 @@ export interface ChatTranscriptProps {
   workspace: WorkspaceRef | null;
   conversationBusy: boolean;
   onWorkspaceResolved: (value: WorkspaceRef | string | null) => void;
-  onCopyMessage: (text: string) => void;
   onEditMessage: (payload: {
     itemId?: number;
     messageIndex: number;
@@ -71,7 +70,6 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                 itemId={item.id}
                 deferMermaid={props.streaming || props.backgroundLive}
                 actionsDisabled={props.conversationBusy}
-                onCopyMessage={props.onCopyMessage}
                 onEditMessage={props.onEditMessage}
                 onBranchSelect={props.onBranchSelect}
               />

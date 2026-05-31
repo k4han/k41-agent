@@ -275,6 +275,7 @@ export function SettingRow(props: {
   info: SettingInfo;
   draft: unknown;
   dirty: boolean;
+  showDescription?: boolean;
   trimProviderPrefix?: boolean;
   actions?: JSX.Element;
   control?: JSX.Element;
@@ -298,7 +299,7 @@ export function SettingRow(props: {
               <div class="setting-inline-actions">{props.actions}</div>
             </Show>
           </div>
-          <Show when={props.info.description}>
+          <Show when={props.showDescription !== false && props.info.description}>
             <div class="setting-description">{props.info.description}</div>
           </Show>
         </div>

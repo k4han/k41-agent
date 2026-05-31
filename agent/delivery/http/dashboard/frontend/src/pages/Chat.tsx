@@ -15,7 +15,6 @@ import { useToast } from "@/components/Toast";
 import { WorkspaceExplorer } from "@/components/WorkspaceExplorer";
 import type { TodoProgress } from "@/components/ChatTodos";
 import { apiFetch, postJson, readError } from "@/lib/api";
-import { writeToClipboard } from "@/lib/utils";
 import {
   threadApiPath,
   toThreadTranscript,
@@ -786,15 +785,6 @@ export function ChatPage() {
     void sendMessage(true);
   };
 
-  const handleCopyMessage = async (text: string) => {
-    try {
-      await writeToClipboard(text);
-      showToast("Message copied.", "success");
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Copy failed", "error");
-    }
-  };
-
   const handleBranchSelect = (checkpointId: string) => {
     const threadId = currentThreadId();
     if (!threadId || !checkpointId || checkpointId === activeCheckpointId() || conversationBusy()) {
@@ -1087,7 +1077,6 @@ export function ChatPage() {
                 workspace={workspaceRef()}
                 conversationBusy={conversationBusy()}
                 onWorkspaceResolved={setWorkspace}
-                onCopyMessage={(text) => void handleCopyMessage(text)}
                 onEditMessage={(payload) => void handleEditMessage(payload)}
                 onBranchSelect={handleBranchSelect}
               />

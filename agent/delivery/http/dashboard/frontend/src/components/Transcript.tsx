@@ -2,7 +2,6 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
-  Copy,
   FileText,
   Image as ImageIcon,
   Pencil,
@@ -10,6 +9,7 @@ import {
 } from "lucide-solid";
 import { createEffect, createSignal, For, Show } from "solid-js";
 
+import { CopyButton } from "@/components/CopyButton";
 import { Markdown } from "@/components/Markdown";
 import { formatValue } from "@/lib/utils";
 
@@ -123,7 +123,6 @@ export function TranscriptMessageView(props: {
   deferMermaid?: boolean;
   itemId?: number;
   actionsDisabled?: boolean;
-  onCopy?: (text: string) => void;
   onEdit?: (payload: {
     itemId?: number;
     messageIndex: number;
@@ -279,15 +278,16 @@ export function TranscriptMessageView(props: {
         </Show>
         <Show when={props.role === "user"}>
           <div class="message-actions" aria-label="Message actions">
-            <button
+            <CopyButton
+              value={props.text}
               class="message-action-btn"
-              type="button"
-              onClick={() => props.onCopy?.(props.text)}
               title="Copy message"
-              aria-label="Copy message"
-            >
-              <Copy size={15} />
-            </button>
+              ariaLabel="Copy message"
+              copiedTitle="Copied"
+              successMessage="Message copied."
+              failureMessage="Copy failed"
+              iconSize={15}
+            />
             <button
               class="message-action-btn"
               type="button"
@@ -367,7 +367,6 @@ export function TranscriptItemView(props: {
   deferMermaid?: boolean;
   itemId?: number;
   actionsDisabled?: boolean;
-  onCopyMessage?: (text: string) => void;
   onEditMessage?: (payload: {
     itemId?: number;
     messageIndex: number;
@@ -388,7 +387,6 @@ export function TranscriptItemView(props: {
       deferMermaid={props.deferMermaid}
       itemId={props.itemId}
       actionsDisabled={props.actionsDisabled}
-      onCopy={props.onCopyMessage}
       onEdit={props.onEditMessage}
       onBranchSelect={props.onBranchSelect}
     />
