@@ -26,9 +26,9 @@ RUNTIME_KEY_PATTERNS = [
 ]
 
 DATABASE_RUNTIME_KEY_PATTERNS = [
-    r"^channels\.telegram\.(enabled|default_agent|code_agent|research_agent|update_mode|webhook_url)$",
-    r"^channels\.discord\.(enabled|default_agent|code_agent|research_agent)$",
-    r"^channels\.github\.(default_agent|trigger_label|mention_triggers)$",
+    r"^channels\.telegram\.(enabled|bot_token|default_agent|code_agent|research_agent|update_mode|webhook_url|webhook_secret)$",
+    r"^channels\.discord\.(enabled|bot_token|default_agent|code_agent|research_agent)$",
+    r"^channels\.github\.(enabled|app_id|app_slug|private_key|private_key_path|webhook_secret|default_agent|trigger_label|mention_triggers)$",
     r"^llm\.default_model$",
     r"^llm\.providers\.[A-Za-z0-9_-]+\.(provider|type|api_key|base_url|default_model|models|temperature|enabled)$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.(transport|command|args|url|enabled)$",
@@ -38,6 +38,9 @@ DATABASE_RUNTIME_KEY_PATTERNS = [
 ]
 
 SENSITIVE_RUNTIME_KEY_PATTERNS = [
+    r"^channels\.telegram\.(bot_token|webhook_secret)$",
+    r"^channels\.discord\.bot_token$",
+    r"^channels\.github\.(private_key|webhook_secret)$",
     r"^llm\.providers\.[A-Za-z0-9_-]+\.api_key$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.env\.[A-Za-z0-9_-]+$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.headers\.[A-Za-z0-9_-]+$",
@@ -112,12 +115,25 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "llm.default_model": "",
     # Channel integrations
     "channels.telegram.enabled": True,
+    "channels.telegram.bot_token": "",
+    "channels.telegram.default_agent": "",
+    "channels.telegram.code_agent": "",
+    "channels.telegram.research_agent": "",
     "channels.telegram.update_mode": "polling",
     "channels.telegram.webhook_url": "",
     "channels.telegram.webhook_secret": "",
     "channels.discord.enabled": True,
+    "channels.discord.bot_token": "",
+    "channels.discord.default_agent": "",
+    "channels.discord.code_agent": "",
+    "channels.discord.research_agent": "",
     "channels.github.enabled": False,
+    "channels.github.app_id": "",
     "channels.github.app_slug": "",
+    "channels.github.private_key": "",
+    "channels.github.private_key_path": "",
+    "channels.github.webhook_secret": "",
+    "channels.github.default_agent": "",
     "channels.github.trigger_label": "kaka-agent",
     "channels.github.mention_triggers": "@kaka-agent,/kaka",
     # Security

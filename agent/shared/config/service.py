@@ -18,6 +18,7 @@ from agent.shared.config.constants import (
     KNOWN_RUNTIME_KEYS,
     get_channel_enabled_key,
     get_setting_metadata,
+    is_database_runtime_key,
     is_runtime_key,
 )
 from agent.shared.config.models import RuntimeSettings, SettingsValue
@@ -339,6 +340,27 @@ def get_config_service() -> ConfigService:
     return _config_service
 
 
+def _database_owned_values_from_yaml_sources(service: ConfigService) -> dict[str, Any]:
+    from agent.shared.infrastructure.config_file import load_flat_config_file
+
+    values: dict[str, Any] = {}
+    for source in sorted(service._sources, key=lambda s: s.priority):
+        if source.__class__.__name__ != "YamlConfigSource":
+            continue
+        path = getattr(source, "_path", None)
+        if path is None:
+            continue
+        flat = load_flat_config_file(path)
+        values.update(
+            {
+                key: value
+                for key, value in flat.items()
+                if isinstance(key, str) and is_database_runtime_key(key)
+            }
+        )
+    return values
+
+
 def attach_database_config_source(database_url: str) -> None:
     """Attach the database config source after persistence has been initialized."""
     global _config_sources
@@ -358,6 +380,14 @@ def attach_database_config_source(database_url: str) -> None:
     from agent.shared.config.database_source import DatabaseConfigSource
 
     source = DatabaseConfigSource(database_url)
+    seed_missing_settings = getattr(source, "seed_missing_settings", None)
+    if callable(seed_missing_settings):
+        seeded_keys = seed_missing_settings(_database_owned_values_from_yaml_sources(service))
+        if seeded_keys:
+            logger.info(
+                "Seeded %s runtime setting(s) from legacy YAML config.",
+                len(seeded_keys),
+            )
     service.add_source(source)
     if _config_sources is not None:
         _config_sources.append(source)

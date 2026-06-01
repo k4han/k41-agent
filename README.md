@@ -101,20 +101,15 @@ uv run python app.py
 enable_web: true
 enable_api: true
 enable_dashboard: true
-
-channels:
-  telegram:
-    bot_token: "123456:telegram-token"
-  discord:
-    bot_token: "discord-token"
 ```
 
 Quy ước hiện tại:
 - `enable_web`, `enable_api`, `enable_dashboard`: bật các capability của web host khi app khởi động.
-- `database.url`, token channel, GitHub App credential, `security.jwt_secret`, `display.timezone` vẫn đọc từ `~/.kaka-agent/config.yaml`.
-- `llm.providers.*`, `llm.default_model`, `mcp.servers.*`, một số policy channel và `recursion_limit` được lưu trong DB để dashboard quản trị runtime. MCP `env.*` và `headers.*` được mã hóa khi lưu.
-- `channels.telegram.enabled`, `channels.discord.enabled`, `channels.telegram.update_mode`, `channels.telegram.webhook_url`: lưu trong DB; nếu enabled thì channel sẽ tự khởi động cùng app.
-- Nếu dùng Telegram webhook, cần `enable_web: true`, `channels.telegram.webhook_url` trỏ tới `/channels/telegram/webhook`, và `channels.telegram.webhook_secret` trong YAML để kiểm tra header `X-Telegram-Bot-Api-Secret-Token`.
+- `database.url`, `security.jwt_secret`, `display.timezone` vẫn đọc từ `~/.kaka-agent/config.yaml`.
+- `llm.providers.*`, `llm.default_model`, `mcp.servers.*`, `channels.*` và `recursion_limit` được lưu trong DB để dashboard quản trị runtime. Provider API key, MCP `env.*`/`headers.*`, channel token/secret và GitHub private key được mã hóa khi lưu.
+- Cấu hình Telegram/Discord/GitHub nằm ở Settings > Channels. Nếu enabled và đủ credential thì channel sẽ tự khởi động cùng app.
+- Nếu dùng Telegram webhook, cần `enable_web: true`, `channels.telegram.webhook_url` trỏ tới `/channels/telegram/webhook`, và `channels.telegram.webhook_secret` trong dashboard để kiểm tra header `X-Telegram-Bot-Api-Secret-Token`.
+- Khi nâng cấp từ YAML cũ, runtime key channel còn thiếu trong DB sẽ được seed một lần từ `~/.kaka-agent/config.yaml`.
 - Với dashboard chạy ở prefix gốc `/`, alias cũ `/bots/*` đã bị loại bỏ. Chỉ dùng `/services/*`.
 - LLM config dùng `llm.providers.*` + `llm.default_model` trong DB; `llm.default_provider` cũ chỉ còn là giá trị tổng hợp cho UI.
 - Backend đang hỗ trợ: `openai_compatible` (dùng `ChatOpenAI`) và `google` (dùng `ChatGoogleGenerativeAI`, bỏ qua `base_url`).

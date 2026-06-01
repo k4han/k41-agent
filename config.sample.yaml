@@ -19,8 +19,7 @@ enable_dashboard: true
 # Runtime/admin configuration is stored in the database and managed from the dashboard:
 # - LLM providers, default model, provider API keys, models, and enabled state
 # - MCP servers, including encrypted env.* and headers.*
-# - Telegram/Discord enabled state and default agent policy
-# - GitHub default agent, trigger label, mention triggers
+# - Telegram/Discord/GitHub channel settings, including encrypted tokens and secrets
 # - recursion_limit
 
 # Security Configuration
@@ -31,26 +30,9 @@ security:
   # You can generate one manually with: `openssl rand -hex 32` or `python -c "import secrets; print(secrets.token_hex(32))"`
   jwt_secret: ""
 
-# Channel integrations (optional - uncomment to enable)
-# channels:
-#   telegram:
-#     # Telegram Bot Token from @BotFather
-#     bot_token: "your-telegram-bot-token-here"
-#     webhook_secret: "your-telegram-webhook-secret"
-#
-#   discord:
-#     # Discord Bot Token from Discord Developer Portal
-#     bot_token: "your-discord-bot-token-here"
-#
-#   github:
-#     enabled: false
-#     # GitHub App settings. client_secret is not needed for the single-admin V1 flow.
-#     app_id: "your-github-app-id"
-#     app_slug: "your-github-app-slug"
-#     private_key_path: "~/.kaka-agent/github-app.pem"
-#     # You may use private_key instead of private_key_path for a PEM string.
-#     private_key: ""
-#     webhook_secret: "your-github-webhook-secret"
+# Channel integrations are configured in the dashboard at Settings > Channels.
+# Existing channel values in config.yaml are copied into the database once when
+# the runtime database source is attached, but new edits should be made there.
 
 # Security (optional)
 # persistence:

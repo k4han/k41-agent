@@ -115,6 +115,10 @@ def _is_provider_setting_key(key: str) -> bool:
     return key.startswith("llm.")
 
 
+def _is_channel_setting_key(key: str) -> bool:
+    return key.startswith("channels.")
+
+
 def _filter_settings[T](
     settings: dict[str, T],
     *,
@@ -124,6 +128,14 @@ def _filter_settings[T](
         key: value
         for key, value in settings.items()
         if _is_provider_setting_key(key) == include_provider_settings
+    }
+
+
+def _filter_config_settings[T](settings: dict[str, T]) -> dict[str, T]:
+    return {
+        key: value
+        for key, value in settings.items()
+        if not _is_provider_setting_key(key) and not _is_channel_setting_key(key)
     }
 
 
@@ -647,6 +659,19 @@ async def _paired_identities() -> list[dict[str, Any]]:
 def _settings_payload(request: Request, *, include_provider_settings: bool) -> dict[str, Any]:
     service = _get_config_service(request)
     settings_raw, settings_sources_raw = service.get_settings_overview_and_sources()
+
+    if not include_provider_settings:
+        settings = _filter_config_settings(settings_raw)
+        settings_sources = _filter_config_settings(settings_sources_raw)
+        return {
+            "active_nav": "config",
+            "page_title": "Runtime Configuration",
+            "page_subtitle": "Manage database, security, and general runtime settings.",
+            "settings": settings,
+            "by_category": _group_settings_by_category(settings),
+            "settings_sources": settings_sources,
+        }
+
     settings = _filter_settings(
         settings_raw,
         include_provider_settings=include_provider_settings,
@@ -655,16 +680,6 @@ def _settings_payload(request: Request, *, include_provider_settings: bool) -> d
         settings_sources_raw,
         include_provider_settings=include_provider_settings,
     )
-
-    if not include_provider_settings:
-        return {
-            "active_nav": "config",
-            "page_title": "Runtime Configuration",
-            "page_subtitle": "Manage channels, database, and security runtime settings.",
-            "settings": settings,
-            "by_category": _group_settings_by_category(settings),
-            "settings_sources": settings_sources,
-        }
 
     global_settings, provider_settings = _split_provider_settings(settings)
     

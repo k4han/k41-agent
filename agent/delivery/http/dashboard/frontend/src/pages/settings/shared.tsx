@@ -87,12 +87,12 @@ export function typedValue(info: SettingInfo, raw: unknown): unknown {
     return Boolean(raw);
   }
   const text = String(raw ?? "");
-  if (!text.trim()) {
-    return null;
-  }
   if (info.key.endsWith(".models")) {
     const models = parseModelList(text);
-    return models.length ? models : null;
+    return models.length ? models : Array.isArray(info.value) ? [] : null;
+  }
+  if (!text.trim()) {
+    return typeof info.value === "string" ? "" : null;
   }
   if (info.input_type === "number") {
     const value = Number(text);
@@ -299,7 +299,7 @@ export function SettingRow(props: {
               <div class="setting-inline-actions">{props.actions}</div>
             </Show>
           </div>
-          <Show when={props.showDescription !== false && props.info.description}>
+          <Show when={props.showDescription === true && props.info.description}>
             <div class="setting-description">{props.info.description}</div>
           </Show>
         </div>

@@ -130,6 +130,32 @@ class DatabaseConfigSource:
                     row.encrypted = encrypted
         self.reload()
 
+    def seed_missing_settings(self, updates: dict[str, Any]) -> set[str]:
+        writable_updates = {
+            key: value
+            for key, value in updates.items()
+            if self.can_update_key(key)
+        }
+        if not writable_updates:
+            return set()
+
+        with self._session_maker() as session:
+            existing_rows = session.execute(
+                select(RuntimeSetting.key).where(RuntimeSetting.key.in_(writable_updates))
+            )
+            existing_keys = set(existing_rows.scalars().all())
+
+        missing_updates = {
+            key: value
+            for key, value in writable_updates.items()
+            if key not in existing_keys
+        }
+        if not missing_updates:
+            return set()
+
+        self.update_settings(missing_updates)
+        return set(missing_updates)
+
     def delete_setting_tree(self, key: str) -> bool:
         prefix = f"{key}."
         deleted = False

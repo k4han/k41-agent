@@ -155,7 +155,7 @@ async def run_telegram_bot() -> None:
     if is_placeholder_value(token):
         raise ValueError(
             "Telegram bot token not configured. "
-            "Set 'channels.telegram.bot_token' in ~/.kaka-agent/config.yaml"
+            "Set 'channels.telegram.bot_token' in the dashboard channel settings."
         )
 
     update_mode = _resolve_update_mode(
@@ -169,12 +169,12 @@ async def run_telegram_bot() -> None:
         if is_placeholder_value(webhook_url):
             raise ValueError(
                 "Telegram webhook URL not configured. "
-                "Set 'channels.telegram.webhook_url' in ~/.kaka-agent/config.yaml"
+                "Set 'channels.telegram.webhook_url' in the dashboard channel settings."
             )
         if is_placeholder_value(webhook_secret):
             raise ValueError(
                 "Telegram webhook secret not configured. "
-                "Set 'channels.telegram.webhook_secret' in ~/.kaka-agent/config.yaml"
+                "Set 'channels.telegram.webhook_secret' in the dashboard channel settings."
             )
 
     dp = create_dispatcher()

@@ -48,7 +48,7 @@ export function ConfigPage() {
   return (
     <SettingsLayout
       title="Runtime Configuration"
-      subtitle="Manage channels, database, and security settings."
+      subtitle="Manage database, security, and general runtime settings."
       breadcrumbLabel="Runtime"
       actions={
         <button

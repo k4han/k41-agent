@@ -69,7 +69,7 @@ async def run_discord_bot() -> None:
     if is_placeholder_value(token):
         raise ValueError(
             "Discord bot token not configured. "
-            "Set 'channels.discord.bot_token' in ~/.kaka-agent/config.yaml"
+            "Set 'channels.discord.bot_token' in the dashboard channel settings."
         )
 
     client = create_discord_client()

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Kaka-agent sử dụng file `~/.kaka-agent/config.yaml` làm nguồn cấu hình duy nhất. Tất cả settings được quản lý tập trung qua ConfigService.
+Kaka-agent sử dụng `~/.kaka-agent/config.yaml` cho cấu hình bootstrap và dùng bảng `runtime_settings` trong DB cho cấu hình runtime quản trị qua dashboard. Tất cả settings vẫn được đọc tập trung qua ConfigService.
 
 ## Configuration File Location
 
@@ -31,53 +31,9 @@ database:
   # For PostgreSQL:
   # url: "postgresql+asyncpg://user:password@localhost:5432/kaka_agent"
 
-# LLM Provider configuration
-llm:
-  # Multi-provider (recommended)
-  default_provider: "openai-main"
-  default_model: ""
-  providers:
-    openai-main:
-      provider: "openai_compatible"
-      api_key: "your-api-key-here"  # REQUIRED
-      base_url: "https://api.mistral.ai/v1"
-      default_model: "devstral-2512"
-    google-main:
-      provider: "google"
-      api_key: "your-google-api-key"
-      default_model: "gemini-2.0-flash"
-  temperature: 0.0
-
-# Channel integrations (optional)
-channels:
-  telegram:
-    bot_token: "your-telegram-bot-token-here"
-    enabled: true
-    update_mode: "polling"
-    # Required only when update_mode is "webhook"
-    webhook_url: "https://your-domain.example/channels/telegram/webhook"
-    webhook_secret: "your-telegram-webhook-secret"
-    # Optional agent overrides
-    default_agent: "default"
-    code_agent: "code-agent"
-    research_agent: "research-agent"
-  
-  discord:
-    bot_token: "your-discord-bot-token-here"
-    enabled: true
-    default_agent: "default"
-
-  github:
-    enabled: true
-    app_id: "123456"
-    app_slug: "your-github-app-slug"
-    private_key_path: "~/.kaka-agent/github-app.pem"
-    webhook_secret: "your-github-webhook-secret"
-    default_agent: "default"
-    trigger_label: "kaka-agent"
-    mention_triggers:
-      - "@kaka-agent"
-      - "/kaka"
+# Runtime settings
+# Configure LLM providers, MCP servers, channels, and recursion_limit
+# from the dashboard. Channel settings live at Settings > Channels.
 
 # Paths
 paths:
@@ -96,35 +52,20 @@ persistence:
 
 Bạn PHẢI cấu hình API key cho LLM provider:
 
-```yaml
-llm:
-  default_provider: "openai-main"
-  providers:
-    openai-main:
-      provider: "openai_compatible"
-      api_key: "sk-your-actual-api-key"
-```
+Vào dashboard `Settings > Providers`, tạo provider, nhập API key, default model, model list và chọn default provider.
 
 Nếu không có API key hợp lệ, ứng dụng sẽ không khởi động được.
 
 ### Optional: Channel Tokens
 
-Nếu muốn sử dụng Telegram hoặc Discord:
-
-```yaml
-channels:
-  telegram:
-    bot_token: "123456:ABC-DEF..."
-    update_mode: "polling"
-  
-  discord:
-    bot_token: "MTk4NjIyNDgzNDcxOTI1MjQ4.Cl2FMQ..."
-```
+Nếu muốn sử dụng Telegram, Discord hoặc GitHub App, vào dashboard `Settings > Channels`.
 
 Telegram có hai chế độ nhận update:
 
 - `polling`: mặc định, phù hợp local/headless, chỉ cần `channels.telegram.bot_token`.
 - `webhook`: cần `enable_web: true`, HTTPS public URL ở `channels.telegram.webhook_url`, và secret ở `channels.telegram.webhook_secret`. Endpoint nhận update là `/channels/telegram/webhook` và kiểm tra header `X-Telegram-Bot-Api-Secret-Token`.
+
+Channel token, webhook secret và GitHub private key được mã hóa trong DB. Nếu nâng cấp từ YAML cũ, các key `channels.*` còn thiếu trong DB sẽ được copy một lần từ YAML.
 
 ## Configuration Precedence
 
@@ -132,6 +73,7 @@ Config được load theo thứ tự ưu tiên:
 
 1. **Default values** (priority: 0) - Hardcoded defaults
 2. **YAML file** (priority: 100) - `~/.kaka-agent/config.yaml`
+3. **Database** (priority: 200) - runtime settings quản trị qua dashboard
 
 Higher priority overrides lower priority.
 
@@ -162,55 +104,32 @@ config.reload()
 Nested YAML structures được flatten thành dot-notation:
 
 ```yaml
-llm:
-  default_provider: "openai-main"
-  providers:
-    openai-main:
-      provider: "openai_compatible"
-      api_key: "sk-123"
-      default_model: "gpt-4"
+security:
+  jwt_secret: "secret"
 ```
 
-Truy cập bằng: `config.get_str("llm.default_provider")`, `config.get_str("llm.providers.openai-main.api_key")`
+Truy cập bằng: `config.get_str("security.jwt_secret")`
 
 ## Provider Backends
 
 ### Multi-provider (recommended)
 
-```yaml
-llm:
-  default_provider: "openai-main"
-  providers:
-    openai-main:
-      provider: "openai_compatible"
-      api_key: "sk-..."
-      base_url: "https://api.mistral.ai/v1"
-      default_model: "devstral-2512"
-    google-main:
-      provider: "google"
-      api_key: "AIza..."
-      default_model: "gemini-2.0-flash"
-```
+Vào dashboard `Settings > Providers` để cấu hình nhiều provider.
 
 Với `google`, trường `base_url` sẽ bị bỏ qua.
 
-## YAML-only Configuration
+## Runtime Database Configuration
 
-Ứng dụng chỉ đọc cấu hình từ `~/.kaka-agent/config.yaml`.
-Ngoài YAML file, không có thêm nguồn runtime config nào khác.
+Các key `llm.*`, `mcp.servers.*`, `channels.*` và `recursion_limit` được lưu trong DB. Dashboard ghi qua endpoint `/settings`; ConfigService đọc DB với priority cao hơn YAML.
 
 ## Validation
 
 Khi khởi động, ứng dụng sẽ validate:
 
 - LLM API key không được là placeholder ("your-api-key-here")
-- Channel tokens (nếu channel được enable) không được là placeholder
+- Channel tokens/secrets (nếu channel được enable) không được là placeholder
 - Database URL phải hợp lệ
 - Paths phải tồn tại hoặc có thể tạo được
-
-## Future: Database Configuration
-
-Nếu bổ sung database config source trong tương lai, tài liệu này sẽ cập nhật thứ tự precedence tương ứng.
 
 ## Troubleshooting
 
@@ -229,7 +148,7 @@ cp config.sample.yaml ~/.kaka-agent/config.yaml
 RuntimeError: LLM API key not configured
 ```
 
-→ Kiểm tra `llm.api_key` trong config.yaml không phải placeholder
+→ Kiểm tra provider API key trong dashboard Settings > Providers.
 
 ### Channel won't start
 
@@ -239,20 +158,15 @@ WARNING: Channel 'telegram' required config keys missing
 
 → Kiểm tra `channels.telegram.bot_token` đã được set
 
+→ Với cấu hình runtime mới, kiểm tra Settings > Channels.
+
 Nếu dùng Telegram webhook mà channel chuyển sang `error`, kiểm tra thêm `channels.telegram.webhook_url`, `channels.telegram.webhook_secret`, public HTTPS endpoint và reverse proxy.
 
 ### GitHub automation
 
 GitHub App V1 dùng một app cho toàn instance, không dùng OAuth từng user nên không cần `client_secret`. Cấu hình bắt buộc:
 
-```yaml
-channels:
-  github:
-    enabled: true
-    app_id: "123456"
-    private_key_path: "~/.kaka-agent/github-app.pem"
-    webhook_secret: "your-github-webhook-secret"
-```
+Đặt `channels.github.enabled`, `app_id`, `private_key` hoặc `private_key_path`, và `webhook_secret` trong dashboard Settings > Channels.
 
 App cần quyền Metadata read, Issues read/write, Contents read/write, Pull requests read/write. Bật events `issues`, `issue_comment`, `pull_request_review_comment`, `installation`, `installation_repositories`, `ping`. Endpoint nhận webhook là `/channels/github/webhook`.
 

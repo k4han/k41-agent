@@ -124,14 +124,40 @@ def dashboard_client(make_dashboard_client):
 
 
 class TestDashboardSettingsEndpoints:
-    def test_get_config_api_excludes_provider_settings(self, dashboard_client) -> None:
+    def test_get_config_api_excludes_dedicated_settings(self, dashboard_client) -> None:
         resp = dashboard_client.get("/dashboard-api/config")
         assert resp.status_code == 200
         data = resp.json()
         assert data["page_title"] == "Runtime Configuration"
         assert "llm.provider" not in data["settings"]
-        assert "channels.telegram.enabled" in data["settings"]
-        assert "channels" in data["by_category"]
+        assert "llm.default_model" not in data["settings"]
+        assert "channels.telegram.enabled" not in data["settings"]
+        assert "channels" not in data["by_category"]
+        assert "database.url" in data["settings"]
+        assert "security.jwt_secret" in data["settings"]
+
+    def test_get_channels_api_includes_channel_settings(
+        self,
+        make_dashboard_client,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from agent.delivery.http.dashboard.routes import dashboard as dashboard_routes
+
+        async def fake_paired_identities() -> list[dict[str, object]]:
+            return []
+
+        monkeypatch.setattr(dashboard_routes, "_paired_identities", fake_paired_identities)
+        client = make_dashboard_client(ConfigService(sources=[DefaultConfigSource()]))
+
+        resp = client.get("/dashboard-api/channels")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["identities"] == []
+        assert "channels.telegram.bot_token" in data["settings"]
+        assert "channels.github.webhook_secret" in data["settings"]
+        assert "telegram" in data["by_channel"]
+        assert "github" in data["by_channel"]
 
     def test_get_providers_api_shows_provider_settings(self, dashboard_client) -> None:
         resp = dashboard_client.get("/dashboard-api/providers")

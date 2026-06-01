@@ -181,11 +181,10 @@ class TestYamlConfigSource:
         cfg = tmp_path / "config.yml"
         cfg.write_text(
             textwrap.dedent("""\
-            channels:
-              telegram:
-                bot_token: token-one
-              discord:
-                bot_token: token-two
+            security:
+              jwt_secret: token-one
+            persistence:
+              allow_any_path: true
             """),
             encoding="utf-8",
         )
@@ -193,21 +192,21 @@ class TestYamlConfigSource:
         source = YamlConfigSource(path=cfg)
         all_settings = source.get_all_settings_values()
 
-        assert all_settings["channels.telegram.bot_token"].value == "token-one"
-        assert all_settings["channels.discord.bot_token"].value == "token-two"
+        assert all_settings["security.jwt_secret"].value == "token-one"
+        assert all_settings["persistence.allow_any_path"].value is True
 
     def test_reload_clears_cache(self, tmp_path: Path) -> None:
         from agent.shared.config.yaml_source import YamlConfigSource
 
         cfg = tmp_path / "config.yml"
-        cfg.write_text("channels:\n  telegram:\n    bot_token: token-one\n", encoding="utf-8")
+        cfg.write_text("security:\n  jwt_secret: token-one\n", encoding="utf-8")
 
         source = YamlConfigSource(path=cfg)
-        assert source.get_settings_value("channels.telegram.bot_token").value == "token-one"
+        assert source.get_settings_value("security.jwt_secret").value == "token-one"
 
-        cfg.write_text("channels:\n  telegram:\n    bot_token: token-two\n", encoding="utf-8")
+        cfg.write_text("security:\n  jwt_secret: token-two\n", encoding="utf-8")
         source.reload()
-        assert source.get_settings_value("channels.telegram.bot_token").value == "token-two"
+        assert source.get_settings_value("security.jwt_secret").value == "token-two"
 
     def test_includes_all_keys(self, tmp_path: Path) -> None:
         from agent.shared.config.yaml_source import YamlConfigSource
@@ -216,9 +215,8 @@ class TestYamlConfigSource:
         cfg.write_text(
             textwrap.dedent("""\
             host: 127.0.0.1
-            channels:
-              telegram:
-                bot_token: token-one
+            security:
+              jwt_secret: token-one
             """),
             encoding="utf-8",
         )
@@ -227,7 +225,7 @@ class TestYamlConfigSource:
         all_settings = source.get_all_settings_values()
 
         assert "host" in all_settings
-        assert all_settings["channels.telegram.bot_token"].value == "token-one"
+        assert all_settings["security.jwt_secret"].value == "token-one"
 
     def test_ignores_database_owned_runtime_keys(self, tmp_path: Path) -> None:
         from agent.shared.config.yaml_source import YamlConfigSource
@@ -249,8 +247,8 @@ class TestYamlConfigSource:
         all_settings = source.get_all_settings_values()
 
         assert "channels.telegram.enabled" not in all_settings
+        assert "channels.telegram.bot_token" not in all_settings
         assert "llm.default_model" not in all_settings
-        assert all_settings["channels.telegram.bot_token"].value == "token-one"
 
     def test_delete_setting_tree_removes_nested_mapping(self, tmp_path: Path) -> None:
         from agent.shared.config.yaml_source import YamlConfigSource
@@ -258,22 +256,21 @@ class TestYamlConfigSource:
         cfg = tmp_path / "config.yml"
         cfg.write_text(
             textwrap.dedent("""\
-            channels:
-              telegram:
-                bot_token: token-one
-              discord:
-                bot_token: token-two
+            security:
+              jwt_secret: token-one
+            persistence:
+              allow_any_path: true
             """),
             encoding="utf-8",
         )
 
         source = YamlConfigSource(path=cfg)
 
-        assert source.delete_setting_tree("channels.discord") is True
+        assert source.delete_setting_tree("persistence") is True
         all_settings = source.get_all_settings_values()
 
-        assert "channels.discord.bot_token" not in all_settings
-        assert all_settings["channels.telegram.bot_token"].value == "token-one"
+        assert "persistence.allow_any_path" not in all_settings
+        assert all_settings["security.jwt_secret"].value == "token-one"
 
 
 class TestDatabaseConfigSource:
@@ -293,11 +290,13 @@ class TestDatabaseConfigSource:
         source.update_settings(
             {
                 "recursion_limit": 42,
+                "channels.telegram.bot_token": "telegram-secret",
                 "mcp.servers.github.headers.Authorization": "Bearer secret",
             }
         )
 
         assert source.get("recursion_limit") == 42
+        assert source.get("channels.telegram.bot_token") == "telegram-secret"
         assert source.get("mcp.servers.github.headers.Authorization") == "Bearer secret"
 
         engine = create_engine(db_url, future=True)
@@ -309,9 +308,36 @@ class TestDatabaseConfigSource:
 
         by_key = {row.key: row for row in rows}
         secret_row = by_key["mcp.servers.github.headers.Authorization"]
+        channel_secret_row = by_key["channels.telegram.bot_token"]
         assert secret_row.encrypted is True
         assert "Bearer secret" not in secret_row.value_json
+        assert channel_secret_row.encrypted is True
+        assert "telegram-secret" not in channel_secret_row.value_json
         assert by_key["recursion_limit"].encrypted is False
+
+    def test_seed_missing_settings_preserves_existing_database_values(self, tmp_path: Path) -> None:
+        from agent.shared.config.database_source import DatabaseConfigSource
+        from agent.shared.infrastructure.db import Base, create_tables, load_orm_models
+
+        load_orm_models()
+        db_url = f"sqlite:///{(tmp_path / 'settings.db').as_posix()}"
+        create_tables(db_url, metadata=Base.metadata)
+
+        source = DatabaseConfigSource(db_url, key_path=tmp_path / "runtime_config.key")
+        source.update_settings({"channels.telegram.bot_token": "database-token"})
+
+        seeded = source.seed_missing_settings(
+            {
+                "channels.telegram.bot_token": "yaml-token",
+                "channels.discord.bot_token": "discord-token",
+                "host": "127.0.0.1",
+            }
+        )
+
+        assert seeded == {"channels.discord.bot_token"}
+        assert source.get("channels.telegram.bot_token") == "database-token"
+        assert source.get("channels.discord.bot_token") == "discord-token"
+        assert source.get("host") is None
 
     def test_database_key_predicate_matches_runtime_ownership(self) -> None:
         assert is_database_runtime_key("llm.default_model")
@@ -319,7 +345,8 @@ class TestDatabaseConfigSource:
         assert is_database_runtime_key("llm.providers.openai-main.api_key")
         assert is_database_runtime_key("mcp.servers.foo.env.GITHUB_TOKEN")
         assert is_database_runtime_key("channels.telegram.enabled")
-        assert not is_database_runtime_key("channels.telegram.bot_token")
+        assert is_database_runtime_key("channels.telegram.bot_token")
+        assert is_database_runtime_key("channels.github.webhook_secret")
         assert not is_database_runtime_key("database.url")
 
 

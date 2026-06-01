@@ -23,8 +23,8 @@ Lệnh này sẽ tạo:
 
 ### 3. Cấu hình
 
-Chỉnh các cấu hình khởi động và credential hệ thống trong `~/.kaka-agent/config.yaml`.
-Provider LLM, MCP servers, default model, policy channel runtime và `recursion_limit` được lưu trong DB và quản trị qua dashboard.
+Chỉnh các cấu hình khởi động, database URL, JWT secret và display timezone trong `~/.kaka-agent/config.yaml`.
+Provider LLM, MCP servers, default model, toàn bộ channel config và `recursion_limit` được lưu trong DB và quản trị qua dashboard.
 
 ```yaml
 host: "0.0.0.0"
@@ -32,47 +32,18 @@ port: 8000
 enable_web: true
 enable_api: true
 enable_dashboard: true
-
-channels:
-  telegram:
-    bot_token: "your-telegram-bot-token"
-  discord:
-    bot_token: "your-discord-bot-token"
-  github:
-    enabled: true
-    app_id: "123456"
-    app_slug: "your-github-app-slug"
-    private_key_path: "~/.kaka-agent/github-app.pem"
-    webhook_secret: "your-github-webhook-secret"
 ```
 
-Với Telegram webhook production, dùng:
+Vào dashboard `Settings > Channels` để cấu hình:
+- `channels.telegram.*`: enabled, bot token, agent policy, update mode, webhook URL/secret.
+- `channels.discord.*`: enabled, bot token, agent policy.
+- `channels.github.*`: enabled, app ID/slug, private key hoặc private key path, webhook secret, default agent, trigger label, mention triggers.
 
-```yaml
-enable_web: true
-channels:
-  telegram:
-    bot_token: "your-telegram-bot-token"
-    webhook_secret: "your-telegram-webhook-secret"
-```
+Token, webhook secret và GitHub private key được mã hóa khi lưu trong DB. Nếu nâng cấp từ cấu hình YAML cũ, các runtime key channel còn thiếu trong DB sẽ được copy một lần từ YAML vào `runtime_settings`.
 
-Đặt `channels.telegram.update_mode` và `channels.telegram.webhook_url` trong dashboard vì hai key này là runtime config trong DB.
+Với Telegram webhook production, bật `enable_web: true` trong YAML, rồi đặt `channels.telegram.update_mode=webhook`, `channels.telegram.webhook_url` và `channels.telegram.webhook_secret` trong dashboard.
 
-Với GitHub App automation, dùng:
-
-```yaml
-channels:
-  github:
-    enabled: true
-    app_id: "123456"
-    app_slug: "your-github-app-slug"
-    private_key_path: "~/.kaka-agent/github-app.pem"
-    webhook_secret: "your-github-webhook-secret"
-```
-
-Đặt GitHub `default_agent`, `trigger_label`, `mention_triggers` trong dashboard.
-
-GitHub App V1 dùng một app cho toàn instance, không cần `client_secret`. App cần quyền tối thiểu: Metadata read, Issues read/write, Contents read/write, Pull requests read/write. Bật webhook events: `issues`, `issue_comment`, `pull_request_review_comment`, `installation`, `installation_repositories`, `ping`. Webhook URL là `/channels/github/webhook`.
+Với GitHub App automation, đặt toàn bộ GitHub App config trong dashboard. GitHub App V1 dùng một app cho toàn instance, không cần `client_secret`. App cần quyền tối thiểu: Metadata read, Issues read/write, Contents read/write, Pull requests read/write. Bật webhook events: `issues`, `issue_comment`, `pull_request_review_comment`, `installation`, `installation_repositories`, `ping`. Webhook URL là `/channels/github/webhook`.
 
 ### 4. Chạy
 
@@ -92,7 +63,7 @@ Hệ thống đọc cấu hình theo thứ tự ưu tiên:
   Dành cho bootstrap, database URL, system credentials và secrets không thuộc runtime DB.
 
 3. **Database** (priority 200)
-  Dành cho `llm.default_model`, `llm.providers.*`, `mcp.servers.*`, selected channel policy và `recursion_limit`.
+  Dành cho `llm.default_model`, `llm.providers.*`, `mcp.servers.*`, `channels.*` và `recursion_limit`.
 
 ## Database Configuration
 

@@ -8,6 +8,7 @@ from agent.modules.admin_auth import get_current_admin
 from agent.delivery.http.dashboard.routes.shared import (
     _agent_card_options,
     _get_channel_manager,
+    _get_config_service,
     _list_all_jobs,
     _paired_identities,
     _scheduler_timezone_label,
@@ -25,6 +26,22 @@ from agent.modules.scheduler import get_scheduler
 router = APIRouter()
 
 
+def _channel_name_from_key(key: str) -> str:
+    parts = key.split(".")
+    if len(parts) >= 3 and parts[0] == "channels":
+        return parts[1]
+    return "other"
+
+
+def _group_channel_settings(
+    settings: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, dict[str, Any]]]:
+    grouped: dict[str, dict[str, dict[str, Any]]] = {}
+    for key, info in settings.items():
+        grouped.setdefault(_channel_name_from_key(key), {})[key] = info
+    return grouped
+
+
 @router.get("/dashboard-api/session")
 async def get_dashboard_session(current_admin: str = Depends(get_current_admin)) -> dict[str, Any]:
     return {"authenticated": True, "admin_id": current_admin}
@@ -37,8 +54,25 @@ async def get_dashboard_overview(request: Request) -> dict[str, Any]:
 
 
 @router.get("/dashboard-api/channels")
-async def get_dashboard_channels() -> dict[str, Any]:
-    return {"identities": await _paired_identities()}
+async def get_dashboard_channels(request: Request) -> dict[str, Any]:
+    service = _get_config_service(request)
+    settings_raw, settings_sources_raw = service.get_settings_overview_and_sources()
+    settings = {
+        key: value
+        for key, value in settings_raw.items()
+        if key.startswith("channels.")
+    }
+    settings_sources = {
+        key: value
+        for key, value in settings_sources_raw.items()
+        if key.startswith("channels.")
+    }
+    return {
+        "identities": await _paired_identities(),
+        "settings": settings,
+        "by_channel": _group_channel_settings(settings),
+        "settings_sources": settings_sources,
+    }
 
 
 @router.get("/dashboard-api/agents")
