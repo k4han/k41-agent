@@ -16,29 +16,12 @@ enable_dashboard: true
 # database:
 #   url: "postgresql+asyncpg://user:password@localhost:5432/kaka_agent"
 
-# LLM Provider configuration
-llm:
-  # Multi-provider mode
-  default_provider: "primary"
-
-  providers:
-    primary:
-      type: "openai_compatible"
-      api_key: "your-primary-provider-api-key"
-      base_url: "https://api.example.com/v1"
-      default_model: ""
-      models: []
-      enabled: true
-
-    secondary:
-      type: "google"
-      api_key: "your-secondary-provider-api-key"
-      default_model: ""
-      models: []
-      enabled: true
-
-  # Temperature for model responses (optional)
-  # temperature: 0.0
+# Runtime/admin configuration is stored in the database and managed from the dashboard:
+# - LLM providers, default model, provider API keys, models, and enabled state
+# - MCP servers, including encrypted env.* and headers.*
+# - Telegram/Discord enabled state and default agent policy
+# - GitHub default agent, trigger label, mention triggers
+# - recursion_limit
 
 # Security Configuration
 security:
@@ -51,17 +34,11 @@ security:
 # Channel integrations (optional - uncomment to enable)
 # channels:
 #   telegram:
-#     enabled: true
-#     # Use "polling" for local/headless deployments, or "webhook" behind HTTPS.
-#     update_mode: "polling"
 #     # Telegram Bot Token from @BotFather
 #     bot_token: "your-telegram-bot-token-here"
-#     # Required only when update_mode is "webhook".
-#     webhook_url: "https://your-domain.example/channels/telegram/webhook"
 #     webhook_secret: "your-telegram-webhook-secret"
 #
 #   discord:
-#     enabled: false
 #     # Discord Bot Token from Discord Developer Portal
 #     bot_token: "your-discord-bot-token-here"
 #
@@ -74,11 +51,6 @@ security:
 #     # You may use private_key instead of private_key_path for a PEM string.
 #     private_key: ""
 #     webhook_secret: "your-github-webhook-secret"
-#     default_agent: "default"
-#     trigger_label: "kaka-agent"
-#     mention_triggers:
-#       - "@kaka-agent"
-#       - "/kaka"
 
 # Security (optional)
 # persistence:
@@ -92,8 +64,4 @@ security:
 # Use an IANA timezone name such as "Asia/Bangkok".
 display:
   timezone: "Asia/Ho_Chi_Minh"
-
-# Max recursion limit for LangGraph workflows (default: 100)
-recursion_limit: 100
-
 

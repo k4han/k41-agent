@@ -9,13 +9,16 @@ import pytest
 from fastapi import Request
 
 from agent.shared.config import ConfigService, SettingsSource, SettingsValue
+from agent.shared.config.constants import is_database_runtime_key
 from agent.shared.config.default_source import DefaultConfigSource
 from agent.shared.config.yaml_source import YamlConfigSource
+from agent.shared.infrastructure.config_file import flatten_config_mapping
 
 
 class StubSource:
-    def __init__(self, entries: dict[str, SettingsValue]) -> None:
+    def __init__(self, entries: dict[str, SettingsValue], priority: int = 100) -> None:
         self._entries = entries
+        self._priority = priority
 
     def get(self, key: str) -> object | None:
         value = self._entries.get(key)
@@ -37,12 +40,57 @@ class StubSource:
 
     @property
     def priority(self) -> int:
-        return 100
+        return self._priority
+
+
+class WritableDbSource(StubSource):
+    def __init__(self, entries: dict[str, SettingsValue] | None = None) -> None:
+        super().__init__(entries or {}, priority=200)
+
+    def can_update_key(self, key: str) -> bool:
+        return is_database_runtime_key(key)
+
+    def update_settings(self, updates: dict[str, object]) -> None:
+        for key, value in updates.items():
+            if not self.can_update_key(key):
+                continue
+            self._entries[key] = SettingsValue(
+                key=key,
+                value=value,
+                source=SettingsSource.DATABASE,
+            )
+
+    def update_setting(self, key: str, value: object) -> None:
+        self.update_settings({key: value})
+
+    def delete_setting_tree(self, key: str) -> bool:
+        prefix = f"{key}."
+        deleted = False
+        for existing_key in list(self._entries):
+            if existing_key == key or existing_key.startswith(prefix):
+                del self._entries[existing_key]
+                deleted = True
+        return deleted
 
 
 def _yaml_config_service(config_path: Path, content: str) -> ConfigService:
     config_path.write_text(textwrap.dedent(content).strip() + "\n", encoding="utf-8")
     return ConfigService(sources=[DefaultConfigSource(), YamlConfigSource(path=config_path)])
+
+
+def _db_config_service(content: str) -> tuple[ConfigService, WritableDbSource]:
+    import yaml
+
+    raw = yaml.safe_load(textwrap.dedent(content).strip() + "\n") or {}
+    flat = flatten_config_mapping(raw)
+    source = WritableDbSource(
+        {
+            key: SettingsValue(key=key, value=value, source=SettingsSource.DATABASE)
+            for key, value in flat.items()
+            if is_database_runtime_key(key)
+        }
+    )
+    return ConfigService(sources=[DefaultConfigSource(), source]), source
 
 
 @pytest.fixture()
@@ -154,21 +202,17 @@ class TestDashboardSettingsEndpoints:
     def test_create_provider_saves_expected_fields(
         self,
         make_dashboard_client,
-        tmp_path: Path,
         provider_type: str,
         base_url: str,
     ) -> None:
-        config_path = tmp_path / "config.yaml"
-        client = make_dashboard_client(
-            _yaml_config_service(
-                config_path,
-                """
-                llm:
-                  default_model: ""
-                  providers: {}
-                """,
-            )
+        service, db_source = _db_config_service(
+            """
+            llm:
+              default_model: ""
+              providers: {}
+            """
         )
+        client = make_dashboard_client(service)
 
         response = client.post(
             "/dashboard-api/providers",
@@ -183,39 +227,34 @@ class TestDashboardSettingsEndpoints:
         assert response.status_code == 200
         assert response.json()["type"] == provider_type
 
-        import yaml
-
-        data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-        provider = data["llm"]["providers"][f"{provider_type}-main"]
-        assert provider["type"] == provider_type
-        assert provider["api_key"] == "provider-key"
-        assert provider["default_model"] == ""
-        assert provider["models"] == []
-        assert provider["enabled"] is True
+        provider_key = f"llm.providers.{provider_type}-main"
+        flat = db_source.get_all()
+        assert flat[f"{provider_key}.type"] == provider_type
+        assert flat[f"{provider_key}.api_key"] == "provider-key"
+        assert flat[f"{provider_key}.default_model"] == ""
+        assert flat[f"{provider_key}.models"] == []
+        assert flat[f"{provider_key}.enabled"] is True
         if provider_type == "openai_compatible":
-            assert provider["base_url"] == "https://api.example.com/v1"
+            assert flat[f"{provider_key}.base_url"] == "https://api.example.com/v1"
         else:
-            assert "base_url" not in provider
+            assert f"{provider_key}.base_url" not in flat
 
     def test_create_provider_rejects_duplicate_name(
         self,
         make_dashboard_client,
-        tmp_path: Path,
     ) -> None:
-        client = make_dashboard_client(
-            _yaml_config_service(
-                tmp_path / "config.yaml",
-                """
-                llm:
-                  default_model: "main/gemini-model"
-                  providers:
-                    main:
-                      type: "google"
-                      api_key: "key"
-                      default_model: "gemini-model"
-                """,
-            )
+        service, _ = _db_config_service(
+            """
+            llm:
+              default_model: "main/gemini-model"
+              providers:
+                main:
+                  type: "google"
+                  api_key: "key"
+                  default_model: "gemini-model"
+            """
         )
+        client = make_dashboard_client(service)
 
         response = client.post(
             "/dashboard-api/providers",
@@ -227,18 +266,15 @@ class TestDashboardSettingsEndpoints:
     def test_create_provider_requires_openai_compatible_base_url(
         self,
         make_dashboard_client,
-        tmp_path: Path,
     ) -> None:
-        client = make_dashboard_client(
-            _yaml_config_service(
-                tmp_path / "config.yaml",
-                """
-                llm:
-                  default_model: ""
-                  providers: {}
-                """,
-            )
+        service, _ = _db_config_service(
+            """
+            llm:
+              default_model: ""
+              providers: {}
+            """
         )
+        client = make_dashboard_client(service)
 
         response = client.post(
             "/dashboard-api/providers",
@@ -248,16 +284,12 @@ class TestDashboardSettingsEndpoints:
         assert response.status_code == 400
         assert "Base URL" in response.json()["detail"]
 
-    def test_delete_provider_removes_yaml_block(
+    def test_delete_provider_removes_db_block(
         self,
         make_dashboard_client,
-        tmp_path: Path,
     ) -> None:
-        config_path = tmp_path / "config.yaml"
-        client = make_dashboard_client(
-            _yaml_config_service(
-                config_path,
-                """
+        service, db_source = _db_config_service(
+            """
                 llm:
                   default_model: "main/gemini-model"
                   providers:
@@ -269,38 +301,33 @@ class TestDashboardSettingsEndpoints:
                       type: "anthropic"
                       api_key: "side-key"
                       default_model: "claude-model"
-                """,
-            )
+            """,
         )
+        client = make_dashboard_client(service)
 
         response = client.delete("/dashboard-api/providers/side")
 
         assert response.status_code == 200
-        import yaml
-
-        data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-        assert "side" not in data["llm"]["providers"]
-        assert "main" in data["llm"]["providers"]
+        flat = db_source.get_all()
+        assert not any(key.startswith("llm.providers.side.") for key in flat)
+        assert any(key.startswith("llm.providers.main.") for key in flat)
 
     def test_delete_provider_rejects_default_provider(
         self,
         make_dashboard_client,
-        tmp_path: Path,
     ) -> None:
-        client = make_dashboard_client(
-            _yaml_config_service(
-                tmp_path / "config.yaml",
-                """
-                llm:
-                  default_model: "main/gemini-model"
-                  providers:
-                    main:
-                      type: "google"
-                      api_key: "key"
-                      default_model: "gemini-model"
-                """,
-            )
+        service, _ = _db_config_service(
+            """
+            llm:
+              default_model: "main/gemini-model"
+              providers:
+                main:
+                  type: "google"
+                  api_key: "key"
+                  default_model: "gemini-model"
+            """
         )
+        client = make_dashboard_client(service)
 
         response = client.delete("/dashboard-api/providers/main")
 
@@ -310,25 +337,22 @@ class TestDashboardSettingsEndpoints:
     def test_default_provider_update_requires_default_model(
         self,
         make_dashboard_client,
-        tmp_path: Path,
     ) -> None:
-        client = make_dashboard_client(
-            _yaml_config_service(
-                tmp_path / "config.yaml",
-                """
-                llm:
-                  default_model: "main/gemini-model"
-                  providers:
-                    main:
-                      type: "google"
-                      api_key: "key"
-                      default_model: "gemini-model"
-                    incomplete:
-                      type: "anthropic"
-                      api_key: "side-key"
-                """,
-            )
+        service, _ = _db_config_service(
+            """
+            llm:
+              default_model: "main/gemini-model"
+              providers:
+                main:
+                  type: "google"
+                  api_key: "key"
+                  default_model: "gemini-model"
+                incomplete:
+                  type: "anthropic"
+                  api_key: "side-key"
+            """
         )
+        client = make_dashboard_client(service)
 
         response = client.put(
             "/settings/llm.default_provider",
@@ -341,22 +365,19 @@ class TestDashboardSettingsEndpoints:
     def test_default_provider_cannot_be_disabled_from_settings(
         self,
         make_dashboard_client,
-        tmp_path: Path,
     ) -> None:
-        client = make_dashboard_client(
-            _yaml_config_service(
-                tmp_path / "config.yaml",
-                """
-                llm:
-                  default_model: "main/gemini-model"
-                  providers:
-                    main:
-                      type: "google"
-                      api_key: "key"
-                      default_model: "gemini-model"
-                """,
-            )
+        service, _ = _db_config_service(
+            """
+            llm:
+              default_model: "main/gemini-model"
+              providers:
+                main:
+                  type: "google"
+                  api_key: "key"
+                  default_model: "gemini-model"
+            """
         )
+        client = make_dashboard_client(service)
 
         response = client.put(
             "/settings/llm.providers.main.enabled",

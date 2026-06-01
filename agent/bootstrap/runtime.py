@@ -34,6 +34,9 @@ async def initialize_persistence() -> None:
     """Initialize SQLAlchemy async engine and LangGraph checkpointer."""
     load_orm_models()
     await initialize_async_engine(metadata=Base.metadata)
+    from agent.shared.config import attach_database_config_source
+
+    attach_database_config_source(get_database_url())
 
     migrate_workspace_tables(get_database_url())
     await prune_usage_events()
@@ -43,6 +46,9 @@ async def initialize_persistence() -> None:
 
 async def close_persistence() -> None:
     """Close persistence resources for clean shutdowns."""
+    from agent.shared.config import detach_database_config_source
+
+    detach_database_config_source()
     await close_checkpointer()
     await close_async_engine()
 
@@ -71,6 +77,9 @@ class AppRuntime:
                 logger.info("Initializing persistence...")
                 await initialize_persistence()
                 self._persistence_ready = True
+                from agent.shared.config import get_config_service
+
+                self.runtime_settings = get_config_service().get_runtime_settings()
 
             logger.info("Building workflows...")
             register_builtin_workflows()

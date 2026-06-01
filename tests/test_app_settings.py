@@ -52,7 +52,8 @@ def test_load_bootstrap_config_uses_defaults(monkeypatch: MonkeyPatch, tmp_path)
     monkeypatch.setattr(service_module, "_config_service", None)
 
     # Point to non-existent config
-    monkeypatch.setattr(yaml_module, "DEFAULT_CONFIG_PATH", tmp_path / "nonexistent.yaml")
+    config_path = tmp_path / "nonexistent.yaml"
+    monkeypatch.setattr(yaml_module, "DEFAULT_CONFIG_PATH", config_path)
 
     config = load_bootstrap_config()
 
@@ -63,3 +64,5 @@ def test_load_bootstrap_config_uses_defaults(monkeypatch: MonkeyPatch, tmp_path)
         enable_api=True,
         enable_dashboard=True,
     )
+    assert config_path.exists()
+    assert "enable_dashboard: true" in config_path.read_text(encoding="utf-8")

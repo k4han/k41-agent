@@ -1,4 +1,4 @@
-"""Tests for the providers module with YAML-only configuration."""
+"""Tests for the providers module with database-owned runtime configuration."""
 
 from __future__ import annotations
 
@@ -23,20 +23,73 @@ from agent.modules.providers.repository import (
     ConfigProviderRepository,
     DEFAULT_BASE_URL,
 )
+from agent.shared.config import ConfigService, SettingsSource, SettingsValue
+from agent.shared.config.constants import is_database_runtime_key
+from agent.shared.config.default_source import DefaultConfigSource
+from agent.shared.infrastructure.config_file import flatten_config_mapping
 
 
 def _set_config_path(monkeypatch: MonkeyPatch, config_path: Path) -> None:
     import agent.shared.config.service as service_module
-    import agent.shared.config.yaml_source as yaml_module
+    import yaml
+
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    flat = flatten_config_mapping(raw)
+    source = _WritableRuntimeSource(
+        {
+            key: SettingsValue(key=key, value=value, source=SettingsSource.DATABASE)
+            for key, value in flat.items()
+            if is_database_runtime_key(key) or key == "llm.default_provider"
+        }
+    )
+    service = ConfigService(sources=[DefaultConfigSource(), source])
+
+    monkeypatch.setattr(service_module, "_config_service", service)
+    monkeypatch.setattr(service_module, "_config_sources", service._sources)
 
 
-def _set_config_path(monkeypatch: MonkeyPatch, config_path: Path) -> None:
-    import agent.shared.config.service as service_module
-    import agent.shared.config.yaml_source as yaml_module
+class _WritableRuntimeSource:
+    def __init__(self, entries: dict[str, SettingsValue]) -> None:
+        self._entries = dict(entries)
+        self._priority = 200
 
-    monkeypatch.setattr(service_module, "_config_service", None)
-    monkeypatch.setattr(service_module, "_config_sources", None)
-    monkeypatch.setattr(yaml_module, "DEFAULT_CONFIG_PATH", config_path)
+    def can_update_key(self, key: str) -> bool:
+        return is_database_runtime_key(key) or key == "llm.default_provider"
+
+    def get(self, key: str) -> object | None:
+        value = self._entries.get(key)
+        return value.value if value else None
+
+    def get_all(self) -> dict[str, object]:
+        return {key: value.value for key, value in self._entries.items()}
+
+    def get_settings_value(self, key: str) -> SettingsValue | None:
+        return self._entries.get(key)
+
+    def get_all_settings_values(self, keys: set[str] | None = None) -> dict[str, SettingsValue]:
+        if keys is None:
+            return dict(self._entries)
+        return {key: value for key, value in self._entries.items() if key in keys}
+
+    def update_setting(self, key: str, value: object) -> None:
+        self.update_settings({key: value})
+
+    def update_settings(self, updates: dict[str, object]) -> None:
+        for key, value in updates.items():
+            if not self.can_update_key(key):
+                continue
+            self._entries[key] = SettingsValue(
+                key=key,
+                value=value,
+                source=SettingsSource.DATABASE,
+            )
+
+    def reload(self) -> None:
+        pass
+
+    @property
+    def priority(self) -> int:
+        return self._priority
 
 
 def _write_config(
@@ -251,7 +304,7 @@ def test_repo_provider_models_from_yaml(monkeypatch: MonkeyPatch, tmp_path: Path
         assert provider.models == ("openai-default", "openai-fast")
 
 
-def test_repo_detects_provider_config_file_changes_without_manual_reload(
+def test_repo_detects_provider_config_updates_without_manual_reload(
     monkeypatch: MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -276,22 +329,12 @@ def test_repo_detects_provider_config_file_changes_without_manual_reload(
 
     assert repo.get_provider("openai-main").models == ("openai-default",)
 
-    _write_yaml(
-        config_path,
-        """
-        llm:
-            default_model: "openai-main/openai-default"
-            providers:
-                openai-main:
-                    type: "openai_compatible"
-                    api_key: "openai-key"
-                    default_model: "openai-default"
-                    models:
-                        - "openai-default"
-                        - "openai-fast"
-        """,
+    from agent.shared.config import get_config_service
+
+    get_config_service().update_setting(
+        "llm.providers.openai-main.models",
+        ["openai-default", "openai-fast"],
     )
-    _bump_mtime(config_path)
 
     assert repo.get_provider("openai-main").models == (
         "openai-default",

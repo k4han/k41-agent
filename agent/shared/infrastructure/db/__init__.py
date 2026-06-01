@@ -11,6 +11,7 @@ from agent.shared.infrastructure.db.engine import (
     initialize_async_engine,
 )
 from agent.shared.infrastructure.db.models import load_orm_models
+from agent.shared.infrastructure.db.runtime_settings import RuntimeSetting
 from agent.shared.infrastructure.db.session import (
     get_async_session,
     get_async_session_maker,
@@ -24,6 +25,7 @@ __all__ = [
     "Base",
     "BaseModel",
     "DEFAULT_DATABASE_URL",
+    "RuntimeSetting",
     "UserPreferences",
     "UserPreferencesRepository",
     "close_async_engine",

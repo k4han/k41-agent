@@ -39,6 +39,7 @@ def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(fastapi_app: FastAPI):
         await runtime.startup()
+        fastapi_app.state.runtime_settings = runtime.runtime_settings
         try:
             yield
         finally:

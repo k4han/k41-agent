@@ -4,8 +4,8 @@ This service provides both:
 1. Simple config access (get, get_str, get_int, get_bool, etc.)
 2. Advanced settings tracking (get_effective, list_all_by_source, etc.)
 
-Precedence (low → high):
-    DEFAULT (priority 0) → CONFIG_FILE (priority 100)
+Precedence (low -> high):
+    DEFAULT (priority 0) -> CONFIG_FILE (priority 100) -> DATABASE (priority 200)
 """
 
 from __future__ import annotations
@@ -58,6 +58,21 @@ class ConfigService:
 
     def __init__(self, sources: list[Any]) -> None:
         self._sources = sorted(sources, key=lambda s: s.priority)
+
+    def add_source(self, source: Any) -> None:
+        """Add a config source and keep precedence order stable."""
+        self._sources.append(source)
+        self._sources = sorted(self._sources, key=lambda s: s.priority)
+
+    def ensure_default_files(self) -> None:
+        """Materialize default-backed file sources that are missing on disk."""
+        created = False
+        for source in self._sources:
+            ensure_default_file = getattr(source, "ensure_default_file", None)
+            if callable(ensure_default_file):
+                created = bool(ensure_default_file()) or created
+        if created:
+            self.reload()
 
     # --- Simple config API ---
 
@@ -289,9 +304,14 @@ class ConfigService:
             key: Config key to update
             value: New value to set
         """
-        for source in self._sources:
-            if hasattr(source, "update_setting"):
-                source.update_setting(key, value)
+        for source in sorted(self._sources, key=lambda s: s.priority, reverse=True):
+            can_update_key = getattr(source, "can_update_key", None)
+            if callable(can_update_key) and not can_update_key(key):
+                continue
+            update_setting = getattr(source, "update_setting", None)
+            if callable(update_setting):
+                update_setting(key, value)
+                break
         self.reload()
 
 
@@ -319,10 +339,57 @@ def get_config_service() -> ConfigService:
     return _config_service
 
 
+def attach_database_config_source(database_url: str) -> None:
+    """Attach the database config source after persistence has been initialized."""
+    global _config_sources
+    service = get_config_service()
+    for source in list(service._sources):
+        if source.__class__.__name__ != "DatabaseConfigSource":
+            continue
+        if getattr(source, "database_url", None) == database_url:
+            return
+        close = getattr(source, "close", None)
+        if callable(close):
+            close()
+        service._sources.remove(source)
+        if _config_sources is not None and source in _config_sources:
+            _config_sources.remove(source)
+
+    from agent.shared.config.database_source import DatabaseConfigSource
+
+    source = DatabaseConfigSource(database_url)
+    service.add_source(source)
+    if _config_sources is not None:
+        _config_sources.append(source)
+    service.reload()
+
+
+def detach_database_config_source() -> None:
+    """Detach and dispose the database config source."""
+    global _config_sources
+    service = get_config_service()
+    for source in list(service._sources):
+        if source.__class__.__name__ != "DatabaseConfigSource":
+            continue
+        close = getattr(source, "close", None)
+        if callable(close):
+            close()
+        service._sources.remove(source)
+        if _config_sources is not None and source in _config_sources:
+            _config_sources.remove(source)
+    service.reload()
+
+
 def reload_config() -> None:
     """Reload configuration from all sources."""
     service = get_config_service()
     service.reload()
 
 
-__all__ = ["ConfigService", "get_config_service", "reload_config"]
+__all__ = [
+    "ConfigService",
+    "attach_database_config_source",
+    "detach_database_config_source",
+    "get_config_service",
+    "reload_config",
+]

@@ -18,6 +18,7 @@ def load_orm_models() -> tuple[type[object], ...]:
     from agent.modules.usage import LLMUsageEvent
     from agent.modules.workspaces import ThreadWorkspace
     from agent.modules.users import User
+    from agent.shared.infrastructure.db.runtime_settings import RuntimeSetting
     from agent.shared.infrastructure.db.user_preferences import UserPreferences
 
     return (
@@ -33,6 +34,7 @@ def load_orm_models() -> tuple[type[object], ...]:
         ThreadWorkspace,
         PromptVariable,
         LLMUsageEvent,
+        RuntimeSetting,
     )
 
 

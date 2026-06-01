@@ -22,15 +22,56 @@ from agent.modules.mcp.client import (
     tools_to_info,
 )
 from agent.modules.mcp.repository import ConfigMcpServerRepository
+from agent.shared.config import ConfigService, SettingsSource, SettingsValue
+from agent.shared.config.constants import is_database_runtime_key
+from agent.shared.config.default_source import DefaultConfigSource
+from agent.shared.infrastructure.config_file import flatten_config_mapping
 
 
 def _set_config_path(monkeypatch: MonkeyPatch, path: Path) -> None:
     import agent.shared.config.service as service_module
-    import agent.shared.config.yaml_source as yaml_module
+    import yaml
 
-    monkeypatch.setattr(service_module, "_config_service", None)
-    monkeypatch.setattr(service_module, "_config_sources", None)
-    monkeypatch.setattr(yaml_module, "DEFAULT_CONFIG_PATH", path)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    flat = flatten_config_mapping(raw)
+    source = _RuntimeSource(
+        {
+            key: SettingsValue(key=key, value=value, source=SettingsSource.DATABASE)
+            for key, value in flat.items()
+            if is_database_runtime_key(key)
+        }
+    )
+    service = ConfigService(sources=[DefaultConfigSource(), source])
+    monkeypatch.setattr(service_module, "_config_service", service)
+    monkeypatch.setattr(service_module, "_config_sources", service._sources)
+
+
+class _RuntimeSource:
+    def __init__(self, entries: dict[str, SettingsValue]) -> None:
+        self._entries = entries
+        self._priority = 200
+
+    def get(self, key: str) -> object | None:
+        value = self._entries.get(key)
+        return value.value if value else None
+
+    def get_all(self) -> dict[str, object]:
+        return {key: value.value for key, value in self._entries.items()}
+
+    def get_settings_value(self, key: str) -> SettingsValue | None:
+        return self._entries.get(key)
+
+    def get_all_settings_values(self, keys: set[str] | None = None) -> dict[str, SettingsValue]:
+        if keys is None:
+            return dict(self._entries)
+        return {key: value for key, value in self._entries.items() if key in keys}
+
+    def reload(self) -> None:
+        pass
+
+    @property
+    def priority(self) -> int:
+        return self._priority
 
 
 def test_parse_mcp_server_key_handles_nested_paths() -> None:
@@ -122,7 +163,7 @@ def test_tools_to_info_strips_server_prefix() -> None:
     ]
 
 
-def test_repository_reads_mcp_servers_from_yaml(
+def test_repository_reads_mcp_servers_from_runtime_config(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:

@@ -251,14 +251,34 @@ def _update_config_settings(
     *,
     require_writable: bool = False,
 ) -> None:
-    updated = False
-    for source in service._sources:
+    remaining = dict(values)
+    updated_keys: set[str] = set()
+    for source in sorted(service._sources, key=lambda s: s.priority, reverse=True):
         update_settings = getattr(source, "update_settings", None)
-        if callable(update_settings):
-            update_settings(values)
-            updated = True
-    if require_writable and not updated:
-        raise HTTPException(status_code=503, detail="No writable config source is available.")
+        if not callable(update_settings):
+            continue
+        can_update_key = getattr(source, "can_update_key", None)
+        source_values = {
+            key: value
+            for key, value in remaining.items()
+            if not callable(can_update_key) or can_update_key(key)
+        }
+        if not source_values:
+            continue
+        update_settings(source_values)
+        updated_keys.update(source_values)
+        for key in source_values:
+            remaining.pop(key, None)
+    if require_writable and remaining:
+        raise HTTPException(
+            status_code=503,
+            detail="No writable config source is available.",
+        )
+    if require_writable and not updated_keys:
+        raise HTTPException(
+            status_code=503,
+            detail="No writable config source is available.",
+        )
     service.reload()
 
 

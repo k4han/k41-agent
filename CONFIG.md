@@ -23,35 +23,20 @@ Lệnh này sẽ tạo:
 
 ### 3. Cấu hình
 
-Chỉnh sửa `~/.kaka-agent/config.yaml`:
+Chỉnh các cấu hình khởi động và credential hệ thống trong `~/.kaka-agent/config.yaml`.
+Provider LLM, MCP servers, default model, policy channel runtime và `recursion_limit` được lưu trong DB và quản trị qua dashboard.
 
 ```yaml
-# LLM Provider
-llm:
-  default_provider: "openai-main"
-  providers:
-    openai-main:
-      provider: "openai_compatible"
-      api_key: "your-actual-api-key"
-      base_url: "https://api.mistral.ai/v1"
-      default_model: "devstral-2512"
-      models:
-        - "devstral-2512"
-    google-main:
-      provider: "google"
-      api_key: "your-google-api-key"
-      default_model: "gemini-2.0-flash"
-      models:
-        - "gemini-2.0-flash"
+host: "0.0.0.0"
+port: 8000
+enable_web: true
+enable_api: true
+enable_dashboard: true
 
-# Telegram Bot (optional)
 channels:
   telegram:
-    enabled: true
-    update_mode: "polling"
     bot_token: "your-telegram-bot-token"
   discord:
-    enabled: false
     bot_token: "your-discord-bot-token"
   github:
     enabled: true
@@ -59,11 +44,6 @@ channels:
     app_slug: "your-github-app-slug"
     private_key_path: "~/.kaka-agent/github-app.pem"
     webhook_secret: "your-github-webhook-secret"
-    default_agent: "default"
-    trigger_label: "kaka-agent"
-    mention_triggers:
-      - "@kaka-agent"
-      - "/kaka"
 ```
 
 Với Telegram webhook production, dùng:
@@ -72,12 +52,11 @@ Với Telegram webhook production, dùng:
 enable_web: true
 channels:
   telegram:
-    enabled: true
-    update_mode: "webhook"
     bot_token: "your-telegram-bot-token"
-    webhook_url: "https://your-domain.example/channels/telegram/webhook"
     webhook_secret: "your-telegram-webhook-secret"
 ```
+
+Đặt `channels.telegram.update_mode` và `channels.telegram.webhook_url` trong dashboard vì hai key này là runtime config trong DB.
 
 Với GitHub App automation, dùng:
 
@@ -89,12 +68,9 @@ channels:
     app_slug: "your-github-app-slug"
     private_key_path: "~/.kaka-agent/github-app.pem"
     webhook_secret: "your-github-webhook-secret"
-    default_agent: "default"
-    trigger_label: "kaka-agent"
-    mention_triggers:
-      - "@kaka-agent"
-      - "/kaka"
 ```
+
+Đặt GitHub `default_agent`, `trigger_label`, `mention_triggers` trong dashboard.
 
 GitHub App V1 dùng một app cho toàn instance, không cần `client_secret`. App cần quyền tối thiểu: Metadata read, Issues read/write, Contents read/write, Pull requests read/write. Bật webhook events: `issues`, `issue_comment`, `pull_request_review_comment`, `installation`, `installation_repositories`, `ping`. Webhook URL là `/channels/github/webhook`.
 
@@ -110,12 +86,13 @@ kaka serve
 
 Hệ thống đọc cấu hình theo thứ tự ưu tiên:
 
-1. **Config file** (`~/.kaka-agent/config.yaml`)
-  Keys: `llm.default_provider`, `llm.providers.*`, `database.url`, `channels.telegram.*`, `channels.discord.*`
+1. **Defaults** (priority 0)
 
-2. **Defaults** (thấp nhất)
+2. **Config file** (`~/.kaka-agent/config.yaml`, priority 100)
+  Dành cho bootstrap, database URL, system credentials và secrets không thuộc runtime DB.
 
-Runtime chỉ đọc cấu hình từ YAML file và defaults nội bộ.
+3. **Database** (priority 200)
+  Dành cho `llm.default_model`, `llm.providers.*`, `mcp.servers.*`, selected channel policy và `recursion_limit`.
 
 ## Database Configuration
 
@@ -133,42 +110,9 @@ database:
 
 ## Examples
 
-### Sử dụng 1 default provider
+### Sử dụng provider
 
-```yaml
-llm:
-  default_provider: "openai-main"
-  providers:
-    openai-main:
-      provider: "openai_compatible"
-      api_key: "sk-..."
-      base_url: "https://api.openai.com/v1"
-      default_model: "gpt-4"
-      models:
-        - "gpt-4"
-        - "gpt-4.1-mini"
-```
-
-### Sử dụng multi-provider + default provider
-
-```yaml
-llm:
-  default_provider: "google-main"
-  providers:
-    openai-main:
-      provider: "openai_compatible"
-      api_key: "sk-..."
-      base_url: "https://api.openai.com/v1"
-      default_model: "gpt-4"
-      models:
-        - "gpt-4"
-    google-main:
-      provider: "google"
-      api_key: "AIza..."
-      default_model: "gemini-2.0-flash"
-      models:
-        - "gemini-2.0-flash"
-```
+Vào dashboard Settings > Providers để tạo provider, nhập API key, base URL, default model, model list và chọn default provider.
 
 ### Chỉ chạy API, tắt dashboard
 

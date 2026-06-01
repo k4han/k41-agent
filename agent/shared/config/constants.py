@@ -25,10 +25,38 @@ RUNTIME_KEY_PATTERNS = [
     r"^recursion_limit$",
 ]
 
+DATABASE_RUNTIME_KEY_PATTERNS = [
+    r"^channels\.telegram\.(enabled|default_agent|code_agent|research_agent|update_mode|webhook_url)$",
+    r"^channels\.discord\.(enabled|default_agent|code_agent|research_agent)$",
+    r"^channels\.github\.(default_agent|trigger_label|mention_triggers)$",
+    r"^llm\.default_model$",
+    r"^llm\.providers\.[A-Za-z0-9_-]+\.(provider|type|api_key|base_url|default_model|models|temperature|enabled)$",
+    r"^mcp\.servers\.[A-Za-z0-9_-]+\.(transport|command|args|url|enabled)$",
+    r"^mcp\.servers\.[A-Za-z0-9_-]+\.env\.[A-Za-z0-9_-]+$",
+    r"^mcp\.servers\.[A-Za-z0-9_-]+\.headers\.[A-Za-z0-9_-]+$",
+    r"^recursion_limit$",
+]
+
+SENSITIVE_RUNTIME_KEY_PATTERNS = [
+    r"^llm\.providers\.[A-Za-z0-9_-]+\.api_key$",
+    r"^mcp\.servers\.[A-Za-z0-9_-]+\.env\.[A-Za-z0-9_-]+$",
+    r"^mcp\.servers\.[A-Za-z0-9_-]+\.headers\.[A-Za-z0-9_-]+$",
+]
+
 
 def is_runtime_key(key: str) -> bool:
     """Check if a key is a valid runtime configuration key."""
     return any(re.match(pattern, key) for pattern in RUNTIME_KEY_PATTERNS)
+
+
+def is_database_runtime_key(key: str) -> bool:
+    """Check whether a runtime key is owned by the database source."""
+    return any(re.match(pattern, key) for pattern in DATABASE_RUNTIME_KEY_PATTERNS)
+
+
+def is_sensitive_runtime_key(key: str) -> bool:
+    """Check whether a runtime key should be encrypted at rest."""
+    return any(re.match(pattern, key) for pattern in SENSITIVE_RUNTIME_KEY_PATTERNS)
 
 
 # Expand patterns into valid runtime keys for iteration
@@ -322,7 +350,7 @@ _PROVIDER_SETTING_FIELD_META: dict[str, dict[str, Any]] = {
     },
     "models": {
         "type": "text",
-        "description": "Selectable models for providers without model listing; saved as a YAML list",
+        "description": "Selectable models for providers without model listing; saved as a list",
         "label": "Models",
     },
     "temperature": {
@@ -432,8 +460,12 @@ __all__ = [
     "DEFAULT_CONFIG",
     "DEFAULT_DISPLAY_TIMEZONE",
     "DISPLAY_TIMEZONE_CONFIG_KEY",
+    "DATABASE_RUNTIME_KEY_PATTERNS",
     "RUNTIME_KEY_PATTERNS",
+    "SENSITIVE_RUNTIME_KEY_PATTERNS",
     "is_runtime_key",
+    "is_database_runtime_key",
+    "is_sensitive_runtime_key",
     "KNOWN_RUNTIME_KEYS",
     "get_channel_enabled_key",
     "SETTING_METADATA",

@@ -12,7 +12,11 @@ from agent.shared.config import (
     SettingsValue,
     ConfigService,
 )
-from agent.shared.config.constants import get_setting_metadata, is_runtime_key
+from agent.shared.config.constants import (
+    get_setting_metadata,
+    is_database_runtime_key,
+    is_runtime_key,
+)
 from agent.shared.config.default_source import DefaultConfigSource
 
 
@@ -102,6 +106,57 @@ class TestYamlConfigSource:
         source = YamlConfigSource(path=tmp_path / "nonexistent.yml")
         assert source.get_all() == {}
 
+    def test_ensure_default_file_creates_bootstrap_defaults(self, tmp_path: Path) -> None:
+        from agent.shared.config.yaml_source import YamlConfigSource
+
+        cfg = tmp_path / "config.yml"
+        source = YamlConfigSource(path=cfg)
+
+        assert source.ensure_default_file() is True
+        all_settings = source.get_all_settings_values()
+
+        assert all_settings["host"].value == "0.0.0.0"
+        assert all_settings["port"].value == 8000
+        assert all_settings["enable_web"].value is True
+        assert all_settings["enable_api"].value is True
+        assert all_settings["enable_dashboard"].value is True
+        assert all_settings["database.url"].value == ""
+        assert "llm.default_model" not in all_settings
+        assert "recursion_limit" not in all_settings
+
+    def test_update_missing_file_seeds_bootstrap_defaults(self, tmp_path: Path) -> None:
+        from agent.shared.config.yaml_source import YamlConfigSource
+
+        cfg = tmp_path / "config.yml"
+        source = YamlConfigSource(path=cfg)
+
+        source.update_setting("security.jwt_secret", "secret")
+        all_settings = source.get_all_settings_values()
+
+        assert all_settings["host"].value == "0.0.0.0"
+        assert all_settings["port"].value == 8000
+        assert all_settings["security.jwt_secret"].value == "secret"
+
+    def test_ensure_default_file_backfills_partial_config(self, tmp_path: Path) -> None:
+        from agent.shared.config.yaml_source import YamlConfigSource
+
+        cfg = tmp_path / "config.yml"
+        cfg.write_text(
+            textwrap.dedent("""\
+            security:
+              jwt_secret: existing-secret
+            """),
+            encoding="utf-8",
+        )
+        source = YamlConfigSource(path=cfg)
+
+        assert source.ensure_default_file() is True
+        all_settings = source.get_all_settings_values()
+
+        assert all_settings["security.jwt_secret"].value == "existing-secret"
+        assert all_settings["host"].value == "0.0.0.0"
+        assert all_settings["enable_dashboard"].value is True
+
     def test_reads_flat_values(self, tmp_path: Path) -> None:
         from agent.shared.config.yaml_source import YamlConfigSource
 
@@ -128,9 +183,9 @@ class TestYamlConfigSource:
             textwrap.dedent("""\
             channels:
               telegram:
-                enabled: false
+                bot_token: token-one
               discord:
-                enabled: true
+                bot_token: token-two
             """),
             encoding="utf-8",
         )
@@ -138,21 +193,21 @@ class TestYamlConfigSource:
         source = YamlConfigSource(path=cfg)
         all_settings = source.get_all_settings_values()
 
-        assert all_settings["channels.telegram.enabled"].value is False
-        assert all_settings["channels.discord.enabled"].value is True
+        assert all_settings["channels.telegram.bot_token"].value == "token-one"
+        assert all_settings["channels.discord.bot_token"].value == "token-two"
 
     def test_reload_clears_cache(self, tmp_path: Path) -> None:
         from agent.shared.config.yaml_source import YamlConfigSource
 
         cfg = tmp_path / "config.yml"
-        cfg.write_text("channels:\n  telegram:\n    enabled: true\n", encoding="utf-8")
+        cfg.write_text("channels:\n  telegram:\n    bot_token: token-one\n", encoding="utf-8")
 
         source = YamlConfigSource(path=cfg)
-        assert source.get_settings_value("channels.telegram.enabled").value is True
+        assert source.get_settings_value("channels.telegram.bot_token").value == "token-one"
 
-        cfg.write_text("channels:\n  telegram:\n    enabled: false\n", encoding="utf-8")
+        cfg.write_text("channels:\n  telegram:\n    bot_token: token-two\n", encoding="utf-8")
         source.reload()
-        assert source.get_settings_value("channels.telegram.enabled").value is False
+        assert source.get_settings_value("channels.telegram.bot_token").value == "token-two"
 
     def test_includes_all_keys(self, tmp_path: Path) -> None:
         from agent.shared.config.yaml_source import YamlConfigSource
@@ -163,7 +218,7 @@ class TestYamlConfigSource:
             host: 127.0.0.1
             channels:
               telegram:
-                enabled: false
+                bot_token: token-one
             """),
             encoding="utf-8",
         )
@@ -172,7 +227,30 @@ class TestYamlConfigSource:
         all_settings = source.get_all_settings_values()
 
         assert "host" in all_settings
-        assert all_settings["channels.telegram.enabled"].value is False
+        assert all_settings["channels.telegram.bot_token"].value == "token-one"
+
+    def test_ignores_database_owned_runtime_keys(self, tmp_path: Path) -> None:
+        from agent.shared.config.yaml_source import YamlConfigSource
+
+        cfg = tmp_path / "config.yml"
+        cfg.write_text(
+            textwrap.dedent("""\
+            channels:
+              telegram:
+                enabled: false
+                bot_token: token-one
+            llm:
+              default_model: main/model
+            """),
+            encoding="utf-8",
+        )
+
+        source = YamlConfigSource(path=cfg)
+        all_settings = source.get_all_settings_values()
+
+        assert "channels.telegram.enabled" not in all_settings
+        assert "llm.default_model" not in all_settings
+        assert all_settings["channels.telegram.bot_token"].value == "token-one"
 
     def test_delete_setting_tree_removes_nested_mapping(self, tmp_path: Path) -> None:
         from agent.shared.config.yaml_source import YamlConfigSource
@@ -180,23 +258,69 @@ class TestYamlConfigSource:
         cfg = tmp_path / "config.yml"
         cfg.write_text(
             textwrap.dedent("""\
-            llm:
-              providers:
-                main:
-                  type: google
-                side:
-                  type: anthropic
+            channels:
+              telegram:
+                bot_token: token-one
+              discord:
+                bot_token: token-two
             """),
             encoding="utf-8",
         )
 
         source = YamlConfigSource(path=cfg)
 
-        assert source.delete_setting_tree("llm.providers.side") is True
+        assert source.delete_setting_tree("channels.discord") is True
         all_settings = source.get_all_settings_values()
 
-        assert "llm.providers.side.type" not in all_settings
-        assert all_settings["llm.providers.main.type"].value == "google"
+        assert "channels.discord.bot_token" not in all_settings
+        assert all_settings["channels.telegram.bot_token"].value == "token-one"
+
+
+class TestDatabaseConfigSource:
+    def test_round_trips_values_and_encrypts_sensitive_entries(self, tmp_path: Path) -> None:
+        from sqlalchemy import create_engine, select
+        from sqlalchemy.orm import Session
+
+        from agent.shared.config.database_source import DatabaseConfigSource
+        from agent.shared.infrastructure.db import Base, create_tables, load_orm_models
+        from agent.shared.infrastructure.db.runtime_settings import RuntimeSetting
+
+        load_orm_models()
+        db_url = f"sqlite:///{(tmp_path / 'settings.db').as_posix()}"
+        create_tables(db_url, metadata=Base.metadata)
+
+        source = DatabaseConfigSource(db_url, key_path=tmp_path / "runtime_config.key")
+        source.update_settings(
+            {
+                "recursion_limit": 42,
+                "mcp.servers.github.headers.Authorization": "Bearer secret",
+            }
+        )
+
+        assert source.get("recursion_limit") == 42
+        assert source.get("mcp.servers.github.headers.Authorization") == "Bearer secret"
+
+        engine = create_engine(db_url, future=True)
+        try:
+            with Session(engine) as session:
+                rows = session.execute(select(RuntimeSetting)).scalars().all()
+        finally:
+            engine.dispose()
+
+        by_key = {row.key: row for row in rows}
+        secret_row = by_key["mcp.servers.github.headers.Authorization"]
+        assert secret_row.encrypted is True
+        assert "Bearer secret" not in secret_row.value_json
+        assert by_key["recursion_limit"].encrypted is False
+
+    def test_database_key_predicate_matches_runtime_ownership(self) -> None:
+        assert is_database_runtime_key("llm.default_model")
+        assert is_database_runtime_key("llm.providers.openai-main.default_model")
+        assert is_database_runtime_key("llm.providers.openai-main.api_key")
+        assert is_database_runtime_key("mcp.servers.foo.env.GITHUB_TOKEN")
+        assert is_database_runtime_key("channels.telegram.enabled")
+        assert not is_database_runtime_key("channels.telegram.bot_token")
+        assert not is_database_runtime_key("database.url")
 
 
 # =====================================================================
@@ -352,7 +476,7 @@ class TestRuntimeKeyMetadata:
         models_meta = get_setting_metadata("llm.providers.openai-main.models")
         assert models_meta["type"] == "text"
         assert "models" in models_meta["label"].lower()
-        assert "saved as a YAML list" in models_meta["description"]
+        assert "models" in models_meta["description"].lower()
 
 
 # =====================================================================

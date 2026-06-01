@@ -105,7 +105,7 @@ def _resolve_api_key(
     if is_placeholder_value(api_key):
         raise RuntimeError(
             "LLM API key not configured. "
-            f"Please set 'llm.providers.{provider_name}.api_key' in ~/.kaka-agent/config.yaml"
+            f"Please set 'llm.providers.{provider_name}.api_key' in runtime settings."
         )
 
     return api_key
@@ -251,7 +251,7 @@ class ConfigProviderRepository:
         if not providers:
             raise RuntimeError(
                 "No providers configured. "
-                "Please configure at least one provider in llm.providers."
+                "Please configure at least one provider in runtime settings."
             )
 
         loaded: dict[str, ProviderConfig] = {}

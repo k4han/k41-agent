@@ -68,8 +68,7 @@ database.url mặc định:
 uv sync
 pnpm install
 uv run kaka init
-# Chỉnh ~/.kaka-agent/config.yaml
-# Bắt buộc set llm.providers.<name>.api_key
+# Mở dashboard và thêm provider tại Settings > Providers
 ```
 
 ## Dashboard frontend
@@ -97,7 +96,7 @@ uv run python app.py
 # Nếu ENABLE_WEB=false, app chạy headless và chỉ giữ các background channels
 ```
 
-### Một số cờ cấu hình runtime
+### Một số cấu hình khởi động
 ```yaml
 enable_web: true
 enable_api: true
@@ -105,42 +104,23 @@ enable_dashboard: true
 
 channels:
   telegram:
-    enabled: true
-    update_mode: "polling"
     bot_token: "123456:telegram-token"
   discord:
-    enabled: false
-
-llm:
-  default_provider: "openai-main"
-  providers:
-    openai-main:
-      provider: "openai_compatible"
-      api_key: "sk-..."
-      base_url: "https://api.mistral.ai/v1"
-      default_model: "devstral-2512"
-      models:
-        - "devstral-2512"
-    google-main:
-      provider: "google"
-      api_key: "AIza..."
-      default_model: "gemini-2.0-flash"
-      models:
-        - "gemini-2.0-flash"
-  temperature: 0.0
+    bot_token: "discord-token"
 ```
 
 Quy ước hiện tại:
 - `enable_web`, `enable_api`, `enable_dashboard`: bật các capability của web host khi app khởi động.
-- `channels.telegram.enabled`, `channels.discord.enabled`: nếu `true` thì channel sẽ tự khởi động cùng app. Các background channel vẫn luôn được đăng ký vào runtime, nên dashboard vẫn có thể start/stop chúng về sau ngay cả khi giá trị này là `false`.
-- `channels.telegram.update_mode`: mặc định `polling`, phù hợp local/headless. Nếu dùng `webhook`, cần `enable_web: true`, `channels.telegram.webhook_url` là URL HTTPS public trỏ tới `/channels/telegram/webhook`, và `channels.telegram.webhook_secret` để kiểm tra header `X-Telegram-Bot-Api-Secret-Token`.
-- Dashboard chỉ thay đổi trạng thái runtime hiện tại. Khi restart app, trạng thái mặc định quay về theo `~/.kaka-agent/config.yaml`.
+- `database.url`, token channel, GitHub App credential, `security.jwt_secret`, `display.timezone` vẫn đọc từ `~/.kaka-agent/config.yaml`.
+- `llm.providers.*`, `llm.default_model`, `mcp.servers.*`, một số policy channel và `recursion_limit` được lưu trong DB để dashboard quản trị runtime. MCP `env.*` và `headers.*` được mã hóa khi lưu.
+- `channels.telegram.enabled`, `channels.discord.enabled`, `channels.telegram.update_mode`, `channels.telegram.webhook_url`: lưu trong DB; nếu enabled thì channel sẽ tự khởi động cùng app.
+- Nếu dùng Telegram webhook, cần `enable_web: true`, `channels.telegram.webhook_url` trỏ tới `/channels/telegram/webhook`, và `channels.telegram.webhook_secret` trong YAML để kiểm tra header `X-Telegram-Bot-Api-Secret-Token`.
 - Với dashboard chạy ở prefix gốc `/`, alias cũ `/bots/*` đã bị loại bỏ. Chỉ dùng `/services/*`.
-- LLM config dùng chuẩn `llm.providers.*` + `llm.default_provider`; không còn fallback qua `llm.api_key`, `llm.base_url`, hoặc `llm.default_model`.
+- LLM config dùng `llm.providers.*` + `llm.default_model` trong DB; `llm.default_provider` cũ chỉ còn là giá trị tổng hợp cho UI.
 - Backend đang hỗ trợ: `openai_compatible` (dùng `ChatOpenAI`) và `google` (dùng `ChatGoogleGenerativeAI`, bỏ qua `base_url`).
 - Model mặc định được resolve theo thứ tự: request override -> agent card -> `provider.default_model`.
 - Dropdown model lấy từ `llm.providers.<name>.models`, cộng thêm `default_model`; endpoint hỗ trợ refresh live nếu provider có API list model.
-- API key phải đặt tại `llm.providers.<name>.api_key`.
+- API key provider được lưu tại `llm.providers.<name>.api_key` trong DB và mã hóa.
 
 ## API Endpoints
 

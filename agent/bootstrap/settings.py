@@ -22,6 +22,7 @@ class BootstrapConfig:
 def load_bootstrap_config() -> BootstrapConfig:
     """Build bootstrap config from config service."""
     config = get_config_service()
+    config.ensure_default_files()
 
     return BootstrapConfig(
         host=config.get_str(CONFIG_KEY_HOST, "localhost"),

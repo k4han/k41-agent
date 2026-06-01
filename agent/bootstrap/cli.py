@@ -85,25 +85,21 @@ def init():
             if sample_file.exists():
                 shutil.copy(sample_file, config_file)
                 click.echo(f"[OK] Created config from sample at {config_file}")
-                click.echo("[IMPORTANT] Please edit config.yaml and set your API key!")
+                click.echo("[IMPORTANT] Add an LLM provider from the dashboard Providers page.")
             else:
                 # Fallback: create minimal config
                 minimal_config = (
                     "# Kaka Agent Configuration\n"
-                    "# Please set your LLM API key below\n\n"
-                    "llm:\n"
-                    "  default_provider: \"primary\"\n"
-                    "  providers:\n"
-                    "    primary:\n"
-                    "      type: \"openai_compatible\"\n"
-                    "      api_key: \"your-api-key-here\"\n"
-                    "      base_url: \"https://api.example.com/v1\"\n"
-                    "      default_model: \"\"\n"
-                    "      models: []\n"
+                    "# Runtime provider, MCP, and channel policy settings live in the database.\n\n"
+                    "host: \"0.0.0.0\"\n"
+                    "port: 8000\n"
+                    "enable_web: true\n"
+                    "enable_api: true\n"
+                    "enable_dashboard: true\n"
                 )
                 config_file.write_text(minimal_config)
                 click.echo(f"[OK] Created minimal config at {config_file}")
-                click.echo("[IMPORTANT] Please edit config.yaml and set your API key!")
+                click.echo("[IMPORTANT] Add an LLM provider from the dashboard Providers page.")
         except (OSError, IOError) as e:
             click.echo(f"[WARNING] Could not copy sample config: {e}")
             click.echo(f"[OK] Please create {config_file} manually")
