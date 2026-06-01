@@ -67,11 +67,30 @@ async def get_dashboard_channels(request: Request) -> dict[str, Any]:
         for key, value in settings_sources_raw.items()
         if key.startswith("channels.")
     }
+    by_channel = _group_channel_settings(settings)
+    channel_manager = getattr(request.app.state, "channel_manager", None)
+    runtime_map: dict[str, dict[str, Any]] = {}
+    if channel_manager is not None:
+        runtime_map = {
+            info["name"]: info
+            for info in list_channel_statuses(channel_manager)
+        }
+    channel_names = sorted(set(by_channel) | set(runtime_map))
+    runtimes = {
+        name: {
+            "name": name,
+            "status": (runtime_map.get(name) or {}).get("status", "unregistered"),
+            "error": (runtime_map.get(name) or {}).get("error"),
+            "registered": name in runtime_map,
+        }
+        for name in channel_names
+    }
     return {
         "identities": await _paired_identities(),
         "settings": settings,
-        "by_channel": _group_channel_settings(settings),
+        "by_channel": by_channel,
         "settings_sources": settings_sources,
+        "runtimes": runtimes,
     }
 
 

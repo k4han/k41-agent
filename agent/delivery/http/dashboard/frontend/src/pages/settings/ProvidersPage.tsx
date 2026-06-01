@@ -155,19 +155,7 @@ function buildProviderView(
   const enabledField = fieldMap.enabled;
   const defaultModelField = fieldMap.default_model;
   const modelsField = fieldMap.models;
-  const searchable = [
-    provider.name,
-    provider.type,
-    provider.type_label,
-    ...orderedFields.flatMap((entry) => [
-      entry.key,
-      entry.info.label,
-      entry.info.description,
-      textValue(draftValue(drafts, entry)),
-    ]),
-  ]
-    .join(" ")
-    .toLowerCase();
+  const searchable = provider.name.toLowerCase();
 
   return {
     name: provider.name,
@@ -249,12 +237,7 @@ export function ProvidersPage() {
       const entry = cat[id];
       const configured = rows.find((r) => r.name.toLowerCase() === id.toLowerCase());
 
-      const searchable = [
-        entry.id,
-        entry.name,
-        entry.provider_type,
-        ...(entry.models || []).flatMap((m: any) => [m.id, m.name]),
-      ].join(" ").toLowerCase();
+      const searchable = [entry.id, entry.name].join(" ").toLowerCase();
 
       return {
         id: entry.id,
@@ -279,11 +262,7 @@ export function ProvidersPage() {
     rows.forEach((row) => {
       const alreadyInCatalog = Object.keys(cat).some((id) => id.toLowerCase() === row.name.toLowerCase());
       if (!alreadyInCatalog) {
-        const searchable = [
-          row.name,
-          row.providerType,
-          row.typeLabel,
-        ].join(" ").toLowerCase();
+        const searchable = row.name.toLowerCase();
 
         cards.push({
           id: row.name.toLowerCase(),
@@ -456,7 +435,7 @@ export function ProvidersPage() {
     } else {
       // Setup helper prefilled from catalog
       setAddForm({
-        name: card.name,
+        name: card.id,
         type: card.providerType,
         api_key: "",
         base_url: card.baseUrl || "",

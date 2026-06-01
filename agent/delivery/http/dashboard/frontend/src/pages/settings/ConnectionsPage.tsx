@@ -1,17 +1,23 @@
 import { Show } from "solid-js";
 import { useSearchParams } from "@solidjs/router";
 
-import { GitHubTab } from "./connections/GitHubTab";
 import { McpTab } from "./connections/McpTab";
+import { RepositoriesTab } from "./connections/RepositoriesTab";
 import { SettingsLayout } from "./SettingsLayout";
 
-type TabKey = "github" | "mcp";
+type TabKey = "repositories" | "mcp";
 
 export function ConnectionsPage() {
   const [searchParams, setSearchParams] = useSearchParams<{ tab?: string }>();
-  const tab = () => {
+  const tab = (): TabKey => {
     const t = searchParams.tab;
-    return t === "mcp" ? "mcp" : "github";
+    if (t === "mcp") {
+      return "mcp";
+    }
+    if (t === "github") {
+      return "repositories";
+    }
+    return "repositories";
   };
 
   return (
@@ -23,11 +29,11 @@ export function ConnectionsPage() {
     >
       <div class="tab-bar">
         <button
-          class={`btn btn-sm ${tab() === "github" ? "btn-primary" : ""}`}
+          class={`btn btn-sm ${tab() === "repositories" ? "btn-primary" : ""}`}
           type="button"
-          onClick={() => setSearchParams({ tab: "github" })}
+          onClick={() => setSearchParams({ tab: "repositories" })}
         >
-          GitHub
+          Repositories
         </button>
         <button
           class={`btn btn-sm ${tab() === "mcp" ? "btn-primary" : ""}`}
@@ -38,8 +44,8 @@ export function ConnectionsPage() {
         </button>
       </div>
 
-      <Show when={tab() === "github"}>
-        <GitHubTab />
+      <Show when={tab() === "repositories"}>
+        <RepositoriesTab />
       </Show>
       <Show when={tab() === "mcp"}>
         <McpTab />

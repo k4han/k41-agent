@@ -1,3 +1,4 @@
+from agent.modules.channels.diagnostics import TestResult, test_channel_connection
 from agent.modules.channels.manager import (
     ChannelManager,
     ChannelRunner,
@@ -35,6 +36,7 @@ __all__ = [
     "ChannelStatus",
     "ManagedChannel",
     "TelegramWebhookRuntime",
+    "TestResult",
     "get_channel_status",
     "get_telegram_webhook_runtime",
     "list_channel_statuses",
@@ -47,5 +49,6 @@ __all__ = [
     "start_enabled_channels",
     "stop_all_channels",
     "stop_channel",
+    "test_channel_connection",
     "BotSettings",
 ]

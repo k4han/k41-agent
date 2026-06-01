@@ -9,6 +9,7 @@ from agent.modules.channels import (
     start_channel,
     stop_all_channels,
     stop_channel,
+    test_channel_connection,
 )
 from agent.modules.users import get_pairing_service
 
@@ -63,6 +64,12 @@ async def stop_service(name: str, request: Request) -> dict[str, str | None]:
         return {"message": f"'{name}' stopped.", **status}
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/services/{name}/test")
+async def test_service(name: str) -> dict[str, object]:
+    result = await test_channel_connection(name)
+    return result.to_dict()
 
 
 @router.post("/services/start-all")

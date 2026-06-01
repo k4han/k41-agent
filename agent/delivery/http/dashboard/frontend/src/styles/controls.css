@@ -96,6 +96,10 @@
     background-color 120ms ease;
 }
 
+.setting-card:has(.select-control.open) {
+  overflow: visible;
+}
+
 .settings-list .setting-card {
   border: 0;
   border-radius: 0;

@@ -37,6 +37,11 @@ const ChannelsPage = lazy(() =>
     default: module.ChannelsPage,
   })),
 );
+const PairingPage = lazy(() =>
+  import("@/pages/settings/PairingPage").then((module) => ({
+    default: module.PairingPage,
+  })),
+);
 const ConnectionsPage = lazy(() =>
   import("@/pages/settings/ConnectionsPage").then((module) => ({
     default: module.ConnectionsPage,
@@ -87,6 +92,7 @@ render(
         <Route path="/settings/providers" component={ProvidersPage} />
         <Route path="/settings/connections" component={ConnectionsPage} />
         <Route path="/settings/channels" component={ChannelsPage} />
+        <Route path="/settings/pairing" component={PairingPage} />
         <Route path="/settings/agents" component={AgentsPage} />
         <Route path="/settings/prompt-variables" component={PromptVariablesPage} />
         <Route path="/settings/security" component={SecurityPage} />
