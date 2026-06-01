@@ -7,26 +7,31 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import { useSearchParams } from "@solidjs/router";
 import {
   CheckCircle2,
   ChevronDown,
   Copy,
+  Fingerprint,
+  Link2,
   Play,
   PlugZap,
   RotateCcw,
   Save,
   Settings as SettingsIcon,
   StopCircle,
+  Trash2,
   TriangleAlert,
   Webhook,
   XCircle,
 } from "lucide-solid";
 
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { DashboardTable } from "@/components/DashboardTable";
 import { Dialog } from "@/components/Dialog";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
-import { apiFetch, postJson, putJson } from "@/lib/api";
+import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
 import { writeToClipboard } from "@/lib/utils";
 import type { Identity, SettingInfo, SourceValue } from "@/types";
 
@@ -59,6 +64,13 @@ type TestOutcome = {
   latency_ms?: number;
   details?: Record<string, unknown>;
 };
+
+type PairingResponse = {
+  code: string;
+  user_id: string;
+};
+
+type TabKey = "channels" | "pairing";
 
 type DrawerSection = {
   id: string;
@@ -173,6 +185,7 @@ const CHANNEL_DEFS: ChannelDefinition[] = [
 const ENABLED_FIELD = "enabled";
 
 export function ChannelsPage() {
+  const [searchParams, setSearchParams] = useSearchParams<{ tab?: string }>();
   const [data, setData] = createSignal<ChannelsPayload>();
   const [error, setError] = createSignal("");
   const [drafts, setDrafts] = createSignal<Record<string, unknown>>({});
@@ -181,7 +194,18 @@ export function ChannelsPage() {
   const [busy, setBusy] = createSignal<Record<string, string>>({});
   const [testResults, setTestResults] = createSignal<Record<string, TestOutcome>>({});
   const [stopTarget, setStopTarget] = createSignal<string | null>(null);
+  const [pairing, setPairing] = createSignal<PairingResponse | null>(null);
+  const [creatingPairingCode, setCreatingPairingCode] = createSignal(false);
+  const [unpairTarget, setUnpairTarget] = createSignal<Identity | null>(null);
   const { showToast } = useToast();
+
+  const tab = (): TabKey => {
+    const value = searchParams.tab;
+    if (value === "pairing") {
+      return "pairing";
+    }
+    return "channels";
+  };
 
   const load = async () => {
     setError("");
@@ -425,6 +449,61 @@ export function ChannelsPage() {
     setCollapsed((current) => ({ ...current, [id]: !current[id] }));
   };
 
+  const createPairingCode = async () => {
+    setCreatingPairingCode(true);
+    try {
+      const response = await postJson<PairingResponse>("/channels/pair");
+      setPairing(response);
+      showToast("Pairing code created.");
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : "Failed to create pairing code",
+        "error",
+      );
+    } finally {
+      setCreatingPairingCode(false);
+    }
+  };
+
+  const copyPairingCode = async () => {
+    const item = pairing();
+    if (!item) {
+      return;
+    }
+    try {
+      await writeToClipboard(item.code);
+      showToast("Pairing code copied.");
+    } catch {
+      showToast("Failed to copy pairing code.", "error");
+    }
+  };
+
+  const requestUnpair = (identity: Identity) => {
+    if (identity.id === null) {
+      return;
+    }
+    setUnpairTarget(identity);
+  };
+
+  const confirmUnpair = async () => {
+    const identity = unpairTarget();
+    if (!identity || identity.id === null) {
+      return;
+    }
+    try {
+      await deleteJson(`/channels/identities/${identity.id}`);
+      showToast("Identity unpaired.");
+      await load();
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : "Failed to unpair identity",
+        "error",
+      );
+    } finally {
+      setUnpairTarget(null);
+    }
+  };
+
   return (
     <SettingsLayout
       title="Channels"
@@ -432,30 +511,63 @@ export function ChannelsPage() {
       breadcrumbLabel="Channels"
       contentWidth="wide"
     >
+      <div class="tab-bar">
+        <button
+          class={`btn btn-sm ${tab() === "channels" ? "btn-primary" : ""}`}
+          type="button"
+          onClick={() => setSearchParams({ tab: "channels" })}
+        >
+          Channels
+        </button>
+        <button
+          class={`btn btn-sm ${tab() === "pairing" ? "btn-primary" : ""}`}
+          type="button"
+          onClick={() => setSearchParams({ tab: "pairing" })}
+        >
+          Pairing
+        </button>
+      </div>
+
       <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => (
           <div class="stack">
-            <div class="channels-grid">
-              <For each={CHANNEL_DEFS}>
-                {(channel) => (
-                  <ChannelCard
-                    channel={channel}
-                    runtime={runtimeFor(channel.name)}
-                    enabled={Boolean(draftValueFor(channel.name, ENABLED_FIELD))}
-                    configured={isChannelConfigured(channel.name)}
-                    pendingCount={(pendingByChannel()[channel.name] || []).length}
-                    busy={busy()[channel.name] || null}
-                    testResult={testResults()[channel.name] || null}
-                    paired={countPairedFor(payload, channel.name)}
-                    onToggle={(value) => void toggleEnabled(channel.name, value)}
-                    onStart={() => void startChannel(channel.name)}
-                    onStopRequest={() => setStopTarget(channel.name)}
-                    onTest={() => void testChannel(channel.name)}
-                    onConfigure={() => setDrawerChannel(channel.name)}
-                  />
-                )}
-              </For>
-            </div>
+            <Show when={tab() === "channels"}>
+              <div class="channels-grid">
+                <For each={CHANNEL_DEFS}>
+                  {(channel) => (
+                    <ChannelCard
+                      channel={channel}
+                      runtime={runtimeFor(channel.name)}
+                      enabled={Boolean(draftValueFor(channel.name, ENABLED_FIELD))}
+                      configured={isChannelConfigured(channel.name)}
+                      pendingCount={(pendingByChannel()[channel.name] || []).length}
+                      busy={busy()[channel.name] || null}
+                      testResult={testResults()[channel.name] || null}
+                      paired={countPairedFor(payload, channel.name)}
+                      onToggle={(value) => void toggleEnabled(channel.name, value)}
+                      onStart={() => void startChannel(channel.name)}
+                      onStopRequest={() => setStopTarget(channel.name)}
+                      onTest={() => void testChannel(channel.name)}
+                      onConfigure={() => setDrawerChannel(channel.name)}
+                    />
+                  )}
+                </For>
+              </div>
+            </Show>
+
+            <Show when={tab() === "pairing"}>
+              <PairingPanel
+                pairing={pairing()}
+                creating={creatingPairingCode()}
+                onCreate={() => void createPairingCode()}
+                onCopy={() => void copyPairingCode()}
+              />
+
+              <PairedIdentitiesTable
+                identities={payload.identities}
+                onUnpair={requestUnpair}
+              />
+            </Show>
           </div>
         )}
       </DataGate>
@@ -564,7 +676,132 @@ export function ChannelsPage() {
           void stopChannel(target);
         }}
       />
+
+      <ConfirmDialog
+        open={unpairTarget() !== null}
+        title="Unpair identity"
+        message={
+          <p>
+            Unpair{" "}
+            <span class="mono">
+              {unpairTarget()?.platform}:{unpairTarget()?.external_id}
+            </span>
+            ? The connected account will lose access until paired again.
+          </p>
+        }
+        confirmLabel="Unpair"
+        confirmVariant="danger"
+        onClose={() => setUnpairTarget(null)}
+        onConfirm={() => void confirmUnpair()}
+      />
     </SettingsLayout>
+  );
+}
+
+function PairingPanel(props: {
+  pairing: PairingResponse | null;
+  creating: boolean;
+  onCreate: () => void;
+  onCopy: () => void;
+}) {
+  return (
+    <section class="panel">
+      <div class="panel-header pairing-panel-header">
+        <div>
+          <div class="panel-title">Pairing</div>
+          <div class="hint">Create a one-time code to link Telegram or Discord identities.</div>
+        </div>
+        <button
+          class="btn btn-primary"
+          type="button"
+          disabled={props.creating}
+          onClick={props.onCreate}
+        >
+          <Link2 size={14} />
+          {props.creating ? "Creating..." : "New Pairing Code"}
+        </button>
+      </div>
+      <div class="panel-body">
+        <Show
+          when={props.pairing}
+          fallback={
+            <div class="row-wrap" style={{ gap: "10px", "align-items": "center" }}>
+              <Fingerprint size={18} />
+              <div>
+                <div class="setting-title">No active code</div>
+                <div class="hint">
+                  Generate a pairing code, then send <span class="mono">/pair XXXX-XXXX</span> from
+                  Telegram or Discord.
+                </div>
+              </div>
+            </div>
+          }
+        >
+          {(item) => (
+            <section class="pairing-code-display">
+              <div class="channel-card-meta-label">Pairing Code</div>
+              <div class="pairing-code-value">
+                <span class="chip">{item().code}</span>
+                <button class="btn btn-sm" type="button" onClick={props.onCopy}>
+                  <Copy size={13} />
+                  Copy
+                </button>
+                <span class="hint">
+                  User ID <span class="mono">{item().user_id}</span>. The code expires in 24 hours.
+                  Send <span class="mono">/pair {item().code}</span> from Telegram or Discord.
+                </span>
+              </div>
+            </section>
+          )}
+        </Show>
+      </div>
+    </section>
+  );
+}
+
+function PairedIdentitiesTable(props: {
+  identities: Identity[];
+  onUnpair: (identity: Identity) => void;
+}) {
+  return (
+    <section class="panel">
+      <div class="panel-header">
+        <div class="panel-title">Paired Identities</div>
+        <span class="hint">{props.identities.length} linked</span>
+      </div>
+      <DashboardTable
+        columns={[
+          { header: "Platform" },
+          { header: "External ID" },
+          { header: "User ID" },
+          { header: "Linked Since" },
+          { header: "Actions" },
+        ]}
+        rows={props.identities}
+        emptyMessage="No paired identities yet."
+      >
+        {(identity) => (
+          <tr>
+            <td>
+              <span class="badge">{identity.platform}</span>
+            </td>
+            <td class="mono">{identity.external_id}</td>
+            <td class="mono">{identity.user_id ?? "-"}</td>
+            <td class="mono hint">{formatDate(identity.created_at)}</td>
+            <td>
+              <button
+                class="btn btn-sm btn-danger"
+                type="button"
+                onClick={() => props.onUnpair(identity)}
+              >
+                <Trash2 size={13} />
+                Unpair
+              </button>
+            </td>
+          </tr>
+        )}
+      </DashboardTable>
+    </section>
   );
 }
 
@@ -882,6 +1119,17 @@ function formatStatus(runtime: ChannelRuntime): string {
 function titleOf(channel: string): string {
   const def = CHANNEL_DEFS.find((item) => item.name === channel);
   return def?.title ?? channel;
+}
+
+function formatDate(value: string | null): string {
+  if (!value) {
+    return "-";
+  }
+  try {
+    return new Date(value).toLocaleString();
+  } catch {
+    return value;
+  }
 }
 
 function countPairedFor(

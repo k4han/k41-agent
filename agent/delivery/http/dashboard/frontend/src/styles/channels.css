@@ -371,7 +371,18 @@
   white-space: nowrap;
 }
 
-/* --- Pairing page --- */
+/* --- Pairing controls --- */
+
+.pairing-panel-header {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.pairing-panel-header > div {
+  min-width: min(100%, 260px);
+}
 
 .pairing-code-display {
   display: grid;
