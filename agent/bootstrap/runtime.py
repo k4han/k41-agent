@@ -26,6 +26,7 @@ from agent.shared.infrastructure.db.engine import (
     initialize_async_engine,
 )
 from agent.modules.workspaces import migrate_workspace_tables
+from agent.modules.github import migrate_github_tables
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ async def initialize_persistence() -> None:
     attach_database_config_source(get_database_url())
 
     migrate_workspace_tables(get_database_url())
+    migrate_github_tables(get_database_url())
     await prune_usage_events()
     await initialize_checkpointer()
 

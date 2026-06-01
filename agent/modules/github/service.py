@@ -14,8 +14,12 @@ from agent.modules.github.config import (
     DEFAULT_TRIGGER_LABEL,
     get_github_settings,
 )
-from agent.modules.github.repository import get_github_repository_store, load_mention_triggers
-from agent.modules.github.workspace import GitHubWorkspaceManager
+from agent.modules.github.repository import (
+    get_github_repository_store,
+    load_allowed_tools,
+    load_mention_triggers,
+)
+from agent.modules.github.workspace import GitHubWorkspaceManager, sanitize_branch_name
 from agent.modules.workspaces import WorkspaceRef, workspace_ref_from_local_path
 
 logger = logging.getLogger(__name__)
@@ -43,6 +47,7 @@ class GitHubTaskContext:
     workspace_path: Path
     completion_mode: str = COMPLETION_OPEN_PULL_REQUEST
     review_comment_id: int | None = None
+    repository_instructions: str = ""
 
 
 def verify_webhook_signature(
@@ -110,6 +115,12 @@ class GitHubAutomationService:
     async def list_repository_bindings(self) -> list[dict[str, Any]]:
         return await self.store.list_bindings()
 
+    async def get_repository_binding(self, repository_id: int) -> dict[str, Any]:
+        binding = await self.store.get_serialized_binding_by_repository_id(repository_id)
+        if binding is None:
+            raise KeyError(f"GitHub repository '{repository_id}' is not synced.")
+        return binding
+
     async def resolve_repository_workspace(self, repository_id: int) -> dict[str, Any]:
         binding = await self.store.get_binding_by_repository_id(repository_id)
         if binding is None:
@@ -146,6 +157,16 @@ class GitHubAutomationService:
         notify_platform: str = "",
         notify_external_id: str = "",
         notify_channel_id: str = "",
+        issue_label_enabled: bool = True,
+        issue_comment_enabled: bool = True,
+        pr_review_comment_enabled: bool = True,
+        repository_instructions: str = "",
+        provider_name: str = "",
+        model_name: str = "",
+        context_trim_threshold: int | None = None,
+        tool_policy_mode: str = "inherit",
+        allowed_tools: list[str] | None = None,
+        branch_prefix: str = "kaka",
     ) -> dict[str, Any]:
         resolved_agent = resolve_catalog_agent_name(agent_name, self.settings.default_agent, "default")
         return await self.store.update_binding(
@@ -157,6 +178,60 @@ class GitHubAutomationService:
             notify_platform=notify_platform,
             notify_external_id=notify_external_id,
             notify_channel_id=notify_channel_id,
+            issue_label_enabled=issue_label_enabled,
+            issue_comment_enabled=issue_comment_enabled,
+            pr_review_comment_enabled=pr_review_comment_enabled,
+            repository_instructions=repository_instructions,
+            provider_name=provider_name,
+            model_name=model_name,
+            context_trim_threshold=context_trim_threshold,
+            tool_policy_mode=tool_policy_mode,
+            allowed_tools=allowed_tools or [],
+            branch_prefix=branch_prefix,
+        )
+
+    async def submit_repository_task(
+        self,
+        repository_id: int,
+        *,
+        request: str,
+        notify_platform: str = "",
+        notify_external_id: str = "",
+        notify_channel_id: str = "",
+    ) -> str:
+        clean_request = request.strip()
+        if not clean_request:
+            raise ValueError("Request cannot be empty.")
+
+        binding = await self.store.get_binding_by_repository_id(repository_id)
+        if binding is None:
+            raise KeyError(f"GitHub repository '{repository_id}' is not synced.")
+
+        workspace_payload = await self.resolve_repository_workspace(repository_id)
+        workspace = WorkspaceRef(**workspace_payload["workspace"])
+        agent_name = resolve_catalog_agent_name(
+            binding.agent_name,
+            self.settings.default_agent,
+            "default",
+        ) or "default"
+        manager = get_background_task_manager()
+        return await manager.submit(
+            request=_build_manual_task_prompt(
+                request=clean_request,
+                repository_full_name=binding.full_name,
+                repository_instructions=_repository_instructions(binding),
+            ),
+            agent_name=agent_name,
+            workspace=workspace,
+            notify_channel=self._notify_channel(
+                notify_platform or getattr(binding, "notify_platform", ""),
+                notify_external_id or getattr(binding, "notify_external_id", ""),
+                notify_channel_id or getattr(binding, "notify_channel_id", ""),
+            ),
+            context_trim_threshold=_context_trim_threshold(binding),
+            allowed_tool_names=_allowed_tools_for_binding(binding),
+            provider=_provider_name(binding),
+            model=_model_name(binding),
         )
 
     async def handle_webhook(
@@ -208,6 +283,11 @@ class GitHubAutomationService:
             return {"status": "ignored", "reason": "repository_not_enabled"}
 
         if event in {"issues", "issue_comment"}:
+            if event == "issues" and not getattr(binding, "issue_label_enabled", True):
+                return {"status": "ignored", "reason": "issue_label_disabled"}
+            if event == "issue_comment" and not getattr(binding, "issue_comment_enabled", True):
+                return {"status": "ignored", "reason": "issue_comment_disabled"}
+
             issue = payload.get("issue") or {}
             if issue.get("pull_request"):
                 return {"status": "ignored", "reason": "pull_request_comment"}
@@ -229,6 +309,9 @@ class GitHubAutomationService:
                 delivery_id=delivery_id,
             )
             return {"status": "submitted", "task_id": task_id}
+
+        if not getattr(binding, "pr_review_comment_enabled", True):
+            return {"status": "ignored", "reason": "pr_review_comment_disabled"}
 
         if not self._should_handle_review_comment_event(action, payload):
             return {"status": "ignored", "reason": "review_comment_not_triggered"}
@@ -297,7 +380,7 @@ class GitHubAutomationService:
             "default",
         ) or "default"
         branch = (
-            f"kaka/{agent_name}/issue-{issue_number}-"
+            f"{_branch_prefix(binding)}/{agent_name}/issue-{issue_number}-"
             f"{(delivery_id or 'manual')[:8]}"
         )
 
@@ -318,6 +401,7 @@ class GitHubAutomationService:
             branch=prepared.branch,
             base_branch=prepared.base_branch,
             workspace_path=prepared.path,
+            repository_instructions=_repository_instructions(binding),
         )
         prompt = _build_agent_prompt(
             event=event,
@@ -332,6 +416,10 @@ class GitHubAutomationService:
             workspace=_github_workspace_ref(context),
             notify_channel=self._notify_channel_for_binding(binding),
             completion_hook=lambda task: self.publish_task_result(task, context),
+            context_trim_threshold=_context_trim_threshold(binding),
+            allowed_tool_names=_allowed_tools_for_binding(binding),
+            provider=_provider_name(binding),
+            model=_model_name(binding),
         )
 
     async def _submit_review_comment_task(
@@ -382,6 +470,7 @@ class GitHubAutomationService:
             workspace_path=prepared.path,
             completion_mode=COMPLETION_UPDATE_PULL_REQUEST,
             review_comment_id=_optional_int(comment.get("id")),
+            repository_instructions=_repository_instructions(binding),
         )
         prompt = _build_agent_prompt(
             event="pull_request_review_comment",
@@ -396,15 +485,31 @@ class GitHubAutomationService:
             workspace=_github_workspace_ref(context),
             notify_channel=self._notify_channel_for_binding(binding),
             completion_hook=lambda task: self.publish_task_result(task, context),
+            context_trim_threshold=_context_trim_threshold(binding),
+            allowed_tool_names=_allowed_tools_for_binding(binding),
+            provider=_provider_name(binding),
+            model=_model_name(binding),
         )
 
     def _notify_channel_for_binding(self, binding: Any) -> NotifyChannel | None:
-        if not binding.notify_platform or not binding.notify_external_id:
+        return self._notify_channel(
+            getattr(binding, "notify_platform", ""),
+            getattr(binding, "notify_external_id", ""),
+            getattr(binding, "notify_channel_id", ""),
+        )
+
+    def _notify_channel(
+        self,
+        notify_platform: str,
+        notify_external_id: str,
+        notify_channel_id: str = "",
+    ) -> NotifyChannel | None:
+        if not notify_platform or not notify_external_id:
             return None
         return NotifyChannel(
-            platform=binding.notify_platform,
-            external_id=binding.notify_external_id,
-            channel_id=binding.notify_channel_id or binding.notify_external_id,
+            platform=notify_platform,
+            external_id=notify_external_id,
+            channel_id=notify_channel_id or notify_external_id,
         )
 
     async def publish_task_result(
@@ -514,6 +619,14 @@ def _build_agent_prompt(
         "Issue body:",
         issue_body or "(empty)",
     ]
+    if context.repository_instructions:
+        lines.extend(
+            [
+                "",
+                "Repository instructions:",
+                context.repository_instructions,
+            ]
+        )
     if event == "issue_comment" and comment_body:
         lines.extend(["", "Trigger comment:", comment_body])
     lines.extend([
@@ -554,10 +667,42 @@ def _build_review_comment_prompt(
     ]
     if diff_hunk:
         lines.extend(["", "Diff hunk:", diff_hunk])
+    if context.repository_instructions:
+        lines.extend(
+            [
+                "",
+                "Repository instructions:",
+                context.repository_instructions,
+            ]
+        )
     lines.extend(
         [
             "",
             "Before editing, inspect the commented file and nearby code in the checkout.",
+            "When you are done, summarize the implementation and any tests you ran.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _build_manual_task_prompt(
+    *,
+    request: str,
+    repository_full_name: str,
+    repository_instructions: str,
+) -> str:
+    lines = [
+        f"You are working on GitHub repository {repository_full_name}.",
+        "Modify files in the current working directory to satisfy the request.",
+        "",
+        "Request:",
+        request,
+    ]
+    if repository_instructions:
+        lines.extend(["", "Repository instructions:", repository_instructions])
+    lines.extend(
+        [
+            "",
             "When you are done, summarize the implementation and any tests you ran.",
         ]
     )
@@ -587,6 +732,45 @@ def _review_update_body(result: str) -> str:
 def _optional_int(value: Any) -> int | None:
     if value is None:
         return None
+
+
+def _repository_instructions(binding: Any) -> str:
+    return str(getattr(binding, "repository_instructions", "") or "").strip()
+
+
+def _provider_name(binding: Any) -> str | None:
+    value = str(getattr(binding, "provider_name", "") or "").strip()
+    return value or None
+
+
+def _model_name(binding: Any) -> str | None:
+    value = str(getattr(binding, "model_name", "") or "").strip()
+    return value or None
+
+
+def _context_trim_threshold(binding: Any) -> int | None:
+    raw = getattr(binding, "context_trim_threshold", None)
+    if raw in (None, ""):
+        return None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def _allowed_tools_for_binding(binding: Any) -> list[str] | None:
+    mode = str(getattr(binding, "tool_policy_mode", "") or "").strip().lower()
+    if mode != "custom":
+        return None
+    tools = load_allowed_tools(str(getattr(binding, "allowed_tools_json", "") or "[]"))
+    return tools or None
+
+
+def _branch_prefix(binding: Any) -> str:
+    prefix = str(getattr(binding, "branch_prefix", "") or "").strip() or "kaka"
+    safe_prefix = sanitize_branch_name(prefix).strip("/.")
+    return safe_prefix or "kaka"
     try:
         return int(value)
     except (TypeError, ValueError):

@@ -76,8 +76,13 @@ class FakeWorkspace:
         self.tmp_path = tmp_path
         self.has_changes_value = has_changes
         self.prepared = []
+        self.shared_checkouts = []
         self.commits = []
         self.pushes = []
+
+    async def ensure_shared_checkout(self, **kwargs):
+        self.shared_checkouts.append(kwargs)
+        return self.tmp_path
 
     async def prepare(self, **kwargs):
         self.prepared.append(kwargs)
@@ -243,6 +248,19 @@ async def test_issue_label_trigger_submits_agent_task(
 
 
 @pytest.mark.asyncio
+async def test_issue_label_scope_can_disable_repository_automation(tmp_path: Path) -> None:
+    service = make_service(tmp_path, FakeStore(binding(issue_label_enabled=False)))
+
+    result = await service.handle_webhook(
+        event="issues",
+        delivery_id="delivery-1",
+        payload=issue_payload(),
+    )
+
+    assert result == {"status": "ignored", "reason": "issue_label_disabled"}
+
+
+@pytest.mark.asyncio
 async def test_comment_mention_trigger_submits_agent_task(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -264,6 +282,23 @@ async def test_comment_mention_trigger_submits_agent_task(
     )
 
     assert result == {"status": "submitted", "task_id": "task-1"}
+
+
+@pytest.mark.asyncio
+async def test_comment_scope_can_disable_repository_automation(tmp_path: Path) -> None:
+    service = make_service(tmp_path, FakeStore(binding(issue_comment_enabled=False)))
+    payload = issue_payload(
+        action="created",
+        comment={"body": "@kaka-agent please handle this"},
+    )
+
+    result = await service.handle_webhook(
+        event="issue_comment",
+        delivery_id="comment-1",
+        payload=payload,
+    )
+
+    assert result == {"status": "ignored", "reason": "issue_comment_disabled"}
 
 
 @pytest.mark.asyncio
@@ -299,6 +334,19 @@ async def test_review_comment_submits_agent_task_on_pr_branch(
 
 
 @pytest.mark.asyncio
+async def test_review_comment_scope_can_disable_repository_automation(tmp_path: Path) -> None:
+    service = make_service(tmp_path, FakeStore(binding(pr_review_comment_enabled=False)))
+
+    result = await service.handle_webhook(
+        event="pull_request_review_comment",
+        delivery_id="review-1",
+        payload=review_comment_payload(),
+    )
+
+    assert result == {"status": "ignored", "reason": "pr_review_comment_disabled"}
+
+
+@pytest.mark.asyncio
 async def test_review_comment_ignores_fork_pull_request(tmp_path: Path) -> None:
     service = make_service(tmp_path, FakeStore(binding()))
     payload = review_comment_payload(
@@ -325,6 +373,42 @@ async def test_review_comment_ignores_fork_pull_request(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_repository_optimization_settings_flow_to_background_task(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    task_manager = FakeTaskManager()
+    import agent.modules.github.service as service_module
+
+    monkeypatch.setattr(service_module, "get_background_task_manager", lambda: task_manager)
+    optimized_binding = binding(
+        repository_instructions="Always run uv tests.",
+        provider_name="main-provider",
+        model_name="fast-model",
+        context_trim_threshold=24000,
+        tool_policy_mode="custom",
+        allowed_tools_json='["read_file", "write_file"]',
+        branch_prefix="repo-bot",
+    )
+    service = make_service(tmp_path, FakeStore(optimized_binding))
+
+    result = await service.handle_webhook(
+        event="issues",
+        delivery_id="abcdef123456",
+        payload=issue_payload(),
+    )
+
+    assert result == {"status": "submitted", "task_id": "task-1"}
+    submission = task_manager.submissions[0]
+    assert "Always run uv tests." in submission["request"]
+    assert submission["provider"] == "main-provider"
+    assert submission["model"] == "fast-model"
+    assert submission["context_trim_threshold"] == 24000
+    assert submission["allowed_tool_names"] == ["read_file", "write_file"]
+    assert submission["workspace"].metadata["branch"] == "repo-bot/default/issue-7-abcdef12"
+
+
+@pytest.mark.asyncio
 async def test_sync_installations_upserts_repositories(tmp_path: Path) -> None:
     store = FakeStore()
     service = make_service(tmp_path, store)
@@ -340,6 +424,82 @@ async def test_sync_installations_upserts_repositories(tmp_path: Path) -> None:
     assert result == {"installations": 1, "repositories": 1}
     assert store.installations[0]["id"] == 10
     assert store.repositories[0][0]["full_name"] == "octo/example"
+
+
+@pytest.mark.asyncio
+async def test_submit_repository_task_uses_repository_settings(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    task_manager = FakeTaskManager()
+    import agent.modules.github.service as service_module
+
+    monkeypatch.setattr(service_module, "get_background_task_manager", lambda: task_manager)
+    optimized_binding = binding(
+        repository_instructions="Prefer small focused changes.",
+        provider_name="repo-provider",
+        model_name="repo-model",
+        context_trim_threshold=12000,
+        tool_policy_mode="custom",
+        allowed_tools_json='["read_file"]',
+        notify_platform="telegram",
+        notify_external_id="123",
+        notify_channel_id="123",
+    )
+    service = make_service(tmp_path, FakeStore(optimized_binding))
+
+    task_id = await service.submit_repository_task(
+        100,
+        request="Fix the failing build",
+    )
+
+    assert task_id == "task-1"
+    submission = task_manager.submissions[0]
+    assert "Fix the failing build" in submission["request"]
+    assert "Prefer small focused changes." in submission["request"]
+    assert submission["agent_name"] == "default"
+    assert submission["provider"] == "repo-provider"
+    assert submission["model"] == "repo-model"
+    assert submission["context_trim_threshold"] == 12000
+    assert submission["allowed_tool_names"] == ["read_file"]
+    assert submission["notify_channel"].platform == "telegram"
+    assert submission["workspace"].metadata["repository_full_name"] == "octo/example"
+
+
+def test_github_migration_adds_repository_binding_columns(tmp_path: Path) -> None:
+    from sqlalchemy import create_engine, inspect, text
+
+    from agent.modules.github.migrations import migrate_github_tables
+
+    db_path = tmp_path / "github.sqlite"
+    database_url = f"sqlite:///{db_path.as_posix()}"
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE TABLE github_repository_bindings ("
+                    "id INTEGER PRIMARY KEY, repository_id INTEGER NOT NULL)"
+                )
+            )
+    finally:
+        engine.dispose()
+
+    migrate_github_tables(database_url)
+    migrate_github_tables(database_url)
+
+    engine = create_engine(database_url)
+    try:
+        inspector = inspect(engine)
+        columns = {column["name"] for column in inspector.get_columns("github_repository_bindings")}
+    finally:
+        engine.dispose()
+
+    assert "repository_instructions" in columns
+    assert "provider_name" in columns
+    assert "model_name" in columns
+    assert "allowed_tools_json" in columns
+    assert "branch_prefix" in columns
 
 
 @pytest.mark.asyncio

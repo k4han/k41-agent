@@ -79,6 +79,10 @@ class BackgroundTask:
     request: str = ""
     agent_name: str = "default"
     workspace: WorkspaceRef | None = None
+    context_trim_threshold: int | None = None
+    allowed_tool_names: list[str] | None = None
+    provider: str | None = None
+    model: str | None = None
     notify_channel: NotifyChannel | None = None
     completion_hook: Callable[["BackgroundTask"], Awaitable[None]] | None = field(
         default=None,
@@ -270,6 +274,10 @@ class BackgroundTaskManager:
         working_dir: str | None = None,
         notify_channel: NotifyChannel | None = None,
         completion_hook: Callable[[BackgroundTask], Awaitable[None]] | None = None,
+        context_trim_threshold: int | None = None,
+        allowed_tool_names: list[str] | None = None,
+        provider: str | None = None,
+        model: str | None = None,
     ) -> str:
         """Submit a new background task and start it.
 
@@ -285,6 +293,10 @@ class BackgroundTaskManager:
                 if workspace is not None or working_dir
                 else None
             ),
+            context_trim_threshold=context_trim_threshold if context_trim_threshold and context_trim_threshold > 0 else None,
+            allowed_tool_names=list(allowed_tool_names) if allowed_tool_names else None,
+            provider=provider.strip() if provider else None,
+            model=model.strip() if model else None,
             notify_channel=notify_channel,
             completion_hook=completion_hook,
         )
@@ -414,6 +426,10 @@ class BackgroundTaskManager:
             thread_id=task.thread_id,
             agent_name=task.agent_name,
             workspace=task.workspace,
+            context_trim_threshold=task.context_trim_threshold,
+            allowed_tool_names=task.allowed_tool_names,
+            provider=task.provider,
+            model=task.model,
             usage_context=_task_usage_context(task),
         ):
             if isinstance(event, dict):

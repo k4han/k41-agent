@@ -34,7 +34,36 @@ def load_mention_triggers(raw: str) -> list[str]:
     return values or list(DEFAULT_MENTION_TRIGGERS)
 
 
+def load_allowed_tools(raw: str) -> list[str]:
+    try:
+        parsed = json.loads(raw or "[]")
+    except json.JSONDecodeError:
+        parsed = []
+    if not isinstance(parsed, list):
+        parsed = []
+    return sorted({str(value).strip() for value in parsed if str(value).strip()})
+
+
+def _tool_policy_mode(mode: str, allowed_tools: list[str]) -> str:
+    normalized = str(mode or "").strip().lower()
+    if normalized == "custom" and allowed_tools:
+        return "custom"
+    return "inherit"
+
+
+def _context_trim_threshold(value: int | None) -> int | None:
+    if value is None:
+        return None
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError):
+        return None
+    return normalized if normalized > 0 else None
+
+
 def _serialize_binding(binding: GitHubRepositoryBinding) -> dict[str, Any]:
+    allowed_tools = load_allowed_tools(binding.allowed_tools_json)
+    tool_policy_mode = _tool_policy_mode(binding.tool_policy_mode, allowed_tools)
     return {
         "id": binding.id,
         "repository_id": binding.repository_id,
@@ -50,6 +79,16 @@ def _serialize_binding(binding: GitHubRepositoryBinding) -> dict[str, Any]:
         "notify_platform": binding.notify_platform or "",
         "notify_external_id": binding.notify_external_id or "",
         "notify_channel_id": binding.notify_channel_id or "",
+        "issue_label_enabled": getattr(binding, "issue_label_enabled", True),
+        "issue_comment_enabled": getattr(binding, "issue_comment_enabled", True),
+        "pr_review_comment_enabled": getattr(binding, "pr_review_comment_enabled", True),
+        "repository_instructions": binding.repository_instructions or "",
+        "provider_name": binding.provider_name or "",
+        "model_name": binding.model_name or "",
+        "context_trim_threshold": _context_trim_threshold(binding.context_trim_threshold),
+        "tool_policy_mode": tool_policy_mode,
+        "allowed_tools": allowed_tools if tool_policy_mode == "custom" else [],
+        "branch_prefix": binding.branch_prefix or "kaka",
         "last_synced_at": binding.last_synced_at.isoformat() if binding.last_synced_at else None,
         "created_at": binding.created_at.isoformat() if binding.created_at else None,
         "updated_at": binding.updated_at.isoformat() if binding.updated_at else None,
@@ -76,6 +115,19 @@ class GitHubRepositoryStore:
             result = await session.execute(stmt)
             return result.scalar_one_or_none()
 
+    async def get_serialized_binding_by_repository_id(
+        self,
+        repository_id: int,
+    ) -> dict[str, Any] | None:
+        session = await get_async_session()
+        async with session:
+            stmt = select(GitHubRepositoryBinding).where(
+                GitHubRepositoryBinding.repository_id == repository_id
+            )
+            result = await session.execute(stmt)
+            binding = result.scalar_one_or_none()
+            return _serialize_binding(binding) if binding else None
+
     async def update_binding(
         self,
         repository_id: int,
@@ -87,6 +139,16 @@ class GitHubRepositoryStore:
         notify_platform: str = "",
         notify_external_id: str = "",
         notify_channel_id: str = "",
+        issue_label_enabled: bool = True,
+        issue_comment_enabled: bool = True,
+        pr_review_comment_enabled: bool = True,
+        repository_instructions: str = "",
+        provider_name: str = "",
+        model_name: str = "",
+        context_trim_threshold: int | None = None,
+        tool_policy_mode: str = "inherit",
+        allowed_tools: list[str] | None = None,
+        branch_prefix: str = "kaka",
     ) -> dict[str, Any]:
         session = await get_async_session()
         async with session:
@@ -105,6 +167,24 @@ class GitHubRepositoryStore:
             binding.notify_platform = notify_platform.strip()
             binding.notify_external_id = notify_external_id.strip()
             binding.notify_channel_id = notify_channel_id.strip()
+            binding.issue_label_enabled = bool(issue_label_enabled)
+            binding.issue_comment_enabled = bool(issue_comment_enabled)
+            binding.pr_review_comment_enabled = bool(pr_review_comment_enabled)
+            binding.repository_instructions = repository_instructions.strip()
+            binding.provider_name = provider_name.strip()
+            binding.model_name = model_name.strip()
+            binding.context_trim_threshold = _context_trim_threshold(context_trim_threshold)
+            normalized_allowed_tools = load_allowed_tools(
+                _json_list(allowed_tools or [])
+            )
+            binding.tool_policy_mode = _tool_policy_mode(
+                tool_policy_mode,
+                normalized_allowed_tools,
+            )
+            binding.allowed_tools_json = _json_list(
+                normalized_allowed_tools if binding.tool_policy_mode == "custom" else []
+            )
+            binding.branch_prefix = branch_prefix.strip() or "kaka"
             await session.commit()
             await session.refresh(binding)
             return _serialize_binding(binding)
@@ -177,6 +257,7 @@ class GitHubRepositoryStore:
                     agent_name=default_agent,
                     trigger_label=default_trigger_label,
                     mention_triggers_json=_json_list(default_mention_triggers),
+                    branch_prefix="kaka",
                 )
                 session.add(binding)
 
@@ -203,4 +284,6 @@ def get_github_repository_store() -> GitHubRepositoryStore:
 __all__ = [
     "GitHubRepositoryStore",
     "get_github_repository_store",
+    "load_allowed_tools",
+    "load_mention_triggers",
 ]

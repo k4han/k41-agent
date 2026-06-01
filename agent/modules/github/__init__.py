@@ -11,6 +11,7 @@ from agent.modules.github.models import (
     GitHubRepositoryBinding,
     GitHubWebhookDelivery,
 )
+from agent.modules.github.migrations import migrate_github_tables
 from agent.modules.github.repository import (
     GitHubRepositoryStore,
     get_github_repository_store,
@@ -38,5 +39,6 @@ __all__ = [
     "get_github_automation_service",
     "get_github_repository_store",
     "get_github_settings",
+    "migrate_github_tables",
     "verify_webhook_signature",
 ]

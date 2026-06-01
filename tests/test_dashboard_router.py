@@ -1453,6 +1453,109 @@ def test_dashboard_api_github_returns_repository_bindings(monkeypatch: pytest.Mo
     assert data["agent_names"] == ["default"]
 
 
+def test_dashboard_api_github_repository_detail_and_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeService:
+        def __init__(self) -> None:
+            self.submissions: list[dict[str, object]] = []
+            self.updates: list[dict[str, object]] = []
+
+        async def get_repository_binding(self, repository_id: int):
+            if repository_id != 100:
+                raise KeyError("missing")
+            return {
+                "repository_id": 100,
+                "installation_id": 10,
+                "full_name": "octo/example",
+                "enabled": True,
+                "agent_name": "default",
+                "trigger_label": "kaka-agent",
+                "mention_triggers": ["@kaka-agent"],
+                "allowed_tools": ["read_file"],
+            }
+
+        async def submit_repository_task(self, repository_id: int, **kwargs):
+            self.submissions.append({"repository_id": repository_id, **kwargs})
+            return "task-1"
+
+        async def update_repository_binding(self, repository_id: int, **kwargs):
+            self.updates.append({"repository_id": repository_id, **kwargs})
+            return {"repository_id": repository_id, **kwargs}
+
+    fake_service = FakeService()
+
+    async def fake_agent_options():
+        return {
+            "agent_names": ["default"],
+            "tools": ["read_file"],
+            "tool_groups": [{"category": "file", "tools": ["read_file"]}],
+            "provider_names": ["main"],
+            "default_provider": "main",
+            "default_model": "model",
+            "model_catalogs": [],
+            "model_catalog_error": "",
+        }
+
+    async def fake_identities():
+        return []
+
+    _patch_dashboard_attr(monkeypatch, "get_github_automation_service", lambda: fake_service)
+    _patch_dashboard_attr(monkeypatch, "_agent_card_options", fake_agent_options)
+    _patch_dashboard_attr(monkeypatch, "_paired_identities", fake_identities)
+
+    client = _create_dashboard_client(ChannelManager())
+    response = client.get("/dashboard-api/github/repositories/100")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["repository"]["full_name"] == "octo/example"
+    assert data["agent_names"] == ["default"]
+    assert data["tools"] == ["read_file"]
+
+    missing = client.get("/dashboard-api/github/repositories/101")
+    assert missing.status_code == 404
+
+    updated = client.put(
+        "/dashboard-api/github/repositories/100/binding",
+        json={
+            "enabled": True,
+            "agent_name": "default",
+            "trigger_label": "repo-agent",
+            "mention_triggers": ["@repo"],
+            "issue_label_enabled": False,
+            "issue_comment_enabled": True,
+            "pr_review_comment_enabled": False,
+            "repository_instructions": "Run tests first.",
+            "provider_name": "main",
+            "model_name": "model",
+            "context_trim_threshold": 24000,
+            "tool_policy_mode": "custom",
+            "allowed_tools": ["read_file"],
+            "branch_prefix": "repo-bot",
+        },
+    )
+    assert updated.status_code == 200
+    assert fake_service.updates[0]["repository_instructions"] == "Run tests first."
+    assert fake_service.updates[0]["allowed_tools"] == ["read_file"]
+
+    submitted = client.post(
+        "/dashboard-api/github/repositories/100/tasks",
+        json={"request": "Fix build", "notify_platform": "telegram", "notify_external_id": "123"},
+    )
+    assert submitted.status_code == 200
+    assert submitted.json() == {"status": "submitted", "task_id": "task-1"}
+    assert fake_service.submissions == [
+        {
+            "repository_id": 100,
+            "request": "Fix build",
+            "notify_platform": "telegram",
+            "notify_external_id": "123",
+            "notify_channel_id": "",
+        }
+    ]
+
+
 def test_dashboard_api_requires_json_auth() -> None:
     app = FastAPI()
     app.state.channel_manager = ChannelManager()

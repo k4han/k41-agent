@@ -13,6 +13,7 @@
 @import "./styles/workspace-selector.css";
 @import "./styles/composer-controls.css";
 @import "./styles/workspace.css";
+@import "./styles/repositories.css";
 @import "./styles/tasks.css";
 @import "./styles/history.css";
 @import "./styles/sidebar-collapsed.css";

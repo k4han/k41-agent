@@ -80,6 +80,7 @@ render(
         <Route path={["/chat", "/c/:threadId"]} component={ChatPage} />
         <Route path="/history" component={ChatHistoryListPage} />
         <Route path="/repositories" component={RepositoriesPage} />
+        <Route path="/repositories/:repositoryId" component={RepositoriesPage} />
         <Route path="/tasks" component={TasksPage} />
         <Route path="/scheduler" component={SchedulerPage} />
         <Route path="/settings" component={() => <Navigate href="/settings/config" />} />

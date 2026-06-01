@@ -318,9 +318,25 @@ export type GitHubRepositoryBinding = {
   notify_platform: string;
   notify_external_id: string;
   notify_channel_id: string;
+  issue_label_enabled: boolean;
+  issue_comment_enabled: boolean;
+  pr_review_comment_enabled: boolean;
+  repository_instructions: string;
+  provider_name: string;
+  model_name: string;
+  context_trim_threshold: number | null;
+  tool_policy_mode: "inherit" | "custom";
+  allowed_tools: string[];
+  branch_prefix: string;
   last_synced_at: string | null;
   created_at: string | null;
   updated_at: string | null;
+};
+
+export type RepositoryActivity = {
+  active_count: number;
+  recent_count: number;
+  tasks: BackgroundTask[];
 };
 
 export type GitHubPayload = {
@@ -333,7 +349,22 @@ export type GitHubPayload = {
   trigger_label: string;
   mention_triggers: string[];
   repositories: GitHubRepositoryBinding[];
+  repository_activity?: Record<string, RepositoryActivity>;
   agent_names: string[];
+};
+
+export type GitHubRepositoryDetailPayload = {
+  repository: GitHubRepositoryBinding;
+  activity: RepositoryActivity;
+  identities: Identity[];
+  agent_names: string[];
+  tools: string[];
+  tool_groups: ToolGroup[];
+  provider_names: string[];
+  default_provider: string;
+  default_model: string;
+  model_catalogs: ModelCatalog[];
+  model_catalog_error: string;
 };
 
 export type McpTransport = "stdio" | "streamable_http";
