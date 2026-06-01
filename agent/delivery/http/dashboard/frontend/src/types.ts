@@ -162,6 +162,7 @@ export type SettingInfo = {
   min?: number;
   max?: number;
   step?: number;
+  restart_required?: boolean;
 };
 
 export type SourceValue = {

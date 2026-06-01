@@ -124,17 +124,23 @@ def dashboard_client(make_dashboard_client):
 
 
 class TestDashboardSettingsEndpoints:
-    def test_get_config_api_excludes_dedicated_settings(self, dashboard_client) -> None:
+    def test_get_config_api_includes_bootstrap_and_excludes_dedicated_settings(self, dashboard_client) -> None:
         resp = dashboard_client.get("/dashboard-api/config")
         assert resp.status_code == 200
         data = resp.json()
         assert data["page_title"] == "Runtime Configuration"
+        assert data["settings"]["host"]["restart_required"] is True
+        assert data["settings"]["port"]["restart_required"] is True
+        assert data["settings"]["enable_web"]["restart_required"] is True
+        assert data["settings"]["enable_api"]["restart_required"] is True
+        assert data["settings"]["enable_dashboard"]["restart_required"] is True
+        assert "bootstrap" in data["by_category"]
         assert "llm.provider" not in data["settings"]
         assert "llm.default_model" not in data["settings"]
         assert "channels.telegram.enabled" not in data["settings"]
         assert "channels" not in data["by_category"]
         assert "database.url" in data["settings"]
-        assert "security.jwt_secret" in data["settings"]
+        assert "security.jwt_secret" not in data["settings"]
 
     def test_get_channels_api_includes_channel_settings(
         self,
@@ -419,7 +425,7 @@ class TestDashboardSettingsEndpoints:
         data = resp.json()
         assert "settings" in data
         assert "channels.telegram.enabled" in data["settings"]
-        assert "host" not in data["settings"]
+        assert "host" in data["settings"]
         assert data["settings"]["channels.telegram.enabled"]["source"] == "default"
 
     def test_get_settings_sources(self, dashboard_client) -> None:
@@ -428,7 +434,7 @@ class TestDashboardSettingsEndpoints:
         data = resp.json()
         assert "sources" in data
         assert "channels.telegram.enabled" in data["sources"]
-        assert "host" not in data["sources"]
+        assert "host" in data["sources"]
         assert isinstance(data["sources"]["channels.telegram.enabled"], list)
 
     def test_put_runtime_setting_saves_successfully(self, dashboard_client) -> None:
@@ -461,18 +467,61 @@ class TestDashboardSettingsEndpoints:
             "llm.providers.openai-main.default_model",
         }
 
-    def test_put_settings_batch_rejects_bootstrap_keys(self, dashboard_client) -> None:
-        resp = dashboard_client.put(
-            "/settings",
-            json={"values": {"host": "0.0.0.0"}},
+    def test_put_bootstrap_settings_saves_to_yaml(
+        self,
+        make_dashboard_client,
+        tmp_path: Path,
+    ) -> None:
+        config_path = tmp_path / "config.yml"
+        service = _yaml_config_service(
+            config_path,
+            """
+            host: 127.0.0.1
+            port: 8000
+            enable_dashboard: true
+            """,
         )
-        assert resp.status_code == 400
-        assert "Unsupported runtime setting" in resp.json()["detail"]
+        client = make_dashboard_client(service)
 
-    def test_put_bootstrap_setting_returns_bad_request(self, dashboard_client) -> None:
+        resp = client.put(
+            "/settings",
+            json={
+                "values": {
+                    "host": " 0.0.0.0 ",
+                    "port": "8080",
+                    "enable_dashboard": False,
+                }
+            },
+        )
+
+        assert resp.status_code == 200
+        assert set(resp.json()["updated"]) == {"host", "port", "enable_dashboard"}
+
+        flat = YamlConfigSource(path=config_path).get_all()
+        assert flat["host"] == "0.0.0.0"
+        assert flat["port"] == 8080
+        assert flat["enable_dashboard"] is False
+
+    def test_put_bootstrap_host_rejects_empty_value(self, dashboard_client) -> None:
         resp = dashboard_client.put(
             "/settings/host",
-            json={"value": "false"},
+            json={"value": "   "},
+        )
+        assert resp.status_code == 400
+        assert "Host cannot be empty" in resp.json()["detail"]
+
+    def test_put_bootstrap_port_rejects_out_of_range(self, dashboard_client) -> None:
+        resp = dashboard_client.put(
+            "/settings/port",
+            json={"value": 70000},
+        )
+        assert resp.status_code == 400
+        assert "Port must be between 1 and 65535" in resp.json()["detail"]
+
+    def test_put_jwt_secret_returns_bad_request(self, dashboard_client) -> None:
+        resp = dashboard_client.put(
+            "/settings/security.jwt_secret",
+            json={"value": "secret"},
         )
         assert resp.status_code == 400
         assert "Unsupported runtime setting" in resp.json()["detail"]

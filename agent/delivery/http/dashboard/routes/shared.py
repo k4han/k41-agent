@@ -36,6 +36,8 @@ from agent.modules.workspaces import (
     resolve_workspace_ref,
 )
 from agent.shared.config import (
+    BOOTSTRAP_BOOLEAN_CONFIG_KEYS,
+    BOOTSTRAP_CONFIG_KEYS,
     PROVIDER_SETTING_FIELD_ORDER,
     ConfigService,
     get_setting_metadata,
@@ -472,7 +474,41 @@ def _dump_model(model: BaseModel) -> dict[str, Any]:
     return model.dict()
 
 
+def _normalize_bootstrap_host(value: Any | None) -> str:
+    host = str(value or "").strip()
+    if not host:
+        raise HTTPException(status_code=400, detail="Host cannot be empty.")
+    return host
+
+
+def _normalize_bootstrap_port(value: Any | None) -> int:
+    if isinstance(value, bool):
+        raise HTTPException(status_code=400, detail="Port must be an integer.")
+    if isinstance(value, int):
+        port = value
+    elif isinstance(value, float):
+        if not value.is_integer():
+            raise HTTPException(status_code=400, detail="Port must be an integer.")
+        port = int(value)
+    else:
+        text = str(value or "").strip()
+        if not re.fullmatch(r"\d+", text):
+            raise HTTPException(status_code=400, detail="Port must be an integer.")
+        port = int(text)
+
+    if port < 1 or port > 65535:
+        raise HTTPException(status_code=400, detail="Port must be between 1 and 65535.")
+    return port
+
+
 def _normalize_setting_value(key: str, value: Any | None) -> Any | None:
+    if key in BOOTSTRAP_CONFIG_KEYS:
+        if key == "host":
+            return _normalize_bootstrap_host(value)
+        if key == "port":
+            return _normalize_bootstrap_port(value)
+        if key in BOOTSTRAP_BOOLEAN_CONFIG_KEYS:
+            return coerce_bool(value)
     if value is None or not key.endswith(".models"):
         return value
     if isinstance(value, str):

@@ -1,4 +1,6 @@
 from agent.shared.config.constants import (
+    BOOTSTRAP_BOOLEAN_CONFIG_KEYS,
+    BOOTSTRAP_CONFIG_KEYS,
     DATABASE_RUNTIME_KEY_PATTERNS,
     DEFAULT_CONFIG,
     DEFAULT_DISPLAY_TIMEZONE,
@@ -50,6 +52,8 @@ __all__ = [
     "DefaultConfigSource",
     "YamlConfigSource",
     # Constants
+    "BOOTSTRAP_BOOLEAN_CONFIG_KEYS",
+    "BOOTSTRAP_CONFIG_KEYS",
     "DEFAULT_CONFIG",
     "DEFAULT_DISPLAY_TIMEZONE",
     "DISPLAY_TIMEZONE_CONFIG_KEY",

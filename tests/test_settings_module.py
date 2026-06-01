@@ -6,6 +6,7 @@ import textwrap
 from pathlib import Path
 
 from agent.shared.config import (
+    BOOTSTRAP_CONFIG_KEYS,
     KNOWN_RUNTIME_KEYS,
     RuntimeSettings,
     SettingsSource,
@@ -71,6 +72,11 @@ class TestDefaultConfigSource:
 
         # Check that runtime keys with defaults are in all_settings
         for key in (
+            "host",
+            "port",
+            "enable_web",
+            "enable_api",
+            "enable_dashboard",
             "channels.telegram.enabled",
             "channels.discord.enabled",
             "database.url",
@@ -475,10 +481,26 @@ class TestConfigService:
         merged = service.list_all()
 
         assert "llm.providers.openai-main.api_key" in merged
-        assert "host" not in merged
+        assert "host" in merged
+        assert merged["host"].value == "127.0.0.1"
+
+    def test_settings_overview_includes_bootstrap_restart_metadata(self) -> None:
+        service = ConfigService(sources=[DefaultConfigSource()])
+        overview = service.get_settings_overview()
+
+        for key in BOOTSTRAP_CONFIG_KEYS:
+            assert key in overview
+            assert overview[key]["restart_required"] is True
 
 
 class TestRuntimeKeyMetadata:
+    def test_runtime_key_allows_bootstrap_entries(self) -> None:
+        for key in BOOTSTRAP_CONFIG_KEYS:
+            assert key in KNOWN_RUNTIME_KEYS
+            assert is_runtime_key(key)
+        assert "security.jwt_secret" not in KNOWN_RUNTIME_KEYS
+        assert not is_runtime_key("security.jwt_secret")
+
     def test_runtime_key_allows_provider_entries(self) -> None:
         assert is_runtime_key("llm.providers.openai-main.api_key")
         assert is_runtime_key("llm.providers.openai-main.default_model")
@@ -504,6 +526,16 @@ class TestRuntimeKeyMetadata:
         assert models_meta["type"] == "text"
         assert "models" in models_meta["label"].lower()
         assert "models" in models_meta["description"].lower()
+
+    def test_bootstrap_setting_metadata(self) -> None:
+        port_meta = get_setting_metadata("port")
+
+        assert port_meta["type"] == "number"
+        assert port_meta["category"] == "bootstrap"
+        assert port_meta["min"] == 1
+        assert port_meta["max"] == 65535
+        assert port_meta["step"] == 1
+        assert port_meta["restart_required"] is True
 
 
 # =====================================================================

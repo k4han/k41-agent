@@ -23,7 +23,8 @@ Lệnh này sẽ tạo:
 
 ### 3. Cấu hình
 
-Chỉnh các cấu hình khởi động, database URL, JWT secret và display timezone trong `~/.kaka-agent/config.yaml`.
+Chỉnh các cấu hình khởi động, database URL và display timezone trong `~/.kaka-agent/config.yaml`.
+JWT secret là secret nội bộ, app tự sinh và lưu khi thiếu.
 Provider LLM, MCP servers, default model, toàn bộ channel config và `recursion_limit` được lưu trong DB và quản trị qua dashboard.
 
 ```yaml

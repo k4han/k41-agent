@@ -1,16 +1,13 @@
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
-import { Save } from "lucide-solid";
+import { Save, TriangleAlert } from "lucide-solid";
 
-import { Dialog } from "@/components/Dialog";
 import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { DataGate } from "@/components/State";
-import type { SettingInfo } from "@/types";
 
 import { SettingsLayout } from "./SettingsLayout";
 import {
   categoryLabel,
-  ChangesPreview,
-  type PendingChange,
+  RESTART_REQUIRED_NOTICE,
   SettingRow,
   SettingsSection,
   SettingsConfirmDialog,
@@ -43,6 +40,16 @@ export function ConfigPage() {
       .filter((group) => group.settings.length > 0);
   });
 
+  const pendingRestartChanges = createMemo(() => {
+    const payload = data();
+    if (!payload) {
+      return [];
+    }
+    return pendingChanges().filter(
+      (change) => payload.settings[change.key]?.restart_required === true,
+    );
+  });
+
   onMount(load);
 
   return (
@@ -71,6 +78,12 @@ export function ConfigPage() {
                 searchPlaceholder="Search settings..."
                 onSearchInput={setSearch}
               />
+              <Show when={pendingRestartChanges().length > 0}>
+                <div class="settings-restart-notice" role="status">
+                  <TriangleAlert size={14} />
+                  <span>{RESTART_REQUIRED_NOTICE}</span>
+                </div>
+              </Show>
               <For each={filteredCategories()}>
                 {(group) => (
                   <SettingsSection
@@ -103,6 +116,7 @@ export function ConfigPage() {
               open={confirmOpen()}
               changes={pendingChanges()}
               settings={payload.settings}
+              restartRequired={pendingRestartChanges().length > 0}
               onClose={() => setConfirmOpen(false)}
               onConfirm={() => saveChanges(() => setConfirmOpen(false))}
             />

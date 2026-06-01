@@ -103,12 +103,7 @@ config.reload()
 
 Nested YAML structures được flatten thành dot-notation:
 
-```yaml
-security:
-  jwt_secret: "secret"
-```
-
-Truy cập bằng: `config.get_str("security.jwt_secret")`
+`security.jwt_secret` là secret nội bộ dùng để ký JWT admin. Nếu thiếu hoặc rỗng, app sẽ tự sinh và lưu vào `~/.kaka-agent/config.yaml`; key này không được quản trị qua dashboard.
 
 ## Provider Backends
 

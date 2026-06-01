@@ -1,5 +1,5 @@
 import { createMemo, createSignal, For, JSX, Show } from "solid-js";
-import { RotateCcw } from "lucide-solid";
+import { RotateCcw, TriangleAlert } from "lucide-solid";
 
 import { Dialog } from "@/components/Dialog";
 import { useToast } from "@/components/Toast";
@@ -14,6 +14,8 @@ export type PendingChange = {
   oldValue: unknown;
   newValue: unknown;
 };
+
+export const RESTART_REQUIRED_NOTICE = "Restart required to apply bootstrap changes.";
 
 // --- Helpers -------------------------------------------------------------
 
@@ -165,12 +167,23 @@ export function useSettingsData(endpoint: string) {
   };
 
   const saveChanges = async (onSuccess?: () => void) => {
+    const changes = pendingChanges();
+    const payload = data();
+    const settings = payload ? settingsFromPayload(payload) : {};
+    const restartRequired = changes.some(
+      (change) => settings[change.key]?.restart_required === true,
+    );
     const values = Object.fromEntries(
-      pendingChanges().map((change) => [change.key, change.newValue]),
+      changes.map((change) => [change.key, change.newValue]),
     );
     try {
       await putJson("/settings", { values });
-      showToast(`Updated ${pendingChanges().length} setting(s).`);
+      showToast(
+        restartRequired
+          ? `Updated ${changes.length} setting(s). ${RESTART_REQUIRED_NOTICE}`
+          : `Updated ${changes.length} setting(s).`,
+        restartRequired ? "warning" : "success",
+      );
       onSuccess?.();
       await load();
     } catch (err) {
@@ -359,6 +372,7 @@ export function SettingsConfirmDialog(props: {
   saving?: boolean;
   changes: PendingChange[];
   settings: Record<string, SettingInfo>;
+  restartRequired?: boolean;
   onClose: () => void;
   onConfirm: () => void;
 }) {
@@ -390,6 +404,12 @@ export function SettingsConfirmDialog(props: {
     >
       <div class="stack">
         <p>You are about to update {props.changes.length} setting{props.changes.length === 1 ? "" : "s"}.</p>
+        <Show when={props.restartRequired}>
+          <div class="settings-restart-notice" role="status">
+            <TriangleAlert size={14} />
+            <span>{RESTART_REQUIRED_NOTICE}</span>
+          </div>
+        </Show>
         <ChangesPreview changes={props.changes} settings={props.settings} />
       </div>
     </Dialog>

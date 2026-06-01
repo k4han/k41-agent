@@ -86,6 +86,24 @@
   gap: 10px;
 }
 
+.settings-restart-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warning) 8%, var(--surface));
+  color: var(--warning);
+  padding: 9px 11px;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.settings-restart-notice svg {
+  flex-shrink: 0;
+}
+
 .setting-card {
   overflow: hidden;
   border: 1px solid var(--border);

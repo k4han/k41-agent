@@ -22,12 +22,10 @@ enable_dashboard: true
 # - Telegram/Discord/GitHub channel settings, including encrypted tokens and secrets
 # - recursion_limit
 
-# Security Configuration
+# Internal security configuration
 security:
-  # Secret key used for JWT token signing.
-  # If left empty or missing, the app will auto-generate a secure random string on first run and save it point here.
-  # IMPORTANT: Keep this secret safe in production.
-  # You can generate one manually with: `openssl rand -hex 32` or `python -c "import secrets; print(secrets.token_hex(32))"`
+  # Internal JWT signing secret. Leave empty; the app auto-generates and saves it on first run.
+  # This value is not exposed in the dashboard.
   jwt_secret: ""
 
 # Channel integrations are configured in the dashboard at Settings > Channels.

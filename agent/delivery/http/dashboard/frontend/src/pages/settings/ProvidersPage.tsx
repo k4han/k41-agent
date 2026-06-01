@@ -551,14 +551,18 @@ export function ProvidersPage() {
           display: flex;
           align-items: center;
           justify-content: center;
-          width: 38px;
-          height: 38px;
+          width: 40px;
+          height: 40px;
           border-radius: 8px;
           background: rgba(255, 255, 255, 0.03);
           border: 1px solid rgba(255, 255, 255, 0.06);
           overflow: hidden;
-          padding: 4px;
+          padding: 3px;
           flex-shrink: 0;
+        }
+        .dark .logo-wrap {
+          background: rgba(250, 250, 250, 0.9);
+          border-color: rgba(255, 255, 255, 0.22);
         }
         .logo-img {
           width: 100%;
@@ -576,6 +580,10 @@ export function ProvidersPage() {
           align-items: center;
           justify-content: center;
           border-radius: 6px;
+        }
+        .dark .logo-fallback {
+          color: #111827;
+          background: rgba(99, 102, 241, 0.14);
         }
         .card-right {
           display: flex;

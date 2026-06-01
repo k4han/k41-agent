@@ -7,10 +7,13 @@ from typing import Any
 
 DISPLAY_TIMEZONE_CONFIG_KEY = "display.timezone"
 DEFAULT_DISPLAY_TIMEZONE = "UTC"
+BOOTSTRAP_CONFIG_KEYS = ("host", "port", "enable_web", "enable_api", "enable_dashboard")
+BOOTSTRAP_BOOLEAN_CONFIG_KEYS = ("enable_web", "enable_api", "enable_dashboard")
 
 # Runtime configuration key patterns
 # These patterns define which keys can be updated at runtime
 RUNTIME_KEY_PATTERNS = [
+    r"^(host|port|enable_web|enable_api|enable_dashboard)$",
     r"^channels\.telegram\.(enabled|bot_token|default_agent|code_agent|research_agent|update_mode|webhook_url|webhook_secret)$",
     r"^channels\.discord\.(enabled|bot_token|default_agent|code_agent|research_agent)$",
     r"^channels\.github\.(enabled|app_id|app_slug|private_key|private_key_path|webhook_secret|default_agent|trigger_label|mention_triggers)$",
@@ -21,7 +24,6 @@ RUNTIME_KEY_PATTERNS = [
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.headers\.[A-Za-z0-9_-]+$",
     r"^database\.url$",
     rf"^{re.escape(DISPLAY_TIMEZONE_CONFIG_KEY)}$",
-    r"^security\.jwt_secret$",
     r"^recursion_limit$",
 ]
 
@@ -66,6 +68,7 @@ def is_sensitive_runtime_key(key: str) -> bool:
 def _expand_runtime_keys() -> set[str]:
     """Expand patterns into a set of all valid runtime keys."""
     keys: set[str] = set()
+    keys.update(BOOTSTRAP_CONFIG_KEYS)
     for prop in (
         "enabled",
         "bot_token",
@@ -94,7 +97,6 @@ def _expand_runtime_keys() -> set[str]:
     keys.add("llm.default_model")
     keys.add("database.url")
     keys.add(DISPLAY_TIMEZONE_CONFIG_KEY)
-    keys.add("security.jwt_secret")
     keys.add("recursion_limit")
     return keys
 
@@ -147,6 +149,45 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
 # Metadata for settings - used by dashboard to render appropriate input types
 SETTING_METADATA: dict[str, dict[str, Any]] = {
+    # Bootstrap settings
+    "host": {
+        "type": "text",
+        "description": "Server bind host. Restart required to apply changes.",
+        "category": "bootstrap",
+        "label": "Host",
+        "restart_required": True,
+    },
+    "port": {
+        "type": "number",
+        "description": "Server bind port. Restart required to apply changes.",
+        "category": "bootstrap",
+        "label": "Port",
+        "min": 1,
+        "max": 65535,
+        "step": 1,
+        "restart_required": True,
+    },
+    "enable_web": {
+        "type": "boolean",
+        "description": "Enable HTTP web delivery. Restart required to apply changes.",
+        "category": "bootstrap",
+        "label": "Enable Web",
+        "restart_required": True,
+    },
+    "enable_api": {
+        "type": "boolean",
+        "description": "Enable API delivery. Restart required to apply changes.",
+        "category": "bootstrap",
+        "label": "Enable API",
+        "restart_required": True,
+    },
+    "enable_dashboard": {
+        "type": "boolean",
+        "description": "Enable the dashboard UI. Restart required to apply changes.",
+        "category": "bootstrap",
+        "label": "Enable Dashboard",
+        "restart_required": True,
+    },
     # Workspace settings
     "workspace.root": {
         "type": "text",
@@ -308,13 +349,6 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "category": "general",
         "label": "Display Timezone",
     },
-    # Security settings
-    "security.jwt_secret": {
-        "type": "password",
-        "description": "Secret key for JWT token signing",
-        "category": "security",
-        "label": "JWT Secret",
-    },
     # General / Workflows settings
     "recursion_limit": {
         "type": "number",
@@ -473,6 +507,8 @@ def get_channel_enabled_key(channel_name: str) -> str:
 
 
 __all__ = [
+    "BOOTSTRAP_BOOLEAN_CONFIG_KEYS",
+    "BOOTSTRAP_CONFIG_KEYS",
     "DEFAULT_CONFIG",
     "DEFAULT_DISPLAY_TIMEZONE",
     "DISPLAY_TIMEZONE_CONFIG_KEY",
