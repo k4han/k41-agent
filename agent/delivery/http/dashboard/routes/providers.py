@@ -27,12 +27,12 @@ router = APIRouter()
 
 @router.get("/dashboard-api/config")
 async def get_dashboard_config(request: Request) -> dict[str, Any]:
-    return _settings_payload(request, include_provider_settings=False)
+    return await _settings_payload(request, include_provider_settings=False)
 
 
 @router.get("/dashboard-api/providers")
 async def get_dashboard_providers(request: Request) -> dict[str, Any]:
-    return _settings_payload(request, include_provider_settings=True)
+    return await _settings_payload(request, include_provider_settings=True)
 
 
 class CreateProviderBody(BaseModel):

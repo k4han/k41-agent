@@ -86,6 +86,19 @@ database:
 
 Vào dashboard Settings > Providers để tạo provider, nhập API key, base URL, default model, model list và chọn default provider.
 
+### Fallback model khi agent card bị lỗi
+
+Mỗi agent card có thể pin vào một provider/model. Khi provider đó bị xoá hoặc agent card trỏ vào model không còn resolve được (provider bị disable, model rỗng, key không hợp lệ), hệ thống sẽ rơi về fallback global nếu được cấu hình.
+
+Cấu hình fallback trong dashboard Settings > Providers, section **Fallback Model** ở đầu trang:
+
+- `llm.fallback.provider`: tên provider dùng làm fallback (ví dụ `openai-main`).
+- `llm.fallback.model`: model name dùng cùng fallback provider. Để trống sẽ dùng `default_model` của fallback provider.
+
+Khi fallback được set, nếu resolve provider/model từ agent card (kết hợp với `ctx override` và `llm.default_model`) thất bại, hệ thống tự động retry với fallback. Nếu fallback cũng thất bại, lỗi gốc được raise lại cho caller.
+
+Để tắt fallback, xoá giá trị cả hai key.
+
 ### Chỉ chạy API, tắt dashboard
 
 ```yaml

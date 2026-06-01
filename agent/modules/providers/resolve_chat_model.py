@@ -59,7 +59,7 @@ def resolve_chat_model(
     ).model
 
 
-def resolve_chat_model_info(
+def _resolve_chat_model_info_impl(
     provider_service: ProviderService,
     *,
     provider_name: str | None = None,
@@ -67,13 +67,6 @@ def resolve_chat_model_info(
     temperature: float | None = None,
     api_key: str | None = None,
 ) -> ResolvedChatModel:
-    """Resolve and cache a chat model instance.
-
-    Resolution order:
-    1. provider_name → explicit provider lookup
-    2. Falls back to default provider from repository
-    3. model/temperature override per-call or from config
-    """
     config = get_config_service()
 
     default_provider_name, default_model_name = get_default_llm_settings()
@@ -135,6 +128,51 @@ def resolve_chat_model_info(
         provider_type=str(provider_config.provider_type),
         model_name=model_config.model_name,
     )
+
+
+def resolve_chat_model_info(
+    provider_service: ProviderService,
+    *,
+    provider_name: str | None = None,
+    model: str | None = None,
+    temperature: float | None = None,
+    api_key: str | None = None,
+) -> ResolvedChatModel:
+    """Resolve and cache a chat model instance.
+
+    Resolution order:
+    1. provider_name → explicit provider lookup
+    2. Falls back to default provider from repository
+    3. model/temperature override per-call or from config
+    4. If resolution fails (missing provider, missing model, missing api key,
+       or disabled default provider) and ``llm.fallback.provider`` or
+       ``llm.fallback.model`` is configured, retry using the fallback.
+    """
+    try:
+        return _resolve_chat_model_info_impl(
+            provider_service,
+            provider_name=provider_name,
+            model=model,
+            temperature=temperature,
+            api_key=api_key,
+        )
+    except (RuntimeError, KeyError, ValueError) as primary_error:
+        config = get_config_service()
+        fallback_provider = config.get_str("llm.fallback.provider", "").strip()
+        fallback_model = config.get_str("llm.fallback.model", "").strip()
+        if not fallback_provider and not fallback_model:
+            raise
+
+        try:
+            return _resolve_chat_model_info_impl(
+                provider_service,
+                provider_name=fallback_provider or provider_name,
+                model=fallback_model or model,
+                temperature=temperature,
+                api_key=None,
+            )
+        except (RuntimeError, KeyError, ValueError):
+            raise primary_error from None
 
 
 @lru_cache(maxsize=128)

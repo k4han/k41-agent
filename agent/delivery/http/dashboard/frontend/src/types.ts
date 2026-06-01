@@ -202,9 +202,14 @@ export type SettingsPayload = {
   settings_sources: Record<string, SourceValue[]>;
   provider_rows?: ProviderRow[];
   provider_name_options?: string[];
+  provider_names?: string[];
   provider_field_order?: string[];
   provider_type_options?: ProviderTypeOption[];
   providers_catalog?: Record<string, any>;
+  model_catalogs?: ModelCatalog[];
+  model_catalog_error?: string;
+  default_provider?: string;
+  default_model?: string;
 };
 
 export type UsageSummary = {

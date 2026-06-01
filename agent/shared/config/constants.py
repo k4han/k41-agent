@@ -10,6 +10,9 @@ DEFAULT_DISPLAY_TIMEZONE = "UTC"
 BOOTSTRAP_CONFIG_KEYS = ("host", "port", "enable_web", "enable_api", "enable_dashboard")
 BOOTSTRAP_BOOLEAN_CONFIG_KEYS = ("enable_web", "enable_api", "enable_dashboard")
 
+LLM_FALLBACK_PROVIDER_KEY = "llm.fallback.provider"
+LLM_FALLBACK_MODEL_KEY = "llm.fallback.model"
+
 # Runtime configuration key patterns
 # These patterns define which keys can be updated at runtime
 RUNTIME_KEY_PATTERNS = [
@@ -18,6 +21,8 @@ RUNTIME_KEY_PATTERNS = [
     r"^channels\.discord\.(enabled|bot_token|default_agent|code_agent|research_agent)$",
     r"^channels\.github\.(enabled|app_id|app_slug|private_key|private_key_path|webhook_secret|default_agent|trigger_label|mention_triggers)$",
     r"^llm\.default_model$",
+    rf"^{re.escape(LLM_FALLBACK_PROVIDER_KEY)}$",
+    rf"^{re.escape(LLM_FALLBACK_MODEL_KEY)}$",
     r"^llm\.providers\.[A-Za-z0-9_-]+\.(provider|type|api_key|base_url|default_model|models|temperature|enabled)$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.(transport|command|args|url|enabled)$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.env\.[A-Za-z0-9_-]+$",
@@ -32,6 +37,8 @@ DATABASE_RUNTIME_KEY_PATTERNS = [
     r"^channels\.discord\.(enabled|bot_token|default_agent|code_agent|research_agent)$",
     r"^channels\.github\.(enabled|app_id|app_slug|private_key|private_key_path|webhook_secret|default_agent|trigger_label|mention_triggers)$",
     r"^llm\.default_model$",
+    rf"^{re.escape(LLM_FALLBACK_PROVIDER_KEY)}$",
+    rf"^{re.escape(LLM_FALLBACK_MODEL_KEY)}$",
     r"^llm\.providers\.[A-Za-z0-9_-]+\.(provider|type|api_key|base_url|default_model|models|temperature|enabled)$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.(transport|command|args|url|enabled)$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.env\.[A-Za-z0-9_-]+$",
@@ -95,6 +102,8 @@ def _expand_runtime_keys() -> set[str]:
     ):
         keys.add(f"channels.github.{prop}")
     keys.add("llm.default_model")
+    keys.add(LLM_FALLBACK_PROVIDER_KEY)
+    keys.add(LLM_FALLBACK_MODEL_KEY)
     keys.add("database.url")
     keys.add(DISPLAY_TIMEZONE_CONFIG_KEY)
     keys.add("recursion_limit")
@@ -335,6 +344,18 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "category": "llm",
         "label": "LLM Default Model",
     },
+    LLM_FALLBACK_PROVIDER_KEY: {
+        "type": "text",
+        "description": "Provider name used when the agent's provider/model cannot be resolved (e.g. openai-main). Leave empty to disable.",
+        "category": "llm",
+        "label": "LLM Fallback Provider",
+    },
+    LLM_FALLBACK_MODEL_KEY: {
+        "type": "text",
+        "description": "Model name used together with the fallback provider. Leave empty to use the fallback provider's default model.",
+        "category": "llm",
+        "label": "LLM Fallback Model",
+    },
     # Database settings
     "database.url": {
         "type": "url",
@@ -512,6 +533,8 @@ __all__ = [
     "DEFAULT_CONFIG",
     "DEFAULT_DISPLAY_TIMEZONE",
     "DISPLAY_TIMEZONE_CONFIG_KEY",
+    "LLM_FALLBACK_MODEL_KEY",
+    "LLM_FALLBACK_PROVIDER_KEY",
     "DATABASE_RUNTIME_KEY_PATTERNS",
     "RUNTIME_KEY_PATTERNS",
     "SENSITIVE_RUNTIME_KEY_PATTERNS",

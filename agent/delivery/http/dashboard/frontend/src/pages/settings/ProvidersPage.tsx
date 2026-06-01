@@ -1,14 +1,15 @@
-import { createMemo, createSignal, For, onMount, Show } from "solid-js";
-import { Check, Copy, Edit3, Plus, RefreshCw, Save, Search, Star, Trash2, Globe, Shield, Coins, Sparkles, Sliders } from "lucide-solid";
+import { createMemo, createSignal, createEffect, For, onMount, Show } from "solid-js";
+import { Check, Copy, Edit3, Plus, RefreshCw, Save, Search, ShieldAlert, Star, Trash2, Globe, Shield, Coins, Sparkles, Sliders } from "lucide-solid";
 
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { CopyButton } from "@/components/CopyButton";
 import { Dialog } from "@/components/Dialog";
+import { ModelPicker } from "@/components/ModelPicker";
 import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
-import type { ProviderRow, ProviderTypeOption, SettingInfo } from "@/types";
+import type { ModelCatalog, ProviderRow, ProviderTypeOption, SettingInfo } from "@/types";
 
 import { SettingsLayout } from "./SettingsLayout";
 import {
@@ -200,6 +201,10 @@ export function ProvidersPage() {
   const [changesToConfirm, setChangesToConfirm] = createSignal<PendingChange[]>([]);
   const [deleteTarget, setDeleteTarget] = createSignal<ProviderView | null>(null);
   const [logoErrors, setLogoErrors] = createSignal<Record<string, boolean>>({});
+  const [fallbackProvider, setFallbackProvider] = createSignal("");
+  const [fallbackModel, setFallbackModel] = createSignal("");
+  const [fallbackInitialized, setFallbackInitialized] = createSignal(false);
+  const [savingFallback, setSavingFallback] = createSignal(false);
   const { showToast } = useToast();
 
   const searchNeedle = createMemo(() => search().trim().toLowerCase());
@@ -443,6 +448,59 @@ export function ProvidersPage() {
       });
       setAddOpen(true);
     }
+  };
+
+  // Sync fallback values from server-side settings on the first data load.
+  createEffect(() => {
+    const payload = data();
+    if (!payload || fallbackInitialized()) {
+      return;
+    }
+    const settings = settingsFromPayload(payload);
+    const serverProvider = (settings["llm.fallback.provider"]?.value as string) ?? "";
+    const serverModel = (settings["llm.fallback.model"]?.value as string) ?? "";
+    setFallbackProvider(String(serverProvider));
+    setFallbackModel(String(serverModel));
+    setFallbackInitialized(true);
+  });
+
+  const fallbackDirty = createMemo(() => {
+    const payload = data();
+    if (!payload) {
+      return false;
+    }
+    const settings = settingsFromPayload(payload);
+    const serverProvider = String(settings["llm.fallback.provider"]?.value ?? "").trim();
+    const serverModel = String(settings["llm.fallback.model"]?.value ?? "").trim();
+    return (
+      fallbackProvider().trim() !== serverProvider || fallbackModel().trim() !== serverModel
+    );
+  });
+
+  const saveFallback = async () => {
+    setSavingFallback(true);
+    try {
+      await putJson("/settings", {
+        values: {
+          "llm.fallback.provider": fallbackProvider().trim(),
+          "llm.fallback.model": fallbackModel().trim(),
+        },
+      });
+      showToast("Fallback model updated.");
+      await load();
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : "Failed to save fallback",
+        "error",
+      );
+    } finally {
+      setSavingFallback(false);
+    }
+  };
+
+  const clearFallback = () => {
+    setFallbackProvider("");
+    setFallbackModel("");
   };
 
   onMount(load);
@@ -799,6 +857,23 @@ export function ProvidersPage() {
                   Custom Provider
                 </button>
               }
+            />
+
+            <FallbackModelSection
+              catalogs={payload.model_catalogs || []}
+              providerNames={payload.provider_name_options || payload.provider_names || []}
+              defaultProvider={payload.default_provider || ""}
+              defaultModel={payload.default_model || ""}
+              provider={fallbackProvider()}
+              model={fallbackModel()}
+              dirty={fallbackDirty()}
+              saving={savingFallback()}
+              onProviderModelChange={(nextProvider, nextModel) => {
+                setFallbackProvider(nextProvider);
+                setFallbackModel(nextModel);
+              }}
+              onSave={saveFallback}
+              onClear={clearFallback}
             />
 
             {/* Connected Providers Grid */}
@@ -1284,5 +1359,66 @@ function AddProviderDialog(props: {
         </Show>
       </div>
     </Dialog>
+  );
+}
+
+
+function FallbackModelSection(props: {
+  catalogs: ModelCatalog[];
+  providerNames: string[];
+  defaultProvider: string;
+  defaultModel: string;
+  provider: string;
+  model: string;
+  dirty: boolean;
+  saving: boolean;
+  onProviderModelChange: (provider: string, model: string) => void;
+  onSave: () => void;
+  onClear: () => void;
+}) {
+  return (
+    <section class="settings-group">
+      <div class="settings-section-header">
+        <div>
+          <div class="settings-section-title">
+            <ShieldAlert size={15} style={{ "vertical-align": "middle", "margin-right": "6px" }} />
+            Fallback Model
+          </div>
+          <div class="hint">
+            Used automatically when an agent's configured provider or model is missing or invalid
+            (e.g. the provider was deleted or the agent card no longer references a valid model).
+            Leave empty to disable the fallback and surface the original error.
+          </div>
+        </div>
+        <div class="row-wrap">
+          <Show when={props.dirty}>
+            <button class="btn btn-sm" type="button" onClick={props.onClear} disabled={props.saving}>
+              Reset
+            </button>
+            <button class="btn btn-primary btn-sm" type="button" onClick={props.onSave} disabled={props.saving}>
+              <Save size={13} />
+              {props.saving ? "Saving..." : "Save Fallback"}
+            </button>
+          </Show>
+        </div>
+      </div>
+      <div class="field" style={{ "max-width": "520px" }}>
+        <label>Provider / Model</label>
+        <ModelPicker
+          catalogs={props.catalogs}
+          providerNames={props.providerNames}
+          defaultProvider={props.defaultProvider}
+          defaultModel={props.defaultModel}
+          provider={props.provider}
+          model={props.model}
+          disabled={props.saving}
+          dropdownPlacement="bottom"
+          resolveDefault={true}
+          onChange={(nextProvider, nextModel) => {
+            props.onProviderModelChange(nextProvider, nextModel);
+          }}
+        />
+      </div>
+    </section>
   );
 }

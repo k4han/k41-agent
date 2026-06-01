@@ -896,6 +896,273 @@ def test_resolve_chat_model_uses_provider_specific_temperature(
     _get_cached_model.cache_clear()
 
 
+# --- Application: resolve_chat_model fallback ---
+
+
+def test_resolve_chat_model_falls_back_when_provider_missing(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _get_cached_model.cache_clear()
+
+    config_path = tmp_path / "config.yaml"
+    _write_yaml(
+        config_path,
+        """
+        llm:
+            default_model: "openai-main/openai-model"
+            fallback:
+                provider: "google-main"
+                model: "google-fallback-model"
+            providers:
+                openai-main:
+                    type: "openai_compatible"
+                    api_key: "openai-key"
+                    base_url: "https://openai.example/v1"
+                    default_model: "openai-model"
+                google-main:
+                    type: "google"
+                    api_key: "google-key"
+                    default_model: "google-fallback-model"
+        """,
+    )
+    _set_config_path(monkeypatch, config_path)
+
+    repo = ConfigProviderRepository()
+    service = ProviderService(repository=repo)
+
+    openai_factory = MagicMock()
+    google_factory = MagicMock()
+    fallback_model = MagicMock(name="fallback_model")
+    google_factory.create.return_value = fallback_model
+
+    service.register_factory(ProviderType.OPENAI_COMPATIBLE, openai_factory)
+    service.register_factory(ProviderType.GOOGLE, google_factory)
+
+    result = resolve_chat_model(service, provider_name="missing-provider")
+
+    assert result is fallback_model
+    openai_factory.create.assert_not_called()
+    google_factory.create.assert_called_once()
+    call_args = google_factory.create.call_args.args
+    assert call_args[0].provider_type == ProviderType.GOOGLE
+    assert call_args[1].model_name == "google-fallback-model"
+    assert call_args[2] == "google-key"
+
+    _get_cached_model.cache_clear()
+
+
+def test_resolve_chat_model_falls_back_when_model_missing(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _get_cached_model.cache_clear()
+
+    config_path = tmp_path / "config.yaml"
+    _write_yaml(
+        config_path,
+        """
+        llm:
+            default_model: ""
+            fallback:
+                provider: "google-main"
+            providers:
+                openai-main:
+                    type: "openai_compatible"
+                    api_key: "openai-key"
+                    base_url: "https://openai.example/v1"
+                    default_model: ""
+                google-main:
+                    type: "google"
+                    api_key: "google-key"
+                    default_model: "google-fallback-model"
+        """,
+    )
+    _set_config_path(monkeypatch, config_path)
+
+    repo = ConfigProviderRepository()
+    service = ProviderService(repository=repo)
+
+    openai_factory = MagicMock()
+    google_factory = MagicMock()
+    fallback_model = MagicMock(name="fallback_model")
+    google_factory.create.return_value = fallback_model
+
+    service.register_factory(ProviderType.OPENAI_COMPATIBLE, openai_factory)
+    service.register_factory(ProviderType.GOOGLE, google_factory)
+
+    result = resolve_chat_model(service)
+
+    assert result is fallback_model
+    openai_factory.create.assert_not_called()
+    google_factory.create.assert_called_once()
+    call_args = google_factory.create.call_args.args
+    assert call_args[0].provider_type == ProviderType.GOOGLE
+    assert call_args[1].model_name == "google-fallback-model"
+
+    _get_cached_model.cache_clear()
+
+
+def test_resolve_chat_model_no_fallback_raises_original_error(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _get_cached_model.cache_clear()
+
+    config_path = tmp_path / "config.yaml"
+    _write_yaml(
+        config_path,
+        """
+        llm:
+            default_model: ""
+            providers:
+                openai-main:
+                    type: "openai_compatible"
+                    api_key: "openai-key"
+                    base_url: "https://openai.example/v1"
+                    default_model: ""
+        """,
+    )
+    _set_config_path(monkeypatch, config_path)
+
+    repo = ConfigProviderRepository()
+    service = ProviderService(repository=repo)
+
+    openai_factory = MagicMock()
+    service.register_factory(ProviderType.OPENAI_COMPATIBLE, openai_factory)
+
+    with pytest.raises(RuntimeError, match="Model not configured"):
+        resolve_chat_model(service)
+
+    openai_factory.create.assert_not_called()
+
+    _get_cached_model.cache_clear()
+
+
+def test_resolve_chat_model_fallback_also_failing_raises_original_error(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _get_cached_model.cache_clear()
+
+    config_path = tmp_path / "config.yaml"
+    _write_yaml(
+        config_path,
+        """
+        llm:
+            default_model: ""
+            fallback:
+                provider: "missing-fallback-provider"
+            providers:
+                openai-main:
+                    type: "openai_compatible"
+                    api_key: "openai-key"
+                    base_url: "https://openai.example/v1"
+                    default_model: ""
+        """,
+    )
+    _set_config_path(monkeypatch, config_path)
+
+    repo = ConfigProviderRepository()
+    service = ProviderService(repository=repo)
+
+    openai_factory = MagicMock()
+    service.register_factory(ProviderType.OPENAI_COMPATIBLE, openai_factory)
+
+    with pytest.raises(RuntimeError, match="Model not configured"):
+        resolve_chat_model(service)
+
+    openai_factory.create.assert_not_called()
+
+    _get_cached_model.cache_clear()
+
+
+def test_resolve_chat_model_does_not_use_fallback_when_primary_succeeds(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _get_cached_model.cache_clear()
+
+    config_path = tmp_path / "config.yaml"
+    _write_yaml(
+        config_path,
+        """
+        llm:
+            default_model: "openai-main/openai-model"
+            fallback:
+                provider: "google-main"
+                model: "google-fallback-model"
+            providers:
+                openai-main:
+                    type: "openai_compatible"
+                    api_key: "openai-key"
+                    base_url: "https://openai.example/v1"
+                    default_model: "openai-model"
+                google-main:
+                    type: "google"
+                    api_key: "google-key"
+                    default_model: "google-fallback-model"
+        """,
+    )
+    _set_config_path(monkeypatch, config_path)
+
+    repo = ConfigProviderRepository()
+    service = ProviderService(repository=repo)
+
+    openai_model = MagicMock(name="openai_model")
+    openai_factory = MagicMock()
+    openai_factory.create.return_value = openai_model
+
+    google_factory = MagicMock()
+
+    service.register_factory(ProviderType.OPENAI_COMPATIBLE, openai_factory)
+    service.register_factory(ProviderType.GOOGLE, google_factory)
+
+    result = resolve_chat_model(service)
+
+    assert result is openai_model
+    openai_factory.create.assert_called_once()
+    google_factory.create.assert_not_called()
+
+    _get_cached_model.cache_clear()
+
+
+def test_resolve_chat_model_fallback_disabled_when_keys_empty(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _get_cached_model.cache_clear()
+
+    config_path = tmp_path / "config.yaml"
+    _write_yaml(
+        config_path,
+        """
+        llm:
+            default_model: ""
+            providers:
+                openai-main:
+                    type: "openai_compatible"
+                    api_key: "openai-key"
+                    base_url: "https://openai.example/v1"
+                    default_model: ""
+        """,
+    )
+    _set_config_path(monkeypatch, config_path)
+
+    repo = ConfigProviderRepository()
+    service = ProviderService(repository=repo)
+
+    openai_factory = MagicMock()
+    service.register_factory(ProviderType.OPENAI_COMPATIBLE, openai_factory)
+
+    with pytest.raises(RuntimeError, match="Model not configured"):
+        resolve_chat_model(service)
+
+    openai_factory.create.assert_not_called()
+
+    _get_cached_model.cache_clear()
+
+
 # --- Application: _parse_temperature ---
 
 

@@ -692,7 +692,7 @@ async def _paired_identities() -> list[dict[str, Any]]:
     return [_serialize_identity(identity) for identity in identities]
 
 
-def _settings_payload(request: Request, *, include_provider_settings: bool) -> dict[str, Any]:
+async def _settings_payload(request: Request, *, include_provider_settings: bool) -> dict[str, Any]:
     service = _get_config_service(request)
     settings_raw, settings_sources_raw = service.get_settings_overview_and_sources()
 
@@ -785,6 +785,7 @@ def _settings_payload(request: Request, *, include_provider_settings: bool) -> d
         "provider_field_order": PROVIDER_SETTING_FIELD_ORDER,
         "provider_type_options": PROVIDER_TYPE_OPTIONS,
         "providers_catalog": catalog_serialized,
+        **await _provider_model_options(),
     }
 
 
