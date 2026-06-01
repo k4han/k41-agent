@@ -431,7 +431,7 @@ export function ProvidersPage() {
 
   const handleCardClick = (card: any) => {
     if (card.configured) {
-      setSelectedProviderName(card.name);
+      setSelectedProviderName(card.configuredRow?.name ?? card.id);
     } else {
       // Setup helper prefilled from catalog
       setAddForm({
