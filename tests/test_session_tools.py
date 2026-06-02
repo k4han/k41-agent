@@ -97,7 +97,8 @@ def test_bash_schema_describes_persistent_session_state():
     assert "runtime" not in properties
 
 
-def test_bash_tool_node_injects_runtime_with_class_schema(tmp_path, monkeypatch):
+@pytest.mark.asyncio
+async def test_bash_tool_node_injects_runtime_with_class_schema(tmp_path, monkeypatch):
     captured = {}
 
     def fake_execute_command(**kwargs):
@@ -132,7 +133,7 @@ def test_bash_tool_node_injects_runtime_with_class_schema(tmp_path, monkeypatch)
     graph.add_edge("request", "tools")
     graph.add_edge("tools", END)
 
-    result = graph.compile().invoke(
+    result = await graph.compile().ainvoke(
         {"messages": []},
         config={"configurable": {"thread_id": "thread-1"}},
         context=make_context(working_dir=str(tmp_path)),
@@ -145,7 +146,8 @@ def test_bash_tool_node_injects_runtime_with_class_schema(tmp_path, monkeypatch)
     assert captured["working_dir"] == str(tmp_path)
 
 
-def test_bash_routes_daytona_workspace_to_daytona_manager(monkeypatch):
+@pytest.mark.asyncio
+async def test_bash_routes_daytona_workspace_to_daytona_manager(monkeypatch):
     import agent.modules.tools.langchain.shell_tools.session_tools as session_tools_module
 
     captured = {}
@@ -182,7 +184,7 @@ def test_bash_routes_daytona_workspace_to_daytona_manager(monkeypatch):
         config={"configurable": {"thread_id": "thread-1"}},
     )
 
-    result = bash.func(command="pwd", runtime=runtime, timeout=2)
+    result = await bash.coroutine(command="pwd", runtime=runtime, timeout=2)
 
     assert result == "STDOUT:\nremote"
     assert captured["command"] == "pwd"
@@ -191,7 +193,8 @@ def test_bash_routes_daytona_workspace_to_daytona_manager(monkeypatch):
     assert captured["scope_id"] == "thread-1"
 
 
-def test_bash_routes_modal_workspace_to_modal_manager(monkeypatch):
+@pytest.mark.asyncio
+async def test_bash_routes_modal_workspace_to_modal_manager(monkeypatch):
     import agent.modules.tools.langchain.shell_tools.session_tools as session_tools_module
 
     captured = {}
@@ -199,7 +202,7 @@ def test_bash_routes_modal_workspace_to_modal_manager(monkeypatch):
     class FakeModalSessionManager:
         sessions = {}
 
-        def execute_command(self, **kwargs):
+        async def execute_command(self, **kwargs):
             captured.update(kwargs)
             return {"status": "completed", "output": "remote", "stderr": ""}
 
@@ -228,7 +231,7 @@ def test_bash_routes_modal_workspace_to_modal_manager(monkeypatch):
         config={"configurable": {"thread_id": "thread-1"}},
     )
 
-    result = bash.func(command="pwd", runtime=runtime, timeout=2)
+    result = await bash.coroutine(command="pwd", runtime=runtime, timeout=2)
 
     assert result == "STDOUT:\nremote"
     assert captured["command"] == "pwd"

@@ -71,6 +71,48 @@ def _patch_service(
     return service
 
 
+def _patch_repository_cloner(
+    monkeypatch: pytest.MonkeyPatch,
+    captured: dict[str, Any],
+    *,
+    repository_path: str,
+) -> None:
+    class FakeRepositoryCloner:
+        def __init__(self, workspace: WorkspaceRef) -> None:
+            self.ref = workspace
+
+        async def clone_repository(
+            self,
+            *,
+            owner: str,
+            repo: str,
+            default_branch: str = "main",
+            token: str | None = None,
+            depth: int = 1,
+        ) -> str:
+            captured["backend"] = self.ref.backend
+            captured["locator"] = self.ref.locator
+            captured["owner"] = owner
+            captured["repo"] = repo
+            captured["default_branch"] = default_branch
+            captured["token"] = token
+            captured["depth"] = depth
+            return repository_path
+
+    async def fake_get_workspace_repository_cloner(
+        workspace: WorkspaceRef,
+        *,
+        thread_id: str | None = None,
+    ) -> FakeRepositoryCloner:
+        captured["thread_id"] = thread_id
+        return FakeRepositoryCloner(workspace)
+
+    monkeypatch.setattr(
+        "agent.modules.workspaces.service.get_workspace_repository_cloner",
+        fake_get_workspace_repository_cloner,
+    )
+
+
 def test_is_github_workspace_detects_metadata_source() -> None:
     ref = WorkspaceRef(
         backend="daytona",
@@ -209,7 +251,8 @@ def test_attach_github_to_local_workspace_rejects_invalid_full_name(
         )
 
 
-def test_attach_github_to_daytona_workspace_invokes_clone(
+@pytest.mark.asyncio
+async def test_attach_github_to_daytona_workspace_invokes_clone(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     workspace = WorkspaceRef(
@@ -227,19 +270,10 @@ def test_attach_github_to_daytona_workspace_invokes_clone(
     _patch_service(monkeypatch, binding)
 
     captured: dict[str, Any] = {}
-
-    def fake_clone(ref, *, owner, repo, default_branch, token):
-        captured["backend"] = ref.backend
-        captured["locator"] = ref.locator
-        captured["owner"] = owner
-        captured["repo"] = repo
-        captured["default_branch"] = default_branch
-        captured["token"] = token
-        return f"{owner}/{repo}"
-
-    monkeypatch.setattr(
-        "agent.modules.workspaces.daytona_backend.clone_repository_in_daytona_sandbox",
-        fake_clone,
+    _patch_repository_cloner(
+        monkeypatch,
+        captured,
+        repository_path="acme/widgets",
     )
 
     selection = GitHubRepositorySelection.from_binding(binding)
@@ -250,16 +284,14 @@ def test_attach_github_to_daytona_workspace_invokes_clone(
         installation_id=selection.installation_id,
         token="install-token-abc",
     )
-    ref = attach_github_repository_to_daytona_workspace(workspace, selection)
+    ref = await attach_github_repository_to_daytona_workspace(workspace, selection)
 
-    assert captured == {
-        "backend": "daytona",
-        "locator": "sb-day-1",
-        "owner": "acme",
-        "repo": "widgets",
-        "default_branch": "develop",
-        "token": "install-token-abc",
-    }
+    assert captured["backend"] == "daytona"
+    assert captured["locator"] == "sb-day-1"
+    assert captured["owner"] == "acme"
+    assert captured["repo"] == "widgets"
+    assert captured["default_branch"] == "develop"
+    assert captured["token"] == "install-token-abc"
     assert ref.backend == "daytona"
     assert ref.locator == "sb-day-1"
     assert ref.label == "acme/widgets"
@@ -270,7 +302,8 @@ def test_attach_github_to_daytona_workspace_invokes_clone(
     assert ref.metadata["root"] == "workspace"
 
 
-def test_attach_github_to_modal_workspace_invokes_clone(
+@pytest.mark.asyncio
+async def test_attach_github_to_modal_workspace_invokes_clone(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     workspace = WorkspaceRef(
@@ -288,18 +321,10 @@ def test_attach_github_to_modal_workspace_invokes_clone(
     service = _patch_service(monkeypatch, binding)
 
     captured: dict[str, Any] = {}
-
-    def fake_clone(ref, *, owner, repo, default_branch, token):
-        captured["backend"] = ref.backend
-        captured["owner"] = owner
-        captured["repo"] = repo
-        captured["default_branch"] = default_branch
-        captured["token"] = token
-        return f"{owner}/{repo}"
-
-    monkeypatch.setattr(
-        "agent.modules.workspaces.modal_backend.clone_repository_in_modal_sandbox",
-        fake_clone,
+    _patch_repository_cloner(
+        monkeypatch,
+        captured,
+        repository_path="acme/widgets",
     )
 
     selection = GitHubRepositorySelection(
@@ -308,7 +333,7 @@ def test_attach_github_to_modal_workspace_invokes_clone(
         default_branch="trunk",
         token="explicit-token",
     )
-    ref = attach_github_repository_to_modal_workspace(workspace, selection)
+    ref = await attach_github_repository_to_modal_workspace(workspace, selection)
 
     assert captured["backend"] == "modal"
     assert captured["owner"] == "acme"
@@ -340,9 +365,10 @@ async def test_attach_github_to_workspace_dispatches_to_daytona(
     )
     _patch_service(monkeypatch, binding)
 
-    monkeypatch.setattr(
-        "agent.modules.workspaces.daytona_backend.clone_repository_in_daytona_sandbox",
-        lambda ref, **kwargs: "acme/widgets",
+    _patch_repository_cloner(
+        monkeypatch,
+        {},
+        repository_path="acme/widgets",
     )
 
     ref = await attach_github_repository_to_workspace(
@@ -374,9 +400,10 @@ async def test_attach_github_to_workspace_dispatches_to_modal(
     )
     _patch_service(monkeypatch, binding)
 
-    monkeypatch.setattr(
-        "agent.modules.workspaces.modal_backend.clone_repository_in_modal_sandbox",
-        lambda ref, **kwargs: "acme/widgets",
+    _patch_repository_cloner(
+        monkeypatch,
+        {},
+        repository_path="acme/widgets",
     )
 
     ref = await attach_github_repository_to_workspace(
@@ -521,9 +548,10 @@ async def test_installation_token_resolved_via_service(monkeypatch: pytest.Monke
         metadata={"root": "workspace"},
     )
 
-    monkeypatch.setattr(
-        "agent.modules.workspaces.daytona_backend.clone_repository_in_daytona_sandbox",
-        lambda ref, **kwargs: "acme/widgets",
+    _patch_repository_cloner(
+        monkeypatch,
+        {},
+        repository_path="acme/widgets",
     )
 
     ref = await attach_github_repository_to_workspace(

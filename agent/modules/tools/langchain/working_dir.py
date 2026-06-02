@@ -6,8 +6,9 @@ from langgraph.prebuilt import ToolRuntime
 
 from agent.modules.tools.runtime.context import ToolContext, get_context_value
 from agent.modules.workspaces import (
+    WorkspaceFileIO,
     WorkspaceRef,
-    get_workspace_backend,
+    get_workspace_file_io,
     normalize_workspace_ref,
 )
 
@@ -24,10 +25,10 @@ def get_workspace(runtime: ToolRuntime[Any, Any]) -> WorkspaceRef:
     )
 
 
-async def get_backend(runtime: ToolRuntime[Any, Any]):
-    """Return the workspace backend for a tool runtime."""
+async def get_file_io(runtime: ToolRuntime[Any, Any]) -> WorkspaceFileIO:
+    """Return the workspace file I/O capability for a tool runtime."""
     tool_context = ToolContext.from_runtime(runtime)
-    return await get_workspace_backend(
+    return await get_workspace_file_io(
         get_workspace(runtime),
         thread_id=tool_context.thread_id,
     )

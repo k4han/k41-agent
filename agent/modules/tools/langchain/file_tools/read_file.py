@@ -5,7 +5,7 @@ from langgraph.prebuilt import ToolRuntime
 
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCapability, ToolCategory
-from agent.modules.tools.langchain.working_dir import get_backend
+from agent.modules.tools.langchain.working_dir import get_file_io
 from agent.modules.tools.result import ToolError, ToolErrorCode
 
 
@@ -21,7 +21,7 @@ async def read_file(
 ) -> str:
     """Read file content in working directory."""
     try:
-        return await (await get_backend(runtime)).read_text(file_path)
+        return await (await get_file_io(runtime)).read_text(file_path)
     except FileNotFoundError as exc:
         raise ToolError(
             ToolErrorCode.NOT_FOUND, f"File does not exist: {file_path}"

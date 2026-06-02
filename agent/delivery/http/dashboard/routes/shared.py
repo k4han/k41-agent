@@ -31,6 +31,7 @@ from agent.modules.workflows import (
     list_registered_workflows,
 )
 from agent.modules.workspaces import (
+    UnsupportedWorkspaceCapabilityError,
     WorkspaceRef,
     WorkspaceUnavailableError,
     get_thread_workspace_ref,
@@ -938,6 +939,8 @@ async def _workspace_ref_from_request(
 def _workspace_http_error(exc: Exception) -> HTTPException:
     if isinstance(exc, WorkspaceUnavailableError):
         return HTTPException(status_code=410, detail=str(exc))
+    if isinstance(exc, UnsupportedWorkspaceCapabilityError):
+        return HTTPException(status_code=400, detail=str(exc))
     if isinstance(exc, FileNotFoundError):
         return HTTPException(status_code=404, detail=str(exc))
     if isinstance(exc, FileExistsError):

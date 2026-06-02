@@ -48,13 +48,14 @@ def test_resolve_safe_path_rejects_absolute_path_outside_working_dir(tmp_path):
         resolve_safe_path(str(sandbox), str(outside))
 
 
-def test_read_file_blocks_parent_traversal(tmp_path):
+@pytest.mark.asyncio
+async def test_read_file_blocks_parent_traversal(tmp_path):
     sandbox = tmp_path / "sandbox"
     sandbox.mkdir()
     outside = tmp_path / "secret.txt"
     outside.write_text("top-secret", encoding="utf-8")
 
-    result = read_file_module.read_file.func(
+    result = await read_file_module.read_file.coroutine(
         file_path="../secret.txt",
         runtime=_runtime(str(sandbox)),
     )
@@ -62,12 +63,13 @@ def test_read_file_blocks_parent_traversal(tmp_path):
     assert "Path escapes working directory" in result
 
 
-def test_write_file_blocks_absolute_path_outside_working_dir(tmp_path):
+@pytest.mark.asyncio
+async def test_write_file_blocks_absolute_path_outside_working_dir(tmp_path):
     sandbox = tmp_path / "sandbox"
     sandbox.mkdir()
     outside = tmp_path / "outside.txt"
 
-    result = write_file_module.write_file.func(
+    result = await write_file_module.write_file.coroutine(
         file_path=str(outside),
         content="should not be written",
         runtime=_runtime(str(sandbox)),
@@ -77,11 +79,12 @@ def test_write_file_blocks_absolute_path_outside_working_dir(tmp_path):
     assert not outside.exists()
 
 
-def test_list_files_blocks_parent_traversal(tmp_path):
+@pytest.mark.asyncio
+async def test_list_files_blocks_parent_traversal(tmp_path):
     sandbox = tmp_path / "sandbox"
     sandbox.mkdir()
 
-    result = list_files_module.list_files.func(
+    result = await list_files_module.list_files.coroutine(
         runtime=_runtime(str(sandbox)),
         sub_dir="..",
     )

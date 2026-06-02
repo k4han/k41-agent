@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import time
@@ -16,7 +17,11 @@ from agent.modules.tools.langchain.shell_tools.session_manager import (
     MAX_OUTPUT_CHARS,
     _strip_ansi,
 )
-from agent.modules.workspaces import DaytonaWorkspaceBackend, WorkspaceRef
+from agent.modules.workspaces import (
+    DaytonaWorkspaceBackend,
+    WorkspaceRef,
+    get_workspace_command_executor,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -292,15 +297,19 @@ class DaytonaTerminalSessionManager:
         timeout: float,
         scope_id: str | None = None,
     ) -> Dict[str, Any]:
-        try:
-            result = DaytonaWorkspaceBackend(
+        async def execute() -> Any:
+            executor = await get_workspace_command_executor(
                 workspace,
                 thread_id=self._thread_id_from_scope(scope_id),
-            ).execute(
+            )
+            return await executor.execute(
                 command,
                 timeout=max(1, int(timeout)),
                 max_output_chars=MAX_OUTPUT_CHARS,
             )
+
+        try:
+            result = self._run_coro_blocking(execute())
         except Exception as exc:
             return {"error": str(exc)}
         return {
@@ -309,6 +318,26 @@ class DaytonaTerminalSessionManager:
             "stderr": "",
             "status": "completed",
         }
+
+    @staticmethod
+    def _run_coro_blocking(coro: Any) -> Any:
+        result_queue: Queue[tuple[bool, Any]] = Queue(maxsize=1)
+
+        def runner() -> None:
+            try:
+                result_queue.put((True, asyncio.run(coro)))
+            except Exception as exc:
+                result_queue.put((False, exc))
+
+        import threading
+
+        thread = threading.Thread(target=runner, daemon=True)
+        thread.start()
+        thread.join()
+        ok, value = result_queue.get()
+        if ok:
+            return value
+        raise value
 
     def get_session_output(
         self,

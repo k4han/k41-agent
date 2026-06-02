@@ -6,7 +6,7 @@ import hashlib
 from typing import Any, Dict, List
 
 from agent.modules.tools.langchain.shell_tools.session_manager import MAX_OUTPUT_CHARS
-from agent.modules.workspaces import ModalWorkspaceBackend, WorkspaceRef
+from agent.modules.workspaces import WorkspaceRef, get_workspace_command_executor
 
 
 class ModalCommandSessionManager:
@@ -57,8 +57,11 @@ class ModalCommandSessionManager:
                 ),
             }
         try:
-            backend = await ModalWorkspaceBackend.create(workspace)
-            result = await backend.execute(
+            executor = await get_workspace_command_executor(
+                workspace,
+                thread_id=self._thread_id_from_scope(scope_id),
+            )
+            result = await executor.execute(
                 command,
                 timeout=max(1, int(timeout)),
                 max_output_chars=MAX_OUTPUT_CHARS,

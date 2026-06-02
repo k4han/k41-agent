@@ -5,7 +5,7 @@ from langgraph.prebuilt import ToolRuntime
 
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCapability, ToolCategory
-from agent.modules.tools.langchain.working_dir import get_backend
+from agent.modules.tools.langchain.working_dir import get_file_io
 from agent.modules.tools.result import ToolError, ToolErrorCode
 
 
@@ -22,6 +22,6 @@ async def write_file(
 ) -> str:
     """Write content to file in working directory."""
     try:
-        return await (await get_backend(runtime)).write_text(file_path, content)
+        return await (await get_file_io(runtime)).write_text(file_path, content)
     except ValueError as exc:
         raise ToolError(ToolErrorCode.INVALID_INPUT, str(exc)) from exc

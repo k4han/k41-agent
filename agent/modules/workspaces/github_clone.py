@@ -156,20 +156,18 @@ def attach_github_repository_to_local_workspace(
     )
 
 
-def attach_github_repository_to_daytona_workspace(
+async def attach_github_repository_to_daytona_workspace(
     workspace: WorkspaceRef,
     selection: GitHubRepositorySelection,
     *,
     token: str | None = None,
 ) -> WorkspaceRef:
     """Clone a GitHub repository inside a Daytona sandbox."""
-    from agent.modules.workspaces.daytona_backend import (
-        clone_repository_in_daytona_sandbox,
-    )
+    from agent.modules.workspaces.service import get_workspace_repository_cloner
 
     owner, repo = _split_full_name(selection.full_name)
-    relative_path = clone_repository_in_daytona_sandbox(
-        workspace,
+    cloner = await get_workspace_repository_cloner(workspace)
+    relative_path = await cloner.clone_repository(
         owner=owner,
         repo=repo,
         default_branch=selection.default_branch,
@@ -185,13 +183,11 @@ async def attach_github_repository_to_modal_workspace(
     token: str | None = None,
 ) -> WorkspaceRef:
     """Clone a GitHub repository inside a Modal sandbox."""
-    from agent.modules.workspaces.modal_backend import (
-        clone_repository_in_modal_sandbox,
-    )
+    from agent.modules.workspaces.service import get_workspace_repository_cloner
 
     owner, repo = _split_full_name(selection.full_name)
-    relative_path = await clone_repository_in_modal_sandbox(
-        workspace,
+    cloner = await get_workspace_repository_cloner(workspace)
+    relative_path = await cloner.clone_repository(
         owner=owner,
         repo=repo,
         default_branch=selection.default_branch,
@@ -269,7 +265,7 @@ async def attach_github_repository_to_workspace(
             token=token or None,
         )
     if backend == "daytona":
-        return attach_github_repository_to_daytona_workspace(
+        return await attach_github_repository_to_daytona_workspace(
             workspace,
             selection,
             token=token or None,

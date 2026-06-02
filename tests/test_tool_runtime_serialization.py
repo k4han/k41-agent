@@ -2,6 +2,7 @@ import inspect
 import warnings
 from typing import Annotated, Any, get_args, get_origin, get_type_hints
 
+import pytest
 from langgraph.prebuilt import ToolRuntime
 
 from agent.modules.tools.langchain.file_tools.list_files import list_files
@@ -38,7 +39,8 @@ def test_tool_runtime_annotations_are_parameterized() -> None:
     assert unparameterized == []
 
 
-def test_runtime_injected_tool_validation_does_not_warn(tmp_path) -> None:
+@pytest.mark.asyncio
+async def test_runtime_injected_tool_validation_does_not_warn(tmp_path) -> None:
     runtime = ToolRuntime[Any, Any](
         state={},
         context=make_context(
@@ -55,7 +57,7 @@ def test_runtime_injected_tool_validation_does_not_warn(tmp_path) -> None:
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        result = list_files.invoke(
+        result = await list_files.ainvoke(
             {
                 "type": "tool_call",
                 "name": list_files.name,

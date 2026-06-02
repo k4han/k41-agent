@@ -8,9 +8,13 @@ from sqlalchemy import create_engine, text
 
 import agent.modules.workspaces.local_backend as local_backend_module
 from agent.modules.workspaces import (
+    UnsupportedWorkspaceCapabilityError,
     WorkspaceRef,
     WorkspaceUnavailableError,
-    get_workspace_backend,
+    get_workspace_command_executor,
+    get_workspace_file_io,
+    get_workspace_lifecycle_manager,
+    get_workspace_repository_cloner,
     resolve_workspace_ref,
     workspace_ref_from_columns,
     workspace_ref_from_local_path,
@@ -848,6 +852,137 @@ def test_modal_backend_changes_reports_unavailable_sandbox():
 
 
 @pytest.mark.asyncio
+async def test_modal_capability_recovers_unavailable_thread_workspace(monkeypatch):
+    from agent.modules.workspaces import service as workspace_service
+
+    workspace_service._modal_recovery_locks.clear()
+    expired = WorkspaceRef(
+        backend="modal",
+        locator="sb-expired",
+        label="acme/widgets",
+        metadata={
+            "root": "/workspace",
+            "source": "github",
+            "repository_id": 44,
+            "repository_full_name": "acme/widgets",
+            "default_branch": "main",
+            "repository_path": "acme/widgets",
+        },
+    )
+    created = WorkspaceRef(
+        backend="modal",
+        locator="sb-new",
+        label="acme/widgets",
+        metadata={"root": "/workspace", "app_name": "kaka-agent-sandboxes"},
+    )
+    stored: dict[str, WorkspaceRef] = {"thread-old": expired}
+    upserts: list[WorkspaceRef] = []
+    create_labels: list[str | None] = []
+    clone_calls: list[dict[str, Any]] = []
+    fresh_sandbox = FakeModalSandbox()
+
+    class FakeWorkspaceRepository:
+        async def get(self, thread_id: str):
+            workspace = stored.get(thread_id)
+            return {"workspace": workspace.model_dump()} if workspace else None
+
+        async def upsert(self, *, thread_id: str, workspace):
+            stored[thread_id] = workspace
+            upserts.append(workspace)
+            return {"workspace": workspace.model_dump()}
+
+    async def fake_create_modal_workspace(*, label: str | None = None):
+        create_labels.append(label)
+        return created
+
+    async def fake_create_backend(ref: WorkspaceRef, *, client=None):
+        del client
+        if ref.locator == "sb-expired":
+            return ModalWorkspaceBackend(
+                ref,
+                sandbox=FakeUnavailableModalSandbox(),
+                fs=FakeUnavailableModalFs(),
+            )
+        if ref.locator == "sb-new":
+            return ModalWorkspaceBackend(
+                ref,
+                sandbox=fresh_sandbox,
+                fs=fresh_sandbox.filesystem,
+            )
+        raise AssertionError(f"Unexpected Modal sandbox: {ref.locator}")
+
+    async def fake_attach_github_repository_to_workspace(
+        workspace: WorkspaceRef,
+        *,
+        repository_id: int,
+        install_token: str | None = None,
+    ) -> WorkspaceRef:
+        clone_calls.append(
+            {
+                "locator": workspace.locator,
+                "repository_id": repository_id,
+                "install_token": install_token,
+            }
+        )
+        metadata = dict(workspace.metadata)
+        metadata.update(
+            {
+                "source": "github",
+                "repository_id": repository_id,
+                "repository_full_name": "acme/widgets",
+                "default_branch": "main",
+                "repository_path": "acme/widgets",
+            }
+        )
+        return WorkspaceRef(
+            backend=workspace.backend,
+            locator=workspace.locator,
+            label="acme/widgets",
+            metadata=metadata,
+        )
+
+    monkeypatch.setattr(
+        workspace_service,
+        "get_thread_workspace_repository",
+        lambda: FakeWorkspaceRepository(),
+    )
+    monkeypatch.setattr(
+        "agent.modules.workspaces.modal_backend.create_modal_workspace",
+        fake_create_modal_workspace,
+    )
+    monkeypatch.setattr(
+        ModalWorkspaceBackend,
+        "create",
+        staticmethod(fake_create_backend),
+    )
+    monkeypatch.setattr(
+        "agent.modules.workspaces.github_clone.attach_github_repository_to_workspace",
+        fake_attach_github_repository_to_workspace,
+    )
+
+    browser = await workspace_service.get_workspace_browser(
+        expired,
+        thread_id="thread-old",
+    )
+    result = await browser.tree()
+
+    assert result["root"] == "/workspace"
+    assert browser.ref.locator == "sb-new"
+    assert create_labels == ["acme/widgets"]
+    assert clone_calls == [
+        {
+            "locator": "sb-new",
+            "repository_id": 44,
+            "install_token": None,
+        }
+    ]
+    assert upserts == [stored["thread-old"]]
+    assert stored["thread-old"].locator == "sb-new"
+    assert stored["thread-old"].metadata["source"] == "github"
+    assert stored["thread-old"].metadata["repository_full_name"] == "acme/widgets"
+
+
+@pytest.mark.asyncio
 async def test_delete_thread_workspace_deletes_daytona_sandbox_and_record(monkeypatch):
     from agent.modules.workspaces import service as workspace_service
 
@@ -1303,13 +1438,13 @@ def test_workspace_migration_backfills_legacy_tables(tmp_path):
     assert json.loads(task_row.workspace_metadata_json) == {}
 
 
-def test_get_workspace_backend_returns_physical_local_backend(tmp_path):
+def test_get_workspace_file_io_returns_physical_local_backend(tmp_path):
     import asyncio
 
     workspace = workspace_ref_from_local_path(str(tmp_path), label="test-lab")
 
     async def _run():
-        return await get_workspace_backend(workspace)
+        return await get_workspace_file_io(workspace)
 
     backend = asyncio.run(_run())
 
@@ -1317,7 +1452,29 @@ def test_get_workspace_backend_returns_physical_local_backend(tmp_path):
     assert not hasattr(backend, "virtual_prefix")
 
 
-def test_get_workspace_backend_returns_modal_backend(monkeypatch):
+def test_local_workspace_unsupported_capabilities(tmp_path):
+    import asyncio
+
+    workspace = workspace_ref_from_local_path(str(tmp_path), label="test-lab")
+
+    async def _repository_cloner():
+        return await get_workspace_repository_cloner(workspace)
+
+    async def _lifecycle_manager():
+        return await get_workspace_lifecycle_manager(workspace)
+
+    with pytest.raises(UnsupportedWorkspaceCapabilityError) as clone_exc:
+        asyncio.run(_repository_cloner())
+    with pytest.raises(UnsupportedWorkspaceCapabilityError) as lifecycle_exc:
+        asyncio.run(_lifecycle_manager())
+
+    assert clone_exc.value.backend == "local"
+    assert clone_exc.value.capability == "repository clone"
+    assert lifecycle_exc.value.backend == "local"
+    assert lifecycle_exc.value.capability == "lifecycle"
+
+
+def test_get_workspace_command_executor_returns_modal_backend(monkeypatch):
     import asyncio
 
     sandbox = FakeModalSandbox()
@@ -1344,7 +1501,7 @@ def test_get_workspace_backend_returns_modal_backend(monkeypatch):
     )
 
     async def _run():
-        return await get_workspace_backend(workspace)
+        return await get_workspace_command_executor(workspace)
 
     backend = asyncio.run(_run())
 

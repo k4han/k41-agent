@@ -931,7 +931,11 @@ def test_dashboard_workspace_tree_reports_unavailable_modal_workspace(
                 locator="sb-expired",
             )
 
-    _patch_dashboard_attr(monkeypatch, "get_workspace_backend", lambda *args, **kwargs: FakeBackend())
+    async def fake_get_workspace_browser(*args, **kwargs):
+        del args, kwargs
+        return FakeBackend()
+
+    _patch_dashboard_attr(monkeypatch, "get_workspace_browser", fake_get_workspace_browser)
     client = _create_dashboard_client(ChannelManager())
 
     response = client.get(

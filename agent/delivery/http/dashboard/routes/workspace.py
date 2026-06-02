@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import inspect
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -20,7 +21,9 @@ from agent.modules.workspaces import (
     create_daytona_workspace,
     create_modal_workspace,
     ensure_workspace_directory,
-    get_workspace_backend,
+    get_workspace_browser,
+    get_workspace_change_inspector,
+    get_workspace_entry_mutator,
     is_github_workspace,
     list_workspace_directories,
     remember_thread_workspace_ref,
@@ -31,13 +34,20 @@ from agent.modules.workspaces import (
 router = APIRouter()
 
 
-async def _run_workspace_backend_operation(
+async def _run_workspace_capability_operation(
     workspace: WorkspaceRef,
     thread_id: str | None,
+    capability_getter: Callable[..., Any],
     operation: Callable[[Any], Any],
 ) -> dict[str, Any]:
-    backend = await get_workspace_backend(workspace, thread_id=thread_id)
-    return await operation(backend)
+    capability = await capability_getter(workspace, thread_id=thread_id)
+    return await operation(capability)
+
+
+async def _maybe_await(value: Any) -> Any:
+    if inspect.isawaitable(value):
+        return await value
+    return value
 
 
 def _workspace_metadata_root(workspace: WorkspaceRef | None) -> str | None:
@@ -77,9 +87,10 @@ async def get_dashboard_workspace_tree(
             root=root,
         )
         async def _op(b): return await b.tree(path)
-        return await _run_workspace_backend_operation(
+        return await _run_workspace_capability_operation(
             workspace,
             thread_id,
+            get_workspace_browser,
             _op,
         )
     except Exception as exc:
@@ -101,9 +112,10 @@ async def get_dashboard_workspace_changes(
             root=root,
         )
         async def _op(b): return await b.changes()
-        return await _run_workspace_backend_operation(
+        return await _run_workspace_capability_operation(
             workspace,
             thread_id,
+            get_workspace_change_inspector,
             _op,
         )
     except Exception as exc:
@@ -126,9 +138,10 @@ async def get_dashboard_workspace_diff(
             root=root,
         )
         async def _op(b): return await b.diff(path)
-        return await _run_workspace_backend_operation(
+        return await _run_workspace_capability_operation(
             workspace,
             thread_id,
+            get_workspace_change_inspector,
             _op,
         )
     except Exception as exc:
@@ -151,9 +164,10 @@ async def get_dashboard_workspace_file(
             root=root,
         )
         async def _op(b): return await b.file(path)
-        return await _run_workspace_backend_operation(
+        return await _run_workspace_capability_operation(
             workspace,
             thread_id,
+            get_workspace_browser,
             _op,
         )
     except Exception as exc:
@@ -177,9 +191,10 @@ async def rename_dashboard_workspace_entry(
             workspace=body.workspace,
         )
         async def _op(b): return await b.rename(path=body.path, new_name=body.new_name)
-        return await _run_workspace_backend_operation(
+        return await _run_workspace_capability_operation(
             workspace,
             body.thread_id,
+            get_workspace_entry_mutator,
             _op,
         )
     except Exception as exc:
@@ -312,12 +327,14 @@ async def resolve_dashboard_workspace(body: WorkspaceResolveBody) -> dict[str, A
             sandbox_id = body.locator or (body.workspace.locator if body.workspace else "")
             if sandbox_id and sandbox_id.strip():
                 root = _workspace_metadata_root(body.workspace)
-                workspace = await attach_modal_workspace(
-                    sandbox_id,
-                    root=root,
+                workspace = await _maybe_await(
+                    attach_modal_workspace(
+                        sandbox_id,
+                        root=root,
+                    )
                 )
             else:
-                workspace = await create_modal_workspace()
+                workspace = await _maybe_await(create_modal_workspace())
             if repository_id is not None:
                 workspace = await attach_github_repository_to_workspace(
                     workspace,
@@ -359,12 +376,14 @@ async def _resolve_github_in_sandbox(
         sandbox_id = body.locator or (body.workspace.locator if body.workspace else "")
         if sandbox_id and sandbox_id.strip():
             root = _workspace_metadata_root(body.workspace)
-            workspace = await attach_modal_workspace(
-                sandbox_id,
-                root=root,
+            workspace = await _maybe_await(
+                attach_modal_workspace(
+                    sandbox_id,
+                    root=root,
+                )
             )
         else:
-            workspace = await create_modal_workspace()
+            workspace = await _maybe_await(create_modal_workspace())
     else:
         raise ValueError(f"Unsupported sandbox backend: {backend}")
     return await attach_github_repository_to_workspace(
@@ -437,9 +456,10 @@ async def delete_dashboard_workspace_entry(
             workspace=body.workspace,
         )
         async def _op(b): return await b.delete(path=body.path)
-        return await _run_workspace_backend_operation(
+        return await _run_workspace_capability_operation(
             workspace,
             body.thread_id,
+            get_workspace_entry_mutator,
             _op,
         )
     except Exception as exc:

@@ -26,7 +26,25 @@ class WorkspaceUnavailableError(RuntimeError):
         self.locator = locator
 
 
-class WorkspaceBackend(Protocol):
+class UnsupportedWorkspaceCapabilityError(RuntimeError):
+    def __init__(
+        self,
+        *,
+        backend: str,
+        capability: str,
+        locator: str | None = None,
+    ) -> None:
+        message = (
+            f"Workspace backend '{backend}' does not support "
+            f"the {capability} capability."
+        )
+        super().__init__(message)
+        self.backend = backend
+        self.capability = capability
+        self.locator = locator
+
+
+class WorkspaceFileIO(Protocol):
     ref: WorkspaceRef
 
     async def list_files(self, sub_dir: str = "") -> str:
@@ -38,6 +56,10 @@ class WorkspaceBackend(Protocol):
     async def write_text(self, file_path: str, content: str) -> str:
         ...
 
+
+class WorkspaceCommandExecutor(Protocol):
+    ref: WorkspaceRef
+
     async def execute(
         self,
         command: str,
@@ -47,17 +69,29 @@ class WorkspaceBackend(Protocol):
     ) -> CommandResult:
         ...
 
+
+class WorkspaceBrowser(Protocol):
+    ref: WorkspaceRef
+
     async def tree(self, path: str | None = None) -> dict[str, Any]:
         ...
 
     async def file(self, path: str) -> dict[str, Any]:
         ...
 
+
+class WorkspaceChangeInspector(Protocol):
+    ref: WorkspaceRef
+
     async def changes(self) -> dict[str, Any]:
         ...
 
     async def diff(self, path: str) -> dict[str, Any]:
         ...
+
+
+class WorkspaceEntryMutator(Protocol):
+    ref: WorkspaceRef
 
     async def rename(self, *, path: str, new_name: str) -> dict[str, Any]:
         ...
@@ -66,4 +100,46 @@ class WorkspaceBackend(Protocol):
         ...
 
 
-__all__ = ["CommandResult", "WorkspaceBackend", "WorkspaceUnavailableError"]
+class WorkspaceRepositoryCloner(Protocol):
+    ref: WorkspaceRef
+
+    async def clone_repository(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        default_branch: str = "main",
+        token: str | None = None,
+        depth: int = 1,
+    ) -> str:
+        ...
+
+
+class WorkspaceLifecycleManager(Protocol):
+    ref: WorkspaceRef
+
+    async def delete_workspace(self) -> str:
+        ...
+
+
+class DaytonaWorkspaceLifecycleManager(WorkspaceLifecycleManager, Protocol):
+    async def stop_workspace(self, *, force: bool = False) -> str:
+        ...
+
+    async def archive_workspace(self) -> str:
+        ...
+
+
+__all__ = [
+    "CommandResult",
+    "DaytonaWorkspaceLifecycleManager",
+    "UnsupportedWorkspaceCapabilityError",
+    "WorkspaceBrowser",
+    "WorkspaceChangeInspector",
+    "WorkspaceCommandExecutor",
+    "WorkspaceEntryMutator",
+    "WorkspaceFileIO",
+    "WorkspaceLifecycleManager",
+    "WorkspaceRepositoryCloner",
+    "WorkspaceUnavailableError",
+]

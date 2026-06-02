@@ -175,14 +175,15 @@ class TestWrapTool:
 
 
 class TestToolErrorEndToEndOnBuiltin:
-    def test_read_file_uses_normalized_format(self, tmp_path) -> None:
+    @pytest.mark.asyncio
+    async def test_read_file_uses_normalized_format(self, tmp_path) -> None:
         from types import SimpleNamespace
 
         from agent.modules.tools.langchain.file_tools import read_file as read_file_module
 
         sandbox = tmp_path / "sandbox"
         sandbox.mkdir()
-        result = read_file_module.read_file.func(
+        result = await read_file_module.read_file.coroutine(
             file_path="../escape.txt",
             runtime=SimpleNamespace(context={"working_dir": str(sandbox)}),
         )

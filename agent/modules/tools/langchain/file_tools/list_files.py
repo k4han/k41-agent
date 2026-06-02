@@ -5,7 +5,7 @@ from langgraph.prebuilt import ToolRuntime
 
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCapability, ToolCategory
-from agent.modules.tools.langchain.working_dir import get_backend
+from agent.modules.tools.langchain.working_dir import get_file_io
 from agent.modules.tools.result import ToolError, ToolErrorCode
 
 
@@ -21,6 +21,6 @@ async def list_files(
 ) -> str:
     """List files in working directory."""
     try:
-        return await (await get_backend(runtime)).list_files(sub_dir)
+        return await (await get_file_io(runtime)).list_files(sub_dir)
     except ValueError as exc:
         raise ToolError(ToolErrorCode.INVALID_INPUT, str(exc)) from exc

@@ -6,9 +6,22 @@ import logging
 import mimetypes
 import shutil
 import subprocess
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
+from agent.modules.workspaces.backends import (
+    CommandResult,
+    UnsupportedWorkspaceCapabilityError,
+    WorkspaceBrowser,
+    WorkspaceChangeInspector,
+    WorkspaceCommandExecutor,
+    WorkspaceEntryMutator,
+    WorkspaceFileIO,
+    WorkspaceLifecycleManager,
+    WorkspaceRepositoryCloner,
+    WorkspaceUnavailableError,
+)
 from agent.modules.workspaces.repository import get_thread_workspace_repository
 from agent.modules.workspaces.refs import (
     WorkspaceRef,
@@ -16,6 +29,7 @@ from agent.modules.workspaces.refs import (
 )
 
 logger = logging.getLogger(__name__)
+T = TypeVar("T")
 
 MAX_TREE_ENTRIES = 500
 MAX_DIFF_CHARS = 200_000
@@ -36,6 +50,7 @@ IGNORED_DIR_NAMES = {
     "node_modules",
     "target",
 }
+_modal_recovery_locks: dict[str, asyncio.Lock] = {}
 
 
 def resolve_workspace_ref(workspace: WorkspaceRef | dict[str, Any] | str | None = None) -> WorkspaceRef:
@@ -63,7 +78,7 @@ def workspace_ref_from_local_path(
     )
 
 
-async def get_workspace_backend(
+async def _create_workspace_runtime_backend(
     workspace: WorkspaceRef | dict[str, Any] | str | None = None,
     *,
     thread_id: str | None = None,
@@ -80,8 +95,401 @@ async def get_workspace_backend(
     if ref.backend == "modal":
         from agent.modules.workspaces.modal_backend import ModalWorkspaceBackend
 
+        if thread_id:
+            return _RecoveringModalWorkspaceBackend(ref, thread_id=thread_id)
         return await ModalWorkspaceBackend.create(ref)
     raise ValueError(f"Unsupported workspace backend: {ref.backend}")
+
+
+async def get_workspace_file_io(
+    workspace: WorkspaceRef | dict[str, Any] | str | None = None,
+    *,
+    thread_id: str | None = None,
+) -> WorkspaceFileIO:
+    return await _create_workspace_runtime_backend(workspace, thread_id=thread_id)
+
+
+async def get_workspace_command_executor(
+    workspace: WorkspaceRef | dict[str, Any] | str | None = None,
+    *,
+    thread_id: str | None = None,
+) -> WorkspaceCommandExecutor:
+    return await _create_workspace_runtime_backend(workspace, thread_id=thread_id)
+
+
+async def get_workspace_browser(
+    workspace: WorkspaceRef | dict[str, Any] | str | None = None,
+    *,
+    thread_id: str | None = None,
+) -> WorkspaceBrowser:
+    return await _create_workspace_runtime_backend(workspace, thread_id=thread_id)
+
+
+async def get_workspace_change_inspector(
+    workspace: WorkspaceRef | dict[str, Any] | str | None = None,
+    *,
+    thread_id: str | None = None,
+) -> WorkspaceChangeInspector:
+    return await _create_workspace_runtime_backend(workspace, thread_id=thread_id)
+
+
+async def get_workspace_entry_mutator(
+    workspace: WorkspaceRef | dict[str, Any] | str | None = None,
+    *,
+    thread_id: str | None = None,
+) -> WorkspaceEntryMutator:
+    return await _create_workspace_runtime_backend(workspace, thread_id=thread_id)
+
+
+async def get_workspace_repository_cloner(
+    workspace: WorkspaceRef | dict[str, Any] | str | None = None,
+    *,
+    thread_id: str | None = None,
+) -> WorkspaceRepositoryCloner:
+    ref = resolve_workspace_ref(workspace)
+    if ref.backend == "daytona":
+        return _DaytonaWorkspaceRepositoryCloner(ref, thread_id=thread_id)
+    if ref.backend == "modal":
+        if thread_id:
+            return _RecoveringModalWorkspaceRepositoryCloner(
+                ref,
+                thread_id=thread_id,
+            )
+        return _ModalWorkspaceRepositoryCloner(ref)
+    raise UnsupportedWorkspaceCapabilityError(
+        backend=ref.backend,
+        capability="repository clone",
+        locator=ref.locator,
+    )
+
+
+async def get_workspace_lifecycle_manager(
+    workspace: WorkspaceRef | dict[str, Any] | str | None = None,
+    *,
+    thread_id: str | None = None,
+) -> WorkspaceLifecycleManager:
+    ref = resolve_workspace_ref(workspace)
+    if ref.backend == "daytona":
+        return _DaytonaWorkspaceLifecycleManager(ref, thread_id=thread_id)
+    if ref.backend == "modal":
+        return _ModalWorkspaceLifecycleManager(ref)
+    raise UnsupportedWorkspaceCapabilityError(
+        backend=ref.backend,
+        capability="lifecycle",
+        locator=ref.locator,
+    )
+
+
+class _DaytonaWorkspaceRepositoryCloner:
+    def __init__(self, ref: WorkspaceRef, *, thread_id: str | None = None) -> None:
+        self.ref = ref
+        self.thread_id = thread_id
+
+    async def clone_repository(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        default_branch: str = "main",
+        token: str | None = None,
+        depth: int = 1,
+    ) -> str:
+        def clone() -> str:
+            from agent.modules.workspaces.daytona_backend import DaytonaWorkspaceBackend
+
+            backend = DaytonaWorkspaceBackend(self.ref, thread_id=self.thread_id)
+            return backend.clone_repository(
+                owner=owner,
+                repo=repo,
+                default_branch=default_branch,
+                token=token,
+                depth=depth,
+            )
+
+        return await asyncio.to_thread(clone)
+
+
+class _ModalWorkspaceRepositoryCloner:
+    def __init__(self, ref: WorkspaceRef) -> None:
+        self.ref = ref
+
+    async def clone_repository(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        default_branch: str = "main",
+        token: str | None = None,
+        depth: int = 1,
+    ) -> str:
+        from agent.modules.workspaces.modal_backend import ModalWorkspaceBackend
+
+        backend = await ModalWorkspaceBackend.create(self.ref)
+        return await backend.clone_repository(
+            owner=owner,
+            repo=repo,
+            default_branch=default_branch,
+            token=token,
+            depth=depth,
+        )
+
+
+class _RecoveringModalWorkspaceBackend:
+    def __init__(self, ref: WorkspaceRef, *, thread_id: str) -> None:
+        self.ref = ref
+        self.thread_id = thread_id
+
+    async def _create_backend(self):
+        from agent.modules.workspaces.modal_backend import ModalWorkspaceBackend
+
+        return await ModalWorkspaceBackend.create(self.ref)
+
+    async def _run(
+        self,
+        operation: Callable[[Any], Awaitable[T]],
+    ) -> T:
+        try:
+            backend = await self._create_backend()
+            result = await operation(backend)
+            self.ref = backend.ref
+            return result
+        except WorkspaceUnavailableError:
+            self.ref = await _recover_modal_thread_workspace(
+                self.ref,
+                thread_id=self.thread_id,
+            )
+            backend = await self._create_backend()
+            result = await operation(backend)
+            self.ref = backend.ref
+            return result
+
+    async def list_files(self, sub_dir: str = "") -> str:
+        return await self._run(lambda backend: backend.list_files(sub_dir))
+
+    async def read_text(self, file_path: str) -> str:
+        return await self._run(lambda backend: backend.read_text(file_path))
+
+    async def write_text(self, file_path: str, content: str) -> str:
+        return await self._run(lambda backend: backend.write_text(file_path, content))
+
+    async def execute(
+        self,
+        command: str,
+        *,
+        timeout: int = 30,
+        max_output_chars: int | None = None,
+    ) -> CommandResult:
+        return await self._run(
+            lambda backend: backend.execute(
+                command,
+                timeout=timeout,
+                max_output_chars=max_output_chars,
+            )
+        )
+
+    async def tree(self, path: str | None = None) -> dict[str, Any]:
+        return await self._run(lambda backend: backend.tree(path))
+
+    async def file(self, path: str) -> dict[str, Any]:
+        return await self._run(lambda backend: backend.file(path))
+
+    async def changes(self) -> dict[str, Any]:
+        return await self._run(lambda backend: backend.changes())
+
+    async def diff(self, path: str) -> dict[str, Any]:
+        return await self._run(lambda backend: backend.diff(path))
+
+    async def rename(self, *, path: str, new_name: str) -> dict[str, Any]:
+        return await self._run(
+            lambda backend: backend.rename(path=path, new_name=new_name)
+        )
+
+    async def delete(self, *, path: str) -> dict[str, Any]:
+        return await self._run(lambda backend: backend.delete(path=path))
+
+
+class _RecoveringModalWorkspaceRepositoryCloner:
+    def __init__(self, ref: WorkspaceRef, *, thread_id: str) -> None:
+        self.ref = ref
+        self.thread_id = thread_id
+
+    async def clone_repository(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        default_branch: str = "main",
+        token: str | None = None,
+        depth: int = 1,
+    ) -> str:
+        async def clone(ref: WorkspaceRef) -> str:
+            cloner = _ModalWorkspaceRepositoryCloner(ref)
+            return await cloner.clone_repository(
+                owner=owner,
+                repo=repo,
+                default_branch=default_branch,
+                token=token,
+                depth=depth,
+            )
+
+        try:
+            return await clone(self.ref)
+        except WorkspaceUnavailableError:
+            self.ref = await _recover_modal_thread_workspace(
+                self.ref,
+                thread_id=self.thread_id,
+            )
+            return await clone(self.ref)
+
+
+async def _recover_modal_thread_workspace(
+    ref: WorkspaceRef,
+    *,
+    thread_id: str,
+) -> WorkspaceRef:
+    normalized_thread_id = str(thread_id or "").strip()
+    if ref.backend != "modal" or not normalized_thread_id:
+        raise WorkspaceUnavailableError(
+            (
+                f"Modal sandbox {ref.locator} is no longer available. "
+                "Create or attach a new Modal workspace for this thread."
+            ),
+            backend=ref.backend,
+            locator=ref.locator,
+        )
+
+    lock = _modal_recovery_locks.setdefault(normalized_thread_id, asyncio.Lock())
+    async with lock:
+        current = await get_thread_workspace_ref(normalized_thread_id)
+        if current and current.backend == "modal" and current.locator != ref.locator:
+            return current
+
+        source_ref = current if current and current.backend == "modal" else ref
+        replacement = await _provision_modal_replacement(source_ref)
+        replacement = await remember_thread_workspace_ref(
+            normalized_thread_id,
+            replacement,
+        )
+        logger.info(
+            "Recreated Modal workspace for thread %s: %s -> %s",
+            normalized_thread_id,
+            ref.locator,
+            replacement.locator,
+        )
+        return replacement
+
+
+async def _provision_modal_replacement(ref: WorkspaceRef) -> WorkspaceRef:
+    from agent.modules.workspaces.github_clone import (
+        attach_github_repository_to_workspace,
+    )
+    from agent.modules.workspaces.modal_backend import (
+        ModalWorkspaceBackend,
+        create_modal_workspace,
+    )
+
+    replacement = await create_modal_workspace(label=_replacement_modal_label(ref))
+    replacement = _merge_recovered_modal_metadata(ref, replacement)
+
+    backend = await ModalWorkspaceBackend.create(replacement)
+    await backend.ensure_git()
+    await backend.ensure_root()
+    replacement = backend.ref
+
+    repository_id = _github_repository_id(ref)
+    if repository_id is None:
+        return replacement
+    return await attach_github_repository_to_workspace(
+        replacement,
+        repository_id=repository_id,
+    )
+
+
+def _replacement_modal_label(ref: WorkspaceRef) -> str | None:
+    label = str(ref.label or "").strip()
+    if not label or label == f"modal:{ref.locator}":
+        return None
+    return label
+
+
+def _merge_recovered_modal_metadata(
+    source: WorkspaceRef,
+    replacement: WorkspaceRef,
+) -> WorkspaceRef:
+    metadata = dict(replacement.metadata or {})
+    for key, value in dict(source.metadata or {}).items():
+        if value in (None, "", []):
+            continue
+        if key in {
+            "last_archived_at",
+            "last_started_at",
+            "last_stopped_at",
+            "last_used_at",
+            "status",
+        }:
+            continue
+        metadata[key] = value
+    return WorkspaceRef(
+        backend=replacement.backend,
+        locator=replacement.locator,
+        label=replacement.label,
+        metadata=metadata,
+    )
+
+
+def _github_repository_id(ref: WorkspaceRef) -> int | None:
+    metadata = ref.metadata or {}
+    if str(metadata.get("source") or "").strip().lower() != "github":
+        return None
+    try:
+        repository_id = int(metadata.get("repository_id") or 0)
+    except (TypeError, ValueError):
+        return None
+    return repository_id or None
+
+
+class _DaytonaWorkspaceLifecycleManager:
+    def __init__(self, ref: WorkspaceRef, *, thread_id: str | None = None) -> None:
+        self.ref = ref
+        self.thread_id = thread_id
+
+    async def delete_workspace(self) -> str:
+        from agent.modules.workspaces.daytona_backend import delete_daytona_workspace
+
+        return await asyncio.to_thread(
+            delete_daytona_workspace,
+            self.ref,
+            thread_id=self.thread_id,
+        )
+
+    async def stop_workspace(self, *, force: bool = False) -> str:
+        from agent.modules.workspaces.daytona_backend import stop_daytona_workspace
+
+        return await asyncio.to_thread(
+            stop_daytona_workspace,
+            self.ref,
+            thread_id=self.thread_id,
+            force=force,
+        )
+
+    async def archive_workspace(self) -> str:
+        from agent.modules.workspaces.daytona_backend import archive_daytona_workspace
+
+        return await asyncio.to_thread(
+            archive_daytona_workspace,
+            self.ref,
+            thread_id=self.thread_id,
+        )
+
+
+class _ModalWorkspaceLifecycleManager:
+    def __init__(self, ref: WorkspaceRef) -> None:
+        self.ref = ref
+
+    async def delete_workspace(self) -> str:
+        from agent.modules.workspaces.modal_backend import delete_modal_workspace
+
+        return await delete_modal_workspace(self.ref)
 
 
 def resolve_workspace_root(working_dir: str | None = None) -> Path:
@@ -242,14 +650,15 @@ async def delete_thread_workspace(thread_id: str) -> WorkspaceRef | None:
     if workspace is None:
         return None
 
-    if workspace.backend == "daytona":
-        from agent.modules.workspaces.daytona_backend import delete_daytona_workspace
-
-        await asyncio.to_thread(delete_daytona_workspace, workspace, thread_id=thread_id)
-    elif workspace.backend == "modal":
-        from agent.modules.workspaces.modal_backend import delete_modal_workspace
-
-        await delete_modal_workspace(workspace)
+    try:
+        lifecycle = await get_workspace_lifecycle_manager(
+            workspace,
+            thread_id=thread_id,
+        )
+    except UnsupportedWorkspaceCapabilityError:
+        lifecycle = None
+    if lifecycle is not None:
+        await lifecycle.delete_workspace()
 
     await get_thread_workspace_repository().delete(thread_id)
     return workspace

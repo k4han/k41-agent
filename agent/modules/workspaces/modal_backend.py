@@ -355,7 +355,11 @@ class ModalWorkspaceBackend:
     ) -> ModalWorkspaceBackend:
         """Async factory that resolves the sandbox from the workspace ref."""
         client = client or await get_modal_client()
-        sandbox = await get_modal_sandbox(ref, client=client)
+        try:
+            sandbox = await get_modal_sandbox(ref, client=client)
+        except Exception as exc:
+            _raise_if_modal_unavailable(ref, exc, strict_not_found=True)
+            raise
         fs = getattr(sandbox, "filesystem", None)
         if fs is None:
             raise RuntimeError("Modal sandbox does not expose filesystem APIs.")
