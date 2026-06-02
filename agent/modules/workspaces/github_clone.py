@@ -203,9 +203,16 @@ def _with_github_metadata(
     repository_path: str,
 ) -> WorkspaceRef:
     metadata = dict(workspace.metadata or {})
+    old_repository_path = str(metadata.get("repository_path") or "").strip()
     metadata.update(
         _github_workspace_metadata(selection, repository_path=repository_path)
     )
+    if workspace.backend in {"daytona", "modal"}:
+        metadata["root"] = _join_sandbox_repository_root(
+            metadata.get("root"),
+            repository_path,
+            old_repository_path=old_repository_path,
+        )
     label = selection.full_name
     return WorkspaceRef(
         backend=workspace.backend,
@@ -213,6 +220,41 @@ def _with_github_metadata(
         label=label,
         metadata=metadata,
     )
+
+
+def _join_sandbox_repository_root(
+    existing_root: Any,
+    repository_path: str,
+    *,
+    old_repository_path: str = "",
+) -> str:
+    """Return the sandbox ``root`` updated to live inside the cloned repository.
+
+    For Daytona/Modal sandboxes the repository is cloned at
+    ``<sandbox_root>/<repository_path>``. The agent's working directory must
+    follow that move so the subprocess cwd sits inside the repository instead
+    of at the bare sandbox root.
+    """
+    clean_root = str(existing_root or "").strip().replace("\\", "/").rstrip("/")
+    if not clean_root:
+        clean_root = "/"
+    if not clean_root.startswith("/"):
+        clean_root = f"/{clean_root.lstrip('/')}"
+    old_relative = (
+        str(old_repository_path or "").strip().replace("\\", "/").strip("/")
+    )
+    if old_relative:
+        suffix = f"/{old_relative}"
+        if clean_root.endswith(suffix):
+            clean_root = clean_root[: -len(suffix)] or "/"
+    clean_relative = (
+        str(repository_path or "").strip().replace("\\", "/").strip("/")
+    )
+    if not clean_relative or clean_relative == ".":
+        return clean_root
+    if clean_root == "/":
+        return f"/{clean_relative}"
+    return f"{clean_root.rstrip('/')}/{clean_relative}"
 
 
 async def _resolve_selection(repository_id: int) -> GitHubRepositorySelection:

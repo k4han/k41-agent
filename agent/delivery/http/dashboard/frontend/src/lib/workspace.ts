@@ -155,3 +155,31 @@ export function workspaceDisplayLabel(workspace: WorkspaceRef | null | undefined
     workspace.backend,
   );
 }
+
+function metadataRoot(metadata: Record<string, unknown> | undefined): string {
+  const value = metadata?.root;
+  return typeof value === "string" ? value.trim() : "";
+}
+
+export function resolveWorkspaceWorkingDir(
+  workspace: WorkspaceRef | null | undefined,
+): string {
+  /*
+   * Return the on-disk path the workspace backend uses as its cwd.
+   *
+   * For Daytona/Modal sandboxes the locator is a sandbox ID and is not a
+   * usable filesystem path. Prefer metadata.root (which is updated to live
+   * inside a cloned repository when a GitHub repo is attached) so the value
+   * shown to the user matches the actual subprocess cwd.
+   */
+  if (!workspace) {
+    return "";
+  }
+  if (workspace.backend === "daytona" || workspace.backend === "modal") {
+    const root = metadataRoot(workspace.metadata);
+    if (root) {
+      return root;
+    }
+  }
+  return workspace.locator.trim();
+}

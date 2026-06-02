@@ -341,6 +341,12 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
   };
 
   createEffect(() => {
+    const workspace = props.workspace;
+    if (workspace && workspace.backend !== "local") {
+      // Sandbox roots (e.g. /workspace/repo) are not valid local paths and
+      // must not leak into the path-source draft.
+      return;
+    }
     if (props.workingDir) {
       setLocalDraft(props.workingDir);
     }

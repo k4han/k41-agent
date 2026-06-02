@@ -25,6 +25,7 @@ import {
   daytonaWorkspaceRef,
   localWorkspaceRef,
   modalWorkspaceRef,
+  resolveWorkspaceWorkingDir,
 } from "@/lib/workspace";
 import type {
   ActiveSession,
@@ -302,7 +303,7 @@ export function ChatPage() {
       return;
     }
 
-    setWorkingDir(value.locator.trim());
+    setWorkingDir(resolveWorkspaceWorkingDir(value));
     setWorkspaceRef(value);
   };
 

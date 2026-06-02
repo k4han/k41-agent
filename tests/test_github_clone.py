@@ -299,7 +299,7 @@ async def test_attach_github_to_daytona_workspace_invokes_clone(
     assert ref.metadata["repository_full_name"] == "acme/widgets"
     assert ref.metadata["default_branch"] == "develop"
     assert ref.metadata["repository_path"] == "acme/widgets"
-    assert ref.metadata["root"] == "workspace"
+    assert ref.metadata["root"] == "/workspace/acme/widgets"
 
 
 @pytest.mark.asyncio
@@ -345,6 +345,7 @@ async def test_attach_github_to_modal_workspace_invokes_clone(
     assert ref.label == "acme/widgets"
     assert ref.metadata["source"] == "github"
     assert ref.metadata["repository_path"] == "acme/widgets"
+    assert ref.metadata["root"] == "/workspace/acme/widgets"
 
 
 @pytest.mark.asyncio
@@ -562,3 +563,285 @@ async def test_installation_token_resolved_via_service(monkeypatch: pytest.Monke
     assert service.token_calls == [1234]
     assert ref.metadata["source"] == "github"
     assert ref.metadata["repository_full_name"] == "acme/widgets"
+
+
+@pytest.mark.asyncio
+async def test_attach_github_to_daytona_switching_repo_strips_old_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Re-attaching a different repo should reset the sandbox root, not nest."""
+    workspace = WorkspaceRef(
+        backend="daytona",
+        locator="sb-day-3",
+        label="daytona:sb-day-3",
+        metadata={
+            "root": "workspace/acme/old-repo",
+            "source": "github",
+            "repository_id": 100,
+            "repository_full_name": "acme/old-repo",
+            "default_branch": "main",
+            "repository_path": "acme/old-repo",
+        },
+    )
+    binding = FakeBinding(
+        repository_id=200,
+        full_name="acme/new-repo",
+        default_branch="main",
+        installation_id=0,
+    )
+    _patch_service(monkeypatch, binding)
+
+    captured: dict[str, Any] = {}
+    _patch_repository_cloner(
+        monkeypatch,
+        captured,
+        repository_path="acme/new-repo",
+    )
+
+    selection = GitHubRepositorySelection.from_binding(binding)
+    ref = await attach_github_repository_to_daytona_workspace(workspace, selection)
+
+    assert ref.metadata["repository_full_name"] == "acme/new-repo"
+    assert ref.metadata["repository_path"] == "acme/new-repo"
+    assert ref.metadata["root"] == "/workspace/acme/new-repo"
+
+
+@pytest.mark.asyncio
+async def test_attach_github_to_modal_switching_repo_strips_old_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Re-attaching a different repo should reset the sandbox root, not nest."""
+    workspace = WorkspaceRef(
+        backend="modal",
+        locator="sb-mod-3",
+        label="modal:sb-mod-3",
+        metadata={
+            "root": "/workspace/acme/old-repo",
+            "source": "github",
+            "repository_id": 101,
+            "repository_full_name": "acme/old-repo",
+            "default_branch": "main",
+            "repository_path": "acme/old-repo",
+        },
+    )
+    binding = FakeBinding(
+        repository_id=201,
+        full_name="acme/new-repo",
+        default_branch="main",
+        installation_id=0,
+    )
+    _patch_service(monkeypatch, binding)
+
+    captured: dict[str, Any] = {}
+    _patch_repository_cloner(
+        monkeypatch,
+        captured,
+        repository_path="acme/new-repo",
+    )
+
+    selection = GitHubRepositorySelection.from_binding(binding)
+    ref = await attach_github_repository_to_modal_workspace(workspace, selection)
+
+    assert ref.metadata["repository_full_name"] == "acme/new-repo"
+    assert ref.metadata["repository_path"] == "acme/new-repo"
+    assert ref.metadata["root"] == "/workspace/acme/new-repo"
+
+
+@pytest.mark.asyncio
+async def test_attach_github_to_local_workspace_does_not_rewrite_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The local backend already uses the repo path as the locator, so root
+    metadata should be left alone (other than the github source fields)."""
+    checkout_path = tmp_path / "acme" / "widgets"
+    checkout_path.mkdir(parents=True)
+
+    class FakeManager:
+        async def ensure_shared_checkout(self, *, full_name: str, token: str) -> Path:
+            return checkout_path
+
+    binding = FakeBinding(
+        repository_id=7,
+        full_name="acme/widgets",
+        default_branch="main",
+        installation_id=0,
+    )
+    _patch_service(monkeypatch, binding)
+
+    monkeypatch.setattr(
+        github_clone_module,
+        "_get_github_workspace_manager_cls",
+        lambda: FakeManager,
+    )
+
+    workspace = WorkspaceRef(
+        backend="local",
+        locator=str(tmp_path),
+        label=str(tmp_path),
+        metadata={"root": str(tmp_path)},
+    )
+
+    ref = await attach_github_repository_to_workspace(
+        workspace,
+        repository_id=7,
+    )
+
+    assert ref.backend == "local"
+    assert ref.metadata["source"] == "github"
+    assert "root" not in ref.metadata
+
+
+def test_workflow_context_uses_sandbox_root_for_daytona_workspace() -> None:
+    from agent.modules.workflows.run_config import WorkflowContext
+
+    workspace = WorkspaceRef(
+        backend="daytona",
+        locator="sb-1",
+        label="acme/widgets",
+        metadata={"root": "workspace/acme/widgets"},
+    )
+
+    ctx = WorkflowContext(workspace=workspace)
+
+    assert ctx.get_working_dir() == "workspace/acme/widgets"
+
+
+def test_workflow_context_uses_sandbox_root_for_modal_workspace() -> None:
+    from agent.modules.workflows.run_config import WorkflowContext
+
+    workspace = WorkspaceRef(
+        backend="modal",
+        locator="sb-1",
+        label="acme/widgets",
+        metadata={"root": "/workspace/acme/widgets"},
+    )
+
+    ctx = WorkflowContext(workspace=workspace)
+
+    assert ctx.get_working_dir() == "/workspace/acme/widgets"
+
+
+def test_workflow_context_falls_back_to_locator_when_root_missing() -> None:
+    from agent.modules.workflows.run_config import WorkflowContext
+
+    workspace = WorkspaceRef(
+        backend="daytona",
+        locator="sb-1",
+        label="daytona:sb-1",
+        metadata={},
+    )
+
+    ctx = WorkflowContext(workspace=workspace)
+
+    assert ctx.get_working_dir() == "workspace"
+
+
+def test_workflow_context_keeps_locator_for_local_workspace(tmp_path) -> None:
+    from agent.modules.workflows.run_config import WorkflowContext
+
+    locator = str(tmp_path / "acme" / "widgets")
+    workspace = WorkspaceRef(
+        backend="local",
+        locator=locator,
+        label="acme/widgets",
+        metadata={"root": locator},
+    )
+
+    ctx = WorkflowContext(workspace=workspace)
+
+    assert ctx.get_working_dir() == locator
+
+
+def test_tool_get_working_dir_prefers_sandbox_root_for_daytona() -> None:
+    from types import SimpleNamespace
+
+    from agent.modules.tools.langchain.working_dir import get_working_dir
+
+    workspace = WorkspaceRef(
+        backend="daytona",
+        locator="sb-1",
+        label="acme/widgets",
+        metadata={"root": "workspace/acme/widgets"},
+    )
+    runtime = SimpleNamespace(
+        context={
+            "workspace": workspace.model_dump(),
+            "working_dir": workspace.locator,
+        }
+    )
+
+    assert get_working_dir(runtime) == "workspace/acme/widgets"
+
+
+def test_tool_get_working_dir_prefers_sandbox_root_for_modal() -> None:
+    from types import SimpleNamespace
+
+    from agent.modules.tools.langchain.working_dir import get_working_dir
+
+    workspace = WorkspaceRef(
+        backend="modal",
+        locator="sb-1",
+        label="acme/widgets",
+        metadata={"root": "/workspace/acme/widgets"},
+    )
+    runtime = SimpleNamespace(
+        context={
+            "workspace": workspace.model_dump(),
+            "working_dir": workspace.locator,
+        }
+    )
+
+    assert get_working_dir(runtime) == "/workspace/acme/widgets"
+
+
+def test_tool_get_working_dir_keeps_locator_for_local_workspace(tmp_path) -> None:
+    from types import SimpleNamespace
+
+    from agent.modules.tools.langchain.working_dir import get_working_dir
+
+    locator = str(tmp_path / "acme" / "widgets")
+    workspace = WorkspaceRef(
+        backend="local",
+        locator=locator,
+        label="acme/widgets",
+        metadata={"root": locator},
+    )
+    runtime = SimpleNamespace(
+        context={
+            "workspace": workspace.model_dump(),
+            "working_dir": workspace.locator,
+        }
+    )
+
+    assert get_working_dir(runtime) == locator
+
+
+@pytest.mark.parametrize(
+    ("existing_root", "repository_path", "old_repository_path", "expected"),
+    [
+        ("workspace", "widgets", "", "/workspace/widgets"),
+        ("/workspace", "widgets", "", "/workspace/widgets"),
+        ("/workspace/", "widgets", "", "/workspace/widgets"),
+        ("/", "widgets", "", "/widgets"),
+        ("", "widgets", "", "/widgets"),
+        ("/workspace/old", "new", "old", "/workspace/new"),
+        ("/workspace/acme/old", "new", "old", "/workspace/acme/new"),
+        ("workspace", "", "", "/workspace"),
+        ("workspace", ".", "", "/workspace"),
+    ],
+)
+def test_join_sandbox_repository_root_paths(
+    existing_root: str,
+    repository_path: str,
+    old_repository_path: str,
+    expected: str,
+) -> None:
+    from agent.modules.workspaces.github_clone import _join_sandbox_repository_root
+
+    result = _join_sandbox_repository_root(
+        existing_root,
+        repository_path,
+        old_repository_path=old_repository_path,
+    )
+    assert result == expected
