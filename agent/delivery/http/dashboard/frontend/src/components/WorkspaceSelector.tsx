@@ -300,6 +300,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
     kind: string;
     thread_id: string | null;
     repository_id?: number;
+    backend?: string;
     workspace?: WorkspaceRef | null;
     locator?: string | null;
   } => {
@@ -311,6 +312,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
         kind: "github",
         thread_id: threadId,
         repository_id: Number(repositoryId()),
+        backend: back,
         workspace:
           back === "local"
             ? localWorkspaceRef(targetPath)
@@ -799,26 +801,77 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
               </Show>
             }
           >
-            <div class="workspace-selector-row">
-              <SelectControl
-                value={repositoryId()}
-                options={repositoryOptions()}
-                disabled={props.disabled || resolving() || repositoriesLoading() || !repositoryOptions().length}
-                onChange={setRepositoryId}
-                ariaLabel="GitHub repository"
-                title={selectedRepository()?.full_name || "Select repository"}
-                icon={<GitBranch size={14} />}
-              />
-              <button
-                class="btn btn-sm btn-primary"
-                type="button"
-                disabled={resolveDisabled()}
-                onClick={() => void resolveWorkspace()}
-              >
-                <CheckCircle2 size={13} />
-                {backend() === "local" ? "Use" : "Clone & use"}
-              </button>
-            </div>
+            <Show
+              when={backend() !== "local"}
+              fallback={
+                <div class="workspace-selector-row">
+                  <SelectControl
+                    value={repositoryId()}
+                    options={repositoryOptions()}
+                    disabled={props.disabled || resolving() || repositoriesLoading() || !repositoryOptions().length}
+                    onChange={setRepositoryId}
+                    ariaLabel="GitHub repository"
+                    title={selectedRepository()?.full_name || "Select repository"}
+                    icon={<GitBranch size={14} />}
+                  />
+                  <button
+                    class="btn btn-sm btn-primary"
+                    type="button"
+                    disabled={resolveDisabled()}
+                    onClick={() => void resolveWorkspace()}
+                  >
+                    <CheckCircle2 size={13} />
+                    Use
+                  </button>
+                </div>
+              }
+            >
+              <div class="workspace-selector-row-enhanced">
+                <div class="workspace-input-group">
+                  <input
+                    class="input workspace-selector-input"
+                    value={backend() === "daytona" ? daytonaSandboxId() : modalSandboxId()}
+                    disabled={props.disabled || resolving()}
+                    placeholder={`${backend() === "daytona" ? "Daytona" : "Modal"} sandbox ID (leave empty to create new)`}
+                    onInput={(event) => {
+                      if (backend() === "daytona") {
+                        setDaytonaSandboxId(event.currentTarget.value);
+                      } else {
+                        setModalSandboxId(event.currentTarget.value);
+                      }
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void resolveWorkspace();
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+              <div class="workspace-selector-row">
+                <SelectControl
+                  value={repositoryId()}
+                  options={repositoryOptions()}
+                  disabled={props.disabled || resolving() || repositoriesLoading() || !repositoryOptions().length}
+                  onChange={setRepositoryId}
+                  ariaLabel="GitHub repository"
+                  title={selectedRepository()?.full_name || "Select repository"}
+                  icon={<GitBranch size={14} />}
+                />
+                <button
+                  class="btn btn-sm btn-primary"
+                  type="button"
+                  disabled={resolveDisabled()}
+                  onClick={() => void resolveWorkspace()}
+                >
+                  <CheckCircle2 size={13} />
+                  {(backend() === "daytona" ? daytonaSandboxId() : modalSandboxId()).trim()
+                    ? "Attach & clone"
+                    : "Create & clone"}
+                </button>
+              </div>
+            </Show>
               <Show when={repositoriesError() || (!repositoriesLoading() && !repositories().length)}>
                 <div class="hint workspace-selector-hint">
                   {repositoriesError() || "No synced GitHub repositories."}
