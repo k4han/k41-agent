@@ -730,13 +730,13 @@ class DaytonaWorkspaceBackend:
 
         The clone URL embeds an installation token when provided so the sandbox
         can fetch private repositories. Returns the path relative to ``self.root``
-        (for example ``"owner/repo"``).
+        (for example ``"repo"``).
         """
         if not owner or not repo:
             raise ValueError("Repository owner and name are required.")
         self.ensure_active()
         self.ensure_root()
-        relative = f"{owner}/{repo}"
+        relative = repo
         destination = resolve_daytona_path(self.root, relative)
         branch = (default_branch or "main").strip() or "main"
         depth_flag = f"--depth={int(depth)}" if depth and int(depth) > 0 else ""

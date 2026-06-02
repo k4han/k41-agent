@@ -689,6 +689,69 @@ def test_modal_workspace_backend_file_operations_and_path_guard():
     asyncio.run(_run())
 
 
+def test_daytona_clone_repository_uses_repo_only_relative_path():
+    import asyncio
+
+    async def _run():
+        sandbox = FakeDaytonaSandbox()
+        workspace = WorkspaceRef(
+            backend="daytona",
+            locator="sandbox-1",
+            label="sandbox",
+            metadata={"root": "workspace"},
+        )
+        backend = DaytonaWorkspaceBackend(workspace, sandbox=sandbox)
+
+        relative = backend.clone_repository(
+            owner="acme",
+            repo="widgets",
+            default_branch="main",
+            token="install-token",
+        )
+
+        assert relative == "widgets"
+        clone_commands = [
+            cmd for cmd, _, _ in sandbox.process.commands if cmd.startswith("git clone")
+        ]
+        assert clone_commands, sandbox.process.commands
+        for cmd in clone_commands:
+            assert cmd.rstrip().endswith("/workspace/widgets")
+
+    asyncio.run(_run())
+
+
+def test_modal_clone_repository_uses_repo_only_relative_path():
+    import asyncio
+
+    async def _run():
+        sandbox = FakeModalSandbox()
+        fs = sandbox.filesystem
+        workspace = WorkspaceRef(
+            backend="modal",
+            locator="sb-1",
+            label="sandbox",
+            metadata={"root": "/workspace"},
+        )
+        backend = ModalWorkspaceBackend(workspace, sandbox=sandbox, fs=fs)
+
+        relative = await backend.clone_repository(
+            owner="acme",
+            repo="widgets",
+            default_branch="main",
+            token="install-token",
+        )
+
+        assert relative == "widgets"
+        clone_commands = [
+            cmd for cmd, _, _ in sandbox.commands if cmd.startswith("git clone")
+        ]
+        assert clone_commands, sandbox.commands
+        for cmd in clone_commands:
+            assert cmd.rstrip().endswith("/workspace/widgets")
+
+    asyncio.run(_run())
+
+
 def test_daytona_workspace_backend_starts_stopped_sandbox():
     sandbox = FakeDaytonaSandbox(state="stopped")
     workspace = WorkspaceRef(

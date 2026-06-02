@@ -398,7 +398,7 @@ class ModalWorkspaceBackend:
             raise ValueError("Repository owner and name are required.")
         self.touch()
         await self.ensure_root()
-        relative = f"{owner}/{repo}"
+        relative = repo
         destination = resolve_modal_path(self.root, relative)
         branch = (default_branch or "main").strip() or "main"
         depth_flag = f"--depth={int(depth)}" if depth and int(depth) > 0 else ""
