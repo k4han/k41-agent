@@ -3,6 +3,7 @@ import { For, Show } from "solid-js";
 
 import { TranscriptItemView } from "@/components/Transcript";
 import { WorkspaceSelector } from "@/components/WorkspaceSelector";
+import type { WorkspaceSelectionDraft } from "@/components/WorkspaceSelector";
 import type { ChatTranscriptItem } from "@/lib/chatStreamStore";
 import type { WorkspaceRef } from "@/types";
 
@@ -21,8 +22,9 @@ export interface ChatTranscriptProps {
   workingDir: string;
   defaultWorkingDir: string;
   workspace: WorkspaceRef | null;
+  workspaceSelection: WorkspaceSelectionDraft | null;
   conversationBusy: boolean;
-  onWorkspaceResolved: (value: WorkspaceRef | string | null) => void;
+  onWorkspaceSelectionChange: (value: WorkspaceSelectionDraft) => void;
   onEditMessage: (payload: {
     itemId?: number;
     messageIndex: number;
@@ -50,11 +52,11 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                     <WorkspaceSelector
                       workingDir={props.workingDir}
                       defaultWorkingDir={props.defaultWorkingDir}
-                      threadId={props.currentThreadId}
                       workspace={props.workspace}
+                      selection={props.workspaceSelection}
                       locked={false}
                       disabled={props.conversationBusy}
-                      onResolved={props.onWorkspaceResolved}
+                      onSelectionChange={props.onWorkspaceSelectionChange}
                     />
                   </div>
                 </Show>

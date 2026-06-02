@@ -10,6 +10,7 @@ import { AppShell } from "@/components/AppShell";
 import { ChatComposer } from "@/components/ChatComposer";
 import { ChatThreadBadges } from "@/components/ChatThreadBadges";
 import { ChatTranscript } from "@/components/ChatTranscript";
+import type { WorkspaceSelectionDraft } from "@/components/WorkspaceSelector";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
 import { WorkspaceExplorer } from "@/components/WorkspaceExplorer";
@@ -20,7 +21,11 @@ import {
   toThreadTranscript,
 } from "@/lib/chatThreads";
 import type { ThreadMessagesPayload } from "@/lib/chatThreads";
-import { localWorkspaceRef } from "@/lib/workspace";
+import {
+  daytonaWorkspaceRef,
+  localWorkspaceRef,
+  modalWorkspaceRef,
+} from "@/lib/workspace";
 import type {
   ActiveSession,
   AgentCard,
@@ -63,6 +68,44 @@ import { useChatAttachments } from "@/lib/useChatAttachments";
 import { useContextWindow } from "@/lib/useContextWindow";
 import { useBackgroundStream } from "@/lib/useBackgroundStream";
 
+const INITIALIZING_ENVIRONMENT_TEXT = "Initializing environment...";
+const THINKING_TEXT = "Thinking...";
+
+type WorkspaceResolveRequest = {
+  kind: string;
+  thread_id: string | null;
+  repository_id?: number;
+  backend?: string;
+  workspace?: WorkspaceRef | null;
+  locator?: string | null;
+};
+
+function workspaceSelectionReady(selection: WorkspaceSelectionDraft | null): boolean {
+  if (!selection) {
+    return false;
+  }
+  if (selection.source === "path") {
+    return Boolean(selection.localPath.trim());
+  }
+  if (selection.source === "github") {
+    return selection.repositoryId !== null;
+  }
+  return selection.backend === "daytona" || selection.backend === "modal";
+}
+
+function workspaceSelectionLocator(selection: WorkspaceSelectionDraft): string {
+  if (selection.source === "path") {
+    return selection.localPath.trim();
+  }
+  if (selection.source === "github") {
+    return selection.repositoryFullName || selection.label;
+  }
+  const sandboxId = selection.backend === "daytona"
+    ? selection.daytonaSandboxId
+    : selection.modalSandboxId;
+  return sandboxId || selection.label;
+}
+
 export function ChatPage() {
   const navigate = useNavigate();
   const params = useParams<{ threadId?: string }>();
@@ -84,6 +127,7 @@ export function ChatPage() {
   const [model, setModel] = createSignal("");
   const [workingDir, setWorkingDir] = createSignal("");
   const [workspaceRef, setWorkspaceRef] = createSignal<WorkspaceRef | null>(null);
+  const [workspaceSelection, setWorkspaceSelection] = createSignal<WorkspaceSelectionDraft | null>(null);
   const [defaultWorkingDir, setDefaultWorkingDir] = createSignal("");
   const [defaultWorkspace, setDefaultWorkspace] = createSignal<WorkspaceRef | null>(null);
   const [prompt, setPrompt] = createSignal("");
@@ -164,6 +208,8 @@ export function ChatPage() {
     setLocalItems,
     appendItem,
     updateMessage,
+    replaceMessage,
+    removeItem,
     updateToolResult,
   } = streams;
 
@@ -236,6 +282,7 @@ export function ChatPage() {
   };
 
   const setWorkspace = (value: WorkspaceRef | string | null) => {
+    setWorkspaceSelection(null);
     if (!value) {
       setWorkingDir("");
       setWorkspaceRef(null);
@@ -251,6 +298,91 @@ export function ChatPage() {
 
     setWorkingDir(value.locator.trim());
     setWorkspaceRef(value);
+  };
+
+  const setWorkspaceDraft = (selection: WorkspaceSelectionDraft) => {
+    setWorkspaceSelection(selection);
+    setWorkspaceRef(null);
+    setWorkingDir(workspaceSelectionLocator(selection));
+  };
+
+  const buildWorkspaceResolvePayload = (
+    selection: WorkspaceSelectionDraft,
+  ): WorkspaceResolveRequest => {
+    const threadId = currentThreadId() || null;
+    if (selection.source === "github") {
+      return {
+        kind: "github",
+        thread_id: threadId,
+        repository_id: selection.repositoryId ?? undefined,
+        backend: selection.backend,
+        workspace:
+          selection.backend === "local"
+            ? localWorkspaceRef(selection.localPath)
+            : selection.backend === "daytona"
+              ? daytonaWorkspaceRef(selection.daytonaSandboxId)
+              : modalWorkspaceRef(selection.modalSandboxId),
+        locator:
+          selection.backend === "local"
+            ? selection.localPath || null
+            : selection.backend === "daytona"
+              ? selection.daytonaSandboxId || null
+              : selection.modalSandboxId || null,
+      };
+    }
+    if (selection.backend === "local") {
+      return {
+        kind: "local",
+        thread_id: threadId,
+        workspace: localWorkspaceRef(selection.localPath),
+      };
+    }
+    if (selection.backend === "daytona") {
+      return {
+        kind: "daytona",
+        thread_id: threadId,
+        workspace: daytonaWorkspaceRef(selection.daytonaSandboxId),
+        locator: selection.daytonaSandboxId || null,
+      };
+    }
+    return {
+      kind: "modal",
+      thread_id: threadId,
+      workspace: modalWorkspaceRef(selection.modalSandboxId),
+      locator: selection.modalSandboxId || null,
+    };
+  };
+
+  const resolveWorkspaceForSend = async (): Promise<WorkspaceRef> => {
+    const currentWorkspace = workspaceRef();
+    if (currentWorkspace) {
+      return currentWorkspace;
+    }
+
+    const selection = workspaceSelection();
+    let payload: WorkspaceResolveRequest | null = null;
+    if (workspaceSelectionReady(selection)) {
+      payload = buildWorkspaceResolvePayload(selection!);
+    } else {
+      const localWorkspace = localWorkspaceRef(workingDir());
+      if (localWorkspace) {
+        payload = {
+          kind: "local",
+          thread_id: currentThreadId() || null,
+          workspace: localWorkspace,
+        };
+      }
+    }
+    if (!payload) {
+      throw new Error("Select a workspace before sending.");
+    }
+
+    const response = await postJson<WorkspaceResolvePayload>(
+      "/dashboard-api/workspace/resolve",
+      payload,
+    );
+    setWorkspace(response.workspace);
+    return response.workspace;
   };
 
   const loadDefaultWorkspace = async () => {
@@ -324,6 +456,8 @@ export function ChatPage() {
   const streamCallbacks: StreamCallbacks = {
     appendItem,
     updateMessage,
+    replaceMessage,
+    removeItem,
     updateToolResult,
     onError: (message) => showToast(message, "error"),
     setRecursionLimitReached: (v) => setRecursionLimitReached(v),
@@ -355,7 +489,12 @@ export function ChatPage() {
     streaming() || threadLoading() || backgroundTaskActive() || backgroundLive()
   ));
   const workspaceLocked = createMemo(() => Boolean(currentThreadId() && workingDir().trim()));
-  const workspaceMissing = createMemo(() => !workingDir().trim());
+  const workspaceReady = createMemo(() => (
+    Boolean(workspaceRef())
+    || workspaceSelectionReady(workspaceSelection())
+    || Boolean(localWorkspaceRef(workingDir()))
+  ));
+  const workspaceMissing = createMemo(() => !workspaceReady());
   const composerDisabled = createMemo(() => (
     conversationBusy() || workspaceMissing()
   ));
@@ -447,18 +586,7 @@ export function ChatPage() {
   createEffect(() => {
     const defWs = defaultWorkspace();
     if (!currentThreadId() && !workingDir().trim() && defWs) {
-      const autoResolve = async () => {
-        try {
-          const resolved = await postJson<WorkspaceResolvePayload>(
-            "/dashboard-api/workspace/resolve",
-            { kind: defWs.backend || "local", workspace: defWs },
-          );
-          setWorkspace(resolved.workspace);
-        } catch {
-          setWorkspace(defWs);
-        }
-      };
-      void autoResolve();
+      setWorkspace(defWs);
     }
   });
 
@@ -500,7 +628,11 @@ export function ChatPage() {
     void loadThread(threadId);
   });
 
-  const buildPayload = (message: string, attachedFiles: ChatAttachmentPayload[]) => {
+  const buildPayload = (
+    message: string,
+    attachedFiles: ChatAttachmentPayload[],
+    resolvedWorkspace?: WorkspaceRef | null,
+  ) => {
     const payload: ChatPayload = {
       message,
       user_id: "dashboard",
@@ -512,7 +644,7 @@ export function ChatPage() {
     if (model()) {
       payload.model = model();
     }
-    const workspace = workspaceRef() || localWorkspaceRef(workingDir());
+    const workspace = resolvedWorkspace || workspaceRef() || localWorkspaceRef(workingDir());
     if (workspace) {
       payload.workspace = workspace;
     }
@@ -577,7 +709,7 @@ export function ChatPage() {
       showToast("No valid agent is available.", "error");
       return;
     }
-    if (!workingDir().trim()) {
+    if (workspaceMissing()) {
       showToast("Select a workspace before sending.", "warning");
       return;
     }
@@ -607,6 +739,7 @@ export function ChatPage() {
       setPrompt("");
       clearAttachments(selectedAttachments);
     }
+
     const abortController = new AbortController();
     setController(abortController, streamThreadIdRef.id);
     setStreaming(true, streamThreadIdRef.id);
@@ -625,11 +758,36 @@ export function ChatPage() {
       );
     }
 
-    const assistantIdRef: AssistantIdRef = { id: null };
+    const needsWorkspaceResolution = !resume && !workspaceRef();
+    const statusMessageId = !resume
+      ? appendItem(
+          {
+            type: "message",
+            role: "assistant",
+            text: needsWorkspaceResolution ? INITIALIZING_ENVIRONMENT_TEXT : THINKING_TEXT,
+          },
+          "bottom",
+          streamThreadIdRef.id,
+        )
+      : null;
+    const assistantIdRef: AssistantIdRef = { id: statusMessageId };
     const streamedRef: StreamedRef = { received: false };
+    const removePendingAssistantStatus = () => {
+      if (assistantIdRef.id !== null && !streamedRef.received) {
+        removeItem(assistantIdRef.id, streamThreadIdRef.id);
+        assistantIdRef.id = null;
+      }
+    };
 
     try {
-      const payload = buildPayload(message, resume ? [] : attachedFiles);
+      const resolvedWorkspace = resume
+        ? workspaceRef() || localWorkspaceRef(workingDir())
+        : await resolveWorkspaceForSend();
+      if (statusMessageId !== null) {
+        replaceMessage(statusMessageId, THINKING_TEXT, streamThreadIdRef.id);
+      }
+
+      const payload = buildPayload(message, resume ? [] : attachedFiles, resolvedWorkspace);
       if (resume) {
         (payload as any).resume = true;
         payload.message = "";
@@ -656,10 +814,12 @@ export function ChatPage() {
       );
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
+        removePendingAssistantStatus();
         if (!isUnmounting) {
           showToast("Response stopped.", "warning");
         }
       } else {
+        removePendingAssistantStatus();
         appendItem({
           type: "message",
           role: "error",
@@ -1075,8 +1235,9 @@ export function ChatPage() {
                 workingDir={workingDir()}
                 defaultWorkingDir={defaultWorkingDir()}
                 workspace={workspaceRef()}
+                workspaceSelection={workspaceSelection()}
                 conversationBusy={conversationBusy()}
-                onWorkspaceResolved={setWorkspace}
+                onWorkspaceSelectionChange={setWorkspaceDraft}
                 onEditMessage={(payload) => void handleEditMessage(payload)}
                 onBranchSelect={handleBranchSelect}
               />
@@ -1131,6 +1292,7 @@ export function ChatPage() {
                 workspace={workspaceRef()}
                 disabled={
                   conversationBusy()
+                  || !workspaceRef()
                   || !(workspaceRef()?.locator || workingDir()).trim()
                   || !currentThreadId()
                   || (workspaceLocked() && workspaceRef()?.backend !== "modal")

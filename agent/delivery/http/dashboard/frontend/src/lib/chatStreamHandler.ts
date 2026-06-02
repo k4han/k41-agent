@@ -7,6 +7,8 @@ import type { AppendScrollMode } from "@/lib/chatTypes";
 export interface StreamCallbacks {
   appendItem: (item: TranscriptItem, mode: AppendScrollMode, threadId?: string) => number;
   updateMessage: (id: number, chunk: string, threadId?: string) => void;
+  replaceMessage?: (id: number, text: string, threadId?: string) => void;
+  removeItem?: (id: number, threadId?: string) => void;
   updateToolResult: (toolCallId: string, name: string, result: unknown, threadId?: string) => void;
   onError?: (message: string, code?: string) => void;
   setRecursionLimitReached: (value: boolean) => void;
@@ -49,12 +51,20 @@ export function handleStreamEvent(
         streamThreadIdRef.id,
       );
     }
+    if (!streamedRef.received && callbacks.replaceMessage) {
+      callbacks.replaceMessage(assistantIdRef.id, content, streamThreadIdRef.id);
+      streamedRef.received = true;
+      return;
+    }
     streamedRef.received = true;
     callbacks.updateMessage(assistantIdRef.id, content, streamThreadIdRef.id);
     return;
   }
 
   if (event.type === "tool_call") {
+    if (assistantIdRef.id !== null && !streamedRef.received) {
+      callbacks.removeItem?.(assistantIdRef.id, streamThreadIdRef.id);
+    }
     callbacks.appendItem(
       createTranscriptTool({
         toolCallId: String(event.id || ""),
@@ -82,6 +92,10 @@ export function handleStreamEvent(
   if (event.type === "error") {
     const errorMessage = String(event.content || event.message || "Chat failed");
     const errorCode = typeof event.code === "string" ? event.code : undefined;
+    if (assistantIdRef.id !== null && !streamedRef.received) {
+      callbacks.removeItem?.(assistantIdRef.id, streamThreadIdRef.id);
+      assistantIdRef.id = null;
+    }
     callbacks.appendItem(
       {
         type: "message",
@@ -118,6 +132,11 @@ export function handleStreamEvent(
         "bottom",
         streamThreadIdRef.id,
       );
+    }
+    if (!streamedRef.received && callbacks.replaceMessage) {
+      callbacks.replaceMessage(assistantIdRef.id, content, streamThreadIdRef.id);
+      streamedRef.received = true;
+      return;
     }
     callbacks.updateMessage(assistantIdRef.id, content, streamThreadIdRef.id);
   }

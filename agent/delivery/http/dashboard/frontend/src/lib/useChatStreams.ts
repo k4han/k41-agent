@@ -122,6 +122,30 @@ export function useChatStreams(params: UseChatStreamsParams) {
     }
   };
 
+  const replaceMessage = (id: number, text: string, targetThreadId?: string) => {
+    setItems(
+      (current) =>
+        current.map((item) =>
+          item.id === id && item.type === "message"
+            ? { ...item, text }
+            : item,
+        ),
+      targetThreadId,
+    );
+    const isCurrent = !getIsUnmounting() && (!targetThreadId || targetThreadId === getCurrentThreadId());
+    if (isCurrent) {
+      scroll.scrollToBottom();
+    }
+  };
+
+  const removeItem = (id: number, targetThreadId?: string) => {
+    setItems((current) => current.filter((item) => item.id !== id), targetThreadId);
+    const isCurrent = !getIsUnmounting() && (!targetThreadId || targetThreadId === getCurrentThreadId());
+    if (isCurrent) {
+      scroll.scrollToBottom();
+    }
+  };
+
   const updateToolResult = (
     toolCallId: string,
     name: string,
@@ -162,6 +186,8 @@ export function useChatStreams(params: UseChatStreamsParams) {
     setLocalItems,
     appendItem,
     updateMessage,
+    replaceMessage,
+    removeItem,
     updateToolResult,
   };
 }

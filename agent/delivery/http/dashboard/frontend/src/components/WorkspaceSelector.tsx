@@ -18,11 +18,8 @@ import { SelectControl } from "@/components/SelectControl";
 import { useToast } from "@/components/Toast";
 import { apiFetch, postJson } from "@/lib/api";
 import {
-  daytonaWorkspaceRef,
   formatWorkspaceRoot,
   isGitHubWorkspace,
-  localWorkspaceRef,
-  modalWorkspaceRef,
   workspaceDisplayLabel,
   workspaceDisplayLabelFromValues,
 } from "@/lib/workspace";
@@ -45,41 +42,45 @@ type WorkspaceBrowsePayload = {
   truncated: boolean;
 };
 
-type WorkspaceResolvePayload = {
-  kind: string;
-  label: string;
-  workspace: WorkspaceRef;
-  is_github_source?: boolean;
-};
+export type WorkspaceBackendKey = "local" | "daytona" | "modal";
+export type WorkspaceSourceKey = "path" | "sandbox" | "github";
 
-type BackendKey = "local" | "daytona" | "modal";
-type SourceKey = "path" | "sandbox" | "github";
+export type WorkspaceSelectionDraft = {
+  backend: WorkspaceBackendKey;
+  source: WorkspaceSourceKey;
+  localPath: string;
+  daytonaSandboxId: string;
+  modalSandboxId: string;
+  repositoryId: number | null;
+  repositoryFullName: string;
+  label: string;
+};
 
 export interface WorkspaceSelectorProps {
   workingDir: string;
   defaultWorkingDir: string;
-  threadId?: string;
   workspace?: WorkspaceRef | null;
+  selection?: WorkspaceSelectionDraft | null;
   locked: boolean;
   disabled?: boolean;
-  onResolved: (workspace: WorkspaceRef) => void;
+  onSelectionChange: (selection: WorkspaceSelectionDraft) => void;
 }
 
-function sourceForBackend(backend: BackendKey): SourceKey[] {
+function sourceForBackend(backend: WorkspaceBackendKey): WorkspaceSourceKey[] {
   if (backend === "local") {
     return ["path", "github"];
   }
   return ["sandbox", "github"];
 }
 
-function defaultSourceForBackend(backend: BackendKey): SourceKey {
+function defaultSourceForBackend(backend: WorkspaceBackendKey): WorkspaceSourceKey {
   if (backend === "local") {
     return "path";
   }
   return "sandbox";
 }
 
-function backendFromWorkspace(workspace: WorkspaceRef | null | undefined): BackendKey {
+function backendFromWorkspace(workspace: WorkspaceRef | null | undefined): WorkspaceBackendKey {
   if (workspace?.backend === "daytona" || workspace?.backend === "modal") {
     return workspace.backend;
   }
@@ -87,9 +88,9 @@ function backendFromWorkspace(workspace: WorkspaceRef | null | undefined): Backe
 }
 
 function sourceFromWorkspace(
-  backend: BackendKey,
+  backend: WorkspaceBackendKey,
   workspace: WorkspaceRef | null | undefined,
-): SourceKey {
+): WorkspaceSourceKey {
   if (isGitHubWorkspace(workspace)) {
     return "github";
   }
@@ -98,8 +99,8 @@ function sourceFromWorkspace(
 
 export function WorkspaceSelector(props: WorkspaceSelectorProps) {
   const { showToast } = useToast();
-  const [backend, setBackend] = createSignal<BackendKey>("local");
-  const [source, setSource] = createSignal<SourceKey>("path");
+  const [backend, setBackend] = createSignal<WorkspaceBackendKey>("local");
+  const [source, setSource] = createSignal<WorkspaceSourceKey>("path");
   const [localDraft, setLocalDraft] = createSignal(props.defaultWorkingDir);
   const [daytonaSandboxId, setDaytonaSandboxId] = createSignal("");
   const [modalSandboxId, setModalSandboxId] = createSignal("");
@@ -107,7 +108,6 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
   const [repositoryId, setRepositoryId] = createSignal("");
   const [repositoriesLoading, setRepositoriesLoading] = createSignal(false);
   const [repositoriesError, setRepositoriesError] = createSignal("");
-  const [resolving, setResolving] = createSignal(false);
   const [resolvedLabel, setResolvedLabel] = createSignal("");
   const [browserOpen, setBrowserOpen] = createSignal(false);
   const [browsePayload, setBrowsePayload] = createSignal<WorkspaceBrowsePayload | null>(null);
@@ -190,14 +190,15 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
   );
   const workspaceStatusLabel = createMemo(() =>
     workspaceDisplayLabel(props.workspace)
+    || props.selection?.label
     || workspaceDisplayLabelFromValues(resolvedLabel(), props.workingDir || resolvedLabel()),
   );
   const workspaceStatusTitle = createMemo(() =>
-    props.workingDir || resolvedLabel() || workspaceStatusLabel(),
+    props.workingDir || props.selection?.label || resolvedLabel() || workspaceStatusLabel(),
   );
 
   const resolveDisabled = createMemo(() => {
-    if (props.disabled || resolving()) {
+    if (props.disabled) {
       return true;
     }
     const src = source();
@@ -267,7 +268,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
     if (payload?.path) {
       setLocalDraft(payload.path);
       closeBrowser();
-      void resolveWorkspace(payload.path);
+      commitSelection(payload.path);
     }
   };
 
@@ -294,65 +295,37 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
     }
   };
 
-  const buildResolvePayload = (
-    targetPath: string,
-  ): {
-    kind: string;
-    thread_id: string | null;
-    repository_id?: number;
-    backend?: string;
-    workspace?: WorkspaceRef | null;
-    locator?: string | null;
-  } => {
-    const threadId = props.threadId || null;
+  const buildSelection = (targetPath: string): WorkspaceSelectionDraft => {
     const src = source();
     const back = backend();
+    const repository = selectedRepository();
+    const sandboxId = back === "daytona" ? daytonaSandboxId().trim() : modalSandboxId().trim();
+    let label = "";
     if (src === "github") {
-      return {
-        kind: "github",
-        thread_id: threadId,
-        repository_id: Number(repositoryId()),
-        backend: back,
-        workspace:
-          back === "local"
-            ? localWorkspaceRef(targetPath)
-            : back === "daytona"
-              ? daytonaWorkspaceRef(daytonaSandboxId())
-              : modalWorkspaceRef(modalSandboxId()),
-        locator:
-          back === "local"
-            ? targetPath || null
-            : back === "daytona"
-              ? daytonaSandboxId().trim() || null
-              : modalSandboxId().trim() || null,
-      };
+      label = repository?.full_name || "GitHub repository";
+    } else if (src === "path") {
+      label = workspaceDisplayLabelFromValues("", targetPath);
+    } else if (sandboxId) {
+      label = `${back}:${sandboxId}`;
+    } else {
+      label = `${back === "daytona" ? "Daytona" : "Modal"} sandbox (new)`;
     }
-    if (back === "local") {
-      return {
-        kind: "local",
-        thread_id: threadId,
-        workspace: localWorkspaceRef(targetPath),
-      };
-    }
-    if (back === "daytona") {
-      return {
-        kind: "daytona",
-        thread_id: threadId,
-        workspace: daytonaWorkspaceRef(daytonaSandboxId()),
-        locator: daytonaSandboxId().trim() || null,
-      };
-    }
+
     return {
-      kind: "modal",
-      thread_id: threadId,
-      workspace: modalWorkspaceRef(modalSandboxId()),
-      locator: modalSandboxId().trim() || null,
+      backend: back,
+      source: src,
+      localPath: targetPath.trim(),
+      daytonaSandboxId: daytonaSandboxId().trim(),
+      modalSandboxId: modalSandboxId().trim(),
+      repositoryId: repositoryId() ? Number(repositoryId()) : null,
+      repositoryFullName: repository?.full_name || "",
+      label,
     };
   };
 
-  const resolveWorkspace = async (pathOverride?: string) => {
+  const commitSelection = (pathOverride?: string) => {
     const targetPath = pathOverride !== undefined ? pathOverride : localDraft();
-    if (props.disabled || resolving()) {
+    if (props.disabled) {
       return;
     }
     if (source() === "path" && !targetPath.trim()) {
@@ -361,29 +334,10 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
     if (source() === "github" && !repositoryId()) {
       return;
     }
-    setResolving(true);
-    try {
-      const payload = buildResolvePayload(targetPath);
-      const response = await postJson<WorkspaceResolvePayload>(
-        "/dashboard-api/workspace/resolve",
-        payload,
-      );
-      const resolved = response.workspace;
-      if (resolved.backend === "daytona") {
-        setDaytonaSandboxId(resolved.locator);
-      } else if (resolved.backend === "modal") {
-        setModalSandboxId(resolved.locator);
-      } else {
-        setLocalDraft(resolved.locator);
-      }
-      setResolvedLabel(response.label || resolved.label || resolved.locator);
-      props.onResolved(resolved);
-      showToast("Workspace selected.", "success");
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Workspace selection failed", "error");
-    } finally {
-      setResolving(false);
-    }
+    const selection = buildSelection(targetPath);
+    setResolvedLabel(selection.label);
+    props.onSelectionChange(selection);
+    showToast("Workspace selected.", "success");
   };
 
   createEffect(() => {
@@ -394,7 +348,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
 
   createEffect(() => {
     const workspace = props.workspace;
-    if (!workspace) {
+    if (!workspace || props.selection) {
       return;
     }
     const back = backendFromWorkspace(workspace);
@@ -405,6 +359,20 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
     } else if (workspace.backend === "modal") {
       setModalSandboxId(workspace.locator);
     }
+  });
+
+  createEffect(() => {
+    const selection = props.selection;
+    if (!selection) {
+      return;
+    }
+    setBackend(selection.backend);
+    setSource(selection.source);
+    setLocalDraft(selection.localPath);
+    setDaytonaSandboxId(selection.daytonaSandboxId);
+    setModalSandboxId(selection.modalSandboxId);
+    setRepositoryId(selection.repositoryId === null ? "" : String(selection.repositoryId));
+    setResolvedLabel(selection.label);
   });
 
   createEffect(() => {
@@ -441,7 +409,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
             <button
               class={`workspace-selector-mode ${backend() === "local" ? "active" : ""}`}
               type="button"
-              disabled={props.disabled || resolving()}
+              disabled={props.disabled}
               onClick={() => setBackend("local")}
               aria-selected={backend() === "local"}
               role="tab"
@@ -452,7 +420,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
             <button
               class={`workspace-selector-mode ${backend() === "daytona" ? "active" : ""}`}
               type="button"
-              disabled={props.disabled || resolving()}
+              disabled={props.disabled}
               onClick={() => setBackend("daytona")}
               aria-selected={backend() === "daytona"}
               role="tab"
@@ -463,7 +431,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
             <button
               class={`workspace-selector-mode ${backend() === "modal" ? "active" : ""}`}
               type="button"
-              disabled={props.disabled || resolving()}
+              disabled={props.disabled}
               onClick={() => setBackend("modal")}
               aria-selected={backend() === "modal"}
               role="tab"
@@ -479,7 +447,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
                 <button
                   class={`workspace-selector-source ${source() === src ? "active" : ""}`}
                   type="button"
-                  disabled={props.disabled || resolving()}
+                  disabled={props.disabled}
                   onClick={() => setSource(src)}
                   aria-selected={source() === src}
                   role="tab"
@@ -525,13 +493,13 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
                   <input
                     class="input workspace-selector-input"
                     value={formatWorkspaceRoot(localDraft())}
-                    disabled={props.disabled || resolving()}
+                    disabled={props.disabled}
                     placeholder="Working directory"
                     onInput={(event) => setLocalDraft(event.currentTarget.value)}
                     onKeyDown={(event) => {
                       if (event.key === "Enter") {
                         event.preventDefault();
-                        void resolveWorkspace();
+                        commitSelection();
                       }
                     }}
                   />
@@ -539,7 +507,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
                     class="workspace-input-btn-browse"
                     type="button"
                     title="Browse folder"
-                    disabled={props.disabled || resolving()}
+                    disabled={props.disabled}
                     onClick={openBrowser}
                   >
                     <FolderOpen size={14} />
@@ -549,7 +517,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
                   class="btn btn-sm btn-primary workspace-use-btn"
                   type="button"
                   disabled={resolveDisabled()}
-                  onClick={() => void resolveWorkspace()}
+                  onClick={() => commitSelection()}
                 >
                   <CheckCircle2 size={13} />
                   Use
@@ -746,13 +714,13 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
                         <input
                           class="input workspace-selector-input"
                           value={modalSandboxId()}
-                          disabled={props.disabled || resolving()}
+                          disabled={props.disabled}
                           placeholder="Sandbox ID"
                           onInput={(event) => setModalSandboxId(event.currentTarget.value)}
                           onKeyDown={(event) => {
                             if (event.key === "Enter") {
                               event.preventDefault();
-                              void resolveWorkspace();
+                              commitSelection();
                             }
                           }}
                         />
@@ -761,7 +729,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
                         class="btn btn-sm btn-primary workspace-use-btn"
                         type="button"
                         disabled={resolveDisabled()}
-                        onClick={() => void resolveWorkspace()}
+                        onClick={() => commitSelection()}
                         title={modalSandboxId().trim() ? "Attach sandbox" : "Create sandbox"}
                       >
                         <Cloud size={13} />
@@ -776,13 +744,13 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
                     <input
                       class="input workspace-selector-input"
                       value={daytonaSandboxId()}
-                      disabled={props.disabled || resolving()}
+                      disabled={props.disabled}
                       placeholder="Sandbox ID"
                       onInput={(event) => setDaytonaSandboxId(event.currentTarget.value)}
                       onKeyDown={(event) => {
                         if (event.key === "Enter") {
                           event.preventDefault();
-                          void resolveWorkspace();
+                          commitSelection();
                         }
                       }}
                     />
@@ -791,7 +759,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
                     class="btn btn-sm btn-primary workspace-use-btn"
                     type="button"
                     disabled={resolveDisabled()}
-                    onClick={() => void resolveWorkspace()}
+                    onClick={() => commitSelection()}
                     title={daytonaSandboxId().trim() ? "Attach sandbox" : "Create sandbox"}
                   >
                     <Cloud size={13} />
@@ -808,7 +776,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
                   <SelectControl
                     value={repositoryId()}
                     options={repositoryOptions()}
-                    disabled={props.disabled || resolving() || repositoriesLoading() || !repositoryOptions().length}
+                    disabled={props.disabled || repositoriesLoading() || !repositoryOptions().length}
                     onChange={setRepositoryId}
                     ariaLabel="GitHub repository"
                     title={selectedRepository()?.full_name || "Select repository"}
@@ -818,7 +786,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
                     class="btn btn-sm btn-primary"
                     type="button"
                     disabled={resolveDisabled()}
-                    onClick={() => void resolveWorkspace()}
+                    onClick={() => commitSelection()}
                   >
                     <CheckCircle2 size={13} />
                     Use
@@ -831,7 +799,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
                   <input
                     class="input workspace-selector-input"
                     value={backend() === "daytona" ? daytonaSandboxId() : modalSandboxId()}
-                    disabled={props.disabled || resolving()}
+                    disabled={props.disabled}
                     placeholder={`${backend() === "daytona" ? "Daytona" : "Modal"} sandbox ID (leave empty to create new)`}
                     onInput={(event) => {
                       if (backend() === "daytona") {
@@ -843,7 +811,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
                     onKeyDown={(event) => {
                       if (event.key === "Enter") {
                         event.preventDefault();
-                        void resolveWorkspace();
+                        commitSelection();
                       }
                     }}
                   />
@@ -853,7 +821,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
                 <SelectControl
                   value={repositoryId()}
                   options={repositoryOptions()}
-                  disabled={props.disabled || resolving() || repositoriesLoading() || !repositoryOptions().length}
+                  disabled={props.disabled || repositoriesLoading() || !repositoryOptions().length}
                   onChange={setRepositoryId}
                   ariaLabel="GitHub repository"
                   title={selectedRepository()?.full_name || "Select repository"}
@@ -863,7 +831,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
                   class="btn btn-sm btn-primary"
                   type="button"
                   disabled={resolveDisabled()}
-                  onClick={() => void resolveWorkspace()}
+                  onClick={() => commitSelection()}
                 >
                   <CheckCircle2 size={13} />
                   {(backend() === "daytona" ? daytonaSandboxId() : modalSandboxId()).trim()
