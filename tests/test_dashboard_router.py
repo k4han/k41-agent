@@ -253,6 +253,178 @@ def test_dashboard_workspace_resolve_rejects_missing_local_path(tmp_path: Path) 
     assert "Workspace does not exist" in response.json()["detail"]
 
 
+def test_dashboard_workspace_resolve_creates_daytona_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.modules.workspaces import WorkspaceRef
+
+    workspace = WorkspaceRef(
+        backend="daytona",
+        locator="sandbox-new",
+        label="daytona:sandbox-new",
+        metadata={"root": "workspace"},
+    )
+
+    _patch_dashboard_attr(monkeypatch, "create_daytona_workspace", lambda: workspace)
+    client = _create_dashboard_client(ChannelManager())
+
+    response = client.post(
+        "/dashboard-api/workspace/resolve",
+        json={"kind": "daytona"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "kind": "daytona",
+        "label": "daytona:sandbox-new",
+        "workspace": workspace.model_dump(),
+    }
+
+
+def test_dashboard_workspace_resolve_attaches_daytona_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.modules.workspaces import WorkspaceRef
+
+    calls: dict[str, object] = {}
+
+    def fake_attach(sandbox_id: str, *, root: str | None = None, label: str | None = None):
+        calls["sandbox_id"] = sandbox_id
+        calls["root"] = root
+        calls["label"] = label
+        return WorkspaceRef(
+            backend="daytona",
+            locator=sandbox_id,
+            label=f"daytona:{sandbox_id}",
+            metadata={"root": root or "workspace"},
+        )
+
+    _patch_dashboard_attr(monkeypatch, "attach_daytona_workspace", fake_attach)
+    client = _create_dashboard_client(ChannelManager())
+
+    response = client.post(
+        "/dashboard-api/workspace/resolve",
+        json={
+            "kind": "daytona",
+            "workspace": {
+                "backend": "daytona",
+                "locator": "sandbox-existing",
+                "label": "",
+                "metadata": {"root": "custom-root"},
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert calls == {"sandbox_id": "sandbox-existing", "root": "custom-root", "label": None}
+    assert response.json()["workspace"]["locator"] == "sandbox-existing"
+    assert response.json()["workspace"]["metadata"]["root"] == "custom-root"
+
+
+def test_dashboard_workspace_resolve_daytona_reports_missing_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_create():
+        raise ValueError("Daytona API key is not configured.")
+
+    _patch_dashboard_attr(monkeypatch, "create_daytona_workspace", fake_create)
+    client = _create_dashboard_client(ChannelManager())
+
+    response = client.post(
+        "/dashboard-api/workspace/resolve",
+        json={"kind": "daytona"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Daytona API key is not configured."
+
+
+def test_dashboard_workspace_resolve_creates_modal_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.modules.workspaces import WorkspaceRef
+
+    workspace = WorkspaceRef(
+        backend="modal",
+        locator="sb-new",
+        label="modal:sb-new",
+        metadata={"root": "/workspace"},
+    )
+
+    _patch_dashboard_attr(monkeypatch, "create_modal_workspace", lambda: workspace)
+    client = _create_dashboard_client(ChannelManager())
+
+    response = client.post(
+        "/dashboard-api/workspace/resolve",
+        json={"kind": "modal"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "kind": "modal",
+        "label": "modal:sb-new",
+        "workspace": workspace.model_dump(),
+    }
+
+
+def test_dashboard_workspace_resolve_attaches_modal_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.modules.workspaces import WorkspaceRef
+
+    calls: dict[str, object] = {}
+
+    def fake_attach(sandbox_id: str, *, root: str | None = None, label: str | None = None):
+        calls["sandbox_id"] = sandbox_id
+        calls["root"] = root
+        calls["label"] = label
+        return WorkspaceRef(
+            backend="modal",
+            locator=sandbox_id,
+            label=f"modal:{sandbox_id}",
+            metadata={"root": root or "/workspace"},
+        )
+
+    _patch_dashboard_attr(monkeypatch, "attach_modal_workspace", fake_attach)
+    client = _create_dashboard_client(ChannelManager())
+
+    response = client.post(
+        "/dashboard-api/workspace/resolve",
+        json={
+            "kind": "modal",
+            "workspace": {
+                "backend": "modal",
+                "locator": "sb-existing",
+                "label": "",
+                "metadata": {"root": "/repo"},
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert calls == {"sandbox_id": "sb-existing", "root": "/repo", "label": None}
+    assert response.json()["workspace"]["locator"] == "sb-existing"
+    assert response.json()["workspace"]["metadata"]["root"] == "/repo"
+
+
+def test_dashboard_workspace_resolve_modal_reports_disabled_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_create():
+        raise ValueError("Modal workspace backend is disabled.")
+
+    _patch_dashboard_attr(monkeypatch, "create_modal_workspace", fake_create)
+    client = _create_dashboard_client(ChannelManager())
+
+    response = client.post(
+        "/dashboard-api/workspace/resolve",
+        json={"kind": "modal"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Modal workspace backend is disabled."
+
+
 def test_dashboard_workspace_browse_lists_directories(tmp_path: Path) -> None:
     (tmp_path / "src").mkdir()
     (tmp_path / "docs").mkdir()
@@ -396,6 +568,40 @@ def test_dashboard_workspace_tree_blocks_directory_escape(tmp_path: Path) -> Non
 
     assert response.status_code == 400
     assert "escapes workspace" in response.json()["detail"]
+
+
+def test_dashboard_workspace_tree_reports_unavailable_modal_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.modules.workspaces import WorkspaceUnavailableError
+
+    class FakeBackend:
+        def tree(self, path: str | None = None):
+            del path
+            raise WorkspaceUnavailableError(
+                (
+                    "Modal sandbox sb-expired is no longer available. "
+                    "Create or attach a new Modal workspace for this thread."
+                ),
+                backend="modal",
+                locator="sb-expired",
+            )
+
+    _patch_dashboard_attr(monkeypatch, "get_workspace_backend", lambda *args, **kwargs: FakeBackend())
+    client = _create_dashboard_client(ChannelManager())
+
+    response = client.get(
+        "/dashboard-api/workspace/tree",
+        params={
+            "thread_id": "thread-1",
+            "backend": "modal",
+            "locator": "sb-expired",
+            "root": "/workspace",
+        },
+    )
+
+    assert response.status_code == 410
+    assert "no longer available" in response.json()["detail"]
 
 
 def test_dashboard_workspace_file_reads_text_and_blocks_directory_escape(
@@ -922,6 +1128,7 @@ async def test_dashboard_delete_chat_thread_deletes_workflow_tree(
         "agent.modules.tools.langchain.shell_tools.session_manager"
     )
     workflows_module = importlib.import_module("agent.modules.workflows")
+    workspaces_module = importlib.import_module("agent.modules.workspaces")
     calls: list[tuple[str, str]] = []
 
     class FakeSessionManager:
@@ -936,6 +1143,9 @@ async def test_dashboard_delete_chat_thread_deletes_workflow_tree(
     async def fake_delete_tree(thread_id: str) -> None:
         calls.append(("delete_tree", thread_id))
 
+    async def fake_delete_workspace(thread_id: str) -> None:
+        calls.append(("delete_workspace", thread_id))
+
     monkeypatch.setattr(
         conversations_module,
         "mark_conversation_thread_deleted",
@@ -947,12 +1157,18 @@ async def test_dashboard_delete_chat_thread_deletes_workflow_tree(
         "delete_workflow_thread_tree",
         fake_delete_tree,
     )
+    monkeypatch.setattr(
+        workspaces_module,
+        "delete_thread_workspace",
+        fake_delete_workspace,
+    )
 
     result = await _dashboard_attr("delete_chat_thread")("api_dashboard_123")
 
     assert result == {"status": "deleted", "thread_id": "api_dashboard_123"}
     assert calls == [
         ("close_shell", "api_dashboard_123"),
+        ("delete_workspace", "api_dashboard_123"),
         ("mark_deleted", "api_dashboard_123"),
         ("delete_tree", "api_dashboard_123"),
     ]
@@ -968,6 +1184,7 @@ async def test_dashboard_delete_background_task_thread_deletes_workflow_tree(
         "agent.modules.tools.langchain.shell_tools.session_manager"
     )
     workflows_module = importlib.import_module("agent.modules.workflows")
+    workspaces_module = importlib.import_module("agent.modules.workspaces")
     calls: list[tuple[str, str]] = []
 
     class FakeSessionManager:
@@ -987,6 +1204,9 @@ async def test_dashboard_delete_background_task_thread_deletes_workflow_tree(
     async def fake_delete_tree(thread_id: str) -> None:
         calls.append(("delete_tree", thread_id))
 
+    async def fake_delete_workspace(thread_id: str) -> None:
+        calls.append(("delete_workspace", thread_id))
+
     monkeypatch.setattr(
         agent_runtime_module,
         "get_background_task_repository",
@@ -1003,6 +1223,11 @@ async def test_dashboard_delete_background_task_thread_deletes_workflow_tree(
         "delete_workflow_thread_tree",
         fake_delete_tree,
     )
+    monkeypatch.setattr(
+        workspaces_module,
+        "delete_thread_workspace",
+        fake_delete_workspace,
+    )
 
     result = await _dashboard_attr("delete_background_task_thread")(
         "task_dashboard_123"
@@ -1011,6 +1236,7 @@ async def test_dashboard_delete_background_task_thread_deletes_workflow_tree(
     assert result == {"status": "deleted", "thread_id": "task_dashboard_123"}
     assert calls == [
         ("close_shell", "task_dashboard_123"),
+        ("delete_workspace", "task_dashboard_123"),
         ("mark_task_deleted", "task_dashboard_123"),
         ("mark_thread_deleted", "task_dashboard_123"),
         ("delete_tree", "task_dashboard_123"),

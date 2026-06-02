@@ -1128,7 +1128,13 @@ export function ChatPage() {
               <WorkspaceExplorer
                 threadId={currentThreadId()}
                 workingDir={workingDir()}
-                disabled={conversationBusy() || !workingDir().trim() || !currentThreadId() || workspaceLocked()}
+                workspace={workspaceRef()}
+                disabled={
+                  conversationBusy()
+                  || !(workspaceRef()?.locator || workingDir()).trim()
+                  || !currentThreadId()
+                  || (workspaceLocked() && workspaceRef()?.backend !== "modal")
+                }
                 onWorkingDirChange={setWorkspace}
               />
             </div>

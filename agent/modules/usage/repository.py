@@ -361,7 +361,7 @@ class LLMUsageRepository:
         return root_result.scalars().first()
 
     async def aggregate_by_workspace(self, backend: str, locator: str) -> dict[str, Any]:
-        from agent.modules.workspaces.models import ThreadWorkspace
+        from agent.modules.workspaces import ThreadWorkspace
 
         session = await get_async_session()
         thread_stmt = (
@@ -440,7 +440,7 @@ class LLMUsageRepository:
         }
 
     async def aggregate_workspaces(self, query: UsageQuery) -> list[dict[str, Any]]:
-        from agent.modules.workspaces.models import ThreadWorkspace
+        from agent.modules.workspaces import ThreadWorkspace
 
         session = await get_async_session()
         stmt = (
@@ -539,7 +539,7 @@ class LLMUsageRepository:
         return workspaces
 
     async def aggregate_threads(self, query: UsageQuery) -> list[dict[str, Any]]:
-        from agent.modules.conversations.models import ConversationThread
+        from agent.modules.conversations import ConversationThread
 
         session = await get_async_session()
         thread_id_expr = _root_thread_expr()

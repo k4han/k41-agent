@@ -50,6 +50,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                     <WorkspaceSelector
                       workingDir={props.workingDir}
                       defaultWorkingDir={props.defaultWorkingDir}
+                      threadId={props.currentThreadId}
                       workspace={props.workspace}
                       locked={false}
                       disabled={props.conversationBusy}

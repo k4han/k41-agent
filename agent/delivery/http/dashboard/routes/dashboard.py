@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request, HTTPException
+from fastapi.responses import StreamingResponse
 
 from agent.modules.admin_auth import get_current_admin
 from agent.delivery.http.dashboard.routes.shared import (

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 from agent.modules.workspaces import WorkspaceRef
 from agent.delivery.http.dashboard.routes.shared import (
@@ -12,14 +14,37 @@ from agent.delivery.http.dashboard.routes.shared import (
 )
 from agent.modules.github import get_github_automation_service
 from agent.modules.workspaces import (
+    attach_daytona_workspace,
+    attach_modal_workspace,
+    create_daytona_workspace,
+    create_modal_workspace,
     ensure_workspace_directory,
     get_workspace_backend,
     list_workspace_directories,
+    remember_thread_workspace_ref,
     resolve_workspace_ref,
 )
 
 
 router = APIRouter()
+
+
+async def _run_workspace_backend_operation(
+    workspace: WorkspaceRef,
+    thread_id: str | None,
+    operation: Callable[[Any], dict[str, Any]],
+) -> dict[str, Any]:
+    def run() -> dict[str, Any]:
+        backend = get_workspace_backend(workspace, thread_id=thread_id)
+        return operation(backend)
+
+    return await run_in_threadpool(run)
+
+
+def _workspace_metadata_root(workspace: WorkspaceRef | None) -> str | None:
+    if workspace is None:
+        return None
+    return str(workspace.metadata.get("root") or "").strip() or None
 
 
 @router.get("/dashboard-api/workspace/default")
@@ -42,6 +67,7 @@ async def get_dashboard_workspace_tree(
     thread_id: str | None = Query(default=None),
     backend: str | None = Query(default="local"),
     locator: str | None = Query(default=None),
+    root: str | None = Query(default=None),
     path: str = Query(default=""),
 ) -> dict[str, Any]:
     try:
@@ -49,8 +75,13 @@ async def get_dashboard_workspace_tree(
             thread_id=thread_id,
             backend=backend,
             locator=locator,
+            root=root,
         )
-        return get_workspace_backend(workspace).tree(path)
+        return await _run_workspace_backend_operation(
+            workspace,
+            thread_id,
+            lambda backend: backend.tree(path),
+        )
     except Exception as exc:
         raise _workspace_http_error(exc) from exc
 
@@ -60,14 +91,20 @@ async def get_dashboard_workspace_changes(
     thread_id: str | None = Query(default=None),
     backend: str | None = Query(default="local"),
     locator: str | None = Query(default=None),
+    root: str | None = Query(default=None),
 ) -> dict[str, Any]:
     try:
         workspace = await _workspace_ref_from_request(
             thread_id=thread_id,
             backend=backend,
             locator=locator,
+            root=root,
         )
-        return get_workspace_backend(workspace).changes()
+        return await _run_workspace_backend_operation(
+            workspace,
+            thread_id,
+            lambda backend: backend.changes(),
+        )
     except Exception as exc:
         raise _workspace_http_error(exc) from exc
 
@@ -77,6 +114,7 @@ async def get_dashboard_workspace_diff(
     thread_id: str | None = Query(default=None),
     backend: str | None = Query(default="local"),
     locator: str | None = Query(default=None),
+    root: str | None = Query(default=None),
     path: str = Query(..., min_length=1),
 ) -> dict[str, Any]:
     try:
@@ -84,8 +122,13 @@ async def get_dashboard_workspace_diff(
             thread_id=thread_id,
             backend=backend,
             locator=locator,
+            root=root,
         )
-        return get_workspace_backend(workspace).diff(path)
+        return await _run_workspace_backend_operation(
+            workspace,
+            thread_id,
+            lambda backend: backend.diff(path),
+        )
     except Exception as exc:
         raise _workspace_http_error(exc) from exc
 
@@ -95,6 +138,7 @@ async def get_dashboard_workspace_file(
     thread_id: str | None = Query(default=None),
     backend: str | None = Query(default="local"),
     locator: str | None = Query(default=None),
+    root: str | None = Query(default=None),
     path: str = Query(..., min_length=1),
 ) -> dict[str, Any]:
     try:
@@ -102,8 +146,13 @@ async def get_dashboard_workspace_file(
             thread_id=thread_id,
             backend=backend,
             locator=locator,
+            root=root,
         )
-        return get_workspace_backend(workspace).file(path)
+        return await _run_workspace_backend_operation(
+            workspace,
+            thread_id,
+            lambda backend: backend.file(path),
+        )
     except Exception as exc:
         raise _workspace_http_error(exc) from exc
 
@@ -124,9 +173,10 @@ async def rename_dashboard_workspace_entry(
             thread_id=body.thread_id,
             workspace=body.workspace,
         )
-        return get_workspace_backend(workspace).rename(
-            path=body.path,
-            new_name=body.new_name,
+        return await _run_workspace_backend_operation(
+            workspace,
+            body.thread_id,
+            lambda backend: backend.rename(path=body.path, new_name=body.new_name),
         )
     except Exception as exc:
         raise _workspace_http_error(exc) from exc
@@ -143,6 +193,7 @@ class WorkspaceResolveBody(BaseModel):
     workspace: WorkspaceRef | None = None
     locator: str | None = None
     repository_id: int | None = None
+    thread_id: str | None = None
 
 
 @router.post("/dashboard-api/workspace/resolve")
@@ -163,6 +214,8 @@ async def resolve_dashboard_workspace(body: WorkspaceResolveBody) -> dict[str, A
                     "metadata": ref.metadata,
                 }
             )
+            if body.thread_id and body.thread_id.strip():
+                workspace = await remember_thread_workspace_ref(body.thread_id, workspace)
             return {
                 "kind": "local",
                 "label": workspace.label,
@@ -171,9 +224,52 @@ async def resolve_dashboard_workspace(body: WorkspaceResolveBody) -> dict[str, A
         if kind == "github":
             if body.repository_id is None:
                 raise ValueError("Repository ID is required.")
-            return await get_github_automation_service().resolve_repository_workspace(
+            result = await get_github_automation_service().resolve_repository_workspace(
                 body.repository_id,
             )
+            if body.thread_id and body.thread_id.strip():
+                payload = result.get("workspace")
+                if payload:
+                    workspace = await remember_thread_workspace_ref(body.thread_id, payload)
+                    result["workspace"] = workspace.model_dump()
+                    result["label"] = workspace.label
+            return result
+        if kind == "daytona":
+            sandbox_id = body.locator or (body.workspace.locator if body.workspace else "")
+            if sandbox_id and sandbox_id.strip():
+                root = _workspace_metadata_root(body.workspace)
+                workspace = await run_in_threadpool(
+                    attach_daytona_workspace,
+                    sandbox_id,
+                    root=root,
+                )
+            else:
+                workspace = await run_in_threadpool(create_daytona_workspace)
+            if body.thread_id and body.thread_id.strip():
+                workspace = await remember_thread_workspace_ref(body.thread_id, workspace)
+            return {
+                "kind": "daytona",
+                "label": workspace.label,
+                "workspace": workspace.model_dump(),
+            }
+        if kind == "modal":
+            sandbox_id = body.locator or (body.workspace.locator if body.workspace else "")
+            if sandbox_id and sandbox_id.strip():
+                root = _workspace_metadata_root(body.workspace)
+                workspace = await run_in_threadpool(
+                    attach_modal_workspace,
+                    sandbox_id,
+                    root=root,
+                )
+            else:
+                workspace = await run_in_threadpool(create_modal_workspace)
+            if body.thread_id and body.thread_id.strip():
+                workspace = await remember_thread_workspace_ref(body.thread_id, workspace)
+            return {
+                "kind": "modal",
+                "label": workspace.label,
+                "workspace": workspace.model_dump(),
+            }
         raise ValueError(f"Unsupported workspace kind: {body.kind}")
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -227,6 +323,10 @@ async def delete_dashboard_workspace_entry(
             thread_id=body.thread_id,
             workspace=body.workspace,
         )
-        return get_workspace_backend(workspace).delete(path=body.path)
+        return await _run_workspace_backend_operation(
+            workspace,
+            body.thread_id,
+            lambda backend: backend.delete(path=body.path),
+        )
     except Exception as exc:
         raise _workspace_http_error(exc) from exc

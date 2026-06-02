@@ -20,7 +20,7 @@ import { apiFetch, postJson } from "@/lib/api";
 import { highlightCode, languageFromPath } from "@/lib/codeHighlight";
 import { renderUnifiedDiffHtml } from "@/lib/diffView";
 import { createDarkMode } from "@/lib/theme";
-import { formatWorkspaceRoot, localWorkspaceRef } from "@/lib/workspace";
+import { formatWorkspaceRoot, localWorkspaceRef, workspaceDisplayLabel } from "@/lib/workspace";
 import type { WorkspaceRef, WorkspaceUsagePayload } from "@/types";
 
 type WorkspaceTreeEntry = {
@@ -76,16 +76,30 @@ type WorkspaceFilePayload = {
   message: string;
 };
 
+type WorkspaceResolvePayload = {
+  kind: string;
+  label: string;
+  workspace: WorkspaceRef;
+};
+
 type WorkspaceTab = "changes" | "files" | `file:${string}`;
 
-function workspaceQuery(threadId: string, workingDir: string, extra?: Record<string, string>) {
+function workspaceQuery(threadId: string, workspace: WorkspaceRef | null, extra?: Record<string, string>) {
   const params = new URLSearchParams();
   if (threadId) {
     params.set("thread_id", threadId);
   }
-  if (workingDir.trim()) {
-    params.set("backend", "local");
-    params.set("locator", workingDir.trim());
+  if (workspace?.locator.trim()) {
+    params.set("backend", workspace.backend);
+    params.set("locator", workspace.locator.trim());
+    const root = workspace.metadata?.root;
+    if (
+      (workspace.backend === "daytona" || workspace.backend === "modal")
+      && typeof root === "string"
+      && root.trim()
+    ) {
+      params.set("root", root.trim());
+    }
   }
   Object.entries(extra || {}).forEach(([key, value]) => {
     params.set(key, value);
@@ -172,8 +186,9 @@ async function writeToClipboard(text: string): Promise<void> {
 export function WorkspaceExplorer(props: {
   threadId: string;
   workingDir: string;
+  workspace?: WorkspaceRef | null;
   disabled?: boolean;
-  onWorkingDirChange: (workingDir: string) => void;
+  onWorkingDirChange: (value: WorkspaceRef | string | null) => void;
 }) {
   const dark = createDarkMode();
   const { showToast } = useToast();
@@ -204,17 +219,22 @@ export function WorkspaceExplorer(props: {
   const [deleteTarget, setDeleteTarget] = createSignal<WorkspaceTreeEntry | null>(null);
   const [deleting, setDeleting] = createSignal(false);
   const [workspaceRoot, setWorkspaceRoot] = createSignal("");
+  const [reconnectingModal, setReconnectingModal] = createSignal(false);
   let generation = 0;
 
+  const effectiveWorkspace = createMemo(() => props.workspace || localWorkspaceRef(props.workingDir));
+  const isLocalWorkspace = () => (effectiveWorkspace()?.backend || "local") === "local";
   const rootPath = () => workspaceRoot() || "";
   const rootEntries = () => entriesByPath()[rootPath()] || entriesByPath()[""] || [];
   const rootTreeTruncated = () =>
     treeTruncatedByPath()[rootPath()] || treeTruncatedByPath()[""] || false;
-  const canQuery = () => Boolean(props.workingDir.trim() || props.threadId);
+  const canQuery = () => Boolean(effectiveWorkspace()?.locator.trim() || props.threadId);
   const activeFilePath = () => fileTabPath(activeTab());
   const activeFilePayload = () => filePayloads()[activeFilePath()];
   const workingDirDisplayValue = () =>
-    props.disabled ? formatWorkspaceRoot(draftWorkingDir()) : draftWorkingDir();
+    isLocalWorkspace()
+      ? props.disabled ? formatWorkspaceRoot(draftWorkingDir()) : draftWorkingDir()
+      : workspaceDisplayLabel(effectiveWorkspace()) || effectiveWorkspace()?.locator || "";
 
   const loadTree = async (path = "", targetGeneration = generation) => {
     if (!canQuery()) {
@@ -225,7 +245,7 @@ export function WorkspaceExplorer(props: {
       setTreeError("");
     }
     try {
-      const query = workspaceQuery(props.threadId, props.workingDir, { path });
+      const query = workspaceQuery(props.threadId, effectiveWorkspace(), { path });
       const payload = await apiFetch<WorkspaceTreePayload>(
         `/dashboard-api/workspace/tree?${query}`,
       );
@@ -255,7 +275,7 @@ export function WorkspaceExplorer(props: {
     setChangesLoading(true);
     setChangesError("");
     try {
-      const query = workspaceQuery(props.threadId, props.workingDir);
+      const query = workspaceQuery(props.threadId, effectiveWorkspace());
       const payload = await apiFetch<WorkspaceChangesPayload>(
         `/dashboard-api/workspace/changes?${query}`,
       );
@@ -285,7 +305,7 @@ export function WorkspaceExplorer(props: {
     setDiffError("");
     setDiffLoading(true);
     try {
-      const query = workspaceQuery(props.threadId, props.workingDir, { path });
+      const query = workspaceQuery(props.threadId, effectiveWorkspace(), { path });
       const payload = await apiFetch<WorkspaceDiffPayload>(
         `/dashboard-api/workspace/diff?${query}`,
       );
@@ -310,7 +330,7 @@ export function WorkspaceExplorer(props: {
     setFileLoadingByPath((current) => ({ ...current, [path]: true }));
     setFileErrorByPath((current) => ({ ...current, [path]: "" }));
     try {
-      const query = workspaceQuery(props.threadId, props.workingDir, { path });
+      const query = workspaceQuery(props.threadId, effectiveWorkspace(), { path });
       const payload = await apiFetch<WorkspaceFilePayload>(
         `/dashboard-api/workspace/file?${query}`,
       );
@@ -367,7 +387,50 @@ export function WorkspaceExplorer(props: {
   };
 
   const applyWorkingDir = () => {
+    if (!isLocalWorkspace()) {
+      showToast("Working directory is fixed for non-local workspaces.", "warning");
+      return;
+    }
     props.onWorkingDirChange(draftWorkingDir().trim());
+  };
+
+  const reconnectModalWorkspace = async () => {
+    if (props.disabled || reconnectingModal() || effectiveWorkspace()?.backend !== "modal") {
+      return;
+    }
+    setReconnectingModal(true);
+    try {
+      const payload = await postJson<WorkspaceResolvePayload>(
+        "/dashboard-api/workspace/resolve",
+        {
+          kind: "modal",
+          thread_id: props.threadId || null,
+        },
+      );
+      props.onWorkingDirChange(payload.workspace);
+      generation += 1;
+      const targetGeneration = generation;
+      setEntriesByPath({});
+      setExpandedByPath({ "": true });
+      setTreeTruncatedByPath({});
+      setWorkspaceRoot("");
+      setExpandedChangePath("");
+      setDiffPayload(null);
+      setDiffError("");
+      setFileTabs([]);
+      setFilePayloads({});
+      setFileLoadingByPath({});
+      setFileErrorByPath({});
+      queueMicrotask(() => {
+        void loadTree("", targetGeneration);
+        void loadChanges(targetGeneration);
+      });
+      showToast("Modal workspace reconnected.", "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to reconnect Modal workspace", "error");
+    } finally {
+      setReconnectingModal(false);
+    }
   };
 
   const toggleDirectory = (path: string) => {
@@ -439,7 +502,7 @@ export function WorkspaceExplorer(props: {
     try {
       await postJson("/dashboard-api/workspace/rename", {
         thread_id: props.threadId || null,
-        workspace: localWorkspaceRef(props.workingDir),
+        workspace: effectiveWorkspace(),
         path: entry.path,
         new_name: nextName,
       });
@@ -480,7 +543,7 @@ export function WorkspaceExplorer(props: {
     try {
       await postJson("/dashboard-api/workspace/delete", {
         thread_id: props.threadId || null,
-        workspace: localWorkspaceRef(props.workingDir),
+        workspace: effectiveWorkspace(),
         path: entry.path,
       });
       showToast(`Deleted ${entry.name}`, "success");
@@ -537,6 +600,8 @@ export function WorkspaceExplorer(props: {
   createEffect(() => {
     props.threadId;
     props.workingDir;
+    props.workspace?.backend;
+    props.workspace?.locator;
     refresh();
   });
 
@@ -651,7 +716,7 @@ export function WorkspaceExplorer(props: {
         <input
           class="input workspace-dir-input"
           value={workingDirDisplayValue()}
-          disabled={props.disabled}
+          disabled={props.disabled || !isLocalWorkspace()}
           placeholder="Working directory"
           title={draftWorkingDir()}
           onInput={(event) => setDraftWorkingDir(event.currentTarget.value)}
@@ -666,6 +731,18 @@ export function WorkspaceExplorer(props: {
           <RefreshCw size={13} />
           {/* <span>Reloaad</span> */}
         </button>
+        <Show when={effectiveWorkspace()?.backend === "modal"}>
+          <button
+            class="btn btn-sm"
+            type="button"
+            title="Create new Modal sandbox"
+            aria-label="Create new Modal sandbox"
+            onClick={() => void reconnectModalWorkspace()}
+            disabled={props.disabled || reconnectingModal() || !props.threadId}
+          >
+            <Zap size={13} />
+          </button>
+        </Show>
       </div>
 
       <div class="workspace-tabs" role="tablist" aria-label="Workspace views">

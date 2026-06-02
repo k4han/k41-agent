@@ -118,7 +118,10 @@ class TerminalSessionManager:
         )
 
         # Register the PID in the active session registry
-        from agent.modules.agent_runtime.active_sessions import current_session_id_var, get_active_session_registry
+        from agent.modules.agent_runtime import (
+            current_session_id_var,
+            get_active_session_registry,
+        )
         session_id_context = current_session_id_var.get()
         if session_id_context:
             registry = get_active_session_registry()
@@ -514,7 +517,10 @@ class TerminalSessionManager:
         session.is_running = False
 
         # Unregister the PID
-        from agent.modules.agent_runtime.active_sessions import current_session_id_var, get_active_session_registry
+        from agent.modules.agent_runtime import (
+            current_session_id_var,
+            get_active_session_registry,
+        )
         session_id_context = current_session_id_var.get()
         if session_id_context:
             registry = get_active_session_registry()

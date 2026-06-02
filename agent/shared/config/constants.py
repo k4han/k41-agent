@@ -27,6 +27,9 @@ RUNTIME_KEY_PATTERNS = [
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.(transport|command|args|url|enabled)$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.env\.[A-Za-z0-9_-]+$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.headers\.[A-Za-z0-9_-]+$",
+    r"^workspace\.root$",
+    r"^workspace\.daytona\.(enabled|api_key|default_root|auto_stop_minutes|auto_archive_days|sweeper_interval_seconds|start_timeout_seconds|stop_timeout_seconds)$",
+    r"^workspace\.modal\.(enabled|token_id|token_secret|app_name|default_root|image|sandbox_timeout_seconds|idle_timeout_seconds)$",
     r"^database\.url$",
     rf"^{re.escape(DISPLAY_TIMEZONE_CONFIG_KEY)}$",
     r"^recursion_limit$",
@@ -43,6 +46,8 @@ DATABASE_RUNTIME_KEY_PATTERNS = [
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.(transport|command|args|url|enabled)$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.env\.[A-Za-z0-9_-]+$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.headers\.[A-Za-z0-9_-]+$",
+    r"^workspace\.daytona\.(enabled|api_key|default_root|auto_stop_minutes|auto_archive_days|sweeper_interval_seconds|start_timeout_seconds|stop_timeout_seconds)$",
+    r"^workspace\.modal\.(enabled|token_id|token_secret|app_name|default_root|image|sandbox_timeout_seconds|idle_timeout_seconds)$",
     r"^recursion_limit$",
 ]
 
@@ -53,6 +58,8 @@ SENSITIVE_RUNTIME_KEY_PATTERNS = [
     r"^llm\.providers\.[A-Za-z0-9_-]+\.api_key$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.env\.[A-Za-z0-9_-]+$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.headers\.[A-Za-z0-9_-]+$",
+    r"^workspace\.daytona\.api_key$",
+    r"^workspace\.modal\.(token_id|token_secret)$",
 ]
 
 
@@ -105,6 +112,23 @@ def _expand_runtime_keys() -> set[str]:
     keys.add(LLM_FALLBACK_PROVIDER_KEY)
     keys.add(LLM_FALLBACK_MODEL_KEY)
     keys.add("database.url")
+    keys.add("workspace.root")
+    keys.add("workspace.daytona.enabled")
+    keys.add("workspace.daytona.api_key")
+    keys.add("workspace.daytona.default_root")
+    keys.add("workspace.daytona.auto_stop_minutes")
+    keys.add("workspace.daytona.auto_archive_days")
+    keys.add("workspace.daytona.sweeper_interval_seconds")
+    keys.add("workspace.daytona.start_timeout_seconds")
+    keys.add("workspace.daytona.stop_timeout_seconds")
+    keys.add("workspace.modal.enabled")
+    keys.add("workspace.modal.token_id")
+    keys.add("workspace.modal.token_secret")
+    keys.add("workspace.modal.app_name")
+    keys.add("workspace.modal.default_root")
+    keys.add("workspace.modal.image")
+    keys.add("workspace.modal.sandbox_timeout_seconds")
+    keys.add("workspace.modal.idle_timeout_seconds")
     keys.add(DISPLAY_TIMEZONE_CONFIG_KEY)
     keys.add("recursion_limit")
     return keys
@@ -150,6 +174,22 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # Security
     "persistence.allow_any_path": False,
     "workspace.root": "~/kaka-agent",
+    "workspace.daytona.enabled": False,
+    "workspace.daytona.api_key": "",
+    "workspace.daytona.default_root": "workspace",
+    "workspace.daytona.auto_stop_minutes": 30,
+    "workspace.daytona.auto_archive_days": 7,
+    "workspace.daytona.sweeper_interval_seconds": 60,
+    "workspace.daytona.start_timeout_seconds": 120,
+    "workspace.daytona.stop_timeout_seconds": 60,
+    "workspace.modal.enabled": False,
+    "workspace.modal.token_id": "",
+    "workspace.modal.token_secret": "",
+    "workspace.modal.app_name": "kaka-agent-sandboxes",
+    "workspace.modal.default_root": "/workspace",
+    "workspace.modal.image": "python:3.13-slim",
+    "workspace.modal.sandbox_timeout_seconds": 3600,
+    "workspace.modal.idle_timeout_seconds": 900,
     DISPLAY_TIMEZONE_CONFIG_KEY: DEFAULT_DISPLAY_TIMEZONE,
     "security.jwt_secret": "",
     "recursion_limit": 100,
@@ -203,6 +243,118 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "description": "Root directory for local workspaces (supports ~)",
         "category": "general",
         "label": "Workspace Root",
+    },
+    "workspace.daytona.enabled": {
+        "type": "boolean",
+        "description": "Enable Daytona sandbox workspaces.",
+        "category": "workspace",
+        "label": "Daytona Enabled",
+    },
+    "workspace.daytona.api_key": {
+        "type": "password",
+        "description": "Daytona API key used to create and attach sandbox workspaces.",
+        "category": "workspace",
+        "label": "Daytona API Key",
+    },
+    "workspace.daytona.default_root": {
+        "type": "text",
+        "description": "Default root directory inside Daytona sandboxes.",
+        "category": "workspace",
+        "label": "Daytona Default Root",
+    },
+    "workspace.daytona.auto_stop_minutes": {
+        "type": "number",
+        "description": "Stop idle Daytona sandboxes after this many minutes. Use 0 to disable.",
+        "category": "workspace",
+        "label": "Daytona Auto Stop Minutes",
+        "min": 0,
+        "step": 1,
+    },
+    "workspace.daytona.auto_archive_days": {
+        "type": "number",
+        "description": "Archive stopped Daytona sandboxes after this many idle days. Use 0 to disable.",
+        "category": "workspace",
+        "label": "Daytona Auto Archive Days",
+        "min": 0,
+        "step": 1,
+    },
+    "workspace.daytona.sweeper_interval_seconds": {
+        "type": "number",
+        "description": "Interval in seconds for the Daytona lifecycle sweeper.",
+        "category": "workspace",
+        "label": "Daytona Sweeper Interval Seconds",
+        "min": 30,
+        "step": 1,
+    },
+    "workspace.daytona.start_timeout_seconds": {
+        "type": "number",
+        "description": "Maximum seconds to wait when starting a Daytona sandbox.",
+        "category": "workspace",
+        "label": "Daytona Start Timeout Seconds",
+        "min": 1,
+        "step": 1,
+    },
+    "workspace.daytona.stop_timeout_seconds": {
+        "type": "number",
+        "description": "Maximum seconds to wait when stopping a Daytona sandbox.",
+        "category": "workspace",
+        "label": "Daytona Stop Timeout Seconds",
+        "min": 1,
+        "step": 1,
+    },
+    "workspace.modal.enabled": {
+        "type": "boolean",
+        "description": "Enable Modal sandbox workspaces.",
+        "category": "workspace",
+        "label": "Modal Enabled",
+    },
+    "workspace.modal.token_id": {
+        "type": "password",
+        "description": "Modal token ID. Leave empty to use the Modal SDK default credentials.",
+        "category": "workspace",
+        "label": "Modal Token ID",
+    },
+    "workspace.modal.token_secret": {
+        "type": "password",
+        "description": "Modal token secret. Leave empty to use the Modal SDK default credentials.",
+        "category": "workspace",
+        "label": "Modal Token Secret",
+    },
+    "workspace.modal.app_name": {
+        "type": "text",
+        "description": "Modal App name used to create sandbox workspaces.",
+        "category": "workspace",
+        "label": "Modal App Name",
+    },
+    "workspace.modal.default_root": {
+        "type": "text",
+        "description": "Default root directory inside Modal sandboxes.",
+        "category": "workspace",
+        "label": "Modal Default Root",
+    },
+    "workspace.modal.image": {
+        "type": "text",
+        "description": "Container image used for new Modal sandboxes.",
+        "category": "workspace",
+        "label": "Modal Image",
+    },
+    "workspace.modal.sandbox_timeout_seconds": {
+        "type": "number",
+        "description": "Maximum lifetime in seconds for new Modal sandboxes.",
+        "category": "workspace",
+        "label": "Modal Sandbox Timeout Seconds",
+        "min": 60,
+        "max": 86400,
+        "step": 1,
+    },
+    "workspace.modal.idle_timeout_seconds": {
+        "type": "number",
+        "description": "Terminate idle Modal sandboxes after this many seconds. Use 0 for Modal default behavior.",
+        "category": "workspace",
+        "label": "Modal Idle Timeout Seconds",
+        "min": 0,
+        "max": 86400,
+        "step": 1,
     },
     # Channel settings
     "channels.telegram.enabled": {

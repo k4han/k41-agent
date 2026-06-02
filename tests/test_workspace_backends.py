@@ -1,5 +1,7 @@
 import json
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -7,12 +9,398 @@ from sqlalchemy import create_engine, text
 import agent.modules.workspaces.local_backend as local_backend_module
 from agent.modules.workspaces import (
     WorkspaceRef,
+    WorkspaceUnavailableError,
     get_workspace_backend,
     resolve_workspace_ref,
+    workspace_ref_from_columns,
     workspace_ref_from_local_path,
+)
+from agent.modules.workspaces.daytona_backend import (
+    DaytonaWorkspaceBackend,
+    archive_daytona_workspace,
+    delete_daytona_workspace,
+    resolve_daytona_path,
+    stop_daytona_workspace,
+    sweep_idle_daytona_workspaces,
 )
 from agent.modules.workspaces.local_backend import LocalWorkspaceBackend
 from agent.modules.workspaces.migrations import migrate_workspace_tables
+from agent.modules.workspaces.modal_backend import (
+    ModalWorkspaceBackend,
+    delete_modal_workspace,
+    resolve_modal_path,
+)
+
+
+class FakeDaytonaFs:
+    def __init__(self) -> None:
+        self.files: dict[str, bytes] = {}
+        self.dirs: set[str] = {"/", "/workspace"}
+
+    def upload_file(self, src: bytes | str, dst: str, timeout: int = 1800) -> None:
+        content = src.encode("utf-8") if isinstance(src, str) else bytes(src)
+        self.files[dst] = content
+        parent = dst.rsplit("/", 1)[0] or "/"
+        self.dirs.add(parent)
+
+    def download_file(self, path: str) -> bytes:
+        return self.files[path]
+
+    def list_files(self, path: str):
+        prefix = path.rstrip("/") + "/"
+        entries = []
+        seen: set[str] = set()
+        for directory in sorted(self.dirs):
+            if directory == path or not directory.startswith(prefix):
+                continue
+            remainder = directory[len(prefix) :]
+            if "/" in remainder or not remainder:
+                continue
+            seen.add(remainder)
+            entries.append(
+                SimpleNamespace(
+                    name=remainder,
+                    path=directory,
+                    is_dir=True,
+                    size=0,
+                    mod_time="2026-01-01T00:00:00Z",
+                )
+            )
+        for file_path, content in sorted(self.files.items()):
+            if not file_path.startswith(prefix):
+                continue
+            remainder = file_path[len(prefix) :]
+            if "/" in remainder or not remainder or remainder in seen:
+                continue
+            entries.append(
+                SimpleNamespace(
+                    name=remainder,
+                    path=file_path,
+                    is_dir=False,
+                    size=len(content),
+                    mod_time="2026-01-01T00:00:00Z",
+                )
+            )
+        return entries
+
+    def get_file_info(self, path: str):
+        if path in self.files:
+            return SimpleNamespace(
+                name=path.rsplit("/", 1)[-1],
+                path=path,
+                is_dir=False,
+                size=len(self.files[path]),
+                mod_time="2026-01-01T00:00:00Z",
+            )
+        if path in self.dirs:
+            return SimpleNamespace(
+                name=path.rsplit("/", 1)[-1],
+                path=path,
+                is_dir=True,
+                size=0,
+                mod_time="2026-01-01T00:00:00Z",
+            )
+        raise FileNotFoundError(path)
+
+
+class FakeDaytonaProcess:
+    def __init__(self, fs: FakeDaytonaFs, *, git_root: str | None = None) -> None:
+        self.fs = fs
+        self.git_root = git_root
+        self.git_status_output = ""
+        self.git_diff_output = ""
+        self.git_numstat_output = ""
+        self.commands: list[tuple[str, str | None, int | None]] = []
+
+    def exec(self, command: str, cwd: str | None = None, timeout: int | None = None):
+        self.commands.append((command, cwd, timeout))
+        if "&& cd" in command and command.endswith("&& pwd"):
+            return SimpleNamespace(result="/workspace\n", exit_code=0, stderr="")
+        if command.startswith("mkdir -p "):
+            self.fs.dirs.add(command.split("mkdir -p ", 1)[1].strip("'\""))
+            return SimpleNamespace(result="", exit_code=0, stderr="")
+        if command.startswith("find "):
+            return SimpleNamespace(
+                result="\n".join(sorted(self.fs.files))
+                + ("\n" if self.fs.files else ""),
+                exit_code=0,
+                stderr="",
+            )
+        if command.startswith("git rev-parse"):
+            if self.git_root is None:
+                return SimpleNamespace(
+                    result="", exit_code=128, stderr="not a git repo"
+                )
+            return SimpleNamespace(result=f"{self.git_root}\n", exit_code=0, stderr="")
+        if command.startswith("git -c status.relativePaths=false status"):
+            return SimpleNamespace(
+                result=self.git_status_output, exit_code=0, stderr=""
+            )
+        if command.startswith("git diff --numstat"):
+            return SimpleNamespace(
+                result=self.git_numstat_output, exit_code=0, stderr=""
+            )
+        if command.startswith("git diff"):
+            return SimpleNamespace(result=self.git_diff_output, exit_code=0, stderr="")
+        if command.startswith("test -e "):
+            target = command.split("test -e ", 1)[1].strip("'\"")
+            exists = target in self.fs.files or target in self.fs.dirs
+            return SimpleNamespace(result="", exit_code=0 if exists else 1, stderr="")
+        if command.startswith("mv "):
+            parts = command.split()
+            source = parts[1].strip("'\"")
+            destination = parts[2].strip("'\"")
+            self.fs.files[destination] = self.fs.files.pop(source)
+            return SimpleNamespace(result="", exit_code=0, stderr="")
+        if command.startswith("if [ -d "):
+            target = command.split("if [ -d ", 1)[1].split(" ];", 1)[0].strip("'\"")
+            if target in self.fs.dirs:
+                return SimpleNamespace(result="directory\n", exit_code=0, stderr="")
+            if target in self.fs.files:
+                return SimpleNamespace(result="file\n", exit_code=0, stderr="")
+            return SimpleNamespace(result="", exit_code=44, stderr="")
+        if command.startswith("rm -rf "):
+            target = command.split("rm -rf ", 1)[1].strip("'\"")
+            self.fs.files.pop(target, None)
+            self.fs.dirs.discard(target)
+            return SimpleNamespace(result="", exit_code=0, stderr="")
+        return SimpleNamespace(result="ok\n", exit_code=0, stderr="")
+
+
+class FakeDaytonaSandbox:
+    id = "sandbox-1"
+
+    def __init__(
+        self,
+        *,
+        git_root: str | None = None,
+        state: str = "started",
+    ) -> None:
+        self.fs = FakeDaytonaFs()
+        self.process = FakeDaytonaProcess(self.fs, git_root=git_root)
+        self.state = state
+        self.start_calls = 0
+        self.stop_calls = 0
+        self.archive_calls = 0
+        self.delete_calls = 0
+        self.recover_calls = 0
+
+    def refresh_data(self) -> None:
+        return None
+
+    def start(self, timeout: int | None = None) -> None:
+        self.start_calls += 1
+        self.state = "started"
+
+    def stop(self, timeout: int | None = None, force: bool = False) -> None:
+        self.stop_calls += 1
+        self.state = "stopped"
+
+    def archive(self) -> None:
+        self.archive_calls += 1
+        self.state = "archived"
+
+    def delete(self, timeout: int | None = None) -> None:
+        self.delete_calls += 1
+        self.state = "destroyed"
+
+    def recover(self, timeout: int | None = None) -> None:
+        self.recover_calls += 1
+        self.state = "started"
+
+
+class FakeModalStream:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def read(self) -> str:
+        return self.text
+
+
+class FakeModalFs:
+    def __init__(self) -> None:
+        self.files: dict[str, bytes] = {}
+        self.dirs: set[str] = {"/", "/workspace"}
+
+    def make_directory(self, remote_path: str, *, create_parents: bool = True) -> None:
+        if create_parents:
+            current = ""
+            for part in remote_path.split("/"):
+                if not part:
+                    current = "/"
+                    continue
+                current = f"{current.rstrip('/')}/{part}"
+                self.dirs.add(current)
+            return
+        self.dirs.add(remote_path)
+
+    def write_text(self, data: str, remote_path: str) -> None:
+        self.write_bytes(data.encode("utf-8"), remote_path)
+
+    def write_bytes(self, data: bytes | bytearray | memoryview, remote_path: str) -> None:
+        parent = remote_path.rsplit("/", 1)[0] or "/"
+        self.make_directory(parent)
+        self.files[remote_path] = bytes(data)
+
+    def read_text(self, remote_path: str) -> str:
+        return self.files[remote_path].decode("utf-8")
+
+    def read_bytes(self, remote_path: str) -> bytes:
+        return self.files[remote_path]
+
+    def list_files(self, remote_path: str):
+        prefix = remote_path.rstrip("/") + "/"
+        entries = []
+        seen: set[str] = set()
+        for directory in sorted(self.dirs):
+            if directory == remote_path or not directory.startswith(prefix):
+                continue
+            remainder = directory[len(prefix) :]
+            if "/" in remainder or not remainder:
+                continue
+            seen.add(remainder)
+            entries.append(
+                SimpleNamespace(
+                    name=remainder,
+                    path=directory,
+                    type="directory",
+                    size=0,
+                    modified_time="2026-01-01T00:00:00Z",
+                )
+            )
+        for file_path, content in sorted(self.files.items()):
+            if not file_path.startswith(prefix):
+                continue
+            remainder = file_path[len(prefix) :]
+            if "/" in remainder or not remainder or remainder in seen:
+                continue
+            entries.append(
+                SimpleNamespace(
+                    name=remainder,
+                    path=file_path,
+                    type="file",
+                    size=len(content),
+                    modified_time="2026-01-01T00:00:00Z",
+                )
+            )
+        return entries
+
+    def stat(self, remote_path: str):
+        if remote_path in self.files:
+            return SimpleNamespace(
+                name=remote_path.rsplit("/", 1)[-1],
+                path=remote_path,
+                type="file",
+                size=len(self.files[remote_path]),
+                modified_time="2026-01-01T00:00:00Z",
+            )
+        if remote_path in self.dirs:
+            return SimpleNamespace(
+                name=remote_path.rsplit("/", 1)[-1],
+                path=remote_path,
+                type="directory",
+                size=0,
+                modified_time="2026-01-01T00:00:00Z",
+            )
+        raise FileNotFoundError(remote_path)
+
+
+class FakeModalSandbox:
+    object_id = "sb-1"
+
+    def __init__(self, *, git_root: str | None = None) -> None:
+        self.filesystem = FakeModalFs()
+        self.git_root = git_root
+        self.git_status_output = ""
+        self.git_diff_output = ""
+        self.git_numstat_output = ""
+        self.commands: list[tuple[str, str | None, int | None]] = []
+        self.terminate_calls = 0
+        self.detach_calls = 0
+
+    def exec(self, *args, timeout: int | None = None, workdir: str | None = None, **kwargs):
+        del kwargs
+        command = args[-1]
+        self.commands.append((command, workdir, timeout))
+        result = "ok\n"
+        exit_code = 0
+        if command.startswith("mkdir -p "):
+            self.filesystem.make_directory(command.split("mkdir -p ", 1)[1].strip("'\""))
+            result = ""
+        elif command.startswith("find "):
+            result = (
+                "\n".join(sorted(self.filesystem.files))
+                + ("\n" if self.filesystem.files else "")
+            )
+        elif command.startswith("git rev-parse"):
+            if self.git_root is None:
+                result = ""
+                exit_code = 128
+            else:
+                result = f"{self.git_root}\n"
+        elif command.startswith("git -c status.relativePaths=false status"):
+            result = self.git_status_output
+        elif command.startswith("git diff --numstat"):
+            result = self.git_numstat_output
+        elif command.startswith("git diff"):
+            result = self.git_diff_output
+        elif command.startswith("test -e "):
+            target = command.split("test -e ", 1)[1].strip("'\"")
+            exists = target in self.filesystem.files or target in self.filesystem.dirs
+            result = ""
+            exit_code = 0 if exists else 1
+        elif command.startswith("mv "):
+            parts = command.split()
+            source = parts[1].strip("'\"")
+            destination = parts[2].strip("'\"")
+            self.filesystem.files[destination] = self.filesystem.files.pop(source)
+            result = ""
+        elif command.startswith("if [ -d "):
+            target = command.split("if [ -d ", 1)[1].split(" ];", 1)[0].strip("'\"")
+            if target in self.filesystem.dirs:
+                result = "directory\n"
+            elif target in self.filesystem.files:
+                result = "file\n"
+            else:
+                result = ""
+                exit_code = 44
+        elif command.startswith("rm -rf "):
+            target = command.split("rm -rf ", 1)[1].strip("'\"")
+            self.filesystem.files.pop(target, None)
+            self.filesystem.dirs.discard(target)
+            result = ""
+        return SimpleNamespace(
+            stdout=FakeModalStream(result),
+            stderr=FakeModalStream(""),
+            wait=lambda: exit_code,
+            returncode=exit_code,
+        )
+
+    def terminate(self, *, wait: bool = False):
+        del wait
+        self.terminate_calls += 1
+        return 0
+
+    def detach(self) -> None:
+        self.detach_calls += 1
+
+
+class FakeModalUnavailableError(Exception):
+    pass
+
+
+class FakeUnavailableModalFs(FakeModalFs):
+    def list_files(self, path: str):
+        del path
+        raise FakeModalUnavailableError(
+            "The Sandbox is unavailable. This Sandbox may have already shut down."
+        )
+
+
+class FakeUnavailableModalSandbox(FakeModalSandbox):
+    def exec(self, *args, timeout: int | None = None, workdir: str | None = None, **kwargs):
+        del args, timeout, workdir, kwargs
+        raise FakeModalUnavailableError("Task has already finished with status idle timeout")
 
 
 def test_workspace_ref_normalizes_local_path(tmp_path):
@@ -75,6 +463,96 @@ def test_workspace_ref_normalizes_model_instances(tmp_path):
     assert workspace.metadata == {"source": "ui"}
 
 
+def test_workspace_ref_normalizes_daytona_without_resolving_local_path():
+    workspace = resolve_workspace_ref(
+        {
+            "backend": "daytona",
+            "locator": "sandbox-123",
+            "metadata": {},
+        }
+    )
+
+    assert workspace.backend == "daytona"
+    assert workspace.locator == "sandbox-123"
+    assert workspace.label == "daytona:sandbox-123"
+    assert workspace.metadata["root"] == "workspace"
+    assert workspace.display_label() == "daytona:sandbox-123"
+
+
+def test_workspace_ref_normalizes_modal_without_resolving_local_path():
+    workspace = resolve_workspace_ref(
+        {
+            "backend": "modal",
+            "locator": "sb-123",
+            "metadata": {},
+        }
+    )
+
+    assert workspace.backend == "modal"
+    assert workspace.locator == "sb-123"
+    assert workspace.label == "modal:sb-123"
+    assert workspace.metadata["root"] == "/workspace"
+    assert workspace.display_label() == "modal:sb-123"
+
+
+def test_workspace_ref_from_columns_preserves_daytona_backend():
+    workspace = workspace_ref_from_columns(
+        backend="daytona",
+        locator="sandbox-123",
+        label="remote",
+        metadata_json='{"root": "src"}',
+    )
+
+    assert workspace.backend == "daytona"
+    assert workspace.locator == "sandbox-123"
+    assert workspace.label == "remote"
+    assert workspace.metadata == {"root": "src"}
+
+
+def test_workspace_ref_from_columns_preserves_modal_backend():
+    workspace = workspace_ref_from_columns(
+        backend="modal",
+        locator="sb-123",
+        label="remote",
+        metadata_json='{"root": "/repo"}',
+    )
+
+    assert workspace.backend == "modal"
+    assert workspace.locator == "sb-123"
+    assert workspace.label == "remote"
+    assert workspace.metadata == {"root": "/repo"}
+
+
+def test_resolve_daytona_path_blocks_remote_root_escape():
+    assert resolve_daytona_path("/workspace", "src/app.py") == "/workspace/src/app.py"
+    assert (
+        resolve_daytona_path("/workspace", "/workspace/src/app.py")
+        == "/workspace/src/app.py"
+    )
+
+    with pytest.raises(ValueError, match="Path escapes workspace"):
+        resolve_daytona_path("/workspace", "../secret.txt")
+    with pytest.raises(ValueError, match="Path escapes workspace"):
+        resolve_daytona_path("/workspace", "src/../secret.txt")
+    with pytest.raises(ValueError, match="Path escapes workspace"):
+        resolve_daytona_path("/workspace", "/etc/passwd")
+
+
+def test_resolve_modal_path_blocks_remote_root_escape():
+    assert resolve_modal_path("/workspace", "src/app.py") == "/workspace/src/app.py"
+    assert resolve_modal_path("/workspace", "/workspace/src/app.py") == (
+        "/workspace/src/app.py"
+    )
+    assert resolve_modal_path("/", "workspace/src/app.py") == "/workspace/src/app.py"
+
+    with pytest.raises(ValueError, match="Path escapes workspace"):
+        resolve_modal_path("/workspace", "../secret.txt")
+    with pytest.raises(ValueError, match="Path escapes workspace"):
+        resolve_modal_path("/workspace", "src/../secret.txt")
+    with pytest.raises(ValueError, match="Path escapes workspace"):
+        resolve_modal_path("/workspace", "/etc/passwd")
+
+
 def test_local_workspace_backend_file_operations_and_path_guard(tmp_path):
     workspace = workspace_ref_from_local_path(str(tmp_path))
     backend = LocalWorkspaceBackend(workspace)
@@ -90,6 +568,455 @@ def test_local_workspace_backend_file_operations_and_path_guard(tmp_path):
         backend.read_text("../secret.txt")
 
 
+def test_daytona_workspace_backend_file_operations_and_path_guard():
+    sandbox = FakeDaytonaSandbox()
+    workspace = WorkspaceRef(
+        backend="daytona",
+        locator="sandbox-1",
+        label="sandbox",
+        metadata={"root": "workspace"},
+    )
+    backend = DaytonaWorkspaceBackend(workspace, sandbox=sandbox)
+
+    result = backend.write_text("src/app.py", "print('hello')\n")
+
+    assert result == "[OK] Wrote file: /workspace/src/app.py"
+    assert backend.read_text("src/app.py") == "print('hello')\n"
+    assert backend.list_files("src") == "/workspace/src/app.py"
+    tree = backend.tree()
+    assert tree["root"] == "/workspace"
+    assert tree["entries"][0]["path"] == "/workspace/src"
+    assert backend.file("src/app.py")["content"] == "print('hello')\n"
+    assert backend.rename(path="src/app.py", new_name="main.py")["new_path"] == (
+        "/workspace/src/main.py"
+    )
+    assert backend.delete(path="src/main.py")["kind"] == "file"
+    with pytest.raises(ValueError, match="Path escapes workspace"):
+        backend.read_text("../secret.txt")
+
+
+def test_modal_workspace_backend_file_operations_and_path_guard():
+    sandbox = FakeModalSandbox()
+    workspace = WorkspaceRef(
+        backend="modal",
+        locator="sb-1",
+        label="sandbox",
+        metadata={"root": "/workspace"},
+    )
+    backend = ModalWorkspaceBackend(workspace, sandbox=sandbox)
+
+    result = backend.write_text("src/app.py", "print('hello')\n")
+
+    assert result == "[OK] Wrote file: /workspace/src/app.py"
+    assert backend.read_text("src/app.py") == "print('hello')\n"
+    assert backend.list_files("src") == "/workspace/src/app.py"
+    tree = backend.tree()
+    assert tree["root"] == "/workspace"
+    assert tree["entries"][0]["path"] == "/workspace/src"
+    assert backend.file("src/app.py")["content"] == "print('hello')\n"
+    assert backend.rename(path="src/app.py", new_name="main.py")["new_path"] == (
+        "/workspace/src/main.py"
+    )
+    assert backend.delete(path="src/main.py")["kind"] == "file"
+    with pytest.raises(ValueError, match="Path escapes workspace"):
+        backend.read_text("../secret.txt")
+
+
+def test_daytona_workspace_backend_starts_stopped_sandbox():
+    sandbox = FakeDaytonaSandbox(state="stopped")
+    workspace = WorkspaceRef(
+        backend="daytona",
+        locator="sandbox-1",
+        label="sandbox",
+        metadata={"root": "workspace"},
+    )
+
+    backend = DaytonaWorkspaceBackend(workspace, sandbox=sandbox)
+
+    assert backend.status == "started"
+    assert sandbox.start_calls == 1
+    assert workspace.metadata["status"] == "started"
+    assert workspace.metadata["root"] == "workspace"
+    assert workspace.metadata["last_used_at"]
+    assert workspace.metadata["last_started_at"]
+
+
+def test_daytona_lifecycle_helpers_stop_and_archive_sandbox(monkeypatch):
+    sandbox = FakeDaytonaSandbox(state="started")
+    workspace = WorkspaceRef(
+        backend="daytona",
+        locator="sandbox-1",
+        label="sandbox",
+        metadata={"root": "workspace"},
+    )
+
+    lifecycle_calls: list[dict[str, str | None]] = []
+
+    def fake_update_daytona_thread_lifecycle_sync(
+        thread_id,
+        *,
+        root=None,
+        status=None,
+        touch=False,
+        started=False,
+        stopped=False,
+        archived=False,
+    ):
+        lifecycle_calls.append(
+            {
+                "thread_id": thread_id,
+                "root": root,
+                "status": status,
+                "touch": touch,
+                "started": started,
+                "stopped": stopped,
+                "archived": archived,
+            }
+        )
+
+    monkeypatch.setattr(
+        "agent.modules.workspaces.daytona_backend.get_daytona_sandbox",
+        lambda ref: sandbox,
+    )
+    monkeypatch.setattr(
+        "agent.modules.workspaces.daytona_backend.update_daytona_thread_lifecycle_sync",
+        fake_update_daytona_thread_lifecycle_sync,
+    )
+
+    thread_id = "thread-lifecycle"
+    assert stop_daytona_workspace(workspace, thread_id=thread_id) == "stopped"
+    assert sandbox.stop_calls == 1
+    assert workspace.metadata["status"] == "stopped"
+    assert workspace.metadata["last_stopped_at"]
+
+    assert archive_daytona_workspace(workspace, thread_id=thread_id) == "archived"
+    assert sandbox.archive_calls == 1
+    assert workspace.metadata["status"] == "archived"
+    assert workspace.metadata["last_archived_at"]
+
+    assert delete_daytona_workspace(workspace, thread_id=thread_id) == "destroyed"
+    assert sandbox.delete_calls == 1
+    assert workspace.metadata["status"] == "destroyed"
+
+    # Each lifecycle helper should forward the thread id to the persistence
+    # update so the sweeper/stop/archive hooks stay attached to the right
+    # thread workspace record.
+    assert [call["thread_id"] for call in lifecycle_calls] == [
+        thread_id,
+        thread_id,
+        thread_id,
+    ]
+    assert lifecycle_calls[0]["status"] == "stopped"
+    assert lifecycle_calls[0]["stopped"] is True
+    assert lifecycle_calls[1]["status"] == "archived"
+    assert lifecycle_calls[1]["archived"] is True
+    assert lifecycle_calls[2]["status"] == "destroyed"
+
+
+def test_delete_modal_workspace_terminates_and_detaches_sandbox(monkeypatch):
+    sandbox = FakeModalSandbox()
+    workspace = WorkspaceRef(
+        backend="modal",
+        locator="sb-1",
+        label="sandbox",
+        metadata={"root": "/workspace"},
+    )
+
+    monkeypatch.setattr(
+        "agent.modules.workspaces.modal_backend.get_modal_sandbox",
+        lambda ref: sandbox,
+    )
+
+    assert delete_modal_workspace(workspace) == "terminated"
+    assert sandbox.terminate_calls == 1
+    assert sandbox.detach_calls == 1
+
+
+def test_modal_backend_reports_unavailable_sandbox():
+    workspace = resolve_workspace_ref(
+        {
+            "backend": "modal",
+            "locator": "sb-expired",
+            "metadata": {"root": "/workspace"},
+        }
+    )
+    sandbox = FakeModalSandbox()
+    sandbox.filesystem = FakeUnavailableModalFs()
+    backend = ModalWorkspaceBackend(workspace, sandbox=sandbox)
+
+    with pytest.raises(WorkspaceUnavailableError) as exc_info:
+        backend.tree()
+
+    assert exc_info.value.backend == "modal"
+    assert exc_info.value.locator == "sb-expired"
+    assert "no longer available" in str(exc_info.value)
+
+
+def test_modal_backend_changes_reports_unavailable_sandbox():
+    workspace = resolve_workspace_ref(
+        {
+            "backend": "modal",
+            "locator": "sb-expired",
+            "metadata": {"root": "/workspace"},
+        }
+    )
+    backend = ModalWorkspaceBackend(workspace, sandbox=FakeUnavailableModalSandbox())
+
+    with pytest.raises(WorkspaceUnavailableError):
+        backend.changes()
+
+
+@pytest.mark.asyncio
+async def test_delete_thread_workspace_deletes_daytona_sandbox_and_record(monkeypatch):
+    from agent.modules.workspaces import service as workspace_service
+
+    workspace = WorkspaceRef(
+        backend="daytona",
+        locator="sandbox-1",
+        label="sandbox",
+        metadata={"root": "workspace"},
+    )
+    calls: list[tuple[str, str]] = []
+
+    class FakeWorkspaceRepository:
+        async def get(self, thread_id: str):
+            calls.append(("get", thread_id))
+            return {"workspace": workspace.model_dump()}
+
+        async def delete(self, thread_id: str):
+            calls.append(("delete_record", thread_id))
+            return True
+
+    def fake_delete_daytona_workspace(ref: WorkspaceRef, *, thread_id: str | None = None):
+        calls.append(("delete_sandbox", f"{thread_id}:{ref.locator}"))
+        return "destroyed"
+
+    monkeypatch.setattr(
+        workspace_service,
+        "get_thread_workspace_repository",
+        lambda: FakeWorkspaceRepository(),
+    )
+    monkeypatch.setattr(
+        "agent.modules.workspaces.daytona_backend.delete_daytona_workspace",
+        fake_delete_daytona_workspace,
+    )
+
+    result = await workspace_service.delete_thread_workspace("thread-daytona")
+
+    assert result == workspace
+    assert calls == [
+        ("get", "thread-daytona"),
+        ("delete_sandbox", "thread-daytona:sandbox-1"),
+        ("delete_record", "thread-daytona"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_delete_thread_workspace_deletes_modal_sandbox_and_record(monkeypatch):
+    from agent.modules.workspaces import service as workspace_service
+
+    workspace = WorkspaceRef(
+        backend="modal",
+        locator="sb-1",
+        label="sandbox",
+        metadata={"root": "/workspace"},
+    )
+    calls: list[tuple[str, str]] = []
+
+    class FakeWorkspaceRepository:
+        async def get(self, thread_id: str):
+            calls.append(("get", thread_id))
+            return {"workspace": workspace.model_dump()}
+
+        async def delete(self, thread_id: str):
+            calls.append(("delete_record", thread_id))
+            return True
+
+    def fake_delete_modal_workspace(ref: WorkspaceRef):
+        calls.append(("delete_sandbox", ref.locator))
+        return "terminated"
+
+    monkeypatch.setattr(
+        workspace_service,
+        "get_thread_workspace_repository",
+        lambda: FakeWorkspaceRepository(),
+    )
+    monkeypatch.setattr(
+        "agent.modules.workspaces.modal_backend.delete_modal_workspace",
+        fake_delete_modal_workspace,
+    )
+
+    result = await workspace_service.delete_thread_workspace("thread-modal")
+
+    assert result == workspace
+    assert calls == [
+        ("get", "thread-modal"),
+        ("delete_sandbox", "sb-1"),
+        ("delete_record", "thread-modal"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_daytona_lifecycle_sweeper_stops_and_archives_idle_workspaces(
+    monkeypatch,
+):
+    now = datetime(2026, 1, 8, tzinfo=timezone.utc)
+    stopped: list[str] = []
+    archived: list[str] = []
+    closed: list[str] = []
+
+    class FakeWorkspaceRepository:
+        async def list_by_backend(self, backend: str):
+            assert backend == "daytona"
+            return {
+                "thread-stop": {
+                    "workspace": {
+                        "backend": "daytona",
+                        "locator": "sandbox-stop",
+                        "label": "stop",
+                        "metadata": {
+                            "root": "workspace",
+                            "status": "started",
+                            "last_used_at": (now - timedelta(minutes=31)).isoformat(),
+                        },
+                    },
+                },
+                "thread-archive": {
+                    "workspace": {
+                        "backend": "daytona",
+                        "locator": "sandbox-archive",
+                        "label": "archive",
+                        "metadata": {
+                            "root": "workspace",
+                            "status": "stopped",
+                            "last_used_at": (now - timedelta(days=8)).isoformat(),
+                        },
+                    },
+                },
+                "thread-fresh": {
+                    "workspace": {
+                        "backend": "daytona",
+                        "locator": "sandbox-fresh",
+                        "label": "fresh",
+                        "metadata": {
+                            "root": "workspace",
+                            "status": "started",
+                            "last_used_at": (now - timedelta(minutes=5)).isoformat(),
+                        },
+                    },
+                },
+            }
+
+    monkeypatch.setattr(
+        "agent.modules.workspaces.daytona_backend._config",
+        lambda: (True, "key", "workspace"),
+    )
+    monkeypatch.setattr(
+        "agent.modules.workspaces.daytona_backend._lifecycle_config",
+        lambda: {
+            "auto_stop_minutes": 30,
+            "auto_archive_days": 7,
+            "sweeper_interval_seconds": 60,
+            "start_timeout_seconds": 120,
+            "stop_timeout_seconds": 60,
+        },
+    )
+    monkeypatch.setattr(
+        "agent.modules.workspaces.repository.get_thread_workspace_repository",
+        lambda: FakeWorkspaceRepository(),
+    )
+    monkeypatch.setattr(
+        "agent.modules.tools.close_thread_shell_sessions",
+        lambda thread_id: closed.append(thread_id) or 0,
+    )
+    monkeypatch.setattr(
+        "agent.modules.workspaces.daytona_backend.stop_daytona_workspace",
+        lambda workspace, thread_id=None: stopped.append(thread_id or "") or "stopped",
+    )
+    monkeypatch.setattr(
+        "agent.modules.workspaces.daytona_backend.archive_daytona_workspace",
+        lambda workspace, thread_id=None: (
+            archived.append(thread_id or "") or "archived"
+        ),
+    )
+
+    result = await sweep_idle_daytona_workspaces(now=now)
+
+    assert result["checked"] == 3
+    assert result["stopped"] == 1
+    assert result["archived"] == 1
+    assert result["skipped"] == 1
+    assert stopped == ["thread-stop"]
+    assert archived == ["thread-archive"]
+    assert closed == ["thread-stop", "thread-archive"]
+
+
+@pytest.mark.asyncio
+async def test_daytona_sweeper_marks_not_found_as_destroyed(monkeypatch):
+    now = datetime(2026, 1, 8, tzinfo=timezone.utc)
+    lifecycle_updates: list[dict[str, Any]] = []
+
+    class FakeWorkspaceRepository:
+        async def list_by_backend(self, backend: str):
+            assert backend == "daytona"
+            return {
+                "thread-gone": {
+                    "workspace": {
+                        "backend": "daytona",
+                        "locator": "sandbox-gone",
+                        "label": "gone",
+                        "metadata": {
+                            "root": "workspace",
+                            "status": "started",
+                            "last_used_at": (now - timedelta(minutes=31)).isoformat(),
+                        },
+                    },
+                },
+            }
+
+    monkeypatch.setattr(
+        "agent.modules.workspaces.daytona_backend._config",
+        lambda: (True, "key", "workspace"),
+    )
+    monkeypatch.setattr(
+        "agent.modules.workspaces.daytona_backend._lifecycle_config",
+        lambda: {
+            "auto_stop_minutes": 30,
+            "auto_archive_days": 7,
+            "sweeper_interval_seconds": 60,
+            "start_timeout_seconds": 120,
+            "stop_timeout_seconds": 60,
+        },
+    )
+    monkeypatch.setattr(
+        "agent.modules.workspaces.repository.get_thread_workspace_repository",
+        lambda: FakeWorkspaceRepository(),
+    )
+    monkeypatch.setattr(
+        "agent.modules.workspaces.daytona_backend.stop_daytona_workspace",
+        lambda workspace, thread_id=None: (_ for _ in ()).throw(
+            RuntimeError("Sandbox with ID or name sandbox-gone not found")
+        ),
+    )
+    monkeypatch.setattr(
+        "agent.modules.tools.close_thread_shell_sessions",
+        lambda thread_id: 0,
+    )
+    monkeypatch.setattr(
+        "agent.modules.workspaces.daytona_backend.update_daytona_thread_lifecycle_sync",
+        lambda thread_id, **kw: lifecycle_updates.append(kw),
+    )
+
+    result = await sweep_idle_daytona_workspaces(now=now)
+
+    assert result["errors"] == [], f"Unexpected errors: {result['errors']}"
+    assert result["skipped"] == 1
+    assert result["stopped"] == 0
+    assert result["archived"] == 0
+    assert len(lifecycle_updates) == 1
+    assert lifecycle_updates[0]["status"] == "destroyed"
+
+
 def test_local_workspace_backend_execute_uses_safe_workspace(
     monkeypatch,
     tmp_path,
@@ -98,12 +1025,22 @@ def test_local_workspace_backend_execute_uses_safe_workspace(
     backend = LocalWorkspaceBackend(workspace)
     captured = {}
 
-    def fake_run(command, **kwargs):
-        captured["command"] = command
-        captured.update(kwargs)
-        return SimpleNamespace(stdout="ok", stderr="", returncode=0)
+    class FakePopen:
+        pid = 12345
+        returncode = 0
 
-    monkeypatch.setattr(local_backend_module.subprocess, "run", fake_run)
+        def __init__(self, command, **kwargs):
+            captured["command"] = command
+            captured.update(kwargs)
+
+        def communicate(self, timeout=None):
+            captured["timeout"] = timeout
+            return "ok", ""
+
+        def kill(self):
+            return None
+
+    monkeypatch.setattr(local_backend_module.subprocess, "Popen", FakePopen)
 
     result = backend.execute("echo ok", timeout=12)
 
@@ -112,6 +1049,78 @@ def test_local_workspace_backend_execute_uses_safe_workspace(
     assert captured["command"] == "echo ok"
     assert captured["cwd"] == str(tmp_path.resolve())
     assert captured["timeout"] == 12
+
+
+def test_daytona_workspace_backend_execute_changes_and_untracked_diff():
+    sandbox = FakeDaytonaSandbox(git_root="/workspace")
+    sandbox.fs.upload_file(b"hello\nworld\n", "/workspace/notes.txt")
+    sandbox.process.git_status_output = "?? notes.txt\0"
+    workspace = WorkspaceRef(
+        backend="daytona",
+        locator="sandbox-1",
+        label="sandbox",
+        metadata={"root": "workspace"},
+    )
+    backend = DaytonaWorkspaceBackend(workspace, sandbox=sandbox)
+
+    result = backend.execute("echo ok", timeout=12)
+    changes = backend.changes()
+    diff = backend.diff("/workspace/notes.txt")
+
+    assert result.output == "ok\n"
+    assert result.exit_code == 0
+    assert ("echo ok", "/workspace", 12) in sandbox.process.commands
+    assert changes["is_git_repo"] is True
+    assert changes["changes"][0]["path"] == "/workspace/notes.txt"
+    assert changes["changes"][0]["status"] == "untracked"
+    assert changes["changes"][0]["additions"] == 2
+    assert "+hello" in diff["diff"]
+    assert "+world" in diff["diff"]
+
+
+def test_daytona_workspace_backend_changes_handles_non_git_workspace():
+    sandbox = FakeDaytonaSandbox(git_root=None)
+    workspace = WorkspaceRef(
+        backend="daytona",
+        locator="sandbox-1",
+        label="sandbox",
+        metadata={"root": "workspace"},
+    )
+    backend = DaytonaWorkspaceBackend(workspace, sandbox=sandbox)
+
+    assert backend.changes() == {
+        "root": "/workspace",
+        "is_git_repo": False,
+        "changes": [],
+        "message": "Workspace is not a Git repository.",
+    }
+
+
+def test_modal_workspace_backend_execute_changes_and_untracked_diff():
+    sandbox = FakeModalSandbox(git_root="/workspace")
+    sandbox.filesystem.write_text("hello\nworld\n", "/workspace/notes.txt")
+    sandbox.git_status_output = "?? notes.txt\0"
+    workspace = WorkspaceRef(
+        backend="modal",
+        locator="sb-1",
+        label="sandbox",
+        metadata={"root": "/workspace"},
+    )
+    backend = ModalWorkspaceBackend(workspace, sandbox=sandbox)
+
+    result = backend.execute("echo ok", timeout=12)
+    changes = backend.changes()
+    diff = backend.diff("/workspace/notes.txt")
+
+    assert result.output == "ok\n"
+    assert result.exit_code == 0
+    assert ("echo ok", "/workspace", 12) in sandbox.commands
+    assert changes["is_git_repo"] is True
+    assert changes["changes"][0]["path"] == "/workspace/notes.txt"
+    assert changes["changes"][0]["status"] == "untracked"
+    assert changes["changes"][0]["additions"] == 2
+    assert "+hello" in diff["diff"]
+    assert "+world" in diff["diff"]
 
 
 def test_workspace_migration_backfills_legacy_tables(tmp_path):
@@ -199,6 +1208,24 @@ def test_get_workspace_backend_returns_physical_local_backend(tmp_path):
     assert not hasattr(backend, "virtual_prefix")
 
 
+def test_get_workspace_backend_returns_modal_backend(monkeypatch):
+    sandbox = FakeModalSandbox()
+    workspace = WorkspaceRef(
+        backend="modal",
+        locator="sb-1",
+        label="sandbox",
+        metadata={"root": "/workspace"},
+    )
+    monkeypatch.setattr(
+        "agent.modules.workspaces.modal_backend.get_modal_sandbox",
+        lambda ref: sandbox,
+    )
+
+    backend = get_workspace_backend(workspace)
+
+    assert isinstance(backend, ModalWorkspaceBackend)
+
+
 def test_local_workspace_tree_uses_absolute_path_keys(tmp_path):
     workspace = workspace_ref_from_local_path(str(tmp_path), label="test-lab")
     backend = LocalWorkspaceBackend(workspace)
@@ -213,4 +1240,6 @@ def test_local_workspace_tree_uses_absolute_path_keys(tmp_path):
     src_tree = backend.tree(root_tree["entries"][0]["path"])
 
     assert src_tree["path"] == str((tmp_path / "src").resolve())
-    assert src_tree["entries"][0]["path"] == str((tmp_path / "src" / "main.py").resolve())
+    assert src_tree["entries"][0]["path"] == str(
+        (tmp_path / "src" / "main.py").resolve()
+    )

@@ -66,7 +66,7 @@ class LocalWorkspaceBackend:
             os.makedirs(parent, exist_ok=True)
         with open(full_path, "w", encoding="utf-8") as file_handle:
             file_handle.write(content)
-        return "[OK] Done"
+        return f"[OK] Wrote file: {full_path}"
 
     def execute(
         self,
@@ -75,7 +75,10 @@ class LocalWorkspaceBackend:
         timeout: int = 30,
         max_output_chars: int | None = None,
     ) -> CommandResult:
-        from agent.modules.agent_runtime.active_sessions import current_session_id_var, get_active_session_registry
+        from agent.modules.agent_runtime import (
+            current_session_id_var,
+            get_active_session_registry,
+        )
         session_id = current_session_id_var.get()
         registry = get_active_session_registry()
 

@@ -328,12 +328,14 @@ async def test_background_task_remove_is_persisted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import agent.modules.agent_runtime.runner as runner_module
+    import agent.modules.workspaces as workspaces_module
     import agent.modules.workflows as workflows_module
 
     async def fake_run_agent_stream(**kwargs):
         yield {"type": "final", "content": "done"}
 
     deleted_thread_ids: list[str] = []
+    deleted_workspace_thread_ids: list[str] = []
     closed_thread_ids: list[str] = []
 
     shell_manager_module = importlib.import_module(
@@ -348,8 +350,16 @@ async def test_background_task_remove_is_persisted(
     async def fake_delete_workflow_thread_tree(thread_id: str) -> None:
         deleted_thread_ids.append(thread_id)
 
+    async def fake_delete_thread_workspace(thread_id: str) -> None:
+        deleted_workspace_thread_ids.append(thread_id)
+
     monkeypatch.setattr(runner_module, "run_agent_stream", fake_run_agent_stream)
     monkeypatch.setattr(shell_manager_module, "session_manager", FakeSessionManager())
+    monkeypatch.setattr(
+        workspaces_module,
+        "delete_thread_workspace",
+        fake_delete_thread_workspace,
+    )
     monkeypatch.setattr(
         workflows_module,
         "delete_workflow_thread_tree",
@@ -368,6 +378,7 @@ async def test_background_task_remove_is_persisted(
     assert restored.get(task_id) is None
     assert restored.list_all() == []
     assert closed_thread_ids == [task["thread_id"]]
+    assert deleted_workspace_thread_ids == [task["thread_id"]]
     assert deleted_thread_ids == [task["thread_id"]]
 
 

@@ -139,8 +139,23 @@ class TestDashboardSettingsEndpoints:
         assert "llm.default_model" not in data["settings"]
         assert "channels.telegram.enabled" not in data["settings"]
         assert "channels" not in data["by_category"]
+        assert "workspace.root" not in data["settings"]
+        assert "workspace.daytona.enabled" not in data["settings"]
+        assert "workspace.modal.enabled" not in data["settings"]
         assert "database.url" in data["settings"]
         assert "security.jwt_secret" not in data["settings"]
+
+    def test_get_backends_api_includes_workspace_backend_settings(self, dashboard_client) -> None:
+        resp = dashboard_client.get("/dashboard-api/backends")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["active_nav"] == "backends"
+        assert data["page_title"] == "Workspace Backends"
+        assert "workspace.root" in data["settings"]
+        assert "workspace.daytona.enabled" in data["settings"]
+        assert "workspace.modal.enabled" in data["settings"]
+        assert "workspace.modal.token_secret" in data["settings"]
+        assert "workspace" in data["by_category"]
 
     def test_get_channels_api_includes_channel_settings(
         self,

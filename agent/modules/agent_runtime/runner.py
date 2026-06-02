@@ -274,11 +274,13 @@ async def clear_agent_session(
     channel_id: str = "",
 ) -> None:
     """Clear the session history (checkpoint thread) for a specific user and channel."""
-    from agent.modules.tools.langchain.shell_tools.session_manager import session_manager
+    from agent.modules.tools import close_thread_shell_sessions
+    from agent.modules.workspaces import delete_thread_workspace
     from agent.modules.workflows import delete_workflow_thread_tree
 
     thread_id = SessionManager.make_thread_id(platform, user_id, channel_id)
-    session_manager.close_thread_sessions(thread_id)
+    close_thread_shell_sessions(thread_id)
+    await delete_thread_workspace(thread_id)
     await delete_workflow_thread_tree(thread_id)
 
 

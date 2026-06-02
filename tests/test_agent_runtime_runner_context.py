@@ -17,6 +17,7 @@ async def test_clear_agent_session_closes_shell_sessions_and_deletes_thread_tree
         "agent.modules.tools.langchain.shell_tools.session_manager"
     )
     workflows_module = importlib.import_module("agent.modules.workflows")
+    workspaces_module = importlib.import_module("agent.modules.workspaces")
     calls = []
 
     class FakeSessionManager:
@@ -27,7 +28,15 @@ async def test_clear_agent_session_closes_shell_sessions_and_deletes_thread_tree
     async def fake_delete_workflow_thread_tree(thread_id: str):
         calls.append(("delete_tree", thread_id))
 
+    async def fake_delete_thread_workspace(thread_id: str):
+        calls.append(("delete_workspace", thread_id))
+
     monkeypatch.setattr(shell_manager_module, "session_manager", FakeSessionManager())
+    monkeypatch.setattr(
+        workspaces_module,
+        "delete_thread_workspace",
+        fake_delete_thread_workspace,
+    )
     monkeypatch.setattr(
         workflows_module,
         "delete_workflow_thread_tree",
@@ -42,6 +51,7 @@ async def test_clear_agent_session_closes_shell_sessions_and_deletes_thread_tree
 
     assert calls == [
         ("close_shell", "api_dashboard_thread-1"),
+        ("delete_workspace", "api_dashboard_thread-1"),
         ("delete_tree", "api_dashboard_thread-1"),
     ]
 

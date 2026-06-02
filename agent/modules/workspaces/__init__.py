@@ -1,9 +1,14 @@
-from agent.modules.workspaces.backends import CommandResult, WorkspaceBackend
+from agent.modules.workspaces.backends import (
+    CommandResult,
+    WorkspaceBackend,
+    WorkspaceUnavailableError,
+)
 from agent.modules.workspaces.migrations import migrate_workspace_tables
 from agent.modules.workspaces.models import ThreadWorkspace
 from agent.modules.workspaces.refs import (
     DEFAULT_LOCAL_WORKSPACE,
     WorkspaceRef,
+    WorkspaceBackendName,
     normalize_workspace_ref,
     workspace_ref_from_columns,
 )
@@ -11,8 +16,10 @@ from agent.modules.workspaces.repository import (
     ThreadWorkspaceRepository,
     get_thread_workspace_repository,
     serialize_thread_workspace,
+    update_thread_workspace_metadata_sync,
 )
 from agent.modules.workspaces.service import (
+    delete_thread_workspace,
     delete_workspace_entry,
     ensure_workspace_directory,
     get_thread_workspace_dir,
@@ -31,14 +38,46 @@ from agent.modules.workspaces.service import (
     resolve_workspace_root,
     workspace_ref_from_local_path,
 )
+from agent.modules.workspaces.daytona_backend import (
+    DaytonaWorkspaceBackend,
+    archive_daytona_workspace,
+    attach_daytona_workspace,
+    create_daytona_workspace,
+    delete_daytona_workspace,
+    ensure_daytona_workspace_active,
+    resolve_daytona_path,
+    start_daytona_lifecycle_sweeper,
+    stop_daytona_lifecycle_sweeper,
+    stop_daytona_workspace,
+    sweep_idle_daytona_workspaces,
+)
+from agent.modules.workspaces.modal_backend import (
+    ModalWorkspaceBackend,
+    attach_modal_workspace,
+    create_modal_workspace,
+    delete_modal_workspace,
+    resolve_modal_path,
+)
 
 __all__ = [
     "CommandResult",
     "DEFAULT_LOCAL_WORKSPACE",
     "ThreadWorkspace",
     "ThreadWorkspaceRepository",
+    "WorkspaceBackendName",
     "WorkspaceBackend",
     "WorkspaceRef",
+    "WorkspaceUnavailableError",
+    "DaytonaWorkspaceBackend",
+    "ModalWorkspaceBackend",
+    "archive_daytona_workspace",
+    "attach_daytona_workspace",
+    "attach_modal_workspace",
+    "create_daytona_workspace",
+    "create_modal_workspace",
+    "delete_daytona_workspace",
+    "delete_modal_workspace",
+    "delete_thread_workspace",
     "delete_workspace_entry",
     "ensure_workspace_directory",
     "get_thread_workspace_dir",
@@ -58,7 +97,15 @@ __all__ = [
     "rename_workspace_entry",
     "resolve_workspace_ref",
     "resolve_workspace_root",
+    "resolve_daytona_path",
+    "resolve_modal_path",
     "serialize_thread_workspace",
+    "ensure_daytona_workspace_active",
+    "start_daytona_lifecycle_sweeper",
+    "stop_daytona_lifecycle_sweeper",
+    "stop_daytona_workspace",
+    "sweep_idle_daytona_workspaces",
+    "update_thread_workspace_metadata_sync",
     "workspace_ref_from_columns",
     "workspace_ref_from_local_path",
 ]

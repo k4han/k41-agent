@@ -32,6 +32,7 @@ from agent.modules.workflows import (
 )
 from agent.modules.workspaces import (
     WorkspaceRef,
+    WorkspaceUnavailableError,
     get_thread_workspace_ref,
     resolve_workspace_ref,
 )
@@ -121,6 +122,10 @@ def _is_channel_setting_key(key: str) -> bool:
     return key.startswith("channels.")
 
 
+def _is_workspace_setting_key(key: str) -> bool:
+    return key == "workspace.root" or key.startswith("workspace.")
+
+
 def _filter_settings[T](
     settings: dict[str, T],
     *,
@@ -137,7 +142,19 @@ def _filter_config_settings[T](settings: dict[str, T]) -> dict[str, T]:
     return {
         key: value
         for key, value in settings.items()
-        if not _is_provider_setting_key(key) and not _is_channel_setting_key(key)
+        if (
+            not _is_provider_setting_key(key)
+            and not _is_channel_setting_key(key)
+            and not _is_workspace_setting_key(key)
+        )
+    }
+
+
+def _filter_workspace_settings[T](settings: dict[str, T]) -> dict[str, T]:
+    return {
+        key: value
+        for key, value in settings.items()
+        if _is_workspace_setting_key(key)
     }
 
 
@@ -744,7 +761,7 @@ async def _settings_payload(request: Request, *, include_provider_settings: bool
         default_provider,
     )
 
-    from agent.modules.providers.catalog import load_providers_catalog
+    from agent.modules.providers import load_providers_catalog
     catalog = load_providers_catalog()
     catalog_serialized = {}
     for pid, entry in catalog.items():
@@ -786,6 +803,21 @@ async def _settings_payload(request: Request, *, include_provider_settings: bool
         "provider_type_options": PROVIDER_TYPE_OPTIONS,
         "providers_catalog": catalog_serialized,
         **await _provider_model_options(),
+    }
+
+
+async def _backend_settings_payload(request: Request) -> dict[str, Any]:
+    service = _get_config_service(request)
+    settings_raw, settings_sources_raw = service.get_settings_overview_and_sources()
+    settings = _filter_workspace_settings(settings_raw)
+    settings_sources = _filter_workspace_settings(settings_sources_raw)
+    return {
+        "active_nav": "backends",
+        "page_title": "Workspace Backends",
+        "page_subtitle": "Manage local, Daytona, and Modal workspace backends.",
+        "settings": settings,
+        "by_category": _group_settings_by_category(settings),
+        "settings_sources": settings_sources,
     }
 
 
@@ -881,14 +913,19 @@ async def _workspace_ref_from_request(
     workspace: WorkspaceRef | dict[str, Any] | str | None = None,
     backend: str | None = None,
     locator: str | None = None,
+    root: str | None = None,
 ) -> WorkspaceRef:
     if workspace is not None:
         return resolve_workspace_ref(workspace)
     if locator and locator.strip():
+        metadata: dict[str, Any] = {}
+        if (backend or "").strip().lower() in {"daytona", "modal"} and root and root.strip():
+            metadata["root"] = root.strip()
         return resolve_workspace_ref(
             {
                 "backend": (backend or "local").strip() or "local",
                 "locator": locator,
+                "metadata": metadata,
             }
         )
     if thread_id and thread_id.strip():
@@ -899,6 +936,8 @@ async def _workspace_ref_from_request(
 
 
 def _workspace_http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, WorkspaceUnavailableError):
+        return HTTPException(status_code=410, detail=str(exc))
     if isinstance(exc, FileNotFoundError):
         return HTTPException(status_code=404, detail=str(exc))
     if isinstance(exc, FileExistsError):

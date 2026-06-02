@@ -8,6 +8,7 @@ import {
   Plus,
   ChevronRight,
   RefreshCw,
+  Cloud,
 } from "lucide-solid";
 
 import { Dialog } from "@/components/Dialog";
@@ -15,8 +16,10 @@ import { SelectControl } from "@/components/SelectControl";
 import { useToast } from "@/components/Toast";
 import { apiFetch, postJson } from "@/lib/api";
 import {
+  daytonaWorkspaceRef,
   formatWorkspaceRoot,
   localWorkspaceRef,
+  modalWorkspaceRef,
   workspaceDisplayLabel,
   workspaceDisplayLabelFromValues,
 } from "@/lib/workspace";
@@ -48,6 +51,7 @@ type WorkspaceResolvePayload = {
 export interface WorkspaceSelectorProps {
   workingDir: string;
   defaultWorkingDir: string;
+  threadId?: string;
   workspace?: WorkspaceRef | null;
   locked: boolean;
   disabled?: boolean;
@@ -56,8 +60,10 @@ export interface WorkspaceSelectorProps {
 
 export function WorkspaceSelector(props: WorkspaceSelectorProps) {
   const { showToast } = useToast();
-  const [kind, setKind] = createSignal<"local" | "github">("local");
+  const [kind, setKind] = createSignal<"local" | "github" | "daytona" | "modal">("local");
   const [localDraft, setLocalDraft] = createSignal(props.defaultWorkingDir);
+  const [daytonaSandboxId, setDaytonaSandboxId] = createSignal("");
+  const [modalSandboxId, setModalSandboxId] = createSignal("");
   const [repositories, setRepositories] = createSignal<GitHubRepositoryBinding[]>([]);
   const [repositoryId, setRepositoryId] = createSignal("");
   const [repositoriesLoading, setRepositoriesLoading] = createSignal(false);
@@ -158,6 +164,12 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
     if (kind() === "local") {
       return !localDraft().trim();
     }
+    if (kind() === "daytona") {
+      return false;
+    }
+    if (kind() === "modal") {
+      return false;
+    }
     return !repositoryId();
   });
 
@@ -246,13 +258,38 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
     }
     setResolving(true);
     try {
+      const daytonaWorkspace =
+        kind() === "daytona" ? daytonaWorkspaceRef(daytonaSandboxId()) : null;
+      const modalWorkspace =
+        kind() === "modal" ? modalWorkspaceRef(modalSandboxId()) : null;
       const payload = await postJson<WorkspaceResolvePayload>(
         "/dashboard-api/workspace/resolve",
         kind() === "local"
-          ? { kind: "local", workspace: localWorkspaceRef(targetPath) }
-          : { kind: "github", repository_id: Number(repositoryId()) },
+          ? {
+              kind: "local",
+              thread_id: props.threadId || null,
+              workspace: localWorkspaceRef(targetPath),
+            }
+          : kind() === "github"
+            ? {
+                kind: "github",
+                thread_id: props.threadId || null,
+                repository_id: Number(repositoryId()),
+              }
+            : {
+                kind: kind() === "daytona" ? "daytona" : "modal",
+                thread_id: props.threadId || null,
+                workspace: daytonaWorkspace || modalWorkspace,
+                locator: daytonaWorkspace?.locator || modalWorkspace?.locator || null,
+              },
       );
-      setLocalDraft(payload.workspace.locator);
+      if (payload.workspace.backend === "daytona") {
+        setDaytonaSandboxId(payload.workspace.locator);
+      } else if (payload.workspace.backend === "modal") {
+        setModalSandboxId(payload.workspace.locator);
+      } else {
+        setLocalDraft(payload.workspace.locator);
+      }
       setResolvedLabel(payload.label || payload.workspace.label || payload.workspace.locator);
       props.onResolved(payload.workspace);
       showToast("Workspace selected.", "success");
@@ -266,6 +303,24 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
   createEffect(() => {
     if (props.workingDir) {
       setLocalDraft(props.workingDir);
+    }
+  });
+
+  createEffect(() => {
+    const workspace = props.workspace;
+    if (!workspace) {
+      return;
+    }
+    if (workspace.backend === "daytona") {
+      setKind("daytona");
+      setDaytonaSandboxId(workspace.locator);
+    } else if (workspace.backend === "modal") {
+      setKind("modal");
+      setModalSandboxId(workspace.locator);
+    } else if (workspace.backend === "github") {
+      setKind("github");
+    } else {
+      setKind("local");
     }
   });
 
@@ -315,12 +370,40 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
               <GitBranch size={14} />
               <span>GitHub repo</span>
             </button>
+            <button
+              class={`workspace-selector-mode ${kind() === "daytona" ? "active" : ""}`}
+              type="button"
+              disabled={props.disabled || resolving()}
+              onClick={() => setKind("daytona")}
+              aria-selected={kind() === "daytona"}
+              role="tab"
+            >
+              <Cloud size={14} />
+              <span>Daytona</span>
+            </button>
+            <button
+              class={`workspace-selector-mode ${kind() === "modal" ? "active" : ""}`}
+              type="button"
+              disabled={props.disabled || resolving()}
+              onClick={() => setKind("modal")}
+              aria-selected={kind() === "modal"}
+              role="tab"
+            >
+              <Cloud size={14} />
+              <span>Modal</span>
+            </button>
           </div>
 
           <Show
             when={kind() === "github"}
             fallback={
-              <div class="workspace-selector-row-enhanced">
+              <Show
+                when={kind() === "daytona"}
+                fallback={
+                  <Show
+                    when={kind() === "modal"}
+                    fallback={
+                      <div class="workspace-selector-row-enhanced">
                 <div class="workspace-input-group">
                   <input
                     class="input workspace-selector-input"
@@ -538,7 +621,67 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
                     </Dialog>
                   </div>
                 </Show>
-              </div>
+                  </div>
+                    }
+                  >
+                    <div class="workspace-selector-row-enhanced">
+                      <div class="workspace-input-group">
+                        <input
+                          class="input workspace-selector-input"
+                          value={modalSandboxId()}
+                          disabled={props.disabled || resolving()}
+                          placeholder="Sandbox ID"
+                          onInput={(event) => setModalSandboxId(event.currentTarget.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              void resolveWorkspace();
+                            }
+                          }}
+                        />
+                      </div>
+                      <button
+                        class="btn btn-sm btn-primary workspace-use-btn"
+                        type="button"
+                        disabled={resolveDisabled()}
+                        onClick={() => void resolveWorkspace()}
+                        title={modalSandboxId().trim() ? "Attach sandbox" : "Create sandbox"}
+                      >
+                        <Cloud size={13} />
+                        {modalSandboxId().trim() ? "Attach" : "Create"}
+                      </button>
+                    </div>
+                  </Show>
+                }
+              >
+                <div class="workspace-selector-row-enhanced">
+                  <div class="workspace-input-group">
+                    <input
+                      class="input workspace-selector-input"
+                      value={daytonaSandboxId()}
+                      disabled={props.disabled || resolving()}
+                      placeholder="Sandbox ID"
+                      onInput={(event) => setDaytonaSandboxId(event.currentTarget.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          void resolveWorkspace();
+                        }
+                      }}
+                    />
+                  </div>
+                  <button
+                    class="btn btn-sm btn-primary workspace-use-btn"
+                    type="button"
+                    disabled={resolveDisabled()}
+                    onClick={() => void resolveWorkspace()}
+                    title={daytonaSandboxId().trim() ? "Attach sandbox" : "Create sandbox"}
+                  >
+                    <Cloud size={13} />
+                    {daytonaSandboxId().trim() ? "Attach" : "Create"}
+                  </button>
+                </div>
+              </Show>
             }
           >
             <div class="workspace-selector-row">

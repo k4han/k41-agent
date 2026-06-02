@@ -99,7 +99,7 @@ export type PromptVariablesPayload = {
 };
 
 export type WorkspaceRef = {
-  backend: "local";
+  backend: "local" | "daytona" | "modal" | "github";
   locator: string;
   label: string;
   metadata: Record<string, unknown>;
@@ -194,7 +194,7 @@ export type ProviderTypeOption = {
 };
 
 export type SettingsPayload = {
-  active_nav: "config" | "providers";
+  active_nav: "config" | "providers" | "backends";
   page_title: string;
   page_subtitle: string;
   settings: Record<string, SettingInfo>;

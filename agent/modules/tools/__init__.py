@@ -62,6 +62,23 @@ def get_runtime_context_value(runtime_or_context, key: str, default: T) -> T:
     return get_context_value(runtime_or_context, key, default)
 
 
+def close_thread_shell_sessions(thread_id: str) -> int:
+    """Close local and remote shell sessions for a thread tree."""
+    from agent.modules.tools.langchain.shell_tools.daytona_session_manager import (
+        daytona_session_manager,
+    )
+    from agent.modules.tools.langchain.shell_tools.modal_session_manager import (
+        modal_session_manager,
+    )
+    from agent.modules.tools.langchain.shell_tools.session_manager import session_manager
+
+    return (
+        session_manager.close_thread_sessions(thread_id)
+        + daytona_session_manager.close_thread_sessions(thread_id)
+        + modal_session_manager.close_thread_sessions(thread_id)
+    )
+
+
 def get_default_descriptors() -> list[ToolDescriptor]:
     """Return all descriptors loaded into the registry."""
     return get_registry_service().get_descriptors()
@@ -126,6 +143,7 @@ __all__ = [
     "ToolResolver",
     "ToolSource",
     "aresolve_tools_for_agent",
+    "close_thread_shell_sessions",
     "ensure_mcp_loaded",
     "find_descriptors",
     "find_tools",

@@ -93,10 +93,10 @@ async def _list_workflow_child_thread_ids(checkpointer: object, thread_id: str) 
 
 
 async def delete_workflow_thread_tree(thread_id: str) -> None:
-    from agent.modules.tools.langchain.shell_tools.session_manager import session_manager
+    from agent.modules.tools import close_thread_shell_sessions
     from agent.modules.workflows.checkpoint.store import get_checkpointer
 
-    session_manager.close_thread_sessions(thread_id)
+    close_thread_shell_sessions(thread_id)
     checkpointer = get_checkpointer()
     thread_ids = {thread_id}
     try:

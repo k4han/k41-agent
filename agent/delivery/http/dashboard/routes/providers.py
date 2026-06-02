@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from agent.delivery.http.dashboard.routes.shared import (
+    _backend_settings_payload,
     _delete_config_tree,
     _get_config_service,
     _normalize_provider_name,
@@ -28,6 +29,11 @@ router = APIRouter()
 @router.get("/dashboard-api/config")
 async def get_dashboard_config(request: Request) -> dict[str, Any]:
     return await _settings_payload(request, include_provider_settings=False)
+
+
+@router.get("/dashboard-api/backends")
+async def get_dashboard_backends(request: Request) -> dict[str, Any]:
+    return await _backend_settings_payload(request)
 
 
 @router.get("/dashboard-api/providers")
@@ -139,7 +145,7 @@ async def list_dashboard_provider_models(
 
 @router.post("/dashboard-api/providers/update-catalog")
 async def update_providers_catalog() -> dict[str, str]:
-    from agent.modules.providers.catalog import update_catalog_from_url
+    from agent.modules.providers import update_catalog_from_url
     success, message = await update_catalog_from_url()
     if not success:
         raise HTTPException(status_code=500, detail=message)

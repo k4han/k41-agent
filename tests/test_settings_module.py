@@ -298,12 +298,18 @@ class TestDatabaseConfigSource:
                 "recursion_limit": 42,
                 "channels.telegram.bot_token": "telegram-secret",
                 "mcp.servers.github.headers.Authorization": "Bearer secret",
+                "workspace.daytona.api_key": "daytona-secret",
+                "workspace.modal.token_id": "modal-id",
+                "workspace.modal.token_secret": "modal-secret",
             }
         )
 
         assert source.get("recursion_limit") == 42
         assert source.get("channels.telegram.bot_token") == "telegram-secret"
         assert source.get("mcp.servers.github.headers.Authorization") == "Bearer secret"
+        assert source.get("workspace.daytona.api_key") == "daytona-secret"
+        assert source.get("workspace.modal.token_id") == "modal-id"
+        assert source.get("workspace.modal.token_secret") == "modal-secret"
 
         engine = create_engine(db_url, future=True)
         try:
@@ -315,10 +321,19 @@ class TestDatabaseConfigSource:
         by_key = {row.key: row for row in rows}
         secret_row = by_key["mcp.servers.github.headers.Authorization"]
         channel_secret_row = by_key["channels.telegram.bot_token"]
+        daytona_secret_row = by_key["workspace.daytona.api_key"]
+        modal_id_row = by_key["workspace.modal.token_id"]
+        modal_secret_row = by_key["workspace.modal.token_secret"]
         assert secret_row.encrypted is True
         assert "Bearer secret" not in secret_row.value_json
         assert channel_secret_row.encrypted is True
         assert "telegram-secret" not in channel_secret_row.value_json
+        assert daytona_secret_row.encrypted is True
+        assert "daytona-secret" not in daytona_secret_row.value_json
+        assert modal_id_row.encrypted is True
+        assert "modal-id" not in modal_id_row.value_json
+        assert modal_secret_row.encrypted is True
+        assert "modal-secret" not in modal_secret_row.value_json
         assert by_key["recursion_limit"].encrypted is False
 
     def test_seed_missing_settings_preserves_existing_database_values(self, tmp_path: Path) -> None:
@@ -353,6 +368,13 @@ class TestDatabaseConfigSource:
         assert is_database_runtime_key("channels.telegram.enabled")
         assert is_database_runtime_key("channels.telegram.bot_token")
         assert is_database_runtime_key("channels.github.webhook_secret")
+        assert is_database_runtime_key("workspace.daytona.enabled")
+        assert is_database_runtime_key("workspace.daytona.api_key")
+        assert is_database_runtime_key("workspace.daytona.default_root")
+        assert is_database_runtime_key("workspace.modal.enabled")
+        assert is_database_runtime_key("workspace.modal.token_id")
+        assert is_database_runtime_key("workspace.modal.token_secret")
+        assert is_database_runtime_key("workspace.modal.default_root")
         assert not is_database_runtime_key("database.url")
 
 
@@ -508,6 +530,14 @@ class TestRuntimeKeyMetadata:
         assert is_runtime_key("llm.providers.openai-main.temperature")
         assert is_runtime_key("channels.github.app_id")
         assert is_runtime_key("channels.github.webhook_secret")
+        assert is_runtime_key("workspace.daytona.enabled")
+        assert is_runtime_key("workspace.daytona.api_key")
+        assert is_runtime_key("workspace.daytona.default_root")
+        assert is_runtime_key("workspace.modal.enabled")
+        assert is_runtime_key("workspace.modal.token_id")
+        assert is_runtime_key("workspace.modal.token_secret")
+        assert is_runtime_key("workspace.modal.default_root")
+        assert is_runtime_key("workspace.root")
         assert not is_runtime_key("llm.providers.openai-main.random_field")
 
     def test_provider_setting_metadata(self) -> None:
@@ -537,6 +567,26 @@ class TestRuntimeKeyMetadata:
         assert port_meta["step"] == 1
         assert port_meta["restart_required"] is True
 
+    def test_daytona_setting_metadata(self) -> None:
+        api_key_meta = get_setting_metadata("workspace.daytona.api_key")
+        enabled_meta = get_setting_metadata("workspace.daytona.enabled")
+        root_meta = get_setting_metadata("workspace.daytona.default_root")
+
+        assert api_key_meta["type"] == "password"
+        assert api_key_meta["category"] == "workspace"
+        assert enabled_meta["type"] == "boolean"
+        assert root_meta["type"] == "text"
+
+    def test_modal_setting_metadata(self) -> None:
+        token_meta = get_setting_metadata("workspace.modal.token_secret")
+        enabled_meta = get_setting_metadata("workspace.modal.enabled")
+        image_meta = get_setting_metadata("workspace.modal.image")
+
+        assert token_meta["type"] == "password"
+        assert token_meta["category"] == "workspace"
+        assert enabled_meta["type"] == "boolean"
+        assert image_meta["type"] == "text"
+
 
 # =====================================================================
 # Public API
@@ -549,7 +599,6 @@ class TestPublicAPI:
         monkeypatch,
     ) -> None:
         from agent.shared.config import get_config_service
-        from agent.shared.config.yaml_source import YamlConfigSource
         import agent.shared.config.service as service_module
         import agent.shared.config.yaml_source as yaml_src
 

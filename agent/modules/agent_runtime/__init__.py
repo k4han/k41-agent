@@ -1,6 +1,7 @@
 from agent.modules.agent_runtime.active_sessions import (
     ActiveSession,
     ActiveSessionRegistry,
+    current_session_id_var,
     current_thread_id_var,
     get_active_session_registry,
 )
@@ -45,6 +46,7 @@ __all__ = [
     "TaskStatus",
     "build_run_params",
     "clear_agent_session",
+    "current_session_id_var",
     "current_thread_id_var",
     "get_active_session_registry",
     "get_background_task_manager",

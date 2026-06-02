@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Iterable
 
 from agent.modules.tools.domain import ToolDescriptor, ToolSource
-from agent.modules.tools.sources.mcp import MCP_TOOL_PREFIX, _extract_server_name
+from agent.modules.tools.sources.mcp import _extract_server_name
 
 
 @dataclass(frozen=True)

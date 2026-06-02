@@ -32,6 +32,11 @@ const AppearancePage = lazy(() =>
     default: module.AppearancePage,
   })),
 );
+const BackendsPage = lazy(() =>
+  import("@/pages/settings/BackendsPage").then((module) => ({
+    default: module.BackendsPage,
+  })),
+);
 const ChannelsPage = lazy(() =>
   import("@/pages/settings/ChannelsPage").then((module) => ({
     default: module.ChannelsPage,
@@ -85,6 +90,7 @@ render(
         <Route path="/scheduler" component={SchedulerPage} />
         <Route path="/settings" component={() => <Navigate href="/settings/config" />} />
         <Route path="/settings/config" component={ConfigPage} />
+        <Route path="/settings/backends" component={BackendsPage} />
         <Route path="/settings/providers" component={ProvidersPage} />
         <Route path="/settings/connections" component={ConnectionsPage} />
         <Route path="/settings/channels" component={ChannelsPage} />

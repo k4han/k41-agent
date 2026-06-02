@@ -11,6 +11,7 @@ import {
   Link2,
   Network,
   Palette,
+  ServerCog,
   Users,
   Workflow,
 } from "lucide-solid";
@@ -24,6 +25,7 @@ type SettingsNavItem = {
 
 const settingsNavItems: SettingsNavItem[] = [
   { href: "/settings/config", label: "Runtime", icon: <Cog size={15} /> },
+  { href: "/settings/backends", label: "Backends", icon: <ServerCog size={15} /> },
   { href: "/settings/providers", label: "Providers", icon: <Workflow size={15} /> },
   { href: "/settings/connections", label: "Connections", icon: <Link2 size={15} /> },
   { href: "/settings/channels", label: "Channels", icon: <Network size={15} /> },

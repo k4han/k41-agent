@@ -55,59 +55,58 @@ export function localWorkspaceRef(locator: string): WorkspaceRef | null {
   };
 }
 
+export function daytonaWorkspaceRef(locator: string, root = "workspace"): WorkspaceRef | null {
+  const trimmed = locator.trim();
+  if (!trimmed) {
+    return null;
+  }
+  return {
+    backend: "daytona",
+    locator: trimmed,
+    label: `daytona:${trimmed}`,
+    metadata: { root: root.trim() || "workspace" },
+  };
+}
+
+export function modalWorkspaceRef(locator: string, root = "/workspace"): WorkspaceRef | null {
+  const trimmed = locator.trim();
+  if (!trimmed) {
+    return null;
+  }
+  return {
+    backend: "modal",
+    locator: trimmed,
+    label: `modal:${trimmed}`,
+    metadata: { root: root.trim() || "/workspace" },
+  };
+}
+
 export function formatWorkspaceRoot(locator: string): string {
   const trimmed = locator.trim();
-  if (trimmed === "workspace" || trimmed.startsWith("workspace/")) {
-    return trimmed;
+  if (!trimmed) {
+    return "";
   }
 
-  const normalized = normalizePath(locator);
-  
-  const rootPatterns = [
-    "/kaka-agent/workspace",
-    "~/kaka-agent/workspace",
-    "kaka-agent/workspace"
-  ];
-
-  for (const pattern of rootPatterns) {
-    const idx = normalized.indexOf(pattern);
-    if (idx !== -1) {
-      const remaining = normalized.substring(idx + pattern.length);
-      if (!remaining || remaining === "/") {
-        return "workspace/";
-      }
-      const cleanRemaining = remaining.startsWith("/") ? remaining.substring(1) : remaining;
-      return `workspace/${cleanRemaining}`;
-    }
-  }
-
-  const fallbackPatterns = [
-    "/kaka-agent",
-    "~/kaka-agent",
-    "kaka-agent"
-  ];
-
-  for (const pattern of fallbackPatterns) {
-    const idx = normalized.indexOf(pattern);
-    if (idx !== -1) {
-      const remaining = normalized.substring(idx + pattern.length);
-      if (!remaining || remaining === "/") {
-        return "workspace/";
-      }
-      const cleanRemaining = remaining.startsWith("/") ? remaining.substring(1) : remaining;
-      return `workspace/${cleanRemaining}`;
-    }
-  }
-
-  const compactTail = compactPathTail(locator);
-  return compactTail ? `${compactTail}/` : locator.trim();
+  const compactTail = compactPathTail(trimmed);
+  return compactTail ? `${compactTail}/` : trimmed;
 }
 
 export function workspaceDisplayLabelFromValues(
   label: string | undefined,
   locator: string | undefined,
   metadata?: Record<string, unknown>,
+  backend: WorkspaceRef["backend"] = "local",
 ): string {
+  if (backend === "daytona" || backend === "modal") {
+    const trimmedLabel = (label || "").trim();
+    if (trimmedLabel) {
+      return trimmedLabel;
+    }
+    const trimmedLocator = (locator || "").trim();
+    const root = metadataText(metadata, "root");
+    return root ? `${backend}:${trimmedLocator}:${root}` : `${backend}:${trimmedLocator}`;
+  }
+
   const repository = metadataText(metadata, "repository_full_name") || metadataText(metadata, "repository");
   if (repository) {
     return repository;
@@ -139,5 +138,6 @@ export function workspaceDisplayLabel(workspace: WorkspaceRef | null | undefined
     workspace.label,
     workspace.locator,
     workspace.metadata,
+    workspace.backend,
   );
 }

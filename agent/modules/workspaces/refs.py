@@ -8,10 +8,13 @@ from pydantic import BaseModel, ConfigDict, Field
 DEFAULT_LOCAL_WORKSPACE = str(Path.home() / "kaka-agent")
 
 
+WorkspaceBackendName = Literal["local", "daytona", "modal"]
+
+
 class WorkspaceRef(BaseModel):
     """Serializable reference to a workspace backend instance."""
 
-    backend: Literal["local"] = "local"
+    backend: WorkspaceBackendName = "local"
     locator: str
     label: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -19,36 +22,30 @@ class WorkspaceRef(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     def display_label(self) -> str:
+        if self.backend in {"daytona", "modal"}:
+            label = self.label.strip()
+            if label:
+                return label
+            root = str(self.metadata.get("root") or "").strip()
+            suffix = f":{root}" if root else ""
+            return f"{self.backend}:{self.locator}{suffix}"
+
         # 1. Check metadata for repository info
-        repository = self.metadata.get("repository_full_name") or self.metadata.get("repository")
+        repository = self.metadata.get("repository_full_name") or self.metadata.get(
+            "repository"
+        )
         if repository and isinstance(repository, str) and repository.strip():
             return repository.strip()
 
-        # 2. Check local path relative to workspace_root
+        # 2. Always show the basename (last folder) the user picked as the root.
         locator = self.locator.strip()
         label = self.label.strip()
-        
+
         path_to_resolve = locator or label
         if not path_to_resolve:
             return ""
 
-        from agent.shared.config.service import get_config_service
-        try:
-            workspace_root = get_config_service().get_path("workspace.root", "~/kaka-agent").expanduser().resolve()
-        except Exception:
-            workspace_root = Path("~/kaka-agent").expanduser().resolve()
-
-        try:
-            resolved_path = Path(path_to_resolve).expanduser().resolve()
-            if resolved_path == workspace_root:
-                return "workspace/"
-            elif resolved_path.is_relative_to(workspace_root):
-                rel_path = resolved_path.relative_to(workspace_root).as_posix()
-                return f"workspace/{rel_path}"
-        except Exception:
-            pass
-
-        # Fallback to the old logic if paths cannot be resolved or are not within workspace_root
+        # Keep custom (non-absolute) labels verbatim.
         if label and not _same_local_path(label, locator):
             if _is_absolute_local_path(label):
                 return _local_workspace_display_label(label)
@@ -118,25 +115,57 @@ def normalize_workspace_ref(
         data = _model_dump(workspace)
 
     backend = str(data.get("backend") or "local").strip().lower()
-    if backend != "local":
+    if backend not in {"local", "daytona", "modal"}:
         raise ValueError(f"Unsupported workspace backend: {backend}")
 
     raw_locator = str(data.get("locator") or default_locator).strip()
     if not raw_locator:
         raw_locator = default_locator
 
-    # Dịch ngược đường dẫn rút gọn bắt đầu bằng "workspace/" hoặc là "workspace" về workspace.root
+    metadata = data.get("metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    raw_label = label if label is not None else data.get("label")
+
+    if backend in {"daytona", "modal"}:
+        locator = raw_locator.strip()
+        if not locator:
+            backend_label = "Daytona" if backend == "daytona" else "Modal"
+            raise ValueError(f"{backend_label} sandbox ID is required.")
+        normalized_metadata = dict(metadata)
+        default_root = "workspace" if backend == "daytona" else "/workspace"
+        root = (
+            str(normalized_metadata.get("root") or default_root).strip()
+            or default_root
+        )
+        normalized_metadata["root"] = root
+        normalized_label = str(raw_label or "").strip() or f"{backend}:{locator}"
+        return WorkspaceRef(
+            backend=backend,
+            locator=locator,
+            label=normalized_label,
+            metadata=normalized_metadata,
+        )
+
+    # Expand compact dashboard paths back into the configured workspace root.
     if raw_locator == "workspace" or raw_locator.startswith("workspace/"):
         from agent.shared.config.service import get_config_service
+
         try:
-            workspace_root = get_config_service().get_path("workspace.root", "~/kaka-agent").expanduser().resolve()
+            workspace_root = (
+                get_config_service()
+                .get_path("workspace.root", "~/kaka-agent")
+                .expanduser()
+                .resolve()
+            )
         except Exception:
             workspace_root = Path("~/kaka-agent").expanduser().resolve()
-            
+
         if raw_locator == "workspace":
             raw_locator = str(workspace_root)
         else:
-            rel_part = raw_locator[len("workspace/"):]
+            rel_part = raw_locator[len("workspace/") :]
             rel_part = rel_part.strip().replace("\\", "/").strip("/")
             if rel_part:
                 raw_locator = str(workspace_root / rel_part)
@@ -145,11 +174,7 @@ def normalize_workspace_ref(
 
     locator = str(Path(raw_locator).expanduser().resolve())
 
-    raw_label = label if label is not None else data.get("label")
     normalized_label = str(raw_label or "").strip() or locator
-    metadata = data.get("metadata")
-    if not isinstance(metadata, dict):
-        metadata = {}
 
     return WorkspaceRef(
         backend="local",
@@ -183,8 +208,12 @@ def workspace_ref_from_columns(
         if isinstance(data, dict):
             parsed_metadata = data
 
+    normalized_backend = (backend or "local").strip().lower()
+    if normalized_backend not in {"local", "daytona", "modal"}:
+        normalized_backend = "local"
+
     return WorkspaceRef(
-        backend="local" if (backend or "local").strip().lower() == "local" else "local",
+        backend=normalized_backend,
         locator=locator,
         label=(label or "").strip() or locator,
         metadata=parsed_metadata,
@@ -194,6 +223,7 @@ def workspace_ref_from_columns(
 __all__ = [
     "DEFAULT_LOCAL_WORKSPACE",
     "WorkspaceRef",
+    "WorkspaceBackendName",
     "normalize_workspace_ref",
     "workspace_ref_from_columns",
 ]

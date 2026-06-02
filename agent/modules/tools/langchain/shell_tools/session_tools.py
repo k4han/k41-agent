@@ -8,11 +8,13 @@ from pydantic import BaseModel, Field
 
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCapability, ToolCategory
-from agent.modules.tools.langchain.working_dir import get_working_dir
+from agent.modules.tools.langchain.working_dir import get_workspace
 from agent.modules.tools.runtime.context import ToolContext
 from agent.modules.tools.result import ToolError, ToolErrorCode
+from agent.modules.tools.langchain.shell_tools.daytona_session_manager import daytona_session_manager
+from agent.modules.tools.langchain.shell_tools.modal_session_manager import modal_session_manager
 from agent.modules.tools.langchain.shell_tools.session_manager import session_manager
-from agent.modules.agent_runtime.active_sessions import current_thread_id_var
+from agent.modules.agent_runtime import current_thread_id_var
 
 
 def _scope_id_from_runtime(runtime: ToolRuntime[Any, Any]) -> str | None:
@@ -152,17 +154,38 @@ def bash(
         force: Set to True to force execution even when a background process is running in the session.
     """
     try:
-        working_dir = get_working_dir(runtime)
+        workspace = get_workspace(runtime)
         scope_id = _scope_id_from_runtime(runtime)
-        res = session_manager.execute_command(
-            session_id=session_id,
-            command=command,
-            timeout=timeout,
-            run_in_background=run_in_background,
-            working_dir=working_dir,
-            force=force,
-            scope_id=scope_id,
-        )
+        if workspace.backend == "daytona":
+            res = daytona_session_manager.execute_command(
+                session_id=session_id,
+                command=command,
+                timeout=timeout,
+                run_in_background=run_in_background,
+                workspace=workspace,
+                force=force,
+                scope_id=scope_id,
+            )
+        elif workspace.backend == "modal":
+            res = modal_session_manager.execute_command(
+                session_id=session_id,
+                command=command,
+                timeout=timeout,
+                run_in_background=run_in_background,
+                workspace=workspace,
+                force=force,
+                scope_id=scope_id,
+            )
+        else:
+            res = session_manager.execute_command(
+                session_id=session_id,
+                command=command,
+                timeout=timeout,
+                run_in_background=run_in_background,
+                working_dir=workspace.locator,
+                force=force,
+                scope_id=scope_id,
+            )
 
         if "error" in res:
             raise ToolError(ToolErrorCode.EXECUTION_ERROR, res["error"])
@@ -204,7 +227,20 @@ def bash_read_output(
         timeout: Time in seconds to wait for new output.
     """
     scope_id = _current_scope_id()
-    res = session_manager.get_session_output(session_id, timeout, scope_id=scope_id)
+    if daytona_session_manager.has_session(session_id, scope_id=scope_id):
+        res = daytona_session_manager.get_session_output(
+            session_id,
+            timeout,
+            scope_id=scope_id,
+        )
+    elif modal_session_manager.has_session(session_id, scope_id=scope_id):
+        res = modal_session_manager.get_session_output(
+            session_id,
+            timeout,
+            scope_id=scope_id,
+        )
+    else:
+        res = session_manager.get_session_output(session_id, timeout, scope_id=scope_id)
     if "error" in res:
         raise ToolError(ToolErrorCode.NOT_FOUND, res["error"])
 
@@ -240,7 +276,12 @@ def bash_send_input(
         text: The text to send as stdin input. A newline is automatically appended.
     """
     scope_id = _current_scope_id()
-    res = session_manager.send_input(session_id, text, scope_id=scope_id)
+    if daytona_session_manager.has_session(session_id, scope_id=scope_id):
+        res = daytona_session_manager.send_input(session_id, text, scope_id=scope_id)
+    elif modal_session_manager.has_session(session_id, scope_id=scope_id):
+        res = modal_session_manager.send_input(session_id, text, scope_id=scope_id)
+    else:
+        res = session_manager.send_input(session_id, text, scope_id=scope_id)
     if "error" in res:
         raise ToolError(ToolErrorCode.EXECUTION_ERROR, res["error"])
     return f"Sent input to session '{session_id}': {text!r}"
@@ -268,7 +309,20 @@ def bash_interrupt(
             'terminate' sends SIGTERM. Defaults to 'interrupt'.
     """
     scope_id = _current_scope_id()
-    res = session_manager.send_signal(session_id, signal_type, scope_id=scope_id)
+    if daytona_session_manager.has_session(session_id, scope_id=scope_id):
+        res = daytona_session_manager.send_signal(
+            session_id,
+            signal_type,
+            scope_id=scope_id,
+        )
+    elif modal_session_manager.has_session(session_id, scope_id=scope_id):
+        res = modal_session_manager.send_signal(
+            session_id,
+            signal_type,
+            scope_id=scope_id,
+        )
+    else:
+        res = session_manager.send_signal(session_id, signal_type, scope_id=scope_id)
     if "error" in res:
         raise ToolError(ToolErrorCode.EXECUTION_ERROR, res["error"])
     return (
@@ -289,6 +343,8 @@ def bash_list_sessions() -> str:
     """List all active interactive terminal sessions."""
     scope_id = _current_scope_id()
     sessions = session_manager.list_sessions(scope_id=scope_id)
+    sessions.extend(daytona_session_manager.list_sessions(scope_id=scope_id))
+    sessions.extend(modal_session_manager.list_sessions(scope_id=scope_id))
     if not sessions:
         return "No active terminal sessions."
 
@@ -340,16 +396,27 @@ def bash_close(
     scope_id = _current_scope_id()
     if not ids:
         if scope_id is None:
-            count = len(session_manager.sessions)
+            count = (
+                len(session_manager.sessions)
+                + len(daytona_session_manager.sessions)
+                + len(modal_session_manager.sessions)
+            )
         else:
             count = len(session_manager.list_sessions(scope_id=scope_id))
+            count += len(daytona_session_manager.list_sessions(scope_id=scope_id))
+            count += len(modal_session_manager.list_sessions(scope_id=scope_id))
         session_manager.close_all_sessions(scope_id=scope_id)
+        daytona_session_manager.close_all_sessions(scope_id=scope_id)
+        modal_session_manager.close_all_sessions(scope_id=scope_id)
         return f"Closed all {count} session(s)."
 
     closed = []
     not_found = []
     for sid in ids:
-        if session_manager.close_session(sid, scope_id=scope_id):
+        local_closed = session_manager.close_session(sid, scope_id=scope_id)
+        daytona_closed = daytona_session_manager.close_session(sid, scope_id=scope_id)
+        modal_closed = modal_session_manager.close_session(sid, scope_id=scope_id)
+        if local_closed or daytona_closed or modal_closed:
             closed.append(sid)
         else:
             not_found.append(sid)

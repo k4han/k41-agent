@@ -15,6 +15,7 @@ class ToolErrorCode(StrEnum):
     NOT_FOUND = "not_found"
     PERMISSION_DENIED = "permission_denied"
     TIMEOUT = "timeout"
+    EXECUTION_ERROR = "execution_error"
     UPSTREAM = "upstream"
     UNEXPECTED = "unexpected"
 

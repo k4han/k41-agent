@@ -39,6 +39,7 @@ security:
 # Workspace settings (optional)
 # workspace:
 #   root: "~/kaka-agent"
+# Workspace backend credentials are configured in the dashboard at Settings > Backends.
 
 # Dashboard display settings (optional)
 # Use an IANA timezone name such as "Asia/Bangkok".

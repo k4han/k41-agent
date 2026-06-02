@@ -25,10 +25,22 @@ from agent.shared.infrastructure.db.engine import (
     get_database_url,
     initialize_async_engine,
 )
-from agent.modules.workspaces import migrate_workspace_tables
+from agent.modules.workspaces import (
+    migrate_workspace_tables,
+    start_daytona_lifecycle_sweeper,
+    stop_daytona_lifecycle_sweeper,
+)
 from agent.modules.github import migrate_github_tables
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "AppRuntime",
+    "BUILTIN_CHANNEL_SPECS",
+    "ChannelSpec",
+    "close_persistence",
+    "initialize_persistence",
+]
 
 
 async def initialize_persistence() -> None:
@@ -98,6 +110,9 @@ class AppRuntime:
             logger.info("Restoring background task history...")
             await get_background_task_manager().restore_from_persistence()
 
+            logger.info("Starting Daytona lifecycle sweeper...")
+            start_daytona_lifecycle_sweeper()
+
             self._started = True
             logger.info("Application runtime is ready.")
         except Exception:
@@ -112,6 +127,9 @@ class AppRuntime:
 
         logger.info("Stopping background scheduler...")
         await stop_scheduler()
+
+        logger.info("Stopping Daytona lifecycle sweeper...")
+        await stop_daytona_lifecycle_sweeper()
 
         if self._persistence_ready:
             logger.info("Closing persistence...")

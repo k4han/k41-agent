@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import difflib
 import logging
 import mimetypes
@@ -10,7 +11,6 @@ from typing import Any
 
 from agent.modules.workspaces.repository import get_thread_workspace_repository
 from agent.modules.workspaces.refs import (
-    DEFAULT_LOCAL_WORKSPACE,
     WorkspaceRef,
     normalize_workspace_ref,
 )
@@ -63,12 +63,24 @@ def workspace_ref_from_local_path(
     )
 
 
-def get_workspace_backend(workspace: WorkspaceRef | dict[str, Any] | str | None = None):
+def get_workspace_backend(
+    workspace: WorkspaceRef | dict[str, Any] | str | None = None,
+    *,
+    thread_id: str | None = None,
+):
     ref = resolve_workspace_ref(workspace)
     if ref.backend == "local":
         from agent.modules.workspaces.local_backend import LocalWorkspaceBackend
 
         return LocalWorkspaceBackend(ref)
+    if ref.backend == "daytona":
+        from agent.modules.workspaces.daytona_backend import DaytonaWorkspaceBackend
+
+        return DaytonaWorkspaceBackend(ref, thread_id=thread_id)
+    if ref.backend == "modal":
+        from agent.modules.workspaces.modal_backend import ModalWorkspaceBackend
+
+        return ModalWorkspaceBackend(ref)
     raise ValueError(f"Unsupported workspace backend: {ref.backend}")
 
 
@@ -223,6 +235,24 @@ async def get_thread_workspace_refs(thread_ids: list[str]) -> dict[str, Workspac
 async def get_thread_workspace_dir(thread_id: str) -> str | None:
     workspace = await get_thread_workspace_ref(thread_id)
     return workspace.locator if workspace else None
+
+
+async def delete_thread_workspace(thread_id: str) -> WorkspaceRef | None:
+    workspace = await get_thread_workspace_ref(thread_id)
+    if workspace is None:
+        return None
+
+    if workspace.backend == "daytona":
+        from agent.modules.workspaces.daytona_backend import delete_daytona_workspace
+
+        await asyncio.to_thread(delete_daytona_workspace, workspace, thread_id=thread_id)
+    elif workspace.backend == "modal":
+        from agent.modules.workspaces.modal_backend import delete_modal_workspace
+
+        await asyncio.to_thread(delete_modal_workspace, workspace)
+
+    await get_thread_workspace_repository().delete(thread_id)
+    return workspace
 
 
 def list_workspace_tree(

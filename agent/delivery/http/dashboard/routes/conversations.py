@@ -685,10 +685,12 @@ async def rename_chat_thread(
 @router.delete("/dashboard-api/chat-history/{thread_id:path}")
 async def delete_chat_thread(thread_id: str) -> dict[str, str]:
     from agent.modules.conversations import mark_conversation_thread_deleted
-    from agent.modules.tools.langchain.shell_tools.session_manager import session_manager
+    from agent.modules.tools import close_thread_shell_sessions
+    from agent.modules.workspaces import delete_thread_workspace
     from agent.modules.workflows import delete_workflow_thread_tree
 
-    session_manager.close_thread_sessions(thread_id)
+    close_thread_shell_sessions(thread_id)
+    await delete_thread_workspace(thread_id)
     await mark_conversation_thread_deleted(thread_id)
     await delete_workflow_thread_tree(thread_id)
     return {"status": "deleted", "thread_id": thread_id}
@@ -878,10 +880,12 @@ async def stream_background_task_events(
 async def delete_background_task_thread(thread_id: str) -> dict[str, str]:
     from agent.modules.conversations import mark_conversation_thread_deleted
     from agent.modules.agent_runtime import get_background_task_repository
-    from agent.modules.tools.langchain.shell_tools.session_manager import session_manager
+    from agent.modules.tools import close_thread_shell_sessions
+    from agent.modules.workspaces import delete_thread_workspace
     from agent.modules.workflows import delete_workflow_thread_tree
 
-    session_manager.close_thread_sessions(thread_id)
+    close_thread_shell_sessions(thread_id)
+    await delete_thread_workspace(thread_id)
     await get_background_task_repository().mark_deleted_by_thread_id(thread_id)
     await mark_conversation_thread_deleted(thread_id)
     await delete_workflow_thread_tree(thread_id)

@@ -165,7 +165,7 @@ async def resetquota() -> None:
 
 async def _perform_reset_quota() -> None:
     from agent.shared.infrastructure.db.session import get_async_session
-    from agent.modules.usage.models import LLMUsageEvent
+    from agent.modules.usage import LLMUsageEvent
     from sqlalchemy import delete
 
     session = await get_async_session()

@@ -4,7 +4,7 @@ from typing import Any
 
 from langgraph.prebuilt import ToolRuntime
 
-from agent.modules.tools.runtime.context import get_context_value
+from agent.modules.tools.runtime.context import ToolContext, get_context_value
 from agent.modules.workspaces import (
     WorkspaceRef,
     get_workspace_backend,
@@ -26,7 +26,11 @@ def get_workspace(runtime: ToolRuntime[Any, Any]) -> WorkspaceRef:
 
 def get_backend(runtime: ToolRuntime[Any, Any]):
     """Return the workspace backend for a tool runtime."""
-    return get_workspace_backend(get_workspace(runtime))
+    tool_context = ToolContext.from_runtime(runtime)
+    return get_workspace_backend(
+        get_workspace(runtime),
+        thread_id=tool_context.thread_id,
+    )
 
 
 def get_working_dir(runtime: ToolRuntime[Any, Any]) -> str:

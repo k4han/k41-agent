@@ -13,6 +13,19 @@ class CommandResult:
     truncated: bool = False
 
 
+class WorkspaceUnavailableError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        backend: str | None = None,
+        locator: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.backend = backend
+        self.locator = locator
+
+
 class WorkspaceBackend(Protocol):
     ref: WorkspaceRef
 
@@ -53,4 +66,4 @@ class WorkspaceBackend(Protocol):
         ...
 
 
-__all__ = ["CommandResult", "WorkspaceBackend"]
+__all__ = ["CommandResult", "WorkspaceBackend", "WorkspaceUnavailableError"]

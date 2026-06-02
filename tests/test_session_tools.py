@@ -3,6 +3,7 @@ from langchain_core.messages import AIMessage
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode
 from queue import Queue
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from agent.modules.tools.langchain.shell_tools.session_tools import bash, bash_close
 from agent.modules.tools.langchain.shell_tools.session_manager import (
@@ -142,6 +143,137 @@ def test_bash_tool_node_injects_runtime_with_class_schema(tmp_path, monkeypatch)
     assert captured["timeout"] == 2
     assert captured["scope_id"] == "thread-1"
     assert captured["working_dir"] == str(tmp_path)
+
+
+def test_bash_routes_daytona_workspace_to_daytona_manager(monkeypatch):
+    import agent.modules.tools.langchain.shell_tools.session_tools as session_tools_module
+
+    captured = {}
+
+    class FakeDaytonaSessionManager:
+        sessions = {}
+
+        def execute_command(self, **kwargs):
+            captured.update(kwargs)
+            return {"status": "completed", "output": "remote", "stderr": ""}
+
+        def has_session(self, session_id, scope_id=None):
+            return False
+
+    monkeypatch.setattr(
+        session_tools_module.session_manager,
+        "execute_command",
+        lambda **kwargs: pytest.fail("local session manager should not be used"),
+    )
+    monkeypatch.setattr(
+        session_tools_module,
+        "daytona_session_manager",
+        FakeDaytonaSessionManager(),
+    )
+    runtime = SimpleNamespace(
+        context={
+            "workspace": {
+                "backend": "daytona",
+                "locator": "sandbox-1",
+                "label": "sandbox",
+                "metadata": {"root": "workspace"},
+            },
+        },
+        config={"configurable": {"thread_id": "thread-1"}},
+    )
+
+    result = bash.func(command="pwd", runtime=runtime, timeout=2)
+
+    assert result == "STDOUT:\nremote"
+    assert captured["command"] == "pwd"
+    assert captured["workspace"].backend == "daytona"
+    assert captured["workspace"].locator == "sandbox-1"
+    assert captured["scope_id"] == "thread-1"
+
+
+def test_bash_routes_modal_workspace_to_modal_manager(monkeypatch):
+    import agent.modules.tools.langchain.shell_tools.session_tools as session_tools_module
+
+    captured = {}
+
+    class FakeModalSessionManager:
+        sessions = {}
+
+        def execute_command(self, **kwargs):
+            captured.update(kwargs)
+            return {"status": "completed", "output": "remote", "stderr": ""}
+
+        def has_session(self, session_id, scope_id=None):
+            return False
+
+    monkeypatch.setattr(
+        session_tools_module.session_manager,
+        "execute_command",
+        lambda **kwargs: pytest.fail("local session manager should not be used"),
+    )
+    monkeypatch.setattr(
+        session_tools_module,
+        "modal_session_manager",
+        FakeModalSessionManager(),
+    )
+    runtime = SimpleNamespace(
+        context={
+            "workspace": {
+                "backend": "modal",
+                "locator": "sb-1",
+                "label": "sandbox",
+                "metadata": {"root": "/workspace"},
+            },
+        },
+        config={"configurable": {"thread_id": "thread-1"}},
+    )
+
+    result = bash.func(command="pwd", runtime=runtime, timeout=2)
+
+    assert result == "STDOUT:\nremote"
+    assert captured["command"] == "pwd"
+    assert captured["workspace"].backend == "modal"
+    assert captured["workspace"].locator == "sb-1"
+    assert captured["scope_id"] == "thread-1"
+
+
+def test_daytona_session_manager_passes_root_thread_id_to_backend(monkeypatch):
+    import agent.modules.tools.langchain.shell_tools.daytona_session_manager as module
+
+    captured_thread_ids: list[str | None] = []
+
+    class FakePty:
+        def __iter__(self):
+            return iter(())
+
+    class FakeProcess:
+        def create_pty_session(self, *args, **kwargs):
+            return FakePty()
+
+    class FakeDaytonaBackend:
+        root = "/workspace"
+        process = FakeProcess()
+
+        def __init__(self, workspace, thread_id=None):
+            captured_thread_ids.append(thread_id)
+
+    monkeypatch.setattr(module, "DaytonaWorkspaceBackend", FakeDaytonaBackend)
+
+    manager = module.DaytonaTerminalSessionManager()
+    workspace = SimpleNamespace(
+        backend="daytona",
+        locator="sandbox-1",
+        label="sandbox",
+        metadata={"root": "workspace"},
+    )
+
+    manager.create_session(
+        workspace=workspace,
+        session_name="default",
+        scope_id="thread-1:sub:worker:abc",
+    )
+
+    assert captured_thread_ids == ["thread-1"]
 
 
 class _FakeStdin:
