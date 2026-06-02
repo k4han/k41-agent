@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 import pytest
-from langchain_core.tools import tool
+from langchain_core.tools import StructuredTool, tool
 
 from agent.modules.tools import ToolError, ToolErrorCode, format_tool_error
 from agent.modules.tools.middleware import (
@@ -155,6 +155,23 @@ class TestWrapTool:
             "exit:inner",
             "exit:outer",
         ]
+
+    @pytest.mark.asyncio
+    async def test_async_content_and_artifact_tool_error_is_normalized(self) -> None:
+        async def mcp_tool(x: str) -> tuple[str, None]:
+            """MCP-like async tool."""
+            raise RuntimeError(f"failed: {x}")
+
+        wrapped = apply_default_middleware(
+            StructuredTool.from_function(
+                coroutine=mcp_tool,
+                name="mcp_tool",
+                description="MCP-like async tool.",
+                response_format="content_and_artifact",
+            )
+        )
+
+        assert await wrapped.ainvoke({"x": "abc"}) == "[error] unexpected: failed: abc"
 
 
 class TestToolErrorEndToEndOnBuiltin:

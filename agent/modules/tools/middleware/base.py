@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Any
 
 from langchain_core.tools import BaseTool
@@ -69,10 +70,16 @@ def apply_default_middleware(tool_obj: BaseTool) -> BaseTool:
         error_normalization_async,
     )
 
+    response_format = getattr(tool_obj, "response_format", "content")
+
     return wrap_tool(
         tool_obj,
-        sync_middlewares=[error_normalization],
-        async_middlewares=[error_normalization_async],
+        sync_middlewares=[
+            partial(error_normalization, response_format=response_format),
+        ],
+        async_middlewares=[
+            partial(error_normalization_async, response_format=response_format),
+        ],
     )
 
 
