@@ -125,6 +125,7 @@ def get_system_default_variables(working_dir: str = "", workspace: str = "") -> 
         "current_time": current_time_str,
         "operating_system": os_name,
         "workspace": workspace or working_dir or "",
+        "working_dir": working_dir or "",
         "user_name": username,
     }
 

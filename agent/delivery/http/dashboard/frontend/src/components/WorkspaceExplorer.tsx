@@ -223,12 +223,20 @@ export function WorkspaceExplorer(props: {
   let generation = 0;
 
   const effectiveWorkspace = createMemo(() => props.workspace || localWorkspaceRef(props.workingDir));
+  // Network queries must use a *real* workspace ref, never the local fallback
+  // synthesised from `workingDir`. The fallback exists purely for display and
+  // would otherwise turn a GitHub repo name (e.g. "facebook/react") or a
+  // not-yet-attached sandbox id into a bogus local locator, which the backend
+  // resolves as a missing directory and answers with HTTP 404. When only a
+  // draft is selected (no resolved workspace), we leave the locator empty and
+  // let the backend resolve the workspace from `thread_id` alone.
+  const queryWorkspace = createMemo(() => props.workspace ?? null);
   const isLocalWorkspace = () => (effectiveWorkspace()?.backend || "local") === "local";
   const rootPath = () => workspaceRoot() || "";
   const rootEntries = () => entriesByPath()[rootPath()] || entriesByPath()[""] || [];
   const rootTreeTruncated = () =>
     treeTruncatedByPath()[rootPath()] || treeTruncatedByPath()[""] || false;
-  const canQuery = () => Boolean(effectiveWorkspace()?.locator.trim() || props.threadId);
+  const canQuery = () => Boolean(queryWorkspace()?.locator.trim() || props.threadId);
   const activeFilePath = () => fileTabPath(activeTab());
   const activeFilePayload = () => filePayloads()[activeFilePath()];
   const workingDirDisplayValue = () =>
@@ -245,7 +253,7 @@ export function WorkspaceExplorer(props: {
       setTreeError("");
     }
     try {
-      const query = workspaceQuery(props.threadId, effectiveWorkspace(), { path });
+      const query = workspaceQuery(props.threadId, queryWorkspace(), { path });
       const payload = await apiFetch<WorkspaceTreePayload>(
         `/dashboard-api/workspace/tree?${query}`,
       );
@@ -275,7 +283,7 @@ export function WorkspaceExplorer(props: {
     setChangesLoading(true);
     setChangesError("");
     try {
-      const query = workspaceQuery(props.threadId, effectiveWorkspace());
+      const query = workspaceQuery(props.threadId, queryWorkspace());
       const payload = await apiFetch<WorkspaceChangesPayload>(
         `/dashboard-api/workspace/changes?${query}`,
       );
@@ -305,7 +313,7 @@ export function WorkspaceExplorer(props: {
     setDiffError("");
     setDiffLoading(true);
     try {
-      const query = workspaceQuery(props.threadId, effectiveWorkspace(), { path });
+      const query = workspaceQuery(props.threadId, queryWorkspace(), { path });
       const payload = await apiFetch<WorkspaceDiffPayload>(
         `/dashboard-api/workspace/diff?${query}`,
       );
@@ -330,7 +338,7 @@ export function WorkspaceExplorer(props: {
     setFileLoadingByPath((current) => ({ ...current, [path]: true }));
     setFileErrorByPath((current) => ({ ...current, [path]: "" }));
     try {
-      const query = workspaceQuery(props.threadId, effectiveWorkspace(), { path });
+      const query = workspaceQuery(props.threadId, queryWorkspace(), { path });
       const payload = await apiFetch<WorkspaceFilePayload>(
         `/dashboard-api/workspace/file?${query}`,
       );
@@ -502,7 +510,7 @@ export function WorkspaceExplorer(props: {
     try {
       await postJson("/dashboard-api/workspace/rename", {
         thread_id: props.threadId || null,
-        workspace: effectiveWorkspace(),
+        workspace: queryWorkspace(),
         path: entry.path,
         new_name: nextName,
       });
@@ -543,7 +551,7 @@ export function WorkspaceExplorer(props: {
     try {
       await postJson("/dashboard-api/workspace/delete", {
         thread_id: props.threadId || null,
-        workspace: effectiveWorkspace(),
+        workspace: queryWorkspace(),
         path: entry.path,
       });
       showToast(`Deleted ${entry.name}`, "success");

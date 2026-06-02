@@ -68,9 +68,12 @@ import { useWorkspaceExplorer } from "@/lib/useWorkspaceExplorer";
 import { useChatAttachments } from "@/lib/useChatAttachments";
 import { useContextWindow } from "@/lib/useContextWindow";
 import { useBackgroundStream } from "@/lib/useBackgroundStream";
+import {
+  INITIALIZING_ENVIRONMENT_TEXT,
+  THINKING_TEXT,
+} from "@/lib/chatStatus";
 
-const INITIALIZING_ENVIRONMENT_TEXT = "Initializing environment...";
-const THINKING_TEXT = "Thinking...";
+const DAYTONA_STATUS_STARTED = "started";
 
 type WorkspaceResolveRequest = {
   kind: string;
@@ -107,10 +110,40 @@ function workspaceSelectionLocator(selection: WorkspaceSelectionDraft): string {
   return sandboxId || selection.label;
 }
 
+function workspaceEnvironmentKey(workspace: WorkspaceRef | null | undefined): string {
+  if (!workspace) {
+    return "";
+  }
+  const root = typeof workspace.metadata?.root === "string"
+    ? workspace.metadata.root.trim()
+    : "";
+  return `${workspace.backend}:${workspace.locator}:${root}`;
+}
+
 function workspaceNeedsEnvironmentInitialization(
   workspace: WorkspaceRef | null | undefined,
+  initializedWorkspaces: Set<string>,
 ): boolean {
-  return workspace?.backend === "daytona" || workspace?.backend === "modal";
+  if (!workspace) {
+    return false;
+  }
+  if (workspace.backend !== "daytona" && workspace.backend !== "modal") {
+    return false;
+  }
+
+  const key = workspaceEnvironmentKey(workspace);
+
+  if (workspace.backend === "daytona") {
+    const status = typeof workspace.metadata?.status === "string"
+      ? workspace.metadata.status.trim().toLowerCase()
+      : "";
+    if (status === DAYTONA_STATUS_STARTED) {
+      return false;
+    }
+    return !initializedWorkspaces.has(key);
+  }
+
+  return !initializedWorkspaces.has(key);
 }
 
 export function ChatPage() {
@@ -141,6 +174,7 @@ export function ChatPage() {
   const [todosExpanded, setTodosExpanded] = createSignal(true);
   const [recursionLimitReached, setRecursionLimitReached] = createSignal(false);
   const [activeSession, setActiveSession] = createSignal<ActiveSession | null>(null);
+  const [initializedWorkspaces, setInitializedWorkspaces] = createSignal(new Set<string>());
 
   let transcriptRef: HTMLDivElement | undefined;
   let chatShellRef: HTMLDivElement | undefined;
@@ -768,7 +802,7 @@ export function ChatPage() {
     const currentWorkspace = workspaceRef();
     const needsWorkspaceResolution = !resume && !currentWorkspace;
     const needsEnvironmentInitialization = !resume && (
-      needsWorkspaceResolution || workspaceNeedsEnvironmentInitialization(currentWorkspace)
+      needsWorkspaceResolution || workspaceNeedsEnvironmentInitialization(currentWorkspace, initializedWorkspaces())
     );
     const statusMessageId = !resume
       ? appendItem(
@@ -817,6 +851,14 @@ export function ChatPage() {
       }
       if (!response.body) {
         throw new Error("Streaming response is not available.");
+      }
+      if (!resume && resolvedWorkspace) {
+        const key = workspaceEnvironmentKey(resolvedWorkspace);
+        if (key && !initializedWorkspaces().has(key)) {
+          const next = new Set(initializedWorkspaces());
+          next.add(key);
+          setInitializedWorkspaces(next);
+        }
       }
       if (statusMessageId !== null && needsEnvironmentInitialization && !streamedRef.received) {
         replaceMessage(statusMessageId, THINKING_TEXT, streamThreadIdRef.id);

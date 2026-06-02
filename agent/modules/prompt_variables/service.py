@@ -25,7 +25,13 @@ def serialize_prompt_variable(record: PromptVariable) -> dict[str, Any]:
 
 
 class PromptVariableService:
-    SYSTEM_VARIABLE_NAMES = {"current_time", "operating_system", "workspace", "user_name"}
+    SYSTEM_VARIABLE_NAMES = {
+        "current_time",
+        "operating_system",
+        "workspace",
+        "working_dir",
+        "user_name",
+    }
 
     def __init__(self, repository: PromptVariableRepository | None = None) -> None:
         self._repository = repository or PromptVariableRepository()
@@ -79,8 +85,16 @@ class PromptVariableService:
             },
             {
                 "name": "workspace",
-                "value": "(Dynamic path resolved at runtime from agent workspace)",
+                "value": "(Friendly workspace label, e.g. owner/repo for GitHub-backed sandboxes)",
                 "placeholder": "{{workspace}}",
+                "is_system": True,
+                "created_at": None,
+                "updated_at": None,
+            },
+            {
+                "name": "working_dir",
+                "value": "(Actual on-disk cwd the agent runs in, resolved at runtime)",
+                "placeholder": "{{working_dir}}",
                 "is_system": True,
                 "created_at": None,
                 "updated_at": None,

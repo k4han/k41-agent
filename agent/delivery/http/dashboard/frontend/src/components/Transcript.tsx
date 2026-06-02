@@ -11,6 +11,8 @@ import { createEffect, createSignal, For, Show } from "solid-js";
 
 import { CopyButton } from "@/components/CopyButton";
 import { Markdown } from "@/components/Markdown";
+import { StatusIndicator } from "@/components/StatusIndicator";
+import { isChatStatusText } from "@/lib/chatStatus";
 import { formatValue } from "@/lib/utils";
 
 export type TranscriptRole = "user" | "assistant" | "error" | "system";
@@ -232,14 +234,21 @@ export function TranscriptMessageView(props: {
         >
           <Show when={props.text}>
             <Show
-              when={props.role === "assistant"}
-              fallback={<div class="message-text">{props.text}</div>}
+              when={isChatStatusText(props.text)}
+              fallback={
+                <Show
+                  when={props.role === "assistant"}
+                  fallback={<div class="message-text">{props.text}</div>}
+                >
+                  <Markdown
+                    text={props.text}
+                    class="message-markdown"
+                    deferMermaid={props.deferMermaid}
+                  />
+                </Show>
+              }
             >
-              <Markdown
-                text={props.text}
-                class="message-markdown"
-                deferMermaid={props.deferMermaid}
-              />
+              <StatusIndicator text={props.text} />
             </Show>
           </Show>
         </Show>

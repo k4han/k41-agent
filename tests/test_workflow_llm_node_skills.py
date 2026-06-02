@@ -107,6 +107,89 @@ async def test_llm_node_uses_prompt_builder_output_for_system_message(monkeypatc
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "backend,sandbox_locator,expected_root",
+    [
+        ("daytona", "sb-daytona-001", "/workspace/facebook/react"),
+        ("modal", "sb-modal-001", "/workspace/facebook/react"),
+    ],
+)
+async def test_llm_node_keeps_friendly_workspace_label_and_exposes_actual_sandbox_path(
+    monkeypatch, backend, sandbox_locator, expected_root
+):
+    """{{workspace}} stays as the friendly label, {{working_dir}} carries the real sandbox cwd."""
+    captured: dict = {}
+    builder_calls: dict = {}
+
+    class _FakeCatalog:
+        def get_agent(self, name: str):
+            assert name == "sandbox-agent"
+            return SimpleNamespace(
+                provider="default",
+                model="model-x",
+                system_prompt=(
+                    "Workspace label: {{workspace}}\n"
+                    "Sandbox cwd: {{working_dir}}"
+                ),
+                tools=[],
+            )
+
+    def _fake_builder(**kwargs):
+        builder_calls.update(kwargs)
+        return "Prompt built"
+
+    monkeypatch.setattr(
+        llm_node_module,
+        "get_resolved_chat_model",
+        _fake_chat_model_factory(captured),
+    )
+    monkeypatch.setattr(
+        llm_node_module,
+        "build_llm_system_prompt",
+        _fake_builder,
+    )
+    async def _fake_resolve(self, agent_name, *, override_tool_names=None):
+        return []
+
+    monkeypatch.setattr(
+        llm_node_module.ToolResolver,
+        "aresolve_for_agent",
+        _fake_resolve,
+    )
+    monkeypatch.setattr(
+        "agent.modules.agents.get_catalog_service",
+        lambda: _FakeCatalog(),
+    )
+
+    sandbox_workspace = {
+        "backend": backend,
+        "locator": sandbox_locator,
+        "label": "facebook/react",
+        "metadata": {
+            "root": expected_root,
+            "repository_full_name": "facebook/react",
+            "source": "github",
+        },
+    }
+
+    await llm_node_module.llm_node(
+        {"messages": [HumanMessage(content="hi")]},
+        {"configurable": {"thread_id": "thread-1"}},
+        SimpleNamespace(
+            context=WorkflowContext(
+                agent_name="sandbox-agent",
+                workspace=sandbox_workspace,
+                max_context_tokens=50000,
+                allowed_tool_names=[],
+            )
+        ),
+    )
+
+    assert builder_calls["workspace"] == "facebook/react"
+    assert builder_calls["working_dir"] == expected_root
+
+
+@pytest.mark.asyncio
 async def test_llm_node_prefers_runtime_allowed_tool_names_before_building_prompt(monkeypatch):
     captured: dict = {}
     builder_calls: dict = {}

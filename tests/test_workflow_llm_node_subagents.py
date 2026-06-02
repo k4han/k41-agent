@@ -58,7 +58,25 @@ def test_known_prompt_placeholders_do_not_change_double_brace_variables():
         prompt_variables={},
     )
 
-    assert prompt == "{{working_dir}}\nD:/repo"
+    assert prompt == "D:/repo\nD:/repo"
+
+
+def test_build_llm_system_prompt_resolves_workspace_and_working_dir_independently():
+    """`{{workspace}}` keeps the friendly label, `{{working_dir}}` carries the real path."""
+    prompt = prompt_builders.build_llm_system_prompt(
+        system_prompt_template=(
+            "Workspace: {{workspace}}\n"
+            "Cwd: {{working_dir}}"
+        ),
+        working_dir="/workspace/facebook/react",
+        workspace="facebook/react",
+        agent_name="default",
+        tools=[SimpleNamespace(name="read_file")],
+        catalog=_FakeCatalog(),
+    )
+
+    assert "Workspace: facebook/react" in prompt
+    assert "Cwd: /workspace/facebook/react" in prompt
 
 
 def test_build_llm_system_prompt_injects_skills_section_when_skill_tool_exists(monkeypatch):
