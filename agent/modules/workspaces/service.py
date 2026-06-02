@@ -180,6 +180,51 @@ async def get_workspace_lifecycle_manager(
     )
 
 
+async def ensure_workspace_ready(
+    workspace: WorkspaceRef | dict[str, Any] | str | None = None,
+    *,
+    thread_id: str | None = None,
+) -> WorkspaceRef:
+    ref = resolve_workspace_ref(workspace)
+    if ref.backend == "local":
+        ensure_workspace_directory(ref.locator)
+        if thread_id and thread_id.strip():
+            return await remember_thread_workspace_ref(thread_id, ref)
+        return ref
+
+    if ref.backend == "daytona":
+        from agent.modules.workspaces.daytona_backend import attach_daytona_workspace
+
+        ready = await asyncio.to_thread(
+            attach_daytona_workspace,
+            ref.locator,
+            label=_replacement_workspace_label(ref),
+            root=str(ref.metadata.get("root") or "").strip() or None,
+        )
+        ready = _merge_ready_workspace_metadata(ref, ready)
+        if thread_id and thread_id.strip():
+            return await remember_thread_workspace_ref(thread_id, ready)
+        return ready
+
+    if ref.backend == "modal":
+        try:
+            from agent.modules.workspaces.modal_backend import ModalWorkspaceBackend
+
+            backend = await ModalWorkspaceBackend.create(ref)
+            await backend.ensure_git()
+            await backend.ensure_root()
+            ready = _merge_ready_workspace_metadata(ref, backend.ref)
+        except WorkspaceUnavailableError:
+            if thread_id and thread_id.strip():
+                return await _recover_modal_thread_workspace(ref, thread_id=thread_id)
+            raise
+        if thread_id and thread_id.strip():
+            return await remember_thread_workspace_ref(thread_id, ready)
+        return ready
+
+    raise ValueError(f"Unsupported workspace backend: {ref.backend}")
+
+
 class _DaytonaWorkspaceRepositoryCloner:
     def __init__(self, ref: WorkspaceRef, *, thread_id: str | None = None) -> None:
         self.ref = ref
@@ -388,8 +433,8 @@ async def _provision_modal_replacement(ref: WorkspaceRef) -> WorkspaceRef:
         create_modal_workspace,
     )
 
-    replacement = await create_modal_workspace(label=_replacement_modal_label(ref))
-    replacement = _merge_recovered_modal_metadata(ref, replacement)
+    replacement = await create_modal_workspace(label=_replacement_workspace_label(ref))
+    replacement = _merge_ready_workspace_metadata(ref, replacement)
 
     backend = await ModalWorkspaceBackend.create(replacement)
     await backend.ensure_git()
@@ -405,14 +450,15 @@ async def _provision_modal_replacement(ref: WorkspaceRef) -> WorkspaceRef:
     )
 
 
-def _replacement_modal_label(ref: WorkspaceRef) -> str | None:
+def _replacement_workspace_label(ref: WorkspaceRef) -> str | None:
     label = str(ref.label or "").strip()
-    if not label or label == f"modal:{ref.locator}":
+    default_labels = {f"{ref.backend}:{ref.locator}"}
+    if not label or label in default_labels:
         return None
     return label
 
 
-def _merge_recovered_modal_metadata(
+def _merge_ready_workspace_metadata(
     source: WorkspaceRef,
     replacement: WorkspaceRef,
 ) -> WorkspaceRef:

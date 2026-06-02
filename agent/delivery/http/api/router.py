@@ -28,6 +28,7 @@ from agent.modules.providers import (
 )
 from agent.modules.users import Platform, get_pairing_service
 from agent.modules.workspaces import (
+    ensure_workspace_ready,
     get_thread_workspace_ref,
     remember_thread_workspace_ref,
     resolve_workspace_ref,
@@ -109,6 +110,8 @@ async def _apply_workspace_to_run_params(
     effective_workspace = requested_workspace or stored_workspace
     if effective_workspace is not None:
         resolved = resolve_workspace_ref(effective_workspace)
+        if resolved.backend in {"daytona", "modal"}:
+            resolved = await ensure_workspace_ready(resolved, thread_id=thread_id)
         params["workspace"] = resolved
     else:
         resolved = resolve_workspace_ref(None)

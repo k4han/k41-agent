@@ -106,6 +106,12 @@ function workspaceSelectionLocator(selection: WorkspaceSelectionDraft): string {
   return sandboxId || selection.label;
 }
 
+function workspaceNeedsEnvironmentInitialization(
+  workspace: WorkspaceRef | null | undefined,
+): boolean {
+  return workspace?.backend === "daytona" || workspace?.backend === "modal";
+}
+
 export function ChatPage() {
   const navigate = useNavigate();
   const params = useParams<{ threadId?: string }>();
@@ -758,13 +764,17 @@ export function ChatPage() {
       );
     }
 
-    const needsWorkspaceResolution = !resume && !workspaceRef();
+    const currentWorkspace = workspaceRef();
+    const needsWorkspaceResolution = !resume && !currentWorkspace;
+    const needsEnvironmentInitialization = !resume && (
+      needsWorkspaceResolution || workspaceNeedsEnvironmentInitialization(currentWorkspace)
+    );
     const statusMessageId = !resume
       ? appendItem(
           {
             type: "message",
             role: "assistant",
-            text: needsWorkspaceResolution ? INITIALIZING_ENVIRONMENT_TEXT : THINKING_TEXT,
+            text: needsEnvironmentInitialization ? INITIALIZING_ENVIRONMENT_TEXT : THINKING_TEXT,
           },
           "bottom",
           streamThreadIdRef.id,
@@ -783,7 +793,7 @@ export function ChatPage() {
       const resolvedWorkspace = resume
         ? workspaceRef() || localWorkspaceRef(workingDir())
         : await resolveWorkspaceForSend();
-      if (statusMessageId !== null) {
+      if (statusMessageId !== null && !needsEnvironmentInitialization) {
         replaceMessage(statusMessageId, THINKING_TEXT, streamThreadIdRef.id);
       }
 
@@ -806,6 +816,9 @@ export function ChatPage() {
       }
       if (!response.body) {
         throw new Error("Streaming response is not available.");
+      }
+      if (statusMessageId !== null && needsEnvironmentInitialization && !streamedRef.received) {
+        replaceMessage(statusMessageId, THINKING_TEXT, streamThreadIdRef.id);
       }
 
       await readNDJSONStream(
