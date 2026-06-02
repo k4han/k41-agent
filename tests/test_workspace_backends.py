@@ -216,13 +216,43 @@ class FakeModalStream:
     def read(self) -> str:
         return self.text
 
+    class _AioRead:
+        def __init__(self, parent: "FakeModalStream") -> None:
+            self._parent = parent
+
+        async def __call__(self) -> str:
+            return self._parent.read()
+
+    @property
+    def aio(self):
+        return self._AioRead(self)
+
+
+class _AioWrapper:
+    """Wraps a sync callable with an .aio async variant."""
+    def __init__(self, fn: Any) -> None:
+        self._fn = fn
+
+    def __call__(self, *args, **kwargs):
+        return self._fn(*args, **kwargs)
+
+    async def aio(self, *args, **kwargs):
+        return self._fn(*args, **kwargs)
+
 
 class FakeModalFs:
     def __init__(self) -> None:
         self.files: dict[str, bytes] = {}
         self.dirs: set[str] = {"/", "/workspace"}
+        self.write_text = _AioWrapper(self._write_text)
+        self.write_bytes = _AioWrapper(self._write_bytes)
+        self.read_text = _AioWrapper(self._read_text)
+        self.read_bytes = _AioWrapper(self._read_bytes)
+        self.list_files = _AioWrapper(self._list_files)
+        self.stat = _AioWrapper(self._stat)
+        self.make_directory = _AioWrapper(self._make_directory)
 
-    def make_directory(self, remote_path: str, *, create_parents: bool = True) -> None:
+    def _make_directory(self, remote_path: str, *, create_parents: bool = True) -> None:
         if create_parents:
             current = ""
             for part in remote_path.split("/"):
@@ -234,21 +264,21 @@ class FakeModalFs:
             return
         self.dirs.add(remote_path)
 
-    def write_text(self, data: str, remote_path: str) -> None:
-        self.write_bytes(data.encode("utf-8"), remote_path)
+    def _write_text(self, data: str, remote_path: str) -> None:
+        self._write_bytes(data.encode("utf-8"), remote_path)
 
-    def write_bytes(self, data: bytes | bytearray | memoryview, remote_path: str) -> None:
+    def _write_bytes(self, data: bytes | bytearray | memoryview, remote_path: str) -> None:
         parent = remote_path.rsplit("/", 1)[0] or "/"
         self.make_directory(parent)
         self.files[remote_path] = bytes(data)
 
-    def read_text(self, remote_path: str) -> str:
+    def _read_text(self, remote_path: str) -> str:
         return self.files[remote_path].decode("utf-8")
 
-    def read_bytes(self, remote_path: str) -> bytes:
+    def _read_bytes(self, remote_path: str) -> bytes:
         return self.files[remote_path]
 
-    def list_files(self, remote_path: str):
+    def _list_files(self, remote_path: str):
         prefix = remote_path.rstrip("/") + "/"
         entries = []
         seen: set[str] = set()
@@ -285,7 +315,7 @@ class FakeModalFs:
             )
         return entries
 
-    def stat(self, remote_path: str):
+    def _stat(self, remote_path: str):
         if remote_path in self.files:
             return SimpleNamespace(
                 name=remote_path.rsplit("/", 1)[-1],
@@ -317,8 +347,9 @@ class FakeModalSandbox:
         self.commands: list[tuple[str, str | None, int | None]] = []
         self.terminate_calls = 0
         self.detach_calls = 0
+        self.exec = _AioWrapper(self._exec_impl)
 
-    def exec(self, *args, timeout: int | None = None, workdir: str | None = None, **kwargs):
+    def _exec_impl(self, *args, timeout: int | None = None, workdir: str | None = None, **kwargs):
         del kwargs
         command = args[-1]
         self.commands.append((command, workdir, timeout))
@@ -372,9 +403,21 @@ class FakeModalSandbox:
         return SimpleNamespace(
             stdout=FakeModalStream(result),
             stderr=FakeModalStream(""),
-            wait=lambda: exit_code,
+            wait=self._make_wait(exit_code),
             returncode=exit_code,
         )
+
+    def _make_wait(self, exit_code: int):
+        def wait() -> int:
+            return exit_code
+        wait.aio = self._make_aio_wait(exit_code)
+        return wait
+
+    @staticmethod
+    def _make_aio_wait(exit_code: int):
+        async def aio_wait() -> int:
+            return exit_code
+        return aio_wait
 
     def terminate(self, *, wait: bool = False):
         del wait
@@ -390,17 +433,21 @@ class FakeModalUnavailableError(Exception):
 
 
 class FakeUnavailableModalFs(FakeModalFs):
-    def list_files(self, path: str):
+    def _list_files(self, path: str):
         del path
         raise FakeModalUnavailableError(
             "The Sandbox is unavailable. This Sandbox may have already shut down."
         )
 
+    list_files = _AioWrapper(_list_files)  # type: ignore[assignment]
+
 
 class FakeUnavailableModalSandbox(FakeModalSandbox):
-    def exec(self, *args, timeout: int | None = None, workdir: str | None = None, **kwargs):
+    def _exec_impl(self, *args, timeout: int | None = None, workdir: str | None = None, **kwargs):
         del args, timeout, workdir, kwargs
         raise FakeModalUnavailableError("Task has already finished with status idle timeout")
+
+    exec = _AioWrapper(_exec_impl)  # type: ignore[assignment]
 
 
 def test_workspace_ref_normalizes_local_path(tmp_path):
@@ -554,72 +601,88 @@ def test_resolve_modal_path_blocks_remote_root_escape():
 
 
 def test_local_workspace_backend_file_operations_and_path_guard(tmp_path):
-    workspace = workspace_ref_from_local_path(str(tmp_path))
-    backend = LocalWorkspaceBackend(workspace)
-    file_path = tmp_path / "src" / "app.py"
+    import asyncio
 
-    result = backend.write_text("src/app.py", "print('hello')\n")
+    async def _run():
+        workspace = workspace_ref_from_local_path(str(tmp_path))
+        backend = LocalWorkspaceBackend(workspace)
+        file_path = tmp_path / "src" / "app.py"
 
-    assert result == f"[OK] Wrote file: {file_path.resolve()}"
-    assert backend.read_text("src/app.py") == "print('hello')\n"
-    assert backend.read_text(str(file_path)) == "print('hello')\n"
-    assert backend.list_files("src") == str(file_path.resolve())
-    with pytest.raises(ValueError, match="Path escapes working directory"):
-        backend.read_text("../secret.txt")
+        result = await backend.write_text("src/app.py", "print('hello')\n")
+
+        assert result == f"[OK] Wrote file: {file_path.resolve()}"
+        assert await backend.read_text("src/app.py") == "print('hello')\n"
+        assert await backend.read_text(str(file_path)) == "print('hello')\n"
+        assert await backend.list_files("src") == str(file_path.resolve())
+        with pytest.raises(ValueError, match="Path escapes working directory"):
+            await backend.read_text("../secret.txt")
+
+    asyncio.run(_run())
 
 
 def test_daytona_workspace_backend_file_operations_and_path_guard():
-    sandbox = FakeDaytonaSandbox()
-    workspace = WorkspaceRef(
-        backend="daytona",
-        locator="sandbox-1",
-        label="sandbox",
-        metadata={"root": "workspace"},
-    )
-    backend = DaytonaWorkspaceBackend(workspace, sandbox=sandbox)
+    import asyncio
 
-    result = backend.write_text("src/app.py", "print('hello')\n")
+    async def _run():
+        sandbox = FakeDaytonaSandbox()
+        workspace = WorkspaceRef(
+            backend="daytona",
+            locator="sandbox-1",
+            label="sandbox",
+            metadata={"root": "workspace"},
+        )
+        backend = DaytonaWorkspaceBackend(workspace, sandbox=sandbox)
 
-    assert result == "[OK] Wrote file: /workspace/src/app.py"
-    assert backend.read_text("src/app.py") == "print('hello')\n"
-    assert backend.list_files("src") == "/workspace/src/app.py"
-    tree = backend.tree()
-    assert tree["root"] == "/workspace"
-    assert tree["entries"][0]["path"] == "/workspace/src"
-    assert backend.file("src/app.py")["content"] == "print('hello')\n"
-    assert backend.rename(path="src/app.py", new_name="main.py")["new_path"] == (
-        "/workspace/src/main.py"
-    )
-    assert backend.delete(path="src/main.py")["kind"] == "file"
-    with pytest.raises(ValueError, match="Path escapes workspace"):
-        backend.read_text("../secret.txt")
+        result = await backend.write_text("src/app.py", "print('hello')\n")
+
+        assert result == "[OK] Wrote file: /workspace/src/app.py"
+        assert await backend.read_text("src/app.py") == "print('hello')\n"
+        assert await backend.list_files("src") == "/workspace/src/app.py"
+        tree = await backend.tree()
+        assert tree["root"] == "/workspace"
+        assert tree["entries"][0]["path"] == "/workspace/src"
+        assert (await backend.file("src/app.py"))["content"] == "print('hello')\n"
+        assert (await backend.rename(path="src/app.py", new_name="main.py"))["new_path"] == (
+            "/workspace/src/main.py"
+        )
+        assert (await backend.delete(path="src/main.py"))["kind"] == "file"
+        with pytest.raises(ValueError, match="Path escapes workspace"):
+            await backend.read_text("../secret.txt")
+
+    asyncio.run(_run())
 
 
 def test_modal_workspace_backend_file_operations_and_path_guard():
-    sandbox = FakeModalSandbox()
-    workspace = WorkspaceRef(
-        backend="modal",
-        locator="sb-1",
-        label="sandbox",
-        metadata={"root": "/workspace"},
-    )
-    backend = ModalWorkspaceBackend(workspace, sandbox=sandbox)
+    import asyncio
 
-    result = backend.write_text("src/app.py", "print('hello')\n")
+    async def _run():
+        sandbox = FakeModalSandbox()
+        fs = sandbox.filesystem
+        workspace = WorkspaceRef(
+            backend="modal",
+            locator="sb-1",
+            label="sandbox",
+            metadata={"root": "/workspace"},
+        )
+        backend = ModalWorkspaceBackend(workspace, sandbox=sandbox, fs=fs)
 
-    assert result == "[OK] Wrote file: /workspace/src/app.py"
-    assert backend.read_text("src/app.py") == "print('hello')\n"
-    assert backend.list_files("src") == "/workspace/src/app.py"
-    tree = backend.tree()
-    assert tree["root"] == "/workspace"
-    assert tree["entries"][0]["path"] == "/workspace/src"
-    assert backend.file("src/app.py")["content"] == "print('hello')\n"
-    assert backend.rename(path="src/app.py", new_name="main.py")["new_path"] == (
-        "/workspace/src/main.py"
-    )
-    assert backend.delete(path="src/main.py")["kind"] == "file"
-    with pytest.raises(ValueError, match="Path escapes workspace"):
-        backend.read_text("../secret.txt")
+        result = await backend.write_text("src/app.py", "print('hello')\n")
+
+        assert result == "[OK] Wrote file: /workspace/src/app.py"
+        assert await backend.read_text("src/app.py") == "print('hello')\n"
+        assert await backend.list_files("src") == "/workspace/src/app.py"
+        tree = await backend.tree()
+        assert tree["root"] == "/workspace"
+        assert tree["entries"][0]["path"] == "/workspace/src"
+        assert (await backend.file("src/app.py"))["content"] == "print('hello')\n"
+        assert (await backend.rename(path="src/app.py", new_name="main.py"))["new_path"] == (
+            "/workspace/src/main.py"
+        )
+        assert (await backend.delete(path="src/main.py"))["kind"] == "file"
+        with pytest.raises(ValueError, match="Path escapes workspace"):
+            await backend.read_text("../secret.txt")
+
+    asyncio.run(_run())
 
 
 def test_daytona_workspace_backend_starts_stopped_sandbox():
@@ -714,6 +777,8 @@ def test_daytona_lifecycle_helpers_stop_and_archive_sandbox(monkeypatch):
 
 
 def test_delete_modal_workspace_terminates_and_detaches_sandbox(monkeypatch):
+    import asyncio
+
     sandbox = FakeModalSandbox()
     workspace = WorkspaceRef(
         backend="modal",
@@ -722,17 +787,25 @@ def test_delete_modal_workspace_terminates_and_detaches_sandbox(monkeypatch):
         metadata={"root": "/workspace"},
     )
 
+    async def fake_get_modal_sandbox(ref, *, client=None):
+        return sandbox
+
     monkeypatch.setattr(
         "agent.modules.workspaces.modal_backend.get_modal_sandbox",
-        lambda ref: sandbox,
+        fake_get_modal_sandbox,
     )
 
-    assert delete_modal_workspace(workspace) == "terminated"
+    async def _run():
+        assert await delete_modal_workspace(workspace) == "terminated"
+
+    asyncio.run(_run())
     assert sandbox.terminate_calls == 1
     assert sandbox.detach_calls == 1
 
 
 def test_modal_backend_reports_unavailable_sandbox():
+    import asyncio
+
     workspace = resolve_workspace_ref(
         {
             "backend": "modal",
@@ -742,17 +815,22 @@ def test_modal_backend_reports_unavailable_sandbox():
     )
     sandbox = FakeModalSandbox()
     sandbox.filesystem = FakeUnavailableModalFs()
-    backend = ModalWorkspaceBackend(workspace, sandbox=sandbox)
+    backend = ModalWorkspaceBackend(workspace, sandbox=sandbox, fs=sandbox.filesystem)
 
-    with pytest.raises(WorkspaceUnavailableError) as exc_info:
-        backend.tree()
+    async def _run():
+        with pytest.raises(WorkspaceUnavailableError) as exc_info:
+            await backend.tree()
+        return exc_info
 
+    exc_info = asyncio.run(_run())
     assert exc_info.value.backend == "modal"
     assert exc_info.value.locator == "sb-expired"
     assert "no longer available" in str(exc_info.value)
 
 
 def test_modal_backend_changes_reports_unavailable_sandbox():
+    import asyncio
+
     workspace = resolve_workspace_ref(
         {
             "backend": "modal",
@@ -762,8 +840,11 @@ def test_modal_backend_changes_reports_unavailable_sandbox():
     )
     backend = ModalWorkspaceBackend(workspace, sandbox=FakeUnavailableModalSandbox())
 
-    with pytest.raises(WorkspaceUnavailableError):
-        backend.changes()
+    async def _run():
+        with pytest.raises(WorkspaceUnavailableError):
+            await backend.changes()
+
+    asyncio.run(_run())
 
 
 @pytest.mark.asyncio
@@ -832,7 +913,7 @@ async def test_delete_thread_workspace_deletes_modal_sandbox_and_record(monkeypa
             calls.append(("delete_record", thread_id))
             return True
 
-    def fake_delete_modal_workspace(ref: WorkspaceRef):
+    async def fake_delete_modal_workspace(ref: WorkspaceRef):
         calls.append(("delete_sandbox", ref.locator))
         return "terminated"
 
@@ -1021,6 +1102,8 @@ def test_local_workspace_backend_execute_uses_safe_workspace(
     monkeypatch,
     tmp_path,
 ):
+    import asyncio
+
     workspace = workspace_ref_from_local_path(str(tmp_path))
     backend = LocalWorkspaceBackend(workspace)
     captured = {}
@@ -1042,7 +1125,10 @@ def test_local_workspace_backend_execute_uses_safe_workspace(
 
     monkeypatch.setattr(local_backend_module.subprocess, "Popen", FakePopen)
 
-    result = backend.execute("echo ok", timeout=12)
+    async def _run():
+        return await backend.execute("echo ok", timeout=12)
+
+    result = asyncio.run(_run())
 
     assert result.output == "ok"
     assert result.exit_code == 0
@@ -1052,6 +1138,8 @@ def test_local_workspace_backend_execute_uses_safe_workspace(
 
 
 def test_daytona_workspace_backend_execute_changes_and_untracked_diff():
+    import asyncio
+
     sandbox = FakeDaytonaSandbox(git_root="/workspace")
     sandbox.fs.upload_file(b"hello\nworld\n", "/workspace/notes.txt")
     sandbox.process.git_status_output = "?? notes.txt\0"
@@ -1063,9 +1151,13 @@ def test_daytona_workspace_backend_execute_changes_and_untracked_diff():
     )
     backend = DaytonaWorkspaceBackend(workspace, sandbox=sandbox)
 
-    result = backend.execute("echo ok", timeout=12)
-    changes = backend.changes()
-    diff = backend.diff("/workspace/notes.txt")
+    async def _run():
+        result = await backend.execute("echo ok", timeout=12)
+        changes = await backend.changes()
+        diff = await backend.diff("/workspace/notes.txt")
+        return result, changes, diff
+
+    result, changes, diff = asyncio.run(_run())
 
     assert result.output == "ok\n"
     assert result.exit_code == 0
@@ -1079,6 +1171,8 @@ def test_daytona_workspace_backend_execute_changes_and_untracked_diff():
 
 
 def test_daytona_workspace_backend_changes_handles_non_git_workspace():
+    import asyncio
+
     sandbox = FakeDaytonaSandbox(git_root=None)
     workspace = WorkspaceRef(
         backend="daytona",
@@ -1088,7 +1182,10 @@ def test_daytona_workspace_backend_changes_handles_non_git_workspace():
     )
     backend = DaytonaWorkspaceBackend(workspace, sandbox=sandbox)
 
-    assert backend.changes() == {
+    async def _run():
+        return await backend.changes()
+
+    assert asyncio.run(_run()) == {
         "root": "/workspace",
         "is_git_repo": False,
         "changes": [],
@@ -1097,6 +1194,8 @@ def test_daytona_workspace_backend_changes_handles_non_git_workspace():
 
 
 def test_modal_workspace_backend_execute_changes_and_untracked_diff():
+    import asyncio
+
     sandbox = FakeModalSandbox(git_root="/workspace")
     sandbox.filesystem.write_text("hello\nworld\n", "/workspace/notes.txt")
     sandbox.git_status_output = "?? notes.txt\0"
@@ -1106,11 +1205,15 @@ def test_modal_workspace_backend_execute_changes_and_untracked_diff():
         label="sandbox",
         metadata={"root": "/workspace"},
     )
-    backend = ModalWorkspaceBackend(workspace, sandbox=sandbox)
+    backend = ModalWorkspaceBackend(workspace, sandbox=sandbox, fs=sandbox.filesystem)
 
-    result = backend.execute("echo ok", timeout=12)
-    changes = backend.changes()
-    diff = backend.diff("/workspace/notes.txt")
+    async def _run():
+        result = await backend.execute("echo ok", timeout=12)
+        changes = await backend.changes()
+        diff = await backend.diff("/workspace/notes.txt")
+        return result, changes, diff
+
+    result, changes, diff = asyncio.run(_run())
 
     assert result.output == "ok\n"
     assert result.exit_code == 0
@@ -1201,14 +1304,22 @@ def test_workspace_migration_backfills_legacy_tables(tmp_path):
 
 
 def test_get_workspace_backend_returns_physical_local_backend(tmp_path):
+    import asyncio
+
     workspace = workspace_ref_from_local_path(str(tmp_path), label="test-lab")
-    backend = get_workspace_backend(workspace)
+
+    async def _run():
+        return await get_workspace_backend(workspace)
+
+    backend = asyncio.run(_run())
 
     assert isinstance(backend, LocalWorkspaceBackend)
     assert not hasattr(backend, "virtual_prefix")
 
 
 def test_get_workspace_backend_returns_modal_backend(monkeypatch):
+    import asyncio
+
     sandbox = FakeModalSandbox()
     workspace = WorkspaceRef(
         backend="modal",
@@ -1216,28 +1327,47 @@ def test_get_workspace_backend_returns_modal_backend(monkeypatch):
         label="sandbox",
         metadata={"root": "/workspace"},
     )
+
+    async def fake_get_modal_sandbox(ref, *, client=None):
+        return sandbox
+
+    async def fake_get_modal_client():
+        return None
+
     monkeypatch.setattr(
         "agent.modules.workspaces.modal_backend.get_modal_sandbox",
-        lambda ref: sandbox,
+        fake_get_modal_sandbox,
+    )
+    monkeypatch.setattr(
+        "agent.modules.workspaces.modal_backend.get_modal_client",
+        fake_get_modal_client,
     )
 
-    backend = get_workspace_backend(workspace)
+    async def _run():
+        return await get_workspace_backend(workspace)
+
+    backend = asyncio.run(_run())
 
     assert isinstance(backend, ModalWorkspaceBackend)
 
 
 def test_local_workspace_tree_uses_absolute_path_keys(tmp_path):
+    import asyncio
+
     workspace = workspace_ref_from_local_path(str(tmp_path), label="test-lab")
     backend = LocalWorkspaceBackend(workspace)
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "main.py").write_text("print('hello')", encoding="utf-8")
 
-    root_tree = backend.tree()
+    async def _run():
+        root_tree = await backend.tree()
+        src_tree = await backend.tree(root_tree["entries"][0]["path"])
+        return root_tree, src_tree
+
+    root_tree, src_tree = asyncio.run(_run())
 
     assert root_tree["path"] == str(tmp_path.resolve())
     assert root_tree["entries"][0]["path"] == str((tmp_path / "src").resolve())
-
-    src_tree = backend.tree(root_tree["entries"][0]["path"])
 
     assert src_tree["path"] == str((tmp_path / "src").resolve())
     assert src_tree["entries"][0]["path"] == str(

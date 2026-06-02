@@ -15,13 +15,13 @@ from agent.modules.tools.result import ToolError, ToolErrorCode
     tags=["fs", "io"],
 )
 @tool
-def read_file(
+async def read_file(
     file_path: str,
     runtime: Annotated[ToolRuntime[Any, Any], InjectedToolArg],
 ) -> str:
     """Read file content in working directory."""
     try:
-        return get_backend(runtime).read_text(file_path)
+        return await (await get_backend(runtime)).read_text(file_path)
     except FileNotFoundError as exc:
         raise ToolError(
             ToolErrorCode.NOT_FOUND, f"File does not exist: {file_path}"

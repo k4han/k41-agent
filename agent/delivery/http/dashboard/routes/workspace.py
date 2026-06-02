@@ -15,11 +15,13 @@ from agent.delivery.http.dashboard.routes.shared import (
 from agent.modules.github import get_github_automation_service
 from agent.modules.workspaces import (
     attach_daytona_workspace,
+    attach_github_repository_to_workspace,
     attach_modal_workspace,
     create_daytona_workspace,
     create_modal_workspace,
     ensure_workspace_directory,
     get_workspace_backend,
+    is_github_workspace,
     list_workspace_directories,
     remember_thread_workspace_ref,
     resolve_workspace_ref,
@@ -32,13 +34,10 @@ router = APIRouter()
 async def _run_workspace_backend_operation(
     workspace: WorkspaceRef,
     thread_id: str | None,
-    operation: Callable[[Any], dict[str, Any]],
+    operation: Callable[[Any], Any],
 ) -> dict[str, Any]:
-    def run() -> dict[str, Any]:
-        backend = get_workspace_backend(workspace, thread_id=thread_id)
-        return operation(backend)
-
-    return await run_in_threadpool(run)
+    backend = await get_workspace_backend(workspace, thread_id=thread_id)
+    return await operation(backend)
 
 
 def _workspace_metadata_root(workspace: WorkspaceRef | None) -> str | None:
@@ -77,10 +76,11 @@ async def get_dashboard_workspace_tree(
             locator=locator,
             root=root,
         )
+        async def _op(b): return await b.tree(path)
         return await _run_workspace_backend_operation(
             workspace,
             thread_id,
-            lambda backend: backend.tree(path),
+            _op,
         )
     except Exception as exc:
         raise _workspace_http_error(exc) from exc
@@ -100,10 +100,11 @@ async def get_dashboard_workspace_changes(
             locator=locator,
             root=root,
         )
+        async def _op(b): return await b.changes()
         return await _run_workspace_backend_operation(
             workspace,
             thread_id,
-            lambda backend: backend.changes(),
+            _op,
         )
     except Exception as exc:
         raise _workspace_http_error(exc) from exc
@@ -124,10 +125,11 @@ async def get_dashboard_workspace_diff(
             locator=locator,
             root=root,
         )
+        async def _op(b): return await b.diff(path)
         return await _run_workspace_backend_operation(
             workspace,
             thread_id,
-            lambda backend: backend.diff(path),
+            _op,
         )
     except Exception as exc:
         raise _workspace_http_error(exc) from exc
@@ -148,10 +150,11 @@ async def get_dashboard_workspace_file(
             locator=locator,
             root=root,
         )
+        async def _op(b): return await b.file(path)
         return await _run_workspace_backend_operation(
             workspace,
             thread_id,
-            lambda backend: backend.file(path),
+            _op,
         )
     except Exception as exc:
         raise _workspace_http_error(exc) from exc
@@ -173,10 +176,11 @@ async def rename_dashboard_workspace_entry(
             thread_id=body.thread_id,
             workspace=body.workspace,
         )
+        async def _op(b): return await b.rename(path=body.path, new_name=body.new_name)
         return await _run_workspace_backend_operation(
             workspace,
             body.thread_id,
-            lambda backend: backend.rename(path=body.path, new_name=body.new_name),
+            _op,
         )
     except Exception as exc:
         raise _workspace_http_error(exc) from exc
@@ -190,42 +194,63 @@ class WorkspaceDeleteBody(BaseModel):
 
 class WorkspaceResolveBody(BaseModel):
     kind: str | None = None
+    backend: str | None = None
     workspace: WorkspaceRef | None = None
     locator: str | None = None
     repository_id: int | None = None
     thread_id: str | None = None
 
 
+def _resolve_backend(body: WorkspaceResolveBody, kind: str) -> str:
+    """Return the target backend for the resolve request.
+
+    Prefers an explicit ``backend`` field on the request body, then the
+    ``workspace`` hint, then the request ``kind`` so that ``kind="github"``
+    continues to work for the local-only flow.
+    """
+    if body.backend and body.backend.strip().lower() in {"local", "daytona", "modal"}:
+        return body.backend.strip().lower()
+    if body.workspace and body.workspace.backend in {"local", "daytona", "modal"}:
+        return body.workspace.backend
+    if kind in {"local", "daytona", "modal"}:
+        return kind
+    return "local"
+
+
 @router.post("/dashboard-api/workspace/resolve")
 async def resolve_dashboard_workspace(body: WorkspaceResolveBody) -> dict[str, Any]:
     kind_source = body.kind or (body.workspace.backend if body.workspace else "local")
     kind = kind_source.strip().lower()
+    repository_id = body.repository_id
     try:
-        if kind == "local":
-            ref = resolve_workspace_ref(
-                body.workspace or {"backend": "local", "locator": body.locator}
-            )
-            root = ensure_workspace_directory(ref.locator)
-            workspace = resolve_workspace_ref(
-                {
-                    "backend": "local",
-                    "locator": str(root),
-                    "label": str(root),
-                    "metadata": ref.metadata,
-                }
-            )
-            if body.thread_id and body.thread_id.strip():
-                workspace = await remember_thread_workspace_ref(body.thread_id, workspace)
-            return {
-                "kind": "local",
-                "label": workspace.label,
-                "workspace": workspace.model_dump(),
-            }
         if kind == "github":
-            if body.repository_id is None:
+            if repository_id is None:
                 raise ValueError("Repository ID is required.")
+            backend = _resolve_backend(body, kind)
+            if backend == "daytona":
+                workspace = await _resolve_github_in_sandbox(
+                    body,
+                    backend=backend,
+                    repository_id=repository_id,
+                )
+                return await _remember_and_respond(
+                    body=body,
+                    workspace=workspace,
+                    kind=backend,
+                )
+            if backend == "modal":
+                workspace = await _resolve_github_in_sandbox(
+                    body,
+                    backend=backend,
+                    repository_id=repository_id,
+                )
+                return await _remember_and_respond(
+                    body=body,
+                    workspace=workspace,
+                    kind=backend,
+                )
             result = await get_github_automation_service().resolve_repository_workspace(
-                body.repository_id,
+                repository_id,
             )
             if body.thread_id and body.thread_id.strip():
                 payload = result.get("workspace")
@@ -234,6 +259,32 @@ async def resolve_dashboard_workspace(body: WorkspaceResolveBody) -> dict[str, A
                     result["workspace"] = workspace.model_dump()
                     result["label"] = workspace.label
             return result
+        if kind == "local":
+            ref = resolve_workspace_ref(
+                body.workspace or {"backend": "local", "locator": body.locator}
+            )
+            if repository_id is not None:
+                workspace = await attach_github_repository_to_workspace(
+                    ref,
+                    repository_id=repository_id,
+                )
+            else:
+                root = ensure_workspace_directory(ref.locator)
+                workspace = resolve_workspace_ref(
+                    {
+                        "backend": "local",
+                        "locator": str(root),
+                        "label": str(root),
+                        "metadata": ref.metadata,
+                    }
+                )
+            if body.thread_id and body.thread_id.strip():
+                workspace = await remember_thread_workspace_ref(body.thread_id, workspace)
+            return {
+                "kind": "local",
+                "label": workspace.label,
+                "workspace": workspace.model_dump(),
+            }
         if kind == "daytona":
             sandbox_id = body.locator or (body.workspace.locator if body.workspace else "")
             if sandbox_id and sandbox_id.strip():
@@ -245,6 +296,11 @@ async def resolve_dashboard_workspace(body: WorkspaceResolveBody) -> dict[str, A
                 )
             else:
                 workspace = await run_in_threadpool(create_daytona_workspace)
+            if repository_id is not None:
+                workspace = await attach_github_repository_to_workspace(
+                    workspace,
+                    repository_id=repository_id,
+                )
             if body.thread_id and body.thread_id.strip():
                 workspace = await remember_thread_workspace_ref(body.thread_id, workspace)
             return {
@@ -256,13 +312,17 @@ async def resolve_dashboard_workspace(body: WorkspaceResolveBody) -> dict[str, A
             sandbox_id = body.locator or (body.workspace.locator if body.workspace else "")
             if sandbox_id and sandbox_id.strip():
                 root = _workspace_metadata_root(body.workspace)
-                workspace = await run_in_threadpool(
-                    attach_modal_workspace,
+                workspace = await attach_modal_workspace(
                     sandbox_id,
                     root=root,
                 )
             else:
-                workspace = await run_in_threadpool(create_modal_workspace)
+                workspace = await create_modal_workspace()
+            if repository_id is not None:
+                workspace = await attach_github_repository_to_workspace(
+                    workspace,
+                    repository_id=repository_id,
+                )
             if body.thread_id and body.thread_id.strip():
                 workspace = await remember_thread_workspace_ref(body.thread_id, workspace)
             return {
@@ -275,6 +335,59 @@ async def resolve_dashboard_workspace(body: WorkspaceResolveBody) -> dict[str, A
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         raise _workspace_http_error(exc) from exc
+
+
+async def _resolve_github_in_sandbox(
+    body: WorkspaceResolveBody,
+    *,
+    backend: str,
+    repository_id: int,
+) -> WorkspaceRef:
+    """Create or attach a sandbox then clone a GitHub repository inside it."""
+    if backend == "daytona":
+        sandbox_id = body.locator or (body.workspace.locator if body.workspace else "")
+        if sandbox_id and sandbox_id.strip():
+            root = _workspace_metadata_root(body.workspace)
+            workspace = await run_in_threadpool(
+                attach_daytona_workspace,
+                sandbox_id,
+                root=root,
+            )
+        else:
+            workspace = await run_in_threadpool(create_daytona_workspace)
+    elif backend == "modal":
+        sandbox_id = body.locator or (body.workspace.locator if body.workspace else "")
+        if sandbox_id and sandbox_id.strip():
+            root = _workspace_metadata_root(body.workspace)
+            workspace = await attach_modal_workspace(
+                sandbox_id,
+                root=root,
+            )
+        else:
+            workspace = await create_modal_workspace()
+    else:
+        raise ValueError(f"Unsupported sandbox backend: {backend}")
+    return await attach_github_repository_to_workspace(
+        workspace,
+        repository_id=repository_id,
+    )
+
+
+async def _remember_and_respond(
+    *,
+    body: WorkspaceResolveBody,
+    workspace: WorkspaceRef,
+    kind: str,
+) -> dict[str, Any]:
+    if body.thread_id and body.thread_id.strip():
+        workspace = await remember_thread_workspace_ref(body.thread_id, workspace)
+    payload = workspace.model_dump()
+    return {
+        "kind": kind,
+        "label": workspace.display_label() or workspace.label,
+        "workspace": payload,
+        "is_github_source": is_github_workspace(payload),
+    }
 
 
 class WorkspaceCreateDirBody(BaseModel):
@@ -323,10 +436,11 @@ async def delete_dashboard_workspace_entry(
             thread_id=body.thread_id,
             workspace=body.workspace,
         )
+        async def _op(b): return await b.delete(path=body.path)
         return await _run_workspace_backend_operation(
             workspace,
             body.thread_id,
-            lambda backend: backend.delete(path=body.path),
+            _op,
         )
     except Exception as exc:
         raise _workspace_http_error(exc) from exc

@@ -15,12 +15,12 @@ from agent.modules.tools.result import ToolError, ToolErrorCode
     tags=["fs"],
 )
 @tool
-def list_files(
+async def list_files(
     runtime: Annotated[ToolRuntime[Any, Any], InjectedToolArg],
     sub_dir: str = "",
 ) -> str:
     """List files in working directory."""
     try:
-        return get_backend(runtime).list_files(sub_dir)
+        return await (await get_backend(runtime)).list_files(sub_dir)
     except ValueError as exc:
         raise ToolError(ToolErrorCode.INVALID_INPUT, str(exc)) from exc

@@ -9,6 +9,8 @@ import {
   ChevronRight,
   RefreshCw,
   Cloud,
+  Server,
+  Cpu,
 } from "lucide-solid";
 
 import { Dialog } from "@/components/Dialog";
@@ -18,6 +20,7 @@ import { apiFetch, postJson } from "@/lib/api";
 import {
   daytonaWorkspaceRef,
   formatWorkspaceRoot,
+  isGitHubWorkspace,
   localWorkspaceRef,
   modalWorkspaceRef,
   workspaceDisplayLabel,
@@ -46,7 +49,11 @@ type WorkspaceResolvePayload = {
   kind: string;
   label: string;
   workspace: WorkspaceRef;
+  is_github_source?: boolean;
 };
+
+type BackendKey = "local" | "daytona" | "modal";
+type SourceKey = "path" | "sandbox" | "github";
 
 export interface WorkspaceSelectorProps {
   workingDir: string;
@@ -58,9 +65,41 @@ export interface WorkspaceSelectorProps {
   onResolved: (workspace: WorkspaceRef) => void;
 }
 
+function sourceForBackend(backend: BackendKey): SourceKey[] {
+  if (backend === "local") {
+    return ["path", "github"];
+  }
+  return ["sandbox", "github"];
+}
+
+function defaultSourceForBackend(backend: BackendKey): SourceKey {
+  if (backend === "local") {
+    return "path";
+  }
+  return "sandbox";
+}
+
+function backendFromWorkspace(workspace: WorkspaceRef | null | undefined): BackendKey {
+  if (workspace?.backend === "daytona" || workspace?.backend === "modal") {
+    return workspace.backend;
+  }
+  return "local";
+}
+
+function sourceFromWorkspace(
+  backend: BackendKey,
+  workspace: WorkspaceRef | null | undefined,
+): SourceKey {
+  if (isGitHubWorkspace(workspace)) {
+    return "github";
+  }
+  return defaultSourceForBackend(backend);
+}
+
 export function WorkspaceSelector(props: WorkspaceSelectorProps) {
   const { showToast } = useToast();
-  const [kind, setKind] = createSignal<"local" | "github" | "daytona" | "modal">("local");
+  const [backend, setBackend] = createSignal<BackendKey>("local");
+  const [source, setSource] = createSignal<SourceKey>("path");
   const [localDraft, setLocalDraft] = createSignal(props.defaultWorkingDir);
   const [daytonaSandboxId, setDaytonaSandboxId] = createSignal("");
   const [modalSandboxId, setModalSandboxId] = createSignal("");
@@ -161,16 +200,23 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
     if (props.disabled || resolving()) {
       return true;
     }
-    if (kind() === "local") {
+    const src = source();
+    if (src === "path") {
       return !localDraft().trim();
     }
-    if (kind() === "daytona") {
-      return false;
+    if (src === "sandbox") {
+      if (backend() === "daytona") {
+        return false;
+      }
+      if (backend() === "modal") {
+        return false;
+      }
+      return true;
     }
-    if (kind() === "modal") {
-      return false;
+    if (src === "github") {
+      return !repositoryId();
     }
-    return !repositoryId();
+    return true;
   });
 
   const loadRepositories = async () => {
@@ -248,50 +294,88 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
     }
   };
 
+  const buildResolvePayload = (
+    targetPath: string,
+  ): {
+    kind: string;
+    thread_id: string | null;
+    repository_id?: number;
+    workspace?: WorkspaceRef | null;
+    locator?: string | null;
+  } => {
+    const threadId = props.threadId || null;
+    const src = source();
+    const back = backend();
+    if (src === "github") {
+      return {
+        kind: "github",
+        thread_id: threadId,
+        repository_id: Number(repositoryId()),
+        workspace:
+          back === "local"
+            ? localWorkspaceRef(targetPath)
+            : back === "daytona"
+              ? daytonaWorkspaceRef(daytonaSandboxId())
+              : modalWorkspaceRef(modalSandboxId()),
+        locator:
+          back === "local"
+            ? targetPath || null
+            : back === "daytona"
+              ? daytonaSandboxId().trim() || null
+              : modalSandboxId().trim() || null,
+      };
+    }
+    if (back === "local") {
+      return {
+        kind: "local",
+        thread_id: threadId,
+        workspace: localWorkspaceRef(targetPath),
+      };
+    }
+    if (back === "daytona") {
+      return {
+        kind: "daytona",
+        thread_id: threadId,
+        workspace: daytonaWorkspaceRef(daytonaSandboxId()),
+        locator: daytonaSandboxId().trim() || null,
+      };
+    }
+    return {
+      kind: "modal",
+      thread_id: threadId,
+      workspace: modalWorkspaceRef(modalSandboxId()),
+      locator: modalSandboxId().trim() || null,
+    };
+  };
+
   const resolveWorkspace = async (pathOverride?: string) => {
     const targetPath = pathOverride !== undefined ? pathOverride : localDraft();
     if (props.disabled || resolving()) {
       return;
     }
-    if (kind() === "local" && !targetPath.trim()) {
+    if (source() === "path" && !targetPath.trim()) {
+      return;
+    }
+    if (source() === "github" && !repositoryId()) {
       return;
     }
     setResolving(true);
     try {
-      const daytonaWorkspace =
-        kind() === "daytona" ? daytonaWorkspaceRef(daytonaSandboxId()) : null;
-      const modalWorkspace =
-        kind() === "modal" ? modalWorkspaceRef(modalSandboxId()) : null;
-      const payload = await postJson<WorkspaceResolvePayload>(
+      const payload = buildResolvePayload(targetPath);
+      const response = await postJson<WorkspaceResolvePayload>(
         "/dashboard-api/workspace/resolve",
-        kind() === "local"
-          ? {
-              kind: "local",
-              thread_id: props.threadId || null,
-              workspace: localWorkspaceRef(targetPath),
-            }
-          : kind() === "github"
-            ? {
-                kind: "github",
-                thread_id: props.threadId || null,
-                repository_id: Number(repositoryId()),
-              }
-            : {
-                kind: kind() === "daytona" ? "daytona" : "modal",
-                thread_id: props.threadId || null,
-                workspace: daytonaWorkspace || modalWorkspace,
-                locator: daytonaWorkspace?.locator || modalWorkspace?.locator || null,
-              },
+        payload,
       );
-      if (payload.workspace.backend === "daytona") {
-        setDaytonaSandboxId(payload.workspace.locator);
-      } else if (payload.workspace.backend === "modal") {
-        setModalSandboxId(payload.workspace.locator);
+      const resolved = response.workspace;
+      if (resolved.backend === "daytona") {
+        setDaytonaSandboxId(resolved.locator);
+      } else if (resolved.backend === "modal") {
+        setModalSandboxId(resolved.locator);
       } else {
-        setLocalDraft(payload.workspace.locator);
+        setLocalDraft(resolved.locator);
       }
-      setResolvedLabel(payload.label || payload.workspace.label || payload.workspace.locator);
-      props.onResolved(payload.workspace);
+      setResolvedLabel(response.label || resolved.label || resolved.locator);
+      props.onResolved(resolved);
       showToast("Workspace selected.", "success");
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Workspace selection failed", "error");
@@ -311,22 +395,26 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
     if (!workspace) {
       return;
     }
+    const back = backendFromWorkspace(workspace);
+    setBackend(back);
+    setSource(sourceFromWorkspace(back, workspace));
     if (workspace.backend === "daytona") {
-      setKind("daytona");
       setDaytonaSandboxId(workspace.locator);
     } else if (workspace.backend === "modal") {
-      setKind("modal");
       setModalSandboxId(workspace.locator);
-    } else if (workspace.backend === "github") {
-      setKind("github");
-    } else {
-      setKind("local");
     }
   });
 
   createEffect(() => {
     if (!props.workingDir && props.defaultWorkingDir && !localDraft()) {
       setLocalDraft(props.defaultWorkingDir);
+    }
+  });
+
+  createEffect(() => {
+    const allowed = sourceForBackend(backend());
+    if (!allowed.includes(source())) {
+      setSource(defaultSourceForBackend(backend()));
     }
   });
 
@@ -347,61 +435,88 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
 
       <Show when={!props.locked}>
         <div class="workspace-selector-controls">
-          <div class="workspace-selector-modes" role="tablist" aria-label="Workspace source">
+          <div class="workspace-selector-backends" role="tablist" aria-label="Workspace backend">
             <button
-              class={`workspace-selector-mode ${kind() === "local" ? "active" : ""}`}
+              class={`workspace-selector-mode ${backend() === "local" ? "active" : ""}`}
               type="button"
               disabled={props.disabled || resolving()}
-              onClick={() => setKind("local")}
-              aria-selected={kind() === "local"}
+              onClick={() => setBackend("local")}
+              aria-selected={backend() === "local"}
               role="tab"
             >
-              <FolderOpen size={14} />
-              <span>Local path</span>
+              <HardDrive size={14} />
+              <span>Local</span>
             </button>
             <button
-              class={`workspace-selector-mode ${kind() === "github" ? "active" : ""}`}
+              class={`workspace-selector-mode ${backend() === "daytona" ? "active" : ""}`}
               type="button"
               disabled={props.disabled || resolving()}
-              onClick={() => setKind("github")}
-              aria-selected={kind() === "github"}
+              onClick={() => setBackend("daytona")}
+              aria-selected={backend() === "daytona"}
               role="tab"
             >
-              <GitBranch size={14} />
-              <span>GitHub repo</span>
-            </button>
-            <button
-              class={`workspace-selector-mode ${kind() === "daytona" ? "active" : ""}`}
-              type="button"
-              disabled={props.disabled || resolving()}
-              onClick={() => setKind("daytona")}
-              aria-selected={kind() === "daytona"}
-              role="tab"
-            >
-              <Cloud size={14} />
+              <Server size={14} />
               <span>Daytona</span>
             </button>
             <button
-              class={`workspace-selector-mode ${kind() === "modal" ? "active" : ""}`}
+              class={`workspace-selector-mode ${backend() === "modal" ? "active" : ""}`}
               type="button"
               disabled={props.disabled || resolving()}
-              onClick={() => setKind("modal")}
-              aria-selected={kind() === "modal"}
+              onClick={() => setBackend("modal")}
+              aria-selected={backend() === "modal"}
               role="tab"
             >
-              <Cloud size={14} />
+              <Cpu size={14} />
               <span>Modal</span>
             </button>
           </div>
 
+          <div class="workspace-selector-sources" role="tablist" aria-label="Workspace source">
+            <For each={sourceForBackend(backend())}>
+              {(src) => (
+                <button
+                  class={`workspace-selector-source ${source() === src ? "active" : ""}`}
+                  type="button"
+                  disabled={props.disabled || resolving()}
+                  onClick={() => setSource(src)}
+                  aria-selected={source() === src}
+                  role="tab"
+                >
+                  <Show
+                    when={src === "github"}
+                    fallback={
+                      <Show
+                        when={src === "sandbox"}
+                        fallback={<FolderOpen size={13} />}
+                      >
+                        <Cloud size={13} />
+                      </Show>
+                    }
+                  >
+                    <GitBranch size={13} />
+                  </Show>
+                  <span>
+                    {src === "path"
+                      ? "Local path"
+                      : src === "sandbox"
+                        ? backend() === "local"
+                          ? "Local path"
+                          : `${backend() === "daytona" ? "Daytona" : "Modal"} sandbox`
+                        : "GitHub repo"}
+                  </span>
+                </button>
+              )}
+            </For>
+          </div>
+
           <Show
-            when={kind() === "github"}
+            when={source() === "github"}
             fallback={
               <Show
-                when={kind() === "daytona"}
+                when={source() === "sandbox" && backend() === "modal"}
                 fallback={
                   <Show
-                    when={kind() === "modal"}
+                    when={source() === "sandbox" && backend() === "daytona"}
                     fallback={
                       <div class="workspace-selector-row-enhanced">
                 <div class="workspace-input-group">
@@ -621,7 +736,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
                     </Dialog>
                   </div>
                 </Show>
-                  </div>
+              </div>
                     }
                   >
                     <div class="workspace-selector-row-enhanced">
@@ -695,21 +810,26 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
                 icon={<GitBranch size={14} />}
               />
               <button
-                class="btn btn-sm"
+                class="btn btn-sm btn-primary"
                 type="button"
                 disabled={resolveDisabled()}
                 onClick={() => void resolveWorkspace()}
               >
                 <CheckCircle2 size={13} />
-                Use
+                {backend() === "local" ? "Use" : "Clone & use"}
               </button>
             </div>
-            <Show when={repositoriesError() || (!repositoriesLoading() && !repositories().length)}>
-              <div class="hint workspace-selector-hint">
-                {repositoriesError() || "No synced GitHub repositories."}
-              </div>
+              <Show when={repositoriesError() || (!repositoriesLoading() && !repositories().length)}>
+                <div class="hint workspace-selector-hint">
+                  {repositoriesError() || "No synced GitHub repositories."}
+                </div>
+              </Show>
+              <Show when={backend() !== "local"}>
+                <div class="hint workspace-selector-hint">
+                  Repository will be cloned inside the {backend() === "daytona" ? "Daytona" : "Modal"} sandbox. The agent runs against the cloned copy; pushing back to GitHub still happens from the local webhook flow.
+                </div>
+              </Show>
             </Show>
-          </Show>
         </div>
       </Show>
     </div>

@@ -42,6 +42,16 @@ function metadataText(metadata: Record<string, unknown> | undefined, key: string
   return typeof value === "string" ? value.trim() : "";
 }
 
+export function isGitHubWorkspace(
+  workspace: WorkspaceRef | null | undefined,
+): boolean {
+  if (!workspace) {
+    return false;
+  }
+  const source = workspace.metadata?.source;
+  return typeof source === "string" && source.trim().toLowerCase() === "github";
+}
+
 export function localWorkspaceRef(locator: string): WorkspaceRef | null {
   const trimmed = locator.trim();
   if (!trimmed) {
@@ -98,6 +108,10 @@ export function workspaceDisplayLabelFromValues(
   backend: WorkspaceRef["backend"] = "local",
 ): string {
   if (backend === "daytona" || backend === "modal") {
+    const repository = metadataText(metadata, "repository_full_name");
+    if (repository) {
+      return repository;
+    }
     const trimmedLabel = (label || "").trim();
     if (trimmedLabel) {
       return trimmedLabel;

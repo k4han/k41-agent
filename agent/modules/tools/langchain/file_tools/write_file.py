@@ -15,13 +15,13 @@ from agent.modules.tools.result import ToolError, ToolErrorCode
     tags=["fs", "io"],
 )
 @tool
-def write_file(
+async def write_file(
     file_path: str,
     content: str,
     runtime: Annotated[ToolRuntime[Any, Any], InjectedToolArg],
 ) -> str:
     """Write content to file in working directory."""
     try:
-        return get_backend(runtime).write_text(file_path, content)
+        return await (await get_backend(runtime)).write_text(file_path, content)
     except ValueError as exc:
         raise ToolError(ToolErrorCode.INVALID_INPUT, str(exc)) from exc

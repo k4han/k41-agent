@@ -29,16 +29,16 @@ class WorkspaceUnavailableError(RuntimeError):
 class WorkspaceBackend(Protocol):
     ref: WorkspaceRef
 
-    def list_files(self, sub_dir: str = "") -> str:
+    async def list_files(self, sub_dir: str = "") -> str:
         ...
 
-    def read_text(self, file_path: str) -> str:
+    async def read_text(self, file_path: str) -> str:
         ...
 
-    def write_text(self, file_path: str, content: str) -> str:
+    async def write_text(self, file_path: str, content: str) -> str:
         ...
 
-    def execute(
+    async def execute(
         self,
         command: str,
         *,
@@ -47,22 +47,22 @@ class WorkspaceBackend(Protocol):
     ) -> CommandResult:
         ...
 
-    def tree(self, path: str | None = None) -> dict[str, Any]:
+    async def tree(self, path: str | None = None) -> dict[str, Any]:
         ...
 
-    def file(self, path: str) -> dict[str, Any]:
+    async def file(self, path: str) -> dict[str, Any]:
         ...
 
-    def changes(self) -> dict[str, Any]:
+    async def changes(self) -> dict[str, Any]:
         ...
 
-    def diff(self, path: str) -> dict[str, Any]:
+    async def diff(self, path: str) -> dict[str, Any]:
         ...
 
-    def rename(self, *, path: str, new_name: str) -> dict[str, Any]:
+    async def rename(self, *, path: str, new_name: str) -> dict[str, Any]:
         ...
 
-    def delete(self, *, path: str) -> dict[str, Any]:
+    async def delete(self, *, path: str) -> dict[str, Any]:
         ...
 
 

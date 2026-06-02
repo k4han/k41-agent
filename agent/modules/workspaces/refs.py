@@ -23,6 +23,11 @@ class WorkspaceRef(BaseModel):
 
     def display_label(self) -> str:
         if self.backend in {"daytona", "modal"}:
+            repository = str(
+                self.metadata.get("repository_full_name") or ""
+            ).strip()
+            if repository:
+                return repository
             label = self.label.strip()
             if label:
                 return label

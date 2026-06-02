@@ -38,7 +38,7 @@ class ModalCommandSessionManager:
     def has_session(self, session_id: str, scope_id: str | None = None) -> bool:
         return self._session_key(session_id, scope_id) in self.sessions
 
-    def execute_command(
+    async def execute_command(
         self,
         *,
         session_id: str,
@@ -57,7 +57,8 @@ class ModalCommandSessionManager:
                 ),
             }
         try:
-            result = ModalWorkspaceBackend(workspace).execute(
+            backend = await ModalWorkspaceBackend.create(workspace)
+            result = await backend.execute(
                 command,
                 timeout=max(1, int(timeout)),
                 max_output_chars=MAX_OUTPUT_CHARS,

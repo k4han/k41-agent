@@ -483,6 +483,350 @@ def test_dashboard_workspace_resolve_uses_github_service(
     assert response.json()["workspace"]["locator"] == str(tmp_path)
 
 
+def test_dashboard_workspace_resolve_github_daytona_clones_inside_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.modules.workspaces import WorkspaceRef
+
+    sandbox = WorkspaceRef(
+        backend="daytona",
+        locator="sb-day-1",
+        label="daytona:sb-day-1",
+        metadata={"root": "workspace"},
+    )
+    attached = WorkspaceRef(
+        backend="daytona",
+        locator="sb-day-1",
+        label="acme/widgets",
+        metadata={
+            "root": "workspace",
+            "source": "github",
+            "repository_id": 88,
+            "repository_full_name": "acme/widgets",
+            "default_branch": "main",
+            "repository_path": "acme/widgets",
+        },
+    )
+
+    _patch_dashboard_attr(
+        monkeypatch, "create_daytona_workspace", lambda: sandbox
+    )
+
+    async def fake_attach(workspace, *, repository_id, install_token=None):
+        assert repository_id == 88
+        assert workspace.locator == "sb-day-1"
+        return attached
+
+    _patch_dashboard_attr(
+        monkeypatch, "attach_github_repository_to_workspace", fake_attach
+    )
+    remember_calls: list[tuple[str, WorkspaceRef]] = []
+
+    async def fake_remember(thread_id, workspace):
+        remember_calls.append((thread_id, workspace))
+        return workspace
+
+    _patch_dashboard_attr(
+        monkeypatch, "remember_thread_workspace_ref", fake_remember
+    )
+
+    client = _create_dashboard_client(ChannelManager())
+    response = client.post(
+        "/dashboard-api/workspace/resolve",
+        json={
+            "kind": "github",
+            "backend": "daytona",
+            "repository_id": 88,
+            "thread_id": "thread-1",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kind"] == "daytona"
+    assert payload["label"] == "acme/widgets"
+    assert payload["is_github_source"] is True
+    assert payload["workspace"]["metadata"]["source"] == "github"
+    assert payload["workspace"]["metadata"]["repository_full_name"] == "acme/widgets"
+    assert remember_calls == [("thread-1", attached)]
+
+
+def test_dashboard_workspace_resolve_github_modal_clones_inside_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.modules.workspaces import WorkspaceRef
+
+    sandbox = WorkspaceRef(
+        backend="modal",
+        locator="sb-mod-1",
+        label="modal:sb-mod-1",
+        metadata={"root": "/workspace"},
+    )
+    attached = WorkspaceRef(
+        backend="modal",
+        locator="sb-mod-1",
+        label="acme/widgets",
+        metadata={
+            "root": "/workspace",
+            "source": "github",
+            "repository_id": 89,
+            "repository_full_name": "acme/widgets",
+            "default_branch": "main",
+            "repository_path": "acme/widgets",
+        },
+    )
+
+    _patch_dashboard_attr(
+        monkeypatch, "create_modal_workspace", lambda: sandbox
+    )
+
+    async def fake_attach(workspace, *, repository_id, install_token=None):
+        assert repository_id == 89
+        return attached
+
+    _patch_dashboard_attr(
+        monkeypatch, "attach_github_repository_to_workspace", fake_attach
+    )
+
+    async def fake_remember(thread_id, workspace):
+        return workspace
+
+    _patch_dashboard_attr(
+        monkeypatch, "remember_thread_workspace_ref", fake_remember
+    )
+
+    client = _create_dashboard_client(ChannelManager())
+    response = client.post(
+        "/dashboard-api/workspace/resolve",
+        json={
+            "kind": "github",
+            "backend": "modal",
+            "repository_id": 89,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kind"] == "modal"
+    assert payload["label"] == "acme/widgets"
+    assert payload["is_github_source"] is True
+    assert payload["workspace"]["locator"] == "sb-mod-1"
+
+
+def test_dashboard_workspace_resolve_github_attaches_existing_daytona_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.modules.workspaces import WorkspaceRef
+
+    calls: dict[str, object] = {}
+
+    def fake_attach(sandbox_id, *, root=None, label=None):
+        calls["sandbox_id"] = sandbox_id
+        calls["root"] = root
+        return WorkspaceRef(
+            backend="daytona",
+            locator=sandbox_id,
+            label=f"daytona:{sandbox_id}",
+            metadata={"root": root or "workspace"},
+        )
+
+    _patch_dashboard_attr(
+        monkeypatch, "attach_daytona_workspace", fake_attach
+    )
+
+    async def fake_attach_github(workspace, *, repository_id, install_token=None):
+        return WorkspaceRef(
+            backend="daytona",
+            locator=workspace.locator,
+            label="acme/widgets",
+            metadata={
+                "root": "workspace",
+                "source": "github",
+                "repository_id": repository_id,
+                "repository_full_name": "acme/widgets",
+                "default_branch": "main",
+                "repository_path": "acme/widgets",
+            },
+        )
+
+    _patch_dashboard_attr(
+        monkeypatch, "attach_github_repository_to_workspace", fake_attach_github
+    )
+
+    async def fake_remember(thread_id, workspace):
+        return workspace
+
+    _patch_dashboard_attr(
+        monkeypatch, "remember_thread_workspace_ref", fake_remember
+    )
+
+    client = _create_dashboard_client(ChannelManager())
+    response = client.post(
+        "/dashboard-api/workspace/resolve",
+        json={
+            "kind": "github",
+            "backend": "daytona",
+            "repository_id": 90,
+            "workspace": {
+                "backend": "daytona",
+                "locator": "sb-existing",
+                "label": "",
+                "metadata": {"root": "custom-root"},
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert calls == {"sandbox_id": "sb-existing", "root": "custom-root"}
+    assert response.json()["workspace"]["locator"] == "sb-existing"
+    assert response.json()["is_github_source"] is True
+
+
+def test_dashboard_workspace_resolve_daytona_with_repository_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.modules.workspaces import WorkspaceRef
+
+    sandbox = WorkspaceRef(
+        backend="daytona",
+        locator="sb-day-2",
+        label="daytona:sb-day-2",
+        metadata={"root": "workspace"},
+    )
+    attached = WorkspaceRef(
+        backend="daytona",
+        locator="sb-day-2",
+        label="acme/widgets",
+        metadata={
+            "root": "workspace",
+            "source": "github",
+            "repository_id": 91,
+            "repository_full_name": "acme/widgets",
+            "default_branch": "main",
+            "repository_path": "acme/widgets",
+        },
+    )
+
+    _patch_dashboard_attr(
+        monkeypatch, "create_daytona_workspace", lambda: sandbox
+    )
+
+    async def fake_attach(workspace, *, repository_id, install_token=None):
+        assert repository_id == 91
+        return attached
+
+    _patch_dashboard_attr(
+        monkeypatch, "attach_github_repository_to_workspace", fake_attach
+    )
+
+    async def fake_remember(thread_id, workspace):
+        return workspace
+
+    _patch_dashboard_attr(
+        monkeypatch, "remember_thread_workspace_ref", fake_remember
+    )
+
+    client = _create_dashboard_client(ChannelManager())
+    response = client.post(
+        "/dashboard-api/workspace/resolve",
+        json={"kind": "daytona", "repository_id": 91},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["workspace"]["metadata"]["source"] == "github"
+
+
+def test_dashboard_workspace_resolve_modal_with_repository_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.modules.workspaces import WorkspaceRef
+
+    sandbox = WorkspaceRef(
+        backend="modal",
+        locator="sb-mod-2",
+        label="modal:sb-mod-2",
+        metadata={"root": "/workspace"},
+    )
+    attached = WorkspaceRef(
+        backend="modal",
+        locator="sb-mod-2",
+        label="acme/widgets",
+        metadata={
+            "root": "/workspace",
+            "source": "github",
+            "repository_id": 92,
+            "repository_full_name": "acme/widgets",
+            "default_branch": "main",
+            "repository_path": "acme/widgets",
+        },
+    )
+
+    _patch_dashboard_attr(
+        monkeypatch, "create_modal_workspace", lambda: sandbox
+    )
+
+    async def fake_attach(workspace, *, repository_id, install_token=None):
+        assert repository_id == 92
+        return attached
+
+    _patch_dashboard_attr(
+        monkeypatch, "attach_github_repository_to_workspace", fake_attach
+    )
+
+    async def fake_remember(thread_id, workspace):
+        return workspace
+
+    _patch_dashboard_attr(
+        monkeypatch, "remember_thread_workspace_ref", fake_remember
+    )
+
+    client = _create_dashboard_client(ChannelManager())
+    response = client.post(
+        "/dashboard-api/workspace/resolve",
+        json={"kind": "modal", "repository_id": 92},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["workspace"]["metadata"]["source"] == "github"
+
+
+def test_dashboard_workspace_resolve_github_requires_repository_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_dashboard_attr(
+        monkeypatch,
+        "create_daytona_workspace",
+        lambda: (_ for _ in ()).throw(AssertionError("should not be called")),
+    )
+    client = _create_dashboard_client(ChannelManager())
+
+    response = client.post(
+        "/dashboard-api/workspace/resolve",
+        json={"kind": "github", "backend": "daytona"},
+    )
+
+    assert response.status_code == 400
+    assert "Repository ID is required" in response.json()["detail"]
+
+
+def test_dashboard_workspace_resolve_github_daytona_missing_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_create():
+        raise ValueError("Daytona API key is not configured.")
+
+    _patch_dashboard_attr(monkeypatch, "create_daytona_workspace", fake_create)
+    client = _create_dashboard_client(ChannelManager())
+
+    response = client.post(
+        "/dashboard-api/workspace/resolve",
+        json={"kind": "github", "backend": "daytona", "repository_id": 1},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Daytona API key is not configured."
+
+
 @pytest.mark.asyncio
 async def test_github_workspace_manager_clones_missing_shared_checkout(
     monkeypatch: pytest.MonkeyPatch,

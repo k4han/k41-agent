@@ -63,7 +63,7 @@ def workspace_ref_from_local_path(
     )
 
 
-def get_workspace_backend(
+async def get_workspace_backend(
     workspace: WorkspaceRef | dict[str, Any] | str | None = None,
     *,
     thread_id: str | None = None,
@@ -80,7 +80,7 @@ def get_workspace_backend(
     if ref.backend == "modal":
         from agent.modules.workspaces.modal_backend import ModalWorkspaceBackend
 
-        return ModalWorkspaceBackend(ref)
+        return await ModalWorkspaceBackend.create(ref)
     raise ValueError(f"Unsupported workspace backend: {ref.backend}")
 
 
@@ -249,7 +249,7 @@ async def delete_thread_workspace(thread_id: str) -> WorkspaceRef | None:
     elif workspace.backend == "modal":
         from agent.modules.workspaces.modal_backend import delete_modal_workspace
 
-        await asyncio.to_thread(delete_modal_workspace, workspace)
+        await delete_modal_workspace(workspace)
 
     await get_thread_workspace_repository().delete(thread_id)
     return workspace

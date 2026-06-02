@@ -87,7 +87,7 @@ def get_modal_module():
     return modal
 
 
-def get_modal_client():
+async def get_modal_client():
     enabled, token_id, token_secret, *_ = _config()
     if not enabled:
         raise ValueError("Modal workspace backend is disabled.")
@@ -97,11 +97,11 @@ def get_modal_client():
             raise ValueError(
                 "Both Modal token ID and token secret must be configured."
             )
-        return modal.Client.from_credentials(token_id, token_secret)
+        return await modal.Client.from_credentials.aio(token_id, token_secret)
     return None
 
 
-def create_modal_workspace(*, label: str | None = None) -> WorkspaceRef:
+async def create_modal_workspace(*, label: str | None = None) -> WorkspaceRef:
     (
         _enabled,
         _token_id,
@@ -112,9 +112,9 @@ def create_modal_workspace(*, label: str | None = None) -> WorkspaceRef:
         sandbox_timeout_seconds,
         idle_timeout_seconds,
     ) = _config()
-    client = get_modal_client()
+    client = await get_modal_client()
     modal = get_modal_module()
-    app = modal.App.lookup(app_name, create_if_missing=True, client=client)
+    app = await modal.App.lookup.aio(app_name, create_if_missing=True, client=client)
     create_kwargs: dict[str, Any] = {
         "app": app,
         "client": client,
@@ -123,8 +123,10 @@ def create_modal_workspace(*, label: str | None = None) -> WorkspaceRef:
     if idle_timeout_seconds > 0:
         create_kwargs["idle_timeout"] = idle_timeout_seconds
     if image_ref:
-        create_kwargs["image"] = modal.Image.from_registry(image_ref)
-    sandbox = modal.Sandbox.create(**create_kwargs)
+        create_kwargs["image"] = (
+            modal.Image.from_registry(image_ref).apt_install("git")
+        )
+    sandbox = await modal.Sandbox.create.aio(**create_kwargs)
     sandbox_id = _sandbox_id(sandbox)
     if not sandbox_id:
         raise RuntimeError("Modal did not return a sandbox ID.")
@@ -134,12 +136,16 @@ def create_modal_workspace(*, label: str | None = None) -> WorkspaceRef:
         label=(label or "").strip() or f"modal:{sandbox_id}",
         metadata=modal_metadata(root=root, app_name=app_name, touch=True),
     )
-    backend = ModalWorkspaceBackend(ref, sandbox=sandbox)
-    backend.ensure_root()
+    fs = getattr(sandbox, "filesystem", None)
+    if fs is None:
+        raise RuntimeError("Modal sandbox does not expose filesystem APIs.")
+    backend = ModalWorkspaceBackend(ref, sandbox=sandbox, fs=fs, client=client)
+    await backend.ensure_git()
+    await backend.ensure_root()
     return ref
 
 
-def attach_modal_workspace(
+async def attach_modal_workspace(
     sandbox_id: str,
     *,
     label: str | None = None,
@@ -156,8 +162,9 @@ def attach_modal_workspace(
         label=(label or "").strip() or f"modal:{normalized_sandbox_id}",
         metadata=modal_metadata(root=selected_root, app_name=app_name, touch=True),
     )
-    backend = ModalWorkspaceBackend(ref)
-    backend.ensure_root()
+    backend = await ModalWorkspaceBackend.create(ref)
+    await backend.ensure_git()
+    await backend.ensure_root()
     return ref
 
 
@@ -184,32 +191,43 @@ def _sandbox_id(sandbox: Any) -> str:
     return str(value or "").strip()
 
 
-def get_modal_sandbox(ref: WorkspaceRef):
+async def get_modal_sandbox(ref: WorkspaceRef, *, client: Any | None = None):
     if ref.backend != MODAL_BACKEND:
         raise ValueError(f"Unsupported workspace backend: {ref.backend}")
-    client = get_modal_client()
+    client = client or await get_modal_client()
     modal = get_modal_module()
-    return modal.Sandbox.from_id(ref.locator, client=client)
+    return await modal.Sandbox.from_id.aio(ref.locator, client=client)
 
 
-def delete_modal_workspace(ref: WorkspaceRef) -> str:
+async def delete_modal_workspace(ref: WorkspaceRef) -> str:
     if ref.backend != MODAL_BACKEND:
         raise ValueError(f"Unsupported workspace backend: {ref.backend}")
     try:
-        sandbox = get_modal_sandbox(ref)
+        sandbox = await get_modal_sandbox(ref)
     except Exception as exc:
         if _is_modal_not_found_error(exc):
             return "terminated"
         raise
     terminator = getattr(sandbox, "terminate", None)
     if callable(terminator):
-        terminator(wait=False)
+        aio_terminator = getattr(terminator, "aio", None)
+        if callable(aio_terminator):
+            await aio_terminator(wait=False)
+        else:
+            terminator(wait=False)
     detacher = getattr(sandbox, "detach", None)
     if callable(detacher):
-        try:
-            detacher()
-        except Exception as exc:
-            logger.debug("Failed to detach Modal sandbox %s: %s", ref.locator, exc)
+        aio_detacher = getattr(detacher, "aio", None)
+        if callable(aio_detacher):
+            try:
+                await aio_detacher()
+            except Exception as exc:
+                logger.debug("Failed to detach Modal sandbox %s: %s", ref.locator, exc)
+        else:
+            try:
+                detacher()
+            except Exception as exc:
+                logger.debug("Failed to detach Modal sandbox %s: %s", ref.locator, exc)
     return "terminated"
 
 
@@ -313,38 +331,126 @@ class ModalWorkspaceBackend:
         ref: WorkspaceRef,
         *,
         sandbox: Any | None = None,
+        fs: Any | None = None,
+        client: Any | None = None,
     ) -> None:
         if ref.backend != MODAL_BACKEND:
             raise ValueError(f"Unsupported workspace backend: {ref.backend}")
         self.ref = ref
-        try:
-            self.sandbox = sandbox if sandbox is not None else get_modal_sandbox(ref)
-        except Exception as exc:
-            _raise_if_modal_unavailable(ref, exc, strict_not_found=True)
-            raise
-        self.fs = getattr(self.sandbox, "filesystem", None)
-        if self.fs is None:
-            raise RuntimeError("Modal sandbox does not expose filesystem APIs.")
+        self.sandbox = sandbox
+        self.fs = fs
+        self.client = client
         self.root = resolve_modal_path(
             "/",
             str(ref.metadata.get("root") or DEFAULT_MODAL_ROOT),
         )
         self.ref.metadata.update(modal_metadata(root=self.root, touch=True))
 
-    def ensure_root(self) -> None:
-        self._make_directory(self.root)
+    @classmethod
+    async def create(
+        cls,
+        ref: WorkspaceRef,
+        *,
+        client: Any | None = None,
+    ) -> ModalWorkspaceBackend:
+        """Async factory that resolves the sandbox from the workspace ref."""
+        client = client or await get_modal_client()
+        sandbox = await get_modal_sandbox(ref, client=client)
+        fs = getattr(sandbox, "filesystem", None)
+        if fs is None:
+            raise RuntimeError("Modal sandbox does not expose filesystem APIs.")
+        return cls(ref, sandbox=sandbox, fs=fs, client=client)
+
+    async def ensure_root(self) -> None:
+        await self._make_directory(self.root)
+
+    async def ensure_git(self) -> None:
+        """Install git in the sandbox if it is not already available."""
+        check = await self._exec("which git", cwd="/", timeout=5)
+        if check.exit_code == 0:
+            return
+        install = await self._exec(
+            "apt-get update -qq && apt-get install -y -qq git",
+            cwd="/",
+            timeout=120,
+        )
+        if install.exit_code not in (0, None):
+            logger.warning(
+                "Failed to install git in Modal sandbox %s: %s",
+                self.ref.locator,
+                install.output.strip(),
+            )
+
+    async def clone_repository(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        default_branch: str = "main",
+        token: str | None = None,
+        depth: int= 1,
+    ) -> str:
+        if not owner or not repo:
+            raise ValueError("Repository owner and name are required.")
+        self.touch()
+        await self.ensure_root()
+        relative = f"{owner}/{repo}"
+        destination = resolve_modal_path(self.root, relative)
+        branch = (default_branch or "main").strip() or "main"
+        depth_flag = f"--depth={int(depth)}" if depth and int(depth) > 0 else ""
+        if token:
+            url = f"https://x-access-token:{token}@github.com/{owner}/{repo}.git"
+        else:
+            url = f"https://github.com/{owner}/{repo}.git"
+        parent = posixpath.dirname(destination)
+        await self._make_directory(parent)
+        check = await self._exec(f"test -e {shlex.quote(destination)}", cwd="/")
+        if check.exit_code == 0:
+            existing = await self._exec(
+                f"cd {shlex.quote(destination)} && git rev-parse --is-inside-work-tree",
+                cwd="/",
+                timeout=GIT_TIMEOUT_SECONDS,
+            )
+            if existing.exit_code in (0, None):
+                return relative
+            await self._exec(f"rm -rf {shlex.quote(destination)}", cwd="/")
+        command = (
+            f"git clone {depth_flag} --branch {shlex.quote(branch)} "
+            f"--single-branch {shlex.quote(url)} {shlex.quote(destination)}"
+        )
+        result = await self._exec(command, cwd="/", timeout=120)
+        if result.exit_code not in (0, None):
+            detail = (result.output or "").strip()
+            if "could not find" in detail.lower() or "not found" in detail.lower():
+                fallback = (
+                    f"git clone {depth_flag} --single-branch "
+                    f"{shlex.quote(url)} {shlex.quote(destination)}"
+                )
+                result = await self._exec(fallback, cwd="/", timeout=120)
+        if result.exit_code not in (0, None):
+            raise RuntimeError(
+                f"git clone failed for {owner}/{repo}: {result.output.strip()}"
+            )
+        return relative
 
     def touch(self) -> None:
         self.ref.metadata.update(modal_metadata(root=self.root, touch=True))
 
-    def _run_remote(self, operation: Callable[[], T]) -> T:
+    async def _run_remote(self, operation: Callable[[], T]) -> T:
         try:
             return operation()
         except Exception as exc:
             _raise_if_modal_unavailable(self.ref, exc)
             raise
 
-    def list_files(self, sub_dir: str = "") -> str:
+    async def _run_remote_aio(self, coro_fn: Callable[[], Any]) -> Any:
+        try:
+            return await coro_fn()
+        except Exception as exc:
+            _raise_if_modal_unavailable(self.ref, exc)
+            raise
+
+    async def list_files(self, sub_dir: str = "") -> str:
         self.touch()
         target = resolve_modal_path(self.root, sub_dir or ".")
         command = (
@@ -353,7 +459,7 @@ class ModalWorkspaceBackend:
             "-o -name __pycache__ -o -name .pytest_cache -o -name .ruff_cache \\) "
             "-prune -o -type f -print"
         )
-        result = self._exec(command, timeout=GIT_TIMEOUT_SECONDS)
+        result = await self._exec(command, timeout=GIT_TIMEOUT_SECONDS)
         if result.exit_code not in (0, None):
             raise RuntimeError(result.output.strip() or "Failed to list Modal files.")
         files = [line for line in result.output.splitlines() if line.strip()]
@@ -366,19 +472,19 @@ class ModalWorkspaceBackend:
             output += f"\n...[truncated at {MAX_LIST_FILES_ENTRIES} entries]"
         return output
 
-    def read_text(self, file_path: str) -> str:
+    async def read_text(self, file_path: str) -> str:
         self.touch()
-        return self._run_remote(
-            lambda: self.fs.read_text(resolve_modal_path(self.root, file_path))
+        return await self._run_remote_aio(
+            lambda: self.fs.read_text.aio(resolve_modal_path(self.root, file_path))
         )
 
-    def write_text(self, file_path: str, content: str) -> str:
+    async def write_text(self, file_path: str, content: str) -> str:
         self.touch()
         remote_path = resolve_modal_path(self.root, file_path)
-        self._run_remote(lambda: self.fs.write_text(content, remote_path))
+        await self._run_remote_aio(lambda: self.fs.write_text.aio(content, remote_path))
         return f"[OK] Wrote file: {remote_path}"
 
-    def execute(
+    async def execute(
         self,
         command: str,
         *,
@@ -386,19 +492,20 @@ class ModalWorkspaceBackend:
         max_output_chars: int | None = None,
     ) -> CommandResult:
         self.touch()
-        return self._exec(
+        return await self._exec(
             command,
             cwd=self.root,
             timeout=timeout,
             max_output_chars=max_output_chars,
         )
 
-    def tree(self, path: str | None = None) -> dict[str, Any]:
+    async def tree(self, path: str | None = None) -> dict[str, Any]:
         self.touch()
         target = resolve_modal_path(self.root, path or ".")
         entries: list[dict[str, Any]] = []
         truncated = False
-        for item in self._run_remote(lambda: list(self.fs.list_files(target))):
+        items = await self._run_remote_aio(lambda: self.fs.list_files.aio(target))
+        for item in items:
             name = _file_info_name(item)
             if not name:
                 continue
@@ -428,13 +535,13 @@ class ModalWorkspaceBackend:
             "truncated": truncated,
         }
 
-    def file(self, path: str) -> dict[str, Any]:
+    async def file(self, path: str) -> dict[str, Any]:
         self.touch()
         remote_path = resolve_modal_path(self.root, path)
-        info = self._stat(remote_path)
+        info = await self._stat(remote_path)
         if _file_info_is_dir(info):
             raise ValueError(f"Path is not a file: {path}")
-        raw_bytes = self._read_bytes(remote_path)
+        raw_bytes = await self._read_bytes(remote_path)
         truncated = len(raw_bytes) > MAX_FILE_BYTES
         if truncated:
             raw_bytes = raw_bytes[:MAX_FILE_BYTES]
@@ -461,9 +568,9 @@ class ModalWorkspaceBackend:
             "message": "File truncated." if truncated else "",
         }
 
-    def changes(self) -> dict[str, Any]:
+    async def changes(self) -> dict[str, Any]:
         self.touch()
-        git_root = self._find_git_root()
+        git_root = await self._find_git_root()
         if git_root is None:
             return {
                 "root": self.root,
@@ -471,10 +578,10 @@ class ModalWorkspaceBackend:
                 "changes": [],
                 "message": "Workspace is not a Git repository.",
             }
-        output = self._run_git(_git_status_args(), cwd=self.root)
+        output = await self._run_git(_git_status_args(), cwd=self.root)
         changes = _parse_git_status(output, workspace_root=self.root, git_root=git_root)
         for change in changes:
-            additions, deletions = self._change_line_stats(change, git_root=git_root)
+            additions, deletions = await self._change_line_stats(change, git_root=git_root)
             change["additions"] = additions
             change["deletions"] = deletions
         return {
@@ -484,14 +591,14 @@ class ModalWorkspaceBackend:
             "message": "",
         }
 
-    def diff(self, path: str) -> dict[str, Any]:
+    async def diff(self, path: str) -> dict[str, Any]:
         self.touch()
         remote_path = resolve_modal_path(self.root, path)
         relative_path = modal_relative_path(self.root, remote_path)
         if not relative_path:
             raise ValueError("File path is required.")
 
-        git_root = self._find_git_root()
+        git_root = await self._find_git_root()
         if git_root is None:
             return {
                 "root": self.root,
@@ -506,7 +613,7 @@ class ModalWorkspaceBackend:
         status_by_path = {
             change["path"]: change
             for change in _parse_git_status(
-                self._run_git(_git_status_args(), cwd=self.root),
+                await self._run_git(_git_status_args(), cwd=self.root),
                 workspace_root=self.root,
                 git_root=git_root,
             )
@@ -515,13 +622,13 @@ class ModalWorkspaceBackend:
         status = str(change.get("status") or "") if change else ""
         git_path = _git_relative_path(git_root, remote_path)
         if status == "untracked":
-            diff = self._build_untracked_diff(remote_path, relative_path)
+            diff = await self._build_untracked_diff(remote_path, relative_path)
         else:
-            staged = self._run_git(
+            staged = await self._run_git(
                 ["diff", "--cached", "--no-ext-diff", "--", git_path],
                 cwd=git_root,
             )
-            unstaged = self._run_git(
+            unstaged = await self._run_git(
                 ["diff", "--no-ext-diff", "--", git_path],
                 cwd=git_root,
             )
@@ -540,7 +647,7 @@ class ModalWorkspaceBackend:
             "message": "" if diff else "No diff is available for this file.",
         }
 
-    def rename(self, *, path: str, new_name: str) -> dict[str, Any]:
+    async def rename(self, *, path: str, new_name: str) -> dict[str, Any]:
         self.touch()
         source = resolve_modal_path(self.root, path)
         relative_path = modal_relative_path(self.root, source)
@@ -557,10 +664,10 @@ class ModalWorkspaceBackend:
         )
         if destination == source:
             return {"root": self.root, "path": source, "new_path": destination}
-        check = self._exec(f"test -e {shlex.quote(destination)}", cwd="/")
+        check = await self._exec(f"test -e {shlex.quote(destination)}", cwd="/")
         if check.exit_code == 0:
             raise FileExistsError(f"Destination already exists: {clean_name}")
-        result = self._exec(
+        result = await self._exec(
             f"mv {shlex.quote(source)} {shlex.quote(destination)}",
             cwd="/",
         )
@@ -568,13 +675,13 @@ class ModalWorkspaceBackend:
             raise RuntimeError(result.output.strip() or "Rename failed.")
         return {"root": self.root, "path": source, "new_path": destination}
 
-    def delete(self, *, path: str) -> dict[str, Any]:
+    async def delete(self, *, path: str) -> dict[str, Any]:
         self.touch()
         target = resolve_modal_path(self.root, path)
         relative_path = modal_relative_path(self.root, target)
         if not relative_path:
             raise ValueError("Cannot delete workspace root.")
-        kind_result = self._exec(
+        kind_result = await self._exec(
             f"if [ -d {shlex.quote(target)} ]; then echo directory; "
             f"elif [ -f {shlex.quote(target)} ]; then echo file; "
             "else exit 44; fi",
@@ -585,12 +692,12 @@ class ModalWorkspaceBackend:
         if kind_result.exit_code not in (0, None):
             raise RuntimeError(kind_result.output.strip() or "Delete failed.")
         kind = kind_result.output.strip().splitlines()[-1]
-        result = self._exec(f"rm -rf {shlex.quote(target)}", cwd="/")
+        result = await self._exec(f"rm -rf {shlex.quote(target)}", cwd="/")
         if result.exit_code not in (0, None):
             raise RuntimeError(result.output.strip() or "Delete failed.")
         return {"root": self.root, "path": target, "kind": kind}
 
-    def _exec(
+    async def _exec(
         self,
         command: str,
         *,
@@ -598,9 +705,9 @@ class ModalWorkspaceBackend:
         timeout: int = 30,
         max_output_chars: int | None = None,
     ) -> CommandResult:
-        def run() -> CommandResult:
+        try:
             try:
-                process = self.sandbox.exec(
+                process = await self.sandbox.exec.aio(
                     "bash",
                     "-lc",
                     command,
@@ -609,11 +716,18 @@ class ModalWorkspaceBackend:
                     text=True,
                 )
             except TypeError:
-                process = self.sandbox.exec("bash", "-lc", command, timeout=timeout)
-            output = _read_stream(getattr(process, "stdout", None))
-            stderr = _read_stream(getattr(process, "stderr", None))
-            wait = getattr(process, "wait", None)
-            exit_code = wait() if callable(wait) else getattr(process, "returncode", None)
+                process = await self.sandbox.exec.aio("bash", "-lc", command, timeout=timeout)
+            output = await _read_stream_aio(getattr(process, "stdout", None))
+            stderr = await _read_stream_aio(getattr(process, "stderr", None))
+            wait_fn = getattr(process, "wait", None)
+            if callable(wait_fn):
+                aio_wait = getattr(wait_fn, "aio", None)
+                if callable(aio_wait):
+                    exit_code = await aio_wait()
+                else:
+                    exit_code = wait_fn()
+            else:
+                exit_code = getattr(process, "returncode", None)
             combined = output + (f"\n[stderr]: {stderr}" if stderr else "")
             truncated = False
             if max_output_chars is not None and len(combined) > max_output_chars:
@@ -624,56 +738,86 @@ class ModalWorkspaceBackend:
                 exit_code=int(exit_code) if exit_code is not None else None,
                 truncated=truncated,
             )
+        except Exception as exc:
+            _raise_if_modal_unavailable(self.ref, exc)
+            raise
 
-        return self._run_remote(run)
-
-    def _make_directory(self, path: str) -> None:
+    async def _make_directory(self, path: str) -> None:
         maker = getattr(self.fs, "make_directory", None)
         if not callable(maker):
-            self._exec(f"mkdir -p {shlex.quote(path)}", cwd="/")
+            await self._exec(f"mkdir -p {shlex.quote(path)}", cwd="/")
             return
+        aio_maker = getattr(maker, "aio", None)
         try:
-            self._run_remote(lambda: maker(path, create_parents=True))
-        except TypeError:
-            self._run_remote(lambda: maker(path))
+            if callable(aio_maker):
+                try:
+                    await aio_maker(path, create_parents=True)
+                except TypeError:
+                    await aio_maker(path)
+            else:
+                try:
+                    maker(path, create_parents=True)
+                except TypeError:
+                    maker(path)
+        except Exception as exc:
+            _raise_if_modal_unavailable(self.ref, exc)
+            raise
 
-    def _stat(self, path: str) -> Any:
+    async def _stat(self, path: str) -> Any:
         statter = getattr(self.fs, "stat", None)
         if callable(statter):
-            return self._run_remote(lambda: statter(path))
+            aio_statter = getattr(statter, "aio", None)
+            if callable(aio_statter):
+                return await aio_statter(path)
+            return statter(path)
         getter = getattr(self.fs, "get_file_info", None)
         if callable(getter):
-            return self._run_remote(lambda: getter(path))
-        for item in self._run_remote(
-            lambda: list(self.fs.list_files(posixpath.dirname(path) or "/"))
-        ):
-            if _file_info_path(item, posixpath.dirname(path) or "/") == path:
+            aio_getter = getattr(getter, "aio", None)
+            if callable(aio_getter):
+                return await aio_getter(path)
+            return getter(path)
+        aio_list = getattr(self.fs.list_files, "aio", None)
+        parent = posixpath.dirname(path) or "/"
+        if callable(aio_list):
+            items = await aio_list(parent)
+        else:
+            items = self.fs.list_files(parent)
+        for item in items:
+            if _file_info_path(item, parent) == path:
                 return item
         raise FileNotFoundError(path)
 
-    def _read_bytes(self, path: str) -> bytes:
+    async def _read_bytes(self, path: str) -> bytes:
         reader = getattr(self.fs, "read_bytes", None)
         if callable(reader):
-            raw = self._run_remote(lambda: reader(path))
+            aio_reader = getattr(reader, "aio", None)
+            if callable(aio_reader):
+                raw = await aio_reader(path)
+            else:
+                raw = reader(path)
         else:
-            raw = self._run_remote(lambda: self.fs.read_text(path))
+            aio_read_text = getattr(self.fs.read_text, "aio", None)
+            if callable(aio_read_text):
+                raw = await aio_read_text(path)
+            else:
+                raw = self.fs.read_text(path)
         if isinstance(raw, str):
             return raw.encode("utf-8")
         return bytes(raw or b"")
 
-    def _run_git(self, args: list[str], *, cwd: str) -> str:
+    async def _run_git(self, args: list[str], *, cwd: str) -> str:
         command = "git " + " ".join(shlex.quote(arg) for arg in args)
-        result = self._exec(command, cwd=cwd, timeout=GIT_TIMEOUT_SECONDS)
+        result = await self._exec(command, cwd=cwd, timeout=GIT_TIMEOUT_SECONDS)
         if result.exit_code not in (0, None):
             detail = result.output.strip()
             raise RuntimeError(f"git {' '.join(args)} failed: {detail}")
         return result.output
 
-    def _find_git_root(self) -> str | None:
+    async def _find_git_root(self) -> str | None:
         try:
-            output = self._run_git(
+            output = (await self._run_git(
                 ["rev-parse", "--show-toplevel"], cwd=self.root
-            ).strip()
+            )).strip()
         except WorkspaceUnavailableError:
             raise
         except Exception:
@@ -682,7 +826,7 @@ class ModalWorkspaceBackend:
             return None
         return _normalize_posix_path(output.splitlines()[-1])
 
-    def _change_line_stats(
+    async def _change_line_stats(
         self,
         change: dict[str, Any],
         *,
@@ -692,7 +836,7 @@ class ModalWorkspaceBackend:
         if not path:
             return 0, 0
         if change.get("status") == "untracked":
-            return self._text_line_count(path), 0
+            return await self._text_line_count(path), 0
         git_path = _git_relative_path(git_root, path)
         additions = 0
         deletions = 0
@@ -701,7 +845,7 @@ class ModalWorkspaceBackend:
             ["diff", "--numstat", "--no-ext-diff", "--", git_path],
         ):
             try:
-                output = self._run_git(args, cwd=git_root)
+                output = await self._run_git(args, cwd=git_root)
             except WorkspaceUnavailableError:
                 raise
             except Exception:
@@ -716,9 +860,9 @@ class ModalWorkspaceBackend:
                     deletions += int(fields[1])
         return additions, deletions
 
-    def _text_line_count(self, path: str) -> int:
+    async def _text_line_count(self, path: str) -> int:
         try:
-            raw_bytes = self._read_bytes(path)
+            raw_bytes = await self._read_bytes(path)
         except WorkspaceUnavailableError:
             raise
         except Exception:
@@ -731,9 +875,9 @@ class ModalWorkspaceBackend:
         )
         return len(text.splitlines()) or (1 if text else 0)
 
-    def _build_untracked_diff(self, path: str, relative_path: str) -> str:
+    async def _build_untracked_diff(self, path: str, relative_path: str) -> str:
         try:
-            content = self.read_text(path)
+            content = await self.read_text(path)
         except WorkspaceUnavailableError:
             raise
         except Exception:
@@ -763,6 +907,48 @@ def _normalize_posix_path(value: str) -> str:
     if normalized == ".":
         return ""
     return normalized.rstrip("/") or "/"
+
+
+async def clone_repository_in_modal_sandbox(
+    ref: WorkspaceRef,
+    *,
+    owner: str,
+    repo: str,
+    default_branch: str = "main",
+    token: str | None = None,
+    depth: int = 1,
+) -> str:
+    if ref.backend != MODAL_BACKEND:
+        raise ValueError(f"Unsupported workspace backend: {ref.backend}")
+    backend = await ModalWorkspaceBackend.create(ref)
+    return await backend.clone_repository(
+        owner=owner,
+        repo=repo,
+        default_branch=default_branch,
+        token=token,
+        depth=depth,
+    )
+
+
+async def _read_stream_aio(stream: Any) -> str:
+    if stream is None:
+        return ""
+    reader = getattr(stream, "read", None)
+    if callable(reader):
+        aio_reader = getattr(reader, "aio", None)
+        if callable(aio_reader):
+            value = await aio_reader()
+        else:
+            value = reader()
+    elif isinstance(stream, (str, bytes, bytearray)):
+        value = stream
+    else:
+        value = "".join(str(chunk) for chunk in stream)
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, bytearray):
+        return bytes(value).decode("utf-8", errors="replace")
+    return str(value or "")
 
 
 def _read_stream(stream: Any) -> str:
@@ -942,6 +1128,7 @@ __all__ = [
     "MODAL_BACKEND",
     "ModalWorkspaceBackend",
     "attach_modal_workspace",
+    "clone_repository_in_modal_sandbox",
     "create_modal_workspace",
     "delete_modal_workspace",
     "get_modal_client",

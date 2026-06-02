@@ -130,7 +130,7 @@ class BashCloseInput(BaseModel):
     tags=["shell"],
 )
 @tool(args_schema=BashInput)
-def bash(
+async def bash(
     command: str,
     runtime: ToolRuntime[Any, Any],
     session_id: str = "default",
@@ -167,7 +167,7 @@ def bash(
                 scope_id=scope_id,
             )
         elif workspace.backend == "modal":
-            res = modal_session_manager.execute_command(
+            res = await modal_session_manager.execute_command(
                 session_id=session_id,
                 command=command,
                 timeout=timeout,

@@ -37,6 +37,8 @@
 }
 
 .workspace-selector-modes,
+.workspace-selector-backends,
+.workspace-selector-sources,
 .workspace-selector-row,
 .workspace-selector-row-enhanced {
   display: flex;
@@ -50,7 +52,8 @@
   width: 100%;
 }
 
-.workspace-selector-mode {
+.workspace-selector-mode,
+.workspace-selector-source {
   display: inline-flex;
   min-height: 30px;
   align-items: center;
@@ -66,11 +69,30 @@
   transition: all 0.2s ease;
 }
 
+.workspace-selector-source {
+  min-height: 26px;
+  font-size: 11px;
+  padding: 0 8px;
+  color: var(--muted);
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.workspace-selector-backends .workspace-selector-mode {
+  background: var(--surface-2);
+}
+
 .workspace-selector-mode:hover,
-.workspace-selector-mode.active {
+.workspace-selector-mode.active,
+.workspace-selector-source:hover,
+.workspace-selector-source.active {
   background: var(--surface-2);
   color: var(--fg);
   border-color: var(--muted);
+}
+
+.workspace-selector-source.active {
+  background: var(--surface-3);
 }
 
 /* SLEEK INPUT GROUP */

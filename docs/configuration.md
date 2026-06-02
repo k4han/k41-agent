@@ -167,6 +167,23 @@ App cần quyền Metadata read, Issues read/write, Contents read/write, Pull re
 
 Repo được clone vào `~/kaka-agent/github-workspaces/{owner}/{repo}`. Khi issue/comment được trigger, backend chuẩn bị branch local, chạy agent trong working directory của repo, rồi commit/push/create PR bằng installation token. Khi có `pull_request_review_comment`, backend checkout branch đang mở PR, chạy agent với ngữ cảnh review comment, rồi commit/push lại cùng PR.
 
+#### GitHub repo trong sandbox (Daytona / Modal)
+
+Dashboard Workspace selector là UI 2 cấp:
+
+1. **Backend**: `local` (host filesystem) | `daytona` | `modal`.
+2. **Source**: tuỳ backend — `local` có `folder`, `daytona`/`modal` có `sandbox` và `github-repo`.
+
+Khi chọn backend `daytona` hoặc `modal` + source `github-repo`, dashboard gọi `POST /dashboard-api/workspace/resolve` với `kind="github"`, `backend="daytona"|"modal"`, `repository_id=<id>`. Backend sẽ:
+
+- Tạo (hoặc attach) sandbox tương ứng.
+- Clone repo vào trong sandbox bằng `git clone --depth 1 --branch <default_branch> --single-branch` với installation token (nếu có). Vị trí: `{sandbox_root}/{owner}/{repo}`.
+- Trả về `WorkspaceRef` với `metadata.source="github"`, `metadata.repository_full_name`, `metadata.repository_path`, và label là `owner/repo`.
+
+Local backend giữ hành vi cũ: clone về `~/kaka-agent/github-workspaces/{owner}/{repo}` và resolve qua `GitHubWorkspaceManager.ensure_shared_checkout`. Tương thích ngược với payload `kind="github"` không có `backend` (vẫn trả về workspace local).
+
+Push về GitHub vẫn do local GitHub automation (webhook handler) xử lý — sandbox chỉ dùng để chạy agent và lưu thay đổi trong phiên làm việc.
+
 ### Database path error
 
 ```

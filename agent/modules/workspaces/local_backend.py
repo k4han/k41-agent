@@ -30,7 +30,7 @@ class LocalWorkspaceBackend:
         self.ref = ref
         self.root = resolve_workspace_root(ref.locator)
 
-    def list_files(self, sub_dir: str = "") -> str:
+    async def list_files(self, sub_dir: str = "") -> str:
         target = resolve_safe_path(str(self.root), sub_dir or ".")
         files: list[str] = []
         truncated = False
@@ -54,12 +54,12 @@ class LocalWorkspaceBackend:
             output += f"\n...[truncated at {MAX_LIST_FILES_ENTRIES} entries]"
         return output
 
-    def read_text(self, file_path: str) -> str:
+    async def read_text(self, file_path: str) -> str:
         full_path = resolve_safe_path(str(self.root), file_path)
         with open(full_path, "r", encoding="utf-8") as file_handle:
             return file_handle.read()
 
-    def write_text(self, file_path: str, content: str) -> str:
+    async def write_text(self, file_path: str, content: str) -> str:
         full_path = resolve_safe_path(str(self.root), file_path)
         parent = os.path.dirname(full_path)
         if parent:
@@ -68,7 +68,7 @@ class LocalWorkspaceBackend:
             file_handle.write(content)
         return f"[OK] Wrote file: {full_path}"
 
-    def execute(
+    async def execute(
         self,
         command: str,
         *,
@@ -126,26 +126,26 @@ class LocalWorkspaceBackend:
             truncated=truncated,
         )
 
-    def tree(self, path: str | None = None) -> dict[str, Any]:
+    async def tree(self, path: str | None = None) -> dict[str, Any]:
         return list_workspace_tree(working_dir=str(self.root), path=path)
 
-    def file(self, path: str) -> dict[str, Any]:
+    async def file(self, path: str) -> dict[str, Any]:
         return get_workspace_file(working_dir=str(self.root), path=path)
 
-    def changes(self) -> dict[str, Any]:
+    async def changes(self) -> dict[str, Any]:
         return get_workspace_changes(str(self.root))
 
-    def diff(self, path: str) -> dict[str, Any]:
+    async def diff(self, path: str) -> dict[str, Any]:
         return get_workspace_diff(working_dir=str(self.root), path=path)
 
-    def rename(self, *, path: str, new_name: str) -> dict[str, Any]:
+    async def rename(self, *, path: str, new_name: str) -> dict[str, Any]:
         return rename_workspace_entry(
             working_dir=str(self.root),
             path=path,
             new_name=new_name,
         )
 
-    def delete(self, *, path: str) -> dict[str, Any]:
+    async def delete(self, *, path: str) -> dict[str, Any]:
         return delete_workspace_entry(working_dir=str(self.root), path=path)
 
 

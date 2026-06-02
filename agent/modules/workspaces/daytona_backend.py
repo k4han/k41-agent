@@ -717,7 +717,64 @@ class DaytonaWorkspaceBackend:
         self.ensure_active()
         self._exec(f"mkdir -p {shlex.quote(self.root)}", cwd="/")
 
-    def list_files(self, sub_dir: str = "") -> str:
+    def clone_repository(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        default_branch: str = "main",
+        token: str | None = None,
+        depth: int = 1,
+    ) -> str:
+        """Clone a git repository into the workspace root and return the relative path.
+
+        The clone URL embeds an installation token when provided so the sandbox
+        can fetch private repositories. Returns the path relative to ``self.root``
+        (for example ``"owner/repo"``).
+        """
+        if not owner or not repo:
+            raise ValueError("Repository owner and name are required.")
+        self.ensure_active()
+        self.ensure_root()
+        relative = f"{owner}/{repo}"
+        destination = resolve_daytona_path(self.root, relative)
+        branch = (default_branch or "main").strip() or "main"
+        depth_flag = f"--depth={int(depth)}" if depth and int(depth) > 0 else ""
+        if token:
+            url = f"https://x-access-token:{token}@github.com/{owner}/{repo}.git"
+        else:
+            url = f"https://github.com/{owner}/{repo}.git"
+        parent = posixpath.dirname(destination)
+        self._exec(f"mkdir -p {shlex.quote(parent)}", cwd="/")
+        if self._exec(f"test -e {shlex.quote(destination)}", cwd="/").exit_code == 0:
+            existing = self._exec(
+                f"cd {shlex.quote(destination)} && git rev-parse --is-inside-work-tree",
+                cwd="/",
+                timeout=GIT_TIMEOUT_SECONDS,
+            )
+            if existing.exit_code in (0, None):
+                return relative
+            self._exec(f"rm -rf {shlex.quote(destination)}", cwd="/")
+        command = (
+            f"git clone {depth_flag} --branch {shlex.quote(branch)} "
+            f"--single-branch {shlex.quote(url)} {shlex.quote(destination)}"
+        )
+        result = self._exec(command, cwd="/", timeout=120)
+        if result.exit_code not in (0, None):
+            detail = (result.output or "").strip()
+            if "could not find" in detail.lower() or "not found" in detail.lower():
+                fallback = (
+                    f"git clone {depth_flag} --single-branch "
+                    f"{shlex.quote(url)} {shlex.quote(destination)}"
+                )
+                result = self._exec(fallback, cwd="/", timeout=120)
+        if result.exit_code not in (0, None):
+            raise RuntimeError(
+                f"git clone failed for {owner}/{repo}: {result.output.strip()}"
+            )
+        return relative
+
+    async def list_files(self, sub_dir: str = "") -> str:
         self.ensure_active()
         target = resolve_daytona_path(self.root, sub_dir or ".")
         command = (
@@ -739,7 +796,7 @@ class DaytonaWorkspaceBackend:
             output += f"\n...[truncated at {MAX_LIST_FILES_ENTRIES} entries]"
         return output
 
-    def read_text(self, file_path: str) -> str:
+    async def read_text(self, file_path: str) -> str:
         self.ensure_active()
         remote_path = resolve_daytona_path(self.root, file_path)
         raw = self._download_file(remote_path)
@@ -747,7 +804,7 @@ class DaytonaWorkspaceBackend:
             return raw
         return bytes(raw or b"").decode("utf-8", errors="replace")
 
-    def write_text(self, file_path: str, content: str) -> str:
+    async def write_text(self, file_path: str, content: str) -> str:
         self.ensure_active()
         remote_path = resolve_daytona_path(self.root, file_path)
         parent = posixpath.dirname(remote_path)
@@ -756,7 +813,7 @@ class DaytonaWorkspaceBackend:
         self._upload_file(content.encode("utf-8"), remote_path)
         return f"[OK] Wrote file: {remote_path}"
 
-    def execute(
+    async def execute(
         self,
         command: str,
         *,
@@ -771,7 +828,7 @@ class DaytonaWorkspaceBackend:
             max_output_chars=max_output_chars,
         )
 
-    def tree(self, path: str | None = None) -> dict[str, Any]:
+    async def tree(self, path: str | None = None) -> dict[str, Any]:
         self.ensure_active()
         target = resolve_daytona_path(self.root, path or ".")
         entries: list[dict[str, Any]] = []
@@ -806,7 +863,7 @@ class DaytonaWorkspaceBackend:
             "truncated": truncated,
         }
 
-    def file(self, path: str) -> dict[str, Any]:
+    async def file(self, path: str) -> dict[str, Any]:
         self.ensure_active()
         remote_path = resolve_daytona_path(self.root, path)
         info = self.fs.get_file_info(remote_path)
@@ -844,7 +901,7 @@ class DaytonaWorkspaceBackend:
             "message": "File truncated." if truncated else "",
         }
 
-    def changes(self) -> dict[str, Any]:
+    async def changes(self) -> dict[str, Any]:
         self.ensure_active()
         git_root = self._find_git_root()
         if git_root is None:
@@ -867,7 +924,7 @@ class DaytonaWorkspaceBackend:
             "message": "",
         }
 
-    def diff(self, path: str) -> dict[str, Any]:
+    async def diff(self, path: str) -> dict[str, Any]:
         self.ensure_active()
         remote_path = resolve_daytona_path(self.root, path)
         relative_path = daytona_relative_path(self.root, remote_path)
@@ -898,7 +955,7 @@ class DaytonaWorkspaceBackend:
         status = str(change.get("status") or "") if change else ""
         git_path = _git_relative_path(git_root, remote_path)
         if status == "untracked":
-            diff = self._build_untracked_diff(remote_path, relative_path)
+            diff = await self._build_untracked_diff(remote_path, relative_path)
         else:
             staged = self._run_git(
                 ["diff", "--cached", "--no-ext-diff", "--", git_path],
@@ -923,7 +980,7 @@ class DaytonaWorkspaceBackend:
             "message": "" if diff else "No diff is available for this file.",
         }
 
-    def rename(self, *, path: str, new_name: str) -> dict[str, Any]:
+    async def rename(self, *, path: str, new_name: str) -> dict[str, Any]:
         self.ensure_active()
         source = resolve_daytona_path(self.root, path)
         relative_path = daytona_relative_path(self.root, source)
@@ -951,7 +1008,7 @@ class DaytonaWorkspaceBackend:
             raise RuntimeError(result.output.strip() or "Rename failed.")
         return {"root": self.root, "path": source, "new_path": destination}
 
-    def delete(self, *, path: str) -> dict[str, Any]:
+    async def delete(self, *, path: str) -> dict[str, Any]:
         self.ensure_active()
         target = resolve_daytona_path(self.root, path)
         relative_path = daytona_relative_path(self.root, target)
@@ -1088,9 +1145,9 @@ class DaytonaWorkspaceBackend:
         )
         return len(text.splitlines()) or (1 if text else 0)
 
-    def _build_untracked_diff(self, path: str, relative_path: str) -> str:
+    async def _build_untracked_diff(self, path: str, relative_path: str) -> str:
         try:
-            content = self.read_text(path)
+            content = await self.read_text(path)
         except Exception:
             return ""
         truncated = len(content) > MAX_UNTRACKED_FILE_CHARS
@@ -1118,6 +1175,31 @@ def _normalize_posix_path(value: str) -> str:
     if normalized == ".":
         return ""
     return normalized.rstrip("/") or "/"
+
+
+def clone_repository_in_daytona_sandbox(
+    ref: WorkspaceRef,
+    *,
+    owner: str,
+    repo: str,
+    default_branch: str = "main",
+    token: str | None = None,
+    depth: int = 1,
+) -> str:
+    """Clone a GitHub repository into a Daytona sandbox workspace.
+
+    Returns the relative path (under the workspace root) of the cloned repo.
+    """
+    if ref.backend != DAYTONA_BACKEND:
+        raise ValueError(f"Unsupported workspace backend: {ref.backend}")
+    backend = DaytonaWorkspaceBackend(ref)
+    return backend.clone_repository(
+        owner=owner,
+        repo=repo,
+        default_branch=default_branch,
+        token=token,
+        depth=depth,
+    )
 
 
 def _file_info_name(item: Any) -> str:
@@ -1263,6 +1345,7 @@ __all__ = [
     "DaytonaWorkspaceBackend",
     "archive_daytona_workspace",
     "attach_daytona_workspace",
+    "clone_repository_in_daytona_sandbox",
     "create_daytona_workspace",
     "delete_daytona_workspace",
     "ensure_daytona_workspace_active",

@@ -24,10 +24,10 @@ def get_workspace(runtime: ToolRuntime[Any, Any]) -> WorkspaceRef:
     )
 
 
-def get_backend(runtime: ToolRuntime[Any, Any]):
+async def get_backend(runtime: ToolRuntime[Any, Any]):
     """Return the workspace backend for a tool runtime."""
     tool_context = ToolContext.from_runtime(runtime)
-    return get_workspace_backend(
+    return await get_workspace_backend(
         get_workspace(runtime),
         thread_id=tool_context.thread_id,
     )
