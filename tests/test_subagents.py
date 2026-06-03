@@ -23,7 +23,7 @@ name: researcher
 display_name: Research Agent
 graph_type: react_agent
 provider: default
-tools: [read_file, list_files, call_agent]
+tools: [read_file, list_dir, call_agent]
 sub_agents: []
 max_context_tokens: 30000
 ---
@@ -40,7 +40,7 @@ name: coder
 display_name: Coder Agent
 graph_type: react_agent
 provider: default
-tools: [read_file, write_file, bash, list_files, call_agent]
+tools: [read_file, write_file, bash, list_dir, call_agent]
 sub_agents: [researcher]
 max_context_tokens: 50000
 ---
@@ -82,7 +82,7 @@ class TestParseAgentFile:
         assert config.name == "researcher"
         assert config.display_name == "Research Agent"
         assert config.graph_type == "react_agent"
-        assert config.tools == ["read_file", "list_files", "call_agent"]
+        assert config.tools == ["read_file", "list_dir", "call_agent"]
         assert config.sub_agents == []
         assert config.max_context_tokens == 30000
         assert "research assistant" in config.system_prompt

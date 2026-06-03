@@ -7,7 +7,7 @@ model: ""
 tools:
   - "websearch"
   - "webfetch"
-  - "list_files"
+  - "list_dir"
   - "read_file"
 context_trim_threshold: 50000
 ---

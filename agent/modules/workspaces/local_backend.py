@@ -30,26 +30,25 @@ class LocalWorkspaceBackend:
         self.ref = ref
         self.root = resolve_workspace_root(ref.locator)
 
-    async def list_files(self, sub_dir: str = "") -> str:
-        target = resolve_safe_path(str(self.root), sub_dir or ".")
-        files: list[str] = []
+    async def list_dir(self, path: str = "") -> str:
+        target = resolve_safe_path(str(self.root), path or ".")
+        entries: list[str] = []
         truncated = False
-        for root, dirs, filenames in os.walk(target):
-            dirs[:] = [
-                directory
-                for directory in dirs
-                if not directory.startswith(".") and directory not in IGNORED_DIR_NAMES
-            ]
-            for filename in filenames:
-                if len(files) >= MAX_LIST_FILES_ENTRIES:
+        try:
+            for entry in sorted(os.listdir(target)):
+                if len(entries) >= MAX_LIST_FILES_ENTRIES:
                     truncated = True
                     break
-                files.append(os.path.realpath(os.path.join(root, filename)))
-            if truncated:
-                break
-        if not files:
+                full_path = os.path.join(target, entry)
+                if os.path.isdir(full_path):
+                    entries.append(f"{entry}/")
+                else:
+                    entries.append(entry)
+        except FileNotFoundError:
+            return "(Directory not found)"
+        if not entries:
             return "(Empty directory)"
-        output = "\n".join(files)
+        output = "\n".join(entries)
         if truncated:
             output += f"\n...[truncated at {MAX_LIST_FILES_ENTRIES} entries]"
         return output

@@ -5,7 +5,7 @@ graph_type: "react_agent"
 provider: "default"
 model: ""
 tools:
-  - "list_files"
+  - "list_dir"
   - "read_file"
   - "write_file"
   - "search_files"

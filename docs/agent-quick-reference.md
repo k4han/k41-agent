@@ -43,7 +43,7 @@ description: "My custom agent"
 graph_type: "react_agent"
 model: "devstral-2512"
 tools:
-  - "list_files"
+  - "list_dir"
   - "read_file"
 max_context_tokens: 50000
 ---
@@ -93,7 +93,7 @@ LLM sẽ tự động gọi:
 ## Available Tools
 
 ### File Operations
-- `list_files` - List directory contents
+- `list_dir` - List directory contents
 - `read_file` - Read file
 - `write_file` - Write to file
 - `search_files` - Search in files
@@ -176,7 +176,7 @@ print(f"Available graphs: {graphs}")
 ```yaml
 name: "assistant"
 graph_type: "react_agent"
-tools: ["list_files", "read_file", "write_file"]
+tools: ["list_dir", "read_file", "write_file"]
 ```
 
 ### Research specialist
@@ -191,7 +191,7 @@ tools: ["websearch", "webfetch"]
 ```yaml
 name: "coder"
 graph_type: "react_agent"
-tools: ["list_files", "read_file", "write_file", "run_command"]
+tools: ["list_dir", "read_file", "write_file", "run_command"]
 ```
 
 ### Orchestrator

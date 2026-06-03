@@ -9,7 +9,7 @@ tools:
   - "get_current_time"
   - "echo"
   - "read_file"
-  - "list_files"
+  - "list_dir"
   - "search_files"
 context_trim_threshold: 50000
 ---

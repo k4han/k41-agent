@@ -208,7 +208,7 @@ async def test_run_agent_omits_context_for_graph_without_context_schema(monkeypa
             return SimpleNamespace(
                 graph_type="research_chain",
                 max_context_tokens=1234,
-                tools=["list_files"],
+                tools=["list_dir"],
             )
 
     class _FakeGraph:
@@ -253,7 +253,7 @@ async def test_run_agent_passes_model_override_to_context(monkeypatch):
             return SimpleNamespace(
                 graph_type="react_agent",
                 max_context_tokens=1234,
-                tools=["list_files"],
+                tools=["list_dir"],
             )
 
     class _FakeGraph:
@@ -299,7 +299,7 @@ async def test_run_agent_stream_builds_multimodal_user_message(monkeypatch):
             return SimpleNamespace(
                 graph_type="react_agent",
                 max_context_tokens=1234,
-                tools=["list_files"],
+                tools=["list_dir"],
             )
 
     class _FakeGraph:
@@ -432,7 +432,7 @@ async def test_run_agent_stream_omits_context_for_graph_without_context_schema(
             return SimpleNamespace(
                 graph_type="research_chain",
                 max_context_tokens=1234,
-                tools=["list_files"],
+                tools=["list_dir"],
             )
 
     class _FakeGraph:
@@ -475,7 +475,7 @@ async def test_run_agent_extracts_last_text_from_structured_content(monkeypatch)
             return SimpleNamespace(
                 graph_type="research_chain",
                 max_context_tokens=1234,
-                tools=["list_files"],
+                tools=["list_dir"],
             )
 
     class _FakeGraph:
@@ -524,7 +524,7 @@ async def test_run_agent_stream_extracts_last_text_from_structured_content(monke
             return SimpleNamespace(
                 graph_type="research_chain",
                 max_context_tokens=1234,
-                tools=["list_files"],
+                tools=["list_dir"],
             )
 
     class _FakeGraph:
@@ -576,7 +576,7 @@ async def test_run_agent_stream_emits_message_chunks_and_final(monkeypatch):
             return SimpleNamespace(
                 graph_type="react_agent",
                 max_context_tokens=1234,
-                tools=["list_files"],
+                tools=["list_dir"],
             )
 
     class _FakeGraph:
@@ -630,7 +630,7 @@ async def test_run_agent_stream_skips_checkpoint_messages_before_current_user(mo
             return SimpleNamespace(
                 graph_type="react_agent",
                 max_context_tokens=1234,
-                tools=["list_files"],
+                tools=["list_dir"],
             )
 
     class _FakeGraph:
@@ -683,7 +683,7 @@ async def test_run_agent_stream_emits_tool_call_and_result(monkeypatch):
             return SimpleNamespace(
                 graph_type="react_agent",
                 max_context_tokens=1234,
-                tools=["list_files"],
+                tools=["list_dir"],
             )
 
     class _FakeGraph:
@@ -696,7 +696,7 @@ async def test_run_agent_stream_emits_tool_call_and_result(monkeypatch):
                         tool_calls=[
                             {
                                 "id": "call-1",
-                                "name": "list_files",
+                                "name": "list_dir",
                                 "args": {"path": "."},
                             }
                         ],
@@ -708,7 +708,7 @@ async def test_run_agent_stream_emits_tool_call_and_result(monkeypatch):
                     ToolMessage(
                         content="README.md\nagent/",
                         tool_call_id="call-1",
-                        name="list_files",
+                        name="list_dir",
                         id="tool-result",
                     )
                 ]
@@ -740,13 +740,13 @@ async def test_run_agent_stream_emits_tool_call_and_result(monkeypatch):
         {
             "type": "tool_call",
             "id": "call-1",
-            "name": "list_files",
+            "name": "list_dir",
             "args": {"path": "."},
         },
         {
             "type": "tool_result",
             "tool_call_id": "call-1",
-            "name": "list_files",
+            "name": "list_dir",
             "content": "README.md\nagent/",
         },
         {"type": "final", "content": "done"},
@@ -760,7 +760,7 @@ async def test_run_agent_stream_emits_text_attached_to_tool_call(monkeypatch):
             return SimpleNamespace(
                 graph_type="react_agent",
                 max_context_tokens=1234,
-                tools=["list_files"],
+                tools=["list_dir"],
             )
 
     class _FakeGraph:
@@ -773,7 +773,7 @@ async def test_run_agent_stream_emits_text_attached_to_tool_call(monkeypatch):
                         tool_calls=[
                             {
                                 "id": "call-1",
-                                "name": "list_files",
+                                "name": "list_dir",
                                 "args": {"path": "."},
                             }
                         ],
@@ -785,7 +785,7 @@ async def test_run_agent_stream_emits_text_attached_to_tool_call(monkeypatch):
                     ToolMessage(
                         content="README.md\nagent/",
                         tool_call_id="call-1",
-                        name="list_files",
+                        name="list_dir",
                         id="tool-result",
                     )
                 ]
@@ -818,13 +818,13 @@ async def test_run_agent_stream_emits_text_attached_to_tool_call(monkeypatch):
         {
             "type": "tool_call",
             "id": "call-1",
-            "name": "list_files",
+            "name": "list_dir",
             "args": {"path": "."},
         },
         {
             "type": "tool_result",
             "tool_call_id": "call-1",
-            "name": "list_files",
+            "name": "list_dir",
             "content": "README.md\nagent/",
         },
         {"type": "final", "content": "done"},
@@ -840,7 +840,7 @@ async def test_run_agent_stream_resume(monkeypatch):
             return SimpleNamespace(
                 graph_type="react_agent",
                 max_context_tokens=1234,
-                tools=["list_files"],
+                tools=["list_dir"],
             )
 
     class _FakeGraph:
@@ -920,7 +920,7 @@ async def test_run_agent_edit_stream_forks_from_parent_and_preserves_attachments
             return SimpleNamespace(
                 graph_type="react_agent",
                 max_context_tokens=1234,
-                tools=["list_files"],
+                tools=["list_dir"],
             )
 
     class _FakeGraph:

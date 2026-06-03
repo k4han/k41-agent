@@ -5,7 +5,7 @@ from typing import Annotated, Any, get_args, get_origin, get_type_hints
 import pytest
 from langgraph.prebuilt import ToolRuntime
 
-from agent.modules.tools.langchain.file_tools.list_files import list_files
+from agent.modules.tools.langchain.file_tools.list_dir import list_dir
 from agent.modules.tools.langchain.registry import get_all_langchain_tools
 from agent.modules.workflows.run_config import make_context
 
@@ -57,10 +57,10 @@ async def test_runtime_injected_tool_validation_does_not_warn(tmp_path) -> None:
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        result = await list_files.ainvoke(
+        result = await list_dir.ainvoke(
             {
                 "type": "tool_call",
-                "name": list_files.name,
+                "name": list_dir.name,
                 "args": {"runtime": runtime},
                 "id": "call-1",
             }

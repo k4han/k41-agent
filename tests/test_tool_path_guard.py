@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import agent.modules.tools.langchain.file_tools.list_files as list_files_module
+import agent.modules.tools.langchain.file_tools.list_dir as list_dir_module
 import agent.modules.tools.langchain.file_tools.read_file as read_file_module
 import agent.modules.tools.langchain.file_tools.write_file as write_file_module
 from agent.modules.tools.runtime.path_guard import resolve_safe_path
@@ -80,13 +80,13 @@ async def test_write_file_blocks_absolute_path_outside_working_dir(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_list_files_blocks_parent_traversal(tmp_path):
+async def test_list_dir_blocks_parent_traversal(tmp_path):
     sandbox = tmp_path / "sandbox"
     sandbox.mkdir()
 
-    result = await list_files_module.list_files.coroutine(
+    result = await list_dir_module.list_dir.coroutine(
         runtime=_runtime(str(sandbox)),
-        sub_dir="..",
+        path="..",
     )
 
     assert "Path escapes working directory" in result

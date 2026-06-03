@@ -60,7 +60,7 @@ if agent_name:
 - ❌ Any agent named "default" couldn't use tools
 
 ### After Fix
-- ✅ Telegram default agent has tools: `['list_files', 'read_file', 'write_file', 'search_files']`
+- ✅ Telegram default agent has tools: `['list_dir', 'read_file', 'write_file', 'search_files']`
 - ✅ Tools from `~/.kaka-agent/agents/default.md` are loaded
 - ✅ All agents work correctly regardless of name
 

@@ -47,7 +47,7 @@ class UnsupportedWorkspaceCapabilityError(RuntimeError):
 class WorkspaceFileIO(Protocol):
     ref: WorkspaceRef
 
-    async def list_files(self, sub_dir: str = "") -> str:
+    async def list_dir(self, path: str = "") -> str:
         ...
 
     async def read_text(self, file_path: str) -> str:

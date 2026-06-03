@@ -870,24 +870,19 @@ class DaytonaWorkspaceBackend(SandboxBackendBase):
             )
         return relative
 
-    async def list_files(self, sub_dir: str = "") -> str:
+    async def list_dir(self, path: str = "") -> str:
         self.ensure_active()
-        target = resolve_daytona_path(self.root, sub_dir or ".")
-        command = (
-            f"find {shlex.quote(target)} "
-            "-type d \\( -name .git -o -name .venv -o -name node_modules "
-            "-o -name __pycache__ -o -name .pytest_cache -o -name .ruff_cache \\) "
-            "-prune -o -type f -print"
-        )
+        target = resolve_daytona_path(self.root, path or ".")
+        command = f"ls -1 {shlex.quote(target)}"
         result = self._exec(command, timeout=GIT_TIMEOUT_SECONDS)
         if result.exit_code not in (0, None):
-            raise RuntimeError(result.output.strip() or "Failed to list Daytona files.")
-        files = [line for line in result.output.splitlines() if line.strip()]
-        truncated = len(files) > MAX_LIST_FILES_ENTRIES
-        files = files[:MAX_LIST_FILES_ENTRIES]
-        if not files:
+            raise RuntimeError(result.output.strip() or "Failed to list Daytona directory.")
+        entries = [line for line in result.output.splitlines() if line.strip()]
+        truncated = len(entries) > MAX_LIST_FILES_ENTRIES
+        entries = entries[:MAX_LIST_FILES_ENTRIES]
+        if not entries:
             return "(Empty directory)"
-        output = "\n".join(files)
+        output = "\n".join(entries)
         if truncated:
             output += f"\n...[truncated at {MAX_LIST_FILES_ENTRIES} entries]"
         return output

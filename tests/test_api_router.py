@@ -562,11 +562,11 @@ def test_chat_events_streams_tool_calls_as_ndjson(monkeypatch):
 
     async def fake_run_agent_stream(**params):
         assert params == built_params
-        yield {"type": "tool_call", "id": "call-1", "name": "list_files", "args": {"path": "."}}
+        yield {"type": "tool_call", "id": "call-1", "name": "list_dir", "args": {"path": "."}}
         yield {
             "type": "tool_result",
             "tool_call_id": "call-1",
-            "name": "list_files",
+            "name": "list_dir",
             "content": "README.md",
         }
         yield {"type": "final", "content": "done"}
@@ -580,8 +580,8 @@ def test_chat_events_streams_tool_calls_as_ndjson(monkeypatch):
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("application/x-ndjson")
     assert response.text == (
-        '{"type": "tool_call", "id": "call-1", "name": "list_files", "args": {"path": "."}}\n'
-        '{"type": "tool_result", "tool_call_id": "call-1", "name": "list_files", "content": "README.md"}\n'
+        '{"type": "tool_call", "id": "call-1", "name": "list_dir", "args": {"path": "."}}\n'
+        '{"type": "tool_result", "tool_call_id": "call-1", "name": "list_dir", "content": "README.md"}\n'
         '{"type": "final", "content": "done"}\n'
     )
 

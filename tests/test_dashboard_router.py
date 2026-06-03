@@ -1879,7 +1879,7 @@ async def test_dashboard_thread_messages_preserve_assistant_text_with_tool_calls
                                 tool_calls=[
                                     {
                                         "id": "call-1",
-                                        "name": "list_files",
+                                        "name": "list_dir",
                                         "args": {"path": "."},
                                     }
                                 ],
@@ -1887,7 +1887,7 @@ async def test_dashboard_thread_messages_preserve_assistant_text_with_tool_calls
                             ToolMessage(
                                 content="README.md",
                                 tool_call_id="call-1",
-                                name="list_files",
+                                name="list_dir",
                                 id="tool-result",
                             ),
                         ]
@@ -1908,7 +1908,7 @@ async def test_dashboard_thread_messages_preserve_assistant_text_with_tool_calls
             "tool_calls": [
                 {
                     "id": "call-1",
-                    "name": "list_files",
+                    "name": "list_dir",
                     "args": {"path": "."},
                 }
             ],
@@ -1916,7 +1916,7 @@ async def test_dashboard_thread_messages_preserve_assistant_text_with_tool_calls
         {
             "id": "tool-result",
             "role": "tool",
-            "name": "list_files",
+            "name": "list_dir",
             "tool_call_id": "call-1",
             "content": "README.md",
         },

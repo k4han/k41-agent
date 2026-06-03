@@ -308,8 +308,8 @@ class _RecoveringModalWorkspaceBackend:
             self.ref = backend.ref
             return result
 
-    async def list_files(self, sub_dir: str = "") -> str:
-        return await self._run(lambda backend: backend.list_files(sub_dir))
+    async def list_dir(self, path: str = "") -> str:
+        return await self._run(lambda backend: backend.list_dir(path))
 
     async def read_text(self, file_path: str) -> str:
         return await self._run(lambda backend: backend.read_text(file_path))

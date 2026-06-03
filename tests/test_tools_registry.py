@@ -181,7 +181,7 @@ class TestBuiltinToolSource:
         expected_names = {
             "read_file",
             "write_file",
-            "list_files",
+            "list_dir",
             "bash",
             "bash_send_input",
             "bash_interrupt",
@@ -250,7 +250,7 @@ class TestPublicFacade:
     def test_find_tools_by_category(self) -> None:
         file_tools = find_tools(category=ToolCategory.FILE)
         names = {t.name for t in file_tools}
-        assert {"read_file", "write_file", "list_files"}.issubset(names)
+        assert {"read_file", "write_file", "list_dir"}.issubset(names)
 
     def test_find_descriptors_by_capability(self) -> None:
         net = find_descriptors(capabilities=[ToolCapability.NETWORK])

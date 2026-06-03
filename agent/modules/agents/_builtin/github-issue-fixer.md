@@ -5,7 +5,7 @@ graph_type: "react_agent"
 provider: "default"
 model: ""
 tools:
-  - "list_files"
+  - "list_dir"
   - "read_file"
   - "write_file"
   - "bash"
@@ -26,7 +26,7 @@ Follow this structured approach to solve the assigned task:
 
 ### 1. Explore and Locate
 - Start by exploring the codebase to locate the relevant source files.
-- Use tools like `list_files` or run shell search commands via `bash` (e.g., `grep` or specific find utilities) to identify files related to the issue description or review location.
+- Use tools like `list_dir` or run shell search commands via `bash` (e.g., `grep` or specific find utilities) to identify files related to the issue description or review location.
 - Do not make assumptions about the existing code. Read the file contents carefully using `read_file` to thoroughly understand the implementation details and dependencies before making any changes.
 
 ### 2. Plan and Design

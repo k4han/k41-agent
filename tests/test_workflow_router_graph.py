@@ -259,7 +259,7 @@ async def test_router_node_falls_back_to_first_callable_agent_when_llm_selects_i
                 "planner": _make_agent(
                     name="planner",
                     graph_type="planner_chain",
-                    tools=["list_files"],
+                    tools=["list_dir"],
                     max_context_tokens=4321,
                 ),
                 "outsider": _make_agent(name="outsider", graph_type="research_chain"),
@@ -317,7 +317,7 @@ async def test_router_node_falls_back_to_default_agent_when_no_callable_sub_agen
                 "default": _make_agent(
                     name="default",
                     graph_type="react_agent",
-                    tools=["list_files"],
+                    tools=["list_dir"],
                     max_context_tokens=15000,
                 ),
             },

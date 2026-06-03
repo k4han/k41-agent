@@ -23,7 +23,7 @@ graph_type: "react_agent"
 provider: "default"
 model: ""
 tools:
-  - "list_files"
+  - "list_dir"
 max_context_tokens: 10000
 ---
 
@@ -55,7 +55,7 @@ async def test_agent_workflow_integration(test_agent_dir):
     assert config.name == "test-agent"
     assert config.graph_type == "react_agent"
     assert config.model == ""
-    assert "list_files" in config.tools
+    assert "list_dir" in config.tools
 
     # 3. Build context with agent_name
     context = make_run_context(
@@ -67,7 +67,7 @@ async def test_agent_workflow_integration(test_agent_dir):
 
     assert context.agent_name == "test-agent"
     assert context.max_context_tokens == 10000
-    assert context.allowed_tool_names == ["list_files"]
+    assert context.allowed_tool_names == ["list_dir"]
 
     # Verify config resolution chain is complete
     # (We don't invoke the graph to avoid API calls)
@@ -108,12 +108,12 @@ def test_agent_config_overrides_defaults(test_agent_dir):
 
     # Test agent has custom config
     assert test_agent.model == ""
-    assert test_agent.tools == ["list_files"]
+    assert test_agent.tools == ["list_dir"]
     assert "Test response" in test_agent.system_prompt
 
     # Default agent has builtin config
     assert default_agent.model == ""
-    assert default_agent.tools == ["list_files", "read_file", "write_file", "search_files"]
+    assert default_agent.tools == ["list_dir", "read_file", "write_file", "search_files"]
     assert "helpful AI assistant" in default_agent.system_prompt
 
 
@@ -144,7 +144,7 @@ name: "child"
 graph_type: "react_agent"
 provider: "default"
 tools:
-  - "list_files"
+  - "list_dir"
 ---
 
 Child agent (leaf node).

@@ -617,7 +617,7 @@ def test_local_workspace_backend_file_operations_and_path_guard(tmp_path):
         assert result == f"[OK] Wrote file: {file_path.resolve()}"
         assert await backend.read_text("src/app.py") == "print('hello')\n"
         assert await backend.read_text(str(file_path)) == "print('hello')\n"
-        assert await backend.list_files("src") == str(file_path.resolve())
+        assert await backend.list_dir("src") == "app.py"
         with pytest.raises(ValueError, match="Path escapes working directory"):
             await backend.read_text("../secret.txt")
 
@@ -641,7 +641,7 @@ def test_daytona_workspace_backend_file_operations_and_path_guard():
 
         assert result == "[OK] Wrote file: /workspace/src/app.py"
         assert await backend.read_text("src/app.py") == "print('hello')\n"
-        assert await backend.list_files("src") == "/workspace/src/app.py"
+        assert await backend.list_dir("src") == "app.py"
         tree = await backend.tree()
         assert tree["root"] == "/workspace"
         assert tree["entries"][0]["path"] == "/workspace/src"
@@ -674,7 +674,7 @@ def test_modal_workspace_backend_file_operations_and_path_guard():
 
         assert result == "[OK] Wrote file: /workspace/src/app.py"
         assert await backend.read_text("src/app.py") == "print('hello')\n"
-        assert await backend.list_files("src") == "/workspace/src/app.py"
+        assert await backend.list_dir("src") == "app.py"
         tree = await backend.tree()
         assert tree["root"] == "/workspace"
         assert tree["entries"][0]["path"] == "/workspace/src"
