@@ -2,12 +2,15 @@ import {
   ChevronDown,
   ChevronRight,
   Clipboard,
+  Cpu,
   File,
   Folder,
   GitCompare,
+  HardDrive,
   MoreHorizontal,
   Pencil,
   RefreshCw,
+  Server,
   Trash2,
   X,
   Zap,
@@ -83,6 +86,8 @@ type WorkspaceResolvePayload = {
 };
 
 type WorkspaceTab = "changes" | "files" | `file:${string}`;
+
+type WorkspaceBackendKey = "local" | "daytona" | "modal";
 
 function workspaceQuery(threadId: string, workspace: WorkspaceRef | null, extra?: Record<string, string>) {
   const params = new URLSearchParams();
@@ -164,6 +169,21 @@ function FileCodeView(props: { content: string; path: string; dark: boolean }) {
   );
 }
 
+function BackendIcon(props: { backend: WorkspaceBackendKey }) {
+  return (
+    <Show
+      when={props.backend === "local"}
+      fallback={
+        <Show when={props.backend === "daytona"} fallback={<Cpu size={12} />}>
+          <Server size={12} />
+        </Show>
+      }
+    >
+      <HardDrive size={12} />
+    </Show>
+  );
+}
+
 async function writeToClipboard(text: string): Promise<void> {
   if (navigator.clipboard && window.isSecureContext) {
     await navigator.clipboard.writeText(text);
@@ -232,6 +252,13 @@ export function WorkspaceExplorer(props: {
   // let the backend resolve the workspace from `thread_id` alone.
   const queryWorkspace = createMemo(() => props.workspace ?? null);
   const isLocalWorkspace = () => (effectiveWorkspace()?.backend || "local") === "local";
+  const effectiveBackend = (): WorkspaceBackendKey => {
+    const backend = effectiveWorkspace()?.backend;
+    if (backend === "daytona" || backend === "modal") {
+      return backend;
+    }
+    return "local";
+  };
   const rootPath = () => workspaceRoot() || "";
   const rootEntries = () => entriesByPath()[rootPath()] || entriesByPath()[""] || [];
   const rootTreeTruncated = () =>
@@ -460,7 +487,7 @@ export function WorkspaceExplorer(props: {
     void loadDiff(path);
   };
 
-  const openFile = (path: string) => {
+   const openFile = (path: string) => {
     setFileTabs((current) => current.includes(path) ? current : [...current, path]);
     setActiveTab(fileTabId(path));
     if (!filePayloads()[path] && !fileLoadingByPath()[path]) {
@@ -495,7 +522,6 @@ export function WorkspaceExplorer(props: {
     setRenameTarget(null);
     setRenameDraft("");
   };
-
   const confirmRename = async () => {
     const entry = renameTarget();
     if (!entry) {
@@ -721,6 +747,14 @@ export function WorkspaceExplorer(props: {
   return (
     <aside class="workspace-explorer">
       <div class="workspace-dir-control">
+        <span
+          class={`workspace-backend-pill backend-${effectiveBackend()}`}
+          title={`Workspace backend: ${effectiveBackend()}`}
+          aria-label={`Workspace backend ${effectiveBackend()}`}
+        >
+          <BackendIcon backend={effectiveBackend()} />
+          <span>{effectiveBackend()}</span>
+        </span>
         <input
           class="input workspace-dir-input"
           value={workingDirDisplayValue()}
@@ -737,20 +771,7 @@ export function WorkspaceExplorer(props: {
         />
         <button class="btn btn-sm" type="button" onClick={refresh} disabled={!canQuery()}>
           <RefreshCw size={13} />
-          {/* <span>Reloaad</span> */}
         </button>
-        <Show when={effectiveWorkspace()?.backend === "modal"}>
-          <button
-            class="btn btn-sm"
-            type="button"
-            title="Create new Modal sandbox"
-            aria-label="Create new Modal sandbox"
-            onClick={() => void reconnectModalWorkspace()}
-            disabled={props.disabled || reconnectingModal() || !props.threadId}
-          >
-            <Zap size={13} />
-          </button>
-        </Show>
       </div>
 
       <div class="workspace-tabs" role="tablist" aria-label="Workspace views">
