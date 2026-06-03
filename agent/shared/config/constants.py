@@ -28,7 +28,7 @@ RUNTIME_KEY_PATTERNS = [
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.env\.[A-Za-z0-9_-]+$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.headers\.[A-Za-z0-9_-]+$",
     r"^workspace\.root$",
-    r"^workspace\.daytona\.(enabled|api_key|default_root|auto_stop_minutes|auto_archive_days|sweeper_interval_seconds|start_timeout_seconds|stop_timeout_seconds)$",
+    r"^workspace\.daytona\.(enabled|api_key|default_root|target|image|cpu|memory|disk|language|auto_stop_minutes|auto_archive_days|sweeper_interval_seconds|start_timeout_seconds|stop_timeout_seconds|sandbox_auto_stop_minutes|sandbox_auto_archive_minutes|sandbox_auto_delete_minutes|ephemeral|network_block_all|network_allow_list)$",
     r"^workspace\.modal\.(enabled|token_id|token_secret|app_name|default_root|image|sandbox_timeout_seconds|idle_timeout_seconds)$",
     r"^database\.url$",
     rf"^{re.escape(DISPLAY_TIMEZONE_CONFIG_KEY)}$",
@@ -46,7 +46,7 @@ DATABASE_RUNTIME_KEY_PATTERNS = [
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.(transport|command|args|url|enabled)$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.env\.[A-Za-z0-9_-]+$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.headers\.[A-Za-z0-9_-]+$",
-    r"^workspace\.daytona\.(enabled|api_key|default_root|auto_stop_minutes|auto_archive_days|sweeper_interval_seconds|start_timeout_seconds|stop_timeout_seconds)$",
+    r"^workspace\.daytona\.(enabled|api_key|default_root|target|image|cpu|memory|disk|language|auto_stop_minutes|auto_archive_days|sweeper_interval_seconds|start_timeout_seconds|stop_timeout_seconds|sandbox_auto_stop_minutes|sandbox_auto_archive_minutes|sandbox_auto_delete_minutes|ephemeral|network_block_all|network_allow_list)$",
     r"^workspace\.modal\.(enabled|token_id|token_secret|app_name|default_root|image|sandbox_timeout_seconds|idle_timeout_seconds)$",
     r"^recursion_limit$",
 ]
@@ -94,7 +94,13 @@ def _expand_runtime_keys() -> set[str]:
         "webhook_secret",
     ):
         keys.add(f"channels.telegram.{prop}")
-    for prop in ("enabled", "bot_token", "default_agent", "code_agent", "research_agent"):
+    for prop in (
+        "enabled",
+        "bot_token",
+        "default_agent",
+        "code_agent",
+        "research_agent",
+    ):
         keys.add(f"channels.discord.{prop}")
     for prop in (
         "enabled",
@@ -116,11 +122,23 @@ def _expand_runtime_keys() -> set[str]:
     keys.add("workspace.daytona.enabled")
     keys.add("workspace.daytona.api_key")
     keys.add("workspace.daytona.default_root")
+    keys.add("workspace.daytona.target")
+    keys.add("workspace.daytona.image")
+    keys.add("workspace.daytona.cpu")
+    keys.add("workspace.daytona.memory")
+    keys.add("workspace.daytona.disk")
+    keys.add("workspace.daytona.language")
     keys.add("workspace.daytona.auto_stop_minutes")
     keys.add("workspace.daytona.auto_archive_days")
     keys.add("workspace.daytona.sweeper_interval_seconds")
     keys.add("workspace.daytona.start_timeout_seconds")
     keys.add("workspace.daytona.stop_timeout_seconds")
+    keys.add("workspace.daytona.sandbox_auto_stop_minutes")
+    keys.add("workspace.daytona.sandbox_auto_archive_minutes")
+    keys.add("workspace.daytona.sandbox_auto_delete_minutes")
+    keys.add("workspace.daytona.ephemeral")
+    keys.add("workspace.daytona.network_block_all")
+    keys.add("workspace.daytona.network_allow_list")
     keys.add("workspace.modal.enabled")
     keys.add("workspace.modal.token_id")
     keys.add("workspace.modal.token_secret")
@@ -177,11 +195,23 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "workspace.daytona.enabled": False,
     "workspace.daytona.api_key": "",
     "workspace.daytona.default_root": "workspace",
+    "workspace.daytona.target": "",
+    "workspace.daytona.image": "",
+    "workspace.daytona.cpu": 0,
+    "workspace.daytona.memory": 0,
+    "workspace.daytona.disk": 0,
+    "workspace.daytona.language": "python",
     "workspace.daytona.auto_stop_minutes": 30,
     "workspace.daytona.auto_archive_days": 7,
     "workspace.daytona.sweeper_interval_seconds": 60,
     "workspace.daytona.start_timeout_seconds": 120,
     "workspace.daytona.stop_timeout_seconds": 60,
+    "workspace.daytona.sandbox_auto_stop_minutes": 15,
+    "workspace.daytona.sandbox_auto_archive_minutes": 10080,
+    "workspace.daytona.sandbox_auto_delete_minutes": -1,
+    "workspace.daytona.ephemeral": False,
+    "workspace.daytona.network_block_all": False,
+    "workspace.daytona.network_allow_list": "",
     "workspace.modal.enabled": False,
     "workspace.modal.token_id": "",
     "workspace.modal.token_secret": "",
@@ -301,6 +331,93 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "label": "Daytona Stop Timeout Seconds",
         "min": 1,
         "step": 1,
+    },
+    "workspace.daytona.target": {
+        "type": "text",
+        "description": "Target runner region for new sandboxes (e.g. us-east-1). Leave empty for default.",
+        "category": "workspace",
+        "label": "Daytona Target Region",
+    },
+    "workspace.daytona.image": {
+        "type": "text",
+        "description": "Docker image for new sandboxes (e.g. python:3.12-slim). Leave empty for Daytona default.",
+        "category": "workspace",
+        "label": "Daytona Image",
+    },
+    "workspace.daytona.cpu": {
+        "type": "number",
+        "description": "CPU cores for new sandboxes (1-4). Use 0 for Daytona default (1).",
+        "category": "workspace",
+        "label": "Daytona CPU Cores",
+        "min": 0,
+        "max": 4,
+        "step": 1,
+    },
+    "workspace.daytona.memory": {
+        "type": "number",
+        "description": "Memory in GiB for new sandboxes (1-8). Use 0 for Daytona default (1).",
+        "category": "workspace",
+        "label": "Daytona Memory GiB",
+        "min": 0,
+        "max": 8,
+        "step": 1,
+    },
+    "workspace.daytona.disk": {
+        "type": "number",
+        "description": "Disk space in GiB for new sandboxes (1-10). Use 0 for Daytona default (3).",
+        "category": "workspace",
+        "label": "Daytona Disk GiB",
+        "min": 0,
+        "max": 10,
+        "step": 1,
+    },
+    "workspace.daytona.language": {
+        "type": "text",
+        "description": "Runtime language for new sandboxes: python, typescript, or javascript.",
+        "category": "workspace",
+        "label": "Daytona Language",
+    },
+    "workspace.daytona.sandbox_auto_stop_minutes": {
+        "type": "number",
+        "description": "Auto-stop interval on Daytona platform (minutes). Use 0 to disable. Default 15.",
+        "category": "workspace",
+        "label": "Daytona Platform Auto-Stop",
+        "min": 0,
+        "step": 1,
+    },
+    "workspace.daytona.sandbox_auto_archive_minutes": {
+        "type": "number",
+        "description": "Auto-archive interval on Daytona platform (minutes). Use 0 for max (30 days). Default 7 days.",
+        "category": "workspace",
+        "label": "Daytona Platform Auto-Archive",
+        "min": 0,
+        "step": 1,
+    },
+    "workspace.daytona.sandbox_auto_delete_minutes": {
+        "type": "number",
+        "description": "Auto-delete interval on Daytona platform (minutes). Use -1 to disable. Default disabled.",
+        "category": "workspace",
+        "label": "Daytona Platform Auto-Delete",
+        "min": -1,
+        "step": 1,
+    },
+    "workspace.daytona.ephemeral": {
+        "type": "boolean",
+        "description": "Create ephemeral sandboxes that auto-delete when stopped.",
+        "category": "workspace",
+        "label": "Daytona Ephemeral",
+    },
+    "workspace.daytona.network_block_all": {
+        "type": "boolean",
+        "description": "Block all outbound network access for new sandboxes.",
+        "category": "workspace",
+        "label": "Daytona Block All Network",
+    },
+    "workspace.daytona.network_allow_list": {
+        "type": "text",
+        "description": "Comma-separated CIDR list for allowed outbound network (e.g. 10.0.0.0/8,172.16.0.0/12).",
+        "category": "workspace",
+        "label": "Daytona Network Allow List",
     },
     "workspace.modal.enabled": {
         "type": "boolean",
@@ -597,7 +714,7 @@ def _split_provider_key(key: str) -> tuple[str, str] | None:
     prefix = "llm.providers."
     if not key.startswith(prefix):
         return None
-    remainder = key[len(prefix):]
+    remainder = key[len(prefix) :]
     if "." not in remainder:
         return None
     provider_name, field_name = remainder.split(".", 1)

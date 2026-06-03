@@ -20,6 +20,12 @@ from agent.modules.github.repository import (
     load_mention_triggers,
 )
 from agent.modules.github.workspace import GitHubWorkspaceManager, sanitize_branch_name
+from agent.modules.github.workspace_helpers import (
+    prepare_workspace_for_binding,
+    remote_commit_all,
+    remote_has_changes,
+    remote_push_branch,
+)
 from agent.modules.workspaces import WorkspaceRef, workspace_ref_from_local_path
 
 logger = logging.getLogger(__name__)
@@ -62,9 +68,24 @@ def verify_webhook_signature(
     return hmac.compare_digest(expected, signature_header)
 
 
-def _github_workspace_ref(context: GitHubTaskContext) -> WorkspaceRef:
-    return workspace_ref_from_local_path(
-        str(context.workspace_path),
+def _github_workspace_ref(context: GitHubTaskContext, *, backend: str = "local") -> WorkspaceRef:
+    if backend == "local":
+        return workspace_ref_from_local_path(
+            str(context.workspace_path),
+            label=context.repository_full_name,
+            metadata={
+                "source": "github",
+                "repository_full_name": context.repository_full_name,
+                "branch": context.branch,
+                "base_branch": context.base_branch,
+                "issue_number": context.issue_number,
+                "issue_url": context.issue_url,
+                "completion_mode": context.completion_mode,
+            },
+        )
+    return WorkspaceRef(
+        backend=backend,
+        locator=f"github:{context.repository_full_name}",
         label=context.repository_full_name,
         metadata={
             "source": "github",
@@ -126,20 +147,34 @@ class GitHubAutomationService:
         if binding is None:
             raise KeyError(f"GitHub repository '{repository_id}' is not synced.")
 
-        token = await self.client.get_installation_token(int(binding.installation_id))
-        path = await self.workspace_manager.ensure_shared_checkout(
-            full_name=binding.full_name,
-            token=token,
-        )
-        workspace = workspace_ref_from_local_path(
-            str(path.resolve()),
-            label=binding.full_name,
-            metadata={
-                "source": "github",
-                "repository_full_name": binding.full_name,
-                "default_branch": binding.default_branch,
-            },
-        )
+        workspace_backend = getattr(binding, "workspace_backend", "local") or "local"
+        if workspace_backend == "local":
+            token = await self.client.get_installation_token(int(binding.installation_id))
+            path = await self.workspace_manager.ensure_shared_checkout(
+                full_name=binding.full_name,
+                token=token,
+            )
+            workspace = workspace_ref_from_local_path(
+                str(path.resolve()),
+                label=binding.full_name,
+                metadata={
+                    "source": "github",
+                    "repository_full_name": binding.full_name,
+                    "default_branch": binding.default_branch,
+                },
+            )
+        else:
+            from agent.modules.github.workspace_helpers import _prepare_remote_workspace
+
+            workspace = await _prepare_remote_workspace(
+                binding=binding,
+                backend=workspace_backend,
+                client=self.client,
+                token="",
+                branch=binding.default_branch or "main",
+                default_branch=binding.default_branch,
+            )
+
         return {
             "kind": "github",
             "label": binding.full_name,
@@ -167,6 +202,7 @@ class GitHubAutomationService:
         tool_policy_mode: str = "inherit",
         allowed_tools: list[str] | None = None,
         branch_prefix: str = "kaka",
+        workspace_backend: str = "local",
     ) -> dict[str, Any]:
         resolved_agent = resolve_catalog_agent_name(agent_name, self.settings.default_agent, "default")
         return await self.store.update_binding(
@@ -188,6 +224,7 @@ class GitHubAutomationService:
             tool_policy_mode=tool_policy_mode,
             allowed_tools=allowed_tools or [],
             branch_prefix=branch_prefix,
+            workspace_backend=workspace_backend,
         )
 
     async def submit_repository_task(
@@ -384,12 +421,14 @@ class GitHubAutomationService:
             f"{(delivery_id or 'manual')[:8]}"
         )
 
-        token = await self.client.get_installation_token(installation_id)
-        prepared = await self.workspace_manager.prepare(
-            full_name=binding.full_name,
-            default_branch=binding.default_branch or repository.get("default_branch") or "main",
+        workspace_backend = getattr(binding, "workspace_backend", "local") or "local"
+        workspace = await prepare_workspace_for_binding(
+            binding,
+            workspace_manager=self.workspace_manager,
+            client=self.client,
+            settings=self.settings,
             branch=branch,
-            token=token,
+            default_branch=binding.default_branch or repository.get("default_branch") or "main",
         )
 
         context = GitHubTaskContext(
@@ -398,9 +437,9 @@ class GitHubAutomationService:
             issue_number=issue_number,
             issue_title=str(issue.get("title") or ""),
             issue_url=str(issue.get("html_url") or ""),
-            branch=prepared.branch,
-            base_branch=prepared.base_branch,
-            workspace_path=prepared.path,
+            branch=workspace.metadata.get("branch", branch),
+            base_branch=workspace.metadata.get("base_branch", binding.default_branch or "main"),
+            workspace_path=workspace.locator if workspace_backend == "local" else Path(workspace.locator),
             repository_instructions=_repository_instructions(binding),
         )
         prompt = _build_agent_prompt(
@@ -413,9 +452,9 @@ class GitHubAutomationService:
         return await manager.submit(
             request=prompt,
             agent_name=agent_name,
-            workspace=_github_workspace_ref(context),
+            workspace=_github_workspace_ref(context, backend=workspace_backend),
             notify_channel=self._notify_channel_for_binding(binding),
-            completion_hook=lambda task: self.publish_task_result(task, context),
+            completion_hook=lambda task: self.publish_task_result(task, context, workspace_backend=workspace_backend),
             context_trim_threshold=_context_trim_threshold(binding),
             allowed_tool_names=_allowed_tools_for_binding(binding),
             provider=_provider_name(binding),
@@ -446,17 +485,20 @@ class GitHubAutomationService:
             "default",
         ) or "default"
 
-        token = await self.client.get_installation_token(installation_id)
-        prepared = await self.workspace_manager.prepare_existing_branch(
-            full_name=binding.full_name,
+        workspace_backend = getattr(binding, "workspace_backend", "local") or "local"
+        workspace = await prepare_workspace_for_binding(
+            binding,
+            workspace_manager=self.workspace_manager,
+            client=self.client,
+            settings=self.settings,
             branch=branch,
-            base_branch=str(
+            default_branch=str(
                 base.get("ref")
                 or binding.default_branch
                 or repository.get("default_branch")
                 or "main"
             ),
-            token=token,
+            existing_branch=True,
         )
 
         context = GitHubTaskContext(
@@ -465,9 +507,9 @@ class GitHubAutomationService:
             issue_number=pull_request_number,
             issue_title=str(pull_request.get("title") or ""),
             issue_url=str(pull_request.get("html_url") or ""),
-            branch=prepared.branch,
-            base_branch=prepared.base_branch,
-            workspace_path=prepared.path,
+            branch=workspace.metadata.get("branch", branch),
+            base_branch=workspace.metadata.get("base_branch", binding.default_branch or "main"),
+            workspace_path=workspace.locator if workspace_backend == "local" else Path(workspace.locator),
             completion_mode=COMPLETION_UPDATE_PULL_REQUEST,
             review_comment_id=_optional_int(comment.get("id")),
             repository_instructions=_repository_instructions(binding),
@@ -482,9 +524,9 @@ class GitHubAutomationService:
         return await manager.submit(
             request=prompt,
             agent_name=agent_name,
-            workspace=_github_workspace_ref(context),
+            workspace=_github_workspace_ref(context, backend=workspace_backend),
             notify_channel=self._notify_channel_for_binding(binding),
-            completion_hook=lambda task: self.publish_task_result(task, context),
+            completion_hook=lambda task: self.publish_task_result(task, context, workspace_backend=workspace_backend),
             context_trim_threshold=_context_trim_threshold(binding),
             allowed_tool_names=_allowed_tools_for_binding(binding),
             provider=_provider_name(binding),
@@ -516,10 +558,19 @@ class GitHubAutomationService:
         self,
         task: BackgroundTask,
         context: GitHubTaskContext,
+        *,
+        workspace_backend: str = "local",
     ) -> None:
         token = await self.client.get_installation_token(context.installation_id)
         completion_mode = getattr(context, "completion_mode", COMPLETION_OPEN_PULL_REQUEST)
-        if not await self.workspace_manager.has_changes(context.workspace_path):
+
+        if workspace_backend == "local":
+            has_changes = await self.workspace_manager.has_changes(context.workspace_path)
+        else:
+            ref = _github_workspace_ref(context, backend=workspace_backend)
+            has_changes = await remote_has_changes(ref)
+
+        if not has_changes:
             await self._post_completion_comment(
                 context,
                 body="Kaka Agent finished running but did not produce any repository changes.",
@@ -531,15 +582,21 @@ class GitHubAutomationService:
             commit_message = f"Address review feedback on PR #{context.issue_number}"
         else:
             commit_message = f"Kaka Agent changes for issue #{context.issue_number}"
-        await self.workspace_manager.commit_all(
-            path=context.workspace_path,
-            message=commit_message,
-        )
-        await self.workspace_manager.push_branch(
-            path=context.workspace_path,
-            branch=context.branch,
-            token=token,
-        )
+
+        if workspace_backend == "local":
+            await self.workspace_manager.commit_all(
+                path=context.workspace_path,
+                message=commit_message,
+            )
+            await self.workspace_manager.push_branch(
+                path=context.workspace_path,
+                branch=context.branch,
+                token=token,
+            )
+        else:
+            ref = _github_workspace_ref(context, backend=workspace_backend)
+            await remote_commit_all(ref, commit_message)
+            await remote_push_branch(ref, context.branch, token)
 
         if completion_mode == COMPLETION_UPDATE_PULL_REQUEST:
             await self._post_completion_comment(
@@ -771,10 +828,6 @@ def _branch_prefix(binding: Any) -> str:
     prefix = str(getattr(binding, "branch_prefix", "") or "").strip() or "kaka"
     safe_prefix = sanitize_branch_name(prefix).strip("/.")
     return safe_prefix or "kaka"
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
 
 
 _service: GitHubAutomationService | None = None

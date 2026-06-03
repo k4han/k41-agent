@@ -102,6 +102,85 @@ def _config() -> tuple[bool, str, str]:
     return enabled, api_key, root
 
 
+def _daytona_client_config() -> dict[str, Any]:
+    from agent.shared.config.service import get_config_service
+
+    service = get_config_service()
+    return {
+        "target": service.get_str("workspace.daytona.target", "").strip() or None,
+    }
+
+
+def _sandbox_create_config() -> dict[str, Any]:
+    from agent.shared.config.service import get_config_service
+
+    service = get_config_service()
+
+    image = service.get_str("workspace.daytona.image", "").strip()
+    cpu = max(0, service.get_int("workspace.daytona.cpu", 0))
+    memory = max(0, service.get_int("workspace.daytona.memory", 0))
+    disk = max(0, service.get_int("workspace.daytona.disk", 0))
+    language = (
+        service.get_str("workspace.daytona.language", "python").strip() or "python"
+    )
+    auto_stop = max(
+        0, service.get_int("workspace.daytona.sandbox_auto_stop_minutes", 15)
+    )
+    auto_archive = max(
+        0, service.get_int("workspace.daytona.sandbox_auto_archive_minutes", 10080)
+    )
+    auto_delete = service.get_int("workspace.daytona.sandbox_auto_delete_minutes", -1)
+    ephemeral = service.get_bool("workspace.daytona.ephemeral", False)
+    network_block_all = service.get_bool("workspace.daytona.network_block_all", False)
+    network_allow_list = (
+        service.get_str("workspace.daytona.network_allow_list", "").strip()
+    )
+
+    try:
+        from daytona import (
+            CreateSandboxFromImageParams,
+            CreateSandboxFromSnapshotParams,
+            Resources,
+        )
+    except ImportError:
+        from daytona_sdk import (  # type: ignore[no-redef]
+            CreateSandboxFromImageParams,
+            CreateSandboxFromSnapshotParams,
+            Resources,
+        )
+
+    resources = None
+    if cpu > 0 or memory > 0 or disk > 0:
+        resources = Resources(
+            cpu=cpu if cpu > 0 else None,
+            memory=memory if memory > 0 else None,
+            disk=disk if disk > 0 else None,
+        )
+
+    base_kwargs: dict[str, Any] = {}
+    base_kwargs["language"] = language
+    if auto_stop >= 0:
+        base_kwargs["auto_stop_interval"] = auto_stop
+    if auto_archive >= 0:
+        base_kwargs["auto_archive_interval"] = auto_archive
+    base_kwargs["auto_delete_interval"] = auto_delete
+    if ephemeral:
+        base_kwargs["ephemeral"] = True
+    if network_block_all:
+        base_kwargs["network_block_all"] = True
+    if network_allow_list:
+        base_kwargs["network_allow_list"] = network_allow_list
+
+    if image:
+        params = CreateSandboxFromImageParams(
+            image=image, resources=resources, **base_kwargs
+        )
+    else:
+        params = CreateSandboxFromSnapshotParams(**base_kwargs)
+
+    return {"params": params}
+
+
 def _lifecycle_config() -> dict[str, int]:
     from agent.shared.config.service import get_config_service
 
@@ -145,13 +224,18 @@ def get_daytona_client():
             raise RuntimeError(
                 "The Daytona Python SDK is not installed. Install project dependencies with uv."
             ) from exc
-    return Daytona(DaytonaConfig(api_key=api_key))
+    client_cfg = _daytona_client_config()
+    config_kwargs: dict[str, Any] = {"api_key": api_key}
+    if client_cfg.get("target"):
+        config_kwargs["target"] = client_cfg["target"]
+    return Daytona(DaytonaConfig(**config_kwargs))
 
 
 def create_daytona_workspace(*, label: str | None = None) -> WorkspaceRef:
     _, _, root = _config()
     client = get_daytona_client()
-    sandbox = client.create()
+    create_cfg = _sandbox_create_config()
+    sandbox = client.create(create_cfg["params"])
     sandbox_id = str(getattr(sandbox, "id", "") or "").strip()
     if not sandbox_id:
         raise RuntimeError("Daytona did not return a sandbox ID.")
@@ -171,7 +255,7 @@ def create_daytona_workspace(*, label: str | None = None) -> WorkspaceRef:
     backend.ensure_root()
     ref.metadata.update(
         daytona_lifecycle_metadata(
-            root=root,
+            root=backend.root,
             status=backend.status,
             touch=True,
             started=True,
@@ -201,7 +285,7 @@ def attach_daytona_workspace(
     backend.ensure_root()
     ref.metadata.update(
         daytona_lifecycle_metadata(
-            root=selected_root,
+            root=backend.root,
             status=backend.status,
             touch=True,
         )
@@ -596,7 +680,9 @@ async def sweep_idle_daytona_workspaces(
                 )
                 workspace.metadata.update(
                     daytona_lifecycle_metadata(
-                        root=str(workspace.metadata.get("root") or DEFAULT_DAYTONA_ROOT),
+                        root=str(
+                            workspace.metadata.get("root") or DEFAULT_DAYTONA_ROOT
+                        ),
                         status=DAYTONA_STATUS_DESTROYED,
                     )
                 )
@@ -1193,6 +1279,7 @@ class DaytonaWorkspaceBackend(SandboxBackendBase):
         except Exception:
             return ""
         from agent.modules.workspaces.git_utils import build_untracked_diff_content
+
         return build_untracked_diff_content(content, relative_path)
 
 
@@ -1247,6 +1334,7 @@ def _file_info_path(item: Any, parent: str) -> str:
 
 def _git_status_args() -> list[str]:
     from agent.modules.workspaces.git_utils import git_status_args
+
     return git_status_args()
 
 
@@ -1257,21 +1345,25 @@ def _parse_git_status(
     git_root: str,
 ) -> list[dict[str, Any]]:
     from agent.modules.workspaces.git_utils import parse_git_status
+
     return parse_git_status(output, workspace_root=workspace_root, git_root=git_root)
 
 
 def _status_label(code: str) -> str:
     from agent.modules.workspaces.git_utils import status_label
+
     return status_label(code)
 
 
 def _git_relative_path(git_root: str, target: str) -> str:
     from agent.modules.workspaces.git_utils import git_relative_path
+
     return git_relative_path(git_root, target)
 
 
 def _truncate_diff(diff: str) -> tuple[str, bool]:
     from agent.modules.workspaces.git_utils import truncate_diff
+
     return truncate_diff(diff)
 
 

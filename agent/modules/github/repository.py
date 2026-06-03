@@ -89,6 +89,7 @@ def _serialize_binding(binding: GitHubRepositoryBinding) -> dict[str, Any]:
         "tool_policy_mode": tool_policy_mode,
         "allowed_tools": allowed_tools if tool_policy_mode == "custom" else [],
         "branch_prefix": binding.branch_prefix or "kaka",
+        "workspace_backend": getattr(binding, "workspace_backend", "local") or "local",
         "last_synced_at": binding.last_synced_at.isoformat() if binding.last_synced_at else None,
         "created_at": binding.created_at.isoformat() if binding.created_at else None,
         "updated_at": binding.updated_at.isoformat() if binding.updated_at else None,
@@ -149,6 +150,7 @@ class GitHubRepositoryStore:
         tool_policy_mode: str = "inherit",
         allowed_tools: list[str] | None = None,
         branch_prefix: str = "kaka",
+        workspace_backend: str = "local",
     ) -> dict[str, Any]:
         session = await get_async_session()
         async with session:
@@ -185,6 +187,10 @@ class GitHubRepositoryStore:
                 normalized_allowed_tools if binding.tool_policy_mode == "custom" else []
             )
             binding.branch_prefix = branch_prefix.strip() or "kaka"
+            normalized_backend = (workspace_backend or "local").strip().lower()
+            if normalized_backend not in ("local", "daytona", "modal"):
+                normalized_backend = "local"
+            binding.workspace_backend = normalized_backend
             await session.commit()
             await session.refresh(binding)
             return _serialize_binding(binding)

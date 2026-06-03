@@ -126,6 +126,7 @@ class GitHubRepositoryBindingBody(BaseModel):
     tool_policy_mode: str = "inherit"
     allowed_tools: list[str] = Field(default_factory=list)
     branch_prefix: str = "kaka"
+    workspace_backend: str = "local"
 
 
 class SubmitGitHubRepositoryTaskBody(BaseModel):
@@ -185,6 +186,7 @@ async def update_dashboard_github_repository_binding(
             tool_policy_mode=body.tool_policy_mode,
             allowed_tools=body.allowed_tools,
             branch_prefix=body.branch_prefix,
+            workspace_backend=body.workspace_backend,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

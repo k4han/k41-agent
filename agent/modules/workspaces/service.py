@@ -471,6 +471,7 @@ def _merge_ready_workspace_metadata(
             "last_started_at",
             "last_stopped_at",
             "last_used_at",
+            "root",
             "status",
         }:
             continue

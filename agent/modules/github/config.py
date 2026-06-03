@@ -10,6 +10,7 @@ from agent.shared.infrastructure.validation import is_placeholder_value
 
 DEFAULT_TRIGGER_LABEL = "kaka-agent"
 DEFAULT_MENTION_TRIGGERS = ("@kaka-agent", "/kaka")
+DEFAULT_WORKSPACE_BACKEND = "local"
 GITHUB_WORKSPACE_ROOT = Path.home() / "kaka-agent" / "github-workspaces"
 
 
@@ -24,6 +25,7 @@ class GitHubSettings:
     default_agent: str
     trigger_label: str
     mention_triggers: tuple[str, ...]
+    default_workspace_backend: str
 
     @property
     def is_configured(self) -> bool:
@@ -69,6 +71,12 @@ def get_github_settings() -> GitHubSettings:
     if not trigger_label:
         trigger_label = DEFAULT_TRIGGER_LABEL
 
+    default_backend = config.get_str(
+        "channels.github.default_workspace_backend", DEFAULT_WORKSPACE_BACKEND
+    ).strip()
+    if default_backend not in ("local", "daytona", "modal"):
+        default_backend = DEFAULT_WORKSPACE_BACKEND
+
     return GitHubSettings(
         enabled=config.get_bool("channels.github.enabled", False),
         app_id=config.get_str("channels.github.app_id", "").strip(),
@@ -81,12 +89,14 @@ def get_github_settings() -> GitHubSettings:
         mention_triggers=_split_triggers(
             config.get("channels.github.mention_triggers", ",".join(DEFAULT_MENTION_TRIGGERS))
         ),
+        default_workspace_backend=default_backend,
     )
 
 
 __all__ = [
     "DEFAULT_MENTION_TRIGGERS",
     "DEFAULT_TRIGGER_LABEL",
+    "DEFAULT_WORKSPACE_BACKEND",
     "GITHUB_WORKSPACE_ROOT",
     "GitHubSettings",
     "get_github_settings",
