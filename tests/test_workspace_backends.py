@@ -870,6 +870,30 @@ def test_delete_modal_workspace_terminates_and_detaches_sandbox(monkeypatch):
     assert sandbox.detach_calls == 1
 
 
+def test_delete_modal_workspace_handles_invalid_sandbox_id(monkeypatch):
+    import asyncio
+
+    workspace = WorkspaceRef(
+        backend="modal",
+        locator="github:k4han/test_code_fix",
+        label="sandbox",
+        metadata={"root": "/workspace"},
+    )
+
+    async def fake_get_modal_sandbox(ref, *, client=None):
+        raise Exception("github:k4han/test_code_fix is not a valid Sandbox ID")
+
+    monkeypatch.setattr(
+        "agent.modules.workspaces.modal_backend.get_modal_sandbox",
+        fake_get_modal_sandbox,
+    )
+
+    async def _run():
+        assert await delete_modal_workspace(workspace) == "terminated"
+
+    asyncio.run(_run())
+
+
 def test_modal_backend_reports_unavailable_sandbox():
     import asyncio
 

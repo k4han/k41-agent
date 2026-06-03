@@ -267,6 +267,8 @@ def _is_modal_unavailable_error(
         return True
     if "sandbox" in message and "not found" in message:
         return True
+    if "not a valid sandbox id" in message:
+        return True
     status = getattr(exc, "status", None)
     if status is None:
         status = getattr(exc, "status_code", None)
