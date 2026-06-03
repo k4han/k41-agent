@@ -25,6 +25,8 @@ def file_info_is_dir(item: Any) -> bool:
     if value is None:
         value = getattr(item, "is_directory", None)
     if value is not None:
+        if callable(value):
+            return bool(value())
         return bool(value)
     # Fallback: check a type attribute (Modal-style)
     info_type = _file_info_type(item)

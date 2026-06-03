@@ -521,6 +521,9 @@ class ModalWorkspaceBackend(SandboxBackendBase):
 
         self.touch()
         target = resolve_remote_path(self.root, path or ".")
+        info = await self._stat(target)
+        if not file_info_is_dir(info):
+            raise NotADirectoryError(f"Path is not a directory: {path or '.'}")
         entries: list[dict[str, Any]] = []
         truncated = False
         items = await self._run_remote_aio(lambda: self.fs.list_files.aio(target))
