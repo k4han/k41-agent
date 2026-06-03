@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import difflib
 import logging
 import mimetypes
 import posixpath
@@ -11,15 +10,30 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from agent.modules.workspaces.backends import CommandResult
-from agent.modules.workspaces.local_backend import MAX_LIST_FILES_ENTRIES
-from agent.modules.workspaces.refs import WorkspaceRef
-from agent.modules.workspaces.service import (
+from agent.modules.workspaces.constants import (
+    GIT_TIMEOUT_SECONDS,
     IGNORED_DIR_NAMES,
-    MAX_DIFF_CHARS,
     MAX_FILE_BYTES,
+    MAX_LIST_FILES_ENTRIES,
     MAX_TREE_ENTRIES,
     MAX_UNTRACKED_FILE_CHARS,
 )
+from agent.modules.workspaces.file_info_utils import (
+    file_info_is_dir,
+    file_info_modified_at,
+    file_info_name,
+    file_info_path,
+    file_info_size,
+)
+from agent.modules.workspaces.git_utils import (
+    git_relative_path,
+    git_status_args,
+    parse_git_status,
+    truncate_diff,
+)
+from agent.modules.workspaces.posix_utils import normalize_posix_path
+from agent.modules.workspaces.refs import WorkspaceRef
+from agent.modules.workspaces.sandbox_backend import SandboxBackendBase
 
 
 logger = logging.getLogger(__name__)
@@ -663,9 +677,7 @@ def daytona_relative_path(root: str, path: str) -> str:
     return target[len(root) + 1 :]
 
 
-class DaytonaWorkspaceBackend:
-    """Workspace backend backed by a Daytona sandbox."""
-
+class DaytonaWorkspaceBackend(SandboxBackendBase):
     def __init__(
         self,
         ref: WorkspaceRef,
@@ -673,9 +685,7 @@ class DaytonaWorkspaceBackend:
         sandbox: Any | None = None,
         thread_id: str | None = None,
     ) -> None:
-        if ref.backend != DAYTONA_BACKEND:
-            raise ValueError(f"Unsupported workspace backend: {ref.backend}")
-        self.ref = ref
+        super().__init__(ref)
         self.thread_id = _thread_root_id(thread_id)
         self.client = None if sandbox is not None else get_daytona_client()
         self.sandbox = sandbox if sandbox is not None else self.client.get(ref.locator)
@@ -829,28 +839,31 @@ class DaytonaWorkspaceBackend:
         )
 
     async def tree(self, path: str | None = None) -> dict[str, Any]:
+        """Return directory listing for *path* (Daytona override for sync fs API)."""
+        from agent.modules.workspaces.posix_utils import resolve_remote_path
+
         self.ensure_active()
-        target = resolve_daytona_path(self.root, path or ".")
+        target = resolve_remote_path(self.root, path or ".")
         entries: list[dict[str, Any]] = []
         truncated = False
         for item in self.fs.list_files(target):
-            name = _file_info_name(item)
+            name = file_info_name(item)
             if not name:
                 continue
-            is_dir = _file_info_is_dir(item)
+            is_dir = file_info_is_dir(item)
             if is_dir and name in IGNORED_DIR_NAMES:
                 continue
             if len(entries) >= MAX_TREE_ENTRIES:
                 truncated = True
                 break
-            entry_path = _file_info_path(item, target)
+            entry_path = file_info_path(item, target)
             entries.append(
                 {
                     "name": name,
                     "path": entry_path,
                     "kind": "directory" if is_dir else "file",
-                    "size": _file_info_size(item) if not is_dir else None,
-                    "modified_at": _file_info_modified_at(item),
+                    "size": file_info_size(item) if not is_dir else None,
+                    "modified_at": file_info_modified_at(item),
                 }
             )
         entries.sort(
@@ -864,12 +877,15 @@ class DaytonaWorkspaceBackend:
         }
 
     async def file(self, path: str) -> dict[str, Any]:
+        """Return file content and metadata (Daytona override for sync fs API)."""
+        from agent.modules.workspaces.posix_utils import resolve_remote_path
+
         self.ensure_active()
-        remote_path = resolve_daytona_path(self.root, path)
+        remote_path = resolve_remote_path(self.root, path)
         info = self.fs.get_file_info(remote_path)
-        if _file_info_is_dir(info):
+        if file_info_is_dir(info):
             raise ValueError(f"Path is not a file: {path}")
-        size = _file_info_size(info)
+        size = file_info_size(info)
         raw = self._download_file(remote_path)
         if isinstance(raw, str):
             raw_bytes = raw.encode("utf-8")
@@ -902,6 +918,7 @@ class DaytonaWorkspaceBackend:
         }
 
     async def changes(self) -> dict[str, Any]:
+        """Return git status for the workspace (Daytona override for sync API)."""
         self.ensure_active()
         git_root = self._find_git_root()
         if git_root is None:
@@ -911,8 +928,8 @@ class DaytonaWorkspaceBackend:
                 "changes": [],
                 "message": "Workspace is not a Git repository.",
             }
-        output = self._run_git(_git_status_args(), cwd=self.root)
-        changes = _parse_git_status(output, workspace_root=self.root, git_root=git_root)
+        output = self._run_git(git_status_args(), cwd=self.root)
+        changes = parse_git_status(output, workspace_root=self.root, git_root=git_root)
         for change in changes:
             additions, deletions = self._change_line_stats(change, git_root=git_root)
             change["additions"] = additions
@@ -925,10 +942,16 @@ class DaytonaWorkspaceBackend:
         }
 
     async def diff(self, path: str) -> dict[str, Any]:
+        """Return git diff for a single file (Daytona override for sync API)."""
+        from agent.modules.workspaces.posix_utils import (
+            relative_remote_path,
+            resolve_remote_path,
+        )
+
         self.ensure_active()
-        remote_path = resolve_daytona_path(self.root, path)
-        relative_path = daytona_relative_path(self.root, remote_path)
-        if not relative_path:
+        remote_path = resolve_remote_path(self.root, path)
+        relative = relative_remote_path(self.root, remote_path)
+        if not relative:
             raise ValueError("File path is required.")
 
         git_root = self._find_git_root()
@@ -945,31 +968,31 @@ class DaytonaWorkspaceBackend:
 
         status_by_path = {
             change["path"]: change
-            for change in _parse_git_status(
-                self._run_git(_git_status_args(), cwd=self.root),
+            for change in parse_git_status(
+                self._run_git(git_status_args(), cwd=self.root),
                 workspace_root=self.root,
                 git_root=git_root,
             )
         }
         change = status_by_path.get(remote_path)
         status = str(change.get("status") or "") if change else ""
-        git_path = _git_relative_path(git_root, remote_path)
+        gpath = git_relative_path(git_root, remote_path)
         if status == "untracked":
-            diff = await self._build_untracked_diff(remote_path, relative_path)
+            diff = await self._build_untracked_diff(remote_path, relative)
         else:
             staged = self._run_git(
-                ["diff", "--cached", "--no-ext-diff", "--", git_path],
+                ["diff", "--cached", "--no-ext-diff", "--", gpath],
                 cwd=git_root,
             )
             unstaged = self._run_git(
-                ["diff", "--no-ext-diff", "--", git_path],
+                ["diff", "--no-ext-diff", "--", gpath],
                 cwd=git_root,
             )
             diff = "\n".join(
                 part for part in (staged.strip(), unstaged.strip()) if part
             )
 
-        diff, truncated = _truncate_diff(diff)
+        diff, truncated = truncate_diff(diff)
         return {
             "root": self.root,
             "path": remote_path,
@@ -981,19 +1004,25 @@ class DaytonaWorkspaceBackend:
         }
 
     async def rename(self, *, path: str, new_name: str) -> dict[str, Any]:
+        """Rename a file or directory (Daytona override for sync API)."""
+        from agent.modules.workspaces.posix_utils import (
+            relative_remote_path,
+            resolve_remote_path,
+        )
+
         self.ensure_active()
-        source = resolve_daytona_path(self.root, path)
-        relative_path = daytona_relative_path(self.root, source)
-        if not relative_path:
+        source = resolve_remote_path(self.root, path)
+        relative = relative_remote_path(self.root, source)
+        if not relative:
             raise ValueError("Cannot rename workspace root.")
         clean_name = str(new_name or "").strip()
         if not clean_name or clean_name in {".", ".."}:
             raise ValueError("New name is invalid.")
         if "/" in clean_name or "\\" in clean_name:
             raise ValueError("New name must not contain path separators.")
-        destination = resolve_daytona_path(
+        destination = resolve_remote_path(
             self.root,
-            posixpath.join(posixpath.dirname(relative_path), clean_name),
+            posixpath.join(posixpath.dirname(relative), clean_name),
         )
         if destination == source:
             return {"root": self.root, "path": source, "new_path": destination}
@@ -1009,10 +1038,16 @@ class DaytonaWorkspaceBackend:
         return {"root": self.root, "path": source, "new_path": destination}
 
     async def delete(self, *, path: str) -> dict[str, Any]:
+        """Delete a file or directory (Daytona override for sync API)."""
+        from agent.modules.workspaces.posix_utils import (
+            relative_remote_path,
+            resolve_remote_path,
+        )
+
         self.ensure_active()
-        target = resolve_daytona_path(self.root, path)
-        relative_path = daytona_relative_path(self.root, target)
-        if not relative_path:
+        target = resolve_remote_path(self.root, path)
+        relative = relative_remote_path(self.root, target)
+        if not relative:
             raise ValueError("Cannot delete workspace root.")
         kind_result = self._exec(
             f"if [ -d {shlex.quote(target)} ]; then echo directory; "
@@ -1080,6 +1115,12 @@ class DaytonaWorkspaceBackend:
     def _upload_file(self, content: bytes, path: str) -> None:
         self.fs.upload_file(content, path)
 
+    def _make_directory(self, path: str) -> None:
+        self._exec(f"mkdir -p {shlex.quote(path)}", cwd="/")
+
+    def _stat_file(self, path: str) -> Any:
+        return self.fs.get_file_info(path)
+
     def _run_git(self, args: list[str], *, cwd: str) -> str:
         command = "git " + " ".join(shlex.quote(arg) for arg in args)
         result = self._exec(command, cwd=cwd, timeout=GIT_TIMEOUT_SECONDS)
@@ -1105,30 +1146,31 @@ class DaytonaWorkspaceBackend:
         *,
         git_root: str,
     ) -> tuple[int, int]:
+        """Compute addition/deletion line counts for a single change."""
+        from agent.modules.workspaces.git_utils import (
+            compute_change_line_stats_from_numstat,
+            git_relative_path,
+        )
+
         path = str(change.get("path") or "")
         if not path:
             return 0, 0
         if change.get("status") == "untracked":
             return self._text_line_count(path), 0
-        git_path = _git_relative_path(git_root, path)
+        gpath = git_relative_path(git_root, path)
         additions = 0
         deletions = 0
         for args in (
-            ["diff", "--numstat", "--cached", "--no-ext-diff", "--", git_path],
-            ["diff", "--numstat", "--no-ext-diff", "--", git_path],
+            ["diff", "--numstat", "--cached", "--no-ext-diff", "--", gpath],
+            ["diff", "--numstat", "--no-ext-diff", "--", gpath],
         ):
             try:
                 output = self._run_git(args, cwd=git_root)
             except Exception:
                 continue
-            for line in output.splitlines():
-                fields = line.split("\t", 2)
-                if len(fields) < 2:
-                    continue
-                if fields[0].isdigit():
-                    additions += int(fields[0])
-                if fields[1].isdigit():
-                    deletions += int(fields[1])
+            a, d = compute_change_line_stats_from_numstat(output)
+            additions += a
+            deletions += d
         return additions, deletions
 
     def _text_line_count(self, path: str) -> int:
@@ -1150,31 +1192,12 @@ class DaytonaWorkspaceBackend:
             content = await self.read_text(path)
         except Exception:
             return ""
-        truncated = len(content) > MAX_UNTRACKED_FILE_CHARS
-        if truncated:
-            content = content[:MAX_UNTRACKED_FILE_CHARS]
-        lines = content.splitlines(keepends=True)
-        diff_lines = difflib.unified_diff(
-            [],
-            lines,
-            fromfile="/dev/null",
-            tofile=f"b/{relative_path}",
-            lineterm="",
-        )
-        diff = "\n".join(diff_lines)
-        if truncated:
-            diff += "\n...[truncated]"
-        return diff
+        from agent.modules.workspaces.git_utils import build_untracked_diff_content
+        return build_untracked_diff_content(content, relative_path)
 
 
 def _normalize_posix_path(value: str) -> str:
-    raw = str(value or "").strip().replace("\\", "/")
-    if not raw:
-        raw = "."
-    normalized = posixpath.normpath(raw)
-    if normalized == ".":
-        return ""
-    return normalized.rstrip("/") or "/"
+    return normalize_posix_path(value)
 
 
 def clone_repository_in_daytona_sandbox(
@@ -1203,69 +1226,28 @@ def clone_repository_in_daytona_sandbox(
 
 
 def _file_info_name(item: Any) -> str:
-    raw_name = getattr(item, "name", "")
-    return str(raw_name or "").strip().rstrip("/")
+    return file_info_name(item)
 
 
 def _file_info_is_dir(item: Any) -> bool:
-    value = getattr(item, "is_dir", None)
-    if value is None:
-        value = getattr(item, "is_directory", None)
-    return bool(value)
+    return file_info_is_dir(item)
 
 
 def _file_info_size(item: Any) -> int:
-    try:
-        return int(getattr(item, "size", 0) or 0)
-    except (TypeError, ValueError):
-        return 0
+    return file_info_size(item)
 
 
 def _file_info_modified_at(item: Any) -> float:
-    value = getattr(item, "mod_time", None)
-    if value is None:
-        value = getattr(item, "modified_at", None)
-    if value is None:
-        return 0.0
-    if isinstance(value, (int, float)):
-        return float(value)
-    timestamp = getattr(value, "timestamp", None)
-    if callable(timestamp):
-        try:
-            return float(timestamp())
-        except Exception:
-            return 0.0
-    if isinstance(value, str):
-        try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
-        except ValueError:
-            pass
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return 0.0
+    return file_info_modified_at(item)
 
 
 def _file_info_path(item: Any, parent: str) -> str:
-    path_value = str(getattr(item, "path", "") or "").strip()
-    if path_value:
-        return _normalize_posix_path(path_value)
-    name = _file_info_name(item)
-    if name == parent or name.startswith(f"{parent}/") or posixpath.isabs(name):
-        return _normalize_posix_path(name)
-    return _normalize_posix_path(posixpath.join(parent, name))
+    return file_info_path(item, parent)
 
 
 def _git_status_args() -> list[str]:
-    return [
-        "-c",
-        "status.relativePaths=false",
-        "status",
-        "--porcelain=v1",
-        "-z",
-        "--",
-        ".",
-    ]
+    from agent.modules.workspaces.git_utils import git_status_args
+    return git_status_args()
 
 
 def _parse_git_status(
@@ -1274,69 +1256,23 @@ def _parse_git_status(
     workspace_root: str,
     git_root: str,
 ) -> list[dict[str, Any]]:
-    changes: list[dict[str, Any]] = []
-    items = output.split("\0")
-    index = 0
-    while index < len(items):
-        item = items[index]
-        index += 1
-        if not item or len(item) < 4:
-            continue
-        code = item[:2]
-        raw_path = item[3:]
-        old_path = ""
-        if ("R" in code or "C" in code) and index < len(items):
-            old_path = items[index]
-            index += 1
-        if code == "!!":
-            continue
-        absolute_path = _normalize_posix_path(posixpath.join(git_root, raw_path))
-        if absolute_path != workspace_root and not absolute_path.startswith(
-            f"{workspace_root}/"
-        ):
-            continue
-        entry = {
-            "path": absolute_path,
-            "status": _status_label(code),
-            "index_status": code[0],
-            "working_tree_status": code[1],
-        }
-        if old_path:
-            old_absolute = _normalize_posix_path(posixpath.join(git_root, old_path))
-            if old_absolute == workspace_root or old_absolute.startswith(
-                f"{workspace_root}/"
-            ):
-                entry["old_path"] = old_absolute
-        changes.append(entry)
-    return sorted(changes, key=lambda change: change["path"])
+    from agent.modules.workspaces.git_utils import parse_git_status
+    return parse_git_status(output, workspace_root=workspace_root, git_root=git_root)
 
 
 def _status_label(code: str) -> str:
-    if code == "??":
-        return "untracked"
-    if "R" in code:
-        return "renamed"
-    if "A" in code and "D" not in code:
-        return "added"
-    if "D" in code and "A" not in code:
-        return "deleted"
-    return "modified"
+    from agent.modules.workspaces.git_utils import status_label
+    return status_label(code)
 
 
 def _git_relative_path(git_root: str, target: str) -> str:
-    target_path = _normalize_posix_path(target)
-    root = _normalize_posix_path(git_root)
-    if target_path == root:
-        return ""
-    if not target_path.startswith(f"{root}/"):
-        raise ValueError("Path escapes Git repository.")
-    return target_path[len(root) + 1 :]
+    from agent.modules.workspaces.git_utils import git_relative_path
+    return git_relative_path(git_root, target)
 
 
 def _truncate_diff(diff: str) -> tuple[str, bool]:
-    if len(diff) <= MAX_DIFF_CHARS:
-        return diff, False
-    return diff[:MAX_DIFF_CHARS] + "\n...[truncated]", True
+    from agent.modules.workspaces.git_utils import truncate_diff
+    return truncate_diff(diff)
 
 
 __all__ = [

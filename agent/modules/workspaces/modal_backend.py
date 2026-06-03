@@ -1,24 +1,37 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-import difflib
 import logging
-import mimetypes
 import posixpath
 import shlex
 from datetime import datetime, timezone
 from typing import Any, TypeVar
 
 from agent.modules.workspaces.backends import CommandResult, WorkspaceUnavailableError
-from agent.modules.workspaces.local_backend import MAX_LIST_FILES_ENTRIES
-from agent.modules.workspaces.refs import WorkspaceRef
-from agent.modules.workspaces.service import (
+from agent.modules.workspaces.constants import (
+    GIT_TIMEOUT_SECONDS,
     IGNORED_DIR_NAMES,
-    MAX_DIFF_CHARS,
     MAX_FILE_BYTES,
+    MAX_LIST_FILES_ENTRIES,
     MAX_TREE_ENTRIES,
     MAX_UNTRACKED_FILE_CHARS,
 )
+from agent.modules.workspaces.file_info_utils import (
+    file_info_is_dir,
+    file_info_modified_at,
+    file_info_name,
+    file_info_path,
+    file_info_size,
+)
+from agent.modules.workspaces.git_utils import (
+    git_relative_path,
+    git_status_args,
+    parse_git_status,
+    truncate_diff,
+)
+from agent.modules.workspaces.posix_utils import normalize_posix_path
+from agent.modules.workspaces.refs import WorkspaceRef
+from agent.modules.workspaces.sandbox_backend import SandboxBackendBase
 
 logger = logging.getLogger(__name__)
 
@@ -323,7 +336,7 @@ def modal_relative_path(root: str, path: str) -> str:
     return target[len(normalized_root) + 1 :]
 
 
-class ModalWorkspaceBackend:
+class ModalWorkspaceBackend(SandboxBackendBase):
     """Workspace backend backed by a Modal sandbox."""
 
     def __init__(
@@ -334,9 +347,7 @@ class ModalWorkspaceBackend:
         fs: Any | None = None,
         client: Any | None = None,
     ) -> None:
-        if ref.backend != MODAL_BACKEND:
-            raise ValueError(f"Unsupported workspace backend: {ref.backend}")
-        self.ref = ref
+        super().__init__(ref)
         self.sandbox = sandbox
         self.fs = fs
         self.client = client
@@ -367,6 +378,10 @@ class ModalWorkspaceBackend:
 
     async def ensure_root(self) -> None:
         await self._make_directory(self.root)
+
+    def ensure_active(self) -> None:
+        """Ensure the sandbox is active (Modal uses touch for lifecycle)."""
+        self.touch()
 
     async def ensure_git(self) -> None:
         """Install git in the sandbox if it is not already available."""
@@ -504,29 +519,32 @@ class ModalWorkspaceBackend:
         )
 
     async def tree(self, path: str | None = None) -> dict[str, Any]:
+        """Return directory listing for *path* (Modal override for async fs API)."""
+        from agent.modules.workspaces.posix_utils import resolve_remote_path
+
         self.touch()
-        target = resolve_modal_path(self.root, path or ".")
+        target = resolve_remote_path(self.root, path or ".")
         entries: list[dict[str, Any]] = []
         truncated = False
         items = await self._run_remote_aio(lambda: self.fs.list_files.aio(target))
         for item in items:
-            name = _file_info_name(item)
+            name = file_info_name(item)
             if not name:
                 continue
-            is_dir = _file_info_is_dir(item)
+            is_dir = file_info_is_dir(item)
             if is_dir and name in IGNORED_DIR_NAMES:
                 continue
             if len(entries) >= MAX_TREE_ENTRIES:
                 truncated = True
                 break
-            entry_path = _file_info_path(item, target)
+            entry_path = file_info_path(item, target)
             entries.append(
                 {
                     "name": name,
                     "path": entry_path,
                     "kind": "directory" if is_dir else "file",
-                    "size": _file_info_size(item) if not is_dir else None,
-                    "modified_at": _file_info_modified_at(item),
+                    "size": file_info_size(item) if not is_dir else None,
+                    "modified_at": file_info_modified_at(item),
                 }
             )
         entries.sort(
@@ -540,10 +558,14 @@ class ModalWorkspaceBackend:
         }
 
     async def file(self, path: str) -> dict[str, Any]:
+        """Return file content and metadata (Modal override for async fs API)."""
+        import mimetypes
+        from agent.modules.workspaces.posix_utils import resolve_remote_path
+
         self.touch()
-        remote_path = resolve_modal_path(self.root, path)
+        remote_path = resolve_remote_path(self.root, path)
         info = await self._stat(remote_path)
-        if _file_info_is_dir(info):
+        if file_info_is_dir(info):
             raise ValueError(f"Path is not a file: {path}")
         raw_bytes = await self._read_bytes(remote_path)
         truncated = len(raw_bytes) > MAX_FILE_BYTES
@@ -555,7 +577,7 @@ class ModalWorkspaceBackend:
                 "root": self.root,
                 "path": remote_path,
                 "mime_type": mime_type,
-                "size": _file_info_size(info),
+                "size": file_info_size(info),
                 "content": "",
                 "truncated": truncated,
                 "binary": True,
@@ -565,7 +587,7 @@ class ModalWorkspaceBackend:
             "root": self.root,
             "path": remote_path,
             "mime_type": mime_type,
-            "size": _file_info_size(info),
+            "size": file_info_size(info),
             "content": raw_bytes.decode("utf-8", errors="replace"),
             "truncated": truncated,
             "binary": False,
@@ -573,6 +595,7 @@ class ModalWorkspaceBackend:
         }
 
     async def changes(self) -> dict[str, Any]:
+        """Return git status for the workspace (Modal override for async API)."""
         self.touch()
         git_root = await self._find_git_root()
         if git_root is None:
@@ -582,8 +605,8 @@ class ModalWorkspaceBackend:
                 "changes": [],
                 "message": "Workspace is not a Git repository.",
             }
-        output = await self._run_git(_git_status_args(), cwd=self.root)
-        changes = _parse_git_status(output, workspace_root=self.root, git_root=git_root)
+        output = await self._run_git(git_status_args(), cwd=self.root)
+        changes = parse_git_status(output, workspace_root=self.root, git_root=git_root)
         for change in changes:
             additions, deletions = await self._change_line_stats(change, git_root=git_root)
             change["additions"] = additions
@@ -596,10 +619,16 @@ class ModalWorkspaceBackend:
         }
 
     async def diff(self, path: str) -> dict[str, Any]:
+        """Return git diff for a single file (Modal override for async API)."""
+        from agent.modules.workspaces.posix_utils import (
+            relative_remote_path,
+            resolve_remote_path,
+        )
+
         self.touch()
-        remote_path = resolve_modal_path(self.root, path)
-        relative_path = modal_relative_path(self.root, remote_path)
-        if not relative_path:
+        remote_path = resolve_remote_path(self.root, path)
+        relative = relative_remote_path(self.root, remote_path)
+        if not relative:
             raise ValueError("File path is required.")
 
         git_root = await self._find_git_root()
@@ -616,31 +645,31 @@ class ModalWorkspaceBackend:
 
         status_by_path = {
             change["path"]: change
-            for change in _parse_git_status(
-                await self._run_git(_git_status_args(), cwd=self.root),
+            for change in parse_git_status(
+                await self._run_git(git_status_args(), cwd=self.root),
                 workspace_root=self.root,
                 git_root=git_root,
             )
         }
         change = status_by_path.get(remote_path)
         status = str(change.get("status") or "") if change else ""
-        git_path = _git_relative_path(git_root, remote_path)
+        gpath = git_relative_path(git_root, remote_path)
         if status == "untracked":
-            diff = await self._build_untracked_diff(remote_path, relative_path)
+            diff = await self._build_untracked_diff(remote_path, relative)
         else:
             staged = await self._run_git(
-                ["diff", "--cached", "--no-ext-diff", "--", git_path],
+                ["diff", "--cached", "--no-ext-diff", "--", gpath],
                 cwd=git_root,
             )
             unstaged = await self._run_git(
-                ["diff", "--no-ext-diff", "--", git_path],
+                ["diff", "--no-ext-diff", "--", gpath],
                 cwd=git_root,
             )
             diff = "\n".join(
                 part for part in (staged.strip(), unstaged.strip()) if part
             )
 
-        diff, truncated = _truncate_diff(diff)
+        diff, truncated = truncate_diff(diff)
         return {
             "root": self.root,
             "path": remote_path,
@@ -652,19 +681,25 @@ class ModalWorkspaceBackend:
         }
 
     async def rename(self, *, path: str, new_name: str) -> dict[str, Any]:
+        """Rename a file or directory (Modal override for async API)."""
+        from agent.modules.workspaces.posix_utils import (
+            relative_remote_path,
+            resolve_remote_path,
+        )
+
         self.touch()
-        source = resolve_modal_path(self.root, path)
-        relative_path = modal_relative_path(self.root, source)
-        if not relative_path:
+        source = resolve_remote_path(self.root, path)
+        relative = relative_remote_path(self.root, source)
+        if not relative:
             raise ValueError("Cannot rename workspace root.")
         clean_name = str(new_name or "").strip()
         if not clean_name or clean_name in {".", ".."}:
             raise ValueError("New name is invalid.")
         if "/" in clean_name or "\\" in clean_name:
             raise ValueError("New name must not contain path separators.")
-        destination = resolve_modal_path(
+        destination = resolve_remote_path(
             self.root,
-            posixpath.join(posixpath.dirname(relative_path), clean_name),
+            posixpath.join(posixpath.dirname(relative), clean_name),
         )
         if destination == source:
             return {"root": self.root, "path": source, "new_path": destination}
@@ -680,10 +715,16 @@ class ModalWorkspaceBackend:
         return {"root": self.root, "path": source, "new_path": destination}
 
     async def delete(self, *, path: str) -> dict[str, Any]:
+        """Delete a file or directory (Modal override for async API)."""
+        from agent.modules.workspaces.posix_utils import (
+            relative_remote_path,
+            resolve_remote_path,
+        )
+
         self.touch()
-        target = resolve_modal_path(self.root, path)
-        relative_path = modal_relative_path(self.root, target)
-        if not relative_path:
+        target = resolve_remote_path(self.root, path)
+        relative = relative_remote_path(self.root, target)
+        if not relative:
             raise ValueError("Cannot delete workspace root.")
         kind_result = await self._exec(
             f"if [ -d {shlex.quote(target)} ]; then echo directory; "
@@ -767,6 +808,48 @@ class ModalWorkspaceBackend:
             _raise_if_modal_unavailable(self.ref, exc)
             raise
 
+    def _download_file(self, path: str) -> bytes | str:
+        """Download file content from the Modal sandbox."""
+        reader = getattr(self.fs, "read_bytes", None)
+        if callable(reader):
+            raw = reader(path)
+        else:
+            aio_read_text = getattr(self.fs.read_text, None)
+            if callable(aio_read_text):
+                raw = aio_read_text(path)
+            else:
+                raw = self.fs.read_text(path)
+        if isinstance(raw, str):
+            return raw.encode("utf-8")
+        return bytes(raw or b"")
+
+    def _upload_file(self, content: bytes, path: str) -> None:
+        """Upload file content to the Modal sandbox."""
+        writer = getattr(self.fs, "write_bytes", None)
+        if callable(writer):
+            writer(content, path)
+        else:
+            writer_text = getattr(self.fs, "write_text", None)
+            if callable(writer_text):
+                writer_text(content.decode("utf-8"), path)
+
+    def _stat_file(self, path: str) -> Any:
+        """Return a file-info object for *path*."""
+        statter = getattr(self.fs, "stat", None)
+        if callable(statter):
+            return statter(path)
+        getter = getattr(self.fs, "get_file_info", None)
+        if callable(getter):
+            return getter(path)
+        aio_list = getattr(self.fs.list_files, None)
+        if callable(aio_list):
+            parent = posixpath.dirname(path) or "/"
+            items = aio_list(parent)
+            for item in items:
+                if file_info_path(item, parent) == path:
+                    return item
+        raise FileNotFoundError(path)
+
     async def _stat(self, path: str) -> Any:
         statter = getattr(self.fs, "stat", None)
         if callable(statter):
@@ -836,17 +919,20 @@ class ModalWorkspaceBackend:
         *,
         git_root: str,
     ) -> tuple[int, int]:
+        """Compute addition/deletion line counts for a single change."""
+        from agent.modules.workspaces.git_utils import compute_change_line_stats_from_numstat
+
         path = str(change.get("path") or "")
         if not path:
             return 0, 0
         if change.get("status") == "untracked":
             return await self._text_line_count(path), 0
-        git_path = _git_relative_path(git_root, path)
+        gpath = git_relative_path(git_root, path)
         additions = 0
         deletions = 0
         for args in (
-            ["diff", "--numstat", "--cached", "--no-ext-diff", "--", git_path],
-            ["diff", "--numstat", "--no-ext-diff", "--", git_path],
+            ["diff", "--numstat", "--cached", "--no-ext-diff", "--", gpath],
+            ["diff", "--numstat", "--no-ext-diff", "--", gpath],
         ):
             try:
                 output = await self._run_git(args, cwd=git_root)
@@ -854,14 +940,9 @@ class ModalWorkspaceBackend:
                 raise
             except Exception:
                 continue
-            for line in output.splitlines():
-                fields = line.split("\t", 2)
-                if len(fields) < 2:
-                    continue
-                if fields[0].isdigit():
-                    additions += int(fields[0])
-                if fields[1].isdigit():
-                    deletions += int(fields[1])
+            a, d = compute_change_line_stats_from_numstat(output)
+            additions += a
+            deletions += d
         return additions, deletions
 
     async def _text_line_count(self, path: str) -> int:
@@ -880,37 +961,20 @@ class ModalWorkspaceBackend:
         return len(text.splitlines()) or (1 if text else 0)
 
     async def _build_untracked_diff(self, path: str, relative_path: str) -> str:
+        """Build a unified diff for an untracked file."""
+        from agent.modules.workspaces.git_utils import build_untracked_diff_content
+
         try:
             content = await self.read_text(path)
         except WorkspaceUnavailableError:
             raise
         except Exception:
             return ""
-        truncated = len(content) > MAX_UNTRACKED_FILE_CHARS
-        if truncated:
-            content = content[:MAX_UNTRACKED_FILE_CHARS]
-        lines = content.splitlines(keepends=True)
-        diff_lines = difflib.unified_diff(
-            [],
-            lines,
-            fromfile="/dev/null",
-            tofile=f"b/{relative_path}",
-            lineterm="",
-        )
-        diff = "\n".join(diff_lines)
-        if truncated:
-            diff += "\n...[truncated]"
-        return diff
+        return build_untracked_diff_content(content, relative_path)
 
 
 def _normalize_posix_path(value: str) -> str:
-    raw = str(value or "").strip().replace("\\", "/")
-    if not raw:
-        raw = "."
-    normalized = posixpath.normpath(raw)
-    if normalized == ".":
-        return ""
-    return normalized.rstrip("/") or "/"
+    return normalize_posix_path(value)
 
 
 async def clone_repository_in_modal_sandbox(
@@ -973,11 +1037,7 @@ def _read_stream(stream: Any) -> str:
 
 
 def _file_info_name(item: Any) -> str:
-    raw_name = getattr(item, "name", "")
-    if not raw_name:
-        path_value = str(getattr(item, "path", "") or "").strip()
-        raw_name = path_value.rsplit("/", 1)[-1]
-    return str(raw_name or "").strip().rstrip("/")
+    return file_info_name(item)
 
 
 def _file_info_type(item: Any) -> str:
@@ -987,69 +1047,23 @@ def _file_info_type(item: Any) -> str:
 
 
 def _file_info_is_dir(item: Any) -> bool:
-    value = getattr(item, "is_dir", None)
-    if value is None:
-        value = getattr(item, "is_directory", None)
-    if value is not None:
-        return bool(value)
-    info_type = _file_info_type(item)
-    return info_type in {"dir", "directory"}
+    return file_info_is_dir(item)
 
 
 def _file_info_size(item: Any) -> int:
-    try:
-        return int(getattr(item, "size", 0) or 0)
-    except (TypeError, ValueError):
-        return 0
+    return file_info_size(item)
 
 
 def _file_info_modified_at(item: Any) -> float:
-    value = getattr(item, "modified_time", None)
-    if value is None:
-        value = getattr(item, "mod_time", None)
-    if value is None:
-        value = getattr(item, "modified_at", None)
-    if value is None:
-        return 0.0
-    if isinstance(value, (int, float)):
-        return float(value)
-    timestamp = getattr(value, "timestamp", None)
-    if callable(timestamp):
-        try:
-            return float(timestamp())
-        except Exception:
-            return 0.0
-    if isinstance(value, str):
-        try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
-        except ValueError:
-            pass
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return 0.0
+    return file_info_modified_at(item)
 
 
 def _file_info_path(item: Any, parent: str) -> str:
-    path_value = str(getattr(item, "path", "") or "").strip()
-    if path_value:
-        return _normalize_posix_path(path_value)
-    name = _file_info_name(item)
-    if name == parent or name.startswith(f"{parent}/") or posixpath.isabs(name):
-        return _normalize_posix_path(name)
-    return _normalize_posix_path(posixpath.join(parent, name))
+    return file_info_path(item, parent)
 
 
 def _git_status_args() -> list[str]:
-    return [
-        "-c",
-        "status.relativePaths=false",
-        "status",
-        "--porcelain=v1",
-        "-z",
-        "--",
-        ".",
-    ]
+    return git_status_args()
 
 
 def _parse_git_status(
@@ -1058,71 +1072,20 @@ def _parse_git_status(
     workspace_root: str,
     git_root: str,
 ) -> list[dict[str, Any]]:
-    changes: list[dict[str, Any]] = []
-    items = output.split("\0")
-    index = 0
-    while index < len(items):
-        item = items[index]
-        index += 1
-        if not item or len(item) < 4:
-            continue
-        code = item[:2]
-        raw_path = item[3:]
-        old_path = ""
-        if ("R" in code or "C" in code) and index < len(items):
-            old_path = items[index]
-            index += 1
-        if code == "!!":
-            continue
-        absolute_path = _normalize_posix_path(posixpath.join(git_root, raw_path))
-        if absolute_path != workspace_root and not absolute_path.startswith(
-            f"{workspace_root}/"
-        ):
-            continue
-        entry = {
-            "path": absolute_path,
-            "status": _status_label(code),
-            "index_status": code[0],
-            "working_tree_status": code[1],
-        }
-        if old_path:
-            old_absolute = _normalize_posix_path(posixpath.join(git_root, old_path))
-            if old_absolute == workspace_root or old_absolute.startswith(
-                f"{workspace_root}/"
-            ):
-                entry["old_path"] = old_absolute
-        changes.append(entry)
-    return sorted(changes, key=lambda change: change["path"])
+    return parse_git_status(output, workspace_root=workspace_root, git_root=git_root)
 
 
 def _status_label(code: str) -> str:
-    if code == "??":
-        return "untracked"
-    if "R" in code:
-        return "renamed"
-    if "A" in code and "D" not in code:
-        return "added"
-    if "D" in code and "A" not in code:
-        return "deleted"
-    return "modified"
+    from agent.modules.workspaces.git_utils import status_label
+    return status_label(code)
 
 
 def _git_relative_path(git_root: str, target: str) -> str:
-    target_path = _normalize_posix_path(target)
-    root = _normalize_posix_path(git_root)
-    if target_path == root:
-        return ""
-    if root == "/":
-        return target_path.lstrip("/")
-    if not target_path.startswith(f"{root}/"):
-        raise ValueError("Path escapes Git repository.")
-    return target_path[len(root) + 1 :]
+    return git_relative_path(git_root, target)
 
 
 def _truncate_diff(diff: str) -> tuple[str, bool]:
-    if len(diff) <= MAX_DIFF_CHARS:
-        return diff, False
-    return diff[:MAX_DIFF_CHARS] + "\n...[truncated]", True
+    return truncate_diff(diff)
 
 
 __all__ = [

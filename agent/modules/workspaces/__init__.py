@@ -11,6 +11,15 @@ from agent.modules.workspaces.backends import (
     WorkspaceRepositoryCloner,
     WorkspaceUnavailableError,
 )
+from agent.modules.workspaces.constants import (
+    GIT_TIMEOUT_SECONDS,
+    IGNORED_DIR_NAMES,
+    MAX_DIFF_CHARS,
+    MAX_FILE_BYTES,
+    MAX_LIST_FILES_ENTRIES,
+    MAX_TREE_ENTRIES,
+    MAX_UNTRACKED_FILE_CHARS,
+)
 from agent.modules.workspaces.migrations import migrate_workspace_tables
 from agent.modules.workspaces.models import ThreadWorkspace
 from agent.modules.workspaces.refs import (
@@ -26,6 +35,7 @@ from agent.modules.workspaces.repository import (
     serialize_thread_workspace,
     update_thread_workspace_metadata_sync,
 )
+from agent.modules.workspaces.sandbox_backend import SandboxBackendBase
 from agent.modules.workspaces.service import (
     delete_thread_workspace,
     delete_workspace_entry,
@@ -87,9 +97,21 @@ from agent.modules.workspaces.github_clone import (
 __all__ = [
     "CommandResult",
     "DEFAULT_LOCAL_WORKSPACE",
+    "DaytonaWorkspaceLifecycleManager",
+    "DaytonaWorkspaceBackend",
+    "GIT_TIMEOUT_SECONDS",
     "GitHubRepositorySelection",
+    "IGNORED_DIR_NAMES",
+    "MAX_DIFF_CHARS",
+    "MAX_FILE_BYTES",
+    "MAX_LIST_FILES_ENTRIES",
+    "MAX_TREE_ENTRIES",
+    "MAX_UNTRACKED_FILE_CHARS",
+    "ModalWorkspaceBackend",
+    "SandboxBackendBase",
     "ThreadWorkspace",
     "ThreadWorkspaceRepository",
+    "UnsupportedWorkspaceCapabilityError",
     "WorkspaceBackendName",
     "WorkspaceBrowser",
     "WorkspaceChangeInspector",
@@ -97,13 +119,9 @@ __all__ = [
     "WorkspaceEntryMutator",
     "WorkspaceFileIO",
     "WorkspaceLifecycleManager",
-    "WorkspaceRepositoryCloner",
     "WorkspaceRef",
-    "DaytonaWorkspaceLifecycleManager",
-    "UnsupportedWorkspaceCapabilityError",
+    "WorkspaceRepositoryCloner",
     "WorkspaceUnavailableError",
-    "DaytonaWorkspaceBackend",
-    "ModalWorkspaceBackend",
     "archive_daytona_workspace",
     "attach_daytona_workspace",
     "attach_github_repository_to_daytona_workspace",
@@ -118,6 +136,7 @@ __all__ = [
     "delete_modal_workspace",
     "delete_thread_workspace",
     "delete_workspace_entry",
+    "ensure_daytona_workspace_active",
     "ensure_workspace_directory",
     "ensure_workspace_ready",
     "get_thread_workspace_dir",
@@ -143,12 +162,11 @@ __all__ = [
     "remember_thread_workspace",
     "remember_thread_workspace_ref",
     "rename_workspace_entry",
-    "resolve_workspace_ref",
-    "resolve_workspace_root",
     "resolve_daytona_path",
     "resolve_modal_path",
+    "resolve_workspace_ref",
+    "resolve_workspace_root",
     "serialize_thread_workspace",
-    "ensure_daytona_workspace_active",
     "start_daytona_lifecycle_sweeper",
     "stop_daytona_lifecycle_sweeper",
     "stop_daytona_workspace",
