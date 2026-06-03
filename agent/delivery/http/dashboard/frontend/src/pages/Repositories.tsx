@@ -3,11 +3,14 @@ import { createMemo, createSignal, For, JSX, onMount, Show } from "solid-js";
 import {
   ArrowLeft,
   Bot,
+  CloudCog,
+  Cpu,
   GitBranch,
   GitPullRequest,
   MessageSquare,
   Play,
   Save,
+  Server,
   Settings2,
   SlidersHorizontal,
 } from "lucide-solid";
@@ -47,6 +50,7 @@ type RepositoryDraft = {
   tool_policy_mode: "inherit" | "custom";
   allowed_tools: string[];
   branch_prefix: string;
+  workspace_backend: "local" | "daytona" | "modal";
 };
 
 type RepositoryTab = "overview" | "automation" | "optimization" | "activity";
@@ -76,6 +80,7 @@ function toDraft(repo: GitHubRepositoryBinding): RepositoryDraft {
     tool_policy_mode: repo.tool_policy_mode === "custom" ? "custom" : "inherit",
     allowed_tools: repo.allowed_tools || [],
     branch_prefix: repo.branch_prefix || "kaka",
+    workspace_backend: repo.workspace_backend || "local",
   };
 }
 
@@ -127,6 +132,7 @@ function bindingPayload(draft: RepositoryDraft) {
     tool_policy_mode: customTools.length ? "custom" : "inherit",
     allowed_tools: customTools,
     branch_prefix: draft.branch_prefix,
+    workspace_backend: draft.workspace_backend,
   };
 }
 
@@ -672,7 +678,7 @@ function RepositoryOverview(props: {
         <div class="metric-value">{props.activity.active_count}</div>
         <div class="metric-label">Active tasks</div>
       </section>
-      <section class="panel repository-overview-card">
+          <section class="panel repository-overview-card">
         <div class="panel-header">
           <div class="panel-title">Automation Summary</div>
         </div>
@@ -680,6 +686,10 @@ function RepositoryOverview(props: {
           <div class="repository-summary-row">
             <span class="hint">Agent</span>
             <span class="mono">{props.draft.agent_name}</span>
+          </div>
+          <div class="repository-summary-row">
+            <span class="hint">Workspace backend</span>
+            <span class="mono">{props.draft.workspace_backend}</span>
           </div>
           <div class="repository-summary-row">
             <span class="hint">Trigger label</span>
@@ -747,6 +757,12 @@ function RepositoryAutomation(props: {
   agentNames: string[];
   onChange: <K extends keyof RepositoryDraft>(key: K, value: RepositoryDraft[K]) => void;
 }) {
+  const backendOptions = [
+    { value: "local", label: "Local", icon: <Server size={14} /> },
+    { value: "daytona", label: "Daytona", icon: <CloudCog size={14} /> },
+    { value: "modal", label: "Modal", icon: <Cpu size={14} /> },
+  ];
+
   return (
     <section class="panel">
       <div class="panel-header">
@@ -775,6 +791,27 @@ function RepositoryAutomation(props: {
               icon={<Bot size={14} />}
             />
           </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="field">
+            <label>Workspace backend</label>
+            <SelectControl
+              value={props.draft.workspace_backend}
+              options={backendOptions}
+              onChange={(value) => props.onChange("workspace_backend", value as "local" | "daytona" | "modal")}
+              ariaLabel="Workspace backend"
+              icon={<Server size={14} />}
+            />
+            <span class="hint">
+              {props.draft.workspace_backend === "local"
+                ? "Run agent on the host filesystem."
+                : props.draft.workspace_backend === "daytona"
+                  ? "Run agent inside a Daytona cloud sandbox."
+                  : "Run agent inside a Modal serverless sandbox."}
+            </span>
+          </div>
+          <div />
         </div>
 
         <div class="grid-2">

@@ -7,6 +7,7 @@ git operations (commit, push) for non-local backends.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -122,7 +123,6 @@ async def _prepare_remote_workspace(
         attach_github_repository_to_daytona_workspace,
         attach_github_repository_to_modal_workspace,
     )
-    from agent.modules.workspaces.service import resolve_workspace_ref
 
     selection = GitHubRepositorySelection(
         repository_id=int(getattr(binding, "repository_id", 0) or 0),
@@ -132,17 +132,15 @@ async def _prepare_remote_workspace(
         token=token,
     )
 
-    workspace_ref = resolve_workspace_ref(
-        {"backend": backend, "locator": f"github:{binding.full_name}"}
-    )
-
     if backend == "daytona":
+        workspace_ref = await _create_daytona_workspace(binding.full_name)
         ref = await attach_github_repository_to_daytona_workspace(
             workspace_ref,
             selection,
             token=token,
         )
     elif backend == "modal":
+        workspace_ref = await _create_modal_workspace(binding.full_name)
         ref = await attach_github_repository_to_modal_workspace(
             workspace_ref,
             selection,
@@ -160,6 +158,20 @@ async def _prepare_remote_workspace(
         label=ref.label,
         metadata=metadata,
     )
+
+
+async def _create_daytona_workspace(label: str) -> WorkspaceRef:
+    """Create a new Daytona sandbox and return its WorkspaceRef."""
+    from agent.modules.workspaces.daytona_backend import create_daytona_workspace
+
+    return await asyncio.to_thread(create_daytona_workspace, label=label)
+
+
+async def _create_modal_workspace(label: str) -> WorkspaceRef:
+    """Create a new Modal sandbox and return its WorkspaceRef."""
+    from agent.modules.workspaces.modal_backend import create_modal_workspace
+
+    return await create_modal_workspace(label=label)
 
 
 async def remote_has_changes(ref: WorkspaceRef) -> bool:

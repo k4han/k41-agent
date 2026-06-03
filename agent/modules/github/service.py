@@ -54,6 +54,7 @@ class GitHubTaskContext:
     completion_mode: str = COMPLETION_OPEN_PULL_REQUEST
     review_comment_id: int | None = None
     repository_instructions: str = ""
+    workspace_ref: WorkspaceRef | None = None
 
 
 def verify_webhook_signature(
@@ -69,6 +70,9 @@ def verify_webhook_signature(
 
 
 def _github_workspace_ref(context: GitHubTaskContext, *, backend: str = "local") -> WorkspaceRef:
+    if context.workspace_ref is not None:
+        return context.workspace_ref
+
     if backend == "local":
         return workspace_ref_from_local_path(
             str(context.workspace_path),
@@ -441,6 +445,7 @@ class GitHubAutomationService:
             base_branch=workspace.metadata.get("base_branch", binding.default_branch or "main"),
             workspace_path=workspace.locator if workspace_backend == "local" else Path(workspace.locator),
             repository_instructions=_repository_instructions(binding),
+            workspace_ref=workspace,
         )
         prompt = _build_agent_prompt(
             event=event,
@@ -513,6 +518,7 @@ class GitHubAutomationService:
             completion_mode=COMPLETION_UPDATE_PULL_REQUEST,
             review_comment_id=_optional_int(comment.get("id")),
             repository_instructions=_repository_instructions(binding),
+            workspace_ref=workspace,
         )
         prompt = _build_agent_prompt(
             event="pull_request_review_comment",

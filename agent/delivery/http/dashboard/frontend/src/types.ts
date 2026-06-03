@@ -333,6 +333,7 @@ export type GitHubRepositoryBinding = {
   tool_policy_mode: "inherit" | "custom";
   allowed_tools: string[];
   branch_prefix: string;
+  workspace_backend: "local" | "daytona" | "modal";
   last_synced_at: string | null;
   created_at: string | null;
   updated_at: string | null;
