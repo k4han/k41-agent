@@ -9,6 +9,7 @@ import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
+import { fetchCatalog, getProviderTypes } from "@/lib/catalogStore";
 import type { ModelCatalog, ProviderRow, ProviderTypeOption, SettingInfo } from "@/types";
 
 import { SettingsLayout } from "./SettingsLayout";
@@ -109,26 +110,11 @@ function providerTypeOptions(payloadOptions: ProviderTypeOption[] | undefined): 
   if (payloadOptions?.length) {
     return payloadOptions;
   }
-  return [
-    {
-      value: "google",
-      label: "Google",
-      description: "Google Gemini provider",
-      requires_base_url: false,
-    },
-    {
-      value: "anthropic",
-      label: "Anthropic",
-      description: "Anthropic Claude provider",
-      requires_base_url: false,
-    },
-    {
-      value: "openai_compatible",
-      label: "OpenAI-compatible",
-      description: "Custom endpoint that implements the OpenAI chat API",
-      requires_base_url: true,
-    },
-  ];
+  const catalogOptions = getProviderTypes();
+  if (catalogOptions.length) {
+    return catalogOptions;
+  }
+  return [];
 }
 
 function buildProviderView(
@@ -503,7 +489,10 @@ export function ProvidersPage() {
     setFallbackModel("");
   };
 
-  onMount(load);
+  onMount(async () => {
+    await fetchCatalog();
+    await load();
+  });
 
   return (
     <SettingsLayout

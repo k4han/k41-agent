@@ -10,6 +10,7 @@ import { DataGate } from "@/components/State";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
+import { fetchCatalog, getPlatforms, getTriggerTypes } from "@/lib/catalogStore";
 import { dateTimeInTimeZone, triggerArgsFromDateInput } from "@/lib/utils";
 import type { Identity, SchedulerJob } from "@/types";
 
@@ -326,7 +327,10 @@ export function SchedulerPage() {
     }
   };
 
-  onMount(load);
+  onMount(async () => {
+    await fetchCatalog();
+    await load();
+  });
 
   return (
     <AppShell
@@ -366,7 +370,7 @@ export function SchedulerPage() {
                       <label>Schedule</label>
                       <SelectControl
                         value={form().trigger_type}
-                        options={[
+                        options={getTriggerTypes().length > 0 ? getTriggerTypes() : [
                           { value: "date", label: "Run once at a time" },
                           { value: "relative", label: "Run once after a delay" },
                           { value: "interval", label: "Run every interval" },
@@ -383,7 +387,7 @@ export function SchedulerPage() {
                         <label>Platform</label>
                         <SelectControl
                           value={form().platform}
-                          options={[
+                          options={getPlatforms().length > 0 ? getPlatforms() : [
                             { value: "telegram", label: "telegram" },
                             { value: "discord", label: "discord" },
                           ]}
@@ -508,7 +512,7 @@ export function SchedulerPage() {
                       <label>Schedule</label>
                       <SelectControl
                         value={editForm().trigger_type}
-                        options={[
+                        options={getTriggerTypes().length > 0 ? getTriggerTypes() : [
                           { value: "date", label: "Run once at a time" },
                           { value: "relative", label: "Run once after a delay" },
                           { value: "interval", label: "Run every interval" },
@@ -525,7 +529,7 @@ export function SchedulerPage() {
                         <label>Platform</label>
                         <SelectControl
                           value={editForm().platform}
-                          options={[
+                          options={getPlatforms().length > 0 ? getPlatforms() : [
                             { value: "telegram", label: "telegram" },
                             { value: "discord", label: "discord" },
                           ]}

@@ -20,6 +20,7 @@ import { DataGate } from "@/components/State";
 import { Dialog } from "@/components/Dialog";
 import { useToast } from "@/components/Toast";
 import { apiFetch, putJson } from "@/lib/api";
+import { fetchCatalog } from "@/lib/catalogStore";
 import type { SettingInfo, SettingsPayload } from "@/types";
 
 import { SettingsLayout } from "./SettingsLayout";
@@ -205,7 +206,10 @@ export function BackendsPage() {
     }
   };
 
-  onMount(load);
+  onMount(async () => {
+    await fetchCatalog();
+    await load();
+  });
 
   createEffect(() => {
     const payload = data();

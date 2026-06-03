@@ -1,0 +1,76 @@
+import { createSignal } from "solid-js";
+import { apiFetch } from "./api";
+import type { CatalogResponse, ChannelCatalogItem, BackendCatalogItem, ProviderTypeOption, SelectOption } from "@/types";
+
+const [catalog, setCatalog] = createSignal<CatalogResponse | null>(null);
+const [loading, setLoading] = createSignal(false);
+const [error, setError] = createSignal<string | null>(null);
+
+let fetchPromise: Promise<CatalogResponse> | null = null;
+
+export async function fetchCatalog(): Promise<CatalogResponse> {
+  if (catalog()) {
+    return catalog()!;
+  }
+  if (fetchPromise) {
+    return fetchPromise;
+  }
+  setLoading(true);
+  setError(null);
+  fetchPromise = apiFetch<CatalogResponse>("/dashboard-api/catalog")
+    .then((data) => {
+      setCatalog(data);
+      setLoading(false);
+      fetchPromise = null;
+      return data;
+    })
+    .catch((err) => {
+      const message = err instanceof Error ? err.message : "Failed to load catalog";
+      setError(message);
+      setLoading(false);
+      fetchPromise = null;
+      throw err;
+    });
+  return fetchPromise;
+}
+
+export async function refreshCatalog(): Promise<CatalogResponse> {
+  fetchPromise = null;
+  return fetchCatalog();
+}
+
+export function getCatalog(): CatalogResponse | null {
+  return catalog();
+}
+
+export function getProviderTypes(): ProviderTypeOption[] {
+  return catalog()?.provider_types ?? [];
+}
+
+export function getChannels(): ChannelCatalogItem[] {
+  return catalog()?.channels ?? [];
+}
+
+export function getBackends(): BackendCatalogItem[] {
+  return catalog()?.backends ?? [];
+}
+
+export function getTriggerTypes(): SelectOption[] {
+  return catalog()?.trigger_types ?? [];
+}
+
+export function getChannelStatuses(): SelectOption[] {
+  return catalog()?.channel_statuses ?? [];
+}
+
+export function getPlatforms(): SelectOption[] {
+  return catalog()?.platforms ?? [];
+}
+
+export function isLoading(): boolean {
+  return loading();
+}
+
+export function getError(): string | null {
+  return error();
+}

@@ -193,6 +193,31 @@ export type ProviderTypeOption = {
   requires_base_url: boolean;
 };
 
+export type ChannelCatalogItem = {
+  name: string;
+  title: string;
+  required_env: string[];
+};
+
+export type BackendCatalogItem = {
+  name: string;
+  title: string;
+};
+
+export type SelectOption = {
+  value: string;
+  label: string;
+};
+
+export type CatalogResponse = {
+  provider_types: ProviderTypeOption[];
+  channels: ChannelCatalogItem[];
+  backends: BackendCatalogItem[];
+  trigger_types: SelectOption[];
+  channel_statuses: SelectOption[];
+  platforms: SelectOption[];
+};
+
 export type SettingsPayload = {
   active_nav: "config" | "providers" | "backends";
   page_title: string;

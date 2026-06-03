@@ -6,6 +6,7 @@ from agent.modules.admin_auth import get_current_admin
 
 from agent.delivery.http.dashboard.routes import (
     agents as agents_routes,
+    catalog as catalog_routes,
     channels as channels_routes,
     conversations as conversations_routes,
     dashboard as dashboard_routes,
@@ -24,6 +25,7 @@ router = APIRouter(tags=["dashboard"], dependencies=[Depends(get_current_admin)]
 
 for child_router in (
     spa_routes.router,
+    catalog_routes.router,
     dashboard_routes.router,
     providers_routes.router,
     github_routes.router,
