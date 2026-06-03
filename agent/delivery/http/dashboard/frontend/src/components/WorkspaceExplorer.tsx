@@ -303,6 +303,14 @@ export function WorkspaceExplorer(props: {
     }
   };
 
+  const reloadPath = async (path: string) => {
+    const targetGeneration = generation;
+    await loadTree(path, targetGeneration);
+    if (targetGeneration === generation) {
+      await loadChanges(targetGeneration);
+    }
+  };
+
   const loadChanges = async (targetGeneration = generation) => {
     if (!canQuery()) {
       return;
@@ -552,7 +560,8 @@ export function WorkspaceExplorer(props: {
         setActiveTab("files");
       }
       cancelRename();
-      refresh();
+      const parentPath = entry.path.split("/").slice(0, -1).join("/") || "";
+      await reloadPath(parentPath);
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Rename failed", "error");
     } finally {
@@ -592,7 +601,8 @@ export function WorkspaceExplorer(props: {
         setActiveTab("files");
       }
       setDeleteTarget(null);
-      refresh();
+      const parentPath = entry.path.split("/").slice(0, -1).join("/") || "";
+      await reloadPath(parentPath);
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Delete failed", "error");
     } finally {

@@ -769,14 +769,7 @@ def get_workspace_changes(working_dir: str | None) -> dict[str, Any]:
 
     output = _run_git(_git_status_args(), cwd=root)
     changes = _parse_git_status(output, workspace_root=root, git_root=git_root)
-    for change in changes:
-        additions, deletions = _change_line_stats(
-            change,
-            workspace_root=root,
-            git_root=git_root,
-        )
-        change["additions"] = additions
-        change["deletions"] = deletions
+    _batch_change_line_stats(changes, workspace_root=root, git_root=git_root)
     return {
         "root": str(root),
         "is_git_repo": True,
@@ -785,7 +778,12 @@ def get_workspace_changes(working_dir: str | None) -> dict[str, Any]:
     }
 
 
-def get_workspace_diff(*, working_dir: str | None, path: str) -> dict[str, Any]:
+def get_workspace_diff(
+    *,
+    working_dir: str | None,
+    path: str,
+    cached_status: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     root = ensure_workspace_directory(working_dir)
     target = resolve_workspace_child(root, path)
     relative_path = workspace_relative_path(root, target)
@@ -805,14 +803,17 @@ def get_workspace_diff(*, working_dir: str | None, path: str) -> dict[str, Any]:
             "message": "Workspace is not a Git repository.",
         }
 
-    status_by_path = {
-        change["path"]: change
-        for change in _parse_git_status(
-            _run_git(_git_status_args(), cwd=root),
-            workspace_root=root,
-            git_root=git_root,
-        )
-    }
+    if cached_status is not None:
+        status_by_path = cached_status
+    else:
+        status_by_path = {
+            change["path"]: change
+            for change in _parse_git_status(
+                _run_git(_git_status_args(), cwd=root),
+                workspace_root=root,
+                git_root=git_root,
+            )
+        }
     change = status_by_path.get(absolute_path)
     status = str(change.get("status") or "") if change else ""
     git_path = _git_relative_path(git_root, target)
@@ -1091,6 +1092,54 @@ def _change_line_stats(
             if fields[1].isdigit():
                 deletions += int(fields[1])
     return additions, deletions
+
+
+def _batch_change_line_stats(
+    changes: list[dict[str, Any]],
+    *,
+    workspace_root: Path,
+    git_root: Path,
+) -> None:
+    """Compute addition/deletion line counts for all changes in batch.
+
+    Runs ``git diff --numstat`` only twice (staged + unstaged) regardless of
+    the number of changed files, instead of 2 calls per file.
+    """
+    if not changes:
+        return
+
+    numstat_by_path: dict[str, dict[str, int]] = {}
+    for args in (
+        ["diff", "--numstat", "--cached", "--no-ext-diff"],
+        ["diff", "--numstat", "--no-ext-diff"],
+    ):
+        try:
+            output = _run_git(args, cwd=git_root)
+        except Exception as exc:
+            logger.debug("Failed to compute batch line stats: %s", exc)
+            continue
+        for line in output.splitlines():
+            fields = line.split("\t", 3)
+            if len(fields) < 3:
+                continue
+            add_str, del_str, file_path = fields[0], fields[1], fields[2]
+            abs_path = str((git_root / file_path).resolve())
+            entry = numstat_by_path.setdefault(abs_path, {"additions": 0, "deletions": 0})
+            if add_str.isdigit():
+                entry["additions"] += int(add_str)
+            if del_str.isdigit():
+                entry["deletions"] += int(del_str)
+
+    for change in changes:
+        path = str(change.get("path") or "")
+        if change.get("status") == "untracked":
+            target = resolve_workspace_child(workspace_root, path)
+            change["additions"] = _text_line_count(target)
+            change["deletions"] = 0
+        else:
+            stats = numstat_by_path.get(path, {})
+            change["additions"] = stats.get("additions", 0)
+            change["deletions"] = stats.get("deletions", 0)
 
 
 def _text_line_count(target: Path) -> int:

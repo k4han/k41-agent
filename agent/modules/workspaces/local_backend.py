@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import os
 import subprocess
+import time
 from typing import Any
 
 from agent.modules.tools import resolve_safe_path
 from agent.modules.workspaces.backends import CommandResult
 from agent.modules.workspaces.refs import WorkspaceRef
 from agent.modules.workspaces.service import (
-    IGNORED_DIR_NAMES,
     delete_workspace_entry,
     get_workspace_changes,
     get_workspace_diff,
@@ -19,6 +19,7 @@ from agent.modules.workspaces.service import (
 )
 
 MAX_LIST_FILES_ENTRIES = 5000
+GIT_STATUS_CACHE_TTL = 2.0
 
 
 class LocalWorkspaceBackend:
@@ -29,6 +30,8 @@ class LocalWorkspaceBackend:
             raise ValueError(f"Unsupported workspace backend: {ref.backend}")
         self.ref = ref
         self.root = resolve_workspace_root(ref.locator)
+        self._git_status_cache_ts: float = 0.0
+        self._git_status_cache: dict[str, dict[str, Any]] | None = None
 
     async def list_dir(self, path: str = "") -> str:
         target = resolve_safe_path(str(self.root), path or ".")
@@ -132,10 +135,28 @@ class LocalWorkspaceBackend:
         return get_workspace_file(working_dir=str(self.root), path=path)
 
     async def changes(self) -> dict[str, Any]:
-        return get_workspace_changes(str(self.root))
+        result = get_workspace_changes(str(self.root))
+        changes = result.get("changes", [])
+        status_by_path: dict[str, dict[str, Any]] = {}
+        for change in changes:
+            path = change.get("path", "")
+            if path:
+                status_by_path[path] = change
+        self._git_status_cache = status_by_path
+        self._git_status_cache_ts = time.monotonic()
+        return result
 
     async def diff(self, path: str) -> dict[str, Any]:
-        return get_workspace_diff(working_dir=str(self.root), path=path)
+        cached_status = self._git_status_cache
+        if cached_status is not None:
+            elapsed = time.monotonic() - self._git_status_cache_ts
+            if elapsed > GIT_STATUS_CACHE_TTL:
+                cached_status = None
+        return get_workspace_diff(
+            working_dir=str(self.root),
+            path=path,
+            cached_status=cached_status,
+        )
 
     async def rename(self, *, path: str, new_name: str) -> dict[str, Any]:
         return rename_workspace_entry(

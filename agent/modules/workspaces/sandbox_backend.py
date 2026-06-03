@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import logging
 import mimetypes
+import posixpath
 import shlex
+import time
 from abc import ABC, abstractmethod
 from typing import Any
 
 from agent.modules.workspaces.backends import CommandResult, WorkspaceRef
 from agent.modules.workspaces.constants import (
+    GIT_STATUS_CACHE_TTL,
     GIT_TIMEOUT_SECONDS,
     IGNORED_DIR_NAMES,
-    MAX_DIFF_CHARS,
     MAX_FILE_BYTES,
     MAX_TREE_ENTRIES,
     MAX_UNTRACKED_FILE_CHARS,
@@ -55,6 +57,8 @@ class SandboxBackendBase(ABC):
             raise ValueError(f"Unsupported sandbox backend: {ref.backend}")
         self.ref = ref
         self.root: str = ""
+        self._git_status_cache_ts: float = 0.0
+        self._git_status_cache: dict[str, dict[str, Any]] | None = None
 
     # ------------------------------------------------------------------ #
     #  Abstract primitives – subclasses must implement
@@ -239,12 +243,14 @@ class SandboxBackendBase(ABC):
             }
         output = await self._run_git_raw(git_status_args(), cwd=self.root)
         changes = parse_git_status(output, workspace_root=self.root, git_root=git_root)
+        await self._batch_change_line_stats(changes, git_root=git_root)
+        status_by_path: dict[str, dict[str, Any]] = {}
         for change in changes:
-            additions, deletions = await self._change_line_stats(
-                change, git_root=git_root
-            )
-            change["additions"] = additions
-            change["deletions"] = deletions
+            path = change.get("path", "")
+            if path:
+                status_by_path[path] = change
+        self._git_status_cache = status_by_path
+        self._git_status_cache_ts = time.monotonic()
         return {
             "root": self.root,
             "is_git_repo": True,
@@ -277,14 +283,20 @@ class SandboxBackendBase(ABC):
                 "message": "Workspace is not a Git repository.",
             }
 
-        status_by_path = {
-            change["path"]: change
-            for change in parse_git_status(
-                await self._run_git_raw(git_status_args(), cwd=self.root),
-                workspace_root=self.root,
-                git_root=git_root,
-            )
-        }
+        status_by_path = self._git_status_cache
+        cache_valid = (
+            status_by_path is not None
+            and (time.monotonic() - self._git_status_cache_ts) <= GIT_STATUS_CACHE_TTL
+        )
+        if not cache_valid:
+            status_by_path = {
+                change["path"]: change
+                for change in parse_git_status(
+                    await self._run_git_raw(git_status_args(), cwd=self.root),
+                    workspace_root=self.root,
+                    git_root=git_root,
+                )
+            }
         change = status_by_path.get(remote_path)
         status = str(change.get("status") or "") if change else ""
         gpath = git_relative_path(git_root, remote_path)
@@ -479,6 +491,52 @@ class SandboxBackendBase(ABC):
             additions += a
             deletions += d
         return additions, deletions
+
+    async def _batch_change_line_stats(
+        self,
+        changes: list[dict[str, Any]],
+        *,
+        git_root: str,
+    ) -> None:
+        """Compute addition/deletion line counts for all changes in batch.
+
+        Runs ``git diff --numstat`` only twice (staged + unstaged) regardless
+        of the number of changed files.
+        """
+        if not changes:
+            return
+
+        numstat_by_path: dict[str, dict[str, int]] = {}
+        for args in (
+            ["diff", "--numstat", "--cached", "--no-ext-diff"],
+            ["diff", "--numstat", "--no-ext-diff"],
+        ):
+            try:
+                output = await self._run_git_raw(args, cwd=git_root)
+            except Exception as exc:
+                logger.debug("Failed to compute batch line stats: %s", exc)
+                continue
+            for line in output.splitlines():
+                fields = line.split("\t", 3)
+                if len(fields) < 3:
+                    continue
+                add_str, del_str, file_path = fields[0], fields[1], fields[2]
+                abs_path = posixpath.normpath(posixpath.join(git_root, file_path))
+                entry = numstat_by_path.setdefault(abs_path, {"additions": 0, "deletions": 0})
+                if add_str.isdigit():
+                    entry["additions"] += int(add_str)
+                if del_str.isdigit():
+                    entry["deletions"] += int(del_str)
+
+        for change in changes:
+            path = str(change.get("path") or "")
+            if change.get("status") == "untracked":
+                change["additions"] = await self._text_line_count(path)
+                change["deletions"] = 0
+            else:
+                stats = numstat_by_path.get(path, {})
+                change["additions"] = stats.get("additions", 0)
+                change["deletions"] = stats.get("deletions", 0)
 
     async def _text_line_count(self, path: str) -> int:
         """Count text lines in a remote file."""
