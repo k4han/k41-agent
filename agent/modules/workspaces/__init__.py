@@ -36,6 +36,13 @@ from agent.modules.workspaces.repository import (
     update_thread_workspace_metadata_sync,
 )
 from agent.modules.workspaces.sandbox_backend import SandboxBackendBase
+from agent.modules.workspaces.sandboxes import (
+    archive_sandbox,
+    delete_sandbox,
+    get_sandbox,
+    list_sandboxes,
+    stop_sandbox,
+)
 from agent.modules.workspaces.service import (
     delete_thread_workspace,
     delete_workspace_entry,
@@ -123,6 +130,7 @@ __all__ = [
     "WorkspaceRepositoryCloner",
     "WorkspaceUnavailableError",
     "archive_daytona_workspace",
+    "archive_sandbox",
     "attach_daytona_workspace",
     "attach_github_repository_to_daytona_workspace",
     "attach_github_repository_to_local_workspace",
@@ -134,6 +142,7 @@ __all__ = [
     "create_modal_workspace",
     "delete_daytona_workspace",
     "delete_modal_workspace",
+    "delete_sandbox",
     "delete_thread_workspace",
     "delete_workspace_entry",
     "ensure_daytona_workspace_active",
@@ -153,7 +162,9 @@ __all__ = [
     "get_workspace_changes",
     "get_workspace_diff",
     "get_workspace_file",
+    "get_sandbox",
     "is_github_workspace",
+    "list_sandboxes",
     "list_workspace_directories",
     "list_workspace_tree",
     "migrate_workspace_tables",
@@ -170,6 +181,7 @@ __all__ = [
     "start_daytona_lifecycle_sweeper",
     "stop_daytona_lifecycle_sweeper",
     "stop_daytona_workspace",
+    "stop_sandbox",
     "sweep_idle_daytona_workspaces",
     "update_thread_workspace_metadata_sync",
     "workspace_ref_from_columns",

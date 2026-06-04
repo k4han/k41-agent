@@ -6,6 +6,7 @@ import {
   Braces,
   ChevronsLeft,
   ChevronsRight,
+  CloudCog,
   Cog,
   KeyRound,
   Link2,
@@ -28,6 +29,7 @@ type SettingsNavItem = {
 const settingsNavItems: SettingsNavItem[] = [
   { href: "/settings/config", label: "Runtime", icon: <Cog size={15} /> },
   { href: "/settings/backends", label: "Backends", icon: <ServerCog size={15} /> },
+  { href: "/settings/sandboxes", label: "Sandboxes", icon: <CloudCog size={15} /> },
   { href: "/settings/providers", label: "Providers", icon: <Workflow size={15} /> },
   { href: "/settings/connections", label: "Connections", icon: <Link2 size={15} /> },
   { href: "/settings/channels", label: "Channels", icon: <Network size={15} /> },

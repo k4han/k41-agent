@@ -246,6 +246,35 @@ class ConversationThreadRepository:
             thread = refreshed.scalar_one_or_none()
             return serialize_thread(thread) if thread else None
 
+    async def list_active_thread_ids(
+        self,
+        thread_ids: Sequence[str],
+    ) -> set[str]:
+        """Return the subset of ``thread_ids`` that still exist and are not soft-deleted.
+
+        Used by surface code (e.g. the sandbox inspector) to decide whether a
+        link to the underlying chat thread should still be exposed.
+        """
+        normalized = list(
+            dict.fromkeys(
+                _trim(thread_id, 512)
+                for thread_id in thread_ids
+                if thread_id
+            )
+        )
+        if not normalized:
+            return set()
+
+        session = await get_async_session()
+        async with session:
+            result = await session.execute(
+                select(ConversationThread.thread_id).where(
+                    ConversationThread.thread_id.in_(normalized),
+                    ConversationThread.deleted_at.is_(None),
+                )
+            )
+            return {row[0] for row in result.all()}
+
     async def mark_deleted(self, thread_id: str) -> bool:
         now = utcnow()
         session = await get_async_session()

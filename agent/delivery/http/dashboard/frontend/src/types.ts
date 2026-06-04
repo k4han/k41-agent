@@ -506,3 +506,49 @@ export interface WorkspaceUsagePayload {
   output_tokens: number;
   models: ModelUsageDetail[];
 }
+
+export type SandboxStatus =
+  | "started"
+  | "starting"
+  | "stopped"
+  | "archived"
+  | "destroyed"
+  | "error"
+  | "unknown";
+
+export type SandboxBackendKey = Extract<WorkspaceBackendKey, "daytona" | "modal">;
+
+export interface SandboxSummary {
+  sandbox_id: string;
+  backend: SandboxBackendKey;
+  label: string;
+  root: string;
+  status: SandboxStatus;
+  thread_id: string | null;
+  thread_alive: boolean;
+  repository_full_name: string | null;
+  last_used_at: string | null;
+  last_started_at: string | null;
+  last_stopped_at: string | null;
+  last_archived_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  on_cloud: boolean;
+  is_orphan: boolean;
+  metadata: Record<string, unknown>;
+}
+
+export interface SandboxListPayload {
+  backend: SandboxBackendKey;
+  include_all: boolean;
+  count: number;
+  sandboxes: SandboxSummary[];
+}
+
+export interface SandboxDeleteResult {
+  status: "deleted";
+  backend: SandboxBackendKey;
+  sandbox_id: string;
+  cloud_status: string;
+  detached_threads: string[];
+}

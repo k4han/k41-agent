@@ -331,6 +331,21 @@ async def mark_conversation_thread_deleted(
     return await repo.mark_deleted(thread_id)
 
 
+async def list_active_thread_ids(
+    thread_ids: Sequence[str],
+    *,
+    repository: ConversationThreadRepository | None = None,
+) -> set[str]:
+    """Return the subset of ``thread_ids`` that are not soft-deleted.
+
+    Wraps :meth:`ConversationThreadRepository.list_active_thread_ids` so
+    surface code can ask "which of these thread ids still link to a live
+    conversation?" without depending on the repository directly.
+    """
+    repo = repository or get_conversation_thread_repository()
+    return await repo.list_active_thread_ids(thread_ids)
+
+
 __all__ = [
     "CONVERSATION_TITLE_AGENT_NAME",
     "CONVERSATION_TITLE_MAX_CHARS",
@@ -344,6 +359,7 @@ __all__ = [
     "generate_conversation_title",
     "get_conversation_thread",
     "infer_thread_kind",
+    "list_active_thread_ids",
     "list_conversation_threads",
     "mark_conversation_thread_deleted",
     "parse_thread_metadata",

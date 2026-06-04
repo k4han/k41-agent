@@ -391,7 +391,7 @@ def _is_daytona_not_found_error(exc: Exception) -> bool:
     return "404" in message or ("sandbox" in message and "not found" in message)
 
 
-def _thread_root_id(thread_id: str | None) -> str | None:
+def thread_root_id(thread_id: str | None) -> str | None:
     normalized = str(thread_id or "").strip()
     if not normalized:
         return None
@@ -408,7 +408,7 @@ def update_daytona_thread_lifecycle_sync(
     stopped: bool = False,
     archived: bool = False,
 ) -> None:
-    normalized_thread_id = _thread_root_id(thread_id)
+    normalized_thread_id = thread_root_id(thread_id)
     if not normalized_thread_id:
         return
 
@@ -772,7 +772,7 @@ class DaytonaWorkspaceBackend(SandboxBackendBase):
         thread_id: str | None = None,
     ) -> None:
         super().__init__(ref)
-        self.thread_id = _thread_root_id(thread_id)
+        self.thread_id = thread_root_id(thread_id)
         self.client = None if sandbox is not None else get_daytona_client()
         self.sandbox = sandbox if sandbox is not None else self.client.get(ref.locator)
         self.status = DAYTONA_STATUS_UNKNOWN
@@ -1378,4 +1378,5 @@ __all__ = [
     "stop_daytona_lifecycle_sweeper",
     "stop_daytona_workspace",
     "sweep_idle_daytona_workspaces",
+    "thread_root_id",
 ]

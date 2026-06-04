@@ -147,7 +147,9 @@ async def create_modal_workspace(*, label: str | None = None) -> WorkspaceRef:
         backend=MODAL_BACKEND,
         locator=sandbox_id,
         label=(label or "").strip() or f"modal:{sandbox_id}",
-        metadata=modal_metadata(root=root, app_name=app_name, touch=True),
+        metadata=modal_metadata(
+            root=root, app_name=app_name, touch=True, status="started"
+        ),
     )
     fs = getattr(sandbox, "filesystem", None)
     if fs is None:
@@ -173,7 +175,9 @@ async def attach_modal_workspace(
         backend=MODAL_BACKEND,
         locator=normalized_sandbox_id,
         label=(label or "").strip() or f"modal:{normalized_sandbox_id}",
-        metadata=modal_metadata(root=selected_root, app_name=app_name, touch=True),
+        metadata=modal_metadata(
+            root=selected_root, app_name=app_name, touch=True, status="started"
+        ),
     )
     backend = await ModalWorkspaceBackend.create(ref)
     await backend.ensure_git()
@@ -186,12 +190,15 @@ def modal_metadata(
     root: str | None = None,
     app_name: str | None = None,
     touch: bool = False,
+    status: str | None = None,
 ) -> dict[str, Any]:
     metadata: dict[str, Any] = {}
     if root is not None:
         metadata["root"] = resolve_modal_path("/", root)
     if app_name is not None:
         metadata["app_name"] = app_name
+    if status is not None:
+        metadata["status"] = status
     if touch:
         metadata["last_used_at"] = datetime.now(timezone.utc).isoformat()
     return metadata

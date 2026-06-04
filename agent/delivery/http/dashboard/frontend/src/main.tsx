@@ -37,6 +37,11 @@ const BackendsPage = lazy(() =>
     default: module.BackendsPage,
   })),
 );
+const SandboxesPage = lazy(() =>
+  import("@/pages/settings/SandboxesPage").then((module) => ({
+    default: module.SandboxesPage,
+  })),
+);
 const ChannelsPage = lazy(() =>
   import("@/pages/settings/ChannelsPage").then((module) => ({
     default: module.ChannelsPage,
@@ -91,6 +96,7 @@ render(
         <Route path="/settings" component={() => <Navigate href="/settings/config" />} />
         <Route path="/settings/config" component={ConfigPage} />
         <Route path="/settings/backends" component={BackendsPage} />
+        <Route path="/settings/sandboxes" component={SandboxesPage} />
         <Route path="/settings/providers" component={ProvidersPage} />
         <Route path="/settings/connections" component={ConnectionsPage} />
         <Route path="/settings/channels" component={ChannelsPage} />

@@ -13,6 +13,7 @@ from agent.delivery.http.dashboard.routes import (
     github as github_routes,
     mcp as mcp_routes,
     providers as providers_routes,
+    sandboxes as sandboxes_routes,
     scheduler as scheduler_routes,
     settings as settings_routes,
     spa as spa_routes,
@@ -38,6 +39,7 @@ for child_router in (
     usage_routes.router,
     conversations_routes.router,
     mcp_routes.router,
+    sandboxes_routes.router,
 ):
     router.include_router(child_router)
 

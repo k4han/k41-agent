@@ -72,6 +72,13 @@ export const API_PATHS = {
   workspaceTest: "/dashboard-api/workspace/test",
   workspaceRename: "/dashboard-api/workspace/rename",
   workspaceDelete: "/dashboard-api/workspace/delete",
+  sandboxes: "/dashboard-api/sandboxes",
+  sandbox: (backend: string, sandboxId: string) =>
+    `/dashboard-api/sandboxes/${encodeURIComponent(backend)}/${encodeURIComponent(sandboxId)}`,
+  sandboxStop: (backend: string, sandboxId: string) =>
+    `/dashboard-api/sandboxes/${encodeURIComponent(backend)}/${encodeURIComponent(sandboxId)}/stop`,
+  sandboxArchive: (backend: string, sandboxId: string) =>
+    `/dashboard-api/sandboxes/${encodeURIComponent(backend)}/${encodeURIComponent(sandboxId)}/archive`,
   agentsCards: "/agents/cards",
   agentCard: (name: string) => `/agents/cards/${encodeURIComponent(name)}`,
   agentCardClone: (name: string) => `/agents/cards/${encodeURIComponent(name)}/clone`,
