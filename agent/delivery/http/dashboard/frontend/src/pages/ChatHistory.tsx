@@ -16,6 +16,8 @@ import {
   threadApiPath,
 } from "@/lib/chatThreads";
 import { truncateText } from "@/lib/utils";
+import { ALL_WORKSPACES_KEY } from "@/lib/workspaceConstants";
+import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
 import type { ThreadListPayload, ThreadSummary } from "@/lib/chatThreads";
 
 export function ChatHistoryListPage() {
@@ -27,7 +29,7 @@ export function ChatHistoryListPage() {
   const [bulkDeleteOpen, setBulkDeleteOpen] = createSignal(false);
   const [deleting, setDeleting] = createSignal(false);
   const [selectedThreadIds, setSelectedThreadIds] = createSignal<Set<string>>(new Set());
-  const [selectedWorkspaceKey, setSelectedWorkspaceKey] = createSignal("all");
+  const [selectedWorkspaceKey, setSelectedWorkspaceKey] = createSignal(ALL_WORKSPACES_KEY);
   const { showToast } = useToast();
 
   const workspaceGroups = createMemo(() => {
@@ -40,7 +42,7 @@ export function ChatHistoryListPage() {
     });
   });
   const workspaceFilterOptions = createMemo(() => [
-    { value: "all", label: "🗂 All workspaces" },
+    { value: ALL_WORKSPACES_KEY, label: "🗂 All workspaces" },
     ...workspaceGroups().map((group) => {
       const icon = group.isRepo ? "⎇" : "🗀";
       return {
@@ -53,7 +55,7 @@ export function ChatHistoryListPage() {
   const isBackgroundThread = (thread: ThreadSummary) => thread.kind === "background";
   const filteredWorkspaceGroups = createMemo(() => {
     const selected = selectedWorkspaceKey();
-    if (selected === "all") {
+    if (selected === ALL_WORKSPACES_KEY) {
       return workspaceGroups();
     }
     return workspaceGroups().filter((group) => group.key === selected);
@@ -133,7 +135,7 @@ export function ChatHistoryListPage() {
       setThreadSelected(thread.thread_id, false);
       showToast("Thread deleted.", "success");
       await load();
-      window.dispatchEvent(new CustomEvent("kaka:threads-changed"));
+      window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.THREADS_CHANGED));
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Delete failed", "error");
     } finally {
@@ -164,7 +166,7 @@ export function ChatHistoryListPage() {
           `${deletedCount} thread${deletedCount === 1 ? "" : "s"} deleted.`,
           "success",
         );
-        window.dispatchEvent(new CustomEvent("kaka:threads-changed"));
+        window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.THREADS_CHANGED));
       }
       if (failedThreadIds.length > 0) {
         showToast(
@@ -225,7 +227,7 @@ export function ChatHistoryListPage() {
         };
       });
       cancelRenameThread();
-      window.dispatchEvent(new CustomEvent("kaka:threads-changed"));
+      window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.THREADS_CHANGED));
       showToast("Thread renamed.", "success");
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Rename failed", "error");

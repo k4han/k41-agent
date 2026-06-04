@@ -10,6 +10,13 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+MODELS_DEV_LOGO_URL_TEMPLATE = "https://models.dev/logos/{provider_id}.svg"
+
+
+def _build_default_logo_url(provider_id: str) -> str:
+    return MODELS_DEV_LOGO_URL_TEMPLATE.format(provider_id=provider_id)
+
+
 @dataclass(frozen=True, slots=True)
 class ModelCatalogEntry:
     id: str
@@ -33,6 +40,7 @@ class ProviderCatalogEntry:
     doc_url: str | None
     models: tuple[ModelCatalogEntry, ...]
     default_model: str
+    logo_url: str
 
 
 # --- In-memory Cache ---
@@ -166,6 +174,12 @@ def load_providers_catalog(force_reload: bool = False) -> dict[str, ProviderCata
             if not default_model:
                 default_model = models_list[0].id
 
+        raw_logo = pinfo.get("logo") or pinfo.get("logo_url")
+        if isinstance(raw_logo, str) and raw_logo.strip():
+            logo_url = raw_logo.strip()
+        else:
+            logo_url = _build_default_logo_url(provider_id)
+
         catalog[provider_id] = ProviderCatalogEntry(
             id=provider_id,
             name=name,
@@ -175,6 +189,7 @@ def load_providers_catalog(force_reload: bool = False) -> dict[str, ProviderCata
             doc_url=pinfo.get("doc"),
             models=tuple(models_list),
             default_model=default_model,
+            logo_url=logo_url,
         )
 
     _catalog_cache = catalog

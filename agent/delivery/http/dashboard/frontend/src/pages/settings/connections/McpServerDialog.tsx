@@ -1,9 +1,10 @@
-import { createSignal, For, Show } from "solid-js";
+import { createSignal, For, onMount, Show } from "solid-js";
 
 import { Dialog } from "@/components/Dialog";
 import { SelectControl } from "@/components/SelectControl";
 import { useToast } from "@/components/Toast";
 import { postJson } from "@/lib/api";
+import { fetchCatalog, getMcpTransports } from "@/lib/catalogStore";
 import type {
   McpServerInput,
   McpTestResult,
@@ -55,6 +56,14 @@ export function McpServerDialog(props: {
   const [testing, setTesting] = createSignal(false);
   const [testResult, setTestResult] = createSignal<McpTestResult | null>(null);
   const [submitting, setSubmitting] = createSignal(false);
+
+  onMount(() => {
+    // Ensure the dialog can render transport options even when opened
+    // before the parent tab finished loading the catalog.
+    void fetchCatalog().catch(() => {
+      /* catalog store keeps the error signal; the dropdown will fall back to empty. */
+    });
+  });
 
   const parseList = (text: string): string[] =>
     text
@@ -171,7 +180,7 @@ export function McpServerDialog(props: {
                 class="btn btn-primary"
                 type="button"
                 onClick={handleSubmit}
-                disabled={submitting()}
+                disabled={submitting() || getMcpTransports().length === 0}
               >
                 {submitting() ? "Saving..." : "Save"}
               </button>
@@ -276,10 +285,7 @@ export function McpServerDialog(props: {
               <label>Transport</label>
               <SelectControl
                 value={transport()}
-                options={[
-                  { value: "stdio", label: "stdio (command)" },
-                  { value: "streamable_http", label: "HTTP (URL)" },
-                ]}
+                options={getMcpTransports()}
                 onChange={(value) => setTransport(value as McpTransport)}
                 ariaLabel="Transport"
               />

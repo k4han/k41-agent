@@ -11,61 +11,95 @@ import {
   Bug,
   Server,
   Cloud,
-  Terminal,
   Cpu,
   FileText,
   FileCode,
   Trash2,
-  Play
+  Play,
+  type LucideIcon,
 } from "lucide-solid";
 
-// Helper lấy Icon cho Server dựa trên tên server
-export function getServerIcon(name: string) {
-  const norm = name.toLowerCase();
-  if (norm.includes("github")) return <Github size={16} />;
-  if (norm.includes("gitlab")) return <Gitlab size={16} />;
-  if (norm.includes("slack")) return <Slack size={16} />;
-  if (norm.includes("filesystem") || norm.includes("file")) return <Folder size={16} />;
-  if (norm.includes("postgres")) return <Database size={16} />;
-  if (norm.includes("sqlite")) return <Database size={16} />;
-  if (norm.includes("gdrive") || norm.includes("google")) return <Cloud size={16} />;
-  if (norm.includes("memory")) return <Brain size={16} />;
-  if (norm.includes("sequential")) return <Brain size={16} />;
-  if (norm.includes("search") || norm.includes("brave")) return <Search size={16} />;
-  if (norm.includes("puppeteer")) return <Globe size={16} />;
-  if (norm.includes("fetch")) return <Globe size={16} />;
-  if (norm.includes("time")) return <Clock size={16} />;
-  if (norm.includes("sentry")) return <Bug size={16} />;
-  return <Server size={16} />;
+type IconEntry = { pattern: RegExp; icon: LucideIcon; color?: string; opacity?: number };
+
+const SERVER_ICONS: IconEntry[] = [
+  { pattern: /github/i, icon: Github },
+  { pattern: /gitlab/i, icon: Gitlab },
+  { pattern: /slack/i, icon: Slack },
+  { pattern: /(filesystem|file)/i, icon: Folder },
+  { pattern: /(postgres|sqlite)/i, icon: Database },
+  { pattern: /(gdrive|google)/i, icon: Cloud },
+  { pattern: /(memory|sequential)/i, icon: Brain },
+  { pattern: /(search|brave)/i, icon: Search },
+  { pattern: /(puppeteer|fetch)/i, icon: Globe },
+  { pattern: /time/i, icon: Clock },
+  { pattern: /sentry/i, icon: Bug },
+];
+
+const TOOL_ICONS: IconEntry[] = [
+  {
+    pattern: /(read|get|view|show|fetch)/i,
+    icon: FileText,
+    color: "var(--color-primary-light, #0076ff)",
+    opacity: 0.9,
+  },
+  {
+    pattern: /(write|create|save|update|edit|patch|set)/i,
+    icon: FileCode,
+    color: "#10b981",
+    opacity: 0.9,
+  },
+  {
+    pattern: /(delete|remove|clear|destroy|unset)/i,
+    icon: Trash2,
+    color: "#ef4444",
+    opacity: 0.9,
+  },
+  {
+    pattern: /(search|find|query|list|browse)/i,
+    icon: Search,
+    color: "#f59e0b",
+    opacity: 0.9,
+  },
+  {
+    pattern: /(run|execute|bash|shell|cmd|command|think|solve)/i,
+    icon: Play,
+    color: "#8b5cf6",
+    opacity: 0.9,
+  },
+];
+
+const SERVER_FALLBACK_ICONS: IconEntry[] = [
+  { pattern: /github/i, icon: Github, opacity: 0.7 },
+  { pattern: /gitlab/i, icon: Gitlab, opacity: 0.7 },
+  { pattern: /slack/i, icon: Slack, opacity: 0.7 },
+  { pattern: /filesystem/i, icon: Folder, opacity: 0.7 },
+  { pattern: /(postgres|sqlite)/i, icon: Database, opacity: 0.7 },
+];
+
+function resolve(entries: IconEntry[], name: string, fallback: LucideIcon, fallbackOpacity = 0.7): IconEntry {
+  return entries.find((entry) => entry.pattern.test(name)) ?? { pattern: /^.$/, icon: fallback, opacity: fallbackOpacity };
 }
 
-// Helper lấy Icon cho Tool dựa trên tên tool
+function renderIcon(entry: IconEntry, size: number) {
+  const style: Record<string, string> = {};
+  if (entry.color) {
+    style.color = entry.color;
+  }
+  if (entry.opacity !== undefined) {
+    style.opacity = String(entry.opacity);
+  }
+  const Icon = entry.icon;
+  return <Icon size={size} style={style} />;
+}
+
+export function getServerIcon(name: string) {
+  return renderIcon(resolve(SERVER_ICONS, name, Server), 16);
+}
+
 export function getToolIcon(toolName: string, serverName: string) {
-  const norm = toolName.toLowerCase();
-  
-  // Ánh xạ theo hành vi của tool
-  if (norm.includes("read") || norm.includes("get") || norm.includes("view") || norm.includes("show") || norm.includes("fetch")) {
-    return <FileText size={14} style={{ color: "var(--color-primary-light, #0076ff)", opacity: 0.9 }} />;
+  const toolMatch = TOOL_ICONS.find((entry) => entry.pattern.test(toolName));
+  if (toolMatch) {
+    return renderIcon(toolMatch, 14);
   }
-  if (norm.includes("write") || norm.includes("create") || norm.includes("save") || norm.includes("update") || norm.includes("edit") || norm.includes("patch") || norm.includes("set")) {
-    return <FileCode size={14} style={{ color: "#10b981", opacity: 0.9 }} />; // Emerald green
-  }
-  if (norm.includes("delete") || norm.includes("remove") || norm.includes("clear") || norm.includes("destroy") || norm.includes("unset")) {
-    return <Trash2 size={14} style={{ color: "#ef4444", opacity: 0.9 }} />; // Red
-  }
-  if (norm.includes("search") || norm.includes("find") || norm.includes("query") || norm.includes("list") || norm.includes("browse")) {
-    return <Search size={14} style={{ color: "#f59e0b", opacity: 0.9 }} />; // Amber
-  }
-  if (norm.includes("run") || norm.includes("execute") || norm.includes("bash") || norm.includes("shell") || norm.includes("cmd") || norm.includes("command") || norm.includes("think") || norm.includes("solve")) {
-    return <Play size={14} style={{ color: "#8b5cf6", opacity: 0.9 }} />; // Purple
-  }
-  
-  // Dùng fallback là icon của chính Server đó nhưng size nhỏ hơn
-  const serverNorm = serverName.toLowerCase();
-  if (serverNorm.includes("github")) return <Github size={14} style={{ opacity: 0.7 }} />;
-  if (serverNorm.includes("gitlab")) return <Gitlab size={14} style={{ opacity: 0.7 }} />;
-  if (serverNorm.includes("slack")) return <Slack size={14} style={{ opacity: 0.7 }} />;
-  if (serverNorm.includes("filesystem")) return <Folder size={14} style={{ opacity: 0.7 }} />;
-  if (serverNorm.includes("postgres") || serverNorm.includes("sqlite")) return <Database size={14} style={{ opacity: 0.7 }} />;
-  return <Cpu size={14} style={{ opacity: 0.7 }} />;
+  return renderIcon(resolve(SERVER_FALLBACK_ICONS, serverName, Cpu), 14);
 }

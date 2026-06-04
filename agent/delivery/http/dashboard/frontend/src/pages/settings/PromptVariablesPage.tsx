@@ -1,4 +1,4 @@
-import { createMemo, createSignal, onMount, Show } from "solid-js";
+import { createMemo, createSignal, Show } from "solid-js";
 import { Edit3, Plus, RefreshCw, Trash2 } from "lucide-solid";
 
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -9,6 +9,8 @@ import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
+import { getPromptVariableNamePattern, getSystemVariableNames } from "@/lib/catalogStore";
+import { useCatalogAndLoad } from "@/lib/useCatalogAndLoad";
 import { truncateText } from "@/lib/utils";
 import type { PromptVariable, PromptVariablesPayload } from "@/types";
 
@@ -101,8 +103,13 @@ export function PromptVariablesPage() {
 
   const saveVariable = async () => {
     const payload = form();
-    if (!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(payload.name.trim())) {
+    const pattern = new RegExp(getPromptVariableNamePattern());
+    if (!pattern.test(payload.name.trim())) {
       showToast("Prompt variable name is invalid.", "error");
+      return;
+    }
+    if (getSystemVariableNames().includes(payload.name.trim())) {
+      showToast("That name is reserved for a system prompt variable.", "error");
       return;
     }
 
@@ -143,7 +150,7 @@ export function PromptVariablesPage() {
     }
   };
 
-  onMount(load);
+  useCatalogAndLoad(load);
 
   return (
     <SettingsLayout

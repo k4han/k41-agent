@@ -1,4 +1,4 @@
-import { createSignal, For, onMount, Show } from "solid-js";
+import { createSignal, For, Show } from "solid-js";
 import { Edit3, Play, Square, Trash2 } from "lucide-solid";
 
 import { AppShell } from "@/components/AppShell";
@@ -10,7 +10,8 @@ import { DataGate } from "@/components/State";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
-import { fetchCatalog, getPlatforms, getTriggerTypes } from "@/lib/catalogStore";
+import { getPlatforms, getTriggerTypes } from "@/lib/catalogStore";
+import { useCatalogAndLoad } from "@/lib/useCatalogAndLoad";
 import { dateTimeInTimeZone, triggerArgsFromDateInput } from "@/lib/utils";
 import type { Identity, SchedulerJob } from "@/types";
 
@@ -327,10 +328,7 @@ export function SchedulerPage() {
     }
   };
 
-  onMount(async () => {
-    await fetchCatalog();
-    await load();
-  });
+  useCatalogAndLoad(load);
 
   return (
     <AppShell
@@ -370,12 +368,7 @@ export function SchedulerPage() {
                       <label>Schedule</label>
                       <SelectControl
                         value={form().trigger_type}
-                        options={getTriggerTypes().length > 0 ? getTriggerTypes() : [
-                          { value: "date", label: "Run once at a time" },
-                          { value: "relative", label: "Run once after a delay" },
-                          { value: "interval", label: "Run every interval" },
-                          { value: "cron", label: "Cron schedule" },
-                        ]}
+                        options={getTriggerTypes()}
                         onChange={(value) => setField("trigger_type", value as TriggerType)}
                         ariaLabel="Schedule"
                       />
@@ -387,10 +380,7 @@ export function SchedulerPage() {
                         <label>Platform</label>
                         <SelectControl
                           value={form().platform}
-                          options={getPlatforms().length > 0 ? getPlatforms() : [
-                            { value: "telegram", label: "telegram" },
-                            { value: "discord", label: "discord" },
-                          ]}
+                          options={getPlatforms()}
                           onChange={(value) => setField("platform", value)}
                           ariaLabel="Platform"
                         />
@@ -512,12 +502,7 @@ export function SchedulerPage() {
                       <label>Schedule</label>
                       <SelectControl
                         value={editForm().trigger_type}
-                        options={getTriggerTypes().length > 0 ? getTriggerTypes() : [
-                          { value: "date", label: "Run once at a time" },
-                          { value: "relative", label: "Run once after a delay" },
-                          { value: "interval", label: "Run every interval" },
-                          { value: "cron", label: "Cron schedule" },
-                        ]}
+                        options={getTriggerTypes()}
                         onChange={(value) => setEditField("trigger_type", value as TriggerType)}
                         ariaLabel="Schedule"
                       />
@@ -529,10 +514,7 @@ export function SchedulerPage() {
                         <label>Platform</label>
                         <SelectControl
                           value={editForm().platform}
-                          options={getPlatforms().length > 0 ? getPlatforms() : [
-                            { value: "telegram", label: "telegram" },
-                            { value: "discord", label: "discord" },
-                          ]}
+                          options={getPlatforms()}
                           onChange={(value) => setEditField("platform", value)}
                           ariaLabel="Platform"
                         />

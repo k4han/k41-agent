@@ -10,6 +10,8 @@ import { SelectControl } from "@/components/SelectControl";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson } from "@/lib/api";
+import { ACTIVE_TASK_STATUSES, TASK_PAGE_SIZE, TASK_POLL_INTERVAL_MS } from "@/lib/uiConstants";
+import { ALL_WORKSPACES_KEY, NO_WORKSPACE_KEY } from "@/lib/workspaceConstants";
 import { truncateText } from "@/lib/utils";
 import { formatWorkspaceRoot, workspaceDisplayLabelFromValues } from "@/lib/workspace";
 import type { ActiveSession, AgentConfig, BackgroundTask, Identity } from "@/types";
@@ -32,12 +34,6 @@ type SessionsPayload = {
   count: number;
 };
 
-const activeTaskStatuses = new Set(["running", "pending"]);
-const TASK_POLL_INTERVAL_MS = 5000;
-const TASK_PAGE_SIZE = 20;
-const ALL_WORKSPACES_KEY = "all";
-const NO_WORKSPACE_KEY = "no-workspace";
-
 type TaskMetaItem = {
   key: string;
   label: string;
@@ -53,7 +49,7 @@ type TaskWorkspaceOption = {
 };
 
 function hasActiveTasks(tasks: BackgroundTask[]): boolean {
-  return tasks.some((task) => activeTaskStatuses.has(task.status));
+  return tasks.some((task) => ACTIVE_TASK_STATUSES.has(task.status));
 }
 
 function metadataText(task: BackgroundTask, key: string): string {
@@ -474,7 +470,7 @@ export function TasksPage() {
                 <div class="panel-body stack task-history-list">
                   <For each={visibleTasks()} fallback={<div class="empty">No tasks yet.</div>}>
                     {(task) => {
-                      const isActive = activeTaskStatuses.has(task.status);
+                      const isActive = ACTIVE_TASK_STATUSES.has(task.status);
                       const hasDetails = Boolean(task.result || task.error);
                       const liveSession = liveSessionsByThread.get(task.thread_id);
                       return (

@@ -1,6 +1,7 @@
 import type { TranscriptItem } from "@/components/Transcript";
 import { createTranscriptTool } from "@/components/Transcript";
 import type { AppendScrollMode } from "@/lib/chatTypes";
+import { recursionLimitStorageKey, STREAM_ERROR_CODES, STREAM_EVENTS } from "@/lib/eventConstants";
 
 // ── Callback interface for stream event handling ──
 
@@ -30,7 +31,7 @@ export function handleStreamEvent(
   streamThreadIdRef: StreamThreadIdRef,
   callbacks: StreamCallbacks,
 ): void {
-  if (event.type === "thread_created") {
+  if (event.type === STREAM_EVENTS.THREAD_CREATED) {
     const threadId = String(event.thread_id || "");
     if (!threadId) {
       return;
@@ -39,7 +40,7 @@ export function handleStreamEvent(
     return;
   }
 
-  if (event.type === "message") {
+  if (event.type === STREAM_EVENTS.MESSAGE) {
     const content = String(event.content || "");
     if (!content) {
       return;
@@ -53,15 +54,14 @@ export function handleStreamEvent(
     }
     if (!streamedRef.received && callbacks.replaceMessage) {
       callbacks.replaceMessage(assistantIdRef.id, content, streamThreadIdRef.id);
-      streamedRef.received = true;
-      return;
+    } else {
+      callbacks.updateMessage(assistantIdRef.id, content, streamThreadIdRef.id);
     }
     streamedRef.received = true;
-    callbacks.updateMessage(assistantIdRef.id, content, streamThreadIdRef.id);
     return;
   }
 
-  if (event.type === "tool_call") {
+  if (event.type === STREAM_EVENTS.TOOL_CALL) {
     if (assistantIdRef.id !== null && !streamedRef.received) {
       callbacks.removeItem?.(assistantIdRef.id, streamThreadIdRef.id);
     }
@@ -79,7 +79,7 @@ export function handleStreamEvent(
     return;
   }
 
-  if (event.type === "tool_result") {
+  if (event.type === STREAM_EVENTS.TOOL_RESULT) {
     callbacks.updateToolResult(
       String(event.tool_call_id || ""),
       String(event.name || "unknown"),
@@ -89,7 +89,7 @@ export function handleStreamEvent(
     return;
   }
 
-  if (event.type === "error") {
+  if (event.type === STREAM_EVENTS.ERROR) {
     const errorMessage = String(event.content || event.message || "Chat failed");
     const errorCode = typeof event.code === "string" ? event.code : undefined;
     if (assistantIdRef.id !== null && !streamedRef.received) {
@@ -106,11 +106,11 @@ export function handleStreamEvent(
       streamThreadIdRef.id,
     );
     callbacks.onError?.(errorMessage, errorCode);
-    if (event.code === "recursion_limit_reached") {
+    if (event.code === STREAM_ERROR_CODES.RECURSION_LIMIT_REACHED) {
       callbacks.setRecursionLimitReached(true);
       if (streamThreadIdRef.id) {
         window.localStorage.setItem(
-          `kaka:recursion-limit-reached:${streamThreadIdRef.id}`,
+          recursionLimitStorageKey(streamThreadIdRef.id),
           "true",
         );
       }
@@ -118,7 +118,7 @@ export function handleStreamEvent(
     return;
   }
 
-  if (event.type === "final") {
+  if (event.type === STREAM_EVENTS.FINAL) {
     if (streamedRef.received) {
       return;
     }
@@ -133,12 +133,12 @@ export function handleStreamEvent(
         streamThreadIdRef.id,
       );
     }
-    if (!streamedRef.received && callbacks.replaceMessage) {
+    if (callbacks.replaceMessage) {
       callbacks.replaceMessage(assistantIdRef.id, content, streamThreadIdRef.id);
-      streamedRef.received = true;
-      return;
+    } else {
+      callbacks.updateMessage(assistantIdRef.id, content, streamThreadIdRef.id);
     }
-    callbacks.updateMessage(assistantIdRef.id, content, streamThreadIdRef.id);
+    streamedRef.received = true;
   }
 }
 

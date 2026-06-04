@@ -1,4 +1,4 @@
-import { createSignal, For, onMount, Show } from "solid-js";
+import { createSignal, For, Show } from "solid-js";
 import { Plus, RefreshCw, Trash2 } from "lucide-solid";
 
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -6,6 +6,7 @@ import { DashboardTable } from "@/components/DashboardTable";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
+import { useCatalogAndLoad } from "@/lib/useCatalogAndLoad";
 import type {
   McpPopularPayload,
   McpPopularServer,
@@ -130,7 +131,7 @@ export function McpTab() {
     }
   };
 
-  onMount(load);
+  useCatalogAndLoad(load);
 
   return (
     <div class="stack">

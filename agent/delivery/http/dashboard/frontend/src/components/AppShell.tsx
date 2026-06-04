@@ -26,7 +26,6 @@ import { DeleteThreadDialog } from "@/components/DeleteThreadDialog";
 import { InlineRenameInput } from "@/components/InlineRenameInput";
 import { SelectControl } from "@/components/SelectControl";
 import { apiFetch, deleteJson, patchJson, postJson } from "@/lib/api";
-import type { ActiveSession, WorkspaceRef } from "@/types";
 import {
   chatThreadHref,
   groupThreadsByWorkspace,
@@ -35,8 +34,18 @@ import {
   threadWorkspaceLabel,
 } from "@/lib/chatThreads";
 import type { ThreadListPayload, ThreadSummary, ThreadWorkspaceGroup } from "@/lib/chatThreads";
+import { CUSTOM_DOM_EVENTS, SESSION_EVENTS } from "@/lib/eventConstants";
+import { API_PATHS, SSE_URLS } from "@/lib/endpoints";
+import {
+  HISTORY_MENU_MIN_SPACE_PX,
+  HISTORY_PAGE_SIZE,
+  SSE_RECONNECT_DELAY_MS,
+  STORAGE_KEYS,
+} from "@/lib/uiConstants";
+import { ALL_WORKSPACES_KEY } from "@/lib/workspaceConstants";
 import { truncateText } from "@/lib/utils";
 import { useToast } from "@/components/Toast";
+import type { ActiveSession, WorkspaceRef } from "@/types";
 
 type NavItem = {
   href: string;
@@ -52,9 +61,7 @@ const navItems: NavItem[] = [
   { href: "/scheduler", label: "Scheduler", icon: <CalendarClock size={15} /> },
 ];
 
-const HISTORY_PAGE_SIZE = 20;
-const HISTORY_PANEL_STORAGE_KEY = "kaka-dashboard-history";
-const HISTORY_MENU_MIN_SPACE_PX = 78;
+const HISTORY_PANEL_STORAGE_KEY = STORAGE_KEYS.HISTORY_PANEL;
 
 type HistoryCache = {
   threads: ThreadSummary[];
@@ -136,10 +143,10 @@ export function AppShell(props: {
       sessionEventSource.close();
     }
     
-    const source = new EventSource("/dashboard-api/sessions/events");
+    const source = new EventSource(SSE_URLS.sessions);
     sessionEventSource = source;
     
-    source.addEventListener("snapshot", (event) => {
+    source.addEventListener(SESSION_EVENTS.SNAPSHOT, (event) => {
       try {
         const payload = JSON.parse(event.data) as { sessions: ActiveSession[] };
         if (payload && Array.isArray(payload.sessions)) {
@@ -150,7 +157,7 @@ export function AppShell(props: {
       }
     });
 
-    source.addEventListener("session_started", (event) => {
+    source.addEventListener(SESSION_EVENTS.SESSION_STARTED, (event) => {
       try {
         const session = JSON.parse(event.data) as ActiveSession;
         setActiveSessions((prev) => {
@@ -160,9 +167,9 @@ export function AppShell(props: {
           }
           return [...prev, session];
         });
-        window.dispatchEvent(new CustomEvent("kaka:session-started", { detail: session }));
+        window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.SESSION_STARTED, { detail: session }));
         window.dispatchEvent(
-          new CustomEvent("kaka:thread-start-running", {
+          new CustomEvent(CUSTOM_DOM_EVENTS.THREAD_START_RUNNING, {
             detail: {
               threadId: session.thread_id,
               title: session.current_step,
@@ -175,13 +182,13 @@ export function AppShell(props: {
       }
     });
 
-    source.addEventListener("session_stopped", (event) => {
+    source.addEventListener(SESSION_EVENTS.SESSION_STOPPED, (event) => {
       try {
         const stoppedData = JSON.parse(event.data) as { session_id: string; thread_id: string };
         setActiveSessions((prev) => prev.filter((s) => s.session_id !== stoppedData.session_id));
-        window.dispatchEvent(new CustomEvent("kaka:session-stopped", { detail: stoppedData }));
+        window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.SESSION_STOPPED, { detail: stoppedData }));
         window.dispatchEvent(
-          new CustomEvent("kaka:thread-stop-running", {
+          new CustomEvent(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, {
             detail: { threadId: stoppedData.thread_id },
           }),
         );
@@ -190,13 +197,13 @@ export function AppShell(props: {
       }
     });
 
-    source.addEventListener("session_updated", (event) => {
+    source.addEventListener(SESSION_EVENTS.SESSION_UPDATED, (event) => {
       try {
         const session = JSON.parse(event.data) as ActiveSession;
         setActiveSessions((prev) => prev.map((s) => s.session_id === session.session_id ? session : s));
-        window.dispatchEvent(new CustomEvent("kaka:session-updated", { detail: session }));
+        window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.SESSION_UPDATED, { detail: session }));
         window.dispatchEvent(
-          new CustomEvent("kaka:thread-start-running", {
+          new CustomEvent(CUSTOM_DOM_EVENTS.THREAD_START_RUNNING, {
             detail: {
               threadId: session.thread_id,
               title: session.current_step,
@@ -211,7 +218,7 @@ export function AppShell(props: {
 
     source.onerror = () => {
       if (source.readyState === EventSource.CLOSED && !disposed) {
-        setTimeout(connectSessionEvents, 3000);
+        setTimeout(connectSessionEvents, SSE_RECONNECT_DELAY_MS);
       }
     };
   };
@@ -339,7 +346,7 @@ export function AppShell(props: {
 
   const setSidebarCollapsed = (next: boolean) => {
     setCollapsed(next);
-    window.localStorage.setItem("kaka-dashboard-sidebar", next ? "collapsed" : "expanded");
+    window.localStorage.setItem(STORAGE_KEYS.SIDEBAR_COLLAPSED, next ? "collapsed" : "expanded");
 
     if (!next && historyOpen() && !historyLoaded()) {
       void loadHistory(true);
@@ -370,7 +377,7 @@ export function AppShell(props: {
         });
         let sharedRequest: Promise<HistoryLoadResult>;
         sharedRequest = apiFetch<ThreadListPayload>(
-          `/dashboard-api/chat-history?${params.toString()}`,
+          `${API_PATHS.chatHistory}?${params.toString()}`,
         )
           .then((payload) => ({ payload, offset, reset }))
           .finally(() => {
@@ -411,7 +418,7 @@ export function AppShell(props: {
   const historyGroups = createMemo(() => groupThreadsByWorkspace(historyThreads()));
 
   const [selectedWorkspaceFilter, setSelectedWorkspaceFilter] = createSignal<string>(
-    window.localStorage.getItem("kaka-dashboard-workspace-filter") || "all"
+    window.localStorage.getItem(STORAGE_KEYS.WORKSPACE_FILTER) || ALL_WORKSPACES_KEY
   );
 
   const runningThreads = createMemo(() => {
@@ -421,7 +428,7 @@ export function AppShell(props: {
   const filteredThreads = createMemo(() => {
     const filter = selectedWorkspaceFilter();
     const nonRunning = historyThreads().filter((t) => !runningThreadIds().has(t.thread_id));
-    if (filter === "all") {
+    if (filter === ALL_WORKSPACES_KEY) {
       return nonRunning;
     }
     return nonRunning.filter((t) => threadWorkspaceKey(t) === filter);
@@ -450,7 +457,7 @@ export function AppShell(props: {
   });
 
   const historyWorkspaceFilterOptions = createMemo(() => [
-    { value: "all", label: "🗂 All Workspaces" },
+    { value: ALL_WORKSPACES_KEY, label: "🗂 All Workspaces" },
     ...availableWorkspaces().map((ws) => {
       const runningCount = workspaceRunningCounts().get(ws.key) || 0;
       const icon = ws.isRepo ? "⎇" : "🗀";
@@ -465,7 +472,7 @@ export function AppShell(props: {
 
   const updateSelectedWorkspaceFilter = (value: string) => {
     setSelectedWorkspaceFilter(value);
-    window.localStorage.setItem("kaka-dashboard-workspace-filter", value);
+    window.localStorage.setItem(STORAGE_KEYS.WORKSPACE_FILTER, value);
   };
 
   const setHistoryPanelOpen = (next: boolean) => {
@@ -634,13 +641,13 @@ export function AppShell(props: {
     
     // Abort locally if viewing
     window.dispatchEvent(
-      new CustomEvent("kaka:thread-external-abort", {
+      new CustomEvent(CUSTOM_DOM_EVENTS.THREAD_EXTERNAL_ABORT, {
         detail: { threadId },
       }),
     );
     
     try {
-      await postJson("/dashboard-api/sessions/stop", { thread_id: threadId });
+      await postJson(API_PATHS.sessionsStop, { thread_id: threadId });
       showToast("Execution stop request sent.", "success");
     } catch (err) {
       optimisticLocks.delete(threadId);
@@ -714,14 +721,14 @@ export function AppShell(props: {
       });
       cancelRenameHistoryThread();
       showToast("Thread renamed.", "success");
-      window.dispatchEvent(new CustomEvent("kaka:threads-changed"));
+      window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.THREADS_CHANGED));
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Rename failed", "error");
     }
   };
 
   onMount(() => {
-    if (window.localStorage.getItem("kaka-dashboard-sidebar") === "collapsed") {
+    if (window.localStorage.getItem(STORAGE_KEYS.SIDEBAR_COLLAPSED) === "collapsed") {
       setCollapsed(true);
     }
     const savedHistoryState = window.localStorage.getItem(HISTORY_PANEL_STORAGE_KEY);
@@ -732,9 +739,9 @@ export function AppShell(props: {
       void loadHistory(true);
     }
     document.addEventListener("click", handleClickOutside);
-    window.addEventListener("kaka:threads-changed", handleThreadsChanged);
-    window.addEventListener("kaka:thread-start-running", handleThreadStartRunning);
-    window.addEventListener("kaka:thread-stop-running", handleThreadStopRunning);
+    window.addEventListener(CUSTOM_DOM_EVENTS.THREADS_CHANGED, handleThreadsChanged);
+    window.addEventListener(CUSTOM_DOM_EVENTS.THREAD_START_RUNNING, handleThreadStartRunning);
+    window.addEventListener(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, handleThreadStopRunning);
 
     connectSessionEvents();
   });
@@ -746,9 +753,9 @@ export function AppShell(props: {
       sessionEventSource = null;
     }
     document.removeEventListener("click", handleClickOutside);
-    window.removeEventListener("kaka:threads-changed", handleThreadsChanged);
-    window.removeEventListener("kaka:thread-start-running", handleThreadStartRunning);
-    window.removeEventListener("kaka:thread-stop-running", handleThreadStopRunning);
+    window.removeEventListener(CUSTOM_DOM_EVENTS.THREADS_CHANGED, handleThreadsChanged);
+    window.removeEventListener(CUSTOM_DOM_EVENTS.THREAD_START_RUNNING, handleThreadStartRunning);
+    window.removeEventListener(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, handleThreadStopRunning);
   });
 
   return (

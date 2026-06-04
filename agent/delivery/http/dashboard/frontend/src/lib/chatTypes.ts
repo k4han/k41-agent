@@ -89,8 +89,6 @@ export const WORKSPACE_EXPLORER_DEFAULT_WIDTH = 560;
 export const WORKSPACE_EXPLORER_MIN_WIDTH = 340;
 export const WORKSPACE_EXPLORER_MAX_WIDTH = 920;
 
-export const ACTIVE_TASK_STATUSES = new Set(["pending", "running"]);
-
 export const ATTACHMENT_ACCEPT = [
   "image/*",
   ".txt",

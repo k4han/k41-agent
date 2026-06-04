@@ -2,9 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Literal, Optional, Any
+from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+
+def _normalize_max_context_tokens(data: Any) -> Any:
+    """Mirror ``max_context_tokens`` into ``context_trim_threshold`` for legacy inputs."""
+    if not isinstance(data, dict):
+        return data
+    if "max_context_tokens" in data and "context_trim_threshold" not in data:
+        return {**data, "context_trim_threshold": data["max_context_tokens"]}
+    return data
 
 
 class AgentConfig(BaseModel):
@@ -21,14 +30,22 @@ class AgentConfig(BaseModel):
     sub_agents: Optional[list[str]] = None  # None = leaf (no call_agent), list = allowed targets
     hidden: bool = False
     context_trim_threshold: int = 50_000
+    # Backward-compat alias for ``context_trim_threshold``. Always mirrors the trim
+    # threshold after normalization; kept as a field so it round-trips through JSON
+    # for older dashboards and parsers that still read/write the legacy key.
     max_context_tokens: Optional[int] = None
     system_prompt: str = ""  # Markdown body content (after frontmatter)
 
-    def __init__(self, **data: Any) -> None:
-        if "max_context_tokens" in data and "context_trim_threshold" not in data:
-            data["context_trim_threshold"] = data["max_context_tokens"]
-        super().__init__(**data)
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize(cls, data: Any) -> Any:
+        return _normalize_max_context_tokens(data)
+
+    @model_validator(mode="after")
+    def _sync_max_context_tokens(self) -> "AgentConfig":
+        # Keep the legacy field consistent with the canonical threshold.
         object.__setattr__(self, "max_context_tokens", self.context_trim_threshold)
+        return self
 
 
 class AgentCard(BaseModel):
@@ -45,6 +62,7 @@ class AgentCard(BaseModel):
     sub_agents: Optional[list[str]] = None
     hidden: bool = False
     context_trim_threshold: int = 50_000
+    # See ``AgentConfig.max_context_tokens``: legacy alias mirrored at validation.
     max_context_tokens: Optional[int] = None
     system_prompt: str = ""
     source: Literal["builtin", "user"]
@@ -54,11 +72,15 @@ class AgentCard(BaseModel):
     valid: bool = True
     error: str = ""
 
-    def __init__(self, **data: Any) -> None:
-        if "max_context_tokens" in data and "context_trim_threshold" not in data:
-            data["context_trim_threshold"] = data["max_context_tokens"]
-        super().__init__(**data)
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize(cls, data: Any) -> Any:
+        return _normalize_max_context_tokens(data)
+
+    @model_validator(mode="after")
+    def _sync_max_context_tokens(self) -> "AgentCard":
         object.__setattr__(self, "max_context_tokens", self.context_trim_threshold)
+        return self
 
     @classmethod
     def from_config(
@@ -83,6 +105,7 @@ class AgentCard(BaseModel):
             sub_agents=list(config.sub_agents) if config.sub_agents is not None else None,
             hidden=config.hidden,
             context_trim_threshold=config.context_trim_threshold,
+            max_context_tokens=config.max_context_tokens,
             system_prompt=config.system_prompt,
             source=source,
             path=path,
@@ -128,5 +151,6 @@ class AgentCard(BaseModel):
             sub_agents=list(self.sub_agents) if self.sub_agents is not None else None,
             hidden=self.hidden,
             context_trim_threshold=self.context_trim_threshold,
+            max_context_tokens=self.max_context_tokens,
             system_prompt=self.system_prompt,
         )

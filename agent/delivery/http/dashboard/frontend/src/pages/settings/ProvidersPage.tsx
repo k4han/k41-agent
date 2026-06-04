@@ -1,4 +1,4 @@
-import { createMemo, createSignal, createEffect, For, onMount, Show } from "solid-js";
+import { createMemo, createSignal, createEffect, For, Show } from "solid-js";
 import { Check, Copy, Edit3, Plus, RefreshCw, Save, Search, ShieldAlert, Star, Trash2, Globe, Shield, Coins, Sparkles, Sliders } from "lucide-solid";
 
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -9,7 +9,8 @@ import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
-import { fetchCatalog, getProviderTypes } from "@/lib/catalogStore";
+import { getProviderTypes } from "@/lib/catalogStore";
+import { useCatalogAndLoad } from "@/lib/useCatalogAndLoad";
 import type { ModelCatalog, ProviderRow, ProviderTypeOption, SettingInfo } from "@/types";
 
 import { SettingsLayout } from "./SettingsLayout";
@@ -23,7 +24,6 @@ import {
 } from "./shared";
 
 const DEFAULT_PROVIDER_KEY = "llm.default_provider";
-const DETAIL_FIELD_ORDER = ["enabled", "api_key", "base_url", "default_model", "models", "temperature"];
 
 type ProviderFieldEntry = {
   key: string;
@@ -117,6 +117,10 @@ function providerTypeOptions(payloadOptions: ProviderTypeOption[] | undefined): 
   return [];
 }
 
+function providerLogoUrl(card: { id: string; catalogEntry?: { logo_url?: string | null } | null }): string {
+  return card.catalogEntry?.logo_url || `https://models.dev/logos/${card.id}.svg`;
+}
+
 function buildProviderView(
   provider: ProviderRow,
   fieldOrder: string[],
@@ -130,13 +134,17 @@ function buildProviderView(
   const orderedFields = (fieldOrder.length ? fieldOrder : Object.keys(provider.fields))
     .map((field) => fieldMap[field])
     .filter((entry): entry is ProviderFieldEntry => Boolean(entry));
-  const detailFields = DETAIL_FIELD_ORDER
+  const detailFields = fieldOrder
     .map((field) => fieldMap[field])
     .filter((entry): entry is ProviderFieldEntry => {
       if (!entry) {
         return false;
       }
-      return fieldName(entry) !== "base_url" || provider.requires_base_url;
+      const name = fieldName(entry);
+      if (name === "provider" || name === "type") {
+        return false;
+      }
+      return name !== "base_url" || provider.requires_base_url;
     });
   const providerTypeField = fieldMap.type || fieldMap.provider;
   const enabledField = fieldMap.enabled;
@@ -489,10 +497,7 @@ export function ProvidersPage() {
     setFallbackModel("");
   };
 
-  onMount(async () => {
-    await fetchCatalog();
-    await load();
-  });
+  useCatalogAndLoad(load);
 
   return (
     <SettingsLayout
@@ -888,7 +893,7 @@ export function ProvidersPage() {
                             }
                           >
                             <img
-                              src={`https://models.dev/logos/${card.id}.svg`}
+                              src={providerLogoUrl(card)}
                               alt={card.name}
                               class="logo-img"
                               onError={() => setLogoErrors((curr) => ({ ...curr, [card.id]: true }))}
@@ -939,7 +944,7 @@ export function ProvidersPage() {
                             }
                           >
                             <img
-                              src={`https://models.dev/logos/${card.id}.svg`}
+                              src={providerLogoUrl(card)}
                               alt={card.name}
                               class="logo-img"
                               onError={() => setLogoErrors((curr) => ({ ...curr, [card.id]: true }))}

@@ -1,11 +1,13 @@
 import { createSignal, onCleanup } from "solid-js";
 
+import { API_PATHS } from "@/lib/endpoints";
 import type { ThreadMessagesPayload } from "@/lib/chatThreads";
 import {
   handleStreamEvent,
   type StreamCallbacks,
 } from "@/lib/chatStreamHandler";
 import type { BackgroundTaskSnapshot } from "@/lib/chatTypes";
+import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
 import type { ActiveSession, BackgroundTask } from "@/types";
 
 export interface UseBackgroundStreamParams {
@@ -55,9 +57,7 @@ export function useBackgroundStream(params: UseBackgroundStreamParams) {
     closeBackgroundStream();
     const assistantIdRef = { id: null as number | null };
     const streamedRef = { received: false };
-    const source = new EventSource(
-      `/dashboard-api/background-task-events?thread_id=${encodeURIComponent(threadId)}`,
-    );
+    const source = new EventSource(API_PATHS.backgroundTaskStream(threadId));
     backgroundEventSource = source;
     backgroundEventThreadId = threadId;
     setBackgroundLive(true);
@@ -103,7 +103,7 @@ export function useBackgroundStream(params: UseBackgroundStreamParams) {
         backgroundEventSource = null;
         backgroundEventThreadId = "";
       }
-      window.dispatchEvent(new CustomEvent("kaka:tasks-changed"));
+      window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.TASKS_CHANGED));
     });
     source.addEventListener("heartbeat", () => {
       if (backgroundEventThreadId === threadId) {

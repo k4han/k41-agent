@@ -53,15 +53,17 @@ import {
   type StreamedRef,
   type StreamThreadIdRef,
 } from "@/lib/chatStreamHandler";
+import { CUSTOM_DOM_EVENTS, recursionLimitStorageKey } from "@/lib/eventConstants";
+import { API_PATHS } from "@/lib/endpoints";
 import {
   type ChatAttachmentPayload,
   type ChatPayload,
   type DefaultWorkspacePayload,
   type WorkspaceResolvePayload,
-  ACTIVE_TASK_STATUSES,
   ATTACHMENT_ACCEPT,
   DEFAULT_ATTACHMENT_MESSAGE,
 } from "@/lib/chatTypes";
+import { ACTIVE_TASK_STATUSES } from "@/lib/uiConstants";
 import { useChatScroll } from "@/lib/useChatScroll";
 import { useChatStreams } from "@/lib/useChatStreams";
 import { useWorkspaceExplorer } from "@/lib/useWorkspaceExplorer";
@@ -478,7 +480,7 @@ export function ChatPage() {
 
     if (oldStreamTid !== threadId) {
       window.dispatchEvent(
-        new CustomEvent("kaka:thread-start-running", {
+        new CustomEvent(CUSTOM_DOM_EVENTS.THREAD_START_RUNNING, {
           detail: {
             threadId,
             title: streamThreadIdRef.message,
@@ -549,7 +551,7 @@ export function ChatPage() {
     setCurrentThreadId(threadId);
     setThreadData(undefined);
     setThreadError("");
-    setRecursionLimitReached(window.localStorage.getItem(`kaka:recursion-limit-reached:${threadId}`) === "true");
+    setRecursionLimitReached(window.localStorage.getItem(recursionLimitStorageKey(threadId)) === "true");
     if (!persistedStreams.has(threadId)) {
       setThreadLoading(true);
       setItems([]);
@@ -776,7 +778,7 @@ export function ChatPage() {
     setRecursionLimitReached(false);
     const activeTid = currentThreadId();
     if (activeTid) {
-      window.localStorage.removeItem(`kaka:recursion-limit-reached:${activeTid}`);
+      window.localStorage.removeItem(recursionLimitStorageKey(activeTid));
     }
 
     const streamThreadIdRef: StreamThreadIdRef = { id: currentThreadId() || `__pending__${Date.now()}`, message };
@@ -806,7 +808,7 @@ export function ChatPage() {
     const startTid = streamThreadIdRef.id;
     if (startTid && !startTid.startsWith("__pending__") && !resume) {
       window.dispatchEvent(
-        new CustomEvent("kaka:thread-start-running", {
+        new CustomEvent(CUSTOM_DOM_EVENTS.THREAD_START_RUNNING, {
           detail: {
             threadId: startTid,
             title: message,
@@ -857,7 +859,7 @@ export function ChatPage() {
       } else if (currentThreadId() && activeCheckpointId()) {
         payload.checkpoint_id = activeCheckpointId();
       }
-      const response = await fetch("/api/chat/events", {
+      const response = await fetch(API_PATHS.chatEvents, {
         method: "POST",
         headers: { "content-type": "application/json" },
         credentials: "same-origin",
@@ -920,12 +922,12 @@ export function ChatPage() {
       }
       if (finishedTid) {
         window.dispatchEvent(
-          new CustomEvent("kaka:thread-stop-running", {
+          new CustomEvent(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, {
             detail: { threadId: finishedTid },
           }),
         );
       }
-      window.dispatchEvent(new CustomEvent("kaka:threads-changed"));
+      window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.THREADS_CHANGED));
       if (finishedTid && !isUnmounting && currentThreadId() === finishedTid) {
         void refreshThread(finishedTid);
       }
@@ -957,7 +959,7 @@ export function ChatPage() {
     const streamedRef: StreamedRef = { received: false };
 
     try {
-      const response = await fetch("/api/chat/events/reconnect", {
+      const response = await fetch(API_PATHS.chatEventsReconnect, {
         method: "POST",
         headers: { "content-type": "application/json" },
         credentials: "same-origin",
@@ -1005,12 +1007,12 @@ export function ChatPage() {
       }
       if (finishedTid) {
         window.dispatchEvent(
-          new CustomEvent("kaka:thread-stop-running", {
+          new CustomEvent(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, {
             detail: { threadId: finishedTid },
           }),
         );
       }
-      window.dispatchEvent(new CustomEvent("kaka:threads-changed"));
+      window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.THREADS_CHANGED));
     }
   };
 
@@ -1050,7 +1052,7 @@ export function ChatPage() {
     isUnmounting = false;
     cleanupStaleStreams();
     setRecursionLimitReached(false);
-    window.localStorage.removeItem(`kaka:recursion-limit-reached:${threadId}`);
+    window.localStorage.removeItem(recursionLimitStorageKey(threadId));
 
     const currentItems = items();
     const itemIndex = currentItems.findIndex((item) => item.id === payload.itemId);
@@ -1074,7 +1076,7 @@ export function ChatPage() {
     setStreaming(true, streamThreadIdRef.id);
 
     window.dispatchEvent(
-      new CustomEvent("kaka:thread-start-running", {
+      new CustomEvent(CUSTOM_DOM_EVENTS.THREAD_START_RUNNING, {
         detail: {
           threadId,
           title: nextText,
@@ -1088,7 +1090,7 @@ export function ChatPage() {
     const streamedRef: StreamedRef = { received: false };
 
     try {
-      const response = await fetch("/api/chat/events/edit", {
+      const response = await fetch(API_PATHS.chatEventsEdit, {
         method: "POST",
         headers: { "content-type": "application/json" },
         credentials: "same-origin",
@@ -1147,11 +1149,11 @@ export function ChatPage() {
         }
       }
       window.dispatchEvent(
-        new CustomEvent("kaka:thread-stop-running", {
+        new CustomEvent(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, {
           detail: { threadId: finishedTid },
         }),
       );
-      window.dispatchEvent(new CustomEvent("kaka:threads-changed"));
+      window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.THREADS_CHANGED));
       if (finishedTid && !isUnmounting && currentThreadId() === finishedTid) {
         void refreshThread(finishedTid);
       }
@@ -1220,11 +1222,11 @@ export function ChatPage() {
     isUnmounting = false;
     cleanupStaleStreams();
 
-    window.addEventListener("kaka:thread-external-abort", handleExternalAbort);
-    window.addEventListener("kaka:thread-stop-running", handleThreadStopRunningExternal);
-    window.addEventListener("kaka:session-started", handleSessionStartedOrUpdated);
-    window.addEventListener("kaka:session-updated", handleSessionStartedOrUpdated);
-    window.addEventListener("kaka:session-stopped", handleSessionStopped);
+    window.addEventListener(CUSTOM_DOM_EVENTS.THREAD_EXTERNAL_ABORT, handleExternalAbort);
+    window.addEventListener(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, handleThreadStopRunningExternal);
+    window.addEventListener(CUSTOM_DOM_EVENTS.SESSION_STARTED, handleSessionStartedOrUpdated);
+    window.addEventListener(CUSTOM_DOM_EVENTS.SESSION_UPDATED, handleSessionStartedOrUpdated);
+    window.addEventListener(CUSTOM_DOM_EVENTS.SESSION_STOPPED, handleSessionStopped);
 
     void load();
     void loadDefaultWorkspace();
@@ -1235,11 +1237,11 @@ export function ChatPage() {
     if (!activeTid || !persistedStreams.has(activeTid)) {
       controller()?.abort();
     }
-    window.removeEventListener("kaka:thread-external-abort", handleExternalAbort);
-    window.removeEventListener("kaka:thread-stop-running", handleThreadStopRunningExternal);
-    window.removeEventListener("kaka:session-started", handleSessionStartedOrUpdated);
-    window.removeEventListener("kaka:session-updated", handleSessionStartedOrUpdated);
-    window.removeEventListener("kaka:session-stopped", handleSessionStopped);
+    window.removeEventListener(CUSTOM_DOM_EVENTS.THREAD_EXTERNAL_ABORT, handleExternalAbort);
+    window.removeEventListener(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, handleThreadStopRunningExternal);
+    window.removeEventListener(CUSTOM_DOM_EVENTS.SESSION_STARTED, handleSessionStartedOrUpdated);
+    window.removeEventListener(CUSTOM_DOM_EVENTS.SESSION_UPDATED, handleSessionStartedOrUpdated);
+    window.removeEventListener(CUSTOM_DOM_EVENTS.SESSION_STOPPED, handleSessionStopped);
   });
 
   return (

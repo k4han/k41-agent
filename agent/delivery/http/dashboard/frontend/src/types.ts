@@ -42,6 +42,7 @@ export type AgentCard = {
   sub_agents: string[] | null;
   hidden: boolean;
   context_trim_threshold: number;
+  max_context_tokens?: number | null;
   system_prompt: string;
   source: "builtin" | "user";
   path: string;
@@ -63,6 +64,7 @@ export type AgentConfig = {
   sub_agents: string[] | null;
   hidden: boolean;
   context_trim_threshold: number;
+  max_context_tokens?: number | null;
   system_prompt: string;
 };
 
@@ -98,8 +100,10 @@ export type PromptVariablesPayload = {
   variables: PromptVariable[];
 };
 
+export type WorkspaceBackendKey = "local" | "daytona" | "modal";
+
 export type WorkspaceRef = {
-  backend: "local" | "daytona" | "modal" | "github";
+  backend: WorkspaceBackendKey;
   locator: string;
   label: string;
   metadata: Record<string, unknown>;
@@ -216,6 +220,9 @@ export type CatalogResponse = {
   trigger_types: SelectOption[];
   channel_statuses: SelectOption[];
   platforms: SelectOption[];
+  mcp_transports: SelectOption[];
+  prompt_variable_name_pattern: string;
+  system_variable_names: string[];
 };
 
 export type SettingsPayload = {

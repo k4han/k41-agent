@@ -4,7 +4,6 @@ import {
   createSignal,
   For,
   JSX,
-  onMount,
   Show,
 } from "solid-js";
 import { useSearchParams } from "@solidjs/router";
@@ -32,6 +31,9 @@ import { Dialog } from "@/components/Dialog";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
+import { getChannels } from "@/lib/catalogStore";
+import { getChannelIcon } from "@/lib/iconRegistry";
+import { useCatalogAndLoad } from "@/lib/useCatalogAndLoad";
 import { writeToClipboard } from "@/lib/utils";
 import type { Identity, SettingInfo, SourceValue } from "@/types";
 
@@ -92,7 +94,6 @@ type ChannelDefinition = {
   title: string;
   summary: string;
   tagline: string;
-  brandIcon: () => JSX.Element;
   sections: DrawerSection[];
 };
 
@@ -102,7 +103,6 @@ const CHANNEL_DEFS: ChannelDefinition[] = [
     title: "Telegram",
     summary: "Chat with your agents from Telegram private chats and groups.",
     tagline: "Bot platform",
-    brandIcon: TelegramIcon,
     sections: [
       {
         id: "authentication",
@@ -164,7 +164,6 @@ const CHANNEL_DEFS: ChannelDefinition[] = [
     title: "Discord",
     summary: "Run agents inside Discord servers and DMs.",
     tagline: "Bot platform",
-    brandIcon: DiscordIcon,
     sections: [
       {
         id: "authentication",
@@ -224,7 +223,7 @@ export function ChannelsPage() {
     }
   };
 
-  onMount(load);
+  useCatalogAndLoad(load);
 
   createEffect(() => {
     const payload = data();
@@ -831,7 +830,7 @@ function ChannelCard(props: {
           data-brand={props.channel.name}
           aria-hidden="true"
         >
-          {props.channel.brandIcon()}
+          {getChannelIcon(props.channel.name)()}
         </div>
         <div class="channel-card-title">
           <div class="channel-card-name">{props.channel.title}</div>
@@ -1117,6 +1116,13 @@ function formatStatus(runtime: ChannelRuntime): string {
 }
 
 function titleOf(channel: string): string {
+  // The catalog is the source of truth for human-readable labels. The local
+  // ``CHANNEL_DEFS`` table is only consulted when the catalog has no entry
+  // for the channel (e.g. before the catalog request resolves on first load).
+  const fromCatalog = getChannels().find((entry) => entry.name === channel)?.title;
+  if (fromCatalog) {
+    return fromCatalog;
+  }
   const def = CHANNEL_DEFS.find((item) => item.name === channel);
   return def?.title ?? channel;
 }
@@ -1141,32 +1147,4 @@ function countPairedFor(
   }
   return payload.identities.filter((identity) => identity.platform === channel)
     .length;
-}
-
-function TelegramIcon() {
-  return (
-    <svg
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      aria-hidden="true"
-    >
-      <path d="M21.5 4.3 18.4 19.6c-.2 1.1-.9 1.4-1.8.9l-5-3.6-2.4 2.3c-.3.3-.5.5-1 .5l.3-4.7 8.5-7.6c.4-.3-.1-.5-.6-.2L5.9 13.4 1.4 12c-1-.3-1-1 .2-1.5L20 4c.9-.3 1.7.2 1.5 1.3z" />
-    </svg>
-  );
-}
-
-function DiscordIcon() {
-  return (
-    <svg
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      aria-hidden="true"
-    >
-      <path d="M20.3 4.4A19.7 19.7 0 0 0 15.5 3l-.2.4a17.8 17.8 0 0 0-6.6 0L8.5 3a19.7 19.7 0 0 0-4.8 1.4C1.4 8 .8 11.4 1 14.8a19.9 19.9 0 0 0 5.9 3l1.1-1.7a12.7 12.7 0 0 1-2-1c.2-.1.4-.3.5-.4 3.9 1.8 8.1 1.8 11.9 0 .2.1.3.3.5.4-.6.4-1.3.7-2 1l1.1 1.7a19.9 19.9 0 0 0 6-3c.3-3.9-.4-7.3-2.7-10.4zM8.4 13.1c-1.2 0-2.1-1.1-2.1-2.4 0-1.3.9-2.4 2.1-2.4 1.2 0 2.2 1.1 2.1 2.4 0 1.3-.9 2.4-2.1 2.4zm7.2 0c-1.2 0-2.1-1.1-2.1-2.4 0-1.3.9-2.4 2.1-2.4 1.2 0 2.2 1.1 2.1 2.4 0 1.3-.9 2.4-2.1 2.4z" />
-    </svg>
-  );
 }

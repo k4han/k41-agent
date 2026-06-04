@@ -17,6 +17,8 @@ import {
 } from "lucide-solid";
 import { createSignal, JSX, onMount, Show } from "solid-js";
 
+import { STORAGE_KEYS } from "@/lib/uiConstants";
+
 type SettingsNavItem = {
   href: string;
   label: string;
@@ -52,11 +54,11 @@ export function SettingsLayout(props: {
   const toggleSidebar = () => {
     const next = !collapsed();
     setCollapsed(next);
-    window.localStorage.setItem("kaka-dashboard-sidebar", next ? "collapsed" : "expanded");
+    window.localStorage.setItem(STORAGE_KEYS.SIDEBAR_COLLAPSED, next ? "collapsed" : "expanded");
   };
 
   onMount(() => {
-    if (window.localStorage.getItem("kaka-dashboard-sidebar") === "collapsed") {
+    if (window.localStorage.getItem(STORAGE_KEYS.SIDEBAR_COLLAPSED) === "collapsed") {
       setCollapsed(true);
     }
   });

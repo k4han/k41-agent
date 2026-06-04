@@ -4,6 +4,7 @@ import {
 } from "@/components/Transcript";
 import type { TranscriptAttachment, TranscriptItem } from "@/components/Transcript";
 import { workspaceDisplayLabelFromValues } from "@/lib/workspace";
+import { NO_WORKSPACE_KEY, NO_WORKSPACE_LABEL } from "@/lib/workspaceConstants";
 import type { WorkspaceRef } from "@/types";
 
 export type ThreadSummary = {
@@ -87,17 +88,18 @@ export function chatThreadHref(threadId: string): string {
   return `/c/${encodeURIComponent(threadId)}`;
 }
 
-export const NO_WORKSPACE_KEY = "no-workspace";
-export const NO_WORKSPACE_LABEL = "No workspace";
-
 export function threadWorkspaceKey(thread: ThreadSummary): string {
   if (thread.workspace_key) {
     return thread.workspace_key;
   }
-  if (!thread.workspace) {
+  const workspace = thread.workspace;
+  if (!workspace || !workspace.backend) {
+    // Backend may return ``workspace: {}`` for legacy threads; treat that the
+    // same as a missing workspace so the key stays a stable, comparable
+    // sentinel rather than ``"undefined:undefined"``.
     return NO_WORKSPACE_KEY;
   }
-  return `${thread.workspace.backend}:${thread.workspace.locator}`;
+  return `${workspace.backend}:${workspace.locator ?? ""}`;
 }
 
 export function threadWorkspaceLabel(thread: ThreadSummary): string {

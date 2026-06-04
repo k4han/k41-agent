@@ -67,6 +67,18 @@ export function getPlatforms(): SelectOption[] {
   return catalog()?.platforms ?? [];
 }
 
+export function getMcpTransports(): SelectOption[] {
+  return catalog()?.mcp_transports ?? [];
+}
+
+export function getPromptVariableNamePattern(): string {
+  return catalog()?.prompt_variable_name_pattern ?? "^[A-Za-z][A-Za-z0-9_-]{0,63}$";
+}
+
+export function getSystemVariableNames(): string[] {
+  return catalog()?.system_variable_names ?? [];
+}
+
 export function isLoading(): boolean {
   return loading();
 }

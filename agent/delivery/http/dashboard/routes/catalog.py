@@ -7,6 +7,10 @@ from fastapi import APIRouter
 from agent.delivery.http.dashboard.routes.shared import PROVIDER_TYPE_OPTIONS
 from agent.modules.channels.manager import ChannelStatus
 from agent.modules.channels.service_specs import BUILTIN_CHANNEL_SPECS
+from agent.modules.prompt_variables.service import (
+    PROMPT_VARIABLE_NAME_PATTERN,
+    PromptVariableService,
+)
 from agent.modules.workspaces.refs import WorkspaceBackendName
 
 
@@ -43,6 +47,11 @@ PLATFORM_OPTIONS: list[dict[str, str]] = [
     for spec in BUILTIN_CHANNEL_SPECS
 ]
 
+MCP_TRANSPORT_OPTIONS: list[dict[str, str]] = [
+    {"value": "stdio", "label": "stdio (command)"},
+    {"value": "streamable_http", "label": "HTTP (URL)"},
+]
+
 
 @router.get("/dashboard-api/catalog")
 async def get_catalog() -> dict[str, Any]:
@@ -53,4 +62,7 @@ async def get_catalog() -> dict[str, Any]:
         "trigger_types": TRIGGER_TYPE_OPTIONS,
         "channel_statuses": CHANNEL_STATUS_OPTIONS,
         "platforms": PLATFORM_OPTIONS,
+        "mcp_transports": MCP_TRANSPORT_OPTIONS,
+        "prompt_variable_name_pattern": f"^{PROMPT_VARIABLE_NAME_PATTERN}$",
+        "system_variable_names": sorted(PromptVariableService.SYSTEM_VARIABLE_NAMES),
     }

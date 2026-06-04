@@ -774,6 +774,7 @@ async def _settings_payload(request: Request, *, include_provider_settings: bool
             "env_vars": list(entry.env_vars),
             "doc_url": entry.doc_url,
             "default_model": entry.default_model,
+            "logo_url": entry.logo_url,
             "models": [
                 {
                     "id": m.id,

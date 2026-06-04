@@ -2,36 +2,37 @@ import { createSignal, onMount } from "solid-js";
 import { Moon, Sun } from "lucide-solid";
 
 import { SettingsLayout } from "./SettingsLayout";
+import { STORAGE_KEYS, THEME_OPTIONS } from "@/lib/uiConstants";
 
 export function AppearancePage() {
   const [dark, setDark] = createSignal(false);
 
   onMount(() => {
-    const stored = window.localStorage.getItem("kaka-dashboard-theme");
+    const stored = window.localStorage.getItem(STORAGE_KEYS.THEME);
     const next =
-      stored === "dark" ||
+      stored === THEME_OPTIONS.DARK ||
       (!stored && window.matchMedia("(prefers-color-scheme: dark)").matches);
     setDark(next);
   });
 
   const setTheme = (mode: "light" | "dark" | "system") => {
-    if (mode === "system") {
-      window.localStorage.removeItem("kaka-dashboard-theme");
+    if (mode === THEME_OPTIONS.SYSTEM) {
+      window.localStorage.removeItem(STORAGE_KEYS.THEME);
       const next = window.matchMedia("(prefers-color-scheme: dark)").matches;
       setDark(next);
       document.documentElement.classList.toggle("dark", next);
     } else {
-      const next = mode === "dark";
+      const next = mode === THEME_OPTIONS.DARK;
       setDark(next);
       document.documentElement.classList.toggle("dark", next);
-      window.localStorage.setItem("kaka-dashboard-theme", mode);
+      window.localStorage.setItem(STORAGE_KEYS.THEME, mode);
     }
   };
 
   const currentMode = () => {
-    const stored = window.localStorage.getItem("kaka-dashboard-theme");
+    const stored = window.localStorage.getItem(STORAGE_KEYS.THEME);
     if (!stored) {
-      return "system";
+      return THEME_OPTIONS.SYSTEM;
     }
     return stored as "light" | "dark";
   };

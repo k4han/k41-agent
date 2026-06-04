@@ -4,13 +4,10 @@ import {
   createSignal,
   For,
   JSX,
-  onMount,
   Show,
 } from "solid-js";
 import {
   ChevronDown,
-  CloudCog,
-  Cpu,
   Save,
   Settings as SettingsIcon,
   TriangleAlert,
@@ -20,8 +17,10 @@ import { DataGate } from "@/components/State";
 import { Dialog } from "@/components/Dialog";
 import { useToast } from "@/components/Toast";
 import { apiFetch, putJson } from "@/lib/api";
-import { fetchCatalog } from "@/lib/catalogStore";
-import type { SettingInfo, SettingsPayload } from "@/types";
+import { getBackends } from "@/lib/catalogStore";
+import { getBackendIcon } from "@/lib/iconRegistry";
+import { useCatalogAndLoad } from "@/lib/useCatalogAndLoad";
+import type { BackendCatalogItem, SettingInfo, SettingsPayload } from "@/types";
 
 import { SettingsLayout } from "./SettingsLayout";
 import {
@@ -46,7 +45,6 @@ type BackendDefinition = {
   title: string;
   summary: string;
   tagline: string;
-  brandIcon: () => JSX.Element;
   sections: DrawerSection[];
   toggleable: boolean;
   configuredPredicate?: (
@@ -57,13 +55,12 @@ type BackendDefinition = {
 
 const ENABLED_SUFFIX = "enabled";
 
-const BACKEND_DEFS: BackendDefinition[] = [
-  {
+const BACKEND_DEFS_BY_NAME: Record<string, BackendDefinition> = {
+  local: {
     name: "local",
     title: "Local",
     summary: "Workspaces stored on the host machine under a configurable root.",
     tagline: "Filesystem backend",
-    brandIcon: LocalIcon,
     toggleable: false,
     sections: [
       {
@@ -74,12 +71,11 @@ const BACKEND_DEFS: BackendDefinition[] = [
       },
     ],
   },
-  {
+  daytona: {
     name: "daytona",
     title: "Daytona",
     summary: "Cloud sandbox workspaces powered by the Daytona platform.",
     tagline: "Sandbox provider",
-    brandIcon: DaytonaIcon,
     toggleable: true,
     configuredPredicate: (settings, drafts) => {
       const key = "workspace.daytona.api_key";
@@ -135,12 +131,11 @@ const BACKEND_DEFS: BackendDefinition[] = [
       },
     ],
   },
-  {
+  modal: {
     name: "modal",
     title: "Modal",
     summary: "Serverless sandbox workspaces powered by Modal sandboxes.",
     tagline: "Sandbox provider",
-    brandIcon: ModalIcon,
     toggleable: true,
     configuredPredicate: (settings, drafts) => {
       const id = drafts["workspace.modal.token_id"] ?? settings["workspace.modal.token_id"]?.value;
@@ -173,13 +168,34 @@ const BACKEND_DEFS: BackendDefinition[] = [
       },
     ],
   },
-];
+};
 
 function settingKey(backend: string, suffix: string): string {
   if (backend === "local") {
     return suffix === ENABLED_SUFFIX ? "workspace.local.enabled" : `workspace.${suffix}`;
   }
   return `workspace.${backend}.${suffix}`;
+}
+
+function resolveBackendDef(entry: BackendCatalogItem): BackendDefinition | null {
+  const def = BACKEND_DEFS_BY_NAME[entry.name];
+  if (!def) {
+    // Surface a console warning so missing UI metadata does not silently
+    // hide a backend that the server has just started exposing. The full
+    // fix is to add a BackendDefinition entry in ``BACKEND_DEFS_BY_NAME``
+    // (sections, fields, configuredPredicate, etc.).
+    console.warn(
+      `[BackendsPage] No UI definition for backend "${entry.name}". ` +
+        `Add an entry to BACKEND_DEFS_BY_NAME to expose it in the dashboard.`,
+    );
+  }
+  return def ?? null;
+}
+
+function visibleBackendDefs(): BackendDefinition[] {
+  return getBackends()
+    .map((entry) => resolveBackendDef(entry))
+    .filter((def): def is BackendDefinition => def !== null);
 }
 
 export function BackendsPage() {
@@ -206,10 +222,7 @@ export function BackendsPage() {
     }
   };
 
-  onMount(async () => {
-    await fetchCatalog();
-    await load();
-  });
+  useCatalogAndLoad(load);
 
   createEffect(() => {
     const payload = data();
@@ -218,7 +231,7 @@ export function BackendsPage() {
     }
     setCollapsed((current) => {
       const next = { ...current };
-      for (const backend of BACKEND_DEFS) {
+      for (const backend of visibleBackendDefs()) {
         for (const section of backend.sections) {
           const id = `${backend.name}:${section.id}`;
           if (id in next) {
@@ -314,7 +327,7 @@ export function BackendsPage() {
 
   const pendingByBackend = createMemo<Record<string, PendingChange[]>>(() => {
     return Object.fromEntries(
-      BACKEND_DEFS.map((backend) => [backend.name, changesForBackend(backend.name)]),
+      visibleBackendDefs().map((def) => [def.name, changesForBackend(def.name)]),
     );
   });
 
@@ -391,18 +404,24 @@ export function BackendsPage() {
       <DataGate data={data()} error={error()} onRetry={load}>
         {() => (
           <div class="backends-grid">
-            <For each={BACKEND_DEFS}>
-              {(backend) => (
-                <BackendCard
-                  backend={backend}
-                  status={backendStatus(backend)}
-                  configured={isBackendConfigured(backend)}
-                  pendingCount={(pendingByBackend()[backend.name] || []).length}
-                  busy={busy()[backend.name] || null}
-                  onToggle={(value) => void toggleEnabled(backend, value)}
-                  onConfigure={() => setDrawerBackend(backend.name)}
-                />
-              )}
+            <For each={getBackends()}>
+              {(entry) => {
+                const backend = resolveBackendDef(entry);
+                if (!backend) {
+                  return null;
+                }
+                return (
+                  <BackendCard
+                    backend={backend}
+                    status={backendStatus(backend)}
+                    configured={isBackendConfigured(backend)}
+                    pendingCount={(pendingByBackend()[backend.name] || []).length}
+                    busy={busy()[backend.name] || null}
+                    onToggle={(value) => void toggleEnabled(backend, value)}
+                    onConfigure={() => setDrawerBackend(backend.name)}
+                  />
+                );
+              }}
             </For>
           </div>
         )}
@@ -410,69 +429,73 @@ export function BackendsPage() {
 
       <Show when={drawerBackend()}>
         {(name) => {
-          const def = () => BACKEND_DEFS.find((b) => b.name === name())!;
+          const def = () => BACKEND_DEFS_BY_NAME[name()] ?? null;
           const backendSettings = () => settingsByBackend(name());
           const pending = () => pendingByBackend()[name()] || [];
           return (
-            <Dialog
-              open={true}
-              title={`${def().title} settings`}
-              wide
-              onClose={() => setDrawerBackend(null)}
-              footer={
-                <div class="row-wrap" style={{ "justify-content": "space-between", width: "100%" }}>
-                  <Show
-                    when={def().toggleable}
-                    fallback={
-                      <span class="hint">
-                        The local backend is always available.
-                      </span>
-                    }
-                  >
-                    <span class="hint">
-                      Status: {isEnabled(def()) ? "Enabled" : "Disabled"}
-                    </span>
-                  </Show>
-                  <div class="row-wrap">
-                    <button class="btn" type="button" onClick={() => setDrawerBackend(null)}>
-                      Close
-                    </button>
-                    <button
-                      class="btn btn-primary"
-                      type="button"
-                      disabled={pending().length === 0 || busy()[name()] === "save"}
-                      onClick={() => void saveBackend(name())}
-                    >
-                      <Save size={14} />
-                      {busy()[name()] === "save"
-                        ? "Saving..."
-                        : `Save ${pending().length ? `(${pending().length})` : ""}`}
-                    </button>
+            <Show when={def()}>
+              {(currentDef) => (
+                <Dialog
+                  open={true}
+                  title={`${currentDef().title} settings`}
+                  wide
+                  onClose={() => setDrawerBackend(null)}
+                  footer={
+                    <div class="row-wrap" style={{ "justify-content": "space-between", width: "100%" }}>
+                      <Show
+                        when={currentDef().toggleable}
+                        fallback={
+                          <span class="hint">
+                            The local backend is always available.
+                          </span>
+                        }
+                      >
+                        <span class="hint">
+                          Status: {isEnabled(currentDef()) ? "Enabled" : "Disabled"}
+                        </span>
+                      </Show>
+                      <div class="row-wrap">
+                        <button class="btn" type="button" onClick={() => setDrawerBackend(null)}>
+                          Close
+                        </button>
+                        <button
+                          class="btn btn-primary"
+                          type="button"
+                          disabled={pending().length === 0 || busy()[name()] === "save"}
+                          onClick={() => void saveBackend(name())}
+                        >
+                          <Save size={14} />
+                          {busy()[name()] === "save"
+                            ? "Saving..."
+                            : `Save ${pending().length ? `(${pending().length})` : ""}`}
+                        </button>
+                      </div>
+                    </div>
+                  }
+                >
+                  <div class="backend-drawer-sections">
+                    <For each={currentDef().sections}>
+                      {(section) => {
+                        const id = `${name()}:${section.id}`;
+                        return (
+                          <DrawerSection
+                            backend={name()}
+                            settings={backendSettings()}
+                            section={section}
+                            drafts={drafts()}
+                            pending={pending()}
+                            collapsed={Boolean(collapsed()[id])}
+                            onToggle={() => toggleSection(name(), section.id)}
+                            onChange={setDraft}
+                            onRestore={restoreDraft}
+                          />
+                        );
+                      }}
+                    </For>
                   </div>
-                </div>
-              }
-            >
-              <div class="backend-drawer-sections">
-                <For each={def().sections}>
-                  {(section) => {
-                    const id = `${name()}:${section.id}`;
-                    return (
-                      <DrawerSection
-                        backend={name()}
-                        settings={backendSettings()}
-                        section={section}
-                        drafts={drafts()}
-                        pending={pending()}
-                        collapsed={Boolean(collapsed()[id])}
-                        onToggle={() => toggleSection(name(), section.id)}
-                        onChange={setDraft}
-                        onRestore={restoreDraft}
-                      />
-                    );
-                  }}
-                </For>
-              </div>
-            </Dialog>
+                </Dialog>
+              )}
+            </Show>
           );
         }}
       </Show>
@@ -515,7 +538,7 @@ function BackendCard(props: {
           data-brand={props.backend.name}
           aria-hidden="true"
         >
-          {props.backend.brandIcon()}
+          {getBackendIcon(props.backend.name)()}
         </div>
         <div class="backend-card-title">
           <div class="backend-card-name">{props.backend.title}</div>
@@ -687,32 +710,9 @@ function DrawerSection(props: {
 }
 
 function titleOf(backend: string): string {
-  const def = BACKEND_DEFS.find((item) => item.name === backend);
-  return def?.title ?? backend;
-}
-
-function LocalIcon() {
-  return (
-    <svg
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
-    </svg>
-  );
-}
-
-function DaytonaIcon() {
-  return <CloudCog size={20} />;
-}
-
-function ModalIcon() {
-  return <Cpu size={20} />;
+  const fromCatalog = getBackends().find((entry) => entry.name === backend)?.title;
+  if (fromCatalog) {
+    return fromCatalog;
+  }
+  return BACKEND_DEFS_BY_NAME[backend]?.title ?? backend;
 }
