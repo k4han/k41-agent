@@ -1,0 +1,217 @@
+/* --- Usage page: list view (styled after sandboxes.css) --- */
+
+.usage-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.usage-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+
+.usage-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.usage-filter-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 999px;
+}
+
+.usage-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--fg-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.usage-filter-chip:hover {
+  color: var(--fg);
+  background: var(--surface-2);
+}
+
+.usage-filter-chip.active {
+  background: var(--surface-2);
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.usage-filter-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--fg-muted);
+}
+
+.usage-filter-chip.active .usage-filter-icon {
+  color: var(--fg);
+}
+
+.usage-filter-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  padding: 0 6px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.usage-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg-muted);
+}
+
+.usage-search input {
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 12.5px;
+  min-width: 200px;
+  color: var(--fg);
+}
+
+.usage-search input::placeholder {
+  color: var(--fg-muted);
+}
+
+.usage-statusbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.usage-status-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--fg-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.usage-status-chip:hover {
+  color: var(--fg);
+}
+
+.usage-status-chip.active {
+  color: var(--fg);
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+
+.usage-table-wrap {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: auto;
+}
+
+.usage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.usage-table thead th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted);
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  white-space: nowrap;
+}
+
+.usage-table tbody td {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.usage-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.usage-table tbody tr:hover {
+  background: var(--surface-2);
+}
+
+.usage-table td:not(:first-child),
+.usage-table th:not(:first-child) {
+  text-align: right;
+}
+
+.usage-empty {
+  display: grid;
+  place-items: center;
+  padding: 36px 16px;
+}
+
+.usage-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--fg-muted);
+  margin-bottom: 12px;
+}
+
+.usage-empty-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+  margin-bottom: 4px;
+}
+
+.usage-empty-hint {
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  max-width: 480px;
+  text-align: center;
+  line-height: 1.5;
+}

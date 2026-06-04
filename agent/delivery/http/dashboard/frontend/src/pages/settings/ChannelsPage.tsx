@@ -13,6 +13,7 @@ import {
   Copy,
   Fingerprint,
   Link2,
+  Network,
   Play,
   PlugZap,
   RotateCcw,
@@ -47,6 +48,8 @@ import {
   type PendingChange,
   SettingRow,
   sameValue,
+  SettingsTabBar,
+  type SettingsTabItem,
   typedValue,
 } from "./shared";
 
@@ -78,6 +81,11 @@ type PairingResponse = {
 };
 
 type TabKey = "channels" | "pairing";
+
+const TAB_ITEMS: ReadonlyArray<SettingsTabItem<TabKey>> = [
+  { value: "channels", label: "Channels", icon: <Network size={13} /> },
+  { value: "pairing", label: "Pairing", icon: <Fingerprint size={13} /> },
+];
 
 type DrawerSection = {
   id: string;
@@ -604,26 +612,15 @@ export function ChannelsPage() {
   return (
     <SettingsLayout
       title="Channels"
-      subtitle="Manage chat integrations and runtime status."
       breadcrumbLabel="Channels"
       contentWidth="wide"
     >
-      <div class="tab-bar">
-        <button
-          class={`btn btn-sm ${tab() === "channels" ? "btn-primary" : ""}`}
-          type="button"
-          onClick={() => setSearchParams({ tab: "channels" })}
-        >
-          Channels
-        </button>
-        <button
-          class={`btn btn-sm ${tab() === "pairing" ? "btn-primary" : ""}`}
-          type="button"
-          onClick={() => setSearchParams({ tab: "pairing" })}
-        >
-          Pairing
-        </button>
-      </div>
+      <SettingsTabBar
+        items={TAB_ITEMS}
+        value={tab()}
+        ariaLabel="Channel section"
+        onChange={(value) => setSearchParams({ tab: value })}
+      />
 
       <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => (

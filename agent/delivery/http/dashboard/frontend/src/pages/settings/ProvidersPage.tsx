@@ -502,7 +502,6 @@ export function ProvidersPage() {
   return (
     <SettingsLayout
       title="Provider Configuration"
-      subtitle="Manage default provider and per-provider LLM credentials/models."
       breadcrumbLabel="Providers"
       contentWidth="wide"
       actions={

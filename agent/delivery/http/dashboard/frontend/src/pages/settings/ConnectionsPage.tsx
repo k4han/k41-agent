@@ -1,11 +1,18 @@
 import { Show } from "solid-js";
 import { useSearchParams } from "@solidjs/router";
+import { FolderGit2, PlugZap } from "lucide-solid";
 
 import { McpTab } from "./connections/McpTab";
 import { RepositoriesTab } from "./connections/RepositoriesTab";
 import { SettingsLayout } from "./SettingsLayout";
+import { SettingsTabBar, type SettingsTabItem } from "./shared";
 
 type TabKey = "repositories" | "mcp";
+
+const TAB_ITEMS: ReadonlyArray<SettingsTabItem<TabKey>> = [
+  { value: "repositories", label: "Repositories", icon: <FolderGit2 size={13} /> },
+  { value: "mcp", label: "MCP Servers", icon: <PlugZap size={13} /> },
+];
 
 export function ConnectionsPage() {
   const [searchParams, setSearchParams] = useSearchParams<{ tab?: string }>();
@@ -23,26 +30,15 @@ export function ConnectionsPage() {
   return (
     <SettingsLayout
       title="Connections"
-      subtitle="Manage external service connections."
       breadcrumbLabel="Connections"
       contentWidth="wide"
     >
-      <div class="tab-bar">
-        <button
-          class={`btn btn-sm ${tab() === "repositories" ? "btn-primary" : ""}`}
-          type="button"
-          onClick={() => setSearchParams({ tab: "repositories" })}
-        >
-          Repositories
-        </button>
-        <button
-          class={`btn btn-sm ${tab() === "mcp" ? "btn-primary" : ""}`}
-          type="button"
-          onClick={() => setSearchParams({ tab: "mcp" })}
-        >
-          MCP Servers
-        </button>
-      </div>
+      <SettingsTabBar
+        items={TAB_ITEMS}
+        value={tab()}
+        ariaLabel="Connection category"
+        onChange={(value) => setSearchParams({ tab: value })}
+      />
 
       <Show when={tab() === "repositories"}>
         <RepositoriesTab />

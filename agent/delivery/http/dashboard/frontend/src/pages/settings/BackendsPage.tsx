@@ -397,7 +397,6 @@ export function BackendsPage() {
   return (
     <SettingsLayout
       title="Workspace Backends"
-      subtitle="Manage local, Daytona, and Modal workspace backends."
       breadcrumbLabel="Backends"
       contentWidth="wide"
     >

@@ -415,3 +415,39 @@ export function SettingsConfirmDialog(props: {
     </Dialog>
   );
 }
+
+// --- Segmented tab bar ---------------------------------------------------
+
+export type SettingsTabItem<T extends string> = {
+  value: T;
+  label: string;
+  icon: JSX.Element;
+};
+
+export function SettingsTabBar<T extends string>(props: {
+  items: ReadonlyArray<SettingsTabItem<T>>;
+  value: T;
+  ariaLabel: string;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div class="settings-tabs" role="tablist" aria-label={props.ariaLabel}>
+      <For each={props.items}>
+        {(item) => (
+          <button
+            class={`settings-tab ${props.value === item.value ? "active" : ""}`}
+            type="button"
+            role="tab"
+            aria-selected={props.value === item.value}
+            onClick={() => props.onChange(item.value)}
+          >
+            <span class="settings-tab-icon" aria-hidden="true">
+              {item.icon}
+            </span>
+            <span>{item.label}</span>
+          </button>
+        )}
+      </For>
+    </div>
+  );
+}

@@ -33,7 +33,6 @@ export function SecurityPage() {
   return (
     <SettingsLayout
       title="Security"
-      subtitle="Update the dashboard admin password."
       contentWidth="narrow"
     >
       <section class="panel">

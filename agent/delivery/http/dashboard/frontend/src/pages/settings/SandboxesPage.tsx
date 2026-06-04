@@ -352,7 +352,6 @@ export function SandboxesPage() {
   return (
     <SettingsLayout
       title="Sandboxes"
-      subtitle="Inspect and manage running Daytona and Modal cloud sandboxes."
       breadcrumbLabel="Sandboxes"
       contentWidth="wide"
     >

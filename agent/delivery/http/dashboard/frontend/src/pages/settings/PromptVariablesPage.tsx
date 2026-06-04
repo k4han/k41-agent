@@ -155,7 +155,6 @@ export function PromptVariablesPage() {
   return (
     <SettingsLayout
       title="Prompt Variables"
-      subtitle="Manage shared text blocks for agent system prompts."
       breadcrumbLabel="Prompt Variables"
       contentWidth="wide"
       actions={

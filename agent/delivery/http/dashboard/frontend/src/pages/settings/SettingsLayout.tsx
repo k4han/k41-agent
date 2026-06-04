@@ -44,7 +44,6 @@ const settingsNavItems: SettingsNavItem[] = [
 
 export function SettingsLayout(props: {
   title: string;
-  subtitle?: string;
   actions?: JSX.Element;
   breadcrumbLabel?: string;
   contentWidth?: "narrow" | "medium" | "wide";
@@ -137,7 +136,6 @@ export function SettingsLayout(props: {
           </A>
           <div class="settings-page-heading">
             <h1 class="page-title">{props.title}</h1>
-            {props.subtitle ? <p class="page-subtitle">{props.subtitle}</p> : null}
           </div>
           <div class="settings-page-body">{props.children}</div>
         </div>

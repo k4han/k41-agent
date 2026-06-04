@@ -145,6 +145,41 @@ class TestDashboardSettingsEndpoints:
         assert "skills.repository_dir" not in data["settings"]
         assert "database.url" in data["settings"]
         assert "security.jwt_secret" not in data["settings"]
+        assert not any(key.startswith("mcp.servers.") for key in data["settings"])
+        assert "mcp" not in data["by_category"]
+
+    def test_get_config_api_excludes_mcp_server_settings(
+        self,
+        make_dashboard_client,
+    ) -> None:
+        source = StubSource({
+            "mcp.servers.filesystem.transport": SettingsValue(
+                key="mcp.servers.filesystem.transport",
+                value="stdio",
+                source=SettingsSource.CONFIG_FILE,
+            ),
+            "mcp.servers.filesystem.command": SettingsValue(
+                key="mcp.servers.filesystem.command",
+                value="npx",
+                source=SettingsSource.CONFIG_FILE,
+            ),
+            "mcp.servers.filesystem.enabled": SettingsValue(
+                key="mcp.servers.filesystem.enabled",
+                value=True,
+                source=SettingsSource.CONFIG_FILE,
+            ),
+        })
+        client = make_dashboard_client(
+            ConfigService(sources=[DefaultConfigSource(), source])
+        )
+
+        resp = client.get("/dashboard-api/config")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert not any(key.startswith("mcp.servers.") for key in data["settings"])
+        assert "mcp" not in data["by_category"]
+        assert "database.url" in data["settings"]
 
     def test_get_backends_api_includes_workspace_backend_settings(self, dashboard_client) -> None:
         resp = dashboard_client.get("/dashboard-api/backends")

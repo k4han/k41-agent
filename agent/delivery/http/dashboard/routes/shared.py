@@ -131,6 +131,10 @@ def _is_skill_setting_key(key: str) -> bool:
     return key.startswith("skills.")
 
 
+def _is_mcp_setting_key(key: str) -> bool:
+    return key.startswith("mcp.servers.")
+
+
 def _filter_settings[T](
     settings: dict[str, T],
     *,
@@ -152,6 +156,7 @@ def _filter_config_settings[T](settings: dict[str, T]) -> dict[str, T]:
             and not _is_channel_setting_key(key)
             and not _is_workspace_setting_key(key)
             and not _is_skill_setting_key(key)
+            and not _is_mcp_setting_key(key)
         )
     }
 

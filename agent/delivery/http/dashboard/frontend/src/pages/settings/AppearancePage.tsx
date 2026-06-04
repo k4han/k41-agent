@@ -40,7 +40,6 @@ export function AppearancePage() {
   return (
     <SettingsLayout
       title="Appearance"
-      subtitle="Customize how the dashboard looks."
       contentWidth="narrow"
     >
       <section class="panel">

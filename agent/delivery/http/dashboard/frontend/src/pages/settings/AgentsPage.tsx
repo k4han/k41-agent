@@ -303,7 +303,6 @@ export function AgentsPage() {
   return (
     <SettingsLayout
       title="Agents"
-      subtitle="Manage Markdown agent cards loaded by the runtime catalog."
       contentWidth="wide"
       actions={
         <button class="btn" type="button" onClick={reloadAgents}>

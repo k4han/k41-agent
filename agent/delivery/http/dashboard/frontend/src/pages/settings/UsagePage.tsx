@@ -1,17 +1,41 @@
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
-import { RefreshCw } from "lucide-solid";
+import type { JSX } from "solid-js";
+import {
+  BarChart3,
+  Briefcase,
+  MessageCircle,
+  RefreshCw,
+  Search,
+} from "lucide-solid";
 
 import { DashboardTable } from "@/components/DashboardTable";
 import { MetricGrid } from "@/components/Metrics";
 import { SelectControl } from "@/components/SelectControl";
 import { DataGate } from "@/components/State";
 import { apiFetch } from "@/lib/api";
-import type { ThreadUsageDetail, UsagePayload, UsageRow, WorkspaceUsageDetail } from "@/types";
+import type {
+  ThreadUsageDetail,
+  UsagePayload,
+  UsageRow,
+  WorkspaceUsageDetail,
+} from "@/types";
 
 import { SettingsLayout } from "./SettingsLayout";
 
 const PAGE_SIZE = 50;
 type UsageTab = "users" | "workspaces" | "threads";
+
+type UsageTabItem = {
+  value: UsageTab;
+  label: string;
+  icon: (props: { size?: number }) => JSX.Element;
+};
+
+const TAB_ITEMS: UsageTabItem[] = [
+  { value: "users", label: "User & Channel", icon: BarChart3 },
+  { value: "workspaces", label: "Workspaces", icon: Briefcase },
+  { value: "threads", label: "Conversations", icon: MessageCircle },
+];
 
 function pad(value: number): string {
   return String(value).padStart(2, "0");
@@ -85,7 +109,9 @@ function threadSearchText(row: ThreadUsageDetail): string {
     row.title,
     row.agent_name,
     ...row.models.flatMap((item) => [item.provider, item.model]),
-  ].join(" ").toLowerCase();
+  ]
+    .join(" ")
+    .toLowerCase();
 }
 
 function filterThreads(rows: ThreadUsageDetail[], query: string): ThreadUsageDetail[] {
@@ -96,9 +122,34 @@ function filterThreads(rows: ThreadUsageDetail[], query: string): ThreadUsageDet
   return rows.filter((row) => threadSearchText(row).includes(normalizedQuery));
 }
 
+function tabCount(payload: UsagePayload, tab: UsageTab): number {
+  if (tab === "users") {
+    return payload.pagination.total;
+  }
+  if (tab === "workspaces") {
+    return payload.workspaces?.length || 0;
+  }
+  return payload.threads?.length || 0;
+}
+
+function UsageEmpty(props: { message: string; hint?: string }) {
+  return (
+    <div class="usage-empty">
+      <div class="usage-empty-icon" aria-hidden="true">
+        <BarChart3 size={20} />
+      </div>
+      <div class="usage-empty-title">{props.message}</div>
+      <Show when={props.hint}>
+        <div class="usage-empty-hint">{props.hint}</div>
+      </Show>
+    </div>
+  );
+}
+
 export function UsagePage() {
   const [data, setData] = createSignal<UsagePayload>();
   const [error, setError] = createSignal("");
+  const [busy, setBusy] = createSignal(false);
   const [startDate, setStartDate] = createSignal(defaultStartDate());
   const [endDate, setEndDate] = createSignal(defaultEndDate());
   const [platform, setPlatform] = createSignal("");
@@ -115,6 +166,7 @@ export function UsagePage() {
 
   const load = async (nextOffset = offset(), nextView: UsageTab = activeTab()) => {
     setError("");
+    setBusy(true);
     try {
       const params = new URLSearchParams({
         start: startDate(),
@@ -134,6 +186,8 @@ export function UsagePage() {
       setData(await apiFetch<UsagePayload>(`/dashboard-api/usage?${params.toString()}`));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load usage");
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -201,19 +255,56 @@ export function UsagePage() {
   return (
     <SettingsLayout
       title="Usage"
-      subtitle="Inspect token usage by user, channel, provider, model, and agent."
       breadcrumbLabel="Usage"
       contentWidth="wide"
-      actions={
-        <button class="btn btn-primary" type="button" onClick={() => load()}>
-          <RefreshCw size={14} />
-          Refresh
-        </button>
-      }
     >
       <DataGate data={data()} error={error()} onRetry={() => load()}>
         {(payload) => (
-          <div class="stack">
+          <div class="usage-page">
+            <div class="usage-toolbar">
+              <div class="usage-filter-group" role="tablist" aria-label="Usage view">
+                <For each={TAB_ITEMS}>
+                  {(item) => (
+                    <button
+                      class={`usage-filter-chip ${activeTab() === item.value ? "active" : ""}`}
+                      type="button"
+                      role="tab"
+                      aria-selected={activeTab() === item.value}
+                      onClick={() => switchTab(item.value)}
+                    >
+                      <span class="usage-filter-icon" aria-hidden="true">
+                        {item.icon({ size: 13 })}
+                      </span>
+                      <span>{item.label}</span>
+                      <span class="usage-filter-count">{tabCount(payload, item.value)}</span>
+                    </button>
+                  )}
+                </For>
+              </div>
+              <div class="usage-toolbar-right">
+                <Show when={activeTab() === "threads"}>
+                  <div class="usage-search">
+                    <Search size={13} aria-hidden="true" />
+                    <input
+                      type="search"
+                      placeholder="Search title, thread id, agent, or model…"
+                      value={threadSearch()}
+                      onInput={(event) => setThreadSearch(event.currentTarget.value)}
+                    />
+                  </div>
+                </Show>
+                <button
+                  class="btn btn-sm"
+                  type="button"
+                  onClick={() => load()}
+                  disabled={busy()}
+                >
+                  <RefreshCw size={13} class={busy() ? "spinner-animate" : ""} />
+                  Refresh
+                </button>
+              </div>
+            </div>
+
             <MetricGrid
               items={[
                 { label: "Total tokens", value: formatNumber(payload.summary.total_tokens) },
@@ -377,36 +468,6 @@ export function UsagePage() {
               </div>
             </section>
 
-            <div class="workspace-tabs" role="tablist" style="margin-bottom: 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); display: flex; gap: 8px;">
-              <button
-                class={`workspace-tab ${activeTab() === "users" ? "active" : ""}`}
-                type="button"
-                role="tab"
-                onClick={() => switchTab("users")}
-                style={`padding: 10px 16px; font-weight: 500; font-size: 13px; color: ${activeTab() === "users" ? "var(--color-primary, #3b82f6)" : "#888"}; border-bottom: 2px solid ${activeTab() === "users" ? "var(--color-primary, #3b82f6)" : "transparent"}; background: none; border-top: none; border-left: none; border-right: none; cursor: pointer; transition: all 0.2s;`}
-              >
-                User & Channel
-              </button>
-              <button
-                class={`workspace-tab ${activeTab() === "workspaces" ? "active" : ""}`}
-                type="button"
-                role="tab"
-                onClick={() => switchTab("workspaces")}
-                style={`padding: 10px 16px; font-weight: 500; font-size: 13px; color: ${activeTab() === "workspaces" ? "var(--color-primary, #3b82f6)" : "#888"}; border-bottom: 2px solid ${activeTab() === "workspaces" ? "var(--color-primary, #3b82f6)" : "transparent"}; background: none; border-top: none; border-left: none; border-right: none; cursor: pointer; transition: all 0.2s;`}
-              >
-                Workspaces
-              </button>
-              <button
-                class={`workspace-tab ${activeTab() === "threads" ? "active" : ""}`}
-                type="button"
-                role="tab"
-                onClick={() => switchTab("threads")}
-                style={`padding: 10px 16px; font-weight: 500; font-size: 13px; color: ${activeTab() === "threads" ? "var(--color-primary, #3b82f6)" : "#888"}; border-bottom: 2px solid ${activeTab() === "threads" ? "var(--color-primary, #3b82f6)" : "transparent"}; background: none; border-top: none; border-left: none; border-right: none; cursor: pointer; transition: all 0.2s;`}
-              >
-                Conversations / Threads
-              </button>
-            </div>
-
             <Show when={activeTab() === "users"}>
               <UsageTable rows={payload.rows} displayTimezone={payload.display_timezone} />
             </Show>
@@ -419,8 +480,6 @@ export function UsagePage() {
             <Show when={activeTab() === "threads"}>
               <ThreadUsageTable
                 list={filterThreads(payload.threads || [], threadSearch())}
-                search={threadSearch()}
-                onSearch={setThreadSearch}
                 displayTimezone={payload.display_timezone}
               />
             </Show>
@@ -466,6 +525,7 @@ function UsageTable(props: { rows: UsageRow[]; displayTimezone?: string }) {
         rows={props.rows}
         tableClass="usage-table"
         emptyMessage="No usage recorded."
+        emptyFallback={<UsageEmpty message="No usage recorded." hint="Try widening the date range or clearing filters." />}
       >
         {(row) => (
           <tr>
@@ -507,6 +567,7 @@ function WorkspaceUsageTable(props: { list: WorkspaceUsageDetail[]; displayTimez
         rows={props.list}
         tableClass="usage-table"
         emptyMessage="No workspace usage recorded."
+        emptyFallback={<UsageEmpty message="No workspace usage recorded." hint="Workspaces appear here once an LLM call is made from one." />}
       >
         {(row) => (
           <tr>
@@ -561,26 +622,11 @@ function WorkspaceUsageTable(props: { list: WorkspaceUsageDetail[]; displayTimez
   );
 }
 
-function ThreadUsageTable(props: {
-  list: ThreadUsageDetail[];
-  search: string;
-  onSearch: (value: string) => void;
-  displayTimezone?: string;
-}) {
+function ThreadUsageTable(props: { list: ThreadUsageDetail[]; displayTimezone?: string }) {
   return (
     <section class="panel">
       <div class="panel-header">
         <div class="panel-title">Usage by Conversation / Thread</div>
-        <label class="field" style="min-width: 260px; margin: 0;">
-          <span>Search thread</span>
-          <input
-            class="input"
-            type="search"
-            value={props.search}
-            placeholder="Title, thread id, agent, or model"
-            onInput={(event) => props.onSearch(event.currentTarget.value)}
-          />
-        </label>
       </div>
       <DashboardTable
         columns={[
@@ -594,6 +640,7 @@ function ThreadUsageTable(props: {
         rows={props.list}
         tableClass="usage-table"
         emptyMessage="No conversation usage recorded."
+        emptyFallback={<UsageEmpty message="No conversation usage recorded." hint="Conversations show up here once a thread has any LLM usage." />}
       >
         {(row) => (
           <tr>

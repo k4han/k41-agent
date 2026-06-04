@@ -196,7 +196,6 @@ export function SkillsPage() {
   return (
     <SettingsLayout
       title="Skills"
-      subtitle="Manage global SKILL.md files and repository-local skill discovery."
       breadcrumbLabel="Skills"
       contentWidth="wide"
       actions={
