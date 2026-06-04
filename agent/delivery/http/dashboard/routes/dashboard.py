@@ -20,7 +20,10 @@ from agent.modules.agent_runtime import (
     get_background_task_manager,
 )
 from agent.modules.agents import get_catalog_service
-from agent.modules.channels import list_channel_statuses
+from agent.modules.channels import (
+    get_registered_channel_catalog,
+    list_channel_statuses,
+)
 from agent.modules.scheduler import get_scheduler
 
 
@@ -41,6 +44,29 @@ def _group_channel_settings(
     for key, info in settings.items():
         grouped.setdefault(_channel_name_from_key(key), {})[key] = info
     return grouped
+
+
+def _add_channel_schema_settings(
+    settings: dict[str, dict[str, Any]],
+    settings_sources: dict[str, list[dict[str, Any]]],
+) -> None:
+    for channel in get_registered_channel_catalog():
+        for field in channel.get("settings", []):
+            if not isinstance(field, dict):
+                continue
+            key = str(field.get("key") or "")
+            if not key or key in settings:
+                continue
+            value = field.get("default")
+            settings[key] = {
+                "value": value,
+                "source": "default",
+                "input_type": field.get("input_type", "text"),
+                "description": field.get("description", ""),
+                "category": "channels",
+                "label": field.get("label", key),
+            }
+            settings_sources[key] = [{"value": value, "source": "default"}]
 
 
 @router.get("/dashboard-api/session")
@@ -68,6 +94,7 @@ async def get_dashboard_channels(request: Request) -> dict[str, Any]:
         for key, value in settings_sources_raw.items()
         if key.startswith("channels.")
     }
+    _add_channel_schema_settings(settings, settings_sources)
     by_channel = _group_channel_settings(settings)
     channel_manager = getattr(request.app.state, "channel_manager", None)
     runtime_map: dict[str, dict[str, Any]] = {}
@@ -76,7 +103,12 @@ async def get_dashboard_channels(request: Request) -> dict[str, Any]:
             info["name"]: info
             for info in list_channel_statuses(channel_manager)
         }
-    channel_names = sorted(set(by_channel) | set(runtime_map))
+    catalog_names = {
+        str(item.get("name") or "")
+        for item in get_registered_channel_catalog()
+        if item.get("name")
+    }
+    channel_names = sorted(set(by_channel) | set(runtime_map) | catalog_names)
     runtimes = {
         name: {
             "name": name,

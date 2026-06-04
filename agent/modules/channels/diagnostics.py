@@ -47,6 +47,25 @@ async def test_channel_connection(name: str) -> TestResult:
         return await test_discord_connection()
     if normalized == "github":
         return await test_github_connection()
+    try:
+        from agent.modules.channels import get_channel_registry, register_builtin_channel_adapters
+
+        register_builtin_channel_adapters()
+        adapter = get_channel_registry().get(normalized)
+        if adapter is not None:
+            result = await adapter.test_connection()
+            if isinstance(result, TestResult):
+                return result
+            if hasattr(result, "to_dict"):
+                payload = result.to_dict()
+                return TestResult(
+                    ok=bool(payload.get("ok")),
+                    message=str(payload.get("message") or ""),
+                    latency_ms=payload.get("latency_ms"),
+                    details=payload.get("details"),
+                )
+    except Exception as exc:
+        logger.warning("Channel adapter connection test failed for %s: %s", name, exc)
     return TestResult(ok=False, message=f"Channel '{name}' does not support connection testing.")
 
 

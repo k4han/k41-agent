@@ -35,7 +35,12 @@ import { getChannels } from "@/lib/catalogStore";
 import { getChannelIcon } from "@/lib/iconRegistry";
 import { useCatalogAndLoad } from "@/lib/useCatalogAndLoad";
 import { writeToClipboard } from "@/lib/utils";
-import type { Identity, SettingInfo, SourceValue } from "@/types";
+import type {
+  ChannelCatalogItem,
+  Identity,
+  SettingInfo,
+  SourceValue,
+} from "@/types";
 
 import { SettingsLayout } from "./SettingsLayout";
 import {
@@ -183,6 +188,91 @@ const CHANNEL_DEFS: ChannelDefinition[] = [
 
 const ENABLED_FIELD = "enabled";
 
+function channelDefinitionFromCatalog(channel: ChannelCatalogItem): ChannelDefinition {
+  const settings = channel.settings ?? [];
+  const sections = channel.sections?.length
+    ? channel.sections
+    : [{ id: "general", title: "Settings", subtitle: "" }];
+
+  const drawerSections = sections
+    .map((section): DrawerSection => ({
+      id: section.id,
+      title: section.title,
+      subtitle: section.subtitle,
+      fields: settings
+        .filter(
+          (field) =>
+            field.section === section.id && field.name !== ENABLED_FIELD,
+        )
+        .map((field) => field.name),
+      defaultCollapsed: section.default_collapsed,
+      helper: channel.name === "telegram" && section.id === "webhook"
+        ? telegramWebhookHelper
+        : undefined,
+    }))
+    .filter((section) => section.fields.length > 0 || section.helper);
+
+  const knownSectionIds = new Set(sections.map((section) => section.id));
+  const extraFields = settings
+    .filter(
+      (field) =>
+        field.name !== ENABLED_FIELD && !knownSectionIds.has(field.section),
+    )
+    .map((field) => field.name);
+  if (extraFields.length) {
+    drawerSections.push({
+      id: "general",
+      title: "Settings",
+      fields: extraFields,
+    });
+  }
+
+  return {
+    name: channel.name,
+    title: channel.title || titleOf(channel.name),
+    summary: channel.summary || `Configure ${channel.title || channel.name}.`,
+    tagline: channel.tagline || "Channel",
+    sections: drawerSections,
+  };
+}
+
+function telegramWebhookHelper(
+  valueFor: (suffix: string) => unknown,
+): JSX.Element | null {
+  const mode = String(valueFor("update_mode") ?? "polling").toLowerCase();
+  if (mode !== "webhook") {
+    return null;
+  }
+  const url = String(valueFor("webhook_url") ?? "");
+  if (!url) {
+    return (
+      <div class="channel-webhook-helper">
+        <span class="channel-webhook-helper-label">Webhook tip</span>
+        <span class="hint">
+          Set the webhook URL above, then register it from Telegram via{" "}
+          <span class="mono">setWebhook</span>.
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div class="channel-webhook-helper">
+      <span class="channel-webhook-helper-label">Webhook target</span>
+      <div class="channel-webhook-helper-value">
+        <code>{url}</code>
+        <button
+          class="btn btn-sm"
+          type="button"
+          onClick={() => void writeToClipboard(url).catch(() => {})}
+        >
+          <Copy size={13} />
+          Copy
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function ChannelsPage() {
   const [searchParams, setSearchParams] = useSearchParams<{ tab?: string }>();
   const [data, setData] = createSignal<ChannelsPayload>();
@@ -197,6 +287,14 @@ export function ChannelsPage() {
   const [creatingPairingCode, setCreatingPairingCode] = createSignal(false);
   const [unpairTarget, setUnpairTarget] = createSignal<Identity | null>(null);
   const { showToast } = useToast();
+
+  const channelDefs = createMemo<ChannelDefinition[]>(() => {
+    const catalogChannels = getChannels();
+    if (!catalogChannels.length) {
+      return CHANNEL_DEFS;
+    }
+    return catalogChannels.map(channelDefinitionFromCatalog);
+  });
 
   const tab = (): TabKey => {
     const value = searchParams.tab;
@@ -232,7 +330,7 @@ export function ChannelsPage() {
     }
     setCollapsed((current) => {
       const next = { ...current };
-      for (const channel of CHANNEL_DEFS) {
+      for (const channel of channelDefs()) {
         const channelSettings = payload.by_channel[channel.name] || {};
         for (const section of channel.sections) {
           const id = `${channel.name}:${section.id}`;
@@ -285,7 +383,7 @@ export function ChannelsPage() {
 
   const pendingByChannel = createMemo<Record<string, PendingChange[]>>(() => {
     return Object.fromEntries(
-      CHANNEL_DEFS.map((channel) => [channel.name, changesForChannel(channel.name)]),
+      channelDefs().map((channel) => [channel.name, changesForChannel(channel.name)]),
     );
   });
 
@@ -532,7 +630,7 @@ export function ChannelsPage() {
           <div class="stack">
             <Show when={tab() === "channels"}>
               <div class="channels-grid">
-                <For each={CHANNEL_DEFS}>
+                <For each={channelDefs()}>
                   {(channel) => (
                     <ChannelCard
                       channel={channel}
@@ -573,7 +671,7 @@ export function ChannelsPage() {
 
       <Show when={drawerChannel()}>
         {(name) => {
-          const def = () => CHANNEL_DEFS.find((c) => c.name === name())!;
+          const def = () => channelDefs().find((c) => c.name === name())!;
           const channelPayload = () => data()?.by_channel[name()] || {};
           const pending = () => pendingByChannel()[name()] || [];
           return (

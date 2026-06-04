@@ -197,10 +197,34 @@ export type ProviderTypeOption = {
   requires_base_url: boolean;
 };
 
+export type ChannelCatalogSection = {
+  id: string;
+  title: string;
+  subtitle?: string;
+  default_collapsed?: boolean;
+};
+
+export type ChannelCatalogSetting = {
+  name: string;
+  key: string;
+  label: string;
+  description: string;
+  input_type: string;
+  required: boolean;
+  secret: boolean;
+  section: string;
+  default: unknown;
+};
+
 export type ChannelCatalogItem = {
   name: string;
   title: string;
   required_env: string[];
+  summary?: string;
+  tagline?: string;
+  capabilities?: string[];
+  settings?: ChannelCatalogSetting[];
+  sections?: ChannelCatalogSection[];
 };
 
 export type BackendCatalogItem = {

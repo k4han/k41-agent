@@ -5,25 +5,18 @@ from typing import Any
 from fastapi import APIRouter
 
 from agent.delivery.http.dashboard.routes.shared import PROVIDER_TYPE_OPTIONS
-from agent.modules.channels.manager import ChannelStatus
-from agent.modules.channels.service_specs import BUILTIN_CHANNEL_SPECS
-from agent.modules.prompt_variables.service import (
+from agent.modules.channels import (
+    ChannelStatus,
+    get_registered_channel_catalog,
+)
+from agent.modules.prompt_variables import (
     PROMPT_VARIABLE_NAME_PATTERN,
     PromptVariableService,
 )
-from agent.modules.workspaces.refs import WorkspaceBackendName
+from agent.modules.workspaces import WorkspaceBackendName
 
 
 router = APIRouter()
-
-CHANNEL_CATALOG: list[dict[str, Any]] = [
-    {
-        "name": spec.name,
-        "title": spec.name.title(),
-        "required_env": list(spec.required_env),
-    }
-    for spec in BUILTIN_CHANNEL_SPECS
-]
 
 BACKEND_CATALOG: list[dict[str, Any]] = [
     {"name": name, "title": name.title()}
@@ -42,11 +35,6 @@ CHANNEL_STATUS_OPTIONS: list[dict[str, str]] = [
     for status in ChannelStatus
 ]
 
-PLATFORM_OPTIONS: list[dict[str, str]] = [
-    {"value": spec.name, "label": spec.name}
-    for spec in BUILTIN_CHANNEL_SPECS
-]
-
 MCP_TRANSPORT_OPTIONS: list[dict[str, str]] = [
     {"value": "stdio", "label": "stdio (command)"},
     {"value": "streamable_http", "label": "HTTP (URL)"},
@@ -55,13 +43,17 @@ MCP_TRANSPORT_OPTIONS: list[dict[str, str]] = [
 
 @router.get("/dashboard-api/catalog")
 async def get_catalog() -> dict[str, Any]:
+    channel_catalog = get_registered_channel_catalog()
     return {
         "provider_types": PROVIDER_TYPE_OPTIONS,
-        "channels": CHANNEL_CATALOG,
+        "channels": channel_catalog,
         "backends": BACKEND_CATALOG,
         "trigger_types": TRIGGER_TYPE_OPTIONS,
         "channel_statuses": CHANNEL_STATUS_OPTIONS,
-        "platforms": PLATFORM_OPTIONS,
+        "platforms": [
+            {"value": item["name"], "label": item["title"]}
+            for item in channel_catalog
+        ],
         "mcp_transports": MCP_TRANSPORT_OPTIONS,
         "prompt_variable_name_pattern": f"^{PROMPT_VARIABLE_NAME_PATTERN}$",
         "system_variable_names": sorted(PromptVariableService.SYSTEM_VARIABLE_NAMES),

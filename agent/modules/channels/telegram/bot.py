@@ -6,18 +6,10 @@ from typing import Any
 
 from agent.shared.config import get_config_service
 from agent.shared.infrastructure.validation import is_placeholder_value
-from agent.modules.notifications import set_telegram_bot
-from agent.modules.channels.telegram.commands import (
-    auth_middleware,
-    cmd_start,
-    cmd_help,
-    cmd_clear,
-    cmd_code,
-    cmd_research,
-    cmd_agent,
-    cmd_agents,
-    on_message,
-    resolve_agent_config,
+from agent.modules.channels.commands import get_default_command_registry
+from agent.modules.channels.telegram.adapter import (
+    get_telegram_adapter,
+    handle_telegram_message,
 )
 
 logger = logging.getLogger(__name__)
@@ -75,25 +67,11 @@ def create_dispatcher():
 
     try:
         from aiogram import Dispatcher
-        from aiogram.filters import Command, CommandStart
     except ImportError as exc:
         raise ImportError("Install aiogram with uv before enabling Telegram.") from exc
 
     dp = Dispatcher()
-
-    resolve_agent_config()
-
-    dp.message.outer_middleware()(auth_middleware)
-
-    dp.message.register(cmd_start, CommandStart())
-    dp.message.register(cmd_help, Command("help"))
-    dp.message.register(cmd_clear, Command("clear"))
-    dp.message.register(cmd_code, Command("code"))
-    dp.message.register(cmd_research, Command("research"))
-    dp.message.register(cmd_agent, Command("agent"))
-    dp.message.register(cmd_agents, Command("agents"))
-
-    dp.message.register(on_message)
+    dp.message.register(handle_telegram_message)
 
     return dp
 
@@ -110,7 +88,7 @@ async def _run_polling_bot(bot: Any, dispatcher: Any) -> None:
     finally:
         with contextlib.suppress(Exception):
             await bot.session.close()
-        set_telegram_bot(None)
+        get_telegram_adapter().set_bot(None)
 
 
 async def _run_webhook_bot(
@@ -144,7 +122,7 @@ async def _run_webhook_bot(
             await bot.delete_webhook(drop_pending_updates=False)
         with contextlib.suppress(Exception):
             await bot.session.close()
-        set_telegram_bot(None)
+        get_telegram_adapter().set_bot(None)
 
 
 async def run_telegram_bot() -> None:
@@ -179,7 +157,8 @@ async def run_telegram_bot() -> None:
 
     dp = create_dispatcher()
     bot = create_bot(token)
-    set_telegram_bot(bot)
+    get_telegram_adapter().set_bot(bot)
+    await get_telegram_adapter().sync_commands(get_default_command_registry().list())
 
     if update_mode == TELEGRAM_UPDATE_MODE_POLLING:
         await _run_polling_bot(bot, dp)

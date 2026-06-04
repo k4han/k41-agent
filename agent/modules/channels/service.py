@@ -5,6 +5,11 @@ from agent.modules.channels.service_specs import (
     BUILTIN_CHANNEL_SPECS,
     ChannelSpec,
 )
+from agent.modules.channels.registry import (
+    get_channel_registry,
+    list_channel_catalog,
+    register_channel_adapters,
+)
 from agent.shared.config import get_config_service
 from agent.shared.infrastructure.validation import is_placeholder_value
 
@@ -16,8 +21,23 @@ def register_channels(
     specs: tuple[ChannelSpec, ...],
 ) -> None:
     for spec in specs:
+        if spec.adapter_loader is not None:
+            get_channel_registry().register(spec.adapter_loader(), replace=True)
         channel_manager.register(spec.name, spec.runner_loader())
         logger.info("Channel registered: %s", spec.name)
+
+
+def register_builtin_channel_adapters(
+    specs: tuple[ChannelSpec, ...] | None = None,
+) -> None:
+    if specs is None:
+        specs = BUILTIN_CHANNEL_SPECS
+    adapters = [
+        spec.adapter_loader()
+        for spec in specs
+        if spec.adapter_loader is not None
+    ]
+    register_channel_adapters(adapters, replace=True)
 
 
 def register_builtin_channels(
@@ -45,14 +65,8 @@ async def start_enabled_channels(
             logger.info("Channel starts disabled by config: %s", spec.name)
             continue
 
-        # Check if required config keys are present
         missing_keys = []
-        for env_name in spec.required_env:
-            config_key = _ENV_TO_CONFIG_MAP.get(env_name)
-            if not config_key:
-                logger.warning("Unknown env var '%s' for channel '%s'", env_name, spec.name)
-                continue
-
+        for config_key in _required_config_keys(spec):
             value = config.get_str(config_key, "")
             if is_placeholder_value(value):
                 missing_keys.append(config_key)
@@ -82,6 +96,28 @@ _ENV_TO_CONFIG_MAP = {
     "TELEGRAM_BOT_TOKEN": "channels.telegram.bot_token",
     "DISCORD_BOT_TOKEN": "channels.discord.bot_token",
 }
+
+
+def _required_config_keys(spec: ChannelSpec) -> list[str]:
+    if spec.adapter_loader is not None:
+        adapter = get_channel_registry().get(spec.name)
+    else:
+        adapter = None
+    if adapter is not None:
+        return [
+            field.config_key(adapter.name)
+            for field in adapter.settings_schema
+            if field.required
+        ]
+
+    keys: list[str] = []
+    for env_name in spec.required_env:
+        config_key = _ENV_TO_CONFIG_MAP.get(env_name)
+        if not config_key:
+            logger.warning("Unknown env var '%s' for channel '%s'", env_name, spec.name)
+            continue
+        keys.append(config_key)
+    return keys
 
 
 async def start_channel(channel_manager: ChannelManager, name: str) -> dict[str, str | None]:
@@ -117,3 +153,8 @@ def get_channel_status(
     name: str,
 ) -> dict[str, str | None]:
     return channel_manager.status(name)
+
+
+def get_registered_channel_catalog() -> list[dict[str, object]]:
+    register_builtin_channel_adapters()
+    return list_channel_catalog()

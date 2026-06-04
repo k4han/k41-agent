@@ -1,34 +1,29 @@
-"""Centralized notification service for pushing messages to channel clients.
-
-This module holds references to the Telegram bot and Discord client and
-provides a single ``send_notification`` coroutine that any part of the
-application (scheduler, background tasks, etc.) can call to deliver a
-message to a user on their preferred platform.
-"""
+"""Centralized notification service for pushing messages to channel adapters."""
 
 import logging
 from typing import Any, Literal
-
-from agent.modules.users import Platform
 
 logger = logging.getLogger(__name__)
 
 NotificationFormat = Literal["markdown", "html", "plain"]
 
-_telegram_bot: Any | None = None
-_discord_client: Any | None = None
-
 
 def set_telegram_bot(bot: Any | None) -> None:
-    """Store the Telegram bot instance for later notification use."""
-    global _telegram_bot
-    _telegram_bot = bot
+    """Compatibility shim for older callers that injected Telegram directly."""
+    from agent.modules.channels import get_channel_registry, get_telegram_adapter
+
+    adapter = get_telegram_adapter()
+    adapter.set_bot(bot)
+    get_channel_registry().register(adapter, replace=True)
 
 
 def set_discord_client(client: Any | None) -> None:
-    """Store the Discord client instance for later notification use."""
-    global _discord_client
-    _discord_client = client
+    """Compatibility shim for older callers that injected Discord directly."""
+    from agent.modules.channels import get_channel_registry, get_discord_adapter
+
+    adapter = get_discord_adapter()
+    adapter.set_client(client)
+    get_channel_registry().register(adapter, replace=True)
 
 
 async def send_notification(
@@ -43,28 +38,22 @@ async def send_notification(
     Returns True if the message was sent successfully, False otherwise.
     """
     try:
-        if platform == Platform.TELEGRAM and _telegram_bot:
-            from agent.modules.channels import send_telegram_bot_message
+        from agent.modules.channels import (
+            OutboundMessage,
+            get_channel_registry,
+            register_builtin_channel_adapters,
+        )
 
-            sent = await send_telegram_bot_message(
-                _telegram_bot,
-                external_id,
-                message,
-                mode=mode,
-            )
-            return bool(sent)
+        platform_name = str(getattr(platform, "value", platform) or "").strip().lower()
+        register_builtin_channel_adapters()
+        adapter = get_channel_registry().get(platform_name)
+        if adapter is None:
+            logger.warning("No channel adapter for platform %s.", platform_name)
+            return False
 
-        if platform == Platform.DISCORD and _discord_client:
-            uid = int(external_id)
-            discord_user = _discord_client.get_user(uid)
-            if discord_user is None:
-                discord_user = await _discord_client.fetch_user(uid)
-            if discord_user:
-                await discord_user.send(message)
-                return True
-
-        logger.warning(
-            "No active client for platform %s to send notification.", platform
+        return await adapter.send(
+            external_id,
+            OutboundMessage(text=message, mode=mode),
         )
     except Exception as exc:
         logger.error(

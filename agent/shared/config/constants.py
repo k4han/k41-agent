@@ -17,6 +17,7 @@ LLM_FALLBACK_MODEL_KEY = "llm.fallback.model"
 # These patterns define which keys can be updated at runtime
 RUNTIME_KEY_PATTERNS = [
     r"^(host|port|enable_web|enable_api|enable_dashboard)$",
+    r"^channels\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$",
     r"^channels\.telegram\.(enabled|bot_token|default_agent|code_agent|research_agent|update_mode|webhook_url|webhook_secret)$",
     r"^channels\.discord\.(enabled|bot_token|default_agent|code_agent|research_agent)$",
     r"^channels\.github\.(enabled|app_id|app_slug|private_key|private_key_path|webhook_secret|default_agent|trigger_label|mention_triggers)$",
@@ -36,6 +37,7 @@ RUNTIME_KEY_PATTERNS = [
 ]
 
 DATABASE_RUNTIME_KEY_PATTERNS = [
+    r"^channels\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$",
     r"^channels\.telegram\.(enabled|bot_token|default_agent|code_agent|research_agent|update_mode|webhook_url|webhook_secret)$",
     r"^channels\.discord\.(enabled|bot_token|default_agent|code_agent|research_agent)$",
     r"^channels\.github\.(enabled|app_id|app_slug|private_key|private_key_path|webhook_secret|default_agent|trigger_label|mention_triggers)$",
@@ -52,6 +54,7 @@ DATABASE_RUNTIME_KEY_PATTERNS = [
 ]
 
 SENSITIVE_RUNTIME_KEY_PATTERNS = [
+    r"^channels\.[A-Za-z0-9_-]+\.(bot_token|token|api_token|api_key|secret|client_secret|webhook_secret|private_key)$",
     r"^channels\.telegram\.(bot_token|webhook_secret)$",
     r"^channels\.discord\.bot_token$",
     r"^channels\.github\.(private_key|webhook_secret)$",
@@ -750,6 +753,23 @@ def _provider_setting_metadata(key: str) -> dict[str, Any] | None:
     return metadata
 
 
+def _channel_setting_metadata(key: str) -> dict[str, Any] | None:
+    try:
+        from agent.modules.channels import get_channel_setting_field
+    except Exception:
+        return None
+
+    field = get_channel_setting_field(key)
+    if field is None:
+        return None
+    return {
+        "type": field.input_type,
+        "description": field.description,
+        "category": "channels",
+        "label": field.label,
+    }
+
+
 # Derived ordering - must match keys in _PROVIDER_SETTING_FIELD_META
 PROVIDER_SETTING_FIELD_ORDER: list[str] = list(_PROVIDER_SETTING_FIELD_META.keys())
 
@@ -777,6 +797,9 @@ def get_setting_metadata(key: str) -> dict[str, Any]:
     """
     meta = SETTING_METADATA.get(key)
     if meta is None:
+        channel_meta = _channel_setting_metadata(key)
+        if channel_meta is not None:
+            return channel_meta
         provider_meta = _provider_setting_metadata(key)
         if provider_meta is not None:
             return provider_meta

@@ -37,6 +37,8 @@ from agent.modules.workspaces.repository import (
 )
 from agent.modules.workspaces.sandbox_backend import SandboxBackendBase
 from agent.modules.workspaces.sandboxes import (
+    DAYTONA_BACKEND,
+    MODAL_BACKEND,
     archive_sandbox,
     delete_sandbox,
     get_sandbox,
@@ -103,6 +105,7 @@ from agent.modules.workspaces.github_clone import (
 
 __all__ = [
     "CommandResult",
+    "DAYTONA_BACKEND",
     "DEFAULT_LOCAL_WORKSPACE",
     "DaytonaWorkspaceLifecycleManager",
     "DaytonaWorkspaceBackend",
@@ -114,6 +117,7 @@ __all__ = [
     "MAX_LIST_FILES_ENTRIES",
     "MAX_TREE_ENTRIES",
     "MAX_UNTRACKED_FILE_CHARS",
+    "MODAL_BACKEND",
     "ModalWorkspaceBackend",
     "SandboxBackendBase",
     "ThreadWorkspace",

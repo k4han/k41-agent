@@ -11,8 +11,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
-from agent.modules.workspaces.refs import WorkspaceRef
-from agent.modules.workspaces.service import workspace_ref_from_local_path
+from agent.modules.workspaces import WorkspaceRef, workspace_ref_from_local_path
 
 if TYPE_CHECKING:
     from agent.modules.github.client import GitHubAppClient
@@ -118,7 +117,7 @@ async def _prepare_remote_workspace(
     default_branch: str | None = None,
 ) -> WorkspaceRef:
     """Clone repository inside a Daytona/Modal sandbox and return WorkspaceRef."""
-    from agent.modules.workspaces.github_clone import (
+    from agent.modules.workspaces import (
         GitHubRepositorySelection,
         attach_github_repository_to_daytona_workspace,
         attach_github_repository_to_modal_workspace,
@@ -162,21 +161,21 @@ async def _prepare_remote_workspace(
 
 async def _create_daytona_workspace(label: str) -> WorkspaceRef:
     """Create a new Daytona sandbox and return its WorkspaceRef."""
-    from agent.modules.workspaces.daytona_backend import create_daytona_workspace
+    from agent.modules.workspaces import create_daytona_workspace
 
     return await asyncio.to_thread(create_daytona_workspace, label=label)
 
 
 async def _create_modal_workspace(label: str) -> WorkspaceRef:
     """Create a new Modal sandbox and return its WorkspaceRef."""
-    from agent.modules.workspaces.modal_backend import create_modal_workspace
+    from agent.modules.workspaces import create_modal_workspace
 
     return await create_modal_workspace(label=label)
 
 
 async def remote_has_changes(ref: WorkspaceRef) -> bool:
     """Check if there are uncommitted changes in a remote workspace."""
-    from agent.modules.workspaces.service import get_workspace_change_inspector
+    from agent.modules.workspaces import get_workspace_change_inspector
 
     inspector = await get_workspace_change_inspector(ref)
     changes = await inspector.changes()
@@ -185,7 +184,7 @@ async def remote_has_changes(ref: WorkspaceRef) -> bool:
 
 async def remote_commit_all(ref: WorkspaceRef, message: str) -> None:
     """Stage all changes and commit in a remote workspace."""
-    from agent.modules.workspaces.service import get_workspace_command_executor
+    from agent.modules.workspaces import get_workspace_command_executor
 
     executor = await get_workspace_command_executor(ref)
     await executor.execute("git config user.email 'bot@kaka-agent.local'")
@@ -202,7 +201,7 @@ async def remote_push_branch(
     token: str,
 ) -> None:
     """Push branch to remote in a remote workspace."""
-    from agent.modules.workspaces.service import get_workspace_command_executor
+    from agent.modules.workspaces import get_workspace_command_executor
 
     executor = await get_workspace_command_executor(ref)
     repo_url = _build_push_url(ref, token)

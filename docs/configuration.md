@@ -67,6 +67,8 @@ Telegram có hai chế độ nhận update:
 
 Channel token, webhook secret và GitHub private key được mã hóa trong DB. Nếu nâng cấp từ YAML cũ, các key `channels.*` còn thiếu trong DB sẽ được copy một lần từ YAML.
 
+Các chat channel mới nên khai báo field qua `ChatChannelAdapter.settings_schema`. Dashboard Settings > Channels đọc schema này để render form, kiểm tra required credential và gửi notification qua adapter `send()` thay vì thêm nhánh hard-code trong notification service.
+
 ## Configuration Precedence
 
 Config được load theo thứ tự ưu tiên:

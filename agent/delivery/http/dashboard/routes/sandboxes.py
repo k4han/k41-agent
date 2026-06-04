@@ -12,7 +12,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from agent.modules.workspaces.sandboxes import (
+from agent.modules.workspaces import (
     DAYTONA_BACKEND,
     MODAL_BACKEND,
     archive_sandbox,

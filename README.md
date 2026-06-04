@@ -180,10 +180,12 @@ curl -X POST http://localhost:8000/api/chat/stream \
 
 ## Thêm platform mới (Slack, Zalo,...)
 
-1. Tạo `agent/modules/channels/infrastructure/slack/handler.py`
-2. Gọi `build_run_params()` + `run_agent_full()` từ `agent.modules.agent_runtime`
-3. Thêm `ChannelSpec` mới vào `agent/modules/channels/infrastructure/service_specs.py`
-4. **Không cần** động vào `delivery/http` hay `modules/workflows`
+1. Tạo adapter trong `agent/modules/channels/<platform>/adapter.py` implement `ChatChannelAdapter`.
+2. Adapter khai báo `settings_schema`, `settings_sections`, `capabilities`, `create_runner()`, `send()` và normalize event thành `InboundMessage`.
+3. Gửi message vào pipeline chung bằng `process_inbound_message()`. Pipeline đã xử lý auth, `/pair`, command registry, streaming agent và default agent.
+4. Thêm `ChannelSpec` trong `agent/modules/channels/service_specs.py` trỏ tới adapter loader và runner.
+5. Nếu platform hỗ trợ command suggestion như Telegram, implement `sync_commands()` để map `CommandRegistry` sang API native.
+6. **Không cần** động vào `agent_runtime`, `workflows` hoặc dashboard UI cho các field settings cơ bản; dashboard đọc schema từ adapter catalog.
 
 ## Thêm workflow mới
 
