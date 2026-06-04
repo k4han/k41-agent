@@ -616,6 +616,24 @@ export function ChatPage() {
   });
 
   createEffect(() => {
+    const td = threadData();
+    const cards = validCards();
+    if (!td || cards.length === 0) {
+      return;
+    }
+    const threadAgent = String(td.agent_name || "").trim();
+    if (!threadAgent) {
+      return;
+    }
+    const match = cards.find((card) => card.name === threadAgent);
+    const fallback = cards.find((card) => card.name === "default") || cards[0];
+    const next = match || fallback;
+    if (next && next.name !== agentName()) {
+      setAgentName(next.name);
+    }
+  });
+
+  createEffect(() => {
     const card = selectedCard();
     if (!card) {
       return;
