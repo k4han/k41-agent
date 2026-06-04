@@ -237,7 +237,21 @@ export function AppShell(props: {
     setActiveSessions((prev) => [...prev]);
 
     const exists = historyThreads().some((t) => t.thread_id === threadId);
-    if (!exists) {
+    if (exists) {
+      const updatedAt = new Date().toISOString();
+      applyHistoryState({
+        threads: historyThreads().map((thread) => (
+          thread.thread_id === threadId
+            ? {
+                ...thread,
+                agent_name: agent_name || thread.agent_name,
+                workspace: workspace !== undefined ? workspace : thread.workspace,
+                updated_at: updatedAt,
+              }
+            : thread
+        )),
+      });
+    } else {
       const placeholderThread: ThreadSummary = {
         thread_id: threadId,
         title: title || threadId,

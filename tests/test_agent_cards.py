@@ -16,7 +16,12 @@ def _make_service(agents_dir: Path) -> tuple[AgentCatalogService, FilesystemAgen
     return service, repo
 
 
-def _config(name: str, *, sub_agents: list[str] | None = None) -> AgentConfig:
+def _config(
+    name: str,
+    *,
+    sub_agents: list[str] | None = None,
+    plan_approval_targets: list[str] | None = None,
+) -> AgentConfig:
     return AgentConfig(
         name=name,
         display_name="Sample",
@@ -26,6 +31,7 @@ def _config(name: str, *, sub_agents: list[str] | None = None) -> AgentConfig:
         model="",
         tools=["read_file"],
         sub_agents=sub_agents,
+        plan_approval_targets=plan_approval_targets or [],
         max_context_tokens=1000,
         system_prompt="You are a sample agent.",
     )
@@ -83,6 +89,40 @@ def test_agent_card_create_update_delete_preserves_sub_agent_semantics(
 
     assert not created_path.exists()
     assert service.get_agent("sample") is None
+
+
+def test_agent_card_preserves_plan_approval_targets(tmp_path: Path) -> None:
+    service, _ = _make_service(tmp_path / "agents")
+
+    service.create_agent_card(_config("worker"))
+    created = service.create_agent_card(
+        _config("planner", plan_approval_targets=["worker"])
+    )
+
+    assert created.plan_approval_targets == ["worker"]
+    parsed = parse_agent_file(Path(created.path))
+    assert parsed is not None
+    assert parsed.plan_approval_targets == ["worker"]
+
+
+@pytest.mark.parametrize(
+    "targets, expected",
+    [
+        (["planner"], "planner"),
+        (["missing"], "missing"),
+    ],
+)
+def test_agent_card_validation_rejects_invalid_plan_approval_targets(
+    tmp_path: Path,
+    targets: list[str],
+    expected: str,
+) -> None:
+    service, _ = _make_service(tmp_path / "agents")
+
+    with pytest.raises(ValueError, match=expected):
+        service.create_agent_card(
+            _config("planner", plan_approval_targets=targets)
+        )
 
 
 def test_clone_builtin_agent_creates_user_override_and_rejects_collision(

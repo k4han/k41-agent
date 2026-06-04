@@ -30,6 +30,7 @@ class AgentCardBody(BaseModel):
     tools: list[str] = Field(default_factory=list)
     mcp_servers: list[str] = Field(default_factory=list)
     sub_agents: list[str] | None = None
+    plan_approval_targets: list[str] = Field(default_factory=list)
     hidden: bool = False
     max_context_tokens: int = 50_000
     system_prompt: str = ""

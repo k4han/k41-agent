@@ -28,6 +28,7 @@ class AgentConfig(BaseModel):
     tools: list[str] = Field(default_factory=list)
     mcp_servers: Optional[list[str]] = None
     sub_agents: Optional[list[str]] = None  # None = leaf (no call_agent), list = allowed targets
+    plan_approval_targets: list[str] = Field(default_factory=list)
     hidden: bool = False
     context_trim_threshold: int = 50_000
     # Backward-compat alias for ``context_trim_threshold``. Always mirrors the trim
@@ -60,6 +61,7 @@ class AgentCard(BaseModel):
     tools: list[str] = Field(default_factory=list)
     mcp_servers: Optional[list[str]] = None
     sub_agents: Optional[list[str]] = None
+    plan_approval_targets: list[str] = Field(default_factory=list)
     hidden: bool = False
     context_trim_threshold: int = 50_000
     # See ``AgentConfig.max_context_tokens``: legacy alias mirrored at validation.
@@ -103,6 +105,7 @@ class AgentCard(BaseModel):
             tools=list(config.tools),
             mcp_servers=list(config.mcp_servers) if config.mcp_servers is not None else None,
             sub_agents=list(config.sub_agents) if config.sub_agents is not None else None,
+            plan_approval_targets=list(config.plan_approval_targets),
             hidden=config.hidden,
             context_trim_threshold=config.context_trim_threshold,
             max_context_tokens=config.max_context_tokens,
@@ -149,6 +152,7 @@ class AgentCard(BaseModel):
             tools=list(self.tools),
             mcp_servers=list(self.mcp_servers) if self.mcp_servers is not None else None,
             sub_agents=list(self.sub_agents) if self.sub_agents is not None else None,
+            plan_approval_targets=list(self.plan_approval_targets),
             hidden=self.hidden,
             context_trim_threshold=self.context_trim_threshold,
             max_context_tokens=self.max_context_tokens,

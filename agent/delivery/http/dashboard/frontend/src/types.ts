@@ -40,6 +40,7 @@ export type AgentCard = {
   tools: string[];
   mcp_servers?: string[];
   sub_agents: string[] | null;
+  plan_approval_targets: string[];
   hidden: boolean;
   context_trim_threshold: number;
   max_context_tokens?: number | null;
@@ -62,6 +63,7 @@ export type AgentConfig = {
   tools: string[];
   mcp_servers?: string[];
   sub_agents: string[] | null;
+  plan_approval_targets: string[];
   hidden: boolean;
   context_trim_threshold: number;
   max_context_tokens?: number | null;

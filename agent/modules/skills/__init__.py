@@ -15,6 +15,11 @@ from xml.sax.saxutils import escape as xml_escape
 
 logger = logging.getLogger(__name__)
 
+from agent.modules.skills.repository import (  # noqa: E402
+    DEFAULT_SKILLS_ROOT,
+    normalize_repository_skill_dir,
+)
+
 _repository = None
 
 # TTL cache for repository-local skill discovery. The same workspace
@@ -318,6 +323,7 @@ def __getattr__(name: str):
 __all__ = [
     "Skill",
     "SkillSummary",
+    "DEFAULT_SKILLS_ROOT",
     "create_skill",
     "delete_skill",
     "get_effective_skill_content_xml",
@@ -331,5 +337,6 @@ __all__ = [
     "read_skill_content",
     "reload_repository_skills",
     "reload_skills",
+    "normalize_repository_skill_dir",
     "update_skill",
 ]

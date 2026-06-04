@@ -1,6 +1,10 @@
 import {
+  PLAN_MODE_TOOL_NAME,
+  createTranscriptPlanReview,
   createTranscriptTool,
+  findTranscriptPlanReviewTarget,
   findTranscriptToolTarget,
+  parsePlanReviewToolResult,
 } from "@/components/Transcript";
 import type { TranscriptAttachment, TranscriptItem } from "@/components/Transcript";
 import { workspaceDisplayLabelFromValues } from "@/lib/workspace";
@@ -141,6 +145,22 @@ export function toThreadTranscript(messages: ThreadMessage[]): ThreadTranscriptI
 
   messages.forEach((msg, messageIndex) => {
     if (msg.role === "tool") {
+      if (msg.name === PLAN_MODE_TOOL_NAME) {
+        const planTarget = findTranscriptPlanReviewTarget(items, msg.tool_call_id);
+        if (planTarget) {
+          Object.assign(planTarget, parsePlanReviewToolResult(msg.content));
+          return;
+        }
+        items.push({
+          key: `plan-review-result-${messageIndex}-${msg.tool_call_id || "unknown"}`,
+          ...createTranscriptPlanReview({
+            toolCallId: msg.tool_call_id,
+            ...parsePlanReviewToolResult(msg.content),
+          }),
+        });
+        return;
+      }
+
       const target = findTranscriptToolTarget(items, msg.tool_call_id, msg.name);
 
       if (target) {
@@ -177,6 +197,17 @@ export function toThreadTranscript(messages: ThreadMessage[]): ThreadTranscriptI
 
     if (msg.tool_calls?.length) {
       msg.tool_calls.forEach((toolCall, toolCallIndex) => {
+        if (toolCall.name === PLAN_MODE_TOOL_NAME) {
+          const args = toolCall.args as { plan?: unknown } | null;
+          items.push({
+            key: `plan-review-${messageIndex}-${toolCallIndex}-${toolCall.id || "unknown"}`,
+            ...createTranscriptPlanReview({
+              toolCallId: toolCall.id,
+              plan: typeof args?.plan === "string" ? args.plan : "",
+            }),
+          });
+          return;
+        }
         items.push({
           key: `tool-call-${messageIndex}-${toolCallIndex}-${toolCall.id || "unknown"}`,
           ...createTranscriptTool({

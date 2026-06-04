@@ -98,3 +98,118 @@
   border-top: 1px solid var(--border);
 }
 
+.plan-review {
+  box-sizing: border-box;
+  width: min(960px, 100%);
+  max-width: 100%;
+  min-width: 0;
+  margin: 0 auto 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 12px;
+}
+
+.plan-review-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  margin-bottom: 8px;
+}
+
+.plan-review-header > div {
+  min-width: 0;
+}
+
+.plan-review-title {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.plan-review-state {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.plan-review-markdown {
+  max-width: 100%;
+  min-width: 0;
+  color: var(--fg);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.plan-review-markdown .markdown-code-frame,
+.plan-review-markdown .markdown-mermaid-frame {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.plan-review-markdown pre,
+.plan-review-markdown table {
+  max-width: 100%;
+}
+
+.plan-review-markdown code {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.plan-review-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 100%;
+  min-width: 0;
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.plan-review-approve-row,
+.plan-review-feedback-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.plan-review-agent-picker {
+  flex: 1 1 180px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.plan-review-agent-picker .select-control-menu {
+  right: auto;
+  left: 0;
+  max-width: min(320px, calc(100vw - 32px));
+}
+
+.plan-review-feedback-input {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-height: 44px;
+  min-width: min(220px, 100%);
+  flex: 1 1 220px;
+  resize: vertical;
+}
+
+.plan-review-approve-btn,
+.plan-review-feedback-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  white-space: nowrap;
+}
+

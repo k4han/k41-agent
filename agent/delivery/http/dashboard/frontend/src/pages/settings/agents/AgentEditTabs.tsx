@@ -18,9 +18,10 @@ export function AgentEditTabs(props: {
   totalBuiltInTools: number;
   mcpServerOptions: string[];
   subAgentOptions: string[];
+  planApprovalTargetOptions: string[];
   onUpdate: <K extends keyof AgentForm>(key: K, value: AgentForm[K]) => void;
   onToggleListValue: (
-    key: "tools" | "sub_agents" | "mcp_servers",
+    key: "tools" | "sub_agents" | "mcp_servers" | "plan_approval_targets",
     value: string,
     checked: boolean,
   ) => void;
@@ -72,6 +73,7 @@ export function AgentEditTabs(props: {
               totalBuiltInTools={props.totalBuiltInTools}
               mcpServerOptions={props.mcpServerOptions}
               subAgentOptions={props.subAgentOptions}
+              planApprovalTargetOptions={props.planApprovalTargetOptions}
               onToggleListValue={props.onToggleListValue}
               onToggleToolGroup={props.onToggleToolGroup}
             />

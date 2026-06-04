@@ -531,7 +531,7 @@ def _normalize_bootstrap_port(value: Any | None) -> int:
 
 def _normalize_setting_value(key: str, value: Any | None) -> Any | None:
     if key == "skills.repository_dir":
-        from agent.modules.skills.repository import normalize_repository_skill_dir
+        from agent.modules.skills import normalize_repository_skill_dir
 
         try:
             return normalize_repository_skill_dir(str(value or ""))
@@ -873,6 +873,7 @@ def _agent_config_from_body(body: "AgentCardBody") -> AgentConfig:
         tools=list(body.tools),
         mcp_servers=list(body.mcp_servers) if hasattr(body, "mcp_servers") and body.mcp_servers is not None else None,
         sub_agents=list(body.sub_agents) if body.sub_agents is not None else None,
+        plan_approval_targets=list(body.plan_approval_targets),
         hidden=body.hidden,
         max_context_tokens=body.max_context_tokens,
         system_prompt=body.system_prompt.strip(),

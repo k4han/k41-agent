@@ -10,6 +10,7 @@ export type AgentForm = {
   tools: string[];
   mcp_servers: string[];
   sub_agents: string[];
+  plan_approval_targets: string[];
   hidden: boolean;
   context_trim_threshold: number;
   system_prompt: string;
@@ -35,6 +36,7 @@ export function blankForm(workflow: string): AgentForm {
     tools: [],
     mcp_servers: [],
     sub_agents: [],
+    plan_approval_targets: [],
     hidden: false,
     context_trim_threshold: DEFAULT_CONTEXT_TRIM_THRESHOLD,
     system_prompt: "",
@@ -52,6 +54,7 @@ export function cardToForm(card: AgentCard): AgentForm {
     tools: card.tools || [],
     mcp_servers: card.mcp_servers || [],
     sub_agents: card.sub_agents || [],
+    plan_approval_targets: card.plan_approval_targets || [],
     hidden: card.hidden || false,
     context_trim_threshold: card.context_trim_threshold || DEFAULT_CONTEXT_TRIM_THRESHOLD,
     system_prompt: card.system_prompt || "",

@@ -5,7 +5,7 @@ import { TranscriptItemView } from "@/components/Transcript";
 import { WorkspaceSelector } from "@/components/WorkspaceSelector";
 import type { WorkspaceSelectionDraft } from "@/components/WorkspaceSelector";
 import type { ChatTranscriptItem } from "@/lib/chatStreamStore";
-import type { WorkspaceRef } from "@/types";
+import type { AgentCard, WorkspaceRef } from "@/types";
 
 export interface ChatTranscriptProps {
   setTranscriptRef: (el: HTMLDivElement) => void;
@@ -24,6 +24,8 @@ export interface ChatTranscriptProps {
   workspace: WorkspaceRef | null;
   workspaceSelection: WorkspaceSelectionDraft | null;
   conversationBusy: boolean;
+  agents: AgentCard[];
+  activeAgentName: string;
   onWorkspaceSelectionChange: (value: WorkspaceSelectionDraft) => void;
   onEditMessage: (payload: {
     itemId?: number;
@@ -32,6 +34,18 @@ export interface ChatTranscriptProps {
     text: string;
   }) => void;
   onBranchSelect: (checkpointId: string) => void;
+  onApprovePlanReview: (payload: {
+    toolCallId?: string | null;
+    interruptId?: string | null;
+    plan: string;
+    targetAgent: string;
+  }) => void;
+  onRevisePlanReview: (payload: {
+    toolCallId?: string | null;
+    interruptId?: string | null;
+    plan: string;
+    feedback: string;
+  }) => void;
 }
 
 export function ChatTranscript(props: ChatTranscriptProps) {
@@ -72,9 +86,13 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                 item={item}
                 itemId={item.id}
                 deferMermaid={props.streaming || props.backgroundLive}
+                agents={props.agents}
+                activeAgentName={props.activeAgentName}
                 actionsDisabled={props.conversationBusy}
                 onEditMessage={props.onEditMessage}
                 onBranchSelect={props.onBranchSelect}
+                onApprovePlanReview={props.onApprovePlanReview}
+                onRevisePlanReview={props.onRevisePlanReview}
               />
             )}
           </For>

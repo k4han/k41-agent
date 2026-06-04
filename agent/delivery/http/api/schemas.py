@@ -1,6 +1,6 @@
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from agent.modules.workspaces import WorkspaceRef
 
@@ -14,6 +14,21 @@ class ChatAttachment(BaseModel):
     base64: Optional[str] = None
 
 
+class PlanResumePayload(BaseModel):
+    action: Literal["approve", "revise"]
+    target_agent: Optional[str] = None
+    feedback: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _validate_action_payload(self) -> "PlanResumePayload":
+        if self.action == "approve":
+            if not (self.target_agent or "").strip():
+                raise ValueError("target_agent is required when approving a plan.")
+        elif not (self.feedback or "").strip():
+            raise ValueError("feedback is required when revising a plan.")
+        return self
+
+
 class ChatRequest(BaseModel):
     message: str
     user_id: str = "anonymous"
@@ -25,6 +40,7 @@ class ChatRequest(BaseModel):
     agent_name: Optional[str] = None
     provider: Optional[str] = None
     model: Optional[str] = None
+    resume_payload: Optional[PlanResumePayload] = None
     attachments: list[ChatAttachment] = Field(default_factory=list)
     resume: bool = False
 

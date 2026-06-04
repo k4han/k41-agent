@@ -16,7 +16,7 @@ from agent.modules.skills import (
     reload_skills,
     update_skill,
 )
-from agent.modules.skills.repository import DEFAULT_SKILLS_ROOT
+from agent.modules.skills import DEFAULT_SKILLS_ROOT
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -120,4 +120,3 @@ async def delete_dashboard_skill(name: str) -> dict[str, str]:
 async def reload_dashboard_skills(request: Request) -> dict[str, Any]:
     reload_skills()
     return {"status": "reloaded", **await get_dashboard_skills(request)}
-

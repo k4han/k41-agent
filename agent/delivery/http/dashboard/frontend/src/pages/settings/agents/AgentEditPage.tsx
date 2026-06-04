@@ -65,7 +65,7 @@ export function AgentEditPage(props: { agentName?: string }) {
   };
 
   const toggleListValue = (
-    key: "tools" | "sub_agents" | "mcp_servers",
+    key: "tools" | "sub_agents" | "mcp_servers" | "plan_approval_targets",
     value: string,
     checked: boolean,
   ) => {
@@ -133,6 +133,14 @@ export function AgentEditPage(props: { agentName?: string }) {
     uniqueSorted([
       ...(payload()?.agent_names || []).filter((name) => name !== form().name),
       ...form().sub_agents,
+    ]),
+  );
+  const planApprovalTargetOptions = createMemo(() =>
+    uniqueSorted([
+      ...(payload()?.cards || [])
+        .filter((card) => card.valid && !card.hidden && card.name !== form().name)
+        .map((card) => card.name),
+      ...form().plan_approval_targets.filter((name) => name !== form().name),
     ]),
   );
   const mcpServerOptions = createMemo(() =>
@@ -315,6 +323,7 @@ export function AgentEditPage(props: { agentName?: string }) {
         totalBuiltInTools={totalBuiltInTools()}
         mcpServerOptions={mcpServerOptions()}
         subAgentOptions={subAgentOptions()}
+        planApprovalTargetOptions={planApprovalTargetOptions()}
         onUpdate={updateForm}
         onToggleListValue={toggleListValue}
         onToggleToolGroup={toggleToolGroup}

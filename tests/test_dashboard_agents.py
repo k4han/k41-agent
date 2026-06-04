@@ -50,6 +50,7 @@ def _payload(name: str) -> dict:
         "model": "",
         "tools": ["read_file"],
         "sub_agents": [],
+        "plan_approval_targets": [],
         "max_context_tokens": 1000,
         "system_prompt": "You are a sample dashboard agent.",
     }
@@ -107,6 +108,7 @@ def test_agent_card_crud_endpoints(dashboard_agent_client) -> None:
 
     assert updated.status_code == 200
     assert updated.json()["card"]["sub_agents"] == []
+    assert updated.json()["card"]["plan_approval_targets"] == []
     assert updated.json()["card"]["system_prompt"] == "Updated prompt."
 
     deleted = client.delete("/agents/cards/sample")

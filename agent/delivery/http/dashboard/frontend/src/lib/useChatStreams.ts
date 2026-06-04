@@ -2,8 +2,11 @@ import { createSignal } from "solid-js";
 
 import {
   createTranscriptTool,
+  findTranscriptPlanReviewTarget,
   findTranscriptToolTarget,
+  parsePlanReviewToolResult,
   type TranscriptItem,
+  type TranscriptPlanReview,
 } from "@/components/Transcript";
 import {
   allocItemId,
@@ -174,6 +177,49 @@ export function useChatStreams(params: UseChatStreamsParams) {
     }
   };
 
+  const updatePlanReviewResult = (
+    toolCallId: string,
+    result: unknown,
+    targetThreadId?: string,
+  ) => {
+    setItems((current) => {
+      const target = findTranscriptPlanReviewTarget(current, toolCallId);
+      if (!target) {
+        return current;
+      }
+      const parsed = parsePlanReviewToolResult(result);
+      return current.map((item) =>
+        item.id === target.id && item.type === "plan_review"
+          ? { ...item, ...parsed }
+          : item,
+      );
+    }, targetThreadId);
+
+    const isCurrent = !getIsUnmounting() && (!targetThreadId || targetThreadId === getCurrentThreadId());
+    if (isCurrent) {
+      scroll.scrollToBottom();
+    }
+  };
+
+  const updatePlanReview = (
+    toolCallId: string | null | undefined,
+    patch: Partial<TranscriptPlanReview>,
+    targetThreadId?: string,
+  ) => {
+    if (!toolCallId) {
+      return;
+    }
+    setItems(
+      (current) =>
+        current.map((item) =>
+          item.type === "plan_review" && item.tool_call_id === toolCallId
+            ? { ...item, ...patch }
+            : item,
+        ),
+      targetThreadId,
+    );
+  };
+
   return {
     items,
     setItems,
@@ -189,5 +235,7 @@ export function useChatStreams(params: UseChatStreamsParams) {
     replaceMessage,
     removeItem,
     updateToolResult,
+    updatePlanReview,
+    updatePlanReviewResult,
   };
 }

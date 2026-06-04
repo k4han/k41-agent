@@ -10,12 +10,11 @@ from langchain_core.runnables import RunnableConfig
 from agent.modules.providers import get_resolved_chat_model
 from agent.modules.usage import with_usage_tracking
 from agent.modules.prompt_variables import get_runtime_prompt_variable_values
-from agent.modules.tools.runtime.context import get_thread_id
 from agent.modules.workflows.message_history import normalize_messages_for_chat_model
 from agent.modules.workflows.prompt_builders import (
     build_llm_system_prompt,
 )
-from agent.modules.tools import ToolResolver
+from agent.modules.tools import ToolResolver, get_thread_id
 
 if TYPE_CHECKING:
     from langgraph.runtime import Runtime

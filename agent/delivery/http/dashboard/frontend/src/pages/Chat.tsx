@@ -10,6 +10,7 @@ import { AppShell } from "@/components/AppShell";
 import { ChatComposer } from "@/components/ChatComposer";
 import { ChatThreadBadges } from "@/components/ChatThreadBadges";
 import { ChatTranscript } from "@/components/ChatTranscript";
+import { PLAN_MODE_TOOL_NAME } from "@/components/Transcript";
 import type { WorkspaceSelectionDraft } from "@/components/WorkspaceSelector";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
@@ -59,6 +60,7 @@ import {
   type ChatAttachmentPayload,
   type ChatPayload,
   type DefaultWorkspacePayload,
+  type PlanResumePayload,
   type WorkspaceResolvePayload,
   ATTACHMENT_ACCEPT,
   DEFAULT_ATTACHMENT_MESSAGE,
@@ -254,6 +256,8 @@ export function ChatPage() {
     replaceMessage,
     removeItem,
     updateToolResult,
+    updatePlanReview,
+    updatePlanReviewResult,
   } = streams;
 
   const attach = useChatAttachments({
@@ -274,7 +278,13 @@ export function ChatPage() {
   });
 
   const filteredItems = createMemo(() =>
-    items().filter((item) => !(item.type === "tool" && item.name === "write_todos"))
+    items().filter(
+      (item) =>
+        !(
+          item.type === "tool" &&
+          (item.name === "write_todos" || item.name === PLAN_MODE_TOOL_NAME)
+        ),
+    )
   );
 
   const currentTodos = createMemo(() => {
@@ -502,6 +512,7 @@ export function ChatPage() {
     replaceMessage,
     removeItem,
     updateToolResult,
+    updatePlanReviewResult,
     onError: (message) => showToast(message, "error"),
     setRecursionLimitReached: (v) => setRecursionLimitReached(v),
     onThreadCreated,
@@ -604,6 +615,27 @@ export function ChatPage() {
     }
   };
 
+  const updateCurrentThreadAgent = (nextAgentName: string) => {
+    const threadId = currentThreadId();
+    setThreadData((current) => (
+      current
+        ? { ...current, agent_name: nextAgentName }
+        : current
+    ));
+    if (!threadId) {
+      return;
+    }
+    window.dispatchEvent(
+      new CustomEvent(CUSTOM_DOM_EVENTS.THREAD_START_RUNNING, {
+        detail: {
+          threadId,
+          workspace: workspaceRef() || localWorkspaceRef(workingDir()),
+          agent_name: nextAgentName,
+        },
+      }),
+    );
+  };
+
   createEffect(() => {
     const payload = data();
     if (!payload || agentName()) {
@@ -693,11 +725,12 @@ export function ChatPage() {
     message: string,
     attachedFiles: ChatAttachmentPayload[],
     resolvedWorkspace?: WorkspaceRef | null,
+    agentNameOverride?: string,
   ) => {
     const payload: ChatPayload = {
       message,
       user_id: "dashboard",
-      agent_name: agentName(),
+      agent_name: agentNameOverride || agentName(),
     };
     if (provider()) {
       payload.provider = provider();
@@ -742,7 +775,11 @@ export function ChatPage() {
     return Date.now() - latestLocalStreamFinish.finishedAt < 5000;
   };
 
-  const sendMessage = async (resume = false) => {
+  const sendMessage = async (
+    resume = false,
+    resumePayload?: PlanResumePayload,
+    agentNameOverride?: string,
+  ) => {
     isUnmounting = false;
     cleanupStaleStreams();
     if (streaming()) {
@@ -766,7 +803,8 @@ export function ChatPage() {
       showToast("Wait for the background task to finish.", "warning");
       return;
     }
-    if (!agentName()) {
+    const effectiveAgentName = agentNameOverride || agentName();
+    if (!effectiveAgentName) {
       showToast("No valid agent is available.", "error");
       return;
     }
@@ -852,10 +890,21 @@ export function ChatPage() {
         replaceMessage(statusMessageId, THINKING_TEXT, streamThreadIdRef.id);
       }
 
-      const payload = buildPayload(message, resume ? [] : attachedFiles, resolvedWorkspace);
+      const payload = buildPayload(
+        message,
+        resume ? [] : attachedFiles,
+        resolvedWorkspace,
+        effectiveAgentName,
+      );
       if (resume) {
-        (payload as any).resume = true;
+        payload.resume = true;
         payload.message = "";
+        if (resumePayload) {
+          payload.resume_payload = resumePayload;
+        }
+        if (activeCheckpointId()) {
+          payload.checkpoint_id = activeCheckpointId();
+        }
       } else if (currentThreadId() && activeCheckpointId()) {
         payload.checkpoint_id = activeCheckpointId();
       }
@@ -1019,6 +1068,63 @@ export function ChatPage() {
   const stopChat = () => controller()?.abort();
   const handleResume = () => {
     void sendMessage(true);
+  };
+  const handleApprovePlanReview = (payload: {
+    toolCallId?: string | null;
+    interruptId?: string | null;
+    plan: string;
+    targetAgent: string;
+  }) => {
+    const targetAgent = payload.targetAgent.trim();
+    if (!targetAgent) {
+      showToast("Select a target agent.", "warning");
+      return;
+    }
+    if (conversationBusy()) {
+      showToast("Wait for the current response to finish.", "warning");
+      return;
+    }
+    updatePlanReview(payload.toolCallId, {
+      status: "approved",
+      targetAgent,
+    });
+    updateCurrentThreadAgent(targetAgent);
+    setAgentName(targetAgent);
+    void sendMessage(
+      true,
+      {
+        action: "approve",
+        target_agent: targetAgent,
+      },
+      targetAgent,
+    );
+  };
+  const handleRevisePlanReview = (payload: {
+    toolCallId?: string | null;
+    interruptId?: string | null;
+    plan: string;
+    feedback: string;
+  }) => {
+    const feedback = payload.feedback.trim();
+    if (!feedback) {
+      showToast("Enter feedback before sending.", "warning");
+      return;
+    }
+    if (conversationBusy()) {
+      showToast("Wait for the current response to finish.", "warning");
+      return;
+    }
+    updatePlanReview(payload.toolCallId, {
+      status: "revision_requested",
+      feedback,
+    });
+    void sendMessage(
+      true,
+      {
+        action: "revise",
+        feedback,
+      },
+    );
   };
 
   const handleBranchSelect = (checkpointId: string) => {
@@ -1313,9 +1419,13 @@ export function ChatPage() {
                 workspace={workspaceRef()}
                 workspaceSelection={workspaceSelection()}
                 conversationBusy={conversationBusy()}
+                agents={validCards()}
+                activeAgentName={agentName()}
                 onWorkspaceSelectionChange={setWorkspaceDraft}
                 onEditMessage={(payload) => void handleEditMessage(payload)}
                 onBranchSelect={handleBranchSelect}
+                onApprovePlanReview={handleApprovePlanReview}
+                onRevisePlanReview={handleRevisePlanReview}
               />
               <ChatComposer
                 prompt={prompt()}

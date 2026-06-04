@@ -129,6 +129,8 @@ def serialize_agent_config(config: AgentConfig) -> str:
         data["mcp_servers"] = list(config.mcp_servers)
     if config.sub_agents is not None:
         data["sub_agents"] = list(config.sub_agents)
+    if config.plan_approval_targets:
+        data["plan_approval_targets"] = list(config.plan_approval_targets)
     if config.hidden:
         data["hidden"] = True
 
@@ -196,6 +198,9 @@ def _build_agent_config(
     else:
         sub_agents = parse_string_or_list(raw_sub) or []
 
+    plan_approval_targets = parse_string_or_list(
+        data.get("plan_approval_targets", [])
+    )
     hidden = bool(data.get("hidden", False))
 
     # Validate router agent template at parse time
@@ -217,6 +222,7 @@ def _build_agent_config(
             tools=tools,
             mcp_servers=mcp_servers,
             sub_agents=sub_agents,
+            plan_approval_targets=plan_approval_targets,
             hidden=hidden,
             context_trim_threshold=context_trim_threshold,
             system_prompt=body,

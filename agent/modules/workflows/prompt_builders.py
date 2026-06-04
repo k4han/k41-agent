@@ -38,6 +38,17 @@ WRITE_TODOS_PROMPT = (
     "Valid statuses are pending, in_progress, and completed."
 )
 
+PLAN_MODE_PROMPT = (
+    "The plan_mode_respond tool can present an implementation plan to the user "
+    "and pause execution for human review.\n"
+    "Use it when the user asks to review or approve a plan before work proceeds, "
+    "or when a task needs an explicit handoff decision before implementation.\n"
+    "The plan must be complete enough for another agent to execute without "
+    "guessing. After the user approves, continue from the tool response and "
+    "execute the approved plan. If the user provides feedback, revise the plan "
+    "and call plan_mode_respond again."
+)
+
 _PROMPT_VARIABLE_RE = re.compile(r"\{\{([A-Za-z][A-Za-z0-9_-]{0,63})\}\}")
 
 
@@ -168,6 +179,9 @@ def build_llm_system_prompt(
     if _has_tool(tools, "write_todos"):
         system_prompt = f"{system_prompt}\n\n{WRITE_TODOS_PROMPT}"
 
+    if _has_tool(tools, "plan_mode_respond"):
+        system_prompt = f"{system_prompt}\n\n{PLAN_MODE_PROMPT}"
+
     if _has_tool(tools, "skill"):
         system_prompt = f"{system_prompt}{_build_skills_prompt_section(skills_catalog_xml)}"
 
@@ -176,6 +190,7 @@ def build_llm_system_prompt(
 
 __all__ = [
     "SKILLS_DISCLOSURE_PROMPT",
+    "PLAN_MODE_PROMPT",
     "SUB_AGENT_DISCLOSURE_PROMPT",
     "SUB_AGENT_EMPTY_PROMPT",
     "WRITE_TODOS_PROMPT",

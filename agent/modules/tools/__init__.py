@@ -27,7 +27,18 @@ from agent.modules.tools.result import (
     ToolErrorCode,
     format_tool_error,
 )
-from agent.modules.tools.runtime.context import ToolContext, get_context_value
+from agent.modules.tools.langchain.utility_tools.plan_mode import (
+    PLAN_MODE_TOOL_NAME,
+    PLAN_REVIEW_APPROVED_PREFIX,
+    PLAN_REVIEW_INTERRUPT_TYPE,
+    PLAN_REVIEW_REVISION_PREFIX,
+    PlanModeResumePayload,
+)
+from agent.modules.tools.runtime.context import (
+    ToolContext,
+    get_context_value,
+    get_thread_id,
+)
 from agent.modules.tools.runtime.path_guard import resolve_safe_path
 
 T = TypeVar("T")
@@ -142,6 +153,11 @@ __all__ = [
     "ToolPolicy",
     "ToolResolver",
     "ToolSource",
+    "PLAN_MODE_TOOL_NAME",
+    "PLAN_REVIEW_APPROVED_PREFIX",
+    "PLAN_REVIEW_INTERRUPT_TYPE",
+    "PLAN_REVIEW_REVISION_PREFIX",
+    "PlanModeResumePayload",
     "aresolve_tools_for_agent",
     "close_thread_shell_sessions",
     "ensure_mcp_loaded",
@@ -152,6 +168,7 @@ __all__ = [
     "get_default_tool_names",
     "get_default_tools",
     "get_runtime_context_value",
+    "get_thread_id",
     "get_tool_by_name",
     "resolve_safe_path",
     "resolve_tools",

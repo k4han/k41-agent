@@ -1,8 +1,10 @@
 from types import SimpleNamespace
 
 from langchain_core.messages import AIMessage
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode as LangGraphToolNode
+from langgraph.types import Command
 from pydantic import ValidationError
 import pytest
 
@@ -13,6 +15,13 @@ from agent.modules.tools.langchain.agent_tools.call_agent import (
     call_agent,
 )
 from agent.modules.tools.langchain.utility_tools.write_todos import write_todos
+from agent.modules.tools.langchain.utility_tools.plan_mode import (
+    PLAN_MODE_TOOL_NAME,
+    PLAN_REVIEW_APPROVED_PREFIX,
+    PLAN_REVIEW_INTERRUPT_TYPE,
+    PlanModeResumePayload,
+    plan_mode_respond,
+)
 from agent.modules.workflows.state.base import BaseState
 
 
@@ -299,9 +308,141 @@ async def test_tool_node_resolves_runtime_allowed_tools(monkeypatch):
     assert captured["config"] == config
 
 
+@pytest.mark.asyncio
+async def test_tool_node_allows_pending_plan_mode_tool_after_agent_switch(monkeypatch):
+    captured: dict = {}
+
+    class _FakeToolNode:
+        def __init__(self, tools):
+            captured["tool_names"] = [tool.name for tool in tools]
+
+        async def ainvoke(self, state, *, config):
+            captured["state"] = state
+            captured["config"] = config
+            return {"messages": []}
+
+    monkeypatch.setattr(tool_node_module, "ToolNode", _FakeToolNode)
+
+    async def _fake_resolve(self, agent_name, *, override_tool_names=None):
+        return [SimpleNamespace(name="read_file")]
+
+    monkeypatch.setattr(
+        tool_node_module.ToolResolver,
+        "aresolve_for_agent",
+        _fake_resolve,
+    )
+
+    state = {
+        "messages": [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": PLAN_MODE_TOOL_NAME,
+                        "args": {"plan": "Do the work."},
+                        "id": "call-plan",
+                    }
+                ],
+            )
+        ]
+    }
+
+    result = await tool_node_module.tool_node(
+        state,
+        config={"configurable": {"thread_id": "thread-1"}},
+        runtime=SimpleNamespace(
+            context={
+                "agent_name": "worker",
+                "allowed_tool_names": ["read_file"],
+            }
+        ),
+    )
+
+    assert result == {"messages": []}
+    assert captured["tool_names"] == ["read_file", PLAN_MODE_TOOL_NAME]
+
+
 def test_default_tool_registry_includes_runtime_tools():
     assert "call_agent" in get_default_tool_names()
     assert "write_todos" in get_default_tool_names()
+    assert PLAN_MODE_TOOL_NAME in get_default_tool_names()
+
+
+def test_plan_mode_tool_validates_plan() -> None:
+    assert plan_mode_respond.args_schema is not None
+
+    with pytest.raises(ValidationError):
+        plan_mode_respond.args_schema.model_validate({"plan": ""})
+
+    with pytest.raises(ValidationError):
+        PlanModeResumePayload.model_validate({"action": "unknown"})
+    with pytest.raises(ValidationError):
+        PlanModeResumePayload.model_validate({"action": "approve"})
+    with pytest.raises(ValidationError):
+        PlanModeResumePayload.model_validate({"action": "revise", "feedback": ""})
+
+
+@pytest.mark.asyncio
+async def test_plan_mode_tool_interrupts_and_resumes() -> None:
+    plan = "1. Inspect code\n2. Implement change"
+
+    def _request_plan(_state):
+        return {
+            "messages": [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": PLAN_MODE_TOOL_NAME,
+                            "args": {"plan": plan},
+                            "id": "call-plan",
+                        }
+                    ],
+                )
+            ]
+        }
+
+    graph = StateGraph(BaseState)
+    graph.add_node("request_plan", _request_plan)
+    graph.add_node("tools", LangGraphToolNode([plan_mode_respond]))
+    graph.add_edge(START, "request_plan")
+    graph.add_edge("request_plan", "tools")
+    graph.add_edge("tools", END)
+
+    compiled = graph.compile(checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "plan-thread"}}
+
+    interrupts = []
+    async for event in compiled.astream(
+        {"messages": []},
+        config=config,
+        stream_mode="values",
+    ):
+        interrupts.extend(event.get("__interrupt__", ()))
+
+    assert len(interrupts) == 1
+    interrupt_value = interrupts[0].value
+    assert interrupt_value["type"] == PLAN_REVIEW_INTERRUPT_TYPE
+    assert interrupt_value["tool_call_id"] == "call-plan"
+    assert interrupt_value["plan"] == plan
+
+    result = await compiled.ainvoke(
+        Command(resume={"action": "approve", "target_agent": "worker"}),
+        config=config,
+    )
+
+    tool_message = result["messages"][-1]
+    assert tool_message.name == PLAN_MODE_TOOL_NAME
+    assert tool_message.content.startswith(PLAN_REVIEW_APPROVED_PREFIX)
+    assert "Target agent: worker" in tool_message.content
+
+
+def test_plan_mode_resume_payload_accepts_revision() -> None:
+    payload = PlanModeResumePayload.model_validate(
+        {"action": "revise", "feedback": "Make it shorter."}
+    )
+    assert payload.action == "revise"
+    assert payload.feedback == "Make it shorter."
 
 
 def test_write_todos_tool_validates_status() -> None:

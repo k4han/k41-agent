@@ -27,7 +27,12 @@ export function AgentToolsTab(props: {
   totalBuiltInTools: number;
   mcpServerOptions: string[];
   subAgentOptions: string[];
-  onToggleListValue: (key: "tools" | "sub_agents" | "mcp_servers", value: string, checked: boolean) => void;
+  planApprovalTargetOptions: string[];
+  onToggleListValue: (
+    key: "tools" | "sub_agents" | "mcp_servers" | "plan_approval_targets",
+    value: string,
+    checked: boolean,
+  ) => void;
   onToggleToolGroup: (tools: string[], checked: boolean) => void;
 }) {
   return (
@@ -44,6 +49,10 @@ export function AgentToolsTab(props: {
         <div class="agent-config-stat">
           <span>Sub-agents</span>
           <strong>{`${props.form.sub_agents.length}/${props.subAgentOptions.length}`}</strong>
+        </div>
+        <div class="agent-config-stat">
+          <span>Plan targets</span>
+          <strong>{`${props.form.plan_approval_targets.length}/${props.planApprovalTargetOptions.length}`}</strong>
         </div>
       </div>
 
@@ -170,6 +179,48 @@ export function AgentToolsTab(props: {
                         disabled={props.readOnly}
                         onChange={(event) =>
                           props.onToggleListValue("sub_agents", agent, event.currentTarget.checked)
+                        }
+                      />
+                      <span class="agent-config-option-text mono">{agent}</span>
+                    </label>
+                  );
+                }}
+              </For>
+            </div>
+          </Show>
+        </div>
+      </section>
+
+      <section class="agent-config-section">
+        <div class="agent-config-section-header">
+          <div>
+            <div class="agent-config-eyebrow">Plan review</div>
+            <h3>Approval Targets</h3>
+            <p class="hint">Limit which agent cards can receive approved plans from this agent.</p>
+          </div>
+          <span class="badge badge-info">{`${props.form.plan_approval_targets.length} selected`}</span>
+        </div>
+        <div class="agent-config-section-body">
+          <Show
+            when={props.planApprovalTargetOptions.length > 0}
+            fallback={<div class="agent-config-empty">No approval target agents available</div>}
+          >
+            <div class="agent-config-option-grid">
+              <For each={props.planApprovalTargetOptions}>
+                {(agent) => {
+                  const isChecked = () => props.form.plan_approval_targets.includes(agent);
+                  return (
+                    <label class={optionCardClass(isChecked(), props.readOnly)}>
+                      <input
+                        type="checkbox"
+                        checked={isChecked()}
+                        disabled={props.readOnly}
+                        onChange={(event) =>
+                          props.onToggleListValue(
+                            "plan_approval_targets",
+                            agent,
+                            event.currentTarget.checked,
+                          )
                         }
                       />
                       <span class="agent-config-option-text mono">{agent}</span>

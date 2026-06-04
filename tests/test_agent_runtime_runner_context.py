@@ -4,9 +4,14 @@ from types import SimpleNamespace
 
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
+from langgraph.types import Command
 
 import agent.modules.conversations as conversations_module
 from agent.modules.agent_runtime import runner as runner_module
+from agent.modules.tools.langchain.utility_tools.plan_mode import (
+    PLAN_MODE_TOOL_NAME,
+    PLAN_REVIEW_INTERRUPT_TYPE,
+)
 
 
 @pytest.mark.asyncio
@@ -890,6 +895,202 @@ async def test_run_agent_stream_resume(monkeypatch):
 
     assert events == [{"type": "final", "content": "resumed-ai-message"}]
     assert captured["payload"] is None
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_emits_plan_review_interrupt(monkeypatch):
+    plan = "1. Inspect\n2. Implement"
+
+    class _FakeCatalog:
+        def get_agent(self, name: str):
+            return SimpleNamespace(
+                graph_type="react_agent",
+                max_context_tokens=1234,
+                tools=[PLAN_MODE_TOOL_NAME],
+            )
+
+    class _FakeInterrupt:
+        id = "interrupt-1"
+        value = {
+            "type": PLAN_REVIEW_INTERRUPT_TYPE,
+            "tool_call_id": "call-plan",
+            "plan": plan,
+        }
+
+    class _FakeGraph:
+        async def astream(self, payload, **kwargs):
+            yield (
+                "values",
+                {
+                    "messages": [
+                        AIMessage(
+                            content="",
+                            id="ai-plan",
+                            tool_calls=[
+                                {
+                                    "name": PLAN_MODE_TOOL_NAME,
+                                    "args": {"plan": plan},
+                                    "id": "call-plan",
+                                }
+                            ],
+                        )
+                    ],
+                    "__interrupt__": (_FakeInterrupt(),),
+                },
+            )
+
+    monkeypatch.setattr(
+        "agent.modules.agents.get_catalog_service",
+        lambda: _FakeCatalog(),
+    )
+    monkeypatch.setattr(runner_module, "get_workflow_graph", lambda name: _FakeGraph())
+    monkeypatch.setattr(runner_module, "make_run_context", lambda **kwargs: kwargs)
+    monkeypatch.setattr(
+        runner_module,
+        "make_run_config",
+        lambda **kwargs: {"configurable": {"thread_id": kwargs["thread_id"]}},
+    )
+
+    events = [
+        event
+        async for event in runner_module.run_agent_stream(
+            user_input="make a plan",
+            thread_id="thread-1",
+            agent_name="default",
+        )
+    ]
+
+    assert events == [
+        {
+            "type": PLAN_REVIEW_INTERRUPT_TYPE,
+            "tool_call_id": "call-plan",
+            "interrupt_id": "interrupt-1",
+            "plan": plan,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_resume_payload_switches_agent(monkeypatch):
+    captured: dict = {}
+    updated: list[tuple[str, str]] = []
+
+    class _FakeCatalog:
+        def get_agent(self, name: str):
+            if name not in {"planner", "worker"}:
+                return None
+            return SimpleNamespace(
+                graph_type="react_agent",
+                max_context_tokens=1234,
+                tools=["read_file"],
+            )
+
+        def get_agent_card(self, name: str):
+            if name != "worker":
+                return None
+            return SimpleNamespace(hidden=False, valid=True)
+
+    class _FakeGraph:
+        async def aget_state(self, config):
+            return SimpleNamespace(
+                values={
+                    "messages": [
+                        HumanMessage(content="old-user", id="old-user"),
+                        AIMessage(content="", id="old-ai"),
+                    ]
+                }
+            )
+
+        async def astream(self, payload, **kwargs):
+            captured["payload"] = payload
+            captured["kwargs"] = kwargs
+            yield (
+                "values",
+                {
+                    "messages": [
+                        HumanMessage(content="old-user", id="old-user"),
+                        AIMessage(content="", id="old-ai"),
+                        AIMessage(content="worker done", id="new-ai"),
+                    ]
+                },
+            )
+
+    async def _fake_update_thread_agent(thread_id: str, agent_name: str):
+        updated.append((thread_id, agent_name))
+
+    monkeypatch.setattr(
+        "agent.modules.agents.get_catalog_service",
+        lambda: _FakeCatalog(),
+    )
+    monkeypatch.setattr(runner_module, "get_workflow_graph", lambda name: _FakeGraph())
+    monkeypatch.setattr(runner_module, "make_run_context", lambda **kwargs: kwargs)
+    monkeypatch.setattr(
+        runner_module,
+        "make_run_config",
+        lambda **kwargs: {"configurable": {"thread_id": kwargs["thread_id"]}},
+    )
+    monkeypatch.setattr(runner_module, "_update_thread_agent", _fake_update_thread_agent)
+
+    events = [
+        event
+        async for event in runner_module.run_agent_stream(
+            user_input="",
+            thread_id="thread-1",
+            agent_name="planner",
+            resume_payload={"action": "approve", "target_agent": "worker"},
+        )
+    ]
+
+    assert events == [{"type": "final", "content": "worker done"}]
+    assert isinstance(captured["payload"], Command)
+    assert captured["payload"].resume == {
+        "action": "approve",
+        "target_agent": "worker",
+    }
+    assert captured["kwargs"]["context"]["agent_name"] == "worker"
+    assert updated == [("thread-1", "worker")]
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_resume_payload_rejects_disallowed_plan_target(
+    monkeypatch,
+):
+    class _FakeCatalog:
+        def get_agent(self, name: str):
+            if name not in {"planner", "worker", "reviewer"}:
+                return None
+            return SimpleNamespace(
+                graph_type="react_agent",
+                max_context_tokens=1234,
+                tools=["read_file"],
+            )
+
+        def get_agent_card(self, name: str):
+            if name == "planner":
+                return SimpleNamespace(
+                    hidden=False,
+                    valid=True,
+                    plan_approval_targets=["reviewer"],
+                )
+            if name in {"worker", "reviewer"}:
+                return SimpleNamespace(hidden=False, valid=True)
+            return None
+
+    monkeypatch.setattr(
+        "agent.modules.agents.get_catalog_service",
+        lambda: _FakeCatalog(),
+    )
+
+    with pytest.raises(ValueError, match="not allowed as a plan approval target"):
+        [
+            event
+            async for event in runner_module.run_agent_stream(
+                user_input="",
+                thread_id="thread-1",
+                agent_name="planner",
+                resume_payload={"action": "approve", "target_agent": "worker"},
+            )
+        ]
 
 
 @pytest.mark.asyncio

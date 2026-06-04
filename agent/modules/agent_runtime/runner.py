@@ -6,6 +6,7 @@ from typing import Any, AsyncGenerator, Iterator
 from uuid import uuid4
 
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
+from langgraph.types import Command
 from agent.shared.infrastructure.parsing import extract_final_text_content
 
 from agent.modules.agent_runtime.active_sessions import (
@@ -23,6 +24,11 @@ from agent.modules.workflows import (
     make_run_context,
 )
 from agent.modules.usage import attach_usage_context, build_usage_context
+from agent.modules.tools import (
+    PLAN_MODE_TOOL_NAME,
+    PLAN_REVIEW_INTERRUPT_TYPE,
+    PlanModeResumePayload,
+)
 from agent.modules.workspaces import WorkspaceRef
 
 logger = logging.getLogger(__name__)
@@ -52,6 +58,7 @@ def build_run_params(
     allowed_skill_names: list[str] | None = None,
     attachments: list[Any] | None = None,
     resume: bool = False,
+    resume_payload: dict[str, Any] | None = None,
     checkpoint_id: str | None = None,
 ) -> dict[str, Any]:
     """Build run parameters for agent execution.
@@ -74,6 +81,8 @@ def build_run_params(
         attachments: Optional files attached to the user message
         resume: Request to resume execution from the last checkpoint
     """
+    if resume_payload is not None:
+        resume = True
     params: dict[str, Any] = {
         "user_input": user_input,
         "thread_id": thread_id or SessionManager.make_thread_id(platform, user_id, channel_id),
@@ -94,6 +103,8 @@ def build_run_params(
     }
     if checkpoint_id:
         params["checkpoint_id"] = checkpoint_id
+    if resume_payload is not None:
+        params["resume_payload"] = dict(resume_payload)
     normalized_attachments = _normalize_chat_attachments(attachments)
     if normalized_attachments:
         params["attachments"] = normalized_attachments
@@ -409,6 +420,157 @@ def _config_with_checkpoint(config: dict[str, Any], checkpoint_id: str | None) -
     return next_config
 
 
+def _normalize_plan_resume_payload(
+    resume_payload: dict[str, Any] | None,
+) -> PlanModeResumePayload | None:
+    if resume_payload is None:
+        return None
+    return PlanModeResumePayload.model_validate(resume_payload)
+
+
+def _resolve_agent_name_for_resume(
+    catalog: Any,
+    agent_name: str,
+    resume_payload: PlanModeResumePayload | None,
+    *,
+    source_agent_name: str = "",
+) -> str:
+    if resume_payload is None or resume_payload.action != "approve":
+        return agent_name
+
+    target_agent = str(resume_payload.target_agent or "").strip()
+    if not target_agent:
+        raise ValueError("Target agent is required to approve a plan.")
+
+    target_config = catalog.get_agent(target_agent)
+    target_card = catalog.get_agent_card(target_agent)
+    if target_config is None or target_card is None:
+        raise ValueError(f"Agent '{target_agent}' not found in catalog.")
+    if target_card.hidden or not target_card.valid:
+        raise ValueError(f"Agent '{target_agent}' cannot be selected for plan approval.")
+    source_agent = str(source_agent_name or "").strip()
+    if source_agent:
+        if target_agent == source_agent:
+            raise ValueError("Plan approval target cannot be the planner agent.")
+        source_card = catalog.get_agent_card(source_agent)
+        allowed_targets = list(getattr(source_card, "plan_approval_targets", []) or [])
+        if allowed_targets and target_agent not in allowed_targets:
+            raise ValueError(
+                f"Agent '{target_agent}' is not allowed as a plan approval target for "
+                f"agent '{source_agent}'."
+            )
+    return target_agent
+
+
+def _validate_plan_resume_payload(
+    resume_payload: PlanModeResumePayload | None,
+) -> None:
+    if resume_payload is None:
+        return
+    if resume_payload.action == "approve":
+        if not str(resume_payload.target_agent or "").strip():
+            raise ValueError("Target agent is required to approve a plan.")
+        return
+    if not str(resume_payload.feedback or "").strip():
+        raise ValueError("Feedback is required to revise a plan.")
+
+
+async def _update_thread_agent(thread_id: str, agent_name: str) -> None:
+    try:
+        from agent.modules.conversations import upsert_conversation_thread
+
+        await upsert_conversation_thread(
+            thread_id=thread_id,
+            agent_name=agent_name,
+        )
+    except Exception as exc:
+        logger.debug(
+            "Failed to update conversation thread '%s' agent to '%s': %s",
+            thread_id,
+            agent_name,
+            exc,
+        )
+
+
+async def _get_plan_resume_source_agent_name(
+    thread_id: str,
+    agent_name: str,
+    resume_payload: PlanModeResumePayload | None,
+) -> str:
+    if resume_payload is None or resume_payload.action != "approve":
+        return ""
+
+    try:
+        from agent.modules.conversations import get_conversation_thread
+
+        thread = await get_conversation_thread(thread_id)
+    except Exception as exc:
+        logger.debug(
+            "Failed to load conversation thread '%s' for plan approval validation: %s",
+            thread_id,
+            exc,
+        )
+        thread = None
+
+    thread_agent = ""
+    if isinstance(thread, dict):
+        thread_agent = str(thread.get("agent_name") or "").strip()
+    if thread_agent:
+        return thread_agent
+
+    target_agent = str(resume_payload.target_agent or "").strip()
+    current_agent = str(agent_name or "").strip()
+    return current_agent if current_agent and current_agent != target_agent else ""
+
+
+def _interrupt_value(interrupt_obj: Any) -> Any:
+    return getattr(interrupt_obj, "value", None)
+
+
+def _interrupt_id(interrupt_obj: Any) -> str:
+    return str(getattr(interrupt_obj, "id", "") or "")
+
+
+def _find_plan_tool_call_id(messages: list[Any], fallback: str = "") -> str:
+    for message in reversed(messages):
+        tool_calls = getattr(message, "tool_calls", None) or []
+        for tool_call in tool_calls:
+            if not isinstance(tool_call, dict):
+                continue
+            if tool_call.get("name") == PLAN_MODE_TOOL_NAME:
+                return str(tool_call.get("id") or fallback)
+    return fallback
+
+
+def _plan_review_events_from_value_event(event: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_interrupts = event.get("__interrupt__")
+    if not raw_interrupts:
+        return []
+    if not isinstance(raw_interrupts, (list, tuple)):
+        raw_interrupts = [raw_interrupts]
+
+    messages = event.get("messages", [])
+    messages = messages if isinstance(messages, list) else []
+    out: list[dict[str, Any]] = []
+    for interrupt_obj in raw_interrupts:
+        value = _interrupt_value(interrupt_obj)
+        if not isinstance(value, dict):
+            continue
+        if value.get("type") != PLAN_REVIEW_INTERRUPT_TYPE:
+            continue
+        tool_call_id = str(value.get("tool_call_id") or "")
+        tool_call_id = _find_plan_tool_call_id(messages, tool_call_id)
+        out.append(
+            {
+                "type": PLAN_REVIEW_INTERRUPT_TYPE,
+                "tool_call_id": tool_call_id,
+                "interrupt_id": _interrupt_id(interrupt_obj),
+                "plan": str(value.get("plan") or ""),
+            }
+        )
+    return out
+
+
 def _run_config_from_checkpoint(
     *,
     base_config: dict[str, Any],
@@ -516,6 +678,8 @@ async def run_agent(
     model: str | None = None,
     attachments: list[Any] | None = None,
     usage_context: dict[str, Any] | None = None,
+    resume: bool = False,
+    resume_payload: dict[str, Any] | None = None,
     checkpoint_id: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """Run a workflow graph and stream assistant chunks.
@@ -538,6 +702,19 @@ async def run_agent(
     from agent.modules.agents import get_catalog_service
 
     catalog = get_catalog_service()
+    normalized_resume_payload = _normalize_plan_resume_payload(resume_payload)
+    _validate_plan_resume_payload(normalized_resume_payload)
+    source_agent_name = await _get_plan_resume_source_agent_name(
+        thread_id,
+        agent_name,
+        normalized_resume_payload,
+    )
+    agent_name = _resolve_agent_name_for_resume(
+        catalog,
+        agent_name,
+        normalized_resume_payload,
+        source_agent_name=source_agent_name,
+    )
     agent_config = catalog.get_agent(agent_name)
     if agent_config is None:
         raise ValueError(f"Agent '{agent_name}' not found in catalog")
@@ -572,12 +749,15 @@ async def run_agent(
         provider=provider,
         model=model,
     )
-    await _record_conversation_thread(
-        thread_id=thread_id,
-        agent_name=agent_name,
-        title=user_input,
-        attachments=attachments,
-    )
+    if normalized_resume_payload is not None and normalized_resume_payload.action == "approve":
+        await _update_thread_agent(thread_id, agent_name)
+    elif not resume and not checkpoint_id:
+        await _record_conversation_thread(
+            thread_id=thread_id,
+            agent_name=agent_name,
+            title=user_input,
+            attachments=attachments,
+        )
 
     stream_kwargs: dict[str, Any] = {
         "config": config,
@@ -587,10 +767,16 @@ async def run_agent(
         stream_kwargs["context"] = context
 
     registry = get_active_session_registry()
-    user_message = _make_user_message(user_input, attachments)
+    if normalized_resume_payload is not None:
+        input_data = Command(resume=normalized_resume_payload.model_dump(exclude_none=True))
+    elif resume:
+        input_data = None
+    else:
+        input_data = {"messages": [_make_user_message(user_input, attachments)]}
+
     with _track_active_session(thread_id, agent_name) as session_id:
         async for event in graph.astream(
-            {"messages": [user_message]},
+            input_data,
             **stream_kwargs,
         ):
             messages = event.get("messages", [])
@@ -620,6 +806,7 @@ async def run_agent_stream(
     attachments: list[Any] | None = None,
     usage_context: dict[str, Any] | None = None,
     resume: bool = False,
+    resume_payload: dict[str, Any] | None = None,
     checkpoint_id: str | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Run a workflow graph and stream UI events (tool calls and text chunks).
@@ -643,6 +830,21 @@ async def run_agent_stream(
     from agent.modules.agents import get_catalog_service
 
     catalog = get_catalog_service()
+    normalized_resume_payload = _normalize_plan_resume_payload(resume_payload)
+    _validate_plan_resume_payload(normalized_resume_payload)
+    source_agent_name = await _get_plan_resume_source_agent_name(
+        thread_id,
+        agent_name,
+        normalized_resume_payload,
+    )
+    agent_name = _resolve_agent_name_for_resume(
+        catalog,
+        agent_name,
+        normalized_resume_payload,
+        source_agent_name=source_agent_name,
+    )
+    if normalized_resume_payload is not None:
+        resume = True
     agent_config = catalog.get_agent(agent_name)
     if agent_config is None:
         raise ValueError(f"Agent '{agent_name}' not found in catalog")
@@ -677,7 +879,9 @@ async def run_agent_stream(
         provider=provider,
         model=model,
     )
-    if not resume and not checkpoint_id:
+    if normalized_resume_payload is not None and normalized_resume_payload.action == "approve":
+        await _update_thread_agent(thread_id, agent_name)
+    elif not resume and not checkpoint_id:
         await _record_conversation_thread(
             thread_id=thread_id,
             agent_name=agent_name,
@@ -709,6 +913,10 @@ async def run_agent_stream(
         input_data = None
         user_message_id = None
         current_user_seen = True
+        if normalized_resume_payload is not None:
+            input_data = Command(
+                resume=normalized_resume_payload.model_dump(exclude_none=True)
+            )
     else:
         user_message = _make_user_message(user_input, attachments)
         input_data = {"messages": [user_message]}
@@ -735,6 +943,9 @@ async def run_agent_stream(
                 continue
 
             event = event_data
+            for plan_review_event in _plan_review_events_from_value_event(event):
+                yield plan_review_event
+
             messages = event.get("messages", [])
             if not messages:
                 continue
@@ -781,6 +992,8 @@ async def run_agent_stream(
                     if tool_calls:
                         for tc in tool_calls:
                             tool_name = tc.get("name") or "unknown"
+                            if tool_name == PLAN_MODE_TOOL_NAME:
+                                continue
                             registry.add_tool_call(session_id, tool_name)
                             yield {
                                 "type": "tool_call",
@@ -913,6 +1126,9 @@ async def run_agent_edit_stream(
                 continue
 
             event = event_data
+            for plan_review_event in _plan_review_events_from_value_event(event):
+                yield plan_review_event
+
             messages = event.get("messages", [])
             if not messages:
                 continue
@@ -958,6 +1174,8 @@ async def run_agent_edit_stream(
                     if tool_calls:
                         for tc in tool_calls:
                             tool_name = tc.get("name") or "unknown"
+                            if tool_name == PLAN_MODE_TOOL_NAME:
+                                continue
                             registry.add_tool_call(session_id, tool_name)
                             yield {
                                 "type": "tool_call",
@@ -989,6 +1207,8 @@ async def run_agent_full(
     model: str | None = None,
     attachments: list[Any] | None = None,
     usage_context: dict[str, Any] | None = None,
+    resume: bool = False,
+    resume_payload: dict[str, Any] | None = None,
     checkpoint_id: str | None = None,
 ) -> str:
     """Run a workflow graph and return the final assistant response.
@@ -1027,6 +1247,8 @@ async def run_agent_full(
         model=model,
         attachments=attachments,
         usage_context=usage_context,
+        resume=resume,
+        resume_payload=resume_payload,
         checkpoint_id=checkpoint_id,
     ):
         chunks.append(chunk)

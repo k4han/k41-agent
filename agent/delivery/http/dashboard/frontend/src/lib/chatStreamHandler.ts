@@ -1,5 +1,9 @@
 import type { TranscriptItem } from "@/components/Transcript";
-import { createTranscriptTool } from "@/components/Transcript";
+import {
+  PLAN_MODE_TOOL_NAME,
+  createTranscriptPlanReview,
+  createTranscriptTool,
+} from "@/components/Transcript";
 import type { AppendScrollMode } from "@/lib/chatTypes";
 import { recursionLimitStorageKey, STREAM_ERROR_CODES, STREAM_EVENTS } from "@/lib/eventConstants";
 
@@ -11,6 +15,7 @@ export interface StreamCallbacks {
   replaceMessage?: (id: number, text: string, threadId?: string) => void;
   removeItem?: (id: number, threadId?: string) => void;
   updateToolResult: (toolCallId: string, name: string, result: unknown, threadId?: string) => void;
+  updatePlanReviewResult: (toolCallId: string, result: unknown, threadId?: string) => void;
   onError?: (message: string, code?: string) => void;
   setRecursionLimitReached: (value: boolean) => void;
   onThreadCreated: (threadId: string, streamThreadIdRef: StreamThreadIdRef) => void;
@@ -62,13 +67,17 @@ export function handleStreamEvent(
   }
 
   if (event.type === STREAM_EVENTS.TOOL_CALL) {
+    const toolName = String(event.name || "unknown");
+    if (toolName === PLAN_MODE_TOOL_NAME) {
+      return;
+    }
     if (assistantIdRef.id !== null && !streamedRef.received) {
       callbacks.removeItem?.(assistantIdRef.id, streamThreadIdRef.id);
     }
     callbacks.appendItem(
       createTranscriptTool({
         toolCallId: String(event.id || ""),
-        name: String(event.name || "unknown"),
+        name: toolName,
         args: event.args ?? null,
       }),
       "bottom",
@@ -80,12 +89,39 @@ export function handleStreamEvent(
   }
 
   if (event.type === STREAM_EVENTS.TOOL_RESULT) {
+    const toolName = String(event.name || "unknown");
+    if (toolName === PLAN_MODE_TOOL_NAME) {
+      callbacks.updatePlanReviewResult(
+        String(event.tool_call_id || ""),
+        event.content ?? null,
+        streamThreadIdRef.id,
+      );
+      return;
+    }
     callbacks.updateToolResult(
       String(event.tool_call_id || ""),
-      String(event.name || "unknown"),
+      toolName,
       event.content ?? null,
       streamThreadIdRef.id,
     );
+    return;
+  }
+
+  if (event.type === STREAM_EVENTS.PLAN_REVIEW) {
+    if (assistantIdRef.id !== null && !streamedRef.received) {
+      callbacks.removeItem?.(assistantIdRef.id, streamThreadIdRef.id);
+    }
+    callbacks.appendItem(
+      createTranscriptPlanReview({
+        toolCallId: String(event.tool_call_id || ""),
+        interruptId: String(event.interrupt_id || ""),
+        plan: String(event.plan || ""),
+      }),
+      "bottom",
+      streamThreadIdRef.id,
+    );
+    assistantIdRef.id = null;
+    streamedRef.received = false;
     return;
   }
 

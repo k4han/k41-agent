@@ -4,7 +4,12 @@ from langchain_core.tools import BaseTool
 from langgraph.prebuilt import ToolNode
 from langgraph.runtime import Runtime
 
-from agent.modules.tools import ToolResolver, get_runtime_context_value
+from agent.modules.tools import (
+    PLAN_MODE_TOOL_NAME,
+    ToolResolver,
+    get_runtime_context_value,
+    get_tool_by_name,
+)
 from agent.modules.workflows.run_config import WorkflowContext
 
 
@@ -43,6 +48,32 @@ def _parallel_write_todos_error(state) -> dict | None:
     }
 
 
+def _last_tool_call_names(state) -> set[str]:
+    messages = state.get("messages", []) if isinstance(state, dict) else []
+    if not messages:
+        return set()
+    tool_calls = getattr(messages[-1], "tool_calls", None) or []
+    return {
+        str(call.get("name") or "")
+        for call in tool_calls
+        if isinstance(call, dict) and call.get("name")
+    }
+
+
+def _include_pending_control_tools(state, tools: list[BaseTool]) -> list[BaseTool]:
+    """Allow resumed control tools to finish even after switching agents."""
+    pending_names = _last_tool_call_names(state)
+    if PLAN_MODE_TOOL_NAME not in pending_names:
+        return tools
+    if any(getattr(tool, "name", "") == PLAN_MODE_TOOL_NAME for tool in tools):
+        return tools
+
+    plan_tool = get_tool_by_name(PLAN_MODE_TOOL_NAME)
+    if plan_tool is None:
+        return tools
+    return [*tools, plan_tool]
+
+
 async def tool_node(
     state,
     config: RunnableConfig,
@@ -68,4 +99,5 @@ async def tool_node(
         agent_name,
         override_tool_names=allowed_tool_names,
     )
+    tools = _include_pending_control_tools(state, tools)
     return await ToolNode(tools).ainvoke(state, config=config)

@@ -73,6 +73,8 @@ def _request_to_run_params(request: ChatRequest) -> dict[str, object]:
         "model": request.model,
         "resume": request.resume,
     }
+    if request.resume_payload is not None:
+        params["resume_payload"] = request.resume_payload.model_dump(exclude_none=True)
     if request.checkpoint_id:
         params["checkpoint_id"] = request.checkpoint_id
     if request.attachments:

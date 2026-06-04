@@ -13,6 +13,8 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 
+from langgraph.errors import GraphInterrupt
+
 from agent.modules.tools.result import (
     ToolError,
     ToolErrorCode,
@@ -45,6 +47,8 @@ def error_normalization(
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         try:
             return func(*args, **kwargs)
+        except GraphInterrupt:
+            raise
         except ToolError as exc:
             return _format_error_result(exc, response_format)
         except Exception as exc:  # noqa: BLE001
@@ -74,6 +78,8 @@ def error_normalization_async(
     async def wrapper(*args: Any, **kwargs: Any) -> Any:
         try:
             return await func(*args, **kwargs)
+        except GraphInterrupt:
+            raise
         except ToolError as exc:
             return _format_error_result(exc, response_format)
         except Exception as exc:  # noqa: BLE001

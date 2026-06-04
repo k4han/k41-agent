@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from agent.modules.admin_auth import get_current_admin
+from agent.delivery.http.api.schemas import ChatRequest
 from agent.modules.providers.models import ModelOption, ProviderModelCatalog
 
 
@@ -35,6 +36,17 @@ def _create_client() -> TestClient:
 
     app.dependency_overrides[get_current_admin] = mock_admin
     return TestClient(app)
+
+
+def test_chat_request_validates_plan_resume_payload() -> None:
+    request = ChatRequest(
+        message="",
+        resume=True,
+        resume_payload={"action": "approve", "target_agent": "worker"},
+    )
+    assert request.resume_payload is not None
+    assert request.resume_payload.action == "approve"
+    assert request.resume_payload.target_agent == "worker"
 
 
 def test_chat_sync_returns_response_payload(monkeypatch):

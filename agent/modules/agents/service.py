@@ -118,6 +118,7 @@ class AgentCatalogService:
                     raise ValueError(
                         "Router agent system_prompt must include {agent_options} and {user_input}."
                     )
+        self._validate_plan_approval_targets(config)
 
         # Round-trip through the Markdown parser so dashboard saves follow the
         # same contract used by runtime file discovery.
@@ -126,6 +127,27 @@ class AgentCatalogService:
             source_label=f"agent:{config.name}",
             strict_router_template=True,
         )
+
+    def _validate_plan_approval_targets(self, config: AgentConfig) -> None:
+        if not config.plan_approval_targets:
+            return
+        cards = {
+            card.name: card
+            for card in self._repository.list_cards()
+            if card.valid
+        }
+        invalid: list[str] = []
+        for target in config.plan_approval_targets:
+            target_name = str(target or "").strip()
+            if not target_name or target_name == config.name:
+                invalid.append(target_name or "<empty>")
+                continue
+            target_card = cards.get(target_name)
+            if target_card is None or target_card.hidden:
+                invalid.append(target_name)
+        if invalid:
+            joined = ", ".join(sorted(set(invalid)))
+            raise ValueError(f"Invalid plan approval target agent(s): {joined}.")
 
 
 # --- Module-level singleton ---

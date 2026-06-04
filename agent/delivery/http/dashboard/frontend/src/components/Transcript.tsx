@@ -9,11 +9,17 @@ import {
 } from "lucide-solid";
 import { createEffect, createSignal, For, Show } from "solid-js";
 
+import { AgentPicker } from "@/components/AgentPicker";
 import { CopyButton } from "@/components/CopyButton";
 import { Markdown } from "@/components/Markdown";
 import { StatusIndicator } from "@/components/StatusIndicator";
 import { isChatStatusText } from "@/lib/chatStatus";
 import { formatValue } from "@/lib/utils";
+import type { AgentCard } from "@/types";
+
+export const PLAN_MODE_TOOL_NAME = "plan_mode_respond";
+export const PLAN_REVIEW_APPROVED_PREFIX = "PLAN_REVIEW_APPROVED";
+export const PLAN_REVIEW_REVISION_PREFIX = "PLAN_REVIEW_REVISION_REQUESTED";
 
 export type TranscriptRole = "user" | "assistant" | "error" | "system";
 
@@ -55,9 +61,23 @@ export type TranscriptTool = {
   result: unknown;
 };
 
-export type TranscriptItem = TranscriptMessage | TranscriptTool;
+export type TranscriptPlanReviewStatus = "pending" | "approved" | "revision_requested";
+
+export type TranscriptPlanReview = {
+  type: "plan_review";
+  tool_call_id?: string | null;
+  interrupt_id?: string | null;
+  plan: string;
+  status: TranscriptPlanReviewStatus;
+  targetAgent?: string;
+  feedback?: string;
+  result?: unknown;
+};
+
+export type TranscriptItem = TranscriptMessage | TranscriptTool | TranscriptPlanReview;
 
 type TranscriptToolTarget<T extends TranscriptItem> = Extract<T, { type: "tool" }>;
+type TranscriptPlanReviewTarget<T extends TranscriptItem> = Extract<T, { type: "plan_review" }>;
 
 export function createTranscriptTool(options: {
   toolCallId?: string | null;
@@ -71,6 +91,27 @@ export function createTranscriptTool(options: {
     name: options.name || "unknown",
     args: options.args ?? null,
     result: options.result ?? null,
+  };
+}
+
+export function createTranscriptPlanReview(options: {
+  toolCallId?: string | null;
+  interruptId?: string | null;
+  plan?: string;
+  status?: TranscriptPlanReviewStatus;
+  targetAgent?: string;
+  feedback?: string;
+  result?: unknown;
+}): TranscriptPlanReview {
+  return {
+    type: "plan_review",
+    tool_call_id: options.toolCallId || null,
+    interrupt_id: options.interruptId || null,
+    plan: options.plan || "",
+    status: options.status || "pending",
+    targetAgent: options.targetAgent,
+    feedback: options.feedback,
+    result: options.result,
   };
 }
 
@@ -99,6 +140,42 @@ export function findTranscriptToolTarget<T extends TranscriptItem>(
     }
   }
   return undefined;
+}
+
+export function findTranscriptPlanReviewTarget<T extends TranscriptItem>(
+  items: T[],
+  toolCallId?: string | null,
+): TranscriptPlanReviewTarget<T> | undefined {
+  if (!toolCallId) {
+    return undefined;
+  }
+  return items.find(
+    (item): item is TranscriptPlanReviewTarget<T> =>
+      item.type === "plan_review" && item.tool_call_id === toolCallId,
+  );
+}
+
+export function parsePlanReviewToolResult(
+  result: unknown,
+): Partial<TranscriptPlanReview> {
+  const text = typeof result === "string" ? result : "";
+  if (text.startsWith(PLAN_REVIEW_APPROVED_PREFIX)) {
+    const targetMatch = text.match(/^Target agent:\s*(.+)$/m);
+    return {
+      status: "approved",
+      targetAgent: targetMatch?.[1]?.trim() || undefined,
+      result,
+    };
+  }
+  if (text.startsWith(PLAN_REVIEW_REVISION_PREFIX)) {
+    const feedbackMatch = text.match(/User feedback:\n([\s\S]*?)(?:\n\n|$)/);
+    return {
+      status: "revision_requested",
+      feedback: feedbackMatch?.[1]?.trim() || undefined,
+      result,
+    };
+  }
+  return { result };
 }
 
 function formatAttachmentSize(size: number): string {
@@ -347,6 +424,160 @@ export function TranscriptMessageView(props: {
   );
 }
 
+export function PlanReviewView(props: {
+  plan: string;
+  status: TranscriptPlanReviewStatus;
+  toolCallId?: string | null;
+  interruptId?: string | null;
+  targetAgent?: string;
+  feedback?: string;
+  agents?: AgentCard[];
+  activeAgentName?: string;
+  itemId?: number;
+  actionsDisabled?: boolean;
+  onApprove?: (payload: {
+    toolCallId?: string | null;
+    interruptId?: string | null;
+    plan: string;
+    targetAgent: string;
+  }) => void;
+  onRevise?: (payload: {
+    toolCallId?: string | null;
+    interruptId?: string | null;
+    plan: string;
+    feedback: string;
+  }) => void;
+}) {
+  const agents = () => props.agents || [];
+  const activeAgent = () => agents().find((agent) => agent.name === props.activeAgentName);
+  const approvalTargetAgents = () => {
+    const sourceAgent = activeAgent();
+    const sourceAgentName = sourceAgent?.name || props.activeAgentName || "";
+    const allowedNames = new Set(sourceAgent?.plan_approval_targets || []);
+    const candidates = agents().filter((agent) => (
+      agent.name !== sourceAgentName && agent.valid && !agent.hidden
+    ));
+    if (allowedNames.size === 0) {
+      return candidates;
+    }
+    return candidates.filter((agent) => allowedNames.has(agent.name));
+  };
+  const defaultTargetAgent = () =>
+    (props.targetAgent &&
+    approvalTargetAgents().some((agent) => agent.name === props.targetAgent)
+      ? props.targetAgent
+      : approvalTargetAgents()[0]?.name || "");
+  const [targetAgent, setTargetAgent] = createSignal(defaultTargetAgent());
+  const [feedback, setFeedback] = createSignal("");
+
+  createEffect(() => {
+    const options = approvalTargetAgents();
+    if (!targetAgent() || !options.some((agent) => agent.name === targetAgent())) {
+      setTargetAgent(defaultTargetAgent());
+    }
+  });
+
+  const pending = () => props.status === "pending";
+  const canAct = () => pending() && !props.actionsDisabled;
+  const submitFeedback = () => {
+    const nextFeedback = feedback().trim();
+    if (!nextFeedback || !canAct()) {
+      return;
+    }
+    props.onRevise?.({
+      toolCallId: props.toolCallId,
+      interruptId: props.interruptId,
+      plan: props.plan,
+      feedback: nextFeedback,
+    });
+  };
+  const approve = () => {
+    const nextAgent = targetAgent().trim();
+    if (!nextAgent || !canAct()) {
+      return;
+    }
+    props.onApprove?.({
+      toolCallId: props.toolCallId,
+      interruptId: props.interruptId,
+      plan: props.plan,
+      targetAgent: nextAgent,
+    });
+  };
+
+  return (
+    <section class="plan-review" data-transcript-item-id={props.itemId}>
+      <div class="plan-review-header">
+        <div>
+          <div class="plan-review-title">Plan Review</div>
+          <Show when={props.status !== "pending"}>
+            <div class="plan-review-state">
+              <Show
+                when={props.status === "approved"}
+                fallback={`Revision requested${props.feedback ? `: ${props.feedback}` : ""}`}
+              >
+                {`Approved${props.targetAgent ? ` for ${props.targetAgent}` : ""}`}
+              </Show>
+            </div>
+          </Show>
+        </div>
+      </div>
+      <Markdown text={props.plan} class="message-markdown plan-review-markdown" />
+      <Show when={pending()}>
+        <div class="plan-review-controls">
+          <div class="plan-review-approve-row">
+            <AgentPicker
+              class="plan-review-agent-picker"
+              value={targetAgent()}
+              agents={approvalTargetAgents()}
+              disabled={!canAct() || approvalTargetAgents().length === 0}
+              onChange={setTargetAgent}
+              ariaLabel="Target agent"
+            />
+            <button
+              class="btn primary plan-review-approve-btn"
+              type="button"
+              onClick={approve}
+              disabled={!canAct() || !targetAgent().trim()}
+              title="Approve"
+              aria-label="Approve plan"
+            >
+              <Check size={15} />
+              <span>Approve</span>
+            </button>
+          </div>
+          <div class="plan-review-feedback-row">
+            <textarea
+              class="plan-review-feedback-input"
+              rows={2}
+              value={feedback()}
+              disabled={!canAct()}
+              placeholder="Add feedback"
+              onInput={(event) => setFeedback(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                  event.preventDefault();
+                  submitFeedback();
+                }
+              }}
+            />
+            <button
+              class="btn plan-review-feedback-btn"
+              type="button"
+              onClick={submitFeedback}
+              disabled={!canAct() || !feedback().trim()}
+              title="Send feedback"
+              aria-label="Send plan feedback"
+            >
+              <Pencil size={15} />
+              <span>Send input</span>
+            </button>
+          </div>
+        </div>
+      </Show>
+    </section>
+  );
+}
+
 export function ToolCallDetail(props: {
   name?: string | null;
   args: unknown;
@@ -375,6 +606,8 @@ export function TranscriptItemView(props: {
   item: TranscriptItem;
   deferMermaid?: boolean;
   itemId?: number;
+  agents?: AgentCard[];
+  activeAgentName?: string;
   actionsDisabled?: boolean;
   onEditMessage?: (payload: {
     itemId?: number;
@@ -383,8 +616,21 @@ export function TranscriptItemView(props: {
     text: string;
   }) => void;
   onBranchSelect?: (checkpointId: string) => void;
+  onApprovePlanReview?: (payload: {
+    toolCallId?: string | null;
+    interruptId?: string | null;
+    plan: string;
+    targetAgent: string;
+  }) => void;
+  onRevisePlanReview?: (payload: {
+    toolCallId?: string | null;
+    interruptId?: string | null;
+    plan: string;
+    feedback: string;
+  }) => void;
 }) {
-  return props.item.type === "message" ? (
+  if (props.item.type === "message") {
+    return (
     <TranscriptMessageView
       role={props.item.role}
       text={props.item.text}
@@ -399,7 +645,27 @@ export function TranscriptItemView(props: {
       onEdit={props.onEditMessage}
       onBranchSelect={props.onBranchSelect}
     />
-  ) : (
+    );
+  }
+  if (props.item.type === "plan_review") {
+    return (
+      <PlanReviewView
+        plan={props.item.plan}
+        status={props.item.status}
+        toolCallId={props.item.tool_call_id}
+        interruptId={props.item.interrupt_id}
+        targetAgent={props.item.targetAgent}
+        feedback={props.item.feedback}
+        agents={props.agents}
+        activeAgentName={props.activeAgentName}
+        itemId={props.itemId}
+        actionsDisabled={props.actionsDisabled}
+        onApprove={props.onApprovePlanReview}
+        onRevise={props.onRevisePlanReview}
+      />
+    );
+  }
+  return (
     <ToolCallDetail
       name={props.item.name}
       args={props.item.args}

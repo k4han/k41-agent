@@ -37,7 +37,13 @@ export type ChatPayload = {
   new_thread?: boolean;
   checkpoint_id?: string;
   attachments?: ChatAttachmentPayload[];
+  resume?: boolean;
+  resume_payload?: PlanResumePayload;
 };
+
+export type PlanResumePayload =
+  | { action: "approve"; target_agent: string }
+  | { action: "revise"; feedback: string };
 
 // ── Scroll & streaming ──
 
