@@ -107,6 +107,8 @@ render(
         <Route path="/settings/channels" component={ChannelsPage} />
         <Route path="/settings/pairing" component={() => <Navigate href="/settings/channels?tab=pairing" />} />
         <Route path="/settings/agents" component={AgentsPage} />
+        <Route path="/settings/agents/new" component={AgentsPage} />
+        <Route path="/settings/agents/:agentName" component={AgentsPage} />
         <Route path="/settings/skills" component={SkillsPage} />
         <Route path="/settings/prompt-variables" component={PromptVariablesPage} />
         <Route path="/settings/security" component={SecurityPage} />
