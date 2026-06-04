@@ -1,6 +1,5 @@
 import { A, useLocation } from "@solidjs/router";
 import {
-  ArrowLeft,
   BarChart3,
   BookOpen,
   Bot,
@@ -17,7 +16,7 @@ import {
   Users,
   Workflow,
 } from "lucide-solid";
-import { createSignal, JSX, onMount, Show } from "solid-js";
+import { createMemo, createSignal, JSX, onMount, Show } from "solid-js";
 
 import { STORAGE_KEYS } from "@/lib/uiConstants";
 
@@ -42,10 +41,16 @@ const settingsNavItems: SettingsNavItem[] = [
   { href: "/settings/appearance", label: "Appearance", icon: <Palette size={15} /> },
 ];
 
+type BreadcrumbSegment = {
+  label: string;
+  href?: string;
+};
+
 export function SettingsLayout(props: {
   title: string;
   actions?: JSX.Element;
   breadcrumbLabel?: string;
+  breadcrumbSegments?: BreadcrumbSegment[];
   contentWidth?: "narrow" | "medium" | "wide";
   children: JSX.Element;
 }) {
@@ -64,6 +69,18 @@ export function SettingsLayout(props: {
     if (window.localStorage.getItem(STORAGE_KEYS.SIDEBAR_COLLAPSED) === "collapsed") {
       setCollapsed(true);
     }
+  });
+
+  const settingsHomeHref = "/settings/config";
+
+  const segments = createMemo<BreadcrumbSegment[]>(() => {
+    if (props.breadcrumbSegments && props.breadcrumbSegments.length > 0) {
+      return [{ label: "Settings", href: settingsHomeHref }, ...props.breadcrumbSegments];
+    }
+    return [
+      { label: "Settings", href: settingsHomeHref },
+      { label: props.breadcrumbLabel || props.title },
+    ];
   });
 
   return (
@@ -89,7 +106,6 @@ export function SettingsLayout(props: {
             </div>
             <div class="brand-text">
               <div class="brand-title">Kaka Dashboard</div>
-              {/* <div class="brand-subtitle">Agent control plane</div> */}
             </div>
             <button
               class="brand-collapse-btn"
@@ -102,11 +118,6 @@ export function SettingsLayout(props: {
           </Show>
         </div>
         <nav class="nav">
-          <A href="/" class="nav-link" title="Back">
-            <ArrowLeft size={15} />
-            <span class="nav-label">Back</span>
-          </A>
-          <div class="nav-separator" />
           <div class="nav-section-title">Settings</div>
           {settingsNavItems.map((item) => (
             <A
@@ -122,18 +133,29 @@ export function SettingsLayout(props: {
       </aside>
       <main class="main">
         <header class="topbar settings-topbar">
-          <div class="settings-breadcrumb" aria-label="Breadcrumb">
-            <span class="settings-breadcrumb-root">Settings</span>
-            <span class="settings-breadcrumb-separator">/</span>
-            <span class="settings-breadcrumb-current">{props.breadcrumbLabel || props.title}</span>
-          </div>
+          <nav class="settings-breadcrumb" aria-label="Breadcrumb">
+            {segments().map((segment, index) => {
+              const isLast = index === segments().length - 1;
+              return (
+                <>
+                  {index > 0 && <span class="settings-breadcrumb-separator">/</span>}
+                  <Show
+                    when={!isLast && segment.href}
+                    fallback={
+                      <span class="settings-breadcrumb-current">{segment.label}</span>
+                    }
+                  >
+                    <A href={segment.href!} class="settings-breadcrumb-link">
+                      {segment.label}
+                    </A>
+                  </Show>
+                </>
+              );
+            })}
+          </nav>
           <div class="row-wrap">{props.actions}</div>
         </header>
         <div class={`content settings-content settings-content-${props.contentWidth || "medium"}`}>
-          <A href="/" class="settings-back-link">
-            <ArrowLeft size={13} />
-            Back to dashboard
-          </A>
           <div class="settings-page-heading">
             <h1 class="page-title">{props.title}</h1>
           </div>

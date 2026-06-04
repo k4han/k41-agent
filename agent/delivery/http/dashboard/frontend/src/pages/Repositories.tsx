@@ -1,7 +1,6 @@
 import { A, useNavigate, useParams } from "@solidjs/router";
 import { createMemo, createSignal, For, JSX, onMount, Show } from "solid-js";
 import {
-  ArrowLeft,
   Bot,
   CloudCog,
   Cpu,
@@ -525,10 +524,6 @@ function RepositoryDetailPage(props: { repositoryId: string }) {
       subtitle="Repo-specific automation, optimization, and activity."
       actions={
         <>
-          <button class="btn" type="button" onClick={() => navigate("/repositories")}>
-            <ArrowLeft size={14} />
-            Back
-          </button>
           <button class="btn" type="button" disabled={busy() === "sync"} onClick={sync}>
             <GitPullRequest size={14} />
             {busy() === "sync" ? "Syncing..." : "Sync"}

@@ -25,6 +25,8 @@ import { buildToolGroups } from "./AgentToolsTab";
 
 type Mode = "create" | "edit" | "view";
 
+const AGENTS_LIST_HREF = "/settings/agents";
+
 export function AgentEditPage(props: { agentName?: string }) {
   const isCreate = !props.agentName;
   const navigate = useNavigate();
@@ -188,7 +190,7 @@ export function AgentEditPage(props: { agentName?: string }) {
 
   const tryNavigateBack = () => {
     if (!isDirty()) {
-      navigate("/settings/agents");
+      navigate(AGENTS_LIST_HREF);
       return;
     }
     setConfirmDiscardOpen(true);
@@ -219,7 +221,7 @@ export function AgentEditPage(props: { agentName?: string }) {
         showToast("Agent updated.");
       }
       setSavedRef(true);
-      navigate("/settings/agents", { replace: true });
+      navigate(AGENTS_LIST_HREF, { replace: true });
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to save agent", "error");
     } finally {
@@ -264,8 +266,18 @@ export function AgentEditPage(props: { agentName?: string }) {
     return card?.display_name || props.agentName || "Agent";
   };
 
-  const breadcrumb = () =>
-    isCreate ? "Agents / New" : `Agents / ${props.agentName || ""}`;
+  const breadcrumbSegments = createMemo(() => {
+    if (isCreate) {
+      return [
+        { label: "Agents", href: AGENTS_LIST_HREF },
+        { label: "New" },
+      ];
+    }
+    return [
+      { label: "Agents", href: AGENTS_LIST_HREF },
+      { label: props.agentName || title() },
+    ];
+  });
 
   const body = createMemo(() => {
     const p = payload();
@@ -283,7 +295,7 @@ export function AgentEditPage(props: { agentName?: string }) {
           title={`Agent "${props.agentName}" was not found`}
           description="The agent may have been deleted or renamed."
           actions={
-            <button class="btn" type="button" onClick={() => navigate("/settings/agents")}>
+            <button class="btn" type="button" onClick={() => navigate(AGENTS_LIST_HREF)}>
               <ArrowLeft size={14} />
               Back to agents
             </button>
@@ -314,26 +326,20 @@ export function AgentEditPage(props: { agentName?: string }) {
   return (
     <SettingsLayout
       title={title()}
-      breadcrumbLabel={breadcrumb()}
+      breadcrumbSegments={breadcrumbSegments()}
       contentWidth="wide"
       actions={
-        <>
-          <button class="btn" type="button" onClick={tryNavigateBack} disabled={saving()}>
-            <ArrowLeft size={14} />
-            Back
+        <Show when={!readOnly() && payload()}>
+          <button
+            class="btn btn-primary"
+            type="button"
+            onClick={saveAgent}
+            disabled={saving() || !isDirty()}
+          >
+            <Save size={14} />
+            {saving() ? "Saving..." : "Save"}
           </button>
-          <Show when={!readOnly() && payload()}>
-            <button
-              class="btn btn-primary"
-              type="button"
-              onClick={saveAgent}
-              disabled={saving() || !isDirty()}
-            >
-              <Save size={14} />
-              {saving() ? "Saving..." : "Save"}
-            </button>
-          </Show>
-        </>
+        </Show>
       }
     >
       {body()}
@@ -356,7 +362,7 @@ export function AgentEditPage(props: { agentName?: string }) {
             pendingRetry = null;
             retry();
           } else {
-            navigate("/settings/agents");
+            navigate(AGENTS_LIST_HREF);
           }
         }}
       />

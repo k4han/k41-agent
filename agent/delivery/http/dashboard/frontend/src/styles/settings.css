@@ -12,7 +12,14 @@
   font-weight: 620;
 }
 
-.settings-breadcrumb-root {
+.settings-breadcrumb-link {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 620;
+  transition: color 120ms ease;
+}
+
+.settings-breadcrumb-link:hover {
   color: var(--fg);
 }
 
