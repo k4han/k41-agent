@@ -49,6 +49,7 @@ def build_run_params(
     agent_name: str = "default",
     provider: str | None = None,
     model: str | None = None,
+    allowed_skill_names: list[str] | None = None,
     attachments: list[Any] | None = None,
     resume: bool = False,
     checkpoint_id: str | None = None,
@@ -83,6 +84,7 @@ def build_run_params(
         "max_context_tokens": max_context_tokens,
         "provider": provider,
         "model": model,
+        "allowed_skill_names": allowed_skill_names,
         "resume": resume,
         "usage_context": {
             "platform": str(getattr(platform, "value", platform) or ""),
@@ -509,6 +511,7 @@ async def run_agent(
     context_trim_threshold: int | None = None,
     max_context_tokens: int | None = None,  # Backward compatibility
     allowed_tool_names: list[str] | None = None,
+    allowed_skill_names: list[str] | None = None,
     provider: str | None = None,
     model: str | None = None,
     attachments: list[Any] | None = None,
@@ -565,6 +568,7 @@ async def run_agent(
         max_context_tokens=resolved_threshold,
         agent_name=agent_name,
         allowed_tool_names=resolved_tools or None,
+        allowed_skill_names=allowed_skill_names,
         provider=provider,
         model=model,
     )
@@ -610,6 +614,7 @@ async def run_agent_stream(
     context_trim_threshold: int | None = None,
     max_context_tokens: int | None = None,  # Backward compatibility
     allowed_tool_names: list[str] | None = None,
+    allowed_skill_names: list[str] | None = None,
     provider: str | None = None,
     model: str | None = None,
     attachments: list[Any] | None = None,
@@ -668,6 +673,7 @@ async def run_agent_stream(
         max_context_tokens=resolved_threshold,
         agent_name=agent_name,
         allowed_tool_names=resolved_tools or None,
+        allowed_skill_names=allowed_skill_names,
         provider=provider,
         model=model,
     )
@@ -804,6 +810,7 @@ async def run_agent_edit_stream(
     context_trim_threshold: int | None = None,
     max_context_tokens: int | None = None,
     allowed_tool_names: list[str] | None = None,
+    allowed_skill_names: list[str] | None = None,
     provider: str | None = None,
     model: str | None = None,
     usage_context: dict[str, Any] | None = None,
@@ -857,6 +864,7 @@ async def run_agent_edit_stream(
         max_context_tokens=resolved_threshold,
         agent_name=agent_name,
         allowed_tool_names=resolved_tools or None,
+        allowed_skill_names=allowed_skill_names,
         provider=provider,
         model=model,
     )
@@ -976,6 +984,7 @@ async def run_agent_full(
     context_trim_threshold: int | None = None,
     max_context_tokens: int | None = None,  # Backward compatibility
     allowed_tool_names: list[str] | None = None,
+    allowed_skill_names: list[str] | None = None,
     provider: str | None = None,
     model: str | None = None,
     attachments: list[Any] | None = None,
@@ -1013,6 +1022,7 @@ async def run_agent_full(
         context_trim_threshold=context_trim_threshold,
         max_context_tokens=max_context_tokens,
         allowed_tool_names=allowed_tool_names,
+        allowed_skill_names=allowed_skill_names,
         provider=provider,
         model=model,
         attachments=attachments,

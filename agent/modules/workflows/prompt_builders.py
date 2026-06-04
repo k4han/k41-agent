@@ -73,8 +73,8 @@ def replace_known_prompt_placeholders(
     return resolved
 
 
-def _build_skills_prompt_section() -> str:
-    catalog_xml = get_skills_catalog_xml().strip()
+def _build_skills_prompt_section(catalog_xml: str | None = None) -> str:
+    catalog_xml = (catalog_xml if catalog_xml is not None else get_skills_catalog_xml()).strip()
     if catalog_xml == "<available_skills/>":
         return ""
     return f"\n\n{SKILLS_DISCLOSURE_PROMPT}\n{catalog_xml}"
@@ -139,6 +139,7 @@ def build_llm_system_prompt(
     tools: Sequence[object] | None,
     catalog: Any,
     prompt_variables: dict[str, str] | None = None,
+    skills_catalog_xml: str | None = None,
 ) -> str:
     """Build the final system prompt for llm_node from runtime state."""
     system_defaults = get_system_default_variables(
@@ -168,7 +169,7 @@ def build_llm_system_prompt(
         system_prompt = f"{system_prompt}\n\n{WRITE_TODOS_PROMPT}"
 
     if _has_tool(tools, "skill"):
-        system_prompt = f"{system_prompt}{_build_skills_prompt_section()}"
+        system_prompt = f"{system_prompt}{_build_skills_prompt_section(skills_catalog_xml)}"
 
     return system_prompt
 

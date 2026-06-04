@@ -18,6 +18,8 @@ class BackgroundTaskRecord(BaseModel):
     notify_platform = Column(String(50), nullable=False, default="")
     notify_external_id = Column(String(255), nullable=False, default="")
     notify_channel_id = Column(String(255), nullable=False, default="")
+    allowed_tool_names_json = Column(Text, nullable=False, default="[]")
+    allowed_skill_names_json = Column(Text, nullable=False, default="[]")
     status = Column(String(50), nullable=False, default="pending", index=True)
     result = Column(Text, nullable=False, default="")
     error = Column(Text, nullable=False, default="")

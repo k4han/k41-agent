@@ -81,6 +81,7 @@ class BackgroundTask:
     workspace: WorkspaceRef | None = None
     context_trim_threshold: int | None = None
     allowed_tool_names: list[str] | None = None
+    allowed_skill_names: list[str] | None = None
     provider: str | None = None
     model: str | None = None
     notify_channel: NotifyChannel | None = None
@@ -129,6 +130,8 @@ class BackgroundTask:
             "elapsed_display": _format_elapsed(elapsed),
             "thread_id": self.thread_id,
             "notify_channel": notify_info,
+            "allowed_tool_names": list(self.allowed_tool_names or []),
+            "allowed_skill_names": list(self.allowed_skill_names or []),
         }
 
 
@@ -238,6 +241,16 @@ class BackgroundTaskManager:
             result=str(record.get("result") or ""),
             error=str(record.get("error") or ""),
             thread_id=str(record.get("thread_id") or ""),
+            allowed_tool_names=(
+                list(record.get("allowed_tool_names"))
+                if record.get("allowed_tool_names") is not None
+                else None
+            ),
+            allowed_skill_names=(
+                list(record.get("allowed_skill_names"))
+                if record.get("allowed_skill_names") is not None
+                else None
+            ),
             created_at=_parse_timestamp(record.get("created_at")),
             started_at=_parse_timestamp(record.get("started_at")) or None,
             completed_at=_parse_timestamp(record.get("completed_at")) or None,
@@ -264,6 +277,8 @@ class BackgroundTaskManager:
             created_at=task.created_at,
             started_at=task.started_at,
             completed_at=task.completed_at,
+            allowed_tool_names=task.allowed_tool_names,
+            allowed_skill_names=task.allowed_skill_names,
         )
 
     async def submit(
@@ -276,6 +291,7 @@ class BackgroundTaskManager:
         completion_hook: Callable[[BackgroundTask], Awaitable[None]] | None = None,
         context_trim_threshold: int | None = None,
         allowed_tool_names: list[str] | None = None,
+        allowed_skill_names: list[str] | None = None,
         provider: str | None = None,
         model: str | None = None,
     ) -> str:
@@ -295,6 +311,9 @@ class BackgroundTaskManager:
             ),
             context_trim_threshold=context_trim_threshold if context_trim_threshold and context_trim_threshold > 0 else None,
             allowed_tool_names=list(allowed_tool_names) if allowed_tool_names else None,
+            allowed_skill_names=(
+                list(allowed_skill_names) if allowed_skill_names is not None else None
+            ),
             provider=provider.strip() if provider else None,
             model=model.strip() if model else None,
             notify_channel=notify_channel,
@@ -428,6 +447,7 @@ class BackgroundTaskManager:
             workspace=task.workspace,
             context_trim_threshold=task.context_trim_threshold,
             allowed_tool_names=task.allowed_tool_names,
+            allowed_skill_names=task.allowed_skill_names,
             provider=task.provider,
             model=task.model,
             usage_context=_task_usage_context(task),

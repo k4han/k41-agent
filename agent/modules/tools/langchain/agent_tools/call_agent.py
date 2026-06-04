@@ -56,6 +56,11 @@ async def call_agent(
     )
     inherited_provider = get_context_value(runtime.context, "provider", None)
     inherited_model = get_context_value(runtime.context, "model", None)
+    inherited_allowed_skills = get_context_value(
+        runtime.context,
+        "allowed_skill_names",
+        None,
+    )
 
     catalog = get_catalog_service()
 
@@ -80,6 +85,7 @@ async def call_agent(
             workspace=workspace_ref,
             provider=inherited_provider,
             model=inherited_model,
+            allowed_skill_names=inherited_allowed_skills,
             usage_context=usage_context_from_config(runtime.config).to_dict(),
         )
         return result or "(empty response)"

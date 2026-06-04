@@ -127,6 +127,10 @@ def _is_workspace_setting_key(key: str) -> bool:
     return key == "workspace.root" or key.startswith("workspace.")
 
 
+def _is_skill_setting_key(key: str) -> bool:
+    return key.startswith("skills.")
+
+
 def _filter_settings[T](
     settings: dict[str, T],
     *,
@@ -147,6 +151,7 @@ def _filter_config_settings[T](settings: dict[str, T]) -> dict[str, T]:
             not _is_provider_setting_key(key)
             and not _is_channel_setting_key(key)
             and not _is_workspace_setting_key(key)
+            and not _is_skill_setting_key(key)
         )
     }
 
@@ -520,6 +525,13 @@ def _normalize_bootstrap_port(value: Any | None) -> int:
 
 
 def _normalize_setting_value(key: str, value: Any | None) -> Any | None:
+    if key == "skills.repository_dir":
+        from agent.modules.skills.repository import normalize_repository_skill_dir
+
+        try:
+            return normalize_repository_skill_dir(str(value or ""))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     if key in BOOTSTRAP_CONFIG_KEYS:
         if key == "host":
             return _normalize_bootstrap_host(value)

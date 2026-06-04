@@ -21,6 +21,7 @@ class WorkflowContext:
     context_trim_threshold: int
     agent_name: str
     allowed_tool_names: list[str]
+    allowed_skill_names: list[str] | None
     provider: str | None = None
     model: str | None = None
 
@@ -33,6 +34,7 @@ class WorkflowContext:
         max_context_tokens: int | None = None,  # Backward compatibility
         agent_name: str = "default",
         allowed_tool_names: list[str] | None = None,
+        allowed_skill_names: list[str] | None = None,
         provider: str | None = None,
         model: str | None = None,
     ) -> None:
@@ -49,6 +51,9 @@ class WorkflowContext:
         )
         self.agent_name = agent_name
         self.allowed_tool_names = list(allowed_tool_names or [])
+        self.allowed_skill_names = (
+            None if allowed_skill_names is None else list(allowed_skill_names)
+        )
         self.provider = provider
         self.model = model
 
@@ -86,6 +91,10 @@ class WorkflowContext:
         """Get allowed tool names from context."""
         return self.allowed_tool_names
 
+    def get_allowed_skill_names(self) -> list[str] | None:
+        """Get run-scoped global skill whitelist."""
+        return self.allowed_skill_names
+
     def get_context_trim_threshold(self) -> int:
         """Get context trim threshold from context."""
         return self.context_trim_threshold
@@ -107,6 +116,7 @@ def make_context(
     max_context_tokens: int | None = None,  # Backward compatibility
     agent_name: str = "default",
     allowed_tool_names: list[str] | None = None,
+    allowed_skill_names: list[str] | None = None,
     provider: str | None = None,
     model: str | None = None,
 ) -> WorkflowContext:
@@ -129,6 +139,7 @@ def make_context(
         max_context_tokens=max_context_tokens,
         agent_name=agent_name,
         allowed_tool_names=allowed_tool_names,
+        allowed_skill_names=allowed_skill_names,
         provider=provider.strip() if provider else None,
         model=model.strip() if model else None,
     )

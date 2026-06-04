@@ -213,6 +213,7 @@ def _build_target_context(runtime_context: WorkflowContext, target_agent: AgentC
         max_context_tokens=target_agent.max_context_tokens,
         agent_name=target_agent.name,
         allowed_tool_names=allowed_tool_names,
+        allowed_skill_names=runtime_context.get_allowed_skill_names(),
         provider=runtime_context.get_provider(),
         model=runtime_context.get_model(),
     )

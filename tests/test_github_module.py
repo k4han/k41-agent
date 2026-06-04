@@ -388,6 +388,7 @@ async def test_repository_optimization_settings_flow_to_background_task(
         context_trim_threshold=24000,
         tool_policy_mode="custom",
         allowed_tools_json='["read_file", "write_file"]',
+        allowed_skills_json='["repo-skill"]',
         branch_prefix="repo-bot",
     )
     service = make_service(tmp_path, FakeStore(optimized_binding))
@@ -405,6 +406,7 @@ async def test_repository_optimization_settings_flow_to_background_task(
     assert submission["model"] == "fast-model"
     assert submission["context_trim_threshold"] == 24000
     assert submission["allowed_tool_names"] == ["read_file", "write_file"]
+    assert submission["allowed_skill_names"] == ["repo-skill"]
     assert submission["workspace"].metadata["branch"] == "repo-bot/default/issue-7-abcdef12"
 
 
@@ -442,6 +444,7 @@ async def test_submit_repository_task_uses_repository_settings(
         context_trim_threshold=12000,
         tool_policy_mode="custom",
         allowed_tools_json='["read_file"]',
+        allowed_skills_json='["repo-skill"]',
         notify_platform="telegram",
         notify_external_id="123",
         notify_channel_id="123",
@@ -462,6 +465,7 @@ async def test_submit_repository_task_uses_repository_settings(
     assert submission["model"] == "repo-model"
     assert submission["context_trim_threshold"] == 12000
     assert submission["allowed_tool_names"] == ["read_file"]
+    assert submission["allowed_skill_names"] == ["repo-skill"]
     assert submission["notify_channel"].platform == "telegram"
     assert submission["workspace"].metadata["repository_full_name"] == "octo/example"
 
@@ -499,6 +503,7 @@ def test_github_migration_adds_repository_binding_columns(tmp_path: Path) -> Non
     assert "provider_name" in columns
     assert "model_name" in columns
     assert "allowed_tools_json" in columns
+    assert "allowed_skills_json" in columns
     assert "branch_prefix" in columns
 
 

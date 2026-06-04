@@ -8,10 +8,12 @@ from pathlib import Path
 import pytest
 
 from agent.modules.skills.models import Skill, SkillSummary
+from agent.modules.skills.parser import parse_skill_md
 from agent.modules.skills.repository import (
     FilesystemSkillRepository,
+    normalize_repository_skill_dir,
+    normalize_skill_name,
 )
-from agent.modules.skills.parser import parse_skill_md
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +158,19 @@ class TestParseSkillMd:
 
 
 class TestFilesystemSkillRepository:
+    def test_normalize_skill_name_rejects_unsafe_names(self) -> None:
+        assert normalize_skill_name("safe-skill") == "safe-skill"
+        for value in ("../escape", "bad/name", "BadName", "bad--name", "-bad"):
+            with pytest.raises(ValueError):
+                normalize_skill_name(value)
+
+    def test_normalize_repository_skill_dir_rejects_unsafe_paths(self) -> None:
+        assert normalize_repository_skill_dir(None) == ".agent/skills"
+        assert normalize_repository_skill_dir(".agent/skills") == ".agent/skills"
+        for value in ("/skills", "C:/skills", "../skills", "skills/../x", "skills//x", "skills\\x"):
+            with pytest.raises(ValueError):
+                normalize_repository_skill_dir(value)
+
     def test_discover_skills(self, tmp_path: Path) -> None:
         _create_skill_dir(tmp_path, "skill-a", description="First skill.")
         _create_skill_dir(tmp_path, "skill-b", description="Second skill.")
@@ -260,6 +275,40 @@ class TestFilesystemSkillRepository:
         with pytest.raises(ValueError, match="SKILL.md"):
             repo.install(empty_dir)
 
+    def test_managed_skill_crud_only_changes_skill_md(self, tmp_path: Path) -> None:
+        repo = FilesystemSkillRepository(skills_root=tmp_path)
+        content = textwrap.dedent(
+            """\
+            ---
+            name: managed-skill
+            description: Managed skill.
+            ---
+            # Instructions
+            Initial body.
+            """
+        )
+
+        created = repo.create_skill("managed-skill", content)
+        assert created.name == "managed-skill"
+        assert repo.read_skill_content("managed-skill").strip() == content.strip()
+
+        skill_dir = tmp_path / "managed-skill"
+        resource = skill_dir / "scripts" / "run.py"
+        resource.parent.mkdir()
+        resource.write_text("print('keep')\n", encoding="utf-8")
+
+        updated_content = content.replace("Initial body.", "Updated body.")
+        updated = repo.update_skill("managed-skill", "managed-skill", updated_content)
+
+        assert updated.body.strip().endswith("Updated body.")
+        assert resource.read_text(encoding="utf-8") == "print('keep')\n"
+
+        repo.delete_skill("managed-skill")
+
+        assert not (skill_dir / "SKILL.md").exists()
+        assert resource.read_text(encoding="utf-8") == "print('keep')\n"
+        assert repo.load_skill("managed-skill") is None
+
 
 # ---------------------------------------------------------------------------
 # Public API tests
@@ -340,6 +389,142 @@ class TestPublicAPI:
         pub.reload_skills()
 
         assert len(pub.list_available_skills()) == 1
+
+    def test_catalog_xml_can_filter_global_skills(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _create_skill_dir(tmp_path, "allowed-skill", description="Allowed.")
+        _create_skill_dir(tmp_path, "blocked-skill", description="Blocked.")
+        import agent.modules.skills as pub
+
+        repo = FilesystemSkillRepository(skills_root=tmp_path)
+        monkeypatch.setattr(pub, "_repository", repo)
+
+        xml = pub.get_skills_catalog_xml(["allowed-skill"])
+
+        assert "<name>allowed-skill</name>" in xml
+        assert "blocked-skill" not in xml
+
+    @pytest.mark.asyncio
+    async def test_effective_catalog_auto_loads_repository_local_skills(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        global_root = tmp_path / "global"
+        workspace = tmp_path / "workspace"
+        _create_skill_dir(global_root, "global-skill", description="Global.")
+        _create_skill_dir(
+            workspace / ".agent" / "skills",
+            "local-skill",
+            description="Local.",
+            body="# Local\nLocal body.",
+        )
+        import agent.modules.skills as pub
+
+        repo = FilesystemSkillRepository(skills_root=global_root)
+        monkeypatch.setattr(pub, "_repository", repo)
+
+        xml = await pub.get_effective_skills_catalog_xml(
+            allowed_names=[],
+            workspace=str(workspace),
+            repository_dir=".agent/skills",
+        )
+
+        assert "<name>local-skill</name>" in xml
+        assert "Local." in xml
+        assert "global-skill" not in xml
+
+    @pytest.mark.asyncio
+    async def test_repository_local_skill_overrides_global_skill(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        global_root = tmp_path / "global"
+        workspace = tmp_path / "workspace"
+        _create_skill_dir(
+            global_root,
+            "shared-skill",
+            description="Global shared.",
+            body="# Global\nGlobal body.",
+        )
+        _create_skill_dir(
+            workspace / ".agent" / "skills",
+            "shared-skill",
+            description="Local shared.",
+            body="# Local\nLocal body.",
+        )
+        import agent.modules.skills as pub
+
+        repo = FilesystemSkillRepository(skills_root=global_root)
+        monkeypatch.setattr(pub, "_repository", repo)
+
+        catalog = await pub.get_effective_skills_catalog_xml(
+            allowed_names=["shared-skill"],
+            workspace=str(workspace),
+            repository_dir=".agent/skills",
+        )
+        content = await pub.get_effective_skill_content_xml(
+            "shared-skill",
+            allowed_names=[],
+            workspace=str(workspace),
+            repository_dir=".agent/skills",
+        )
+
+        assert "Local shared." in catalog
+        assert "Global shared." not in catalog
+        assert content is not None
+        assert "Local body." in content
+        assert "Global body." not in content
+
+    @pytest.mark.asyncio
+    async def test_effective_catalog_whitelist_only_applies_to_global_skills(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        global_root = tmp_path / "global"
+        workspace = tmp_path / "workspace"
+        _create_skill_dir(global_root, "allowed-global", description="Allowed global.")
+        _create_skill_dir(global_root, "blocked-global", description="Blocked global.")
+        _create_skill_dir(
+            workspace / ".agent" / "skills",
+            "local-only",
+            description="Local only.",
+            body="# Local\nLocal only body.",
+        )
+        import agent.modules.skills as pub
+
+        repo = FilesystemSkillRepository(skills_root=global_root)
+        monkeypatch.setattr(pub, "_repository", repo)
+
+        catalog = await pub.get_effective_skills_catalog_xml(
+            allowed_names=["allowed-global"],
+            workspace=str(workspace),
+            repository_dir=".agent/skills",
+        )
+        blocked_content = await pub.get_effective_skill_content_xml(
+            "blocked-global",
+            allowed_names=["allowed-global"],
+            workspace=str(workspace),
+            repository_dir=".agent/skills",
+        )
+        local_content = await pub.get_effective_skill_content_xml(
+            "local-only",
+            allowed_names=[],
+            workspace=str(workspace),
+            repository_dir=".agent/skills",
+        )
+
+        assert "<name>allowed-global</name>" in catalog
+        assert "<name>local-only</name>" in catalog
+        assert "blocked-global" not in catalog
+        assert blocked_content is None
+        assert local_content is not None
+        assert "Local only body." in local_content
 
 
 # ---------------------------------------------------------------------------

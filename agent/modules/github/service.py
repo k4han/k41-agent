@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import json
 import logging
 from dataclasses import dataclass
 from hashlib import sha256
@@ -16,6 +17,7 @@ from agent.modules.github.config import (
 )
 from agent.modules.github.repository import (
     get_github_repository_store,
+    load_allowed_skills,
     load_allowed_tools,
     load_mention_triggers,
 )
@@ -205,10 +207,12 @@ class GitHubAutomationService:
         context_trim_threshold: int | None = None,
         tool_policy_mode: str = "inherit",
         allowed_tools: list[str] | None = None,
+        allowed_skills: list[str] | None = None,
         branch_prefix: str = "kaka",
         workspace_backend: str = "local",
     ) -> dict[str, Any]:
         resolved_agent = resolve_catalog_agent_name(agent_name, self.settings.default_agent, "default")
+        normalized_allowed_skills = await _validate_allowed_global_skills(allowed_skills or [])
         return await self.store.update_binding(
             repository_id,
             enabled=enabled,
@@ -227,6 +231,7 @@ class GitHubAutomationService:
             context_trim_threshold=context_trim_threshold,
             tool_policy_mode=tool_policy_mode,
             allowed_tools=allowed_tools or [],
+            allowed_skills=normalized_allowed_skills,
             branch_prefix=branch_prefix,
             workspace_backend=workspace_backend,
         )
@@ -271,6 +276,7 @@ class GitHubAutomationService:
             ),
             context_trim_threshold=_context_trim_threshold(binding),
             allowed_tool_names=_allowed_tools_for_binding(binding),
+            allowed_skill_names=_allowed_skills_for_binding(binding),
             provider=_provider_name(binding),
             model=_model_name(binding),
         )
@@ -462,6 +468,7 @@ class GitHubAutomationService:
             completion_hook=lambda task: self.publish_task_result(task, context, workspace_backend=workspace_backend),
             context_trim_threshold=_context_trim_threshold(binding),
             allowed_tool_names=_allowed_tools_for_binding(binding),
+            allowed_skill_names=_allowed_skills_for_binding(binding),
             provider=_provider_name(binding),
             model=_model_name(binding),
         )
@@ -535,6 +542,7 @@ class GitHubAutomationService:
             completion_hook=lambda task: self.publish_task_result(task, context, workspace_backend=workspace_backend),
             context_trim_threshold=_context_trim_threshold(binding),
             allowed_tool_names=_allowed_tools_for_binding(binding),
+            allowed_skill_names=_allowed_skills_for_binding(binding),
             provider=_provider_name(binding),
             model=_model_name(binding),
         )
@@ -828,6 +836,23 @@ def _allowed_tools_for_binding(binding: Any) -> list[str] | None:
         return None
     tools = load_allowed_tools(str(getattr(binding, "allowed_tools_json", "") or "[]"))
     return tools or None
+
+
+def _allowed_skills_for_binding(binding: Any) -> list[str]:
+    return load_allowed_skills(str(getattr(binding, "allowed_skills_json", "") or "[]"))
+
+
+async def _validate_allowed_global_skills(values: list[str]) -> list[str]:
+    selected = load_allowed_skills(json.dumps(values))
+    if not selected:
+        return []
+    from agent.modules.skills import list_available_skills
+
+    available = {skill.name for skill in list_available_skills()}
+    invalid = sorted(name for name in selected if name not in available)
+    if invalid:
+        raise ValueError(f"Unknown skill(s): {', '.join(invalid)}")
+    return selected
 
 
 def _branch_prefix(binding: Any) -> str:

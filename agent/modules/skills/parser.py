@@ -49,17 +49,28 @@ def _list_resources(skill_dir: Path) -> list[str]:
     return sorted(resources)
 
 
-def parse_skill_md(content: str, skill_dir: Path) -> Skill | None:
+def parse_skill_md(
+    content: str,
+    skill_dir: Path,
+    *,
+    strict: bool = False,
+) -> Skill | None:
     """Parse a SKILL.md file and return a ``Skill``, or ``None`` on failure.
 
-    Follows lenient validation per agentskills.io:
+    Follows lenient validation per agentskills.io when ``strict=False``:
     - Name doesn't match dir → warn, load anyway
     - Name exceeds 64 chars → warn, load anyway
     - Description missing → skip (return None)
     - YAML completely unparseable → skip (return None)
+
+    When ``strict=True`` (used by dashboard CRUD), the same conditions
+    raise ``ValueError`` instead so that explicit write operations
+    reject malformed content rather than silently accepting it.
     """
     match = _FRONTMATTER_RE.match(content)
     if not match:
+        if strict:
+            raise ValueError("SKILL.md has no valid YAML frontmatter.")
         logger.warning("SKILL.md in %s has no valid YAML frontmatter — skipping.", skill_dir)
         return None
 
@@ -71,10 +82,14 @@ def parse_skill_md(content: str, skill_dir: Path) -> Skill | None:
 
         data = yaml.safe_load(yaml_block)
     except Exception:
+        if strict:
+            raise ValueError("SKILL.md YAML is unparseable.") from None
         logger.warning("SKILL.md in %s has unparseable YAML — skipping.", skill_dir)
         return None
 
     if not isinstance(data, dict):
+        if strict:
+            raise ValueError("SKILL.md frontmatter is not a mapping.")
         logger.warning("SKILL.md in %s frontmatter is not a mapping — skipping.", skill_dir)
         return None
 
@@ -83,11 +98,15 @@ def parse_skill_md(content: str, skill_dir: Path) -> Skill | None:
     description = data.get("description")
 
     if not description:
+        if strict:
+            raise ValueError("SKILL.md is missing 'description'.")
         logger.warning("SKILL.md in %s is missing 'description' — skipping.", skill_dir)
         return None
 
     description = str(description).strip()
     if not description:
+        if strict:
+            raise ValueError("SKILL.md has empty 'description'.")
         logger.warning("SKILL.md in %s has empty 'description' — skipping.", skill_dir)
         return None
 
@@ -98,21 +117,24 @@ def parse_skill_md(content: str, skill_dir: Path) -> Skill | None:
     else:
         name = str(name).strip()
 
-    # Warn on invalid name format but load anyway
+    # Reject invalid name format when strict; otherwise warn and load
     if not _validate_name(name):
-        logger.warning(
-            "Skill name '%s' in %s doesn't follow naming rules — loading anyway.",
-            name,
-            skill_dir,
+        msg = (
+            f"Skill name '{name}' in {skill_dir} doesn't follow naming rules "
+            "(lowercase letters, numbers, single hyphens, 1-64 chars)."
         )
+        if strict:
+            raise ValueError(msg)
+        logger.warning("%s — loading anyway.", msg)
 
-    # Warn if name doesn't match directory
+    # Reject when name doesn't match directory when strict
     if name != skill_dir.name:
-        logger.warning(
-            "Skill name '%s' doesn't match directory '%s' — loading anyway.",
-            name,
-            skill_dir.name,
+        msg = (
+            f"Skill name '{name}' doesn't match directory '{skill_dir.name}'."
         )
+        if strict:
+            raise ValueError(msg)
+        logger.warning("%s — loading anyway.", msg)
 
     # --- optional fields ---
     license_val = data.get("license")

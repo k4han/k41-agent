@@ -78,6 +78,16 @@ async def test_llm_node_uses_prompt_builder_output_for_system_message(monkeypatc
         "agent.modules.agents.get_catalog_service",
         lambda: _FakeCatalog(),
     )
+    skill_catalog_calls: list[dict] = []
+
+    async def _fake_effective_skills_catalog(**kwargs):
+        skill_catalog_calls.append(kwargs)
+        return "<available_skills/>"
+
+    monkeypatch.setattr(
+        "agent.modules.skills.get_effective_skills_catalog_xml",
+        _fake_effective_skills_catalog,
+    )
 
     result = await llm_node_module.llm_node(
         {"messages": [HumanMessage(content="help me")]},
@@ -88,6 +98,7 @@ async def test_llm_node_uses_prompt_builder_output_for_system_message(monkeypatc
                 working_dir="D:/repo",
                 max_context_tokens=50000,
                 allowed_tool_names=["skill", "read_file"],
+                allowed_skill_names=["repo-docs"],
             )
         ),
     )
@@ -104,6 +115,9 @@ async def test_llm_node_uses_prompt_builder_output_for_system_message(monkeypatc
     assert builder_calls["agent_name"] == "builder-agent"
     assert [tool.name for tool in builder_calls["tools"]] == ["skill", "read_file"]
     assert builder_calls["prompt_variables"] == {}
+    assert builder_calls["skills_catalog_xml"] == "<available_skills/>"
+    assert skill_catalog_calls[0]["allowed_names"] == ["repo-docs"]
+    assert skill_catalog_calls[0]["thread_id"] == "thread-1"
 
 
 @pytest.mark.asyncio

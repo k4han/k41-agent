@@ -10,6 +10,7 @@ from langchain_core.runnables import RunnableConfig
 from agent.modules.providers import get_resolved_chat_model
 from agent.modules.usage import with_usage_tracking
 from agent.modules.prompt_variables import get_runtime_prompt_variable_values
+from agent.modules.tools.runtime.context import get_thread_id
 from agent.modules.workflows.message_history import normalize_messages_for_chat_model
 from agent.modules.workflows.prompt_builders import (
     build_llm_system_prompt,
@@ -55,6 +56,15 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
     )
 
     prompt_variables = await get_runtime_prompt_variable_values()
+    skills_catalog_xml = None
+    if any(getattr(tool, "name", "") == "skill" for tool in tools):
+        from agent.modules.skills import get_effective_skills_catalog_xml
+
+        skills_catalog_xml = await get_effective_skills_catalog_xml(
+            allowed_names=ctx.get_allowed_skill_names(),
+            workspace=workspace,
+            thread_id=get_thread_id(config),
+        )
     system_prompt = build_llm_system_prompt(
         system_prompt_template=system_prompt_template,
         working_dir=working_dir,
@@ -63,6 +73,7 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
         tools=tools,
         catalog=catalog,
         prompt_variables=prompt_variables,
+        skills_catalog_xml=skills_catalog_xml,
     )
 
     messages: list[BaseMessage] = normalize_messages_for_chat_model(

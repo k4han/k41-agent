@@ -44,6 +44,10 @@ def load_allowed_tools(raw: str) -> list[str]:
     return sorted({str(value).strip() for value in parsed if str(value).strip()})
 
 
+def load_allowed_skills(raw: str) -> list[str]:
+    return load_allowed_tools(raw)
+
+
 def _tool_policy_mode(mode: str, allowed_tools: list[str]) -> str:
     normalized = str(mode or "").strip().lower()
     if normalized == "custom" and allowed_tools:
@@ -88,6 +92,9 @@ def _serialize_binding(binding: GitHubRepositoryBinding) -> dict[str, Any]:
         "context_trim_threshold": _context_trim_threshold(binding.context_trim_threshold),
         "tool_policy_mode": tool_policy_mode,
         "allowed_tools": allowed_tools if tool_policy_mode == "custom" else [],
+        "allowed_skills": load_allowed_skills(
+            getattr(binding, "allowed_skills_json", "") or "[]"
+        ),
         "branch_prefix": binding.branch_prefix or "kaka",
         "workspace_backend": getattr(binding, "workspace_backend", "local") or "local",
         "last_synced_at": binding.last_synced_at.isoformat() if binding.last_synced_at else None,
@@ -149,6 +156,7 @@ class GitHubRepositoryStore:
         context_trim_threshold: int | None = None,
         tool_policy_mode: str = "inherit",
         allowed_tools: list[str] | None = None,
+        allowed_skills: list[str] | None = None,
         branch_prefix: str = "kaka",
         workspace_backend: str = "local",
     ) -> dict[str, Any]:
@@ -185,6 +193,9 @@ class GitHubRepositoryStore:
             )
             binding.allowed_tools_json = _json_list(
                 normalized_allowed_tools if binding.tool_policy_mode == "custom" else []
+            )
+            binding.allowed_skills_json = _json_list(
+                load_allowed_skills(_json_list(allowed_skills or []))
             )
             binding.branch_prefix = branch_prefix.strip() or "kaka"
             normalized_backend = (workspace_backend or "local").strip().lower()
@@ -290,6 +301,7 @@ def get_github_repository_store() -> GitHubRepositoryStore:
 __all__ = [
     "GitHubRepositoryStore",
     "get_github_repository_store",
+    "load_allowed_skills",
     "load_allowed_tools",
     "load_mention_triggers",
 ]

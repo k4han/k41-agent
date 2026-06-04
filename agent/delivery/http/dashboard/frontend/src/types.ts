@@ -73,6 +73,26 @@ export type ToolGroup = {
   tools: string[];
 };
 
+export type SkillInfo = {
+  name: string;
+  description: string;
+  path: string;
+  skill_file?: string;
+  license?: string | null;
+  compatibility?: string | null;
+  metadata?: Record<string, string>;
+  allowed_tools?: string[];
+  resources?: string[];
+  content?: string;
+};
+
+export type SkillsPayload = {
+  skills_root: string;
+  settings: Record<string, SettingInfo>;
+  settings_sources: Record<string, SourceValue[]>;
+  skills: SkillInfo[];
+};
+
 export type AgentsPayload = {
   cards: AgentCard[];
   tools: string[];
@@ -388,6 +408,7 @@ export type GitHubRepositoryBinding = {
   context_trim_threshold: number | null;
   tool_policy_mode: "inherit" | "custom";
   allowed_tools: string[];
+  allowed_skills: string[];
   branch_prefix: string;
   workspace_backend: "local" | "daytona" | "modal";
   last_synced_at: string | null;
@@ -422,6 +443,8 @@ export type GitHubRepositoryDetailPayload = {
   agent_names: string[];
   tools: string[];
   tool_groups: ToolGroup[];
+  skills: SkillInfo[];
+  repository_skill_dir: string;
   provider_names: string[];
   default_provider: string;
   default_model: string;

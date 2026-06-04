@@ -142,6 +142,7 @@ class TestDashboardSettingsEndpoints:
         assert "workspace.root" not in data["settings"]
         assert "workspace.daytona.enabled" not in data["settings"]
         assert "workspace.modal.enabled" not in data["settings"]
+        assert "skills.repository_dir" not in data["settings"]
         assert "database.url" in data["settings"]
         assert "security.jwt_secret" not in data["settings"]
 
@@ -463,6 +464,47 @@ class TestDashboardSettingsEndpoints:
             "key": "channels.telegram.enabled",
             "value": True,
         }
+
+    def test_put_repository_skills_dir_saves_normalized_value(
+        self,
+        make_dashboard_client,
+    ) -> None:
+        service, db_source = _db_config_service(
+            """
+            skills:
+              repository_dir: ".agent/skills"
+            """
+        )
+        client = make_dashboard_client(service)
+
+        resp = client.put(
+            "/settings/skills.repository_dir",
+            json={"value": "custom/skills"},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "status": "success",
+            "key": "skills.repository_dir",
+            "value": "custom/skills",
+        }
+        assert db_source.get("skills.repository_dir") == "custom/skills"
+
+    @pytest.mark.parametrize(
+        "value",
+        ["/skills", "../skills", "skills/../x", "skills//x", "skills\\x"],
+    )
+    def test_put_repository_skills_dir_rejects_unsafe_value(
+        self,
+        dashboard_client,
+        value: str,
+    ) -> None:
+        resp = dashboard_client.put(
+            "/settings/skills.repository_dir",
+            json={"value": value},
+        )
+
+        assert resp.status_code == 400
 
     def test_put_settings_batch_saves_successfully(self, dashboard_client) -> None:
         resp = dashboard_client.put(

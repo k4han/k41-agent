@@ -190,11 +190,24 @@ class TestToolErrorEndToEndOnBuiltin:
         assert result.startswith("[error] ")
         assert "Path escapes working directory" in result
 
-    def test_skill_tool_uses_normalized_format(self, monkeypatch) -> None:
+    @pytest.mark.asyncio
+    async def test_skill_tool_uses_normalized_format(self, monkeypatch) -> None:
+        from types import SimpleNamespace
+
         import agent.modules.tools.langchain.skill_tools.skill as skill_module
 
-        monkeypatch.setattr(skill_module, "get_skill_content_xml", lambda name: None)
-        result = skill_module.skill.func(name="missing")
+        async def fake_get_effective_skill_content_xml(name, **kwargs):
+            return None
+
+        monkeypatch.setattr(
+            skill_module,
+            "get_effective_skill_content_xml",
+            fake_get_effective_skill_content_xml,
+        )
+        result = await skill_module.skill.coroutine(
+            name="missing",
+            runtime=SimpleNamespace(context={}, config={}),
+        )
         assert result == format_tool_error(
             ToolError(ToolErrorCode.NOT_FOUND, "skill not found")
         )

@@ -15,6 +15,7 @@ GITHUB_REPOSITORY_BINDING_COLUMNS: dict[str, str] = {
     "context_trim_threshold": "INTEGER",
     "tool_policy_mode": "VARCHAR(50) NOT NULL DEFAULT 'inherit'",
     "allowed_tools_json": "TEXT NOT NULL DEFAULT '[]'",
+    "allowed_skills_json": "TEXT NOT NULL DEFAULT '[]'",
     "branch_prefix": "VARCHAR(80) NOT NULL DEFAULT 'kaka'",
     "workspace_backend": "VARCHAR(50) NOT NULL DEFAULT 'local'",
 }

@@ -30,6 +30,7 @@ _DASHBOARD_ROUTE_MODULES = (
     "agent.delivery.http.dashboard.routes.agents",
     "agent.delivery.http.dashboard.routes.channels",
     "agent.delivery.http.dashboard.routes.providers",
+    "agent.delivery.http.dashboard.routes.skills",
     "agent.delivery.http.dashboard.routes.settings",
     "agent.delivery.http.dashboard.routes.spa",
 )
@@ -95,8 +96,12 @@ class FakeScheduler:
 
 
 def _create_dashboard_client(channel_manager: ChannelManager) -> TestClient:
+    from agent.shared.config import ConfigService
+    from agent.shared.config.default_source import DefaultConfigSource
+
     app = FastAPI()
     app.state.channel_manager = channel_manager
+    app.state.config_service = ConfigService(sources=[DefaultConfigSource()])
     app.include_router(dashboard_router)
 
     async def mock_admin(_: Request) -> str:
@@ -197,6 +202,12 @@ def test_dashboard_spa_route_serves_index() -> None:
     assert '<div id="root">' in connections_response.text
     assert "/dashboard-assets/" in connections_response.text
 
+    skills_response = client.get("/settings/skills")
+
+    assert skills_response.status_code == 200
+    assert '<div id="root">' in skills_response.text
+    assert "/dashboard-assets/" in skills_response.text
+
 
 def test_dashboard_api_overview_returns_runtime_snapshot() -> None:
     channel_manager = ChannelManager()
@@ -209,6 +220,69 @@ def test_dashboard_api_overview_returns_runtime_snapshot() -> None:
     assert response.json() == {
         "services": [{"name": "telegram", "status": "stopped", "error": None}]
     }
+
+
+def test_dashboard_api_skills_crud_and_reload(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import agent.modules.skills as skills_module
+    from agent.modules.skills.repository import FilesystemSkillRepository
+
+    repo = FilesystemSkillRepository(skills_root=tmp_path)
+    monkeypatch.setattr(skills_module, "_repository", repo)
+    client = _create_dashboard_client(ChannelManager())
+
+    empty = client.get("/dashboard-api/skills")
+    assert empty.status_code == 200
+    assert empty.json()["skills"] == []
+    assert empty.json()["settings"]["skills.repository_dir"]["value"] == ".agent/skills"
+
+    content = (
+        "---\n"
+        "name: api-skill\n"
+        "description: API skill.\n"
+        "---\n"
+        "# Instructions\n"
+        "Initial body.\n"
+    )
+    created = client.post(
+        "/dashboard-api/skills",
+        json={"name": "api-skill", "content": content},
+    )
+    assert created.status_code == 200
+    assert created.json()["skill"]["name"] == "api-skill"
+
+    detail = client.get("/dashboard-api/skills/api-skill")
+    assert detail.status_code == 200
+    assert "Initial body." in detail.json()["skill"]["content"]
+
+    updated = client.put(
+        "/dashboard-api/skills/api-skill",
+        json={"name": "api-skill", "content": content.replace("Initial", "Updated")},
+    )
+    assert updated.status_code == 200
+    assert "Updated body." in (tmp_path / "api-skill" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+
+    deleted = client.delete("/dashboard-api/skills/api-skill")
+    assert deleted.status_code == 200
+    assert not (tmp_path / "api-skill" / "SKILL.md").exists()
+
+    (tmp_path / "reload-skill").mkdir()
+    (tmp_path / "reload-skill" / "SKILL.md").write_text(
+        "---\n"
+        "name: reload-skill\n"
+        "description: Reload skill.\n"
+        "---\n"
+        "# Instructions\n"
+        "Reloaded.\n",
+        encoding="utf-8",
+    )
+    reloaded = client.post("/dashboard-api/skills/reload")
+    assert reloaded.status_code == 200
+    assert [skill["name"] for skill in reloaded.json()["skills"]] == ["reload-skill"]
 
 
 def test_dashboard_workspace_default_returns_absolute_path() -> None:
@@ -2047,6 +2121,7 @@ def test_dashboard_api_github_repository_detail_and_task(
                 "trigger_label": "kaka-agent",
                 "mention_triggers": ["@kaka-agent"],
                 "allowed_tools": ["read_file"],
+                "allowed_skills": ["code-style"],
             }
 
         async def submit_repository_task(self, repository_id: int, **kwargs):
@@ -2077,6 +2152,18 @@ def test_dashboard_api_github_repository_detail_and_task(
     _patch_dashboard_attr(monkeypatch, "get_github_automation_service", lambda: fake_service)
     _patch_dashboard_attr(monkeypatch, "_agent_card_options", fake_agent_options)
     _patch_dashboard_attr(monkeypatch, "_paired_identities", fake_identities)
+    _patch_dashboard_attr(
+        monkeypatch,
+        "list_available_skills",
+        lambda: [
+            SimpleNamespace(
+                name="code-style",
+                description="Code style instructions.",
+                path=Path("skills/code-style"),
+            )
+        ],
+    )
+    _patch_dashboard_attr(monkeypatch, "get_repository_skill_dir", lambda: ".agent/skills")
 
     client = _create_dashboard_client(ChannelManager())
     response = client.get("/dashboard-api/github/repositories/100")
@@ -2084,8 +2171,11 @@ def test_dashboard_api_github_repository_detail_and_task(
     assert response.status_code == 200
     data = response.json()
     assert data["repository"]["full_name"] == "octo/example"
+    assert data["repository"]["allowed_skills"] == ["code-style"]
     assert data["agent_names"] == ["default"]
     assert data["tools"] == ["read_file"]
+    assert data["skills"][0]["name"] == "code-style"
+    assert data["repository_skill_dir"] == ".agent/skills"
 
     missing = client.get("/dashboard-api/github/repositories/101")
     assert missing.status_code == 404
@@ -2106,12 +2196,14 @@ def test_dashboard_api_github_repository_detail_and_task(
             "context_trim_threshold": 24000,
             "tool_policy_mode": "custom",
             "allowed_tools": ["read_file"],
+            "allowed_skills": ["code-style"],
             "branch_prefix": "repo-bot",
         },
     )
     assert updated.status_code == 200
     assert fake_service.updates[0]["repository_instructions"] == "Run tests first."
     assert fake_service.updates[0]["allowed_tools"] == ["read_file"]
+    assert fake_service.updates[0]["allowed_skills"] == ["code-style"]
 
     submitted = client.post(
         "/dashboard-api/github/repositories/100/tasks",

@@ -49,6 +49,7 @@ type RepositoryDraft = {
   context_trim_threshold_text: string;
   tool_policy_mode: "inherit" | "custom";
   allowed_tools: string[];
+  allowed_skills: string[];
   branch_prefix: string;
   workspace_backend: "local" | "daytona" | "modal";
 };
@@ -79,6 +80,7 @@ function toDraft(repo: GitHubRepositoryBinding): RepositoryDraft {
       : "",
     tool_policy_mode: repo.tool_policy_mode === "custom" ? "custom" : "inherit",
     allowed_tools: repo.allowed_tools || [],
+    allowed_skills: repo.allowed_skills || [],
     branch_prefix: repo.branch_prefix || "kaka",
     workspace_backend: repo.workspace_backend || "local",
   };
@@ -131,6 +133,7 @@ function bindingPayload(draft: RepositoryDraft) {
     context_trim_threshold: contextTrimThreshold,
     tool_policy_mode: customTools.length ? "custom" : "inherit",
     allowed_tools: customTools,
+    allowed_skills: Array.from(new Set(draft.allowed_skills)).sort(),
     branch_prefix: draft.branch_prefix,
     workspace_backend: draft.workspace_backend,
   };
@@ -429,6 +432,21 @@ function RepositoryDetailPage(props: { repositoryId: string }) {
     });
   };
 
+  const toggleSkill = (skill: string, checked: boolean) => {
+    setDraft((current) => {
+      if (!current) {
+        return current;
+      }
+      const values = new Set(current.allowed_skills);
+      if (checked) {
+        values.add(skill);
+      } else {
+        values.delete(skill);
+      }
+      return { ...current, allowed_skills: Array.from(values).sort() };
+    });
+  };
+
   const save = async () => {
     const current = draft();
     if (!current) {
@@ -489,6 +507,7 @@ function RepositoryDetailPage(props: { repositoryId: string }) {
   };
 
   const selectedTools = createMemo(() => new Set(draft()?.allowed_tools || []));
+  const selectedSkills = createMemo(() => new Set(draft()?.allowed_skills || []));
   const visibleAgentNames = createMemo(() => {
     const names = new Set(data()?.agent_names || []);
     const current = draft()?.agent_name;
@@ -599,8 +618,10 @@ function RepositoryDetailPage(props: { repositoryId: string }) {
                     payload={payload}
                     draft={currentDraft}
                     selectedTools={selectedTools()}
+                    selectedSkills={selectedSkills()}
                     onChange={updateDraft}
                     onToggleTool={toggleTool}
+                    onToggleSkill={toggleSkill}
                   />
                 </Show>
 
@@ -729,6 +750,10 @@ function RepositoryOverview(props: {
                 ? `${props.draft.allowed_tools.length} custom tools`
                 : "inherit agent"}
             </span>
+          </div>
+          <div class="repository-summary-row">
+            <span class="hint">Global skills</span>
+            <span class="mono">{props.draft.allowed_skills.length} selected</span>
           </div>
         </div>
       </section>
@@ -886,8 +911,10 @@ function RepositoryOptimization(props: {
   payload: GitHubRepositoryDetailPayload;
   draft: RepositoryDraft;
   selectedTools: Set<string>;
+  selectedSkills: Set<string>;
   onChange: <K extends keyof RepositoryDraft>(key: K, value: RepositoryDraft[K]) => void;
   onToggleTool: (tool: string, checked: boolean) => void;
+  onToggleSkill: (skill: string, checked: boolean) => void;
 }) {
   return (
     <section class="panel">
@@ -1007,6 +1034,46 @@ function RepositoryOptimization(props: {
             </For>
           </div>
         </Show>
+
+        <section class="agent-config-section">
+          <div class="agent-config-section-header">
+            <div>
+              <div class="agent-config-eyebrow">Skills</div>
+              <h3>Global skill whitelist</h3>
+              <p class="hint">
+                Repository-local skills in <span class="mono">{props.payload.repository_skill_dir}</span> are always available and override global skills with the same name.
+              </p>
+            </div>
+            <span class="badge badge-info">{props.draft.allowed_skills.length} selected</span>
+          </div>
+          <div class="agent-config-section-body">
+            <Show
+              when={props.payload.skills.length > 0}
+              fallback={<div class="agent-config-empty">No global skills available</div>}
+            >
+              <div class="agent-config-option-grid">
+                <For each={props.payload.skills}>
+                  {(skill) => {
+                    const checked = () => props.selectedSkills.has(skill.name);
+                    return (
+                      <label class={`agent-config-option ${checked() ? "active" : ""}`}>
+                        <input
+                          type="checkbox"
+                          checked={checked()}
+                          onChange={(event) => props.onToggleSkill(skill.name, event.currentTarget.checked)}
+                        />
+                        <span class="agent-config-option-text">
+                          <span class="mono">{skill.name}</span>
+                          <span class="hint">{truncateText(skill.description, 120)}</span>
+                        </span>
+                      </label>
+                    );
+                  }}
+                </For>
+              </div>
+            </Show>
+          </div>
+        </section>
       </div>
     </section>
   );

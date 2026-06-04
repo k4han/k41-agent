@@ -60,6 +60,11 @@ const PromptVariablesPage = lazy(() =>
     default: module.PromptVariablesPage,
   })),
 );
+const SkillsPage = lazy(() =>
+  import("@/pages/settings/SkillsPage").then((module) => ({
+    default: module.SkillsPage,
+  })),
+);
 const ProvidersPage = lazy(() =>
   import("@/pages/settings/ProvidersPage").then((module) => ({
     default: module.ProvidersPage,
@@ -102,6 +107,7 @@ render(
         <Route path="/settings/channels" component={ChannelsPage} />
         <Route path="/settings/pairing" component={() => <Navigate href="/settings/channels?tab=pairing" />} />
         <Route path="/settings/agents" component={AgentsPage} />
+        <Route path="/settings/skills" component={SkillsPage} />
         <Route path="/settings/prompt-variables" component={PromptVariablesPage} />
         <Route path="/settings/security" component={SecurityPage} />
         <Route path="/settings/usage" component={UsagePage} />

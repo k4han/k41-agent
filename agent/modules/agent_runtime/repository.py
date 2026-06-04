@@ -35,6 +35,18 @@ def _trim(value: str | None, max_length: int) -> str:
     return str(value or "").strip()[:max_length]
 
 
+def _dump_json_list(values: list[str] | None) -> str:
+    """Serialize a list of names to a JSON string for storage.
+
+    ``None`` is treated as "no whitelist configured" and stored as an
+    empty list. Empty list means "deny all" (semantically distinct from
+    unset), so we preserve that distinction at the API layer.
+    """
+    if values is None:
+        return "[]"
+    return json.dumps([str(v) for v in values], ensure_ascii=False)
+
+
 def serialize_background_task(record: BackgroundTaskRecord) -> dict[str, Any]:
     workspace = _workspace_from_record(record)
     return {
@@ -46,6 +58,8 @@ def serialize_background_task(record: BackgroundTaskRecord) -> dict[str, Any]:
         "notify_platform": record.notify_platform,
         "notify_external_id": record.notify_external_id,
         "notify_channel_id": record.notify_channel_id,
+        "allowed_tool_names": _parse_json_list(record.allowed_tool_names_json),
+        "allowed_skill_names": _parse_json_list(record.allowed_skill_names_json),
         "status": record.status,
         "result": record.result,
         "error": record.error,
@@ -54,6 +68,18 @@ def serialize_background_task(record: BackgroundTaskRecord) -> dict[str, Any]:
         "completed_at": _timestamp_from_datetime(record.completed_at),
         "updated_at": record.updated_at.isoformat() if record.updated_at else None,
     }
+
+
+def _parse_json_list(value: Any) -> list[str]:
+    if not value:
+        return []
+    try:
+        data = json.loads(str(value))
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(data, list):
+        return []
+    return [str(item) for item in data if item is not None]
 
 
 def _workspace_from_record(record: BackgroundTaskRecord) -> WorkspaceRef | None:
@@ -86,6 +112,8 @@ class BackgroundTaskRepository:
         created_at: float,
         started_at: float | None,
         completed_at: float | None,
+        allowed_tool_names: list[str] | None = None,
+        allowed_skill_names: list[str] | None = None,
         workspace: WorkspaceRef | dict[str, Any] | str | None = None,
     ) -> dict[str, Any]:
         now = utcnow()
@@ -126,6 +154,8 @@ class BackgroundTaskRepository:
             record.notify_platform = _trim(notify_platform, 50)
             record.notify_external_id = _trim(notify_external_id, 255)
             record.notify_channel_id = _trim(notify_channel_id, 255)
+            record.allowed_tool_names_json = _dump_json_list(allowed_tool_names)
+            record.allowed_skill_names_json = _dump_json_list(allowed_skill_names)
             record.status = _trim(status or "pending", 50) or "pending"
             record.result = str(result or "")
             record.error = str(error or "")

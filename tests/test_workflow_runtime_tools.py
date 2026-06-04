@@ -54,6 +54,7 @@ async def test_call_agent_inherits_parent_runtime_context(monkeypatch):
             "working_dir": "D:/repo",
             "provider": "openai-main",
             "model": "parent-model",
+            "allowed_skill_names": ["repo-docs"],
         },
         config={
             "configurable": {
@@ -76,6 +77,7 @@ async def test_call_agent_inherits_parent_runtime_context(monkeypatch):
     assert run_kwargs["workspace"] == "D:/repo"
     assert run_kwargs["provider"] == "openai-main"
     assert run_kwargs["model"] == "parent-model"
+    assert run_kwargs["allowed_skill_names"] == ["repo-docs"]
     assert run_kwargs["thread_id"].startswith("parent-thread:sub:child-agent:")
 
 

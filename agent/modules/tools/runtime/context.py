@@ -19,6 +19,21 @@ def get_context_value(runtime_or_context, key: str, default: T) -> T:
     return getattr(raw_context, key, default)
 
 
+def get_thread_id(config: Any) -> str | None:
+    """Extract ``thread_id`` from a LangGraph ``RunnableConfig``-shaped object.
+
+    Returns ``None`` when the value is missing or not stringifiable.
+    Shared by tools and workflow nodes to avoid duplicated parsing logic.
+    """
+    if not isinstance(config, dict):
+        return None
+    configurable = config.get("configurable", {})
+    if not isinstance(configurable, dict):
+        return None
+    value = configurable.get("thread_id")
+    return str(value) if value else None
+
+
 @dataclass(frozen=True)
 class ToolContext:
     """Normalized view over runtime data a tool typically needs.
@@ -41,14 +56,7 @@ class ToolContext:
     @classmethod
     def from_runtime(cls, runtime: Any) -> "ToolContext":
         raw_context = getattr(runtime, "context", None)
-        thread_id: str | None = None
-        config = getattr(runtime, "config", None)
-        if isinstance(config, dict):
-            configurable = config.get("configurable", {})
-            if isinstance(configurable, dict):
-                raw_tid = configurable.get("thread_id")
-                if raw_tid is not None:
-                    thread_id = str(raw_tid)
+        thread_id = get_thread_id(getattr(runtime, "config", None))
         return cls(
             agent_name=get_context_value(raw_context, "agent_name", "default"),
             workspace=get_context_value(raw_context, "workspace", None),
@@ -62,4 +70,5 @@ class ToolContext:
 __all__ = [
     "ToolContext",
     "get_context_value",
+    "get_thread_id",
 ]

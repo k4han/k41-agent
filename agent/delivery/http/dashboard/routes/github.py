@@ -14,6 +14,7 @@ from agent.modules.github import (
     get_github_automation_service,
     get_github_settings,
 )
+from agent.modules.skills import get_repository_skill_dir, list_available_skills
 
 
 router = APIRouter()
@@ -125,6 +126,7 @@ class GitHubRepositoryBindingBody(BaseModel):
     context_trim_threshold: int | None = None
     tool_policy_mode: str = "inherit"
     allowed_tools: list[str] = Field(default_factory=list)
+    allowed_skills: list[str] = Field(default_factory=list)
     branch_prefix: str = "kaka"
     workspace_backend: str = "local"
 
@@ -152,6 +154,15 @@ async def get_dashboard_github_repository(repository_id: int) -> dict[str, Any]:
         "agent_names": options["agent_names"],
         "tools": options["tools"],
         "tool_groups": options["tool_groups"],
+        "skills": [
+            {
+                "name": skill.name,
+                "description": skill.description,
+                "path": str(skill.path),
+            }
+            for skill in list_available_skills()
+        ],
+        "repository_skill_dir": get_repository_skill_dir(),
         "provider_names": options["provider_names"],
         "default_provider": options["default_provider"],
         "default_model": options["default_model"],
@@ -185,11 +196,14 @@ async def update_dashboard_github_repository_binding(
             context_trim_threshold=body.context_trim_threshold,
             tool_policy_mode=body.tool_policy_mode,
             allowed_tools=body.allowed_tools,
+            allowed_skills=body.allowed_skills,
             branch_prefix=body.branch_prefix,
             workspace_backend=body.workspace_backend,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"status": "updated", "repository": binding}
 
 

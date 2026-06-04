@@ -12,6 +12,7 @@ BOOTSTRAP_BOOLEAN_CONFIG_KEYS = ("enable_web", "enable_api", "enable_dashboard")
 
 LLM_FALLBACK_PROVIDER_KEY = "llm.fallback.provider"
 LLM_FALLBACK_MODEL_KEY = "llm.fallback.model"
+REPOSITORY_SKILLS_DIR_KEY = "skills.repository_dir"
 
 # Runtime configuration key patterns
 # These patterns define which keys can be updated at runtime
@@ -31,6 +32,7 @@ RUNTIME_KEY_PATTERNS = [
     r"^workspace\.root$",
     r"^workspace\.daytona\.(enabled|api_key|default_root|target|image|cpu|memory|disk|language|auto_stop_minutes|auto_archive_days|sweeper_interval_seconds|start_timeout_seconds|stop_timeout_seconds|sandbox_auto_stop_minutes|sandbox_auto_archive_minutes|sandbox_auto_delete_minutes|ephemeral|network_block_all|network_allow_list)$",
     r"^workspace\.modal\.(enabled|token_id|token_secret|app_name|default_root|image|sandbox_timeout_seconds|idle_timeout_seconds)$",
+    rf"^{re.escape(REPOSITORY_SKILLS_DIR_KEY)}$",
     r"^database\.url$",
     rf"^{re.escape(DISPLAY_TIMEZONE_CONFIG_KEY)}$",
     r"^recursion_limit$",
@@ -50,6 +52,7 @@ DATABASE_RUNTIME_KEY_PATTERNS = [
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.headers\.[A-Za-z0-9_-]+$",
     r"^workspace\.daytona\.(enabled|api_key|default_root|target|image|cpu|memory|disk|language|auto_stop_minutes|auto_archive_days|sweeper_interval_seconds|start_timeout_seconds|stop_timeout_seconds|sandbox_auto_stop_minutes|sandbox_auto_archive_minutes|sandbox_auto_delete_minutes|ephemeral|network_block_all|network_allow_list)$",
     r"^workspace\.modal\.(enabled|token_id|token_secret|app_name|default_root|image|sandbox_timeout_seconds|idle_timeout_seconds)$",
+    rf"^{re.escape(REPOSITORY_SKILLS_DIR_KEY)}$",
     r"^recursion_limit$",
 ]
 
@@ -150,6 +153,7 @@ def _expand_runtime_keys() -> set[str]:
     keys.add("workspace.modal.image")
     keys.add("workspace.modal.sandbox_timeout_seconds")
     keys.add("workspace.modal.idle_timeout_seconds")
+    keys.add(REPOSITORY_SKILLS_DIR_KEY)
     keys.add(DISPLAY_TIMEZONE_CONFIG_KEY)
     keys.add("recursion_limit")
     return keys
@@ -223,6 +227,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "workspace.modal.image": "python:3.13-slim",
     "workspace.modal.sandbox_timeout_seconds": 3600,
     "workspace.modal.idle_timeout_seconds": 900,
+    REPOSITORY_SKILLS_DIR_KEY: ".agent/skills",
     DISPLAY_TIMEZONE_CONFIG_KEY: DEFAULT_DISPLAY_TIMEZONE,
     "security.jwt_secret": "",
     "recursion_limit": 100,
@@ -475,6 +480,12 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "min": 0,
         "max": 86400,
         "step": 1,
+    },
+    REPOSITORY_SKILLS_DIR_KEY: {
+        "type": "text",
+        "description": "Repository-relative directory for repo-local skills.",
+        "category": "skills",
+        "label": "Repository Skills Directory",
     },
     # Channel settings
     "channels.telegram.enabled": {
@@ -827,6 +838,7 @@ __all__ = [
     "DISPLAY_TIMEZONE_CONFIG_KEY",
     "LLM_FALLBACK_MODEL_KEY",
     "LLM_FALLBACK_PROVIDER_KEY",
+    "REPOSITORY_SKILLS_DIR_KEY",
     "DATABASE_RUNTIME_KEY_PATTERNS",
     "RUNTIME_KEY_PATTERNS",
     "SENSITIVE_RUNTIME_KEY_PATTERNS",

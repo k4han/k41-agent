@@ -13,6 +13,14 @@ WORKSPACE_COLUMNS: dict[str, str] = {
     "workspace_metadata_json": "TEXT",
 }
 
+# Columns that only the background_tasks table needs (tool/skill whitelists).
+# Kept in this module so that the workspace migration stays the single source
+# of truth for ``background_tasks`` schema evolution.
+BACKGROUND_TASK_EXTRA_COLUMNS: dict[str, str] = {
+    "allowed_tool_names_json": "TEXT NOT NULL DEFAULT '[]'",
+    "allowed_skill_names_json": "TEXT NOT NULL DEFAULT '[]'",
+}
+
 _TABLES_WITH_WORKSPACE_COLUMNS = ("thread_workspaces", "background_tasks")
 
 
@@ -64,6 +72,15 @@ def migrate_workspace_tables(database_url: str) -> None:
             inspector = inspect(conn)
             for table_name in _TABLES_WITH_WORKSPACE_COLUMNS:
                 _ensure_columns(conn, inspector, table_name, WORKSPACE_COLUMNS)
+
+            inspector = inspect(conn)
+            if _has_table(inspector, "background_tasks"):
+                _ensure_columns(
+                    conn,
+                    inspector,
+                    "background_tasks",
+                    BACKGROUND_TASK_EXTRA_COLUMNS,
+                )
 
             inspector = inspect(conn)
             for table_name in _TABLES_WITH_WORKSPACE_COLUMNS:
