@@ -426,6 +426,7 @@ class ModalWorkspaceBackend(SandboxBackendBase):
     ) -> str:
         if not owner or not repo:
             raise ValueError("Repository owner and name are required.")
+        self._invalidate_workspace_caches()
         self.touch()
         await self.ensure_root()
         relative = repo
@@ -487,6 +488,9 @@ class ModalWorkspaceBackend(SandboxBackendBase):
     async def list_dir(self, path: str = "") -> str:
         self.touch()
         target = resolve_modal_path(self.root, path or ".")
+        cached, value = self._get_metadata_cache("list_dir", target)
+        if cached:
+            return value
         command = f"ls -1 {shlex.quote(target)}"
         result = await self._exec(command, timeout=GIT_TIMEOUT_SECONDS)
         if result.exit_code not in (0, None):
@@ -499,6 +503,7 @@ class ModalWorkspaceBackend(SandboxBackendBase):
         output = "\n".join(entries)
         if truncated:
             output += f"\n...[truncated at {MAX_LIST_FILES_ENTRIES} entries]"
+        self._set_metadata_cache("list_dir", output, target)
         return output
 
     async def read_text(self, file_path: str) -> str:
@@ -509,6 +514,7 @@ class ModalWorkspaceBackend(SandboxBackendBase):
 
     async def write_text(self, file_path: str, content: str) -> str:
         self.touch()
+        self._invalidate_workspace_caches()
         remote_path = resolve_modal_path(self.root, file_path)
         await self._run_remote_aio(lambda: self.fs.write_text.aio(content, remote_path))
         return f"[OK] Wrote file: {remote_path}"
@@ -570,6 +576,7 @@ class ModalWorkspaceBackend(SandboxBackendBase):
         max_output_chars: int | None = None,
     ) -> CommandResult:
         self.touch()
+        self._invalidate_workspace_caches()
         return await self._exec(
             command,
             cwd=self.root,
@@ -583,6 +590,9 @@ class ModalWorkspaceBackend(SandboxBackendBase):
 
         self.touch()
         target = resolve_remote_path(self.root, path or ".")
+        cached, value = self._get_metadata_cache("tree", target)
+        if cached:
+            return value
         info = await self._stat(target)
         if not file_info_is_dir(info):
             raise NotADirectoryError(f"Path is not a directory: {path or '.'}")
@@ -612,12 +622,14 @@ class ModalWorkspaceBackend(SandboxBackendBase):
         entries.sort(
             key=lambda item: (item["kind"] != "directory", item["name"].lower())
         )
-        return {
+        result = {
             "root": self.root,
             "path": target,
             "entries": entries,
             "truncated": truncated,
         }
+        self._set_metadata_cache("tree", result, target)
+        return result
 
     async def file(self, path: str) -> dict[str, Any]:
         """Return file content and metadata (Modal override for async fs API)."""
@@ -669,10 +681,8 @@ class ModalWorkspaceBackend(SandboxBackendBase):
             }
         output = await self._run_git(git_status_args(), cwd=self.root)
         changes = parse_git_status(output, workspace_root=self.root, git_root=git_root)
-        for change in changes:
-            additions, deletions = await self._change_line_stats(change, git_root=git_root)
-            change["additions"] = additions
-            change["deletions"] = deletions
+        await self._batch_change_line_stats(changes, git_root=git_root)
+        self._set_git_status_cache(changes)
         return {
             "root": self.root,
             "is_git_repo": True,
@@ -705,14 +715,16 @@ class ModalWorkspaceBackend(SandboxBackendBase):
                 "message": "Workspace is not a Git repository.",
             }
 
-        status_by_path = {
-            change["path"]: change
-            for change in parse_git_status(
-                await self._run_git(git_status_args(), cwd=self.root),
-                workspace_root=self.root,
-                git_root=git_root,
-            )
-        }
+        status_by_path = self._get_valid_git_status_cache()
+        if status_by_path is None:
+            status_by_path = {
+                change["path"]: change
+                for change in parse_git_status(
+                    await self._run_git(git_status_args(), cwd=self.root),
+                    workspace_root=self.root,
+                    git_root=git_root,
+                )
+            }
         change = status_by_path.get(remote_path)
         status = str(change.get("status") or "") if change else ""
         gpath = git_relative_path(git_root, remote_path)
@@ -750,6 +762,7 @@ class ModalWorkspaceBackend(SandboxBackendBase):
         )
 
         self.touch()
+        self._invalidate_workspace_caches()
         source = resolve_remote_path(self.root, path)
         relative = relative_remote_path(self.root, source)
         if not relative:
@@ -784,6 +797,7 @@ class ModalWorkspaceBackend(SandboxBackendBase):
         )
 
         self.touch()
+        self._invalidate_workspace_caches()
         target = resolve_remote_path(self.root, path)
         relative = relative_remote_path(self.root, target)
         if not relative:
@@ -974,6 +988,56 @@ class ModalWorkspaceBackend(SandboxBackendBase):
         if not output:
             return None
         return _normalize_posix_path(output.splitlines()[-1])
+
+    async def _batch_change_line_stats(
+        self,
+        changes: list[dict[str, Any]],
+        *,
+        git_root: str,
+    ) -> None:
+        if not changes:
+            return
+
+        numstat_by_path: dict[str, dict[str, int]] = {}
+        has_tracked_changes = any(
+            change.get("status") != "untracked" for change in changes
+        )
+        if has_tracked_changes:
+            for args in (
+                ["diff", "--numstat", "--cached", "--no-ext-diff"],
+                ["diff", "--numstat", "--no-ext-diff"],
+            ):
+                try:
+                    output = await self._run_git(args, cwd=git_root)
+                except WorkspaceUnavailableError:
+                    raise
+                except Exception as exc:
+                    logger.debug("Failed to compute batch line stats: %s", exc)
+                    continue
+                for line in output.splitlines():
+                    fields = line.split("\t", 3)
+                    if len(fields) < 3:
+                        continue
+                    add_str, del_str, file_path = fields[0], fields[1], fields[2]
+                    abs_path = posixpath.normpath(posixpath.join(git_root, file_path))
+                    entry = numstat_by_path.setdefault(
+                        abs_path,
+                        {"additions": 0, "deletions": 0},
+                    )
+                    if add_str.isdigit():
+                        entry["additions"] += int(add_str)
+                    if del_str.isdigit():
+                        entry["deletions"] += int(del_str)
+
+        for change in changes:
+            path = str(change.get("path") or "")
+            if change.get("status") == "untracked":
+                change["additions"] = await self._text_line_count(path)
+                change["deletions"] = 0
+                continue
+            stats = numstat_by_path.get(path, {})
+            change["additions"] = stats.get("additions", 0)
+            change["deletions"] = stats.get("deletions", 0)
 
     async def _change_line_stats(
         self,

@@ -29,6 +29,7 @@ from agent.modules.workspaces.daytona_backend import (
     sweep_idle_daytona_workspaces,
 )
 from agent.modules.workspaces.local_backend import LocalWorkspaceBackend
+from agent.modules.workspaces.metadata_cache import clear_workspace_metadata_cache
 from agent.modules.workspaces.migrations import migrate_workspace_tables
 from agent.modules.workspaces.modal_backend import (
     ModalWorkspaceBackend,
@@ -37,10 +38,18 @@ from agent.modules.workspaces.modal_backend import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _clear_workspace_metadata_cache():
+    clear_workspace_metadata_cache()
+    yield
+    clear_workspace_metadata_cache()
+
+
 class FakeDaytonaFs:
     def __init__(self) -> None:
         self.files: dict[str, bytes] = {}
         self.dirs: set[str] = {"/", "/workspace"}
+        self.list_files_calls = 0
 
     def upload_file(self, src: bytes | str, dst: str, timeout: int = 1800) -> None:
         content = src.encode("utf-8") if isinstance(src, str) else bytes(src)
@@ -52,6 +61,7 @@ class FakeDaytonaFs:
         return self.files[path]
 
     def list_files(self, path: str):
+        self.list_files_calls += 1
         prefix = path.rstrip("/") + "/"
         entries = []
         seen: set[str] = set()
@@ -177,6 +187,11 @@ class FakeDaytonaProcess:
             self.fs.files.pop(target, None)
             self.fs.dirs.discard(target)
             return SimpleNamespace(result="", exit_code=0, stderr="")
+        if command.startswith("printf ") and " > " in command:
+            payload, target = command.split(" > ", 1)
+            content = payload.split("printf ", 1)[1].strip("'\"")
+            self.fs.upload_file(content.encode("utf-8"), target.strip("'\""))
+            return SimpleNamespace(result="", exit_code=0, stderr="")
         return SimpleNamespace(result="ok\n", exit_code=0, stderr="")
 
 
@@ -257,6 +272,7 @@ class FakeModalFs:
     def __init__(self) -> None:
         self.files: dict[str, bytes] = {}
         self.dirs: set[str] = {"/", "/workspace"}
+        self.list_files_calls = 0
         self.write_text = _AioWrapper(self._write_text)
         self.write_bytes = _AioWrapper(self._write_bytes)
         self.read_text = _AioWrapper(self._read_text)
@@ -292,6 +308,7 @@ class FakeModalFs:
         return self.files[remote_path]
 
     def _list_files(self, remote_path: str):
+        self.list_files_calls += 1
         prefix = remote_path.rstrip("/") + "/"
         entries = []
         seen: set[str] = set()
@@ -416,6 +433,11 @@ class FakeModalSandbox:
             target = command.split("rm -rf ", 1)[1].strip("'\"")
             self.filesystem.files.pop(target, None)
             self.filesystem.dirs.discard(target)
+            result = ""
+        elif command.startswith("printf ") and " > " in command:
+            payload, target = command.split(" > ", 1)
+            content = payload.split("printf ", 1)[1].strip("'\"")
+            self.filesystem.write_text(content, target.strip("'\""))
             result = ""
         return SimpleNamespace(
             stdout=FakeModalStream(result),
@@ -705,6 +727,125 @@ def test_modal_workspace_backend_file_operations_and_path_guard():
             await backend.read_text("../secret.txt")
 
     asyncio.run(_run())
+
+
+def _count_commands(commands: list[tuple[str, str | None, int | None]], prefix: str) -> int:
+    return sum(1 for command, _, _ in commands if command.startswith(prefix))
+
+
+def test_daytona_workspace_backend_metadata_cache_invalidates_on_mutations():
+    import asyncio
+
+    async def _run():
+        sandbox = FakeDaytonaSandbox()
+        workspace = WorkspaceRef(
+            backend="daytona",
+            locator="sandbox-1",
+            label="sandbox",
+            metadata={"root": "workspace"},
+        )
+        backend = DaytonaWorkspaceBackend(workspace, sandbox=sandbox)
+        await backend.write_text("src/app.py", "print('hello')\n")
+
+        assert await backend.list_dir("src") == "app.py"
+        first_ls_count = _count_commands(sandbox.process.commands, "ls -1 ")
+        assert await backend.list_dir("src") == "app.py"
+        assert _count_commands(sandbox.process.commands, "ls -1 ") == first_ls_count
+
+        sandbox.fs.list_files_calls = 0
+        first_tree = await backend.tree("src")
+        second_tree = await backend.tree("src")
+        assert second_tree == first_tree
+        assert sandbox.fs.list_files_calls == 1
+
+        await backend.execute("echo ok")
+        assert await backend.list_dir("src") == "app.py"
+        assert _count_commands(sandbox.process.commands, "ls -1 ") == first_ls_count + 1
+
+        rename = await backend.rename(path="src/app.py", new_name="main.py")
+        assert rename["new_path"] == "/workspace/src/main.py"
+        assert await backend.list_dir("src") == "main.py"
+
+        delete = await backend.delete(path="src/main.py")
+        assert delete["kind"] == "file"
+        assert await backend.list_dir("src") == "(Empty directory)"
+
+    asyncio.run(_run())
+
+
+def test_modal_workspace_backend_metadata_cache_invalidates_on_mutations():
+    import asyncio
+
+    async def _run():
+        sandbox = FakeModalSandbox()
+        workspace = WorkspaceRef(
+            backend="modal",
+            locator="sb-1",
+            label="sandbox",
+            metadata={"root": "/workspace"},
+        )
+        backend = ModalWorkspaceBackend(workspace, sandbox=sandbox, fs=sandbox.filesystem)
+        await backend.write_text("src/app.py", "print('hello')\n")
+
+        assert await backend.list_dir("src") == "app.py"
+        first_ls_count = _count_commands(sandbox.commands, "ls -1 ")
+        assert await backend.list_dir("src") == "app.py"
+        assert _count_commands(sandbox.commands, "ls -1 ") == first_ls_count
+
+        sandbox.filesystem.list_files_calls = 0
+        first_tree = await backend.tree("src")
+        second_tree = await backend.tree("src")
+        assert second_tree == first_tree
+        assert sandbox.filesystem.list_files_calls == 1
+
+        await backend.execute("echo ok")
+        assert await backend.list_dir("src") == "app.py"
+        assert _count_commands(sandbox.commands, "ls -1 ") == first_ls_count + 1
+
+        rename = await backend.rename(path="src/app.py", new_name="main.py")
+        assert rename["new_path"] == "/workspace/src/main.py"
+        assert await backend.list_dir("src") == "main.py"
+
+        delete = await backend.delete(path="src/main.py")
+        assert delete["kind"] == "file"
+        assert await backend.list_dir("src") == "(Empty directory)"
+
+    asyncio.run(_run())
+
+
+def test_cloud_workspace_read_text_remains_uncached_after_execute():
+    import asyncio
+
+    async def _run_daytona():
+        sandbox = FakeDaytonaSandbox()
+        workspace = WorkspaceRef(
+            backend="daytona",
+            locator="sandbox-1",
+            label="sandbox",
+            metadata={"root": "workspace"},
+        )
+        backend = DaytonaWorkspaceBackend(workspace, sandbox=sandbox)
+        await backend.write_text("src/app.py", "old")
+        assert await backend.read_text("src/app.py") == "old"
+        await backend.execute("printf updated > /workspace/src/app.py")
+        assert await backend.read_text("src/app.py") == "updated"
+
+    async def _run_modal():
+        sandbox = FakeModalSandbox()
+        workspace = WorkspaceRef(
+            backend="modal",
+            locator="sb-1",
+            label="sandbox",
+            metadata={"root": "/workspace"},
+        )
+        backend = ModalWorkspaceBackend(workspace, sandbox=sandbox, fs=sandbox.filesystem)
+        await backend.write_text("src/app.py", "old")
+        assert await backend.read_text("src/app.py") == "old"
+        await backend.execute("printf updated > /workspace/src/app.py")
+        assert await backend.read_text("src/app.py") == "updated"
+
+    asyncio.run(_run_daytona())
+    asyncio.run(_run_modal())
 
 
 def test_daytona_clone_repository_uses_repo_only_relative_path():
@@ -1408,6 +1549,10 @@ def test_daytona_workspace_backend_execute_changes_and_untracked_diff():
     assert changes["changes"][0]["additions"] == 2
     assert "+hello" in diff["diff"]
     assert "+world" in diff["diff"]
+    assert _count_commands(
+        sandbox.process.commands,
+        "git -c status.relativePaths=false status",
+    ) == 1
 
 
 def test_daytona_workspace_backend_changes_handles_non_git_workspace():
@@ -1431,6 +1576,32 @@ def test_daytona_workspace_backend_changes_handles_non_git_workspace():
         "changes": [],
         "message": "Workspace is not a Git repository.",
     }
+
+
+def test_daytona_workspace_backend_changes_batches_tracked_line_stats():
+    import asyncio
+
+    sandbox = FakeDaytonaSandbox(git_root="/workspace")
+    sandbox.process.git_status_output = " M app.py\0 M other.py\0"
+    sandbox.process.git_numstat_output = "1\t0\tapp.py\n2\t0\tother.py\n"
+    workspace = WorkspaceRef(
+        backend="daytona",
+        locator="sandbox-1",
+        label="sandbox",
+        metadata={"root": "workspace"},
+    )
+    backend = DaytonaWorkspaceBackend(workspace, sandbox=sandbox)
+
+    async def _run():
+        return await backend.changes()
+
+    changes = asyncio.run(_run())
+
+    assert [change["path"] for change in changes["changes"]] == [
+        "/workspace/app.py",
+        "/workspace/other.py",
+    ]
+    assert _count_commands(sandbox.process.commands, "git diff --numstat") == 2
 
 
 def test_modal_workspace_backend_execute_changes_and_untracked_diff():
@@ -1464,6 +1635,36 @@ def test_modal_workspace_backend_execute_changes_and_untracked_diff():
     assert changes["changes"][0]["additions"] == 2
     assert "+hello" in diff["diff"]
     assert "+world" in diff["diff"]
+    assert _count_commands(
+        sandbox.commands,
+        "git -c status.relativePaths=false status",
+    ) == 1
+
+
+def test_modal_workspace_backend_changes_batches_tracked_line_stats():
+    import asyncio
+
+    sandbox = FakeModalSandbox(git_root="/workspace")
+    sandbox.git_status_output = " M app.py\0 M other.py\0"
+    sandbox.git_numstat_output = "1\t0\tapp.py\n2\t0\tother.py\n"
+    workspace = WorkspaceRef(
+        backend="modal",
+        locator="sb-1",
+        label="sandbox",
+        metadata={"root": "/workspace"},
+    )
+    backend = ModalWorkspaceBackend(workspace, sandbox=sandbox, fs=sandbox.filesystem)
+
+    async def _run():
+        return await backend.changes()
+
+    changes = asyncio.run(_run())
+
+    assert [change["path"] for change in changes["changes"]] == [
+        "/workspace/app.py",
+        "/workspace/other.py",
+    ]
+    assert _count_commands(sandbox.commands, "git diff --numstat") == 2
 
 
 def test_workspace_migration_backfills_legacy_tables(tmp_path):

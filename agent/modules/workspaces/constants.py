@@ -17,6 +17,9 @@ GIT_STATUS_CACHE_TTL = 2.0
 MAX_DIFF_CHARS = 200_000
 MAX_UNTRACKED_FILE_CHARS = 120_000
 
+# Cloud metadata cache
+METADATA_CACHE_TTL_SECONDS = 1.0
+
 # Directories to ignore when listing files
 IGNORED_DIR_NAMES: frozenset[str] = frozenset({
     ".cache",
@@ -42,4 +45,5 @@ __all__ = [
     "MAX_LIST_FILES_ENTRIES",
     "MAX_TREE_ENTRIES",
     "MAX_UNTRACKED_FILE_CHARS",
+    "METADATA_CACHE_TTL_SECONDS",
 ]

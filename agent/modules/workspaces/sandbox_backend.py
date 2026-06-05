@@ -34,6 +34,11 @@ from agent.modules.workspaces.git_utils import (
     parse_git_status,
     truncate_diff,
 )
+from agent.modules.workspaces.metadata_cache import (
+    get_workspace_metadata_cache,
+    invalidate_workspace_metadata_cache,
+    set_workspace_metadata_cache,
+)
 from agent.modules.workspaces.posix_utils import normalize_posix_path
 
 logger = logging.getLogger(__name__)
@@ -137,6 +142,7 @@ class SandboxBackendBase(ABC):
         """Write a text file to the sandbox."""
         from agent.modules.workspaces.posix_utils import resolve_remote_path
 
+        self._invalidate_workspace_caches()
         remote_path = resolve_remote_path(self.root, file_path)
         parent = remote_path.rsplit("/", 1)[0] or "/"
         self._make_directory(parent)
@@ -153,6 +159,9 @@ class SandboxBackendBase(ABC):
 
         self.ensure_active()
         target = resolve_remote_path(self.root, path or ".")
+        cached, value = self._get_metadata_cache("tree", target)
+        if cached:
+            return value
         entries: list[dict[str, Any]] = []
         truncated = False
         items = self._list_remote_files(target)
@@ -179,12 +188,14 @@ class SandboxBackendBase(ABC):
         entries.sort(
             key=lambda item: (item["kind"] != "directory", item["name"].lower())
         )
-        return {
+        result = {
             "root": self.root,
             "path": target,
             "entries": entries,
             "truncated": truncated,
         }
+        self._set_metadata_cache("tree", result, target)
+        return result
 
     async def file(self, path: str) -> dict[str, Any]:
         """Return file content and metadata."""
@@ -244,13 +255,7 @@ class SandboxBackendBase(ABC):
         output = await self._run_git_raw(git_status_args(), cwd=self.root)
         changes = parse_git_status(output, workspace_root=self.root, git_root=git_root)
         await self._batch_change_line_stats(changes, git_root=git_root)
-        status_by_path: dict[str, dict[str, Any]] = {}
-        for change in changes:
-            path = change.get("path", "")
-            if path:
-                status_by_path[path] = change
-        self._git_status_cache = status_by_path
-        self._git_status_cache_ts = time.monotonic()
+        self._set_git_status_cache(changes)
         return {
             "root": self.root,
             "is_git_repo": True,
@@ -283,12 +288,8 @@ class SandboxBackendBase(ABC):
                 "message": "Workspace is not a Git repository.",
             }
 
-        status_by_path = self._git_status_cache
-        cache_valid = (
-            status_by_path is not None
-            and (time.monotonic() - self._git_status_cache_ts) <= GIT_STATUS_CACHE_TTL
-        )
-        if not cache_valid:
+        status_by_path = self._get_valid_git_status_cache()
+        if status_by_path is None:
             status_by_path = {
                 change["path"]: change
                 for change in parse_git_status(
@@ -337,6 +338,7 @@ class SandboxBackendBase(ABC):
             resolve_remote_path,
         )
 
+        self._invalidate_workspace_caches()
         self.ensure_active()
         source = resolve_remote_path(self.root, path)
         relative = relative_remote_path(self.root, source)
@@ -375,6 +377,7 @@ class SandboxBackendBase(ABC):
             resolve_remote_path,
         )
 
+        self._invalidate_workspace_caches()
         self.ensure_active()
         target = resolve_remote_path(self.root, path)
         relative = relative_remote_path(self.root, target)
@@ -423,6 +426,48 @@ class SandboxBackendBase(ABC):
         """
         return self._exec(command, cwd=cwd, timeout=timeout,
                           max_output_chars=max_output_chars)
+
+    def _cache_root(self) -> str:
+        return str(self.root or self.ref.metadata.get("root") or "")
+
+    def _get_metadata_cache(self, operation: str, *parts: Any) -> tuple[bool, Any]:
+        return get_workspace_metadata_cache(
+            self.ref,
+            root=self._cache_root(),
+            operation=operation,
+            parts=tuple(parts),
+        )
+
+    def _set_metadata_cache(self, operation: str, value: Any, *parts: Any) -> None:
+        set_workspace_metadata_cache(
+            self.ref,
+            value,
+            root=self._cache_root(),
+            operation=operation,
+            parts=tuple(parts),
+        )
+
+    def _invalidate_workspace_caches(self) -> None:
+        invalidate_workspace_metadata_cache(self.ref, root=self._cache_root())
+        self._git_status_cache = None
+        self._git_status_cache_ts = 0.0
+
+    def _set_git_status_cache(self, changes: list[dict[str, Any]]) -> None:
+        status_by_path: dict[str, dict[str, Any]] = {}
+        for change in changes:
+            path = change.get("path", "")
+            if path:
+                status_by_path[path] = change
+        self._git_status_cache = status_by_path
+        self._git_status_cache_ts = time.monotonic()
+
+    def _get_valid_git_status_cache(self) -> dict[str, dict[str, Any]] | None:
+        status_by_path = self._git_status_cache
+        if status_by_path is None:
+            return None
+        if (time.monotonic() - self._git_status_cache_ts) > GIT_STATUS_CACHE_TTL:
+            return None
+        return status_by_path
 
     async def _run_git_raw(self, args: list[str], *, cwd: str) -> str:
         """Run a git command and return stdout."""
@@ -507,26 +552,33 @@ class SandboxBackendBase(ABC):
             return
 
         numstat_by_path: dict[str, dict[str, int]] = {}
-        for args in (
-            ["diff", "--numstat", "--cached", "--no-ext-diff"],
-            ["diff", "--numstat", "--no-ext-diff"],
-        ):
-            try:
-                output = await self._run_git_raw(args, cwd=git_root)
-            except Exception as exc:
-                logger.debug("Failed to compute batch line stats: %s", exc)
-                continue
-            for line in output.splitlines():
-                fields = line.split("\t", 3)
-                if len(fields) < 3:
+        has_tracked_changes = any(
+            change.get("status") != "untracked" for change in changes
+        )
+        if has_tracked_changes:
+            for args in (
+                ["diff", "--numstat", "--cached", "--no-ext-diff"],
+                ["diff", "--numstat", "--no-ext-diff"],
+            ):
+                try:
+                    output = await self._run_git_raw(args, cwd=git_root)
+                except Exception as exc:
+                    logger.debug("Failed to compute batch line stats: %s", exc)
                     continue
-                add_str, del_str, file_path = fields[0], fields[1], fields[2]
-                abs_path = posixpath.normpath(posixpath.join(git_root, file_path))
-                entry = numstat_by_path.setdefault(abs_path, {"additions": 0, "deletions": 0})
-                if add_str.isdigit():
-                    entry["additions"] += int(add_str)
-                if del_str.isdigit():
-                    entry["deletions"] += int(del_str)
+                for line in output.splitlines():
+                    fields = line.split("\t", 3)
+                    if len(fields) < 3:
+                        continue
+                    add_str, del_str, file_path = fields[0], fields[1], fields[2]
+                    abs_path = posixpath.normpath(posixpath.join(git_root, file_path))
+                    entry = numstat_by_path.setdefault(
+                        abs_path,
+                        {"additions": 0, "deletions": 0},
+                    )
+                    if add_str.isdigit():
+                        entry["additions"] += int(add_str)
+                    if del_str.isdigit():
+                        entry["deletions"] += int(del_str)
 
         for change in changes:
             path = str(change.get("path") or "")
