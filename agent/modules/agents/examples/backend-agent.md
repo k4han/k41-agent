@@ -8,6 +8,7 @@ tools:
   - "list_dir"
   - "read_file"
   - "write_file"
+  - "edit_file"
   - "search_files"
   - "run_command"
 max_context_tokens: 50000

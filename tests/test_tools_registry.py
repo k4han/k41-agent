@@ -181,6 +181,7 @@ class TestBuiltinToolSource:
         expected_names = {
             "read_file",
             "write_file",
+            "edit_file",
             "list_dir",
             "bash",
             "bash_send_input",
@@ -203,6 +204,7 @@ class TestBuiltinToolSource:
     def test_descriptors_have_correct_categories(self) -> None:
         by_name = {d.name: d for d in BuiltinToolSource().load()}
         assert by_name["read_file"].category is ToolCategory.FILE
+        assert by_name["edit_file"].category is ToolCategory.FILE
         assert by_name["bash"].category is ToolCategory.SHELL
         assert by_name["web_fetch"].category is ToolCategory.WEB
         assert by_name["call_agent"].category is ToolCategory.AGENT
@@ -213,6 +215,7 @@ class TestBuiltinToolSource:
         by_name = {d.name: d for d in BuiltinToolSource().load()}
         assert ToolCapability.READ_FS in by_name["read_file"].capabilities
         assert ToolCapability.WRITE_FS in by_name["write_file"].capabilities
+        assert ToolCapability.WRITE_FS in by_name["edit_file"].capabilities
         assert ToolCapability.EXEC_SHELL in by_name["bash"].capabilities
         assert ToolCapability.NETWORK in by_name["web_search"].capabilities
         assert ToolCapability.MUTATES_STATE in by_name["write_todos"].capabilities
@@ -252,7 +255,7 @@ class TestPublicFacade:
     def test_find_tools_by_category(self) -> None:
         file_tools = find_tools(category=ToolCategory.FILE)
         names = {t.name for t in file_tools}
-        assert {"read_file", "write_file", "list_dir"}.issubset(names)
+        assert {"read_file", "write_file", "edit_file", "list_dir"}.issubset(names)
 
     def test_find_descriptors_by_capability(self) -> None:
         net = find_descriptors(capabilities=[ToolCapability.NETWORK])

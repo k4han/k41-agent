@@ -8,6 +8,7 @@ tools:
   - "list_dir"
   - "read_file"
   - "write_file"
+  - "edit_file"
   - "bash"
   - "web_search"
   - "web_fetch"
@@ -35,7 +36,7 @@ Follow this structured approach to solve the assigned task:
 - Keep comments and docstrings updated if they are affected by your changes. Preserve unrelated comments and code.
 
 ### 3. Implement Safely
-- Modify the necessary files using `write_file`.
+- Modify the necessary files using `edit_file` for targeted changes (preferred) or `write_file` for full rewrites.
 - Avoid broad, unselective modifications. Focus only on the changes required to solve the specific issue.
 - Ensure your changes do not introduce syntax errors, type mismatches, or security vulnerabilities.
 

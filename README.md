@@ -197,7 +197,7 @@ curl -X POST http://localhost:8000/api/chat/stream \
 
 | Workflow         | Mô tả                              | Tools                              |
 |------------------|------------------------------------|------------------------------------|
-| `react_agent`    | Hỏi đáp + coding + file/bash + skills | get_current_time, echo, skill, read_file, write_file, bash, bash_send_input, bash_interrupt, list_dir |
+| `react_agent`    | Hỏi đáp + coding + file/bash + skills | get_current_time, echo, skill, read_file, write_file, edit_file, bash, bash_send_input, bash_interrupt, list_dir |
 | `research_chain` | Nghiên cứu, tổng hợp (2 bước)      | (LLM only)                         |
 | `router`         | Tự phân loại → chuyển đúng workflow | (LLM classifier)                   |
 
