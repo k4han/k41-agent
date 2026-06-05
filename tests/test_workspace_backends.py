@@ -22,6 +22,7 @@ from agent.modules.workspaces import (
 from agent.modules.workspaces.daytona_backend import (
     DaytonaWorkspaceBackend,
     archive_daytona_workspace,
+    daytona_relative_path,
     delete_daytona_workspace,
     resolve_daytona_path,
     stop_daytona_workspace,
@@ -123,6 +124,14 @@ class FakeDaytonaProcess:
         if command.startswith("mkdir -p "):
             self.fs.dirs.add(command.split("mkdir -p ", 1)[1].strip("'\""))
             return SimpleNamespace(result="", exit_code=0, stderr="")
+        if command.startswith("ls -1 "):
+            target = command.split("ls -1 ", 1)[1].strip("'\"")
+            entries = [item.name for item in self.fs.list_files(target)]
+            return SimpleNamespace(
+                result="\n".join(entries) + ("\n" if entries else ""),
+                exit_code=0,
+                stderr="",
+            )
         if command.startswith("find "):
             return SimpleNamespace(
                 result="\n".join(sorted(self.fs.files))
@@ -362,6 +371,10 @@ class FakeModalSandbox:
         if command.startswith("mkdir -p "):
             self.filesystem.make_directory(command.split("mkdir -p ", 1)[1].strip("'\""))
             result = ""
+        elif command.startswith("ls -1 "):
+            target = command.split("ls -1 ", 1)[1].strip("'\"")
+            entries = [item.name for item in self.filesystem.list_files(target)]
+            result = "\n".join(entries) + ("\n" if entries else "")
         elif command.startswith("find "):
             result = (
                 "\n".join(sorted(self.filesystem.files))
@@ -587,6 +600,11 @@ def test_resolve_daytona_path_blocks_remote_root_escape():
         resolve_daytona_path("/workspace", "src/../secret.txt")
     with pytest.raises(ValueError, match="Path escapes workspace"):
         resolve_daytona_path("/workspace", "/etc/passwd")
+
+
+def test_daytona_relative_path_handles_root_workspace():
+    assert daytona_relative_path("/", "/") == ""
+    assert daytona_relative_path("/", "/src/app.py") == "src/app.py"
 
 
 def test_resolve_modal_path_blocks_remote_root_escape():

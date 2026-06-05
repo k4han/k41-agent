@@ -34,6 +34,12 @@ from agent.modules.workspaces.git_utils import (
 from agent.modules.workspaces.posix_utils import normalize_posix_path
 from agent.modules.workspaces.refs import WorkspaceRef
 from agent.modules.workspaces.sandbox_backend import SandboxBackendBase
+from agent.modules.workspaces.search_utils import (
+    build_sandbox_glob_command,
+    build_sandbox_grep_command,
+    render_sandbox_glob_output,
+    render_sandbox_grep_output,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -757,10 +763,13 @@ def resolve_daytona_path(root: str, path: str | None = None) -> str:
 
 
 def daytona_relative_path(root: str, path: str) -> str:
-    target = resolve_daytona_path(root, path)
-    if target == root:
+    normalized_root = _normalize_posix_path(root) or "/"
+    target = resolve_daytona_path(normalized_root, path)
+    if target == normalized_root:
         return ""
-    return target[len(root) + 1 :]
+    if normalized_root == "/":
+        return target.lstrip("/")
+    return target[len(normalized_root) + 1 :]
 
 
 class DaytonaWorkspaceBackend(SandboxBackendBase):
@@ -903,6 +912,55 @@ class DaytonaWorkspaceBackend(SandboxBackendBase):
             self._exec(f"mkdir -p {shlex.quote(parent)}", cwd="/")
         self._upload_file(content.encode("utf-8"), remote_path)
         return f"[OK] Wrote file: {remote_path}"
+
+    async def glob(
+        self,
+        pattern: str,
+        *,
+        path: str = "",
+        include_dirs: bool = False,
+    ) -> str:
+        self.ensure_active()
+        if not pattern:
+            raise ValueError("Glob pattern must not be empty.")
+        target = resolve_daytona_path(self.root, path or ".")
+        command = build_sandbox_glob_command(
+            root=self.root,
+            target=target,
+            pattern=pattern,
+            include_dirs=include_dirs,
+        )
+        result = self._exec(command, timeout=GIT_TIMEOUT_SECONDS)
+        if result.exit_code not in (0, None):
+            raise RuntimeError(result.output.strip() or "Glob failed.")
+        return render_sandbox_glob_output(result.output)
+
+    async def grep(
+        self,
+        pattern: str,
+        *,
+        path: str = "",
+        include: str | None = None,
+        case_insensitive: bool = False,
+        max_results: int = 100,
+    ) -> str:
+        self.ensure_active()
+        if not pattern:
+            raise ValueError("Grep pattern must not be empty.")
+        target = resolve_daytona_path(self.root, path or ".")
+        command = build_sandbox_grep_command(
+            root=self.root,
+            target=target,
+            relative_path=daytona_relative_path(self.root, target),
+            pattern=pattern,
+            include=include,
+            case_insensitive=case_insensitive,
+            max_results=max_results,
+        )
+        result = self._exec(command, timeout=GIT_TIMEOUT_SECONDS)
+        if result.exit_code not in (0, None):
+            raise RuntimeError(result.output.strip() or "Grep failed.")
+        return render_sandbox_grep_output(result.output, max_results=max_results)
 
     async def execute(
         self,

@@ -118,7 +118,6 @@ def test_agent_config_overrides_defaults(test_agent_dir):
         "read_file",
         "write_file",
         "edit_file",
-        "search_files",
     ]
     assert "helpful AI assistant" in default_agent.system_prompt
 

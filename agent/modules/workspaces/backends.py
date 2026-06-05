@@ -56,6 +56,26 @@ class WorkspaceFileIO(Protocol):
     async def write_text(self, file_path: str, content: str) -> str:
         ...
 
+    async def glob(
+        self,
+        pattern: str,
+        *,
+        path: str = "",
+        include_dirs: bool = False,
+    ) -> str:
+        ...
+
+    async def grep(
+        self,
+        pattern: str,
+        *,
+        path: str = "",
+        include: str | None = None,
+        case_insensitive: bool = False,
+        max_results: int = 100,
+    ) -> str:
+        ...
+
 
 class WorkspaceCommandExecutor(Protocol):
     ref: WorkspaceRef

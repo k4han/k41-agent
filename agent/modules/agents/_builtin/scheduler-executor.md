@@ -10,7 +10,6 @@ tools:
   - "echo"
   - "read_file"
   - "list_dir"
-  - "search_files"
 context_trim_threshold: 50000
 ---
 

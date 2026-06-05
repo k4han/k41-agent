@@ -9,7 +9,6 @@ tools:
   - "read_file"
   - "write_file"
   - "edit_file"
-  - "search_files"
 context_trim_threshold: 50000
 ---
 

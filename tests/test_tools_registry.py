@@ -183,6 +183,8 @@ class TestBuiltinToolSource:
             "write_file",
             "edit_file",
             "list_dir",
+            "glob",
+            "grep",
             "bash",
             "bash_send_input",
             "bash_interrupt",
@@ -205,6 +207,8 @@ class TestBuiltinToolSource:
         by_name = {d.name: d for d in BuiltinToolSource().load()}
         assert by_name["read_file"].category is ToolCategory.FILE
         assert by_name["edit_file"].category is ToolCategory.FILE
+        assert by_name["glob"].category is ToolCategory.FILE
+        assert by_name["grep"].category is ToolCategory.FILE
         assert by_name["bash"].category is ToolCategory.SHELL
         assert by_name["web_fetch"].category is ToolCategory.WEB
         assert by_name["call_agent"].category is ToolCategory.AGENT
@@ -214,6 +218,8 @@ class TestBuiltinToolSource:
     def test_descriptors_include_capabilities(self) -> None:
         by_name = {d.name: d for d in BuiltinToolSource().load()}
         assert ToolCapability.READ_FS in by_name["read_file"].capabilities
+        assert ToolCapability.READ_FS in by_name["glob"].capabilities
+        assert ToolCapability.READ_FS in by_name["grep"].capabilities
         assert ToolCapability.WRITE_FS in by_name["write_file"].capabilities
         assert ToolCapability.WRITE_FS in by_name["edit_file"].capabilities
         assert ToolCapability.EXEC_SHELL in by_name["bash"].capabilities

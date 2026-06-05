@@ -32,6 +32,12 @@ from agent.modules.workspaces.git_utils import (
 from agent.modules.workspaces.posix_utils import normalize_posix_path
 from agent.modules.workspaces.refs import WorkspaceRef
 from agent.modules.workspaces.sandbox_backend import SandboxBackendBase
+from agent.modules.workspaces.search_utils import (
+    build_sandbox_glob_command,
+    build_sandbox_grep_command,
+    render_sandbox_glob_output,
+    render_sandbox_grep_output,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -506,6 +512,55 @@ class ModalWorkspaceBackend(SandboxBackendBase):
         remote_path = resolve_modal_path(self.root, file_path)
         await self._run_remote_aio(lambda: self.fs.write_text.aio(content, remote_path))
         return f"[OK] Wrote file: {remote_path}"
+
+    async def glob(
+        self,
+        pattern: str,
+        *,
+        path: str = "",
+        include_dirs: bool = False,
+    ) -> str:
+        self.touch()
+        if not pattern:
+            raise ValueError("Glob pattern must not be empty.")
+        target = resolve_modal_path(self.root, path or ".")
+        command = build_sandbox_glob_command(
+            root=self.root,
+            target=target,
+            pattern=pattern,
+            include_dirs=include_dirs,
+        )
+        result = await self._exec(command, timeout=GIT_TIMEOUT_SECONDS)
+        if result.exit_code not in (0, None):
+            raise RuntimeError(result.output.strip() or "Glob failed.")
+        return render_sandbox_glob_output(result.output)
+
+    async def grep(
+        self,
+        pattern: str,
+        *,
+        path: str = "",
+        include: str | None = None,
+        case_insensitive: bool = False,
+        max_results: int = 100,
+    ) -> str:
+        self.touch()
+        if not pattern:
+            raise ValueError("Grep pattern must not be empty.")
+        target = resolve_modal_path(self.root, path or ".")
+        command = build_sandbox_grep_command(
+            root=self.root,
+            target=target,
+            relative_path=modal_relative_path(self.root, target),
+            pattern=pattern,
+            include=include,
+            case_insensitive=case_insensitive,
+            max_results=max_results,
+        )
+        result = await self._exec(command, timeout=GIT_TIMEOUT_SECONDS)
+        if result.exit_code not in (0, None):
+            raise RuntimeError(result.output.strip() or "Grep failed.")
+        return render_sandbox_grep_output(result.output, max_results=max_results)
 
     async def execute(
         self,

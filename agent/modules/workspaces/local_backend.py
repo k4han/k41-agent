@@ -1,13 +1,22 @@
 from __future__ import annotations
 
+import fnmatch
 import os
+import re
 import subprocess
 import time
 from typing import Any
 
 from agent.modules.tools import resolve_safe_path
 from agent.modules.workspaces.backends import CommandResult
+from agent.modules.workspaces.constants import (
+    IGNORED_DIR_NAMES,
+    MAX_FILE_BYTES,
+    MAX_GLOB_RESULTS,
+    MAX_GREP_LINE_CHARS,
+)
 from agent.modules.workspaces.refs import WorkspaceRef
+from agent.modules.workspaces.search_utils import clamp_grep_results
 from agent.modules.workspaces.service import (
     delete_workspace_entry,
     get_workspace_changes,
@@ -69,6 +78,130 @@ class LocalWorkspaceBackend:
         with open(full_path, "w", encoding="utf-8") as file_handle:
             file_handle.write(content)
         return f"[OK] Wrote file: {full_path}"
+
+    async def glob(
+        self,
+        pattern: str,
+        *,
+        path: str = "",
+        include_dirs: bool = False,
+    ) -> str:
+        if not pattern:
+            raise ValueError("Glob pattern must not be empty.")
+
+        base = resolve_safe_path(str(self.root), path or ".")
+        if not os.path.isdir(base):
+            return "(Directory not found)"
+
+        matches: list[str] = []
+        truncated = False
+
+        for current_root, dirs, files in os.walk(base, followlinks=False):
+            dirs[:] = sorted(d for d in dirs if d not in IGNORED_DIR_NAMES)
+            entries: list[tuple[str, bool]] = [(d, True) for d in dirs]
+            entries.extend((f, False) for f in files)
+            for name, is_dir in sorted(
+                entries, key=lambda item: (not item[1], item[0].lower())
+            ):
+                if not include_dirs and is_dir:
+                    continue
+                candidate_rel = os.path.relpath(
+                    os.path.join(current_root, name), str(self.root)
+                )
+                candidate_rel = candidate_rel.replace(os.sep, "/")
+                if fnmatch.fnmatchcase(candidate_rel, pattern) or fnmatch.fnmatchcase(
+                    name, pattern
+                ):
+                    matches.append(f"{candidate_rel}/" if is_dir else candidate_rel)
+                    if len(matches) >= MAX_GLOB_RESULTS:
+                        truncated = True
+                        break
+            if truncated:
+                break
+
+        if not matches:
+            return "(No matches)"
+        output = "\n".join(matches)
+        if truncated:
+            output += f"\n...[truncated at {MAX_GLOB_RESULTS} results]"
+        return output
+
+    async def grep(
+        self,
+        pattern: str,
+        *,
+        path: str = "",
+        include: str | None = None,
+        case_insensitive: bool = False,
+        max_results: int = 100,
+    ) -> str:
+        if not pattern:
+            raise ValueError("Grep pattern must not be empty.")
+        effective_max = clamp_grep_results(max_results)
+        regex_flags = re.MULTILINE | (re.IGNORECASE if case_insensitive else 0)
+        try:
+            compiled = re.compile(pattern, regex_flags)
+        except re.error:
+            compiled = re.compile(re.escape(pattern), regex_flags)
+
+        base = resolve_safe_path(str(self.root), path or ".")
+        if not os.path.isdir(base):
+            return "(Directory not found)"
+
+        results: list[str] = []
+        truncated = False
+        file_count = 0
+
+        for current_root, dirs, files in os.walk(base, followlinks=False):
+            dirs[:] = sorted(d for d in dirs if d not in IGNORED_DIR_NAMES)
+            for filename in sorted(files):
+                if include and not fnmatch.fnmatchcase(filename, include):
+                    continue
+                full_path = os.path.join(current_root, filename)
+                rel_path = os.path.relpath(full_path, str(self.root)).replace(
+                    os.sep, "/"
+                )
+                try:
+                    file_size = os.path.getsize(full_path)
+                except OSError:
+                    continue
+                if file_size > MAX_FILE_BYTES:
+                    continue
+                try:
+                    file_handle = open(
+                        full_path,
+                        "r",
+                        encoding="utf-8",
+                        errors="replace",
+                    )
+                except OSError:
+                    continue
+                file_count += 1
+                with file_handle:
+                    for line_no, raw_line in enumerate(file_handle, start=1):
+                        line = raw_line.rstrip("\r\n")
+                        if compiled.search(line):
+                            truncated_line = line
+                            if len(truncated_line) > MAX_GREP_LINE_CHARS:
+                                truncated_line = (
+                                    truncated_line[:MAX_GREP_LINE_CHARS] + "..."
+                                )
+                            results.append(f"{rel_path}:{line_no}: {truncated_line}")
+                            if len(results) >= effective_max:
+                                truncated = True
+                                break
+                if truncated:
+                    break
+            if truncated:
+                break
+
+        if not results:
+            return f"(No matches in {file_count} files)"
+        header = f"[Matches in {file_count} file(s)]"
+        output = header + "\n" + "\n".join(results)
+        if truncated:
+            output += f"\n...[truncated at {effective_max} results]"
+        return output
 
     async def execute(
         self,
