@@ -118,7 +118,7 @@ export function SettingsLayout(props: {
               <Bot size={16} />
             </div>
             <div class="brand-text">
-              <div class="brand-title">Kaka Dashboard</div>
+              <div class="brand-title">Kaka Console</div>
             </div>
             <button
               class="brand-collapse-btn"

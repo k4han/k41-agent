@@ -9,10 +9,10 @@ import {
   FolderOpen,
   GitPullRequest,
   History,
+  Home,
   LogOut,
   MessageSquare,
   MoreHorizontal,
-  PanelsTopLeft,
   Pencil,
   PlaySquare,
   RefreshCw,
@@ -54,7 +54,7 @@ type NavItem = {
 };
 
 const navItems: NavItem[] = [
-  { href: "/", label: "Overview", icon: <PanelsTopLeft size={15} /> },
+  { href: "/", label: "Home", icon: <Home size={15} /> },
   { href: "/chat", label: "Chat", icon: <MessageSquare size={15} /> },
   { href: "/repositories", label: "Repositories", icon: <GitPullRequest size={15} /> },
   { href: "/tasks", label: "Background Tasks", icon: <PlaySquare size={15} /> },
@@ -794,7 +794,7 @@ export function AppShell(props: {
               <Bot size={16} />
             </div>
             <div class="brand-text">
-              <div class="brand-title">Kaka Dashboard</div>
+              <div class="brand-title">Kaka Console</div>
               {/* <div class="brand-subtitle">Agent control plane</div> */}
             </div>
             <button

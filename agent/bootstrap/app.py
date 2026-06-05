@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import selectors
+import time
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -57,6 +58,7 @@ def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:
     fastapi_app.state.bootstrap_config = bootstrap_config
     fastapi_app.state.runtime_settings = runtime_settings
     fastapi_app.state.config_service = config_service
+    fastapi_app.state.started_at = time.time()
 
     fastapi_app.add_middleware(
         CORSMiddleware,

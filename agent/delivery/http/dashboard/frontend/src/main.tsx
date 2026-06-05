@@ -15,8 +15,8 @@ const ChatPage = lazy(() =>
 const LoginPage = lazy(() =>
   import("@/pages/Login").then((module) => ({ default: module.LoginPage })),
 );
-const OverviewPage = lazy(() =>
-  import("@/pages/Overview").then((module) => ({ default: module.OverviewPage })),
+const HomePage = lazy(() =>
+  import("@/pages/Home").then((module) => ({ default: module.HomePage })),
 );
 const RepositoriesPage = lazy(() =>
   import("@/pages/Repositories").then((module) => ({ default: module.RepositoriesPage })),
@@ -83,14 +83,14 @@ const TasksPage = lazy(() =>
 );
 
 function NotFoundPage() {
-  return <OverviewPage />;
+  return <HomePage />;
 }
 
 render(
   () => (
     <ToastProvider>
       <Router>
-        <Route path="/" component={OverviewPage} />
+        <Route path="/" component={HomePage} />
         <Route path="/login" component={LoginPage} />
         <Route path={["/chat", "/c/:threadId"]} component={ChatPage} />
         <Route path="/history" component={ChatHistoryListPage} />

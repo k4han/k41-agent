@@ -1,7 +1,70 @@
+import type { ThreadSummary } from "@/lib/chatThreads";
+
 export type ServiceStatus = {
   name: string;
   status: string;
   error: string | null;
+};
+
+export type SystemHealth = {
+  status: "healthy" | "degraded" | "down";
+  uptime_seconds: number;
+  uptime_display: string;
+  started_at: string | null;
+  version: string;
+};
+
+export type HomeCounters = {
+  channels: { total: number; running: number; error: number };
+  agents: number;
+  tasks: { total: number; active: number; failed: number };
+  scheduler: { total: number; upcoming: number };
+  sessions_active: number;
+  providers: { total: number; ready: number };
+  mcp_servers: { total: number; connected: number };
+};
+
+export type ProviderHealth = {
+  name: string;
+  type: string;
+  enabled: boolean;
+  ready: boolean;
+  has_api_key: boolean;
+  default_model: string;
+  model_count: number;
+};
+
+export type UpcomingJob = {
+  id: string;
+  task: string;
+  platform: string;
+  user_id: string;
+  trigger_type: string;
+  trigger_args: Record<string, unknown>;
+  next_run_time: string | null;
+  paused: boolean;
+};
+
+export type OnboardingState = {
+  show_checklist: boolean;
+  needs_provider: boolean;
+  needs_channel: boolean;
+  needs_agent: boolean;
+};
+
+export type HomePayload = {
+  services: ServiceStatus[];
+  system: SystemHealth;
+  counters: HomeCounters;
+  recent: {
+    tasks: BackgroundTask[];
+    threads: ThreadSummary[];
+    upcoming_jobs: UpcomingJob[];
+  };
+  active_sessions: ActiveSession[];
+  providers_health: ProviderHealth[];
+  scheduler_timezone: string;
+  onboarding: OnboardingState;
 };
 
 export type Identity = {

@@ -42,7 +42,7 @@ export function LoginPage() {
               <Bot size={16} />
             </div>
             <div>
-              <h1 class="page-title">Kaka Dashboard</h1>
+              <h1 class="page-title">Kaka Console</h1>
               <p class="page-subtitle">Sign in with the admin password.</p>
             </div>
           </div>

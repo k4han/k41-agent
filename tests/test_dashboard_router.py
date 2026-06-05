@@ -209,17 +209,26 @@ def test_dashboard_spa_route_serves_index() -> None:
     assert "/dashboard-assets/" in skills_response.text
 
 
-def test_dashboard_api_overview_returns_runtime_snapshot() -> None:
+def test_dashboard_api_home_returns_runtime_snapshot() -> None:
     channel_manager = ChannelManager()
     channel_manager.register("telegram", idle_runner)
 
     client = _create_dashboard_client(channel_manager)
-    response = client.get("/dashboard-api/overview")
+    response = client.get("/dashboard-api/home")
 
     assert response.status_code == 200
-    assert response.json() == {
-        "services": [{"name": "telegram", "status": "stopped", "error": None}]
-    }
+    payload = response.json()
+    assert payload["services"] == [
+        {"name": "telegram", "status": "stopped", "error": None}
+    ]
+    # New aggregate fields are part of the home payload.
+    assert "system" in payload
+    assert "counters" in payload
+    assert "recent" in payload
+    assert "providers_health" in payload
+    assert "onboarding" in payload
+    assert payload["counters"]["channels"]["total"] == 1
+    assert payload["counters"]["channels"]["running"] == 0
 
 
 def test_dashboard_api_skills_crud_and_reload(
