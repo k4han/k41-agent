@@ -156,8 +156,8 @@
 }
 
 .message.user .message-bubble {
-  background: var(--fg);
-  color: var(--bg);
+  background: var(--surface-3);
+  color: var(--fg);
 }
 
 .message.assistant .message-bubble {
@@ -241,8 +241,9 @@
 }
 
 .message-edit {
-  display: grid;
-  gap: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
   min-width: min(520px, 70vw);
 }
 
@@ -250,19 +251,77 @@
   width: 100%;
   min-height: 72px;
   resize: vertical;
-  border: 1px solid color-mix(in srgb, currentColor 24%, transparent);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--bg) 94%, transparent);
-  color: var(--fg);
-  padding: 9px 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
   font: inherit;
   line-height: 1.5;
+  outline: none;
+}
+
+.message-edit-input::placeholder {
+  color: color-mix(in srgb, currentColor 45%, transparent);
 }
 
 .message-edit-actions {
   display: inline-flex;
   justify-content: flex-end;
-  gap: 4px;
+  align-items: center;
+  gap: 8px;
+}
+
+.message-edit-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 72px;
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    opacity 120ms ease;
+}
+
+.message-edit-btn--secondary {
+  border-color: color-mix(in srgb, currentColor 18%, transparent);
+}
+
+.message-edit-btn--secondary:hover:not(:disabled) {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.message-edit-btn--primary {
+  background: var(--fg);
+  color: var(--bg);
+  border-color: var(--fg);
+}
+
+.message-edit-btn--primary:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+.message-edit-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.message.user .message-bubble.editing {
+  border-color: transparent;
+  padding: 14px 16px;
+  border-radius: 18px;
 }
 
 /* Scroll to bottom feature styles */

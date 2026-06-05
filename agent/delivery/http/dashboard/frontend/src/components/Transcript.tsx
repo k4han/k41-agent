@@ -5,7 +5,6 @@ import {
   FileText,
   Image as ImageIcon,
   Pencil,
-  X,
 } from "lucide-solid";
 import { createEffect, createSignal, For, Show } from "solid-js";
 
@@ -347,7 +346,7 @@ export function TranscriptMessageView(props: {
       data-transcript-item-id={props.itemId}
       role={props.role === "error" ? "alert" : undefined}
     >
-      <div class="message-bubble">
+      <div class={`message-bubble${editing() ? " editing" : ""}`}>
         <Show
           when={!editing()}
           fallback={
@@ -371,17 +370,7 @@ export function TranscriptMessageView(props: {
               />
               <div class="message-edit-actions">
                 <button
-                  class="message-action-btn"
-                  type="button"
-                  onClick={submitEdit}
-                  disabled={!draft().trim()}
-                  title="Save edit"
-                  aria-label="Save edit"
-                >
-                  <Check size={15} />
-                </button>
-                <button
-                  class="message-action-btn"
+                  class="message-edit-btn message-edit-btn--secondary"
                   type="button"
                   onClick={() => {
                     setEditing(false);
@@ -390,7 +379,17 @@ export function TranscriptMessageView(props: {
                   title="Cancel edit"
                   aria-label="Cancel edit"
                 >
-                  <X size={15} />
+                  Cancel
+                </button>
+                <button
+                  class="message-edit-btn message-edit-btn--primary"
+                  type="button"
+                  onClick={submitEdit}
+                  disabled={!draft().trim()}
+                  title="Save edit"
+                  aria-label="Save edit"
+                >
+                  Send
                 </button>
               </div>
             </div>
