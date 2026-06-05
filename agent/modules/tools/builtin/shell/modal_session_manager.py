@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any, Dict, List
 
-from agent.modules.tools.langchain.shell_tools.session_manager import MAX_OUTPUT_CHARS
+from agent.modules.tools.builtin.shell.session_manager import MAX_OUTPUT_CHARS
 from agent.modules.workspaces import WorkspaceRef, get_workspace_command_executor
 
 

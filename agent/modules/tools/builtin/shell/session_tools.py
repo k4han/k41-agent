@@ -8,12 +8,12 @@ from pydantic import BaseModel, Field
 
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCapability, ToolCategory
-from agent.modules.tools.langchain.working_dir import get_workspace
+from agent.modules.tools.builtin.workspace import get_workspace
 from agent.modules.tools.runtime.context import ToolContext
 from agent.modules.tools.result import ToolError, ToolErrorCode
-from agent.modules.tools.langchain.shell_tools.daytona_session_manager import daytona_session_manager
-from agent.modules.tools.langchain.shell_tools.modal_session_manager import modal_session_manager
-from agent.modules.tools.langchain.shell_tools.session_manager import session_manager
+from agent.modules.tools.builtin.shell.daytona_session_manager import daytona_session_manager
+from agent.modules.tools.builtin.shell.modal_session_manager import modal_session_manager
+from agent.modules.tools.builtin.shell.session_manager import session_manager
 from agent.modules.agent_runtime import current_thread_id_var
 
 

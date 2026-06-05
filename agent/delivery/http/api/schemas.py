@@ -2,7 +2,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from agent.modules.tools.langchain.utility_tools.plan_resume import PlanResumePayload
+from agent.modules.tools import PlanResumePayload
 from agent.modules.workspaces import WorkspaceRef
 
 

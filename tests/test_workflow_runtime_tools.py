@@ -11,11 +11,11 @@ import pytest
 import agent.modules.workflows.nodes.tool as tool_node_module
 import agent.modules.workflows.prompt_builders as prompt_builders
 from agent.modules.tools import get_default_tool_names
-from agent.modules.tools.langchain.agent_tools.call_agent import (
+from agent.modules.tools.builtin.delegation.call_agent import (
     call_agent,
 )
-from agent.modules.tools.langchain.utility_tools.write_todos import write_todos
-from agent.modules.tools.langchain.utility_tools.plan_mode import (
+from agent.modules.tools.builtin.utility.write_todos import write_todos
+from agent.modules.tools.builtin.utility.plan_mode import (
     PLAN_MODE_TOOL_NAME,
     PLAN_REVIEW_APPROVED_PREFIX,
     PLAN_REVIEW_INTERRUPT_TYPE,

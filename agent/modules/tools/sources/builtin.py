@@ -28,7 +28,7 @@ from agent.modules.tools.middleware import apply_default_middleware
 logger = logging.getLogger(__name__)
 
 DEFAULT_BUILTIN_PACKAGES: tuple[str, ...] = (
-    "agent.modules.tools.langchain",
+    "agent.modules.tools.builtin",
 )
 
 

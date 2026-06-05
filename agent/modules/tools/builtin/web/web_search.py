@@ -12,7 +12,7 @@ from langchain_core.tools import tool
 
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCapability, ToolCategory
-from agent.modules.tools.langchain.web_tools.web_fetch import DEFAULT_HEADERS, _read_limited_response
+from agent.modules.tools.builtin.web.web_fetch import DEFAULT_HEADERS, _read_limited_response
 from agent.modules.tools.result import ToolError, ToolErrorCode
 
 logger = logging.getLogger(__name__)

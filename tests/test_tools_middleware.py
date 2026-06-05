@@ -179,7 +179,7 @@ class TestToolErrorEndToEndOnBuiltin:
     async def test_read_file_uses_normalized_format(self, tmp_path) -> None:
         from types import SimpleNamespace
 
-        from agent.modules.tools.langchain.file_tools import read_file as read_file_module
+        from agent.modules.tools.builtin.filesystem import read_file as read_file_module
 
         sandbox = tmp_path / "sandbox"
         sandbox.mkdir()
@@ -194,7 +194,7 @@ class TestToolErrorEndToEndOnBuiltin:
     async def test_skill_tool_uses_normalized_format(self, monkeypatch) -> None:
         from types import SimpleNamespace
 
-        import agent.modules.tools.langchain.skill_tools.skill as skill_module
+        import agent.modules.tools.builtin.skill.skill as skill_module
 
         async def fake_get_effective_skill_content_xml(name, **kwargs):
             return None

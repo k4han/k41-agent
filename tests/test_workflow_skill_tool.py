@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import agent.modules.tools.langchain.skill_tools.skill as skills_tool_module
+import agent.modules.tools.builtin.skill.skill as skills_tool_module
 
 
 @pytest.mark.asyncio

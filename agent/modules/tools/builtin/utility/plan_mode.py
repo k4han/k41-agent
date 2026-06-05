@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCapability, ToolCategory
-from agent.modules.tools.langchain.utility_tools.plan_resume import (
+from agent.modules.tools.builtin.utility.plan_resume import (
     PlanResumeAction,
     PlanResumePayload,
 )

@@ -5,8 +5,8 @@ from typing import Annotated, Any, get_args, get_origin, get_type_hints
 import pytest
 from langgraph.prebuilt import ToolRuntime
 
-from agent.modules.tools.langchain.file_tools.list_dir import list_dir
-from agent.modules.tools.langchain.registry import get_all_langchain_tools
+from agent.modules.tools.builtin.filesystem.list_dir import list_dir
+from agent.modules.tools.builtin.registry import get_all_builtin_tools
 from agent.modules.workflows.run_config import make_context
 
 
@@ -24,7 +24,7 @@ def _contains_unparameterized_tool_runtime(annotation: object) -> bool:
 def test_tool_runtime_annotations_are_parameterized() -> None:
     unparameterized: list[str] = []
 
-    for tool in get_all_langchain_tools():
+    for tool in get_all_builtin_tools():
         for attr_name in ("func", "coroutine"):
             fn = getattr(tool, attr_name, None)
             if fn is None:

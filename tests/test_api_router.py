@@ -9,7 +9,7 @@ from starlette.requests import Request
 from agent.modules.admin_auth import get_current_admin
 from agent.delivery.http.api.schemas import ChatRequest, PlanResumePayload
 from agent.modules.providers.models import ModelOption, ProviderModelCatalog
-from agent.modules.tools.langchain.utility_tools.plan_mode import PlanModeResumePayload
+from agent.modules.tools.builtin.utility.plan_mode import PlanModeResumePayload
 
 
 router_module = importlib.import_module("agent.delivery.http.api.router")

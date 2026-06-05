@@ -8,7 +8,7 @@ from langgraph.types import Command
 
 import agent.modules.conversations as conversations_module
 from agent.modules.agent_runtime import runner as runner_module
-from agent.modules.tools.langchain.utility_tools.plan_mode import (
+from agent.modules.tools.builtin.utility.plan_mode import (
     PLAN_MODE_TOOL_NAME,
     PLAN_REVIEW_INTERRUPT_TYPE,
 )
@@ -19,7 +19,7 @@ async def test_clear_agent_session_closes_shell_sessions_and_deletes_thread_tree
     monkeypatch,
 ):
     shell_manager_module = importlib.import_module(
-        "agent.modules.tools.langchain.shell_tools.session_manager"
+        "agent.modules.tools.builtin.shell.session_manager"
     )
     workflows_module = importlib.import_module("agent.modules.workflows")
     workspaces_module = importlib.import_module("agent.modules.workspaces")

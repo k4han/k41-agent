@@ -2,9 +2,9 @@ from types import SimpleNamespace
 
 import pytest
 
-import agent.modules.tools.langchain.file_tools.list_dir as list_dir_module
-import agent.modules.tools.langchain.file_tools.read_file as read_file_module
-import agent.modules.tools.langchain.file_tools.write_file as write_file_module
+import agent.modules.tools.builtin.filesystem.list_dir as list_dir_module
+import agent.modules.tools.builtin.filesystem.read_file as read_file_module
+import agent.modules.tools.builtin.filesystem.write_file as write_file_module
 from agent.modules.tools.runtime.path_guard import resolve_safe_path
 
 

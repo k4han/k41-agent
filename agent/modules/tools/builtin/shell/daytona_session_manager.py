@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from queue import Empty, Queue
 from typing import Any, Dict, List
 
-from agent.modules.tools.langchain.shell_tools.session_manager import (
+from agent.modules.tools.builtin.shell.session_manager import (
     MAX_HISTORY_LINES,
     MAX_OUTPUT_CHARS,
     _strip_ansi,

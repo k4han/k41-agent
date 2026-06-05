@@ -339,7 +339,7 @@ async def test_background_task_remove_is_persisted(
     closed_thread_ids: list[str] = []
 
     shell_manager_module = importlib.import_module(
-        "agent.modules.tools.langchain.shell_tools.session_manager"
+        "agent.modules.tools.builtin.shell.session_manager"
     )
 
     class FakeSessionManager:

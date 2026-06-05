@@ -1,5 +1,5 @@
-from agent.modules.tools.langchain.web_tools import web_fetch as web_fetch_module
-from agent.modules.tools.langchain.web_tools import web_search as web_search_module
+from agent.modules.tools.builtin.web import web_fetch as web_fetch_module
+from agent.modules.tools.builtin.web import web_search as web_search_module
 
 
 class _FakeResponse:

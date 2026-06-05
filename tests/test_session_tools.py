@@ -5,8 +5,8 @@ from langgraph.prebuilt import ToolNode
 from queue import Queue
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
-from agent.modules.tools.langchain.shell_tools.session_tools import bash, bash_close
-from agent.modules.tools.langchain.shell_tools.session_manager import (
+from agent.modules.tools.builtin.shell.session_tools import bash, bash_close
+from agent.modules.tools.builtin.shell.session_manager import (
     TerminalSession,
     TerminalSessionManager,
 )
@@ -15,7 +15,7 @@ from agent.modules.workflows.run_config import make_context
 
 @pytest.fixture
 def mock_session_manager():
-    with patch("agent.modules.tools.langchain.shell_tools.session_tools.session_manager") as mock:
+    with patch("agent.modules.tools.builtin.shell.session_tools.session_manager") as mock:
         mock.sessions = {"session-A": MagicMock(), "session-B": MagicMock(), "session-C": MagicMock()}
         # close_session returns True if session exists, False otherwise
         def side_effect(sid, scope_id=None):
@@ -106,7 +106,7 @@ async def test_bash_tool_node_injects_runtime_with_class_schema(tmp_path, monkey
         return {"status": "completed", "output": "ok", "stderr": ""}
 
     monkeypatch.setattr(
-        "agent.modules.tools.langchain.shell_tools.session_tools.session_manager.execute_command",
+        "agent.modules.tools.builtin.shell.session_tools.session_manager.execute_command",
         fake_execute_command,
     )
 
@@ -148,7 +148,7 @@ async def test_bash_tool_node_injects_runtime_with_class_schema(tmp_path, monkey
 
 @pytest.mark.asyncio
 async def test_bash_routes_daytona_workspace_to_daytona_manager(monkeypatch):
-    import agent.modules.tools.langchain.shell_tools.session_tools as session_tools_module
+    import agent.modules.tools.builtin.shell.session_tools as session_tools_module
 
     captured = {}
 
@@ -195,7 +195,7 @@ async def test_bash_routes_daytona_workspace_to_daytona_manager(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_bash_routes_modal_workspace_to_modal_manager(monkeypatch):
-    import agent.modules.tools.langchain.shell_tools.session_tools as session_tools_module
+    import agent.modules.tools.builtin.shell.session_tools as session_tools_module
 
     captured = {}
 
@@ -241,7 +241,7 @@ async def test_bash_routes_modal_workspace_to_modal_manager(monkeypatch):
 
 
 def test_daytona_session_manager_passes_root_thread_id_to_backend(monkeypatch):
-    import agent.modules.tools.langchain.shell_tools.daytona_session_manager as module
+    import agent.modules.tools.builtin.shell.daytona_session_manager as module
 
     captured_thread_ids: list[str | None] = []
 

@@ -1,6 +1,6 @@
 """Shell operation tools."""
 
-from agent.modules.tools.langchain.shell_tools.session_tools import (
+from agent.modules.tools.builtin.shell.session_tools import (
     bash,
     bash_close,
     bash_interrupt,

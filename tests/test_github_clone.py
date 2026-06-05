@@ -756,7 +756,7 @@ def test_workflow_context_keeps_locator_for_local_workspace(tmp_path) -> None:
 def test_tool_get_working_dir_prefers_sandbox_root_for_daytona() -> None:
     from types import SimpleNamespace
 
-    from agent.modules.tools.langchain.working_dir import get_working_dir
+    from agent.modules.tools.builtin.workspace import get_working_dir
 
     workspace = WorkspaceRef(
         backend="daytona",
@@ -777,7 +777,7 @@ def test_tool_get_working_dir_prefers_sandbox_root_for_daytona() -> None:
 def test_tool_get_working_dir_prefers_sandbox_root_for_modal() -> None:
     from types import SimpleNamespace
 
-    from agent.modules.tools.langchain.working_dir import get_working_dir
+    from agent.modules.tools.builtin.workspace import get_working_dir
 
     workspace = WorkspaceRef(
         backend="modal",
@@ -798,7 +798,7 @@ def test_tool_get_working_dir_prefers_sandbox_root_for_modal() -> None:
 def test_tool_get_working_dir_keeps_locator_for_local_workspace(tmp_path) -> None:
     from types import SimpleNamespace
 
-    from agent.modules.tools.langchain.working_dir import get_working_dir
+    from agent.modules.tools.builtin.workspace import get_working_dir
 
     locator = str(tmp_path / "acme" / "widgets")
     workspace = WorkspaceRef(

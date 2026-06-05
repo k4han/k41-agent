@@ -1,4 +1,4 @@
-"""Working directory helpers for LangChain tools."""
+"""Workspace helpers for built-in tools."""
 
 from typing import Any
 

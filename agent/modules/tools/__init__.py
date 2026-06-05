@@ -27,13 +27,14 @@ from agent.modules.tools.result import (
     ToolErrorCode,
     format_tool_error,
 )
-from agent.modules.tools.langchain.utility_tools.plan_mode import (
+from agent.modules.tools.builtin.utility.plan_mode import (
     PLAN_MODE_TOOL_NAME,
     PLAN_REVIEW_APPROVED_PREFIX,
     PLAN_REVIEW_INTERRUPT_TYPE,
     PLAN_REVIEW_REVISION_PREFIX,
     PlanModeResumePayload,
 )
+from agent.modules.tools.builtin.utility.plan_resume import PlanResumePayload
 from agent.modules.tools.runtime.context import (
     ToolContext,
     get_context_value,
@@ -75,13 +76,13 @@ def get_runtime_context_value(runtime_or_context, key: str, default: T) -> T:
 
 def close_thread_shell_sessions(thread_id: str) -> int:
     """Close local and remote shell sessions for a thread tree."""
-    from agent.modules.tools.langchain.shell_tools.daytona_session_manager import (
+    from agent.modules.tools.builtin.shell.daytona_session_manager import (
         daytona_session_manager,
     )
-    from agent.modules.tools.langchain.shell_tools.modal_session_manager import (
+    from agent.modules.tools.builtin.shell.modal_session_manager import (
         modal_session_manager,
     )
-    from agent.modules.tools.langchain.shell_tools.session_manager import session_manager
+    from agent.modules.tools.builtin.shell.session_manager import session_manager
 
     return (
         session_manager.close_thread_sessions(thread_id)
@@ -158,6 +159,7 @@ __all__ = [
     "PLAN_REVIEW_INTERRUPT_TYPE",
     "PLAN_REVIEW_REVISION_PREFIX",
     "PlanModeResumePayload",
+    "PlanResumePayload",
     "aresolve_tools_for_agent",
     "close_thread_shell_sessions",
     "ensure_mcp_loaded",

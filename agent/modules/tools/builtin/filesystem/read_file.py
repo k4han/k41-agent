@@ -5,7 +5,7 @@ from langgraph.prebuilt import ToolRuntime
 
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCapability, ToolCategory
-from agent.modules.tools.langchain.working_dir import get_file_io
+from agent.modules.tools.builtin.workspace import get_file_io
 from agent.modules.tools.result import ToolError, ToolErrorCode
 
 
