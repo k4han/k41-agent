@@ -105,8 +105,8 @@ enable_dashboard: true
 
 Quy ước hiện tại:
 - `enable_web`, `enable_api`, `enable_dashboard`: bật các capability của web host khi app khởi động.
-- `database.url`, `display.timezone` vẫn đọc từ `~/.kaka-agent/config.yaml`; `security.jwt_secret` là secret nội bộ và app tự sinh khi thiếu.
-- `llm.providers.*`, `llm.default_model`, `mcp.servers.*`, `channels.*` và `recursion_limit` được lưu trong DB để dashboard quản trị runtime. Provider API key, MCP `env.*`/`headers.*`, channel token/secret và GitHub private key được mã hóa khi lưu.
+- `database.url` vẫn đọc từ `~/.kaka-agent/config.yaml`; `security.jwt_secret` là secret nội bộ và app tự sinh khi thiếu.
+- `llm.providers.*`, `llm.default_model`, `mcp.servers.*`, `channels.*`, `display.timezone` và `recursion_limit` được lưu trong DB để dashboard quản trị runtime. Provider API key, MCP `env.*`/`headers.*`, channel token/secret và GitHub private key được mã hóa khi lưu.
 - Cấu hình Telegram/Discord/GitHub nằm ở Settings > Channels. Nếu enabled và đủ credential thì channel sẽ tự khởi động cùng app.
 - Nếu dùng Telegram webhook, cần `enable_web: true`, `channels.telegram.webhook_url` trỏ tới `/channels/telegram/webhook`, và `channels.telegram.webhook_secret` trong dashboard để kiểm tra header `X-Telegram-Bot-Api-Secret-Token`.
 - Khi nâng cấp từ YAML cũ, runtime key channel còn thiếu trong DB sẽ được seed một lần từ `~/.kaka-agent/config.yaml`.

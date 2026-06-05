@@ -20,6 +20,7 @@ enable_dashboard: true
 # - LLM providers, default model, provider API keys, models, and enabled state
 # - MCP servers, including encrypted env.* and headers.*
 # - Telegram/Discord/GitHub channel settings, including encrypted tokens and secrets
+# - display.timezone (IANA timezone used to render dashboard timestamps)
 # - recursion_limit
 
 # Internal security configuration
@@ -41,8 +42,6 @@ security:
 #   root: "~/kaka-agent"
 # Workspace backend credentials are configured in the dashboard at Settings > Backends.
 
-# Dashboard display settings (optional)
-# Use an IANA timezone name such as "Asia/Bangkok".
-display:
-  timezone: "Asia/Ho_Chi_Minh"
+# Dashboard display settings (e.g. IANA timezone) are runtime configuration
+# stored in the database and managed from the dashboard at Settings > General.
 
