@@ -15,6 +15,12 @@ import { Markdown } from "@/components/Markdown";
 import { StatusIndicator } from "@/components/StatusIndicator";
 import { isChatStatusText } from "@/lib/chatStatus";
 import { formatValue } from "@/lib/utils";
+import {
+  parseAskUserToolResult,
+  type ParsedAskUserToolResult,
+  type UserQuestion,
+  type UserQuestionAnswer,
+} from "@/lib/userInputRequest";
 import type { AgentCard } from "@/types";
 
 export const PLAN_MODE_TOOL_NAME = "plan_mode_respond";
@@ -76,10 +82,31 @@ export type TranscriptPlanReview = {
   result?: unknown;
 };
 
-export type TranscriptItem = TranscriptMessage | TranscriptTool | TranscriptPlanReview;
+export type TranscriptUserInputRequestStatus = "pending" | "answered";
+
+export type TranscriptUserInputRequest = {
+  type: "user_input_request";
+  tool_call_id?: string | null;
+  interrupt_id?: string | null;
+  title?: string;
+  questions: UserQuestion[];
+  submit_label?: string;
+  status: TranscriptUserInputRequestStatus;
+  answers?: UserQuestionAnswer[];
+  summary?: string;
+  result?: unknown;
+};
+
+export type TranscriptItem =
+  | TranscriptMessage
+  | TranscriptTool
+  | TranscriptPlanReview
+  | TranscriptUserInputRequest;
 
 type TranscriptToolTarget<T extends TranscriptItem> = Extract<T, { type: "tool" }>;
 type TranscriptPlanReviewTarget<T extends TranscriptItem> = Extract<T, { type: "plan_review" }>;
+type TranscriptUserInputRequestTarget<T extends TranscriptItem> =
+  Extract<T, { type: "user_input_request" }>;
 
 export function createTranscriptTool(options: {
   toolCallId?: string | null;
@@ -113,6 +140,31 @@ export function createTranscriptPlanReview(options: {
     status: options.status || "pending",
     targetAgent: options.targetAgent,
     feedback: options.feedback,
+    result: options.result,
+  };
+}
+
+export function createTranscriptUserInputRequest(options: {
+  toolCallId?: string | null;
+  interruptId?: string | null;
+  title?: string;
+  questions?: UserQuestion[];
+  submitLabel?: string;
+  status?: TranscriptUserInputRequestStatus;
+  answers?: UserQuestionAnswer[];
+  summary?: string;
+  result?: unknown;
+}): TranscriptUserInputRequest {
+  return {
+    type: "user_input_request",
+    tool_call_id: options.toolCallId || null,
+    interrupt_id: options.interruptId || null,
+    title: options.title || "",
+    questions: options.questions || [],
+    submit_label: options.submitLabel || "",
+    status: options.status || "pending",
+    answers: options.answers,
+    summary: options.summary,
     result: options.result,
   };
 }
@@ -157,6 +209,19 @@ export function findTranscriptPlanReviewTarget<T extends TranscriptItem>(
   );
 }
 
+export function findTranscriptUserInputRequestTarget<T extends TranscriptItem>(
+  items: T[],
+  toolCallId?: string | null,
+): TranscriptUserInputRequestTarget<T> | undefined {
+  if (!toolCallId) {
+    return undefined;
+  }
+  return items.find(
+    (item): item is TranscriptUserInputRequestTarget<T> =>
+      item.type === "user_input_request" && item.tool_call_id === toolCallId,
+  );
+}
+
 export function parsePlanReviewToolResult(
   result: unknown,
 ): Partial<TranscriptPlanReview> {
@@ -185,6 +250,19 @@ export function parsePlanReviewToolResult(
     };
   }
   return { result };
+}
+
+export function parseUserInputRequestToolResult(
+  result: unknown,
+): Partial<TranscriptUserInputRequest> & ParsedAskUserToolResult {
+  const parsed = parseAskUserToolResult(result);
+  return {
+    valid: parsed.valid,
+    status: "answered",
+    answers: parsed.answers,
+    summary: parsed.summary,
+    result,
+  };
 }
 
 function formatAttachmentSize(size: number): string {
@@ -673,6 +751,9 @@ export function TranscriptItemView(props: {
         onRevise={props.onRevisePlanReview}
       />
     );
+  }
+  if (props.item.type === "user_input_request") {
+    return null;
   }
   return (
     <ToolCallDetail

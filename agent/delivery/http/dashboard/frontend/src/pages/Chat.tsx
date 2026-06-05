@@ -10,7 +10,8 @@ import { AppShell } from "@/components/AppShell";
 import { ChatComposer } from "@/components/ChatComposer";
 import { ChatThreadBadges } from "@/components/ChatThreadBadges";
 import { ChatTranscript } from "@/components/ChatTranscript";
-import { PLAN_MODE_TOOL_NAME } from "@/components/Transcript";
+import { PLAN_MODE_TOOL_NAME, type TranscriptUserInputRequest } from "@/components/Transcript";
+import type { UserInputRequestSubmitPayload } from "@/components/UserInputRequestCard";
 import type { WorkspaceSelectionDraft } from "@/components/WorkspaceSelector";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
@@ -60,7 +61,7 @@ import {
   type ChatAttachmentPayload,
   type ChatPayload,
   type DefaultWorkspacePayload,
-  type PlanResumePayload,
+  type ChatResumePayload,
   type WorkspaceResolvePayload,
   ATTACHMENT_ACCEPT,
   DEFAULT_ATTACHMENT_MESSAGE,
@@ -72,6 +73,7 @@ import { useWorkspaceExplorer } from "@/lib/useWorkspaceExplorer";
 import { useChatAttachments } from "@/lib/useChatAttachments";
 import { useContextWindow } from "@/lib/useContextWindow";
 import { useBackgroundStream } from "@/lib/useBackgroundStream";
+import { ASK_USER_TOOL_NAME } from "@/lib/userInputRequest";
 import {
   INITIALIZING_ENVIRONMENT_TEXT,
   THINKING_TEXT,
@@ -258,6 +260,8 @@ export function ChatPage() {
     updateToolResult,
     updatePlanReview,
     updatePlanReviewResult,
+    updateUserInputRequest,
+    updateUserInputRequestResult,
   } = streams;
 
   const attach = useChatAttachments({
@@ -282,10 +286,25 @@ export function ChatPage() {
       (item) =>
         !(
           item.type === "tool" &&
-          (item.name === "write_todos" || item.name === PLAN_MODE_TOOL_NAME)
-        ),
+          (
+            item.name === "write_todos"
+            || item.name === PLAN_MODE_TOOL_NAME
+            || item.name === ASK_USER_TOOL_NAME
+          )
+        ) && item.type !== "user_input_request",
     )
   );
+
+  const pendingUserInputRequest = createMemo<TranscriptUserInputRequest | null>(() => {
+    const allItems = items();
+    for (let index = allItems.length - 1; index >= 0; index -= 1) {
+      const item = allItems[index];
+      if (item.type === "user_input_request" && item.status === "pending") {
+        return item;
+      }
+    }
+    return null;
+  });
 
   const currentTodos = createMemo(() => {
     const allItems = items();
@@ -513,6 +532,7 @@ export function ChatPage() {
     removeItem,
     updateToolResult,
     updatePlanReviewResult,
+    updateUserInputRequestResult,
     onError: (message) => showToast(message, "error"),
     setRecursionLimitReached: (v) => setRecursionLimitReached(v),
     onThreadCreated,
@@ -550,10 +570,13 @@ export function ChatPage() {
   ));
   const workspaceMissing = createMemo(() => !workspaceReady());
   const composerDisabled = createMemo(() => (
-    conversationBusy() || workspaceMissing()
+    conversationBusy() || workspaceMissing() || Boolean(pendingUserInputRequest())
   ));
   const inputDisabled = createMemo(() => (
-    threadLoading() || workspaceMissing()
+    threadLoading() || workspaceMissing() || Boolean(pendingUserInputRequest())
+  ));
+  const userInputRequestDisabled = createMemo(() => (
+    conversationBusy() || workspaceMissing()
   ));
 
   const loadThread = async (threadId: string, checkpointId = "") => {
@@ -777,7 +800,7 @@ export function ChatPage() {
 
   const sendMessage = async (
     resume = false,
-    resumePayload?: PlanResumePayload,
+    resumePayload?: ChatResumePayload,
     agentNameOverride?: string,
   ) => {
     isUnmounting = false;
@@ -1127,6 +1150,40 @@ export function ChatPage() {
     );
   };
 
+  const handleSubmitUserInputRequest = (payload: UserInputRequestSubmitPayload) => {
+    if (conversationBusy()) {
+      showToast("Wait for the current response to finish.", "warning");
+      return;
+    }
+    if (workspaceMissing()) {
+      showToast("Select a workspace before sending.", "warning");
+      return;
+    }
+    const request = pendingUserInputRequest();
+    if (!request || request.tool_call_id !== payload.toolCallId) {
+      showToast("The input request is no longer active.", "warning");
+      return;
+    }
+    updateUserInputRequest(payload.toolCallId, {
+      status: "answered",
+      answers: payload.answers,
+      summary: payload.summary,
+    });
+    appendItem(
+      {
+        type: "message",
+        role: "user",
+        text: payload.summary,
+      },
+      "turn-start",
+    );
+    void sendMessage(true, {
+      action: "answer",
+      answers: payload.answers,
+      summary: payload.summary,
+    });
+  };
+
   const handleBranchSelect = (checkpointId: string) => {
     const threadId = currentThreadId();
     if (!threadId || !checkpointId || checkpointId === activeCheckpointId() || conversationBusy()) {
@@ -1460,6 +1517,9 @@ export function ChatPage() {
                 todosExpanded={todosExpanded()}
                 onTodosToggle={() => setTodosExpanded(!todosExpanded())}
                 contextWindowData={contextWindowData()}
+                userInputRequest={pendingUserInputRequest()}
+                userInputRequestDisabled={userInputRequestDisabled()}
+                onSubmitUserInputRequest={handleSubmitUserInputRequest}
               />
             </section>
             <div class="workspace-drawer" aria-hidden={!explorer.open()}>

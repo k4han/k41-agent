@@ -14,8 +14,13 @@ import { AgentPicker } from "@/components/AgentPicker";
 import { ChatTodos, type TodoProgress } from "@/components/ChatTodos";
 import { ContextWindowIndicator, type ContextWindowData } from "@/components/ContextWindowIndicator";
 import { ModelPicker } from "@/components/ModelPicker";
+import {
+  UserInputRequestCard,
+  type UserInputRequestSubmitPayload,
+} from "@/components/UserInputRequestCard";
 import { formatBytes } from "@/lib/chatAttachments";
 import type { PendingAttachment } from "@/lib/chatTypes";
+import type { TranscriptUserInputRequest } from "@/components/Transcript";
 import type { AgentCard, AgentsPayload, ModelCatalog } from "@/types";
 
 export interface ChatComposerProps {
@@ -48,6 +53,9 @@ export interface ChatComposerProps {
   todosExpanded: boolean;
   onTodosToggle: () => void;
   contextWindowData: ContextWindowData;
+  userInputRequest: TranscriptUserInputRequest | null;
+  userInputRequestDisabled: boolean;
+  onSubmitUserInputRequest: (payload: UserInputRequestSubmitPayload) => void;
 }
 
 export function ChatComposer(props: ChatComposerProps) {
@@ -93,6 +101,15 @@ export function ChatComposer(props: ChatComposerProps) {
         expanded={props.todosExpanded}
         onToggle={props.onTodosToggle}
       />
+      <Show when={props.userInputRequest}>
+        {(request) => (
+          <UserInputRequestCard
+            request={request()}
+            disabled={props.userInputRequestDisabled}
+            onSubmit={props.onSubmitUserInputRequest}
+          />
+        )}
+      </Show>
       <Show when={props.recursionLimitReached}>
         <div class="chat-recursion-warning">
           <div class="chat-recursion-warning-left">

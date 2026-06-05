@@ -5,6 +5,7 @@ import type {
   WorkspaceRef,
 } from "@/types";
 import type { ThreadMessagesPayload } from "@/lib/chatThreads";
+import type { UserAnswerResumePayload } from "@/lib/userInputRequest";
 
 // ── Attachment types ──
 
@@ -38,12 +39,14 @@ export type ChatPayload = {
   checkpoint_id?: string;
   attachments?: ChatAttachmentPayload[];
   resume?: boolean;
-  resume_payload?: PlanResumePayload;
+  resume_payload?: ChatResumePayload;
 };
 
 export type PlanResumePayload =
   | { action: "approve"; target_agent: string }
   | { action: "revise"; feedback: string };
+
+export type ChatResumePayload = PlanResumePayload | UserAnswerResumePayload;
 
 // ── Scroll & streaming ──
 

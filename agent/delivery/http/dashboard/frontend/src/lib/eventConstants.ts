@@ -5,6 +5,7 @@ export const STREAM_EVENTS = {
   TOOL_CALL: "tool_call",
   TOOL_RESULT: "tool_result",
   PLAN_REVIEW: "plan_review",
+  USER_INPUT_REQUEST: "user_input_request",
   ERROR: "error",
 } as const;
 

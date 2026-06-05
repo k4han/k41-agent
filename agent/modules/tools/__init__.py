@@ -35,6 +35,17 @@ from agent.modules.tools.builtin.utility.plan_mode import (
     PlanModeResumePayload,
 )
 from agent.modules.tools.builtin.utility.plan_resume import PlanResumePayload
+from agent.modules.tools.builtin.utility.ask_user import (
+    ASK_USER_INTERRUPT_TYPE,
+    ASK_USER_TOOL_NAME,
+    AskUserAnswerResumePayload,
+    AskUserFreeText,
+    AskUserInput,
+    AskUserOption,
+    AskUserQuestion,
+    HumanResumePayload,
+    UserQuestionAnswer,
+)
 from agent.modules.tools.runtime.context import (
     ToolContext,
     get_context_value,
@@ -158,8 +169,17 @@ __all__ = [
     "PLAN_REVIEW_APPROVED_PREFIX",
     "PLAN_REVIEW_INTERRUPT_TYPE",
     "PLAN_REVIEW_REVISION_PREFIX",
+    "ASK_USER_INTERRUPT_TYPE",
+    "ASK_USER_TOOL_NAME",
+    "AskUserAnswerResumePayload",
+    "AskUserFreeText",
+    "AskUserInput",
+    "AskUserOption",
+    "AskUserQuestion",
+    "HumanResumePayload",
     "PlanModeResumePayload",
     "PlanResumePayload",
+    "UserQuestionAnswer",
     "aresolve_tools_for_agent",
     "close_thread_shell_sessions",
     "ensure_mcp_loaded",

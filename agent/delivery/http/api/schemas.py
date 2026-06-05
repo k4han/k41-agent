@@ -2,7 +2,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from agent.modules.tools import PlanResumePayload
+from agent.modules.tools import HumanResumePayload, PlanResumePayload
 from agent.modules.workspaces import WorkspaceRef
 
 
@@ -26,7 +26,7 @@ class ChatRequest(BaseModel):
     agent_name: Optional[str] = None
     provider: Optional[str] = None
     model: Optional[str] = None
-    resume_payload: Optional[PlanResumePayload] = None
+    resume_payload: Optional[HumanResumePayload] = None
     attachments: list[ChatAttachment] = Field(default_factory=list)
     resume: bool = False
 

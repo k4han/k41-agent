@@ -2,10 +2,15 @@ import type { TranscriptItem } from "@/components/Transcript";
 import {
   PLAN_MODE_TOOL_NAME,
   createTranscriptPlanReview,
+  createTranscriptUserInputRequest,
   createTranscriptTool,
 } from "@/components/Transcript";
 import type { AppendScrollMode } from "@/lib/chatTypes";
 import { recursionLimitStorageKey, STREAM_ERROR_CODES, STREAM_EVENTS } from "@/lib/eventConstants";
+import {
+  ASK_USER_TOOL_NAME,
+  normalizeUserInputRequest,
+} from "@/lib/userInputRequest";
 
 // ── Callback interface for stream event handling ──
 
@@ -16,6 +21,7 @@ export interface StreamCallbacks {
   removeItem?: (id: number, threadId?: string) => void;
   updateToolResult: (toolCallId: string, name: string, result: unknown, threadId?: string) => void;
   updatePlanReviewResult: (toolCallId: string, result: unknown, threadId?: string) => void;
+  updateUserInputRequestResult: (toolCallId: string, result: unknown, threadId?: string) => void;
   onError?: (message: string, code?: string) => void;
   setRecursionLimitReached: (value: boolean) => void;
   onThreadCreated: (threadId: string, streamThreadIdRef: StreamThreadIdRef) => void;
@@ -68,7 +74,7 @@ export function handleStreamEvent(
 
   if (event.type === STREAM_EVENTS.TOOL_CALL) {
     const toolName = String(event.name || "unknown");
-    if (toolName === PLAN_MODE_TOOL_NAME) {
+    if (toolName === PLAN_MODE_TOOL_NAME || toolName === ASK_USER_TOOL_NAME) {
       return;
     }
     if (assistantIdRef.id !== null && !streamedRef.received) {
@@ -98,6 +104,14 @@ export function handleStreamEvent(
       );
       return;
     }
+    if (toolName === ASK_USER_TOOL_NAME) {
+      callbacks.updateUserInputRequestResult(
+        String(event.tool_call_id || ""),
+        event.content ?? null,
+        streamThreadIdRef.id,
+      );
+      return;
+    }
     callbacks.updateToolResult(
       String(event.tool_call_id || ""),
       toolName,
@@ -116,6 +130,27 @@ export function handleStreamEvent(
         toolCallId: String(event.tool_call_id || ""),
         interruptId: String(event.interrupt_id || ""),
         plan: String(event.plan || ""),
+      }),
+      "bottom",
+      streamThreadIdRef.id,
+    );
+    assistantIdRef.id = null;
+    streamedRef.received = false;
+    return;
+  }
+
+  if (event.type === STREAM_EVENTS.USER_INPUT_REQUEST) {
+    if (assistantIdRef.id !== null && !streamedRef.received) {
+      callbacks.removeItem?.(assistantIdRef.id, streamThreadIdRef.id);
+    }
+    const request = normalizeUserInputRequest(event);
+    callbacks.appendItem(
+      createTranscriptUserInputRequest({
+        toolCallId: request.tool_call_id,
+        interruptId: request.interrupt_id,
+        title: request.title,
+        questions: request.questions,
+        submitLabel: request.submit_label,
       }),
       "bottom",
       streamThreadIdRef.id,

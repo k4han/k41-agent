@@ -49,6 +49,18 @@ PLAN_MODE_PROMPT = (
     "and call plan_mode_respond again."
 )
 
+ASK_USER_PROMPT = (
+    "The ask_user tool can ask the user one or more structured questions and "
+    "pause execution until the user answers.\n"
+    "Use it only when the task requires a user decision, preference, or missing "
+    "information that cannot be discovered from the available context.\n"
+    "When multiple questions are needed, ask them in one ask_user call. Do not "
+    "call ask_user multiple times in parallel. Use single selection for mutually "
+    "exclusive choices, multiple selection when several choices can apply, and "
+    "free text when the user may need to provide a custom answer. Every question "
+    "has a free-text answer field by default unless you explicitly disable it."
+)
+
 _PROMPT_VARIABLE_RE = re.compile(r"\{\{([A-Za-z][A-Za-z0-9_-]{0,63})\}\}")
 
 
@@ -182,6 +194,9 @@ def build_llm_system_prompt(
     if _has_tool(tools, "plan_mode_respond"):
         system_prompt = f"{system_prompt}\n\n{PLAN_MODE_PROMPT}"
 
+    if _has_tool(tools, "ask_user"):
+        system_prompt = f"{system_prompt}\n\n{ASK_USER_PROMPT}"
+
     if _has_tool(tools, "skill"):
         system_prompt = f"{system_prompt}{_build_skills_prompt_section(skills_catalog_xml)}"
 
@@ -190,6 +205,7 @@ def build_llm_system_prompt(
 
 __all__ = [
     "SKILLS_DISCLOSURE_PROMPT",
+    "ASK_USER_PROMPT",
     "PLAN_MODE_PROMPT",
     "SUB_AGENT_DISCLOSURE_PROMPT",
     "SUB_AGENT_EMPTY_PROMPT",

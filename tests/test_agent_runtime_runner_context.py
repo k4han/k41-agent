@@ -8,6 +8,10 @@ from langgraph.types import Command
 
 import agent.modules.conversations as conversations_module
 from agent.modules.agent_runtime import runner as runner_module
+from agent.modules.tools.builtin.utility.ask_user import (
+    ASK_USER_INTERRUPT_TYPE,
+    ASK_USER_TOOL_NAME,
+)
 from agent.modules.tools.builtin.utility.plan_mode import (
     PLAN_MODE_TOOL_NAME,
     PLAN_REVIEW_INTERRUPT_TYPE,
@@ -1026,6 +1030,181 @@ async def test_run_agent_stream_emits_plan_review_interrupt(monkeypatch):
             "plan": plan,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_emits_user_input_request_interrupt(monkeypatch):
+    questions = [
+        {
+            "id": "mode",
+            "question": "Which mode should be used?",
+            "selection_mode": "single",
+            "required": True,
+            "options": [{"id": "fast", "label": "Fast"}],
+            "free_text": {"enabled": True, "label": "Notes"},
+        }
+    ]
+
+    class _FakeCatalog:
+        def get_agent(self, name: str):
+            return SimpleNamespace(
+                graph_type="react_agent",
+                max_context_tokens=1234,
+                tools=[ASK_USER_TOOL_NAME],
+            )
+
+    class _FakeInterrupt:
+        id = "interrupt-ask"
+        value = {
+            "type": ASK_USER_INTERRUPT_TYPE,
+            "tool_call_id": "call-ask",
+            "title": "Choose mode",
+            "questions": questions,
+            "submit_label": "Continue",
+        }
+
+    class _FakeGraph:
+        async def astream(self, payload, **kwargs):
+            yield (
+                "values",
+                {
+                    "messages": [
+                        AIMessage(
+                            content="",
+                            id="ai-ask",
+                            tool_calls=[
+                                {
+                                    "name": ASK_USER_TOOL_NAME,
+                                    "args": {
+                                        "title": "Choose mode",
+                                        "questions": questions,
+                                    },
+                                    "id": "call-ask",
+                                }
+                            ],
+                        )
+                    ],
+                    "__interrupt__": (_FakeInterrupt(),),
+                },
+            )
+
+    monkeypatch.setattr(
+        "agent.modules.agents.get_catalog_service",
+        lambda: _FakeCatalog(),
+    )
+    monkeypatch.setattr(runner_module, "get_workflow_graph", lambda name: _FakeGraph())
+    monkeypatch.setattr(runner_module, "make_run_context", lambda **kwargs: kwargs)
+    monkeypatch.setattr(
+        runner_module,
+        "make_run_config",
+        lambda **kwargs: {"configurable": {"thread_id": kwargs["thread_id"]}},
+    )
+
+    events = [
+        event
+        async for event in runner_module.run_agent_stream(
+            user_input="ask me",
+            thread_id="thread-1",
+            agent_name="default",
+        )
+    ]
+
+    assert events == [
+        {
+            "type": ASK_USER_INTERRUPT_TYPE,
+            "tool_call_id": "call-ask",
+            "interrupt_id": "interrupt-ask",
+            "title": "Choose mode",
+            "questions": questions,
+            "submit_label": "Continue",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_answer_resume_payload_does_not_switch_agent(
+    monkeypatch,
+):
+    captured: dict = {}
+    updated: list[tuple[str, str]] = []
+
+    class _FakeCatalog:
+        def get_agent(self, name: str):
+            if name != "default":
+                return None
+            return SimpleNamespace(
+                graph_type="react_agent",
+                max_context_tokens=1234,
+                tools=[ASK_USER_TOOL_NAME],
+            )
+
+    class _FakeGraph:
+        async def aget_state(self, config):
+            return SimpleNamespace(
+                values={
+                    "messages": [
+                        HumanMessage(content="old-user", id="old-user"),
+                        AIMessage(content="", id="old-ai"),
+                    ]
+                }
+            )
+
+        async def astream(self, payload, **kwargs):
+            captured["payload"] = payload
+            captured["kwargs"] = kwargs
+            yield (
+                "values",
+                {
+                    "messages": [
+                        HumanMessage(content="old-user", id="old-user"),
+                        AIMessage(content="", id="old-ai"),
+                        AIMessage(content="answer accepted", id="new-ai"),
+                    ]
+                },
+            )
+
+    async def _fake_update_thread_agent(thread_id: str, agent_name: str):
+        updated.append((thread_id, agent_name))
+
+    monkeypatch.setattr(
+        "agent.modules.agents.get_catalog_service",
+        lambda: _FakeCatalog(),
+    )
+    monkeypatch.setattr(runner_module, "get_workflow_graph", lambda name: _FakeGraph())
+    monkeypatch.setattr(runner_module, "make_run_context", lambda **kwargs: kwargs)
+    monkeypatch.setattr(
+        runner_module,
+        "make_run_config",
+        lambda **kwargs: {"configurable": {"thread_id": kwargs["thread_id"]}},
+    )
+    monkeypatch.setattr(runner_module, "_update_thread_agent", _fake_update_thread_agent)
+
+    resume_payload = {
+        "action": "answer",
+        "answers": [
+            {
+                "question_id": "mode",
+                "selected_option_ids": ["fast"],
+                "custom_text": "Keep it simple.",
+            }
+        ],
+        "summary": "User answers:\n- Mode: Fast, Keep it simple.",
+    }
+    events = [
+        event
+        async for event in runner_module.run_agent_stream(
+            user_input="",
+            thread_id="thread-1",
+            agent_name="default",
+            resume_payload=resume_payload,
+        )
+    ]
+
+    assert events == [{"type": "final", "content": "answer accepted"}]
+    assert isinstance(captured["payload"], Command)
+    assert captured["payload"].resume == resume_payload
+    assert captured["kwargs"]["context"]["agent_name"] == "default"
+    assert updated == []
 
 
 @pytest.mark.asyncio

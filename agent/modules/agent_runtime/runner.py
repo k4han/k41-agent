@@ -25,8 +25,12 @@ from agent.modules.workflows import (
 )
 from agent.modules.usage import attach_usage_context, build_usage_context
 from agent.modules.tools import (
+    ASK_USER_INTERRUPT_TYPE,
+    ASK_USER_TOOL_NAME,
     PLAN_MODE_TOOL_NAME,
     PLAN_REVIEW_INTERRUPT_TYPE,
+    AskUserAnswerResumePayload,
+    HumanResumePayload,
     PlanModeResumePayload,
 )
 from agent.modules.workspaces import WorkspaceRef
@@ -428,10 +432,21 @@ def _normalize_plan_resume_payload(
     return PlanModeResumePayload.model_validate(resume_payload)
 
 
+def _normalize_human_resume_payload(
+    resume_payload: dict[str, Any] | None,
+) -> HumanResumePayload | None:
+    if resume_payload is None:
+        return None
+    action = str(resume_payload.get("action") or "").strip()
+    if action == "answer":
+        return AskUserAnswerResumePayload.model_validate(resume_payload)
+    return _normalize_plan_resume_payload(resume_payload)
+
+
 def _resolve_agent_name_for_resume(
     catalog: Any,
     agent_name: str,
-    resume_payload: PlanModeResumePayload | None,
+    resume_payload: HumanResumePayload | None,
     *,
     source_agent_name: str = "",
 ) -> str:
@@ -479,6 +494,16 @@ def _validate_plan_resume_payload(
         raise ValueError("Feedback is required to revise a plan.")
 
 
+def _validate_human_resume_payload(
+    resume_payload: HumanResumePayload | None,
+) -> None:
+    if resume_payload is None:
+        return
+    if resume_payload.action == "answer":
+        return
+    _validate_plan_resume_payload(resume_payload)
+
+
 async def _update_thread_agent(thread_id: str, agent_name: str) -> None:
     try:
         from agent.modules.conversations import upsert_conversation_thread
@@ -499,7 +524,7 @@ async def _update_thread_agent(thread_id: str, agent_name: str) -> None:
 async def _get_plan_resume_source_agent_name(
     thread_id: str,
     agent_name: str,
-    resume_payload: PlanModeResumePayload | None,
+    resume_payload: HumanResumePayload | None,
 ) -> str:
     if resume_payload is None or resume_payload.action != "approve":
         return ""
@@ -535,15 +560,23 @@ def _interrupt_id(interrupt_obj: Any) -> str:
     return str(getattr(interrupt_obj, "id", "") or "")
 
 
-def _find_plan_tool_call_id(messages: list[Any], fallback: str = "") -> str:
+def _find_tool_call_id(
+    messages: list[Any],
+    tool_name: str,
+    fallback: str = "",
+) -> str:
     for message in reversed(messages):
         tool_calls = getattr(message, "tool_calls", None) or []
         for tool_call in tool_calls:
             if not isinstance(tool_call, dict):
                 continue
-            if tool_call.get("name") == PLAN_MODE_TOOL_NAME:
+            if tool_call.get("name") == tool_name:
                 return str(tool_call.get("id") or fallback)
     return fallback
+
+
+def _find_plan_tool_call_id(messages: list[Any], fallback: str = "") -> str:
+    return _find_tool_call_id(messages, PLAN_MODE_TOOL_NAME, fallback)
 
 
 def _plan_review_events_from_value_event(event: dict[str, Any]) -> list[dict[str, Any]]:
@@ -570,6 +603,43 @@ def _plan_review_events_from_value_event(event: dict[str, Any]) -> list[dict[str
                 "tool_call_id": tool_call_id,
                 "interrupt_id": _interrupt_id(interrupt_obj),
                 "plan": str(value.get("plan") or ""),
+            }
+        )
+    return out
+
+
+def _user_input_request_events_from_value_event(
+    event: dict[str, Any],
+) -> list[dict[str, Any]]:
+    raw_interrupts = event.get("__interrupt__")
+    if not raw_interrupts:
+        return []
+    if not isinstance(raw_interrupts, (list, tuple)):
+        raw_interrupts = [raw_interrupts]
+
+    messages = event.get("messages", [])
+    messages = messages if isinstance(messages, list) else []
+    out: list[dict[str, Any]] = []
+    for interrupt_obj in raw_interrupts:
+        value = _interrupt_value(interrupt_obj)
+        if not isinstance(value, dict):
+            continue
+        if value.get("type") != ASK_USER_INTERRUPT_TYPE:
+            continue
+        tool_call_id = str(value.get("tool_call_id") or "")
+        tool_call_id = _find_tool_call_id(
+            messages,
+            ASK_USER_TOOL_NAME,
+            tool_call_id,
+        )
+        out.append(
+            {
+                "type": ASK_USER_INTERRUPT_TYPE,
+                "tool_call_id": tool_call_id,
+                "interrupt_id": _interrupt_id(interrupt_obj),
+                "title": str(value.get("title") or ""),
+                "questions": value.get("questions") or [],
+                "submit_label": str(value.get("submit_label") or ""),
             }
         )
     return out
@@ -706,8 +776,8 @@ async def run_agent(
     from agent.modules.agents import get_catalog_service
 
     catalog = get_catalog_service()
-    normalized_resume_payload = _normalize_plan_resume_payload(resume_payload)
-    _validate_plan_resume_payload(normalized_resume_payload)
+    normalized_resume_payload = _normalize_human_resume_payload(resume_payload)
+    _validate_human_resume_payload(normalized_resume_payload)
     source_agent_name = await _get_plan_resume_source_agent_name(
         thread_id,
         agent_name,
@@ -836,8 +906,8 @@ async def run_agent_stream(
     from agent.modules.agents import get_catalog_service
 
     catalog = get_catalog_service()
-    normalized_resume_payload = _normalize_plan_resume_payload(resume_payload)
-    _validate_plan_resume_payload(normalized_resume_payload)
+    normalized_resume_payload = _normalize_human_resume_payload(resume_payload)
+    _validate_human_resume_payload(normalized_resume_payload)
     source_agent_name = await _get_plan_resume_source_agent_name(
         thread_id,
         agent_name,
@@ -951,6 +1021,8 @@ async def run_agent_stream(
             event = event_data
             for plan_review_event in _plan_review_events_from_value_event(event):
                 yield plan_review_event
+            for user_input_event in _user_input_request_events_from_value_event(event):
+                yield user_input_event
 
             messages = event.get("messages", [])
             if not messages:
@@ -998,7 +1070,7 @@ async def run_agent_stream(
                     if tool_calls:
                         for tc in tool_calls:
                             tool_name = tc.get("name") or "unknown"
-                            if tool_name == PLAN_MODE_TOOL_NAME:
+                            if tool_name in {PLAN_MODE_TOOL_NAME, ASK_USER_TOOL_NAME}:
                                 continue
                             registry.add_tool_call(session_id, tool_name)
                             yield {
@@ -1134,6 +1206,8 @@ async def run_agent_edit_stream(
             event = event_data
             for plan_review_event in _plan_review_events_from_value_event(event):
                 yield plan_review_event
+            for user_input_event in _user_input_request_events_from_value_event(event):
+                yield user_input_event
 
             messages = event.get("messages", [])
             if not messages:
@@ -1180,7 +1254,7 @@ async def run_agent_edit_stream(
                     if tool_calls:
                         for tc in tool_calls:
                             tool_name = tc.get("name") or "unknown"
-                            if tool_name == PLAN_MODE_TOOL_NAME:
+                            if tool_name in {PLAN_MODE_TOOL_NAME, ASK_USER_TOOL_NAME}:
                                 continue
                             registry.add_tool_call(session_id, tool_name)
                             yield {

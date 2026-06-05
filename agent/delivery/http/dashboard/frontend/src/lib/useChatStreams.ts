@@ -2,11 +2,15 @@ import { createSignal } from "solid-js";
 
 import {
   createTranscriptTool,
+  createTranscriptUserInputRequest,
   findTranscriptPlanReviewTarget,
   findTranscriptToolTarget,
+  findTranscriptUserInputRequestTarget,
   parsePlanReviewToolResult,
+  parseUserInputRequestToolResult,
   type TranscriptItem,
   type TranscriptPlanReview,
+  type TranscriptUserInputRequest,
 } from "@/components/Transcript";
 import {
   allocItemId,
@@ -201,6 +205,59 @@ export function useChatStreams(params: UseChatStreamsParams) {
     }
   };
 
+  const updateUserInputRequestResult = (
+    toolCallId: string,
+    result: unknown,
+    targetThreadId?: string,
+  ) => {
+    setItems((current) => {
+      const target = findTranscriptUserInputRequestTarget(current, toolCallId);
+      const parsed = parseUserInputRequestToolResult(result);
+      if (!parsed.valid) {
+        return current;
+      }
+      const shouldAppendSummary = Boolean(parsed.summary) && (
+        !target || target.status !== "answered" || target.summary !== parsed.summary
+      );
+      const nextItems = target
+        ? current.map((item) =>
+            item.id === target.id && item.type === "user_input_request"
+              ? { ...item, ...parsed }
+              : item,
+          )
+        : [
+            ...current,
+            {
+              id: allocItemId(),
+              ...createTranscriptUserInputRequest({
+                toolCallId,
+                status: "answered",
+                answers: parsed.answers,
+                summary: parsed.summary,
+                result,
+              }),
+            } satisfies ChatTranscriptItem,
+          ];
+      if (!shouldAppendSummary) {
+        return nextItems;
+      }
+      return [
+        ...nextItems,
+        {
+          id: allocItemId(),
+          type: "message",
+          role: "user",
+          text: parsed.summary,
+        } satisfies ChatTranscriptItem,
+      ];
+    }, targetThreadId);
+
+    const isCurrent = !getIsUnmounting() && (!targetThreadId || targetThreadId === getCurrentThreadId());
+    if (isCurrent) {
+      scroll.scrollToBottom();
+    }
+  };
+
   const updatePlanReview = (
     toolCallId: string | null | undefined,
     patch: Partial<TranscriptPlanReview>,
@@ -213,6 +270,25 @@ export function useChatStreams(params: UseChatStreamsParams) {
       (current) =>
         current.map((item) =>
           item.type === "plan_review" && item.tool_call_id === toolCallId
+            ? { ...item, ...patch }
+            : item,
+        ),
+      targetThreadId,
+    );
+  };
+
+  const updateUserInputRequest = (
+    toolCallId: string | null | undefined,
+    patch: Partial<TranscriptUserInputRequest>,
+    targetThreadId?: string,
+  ) => {
+    if (!toolCallId) {
+      return;
+    }
+    setItems(
+      (current) =>
+        current.map((item) =>
+          item.type === "user_input_request" && item.tool_call_id === toolCallId
             ? { ...item, ...patch }
             : item,
         ),
@@ -237,5 +313,7 @@ export function useChatStreams(params: UseChatStreamsParams) {
     updateToolResult,
     updatePlanReview,
     updatePlanReviewResult,
+    updateUserInputRequest,
+    updateUserInputRequestResult,
   };
 }

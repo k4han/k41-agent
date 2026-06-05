@@ -1,12 +1,19 @@
 import {
   PLAN_MODE_TOOL_NAME,
   createTranscriptPlanReview,
+  createTranscriptUserInputRequest,
   createTranscriptTool,
   findTranscriptPlanReviewTarget,
   findTranscriptToolTarget,
+  findTranscriptUserInputRequestTarget,
   parsePlanReviewToolResult,
+  parseUserInputRequestToolResult,
 } from "@/components/Transcript";
 import type { TranscriptAttachment, TranscriptItem } from "@/components/Transcript";
+import {
+  ASK_USER_TOOL_NAME,
+  normalizeUserQuestion,
+} from "@/lib/userInputRequest";
 import { workspaceDisplayLabelFromValues } from "@/lib/workspace";
 import { NO_WORKSPACE_KEY, NO_WORKSPACE_LABEL } from "@/lib/workspaceConstants";
 import type { WorkspaceRef } from "@/types";
@@ -145,6 +152,37 @@ export function toThreadTranscript(messages: ThreadMessage[]): ThreadTranscriptI
 
   messages.forEach((msg, messageIndex) => {
     if (msg.role === "tool") {
+      if (msg.name === ASK_USER_TOOL_NAME) {
+        const parsed = parseUserInputRequestToolResult(msg.content);
+        if (!parsed.valid) {
+          return;
+        }
+        const target = findTranscriptUserInputRequestTarget(items, msg.tool_call_id);
+        if (target) {
+          Object.assign(target, parsed);
+        } else {
+          items.push({
+            key: `user-input-result-${messageIndex}-${msg.tool_call_id || "unknown"}`,
+            ...createTranscriptUserInputRequest({
+              toolCallId: msg.tool_call_id,
+              status: "answered",
+              answers: parsed.answers,
+              summary: parsed.summary,
+              result: msg.content,
+            }),
+          });
+        }
+        if (parsed.summary) {
+          items.push({
+            key: `user-input-summary-${messageIndex}-${msg.tool_call_id || "unknown"}`,
+            type: "message",
+            role: "user",
+            text: parsed.summary,
+          });
+        }
+        return;
+      }
+
       if (msg.name === PLAN_MODE_TOOL_NAME) {
         const planTarget = findTranscriptPlanReviewTarget(items, msg.tool_call_id);
         if (planTarget) {
@@ -197,6 +235,34 @@ export function toThreadTranscript(messages: ThreadMessage[]): ThreadTranscriptI
 
     if (msg.tool_calls?.length) {
       msg.tool_calls.forEach((toolCall, toolCallIndex) => {
+        if (toolCall.name === ASK_USER_TOOL_NAME) {
+          const args = toolCall.args as { title?: unknown; questions?: unknown; submit_label?: unknown } | null;
+          const questions = Array.isArray(args?.questions)
+            ? args.questions
+                .map(normalizeUserQuestion)
+                .filter((question): question is NonNullable<ReturnType<typeof normalizeUserQuestion>> => Boolean(question))
+            : [];
+          const existingRequest = findTranscriptUserInputRequestTarget(items, toolCall.id);
+          if (existingRequest) {
+            if (!existingRequest.questions.length) {
+              existingRequest.questions = questions;
+            }
+            if (!existingRequest.title && typeof args?.title === "string") {
+              existingRequest.title = args.title;
+            }
+            return;
+          }
+          items.push({
+            key: `user-input-request-${messageIndex}-${toolCallIndex}-${toolCall.id || "unknown"}`,
+            ...createTranscriptUserInputRequest({
+              toolCallId: toolCall.id,
+              title: typeof args?.title === "string" ? args.title : "",
+              questions,
+              submitLabel: typeof args?.submit_label === "string" ? args.submit_label : "",
+            }),
+          });
+          return;
+        }
         if (toolCall.name === PLAN_MODE_TOOL_NAME) {
           const args = toolCall.args as { plan?: unknown } | null;
           const existingPlanReview = findTranscriptPlanReviewTarget(items, toolCall.id);

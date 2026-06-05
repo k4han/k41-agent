@@ -7,8 +7,9 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from agent.modules.admin_auth import get_current_admin
-from agent.delivery.http.api.schemas import ChatRequest, PlanResumePayload
+from agent.delivery.http.api.schemas import ChatRequest, HumanResumePayload, PlanResumePayload
 from agent.modules.providers.models import ModelOption, ProviderModelCatalog
+from agent.modules.tools.builtin.utility.ask_user import AskUserAnswerResumePayload
 from agent.modules.tools.builtin.utility.plan_mode import PlanModeResumePayload
 
 
@@ -50,8 +51,31 @@ def test_chat_request_validates_plan_resume_payload() -> None:
     assert request.resume_payload.target_agent == "worker"
 
 
+def test_chat_request_validates_answer_resume_payload() -> None:
+    request = ChatRequest(
+        message="",
+        resume=True,
+        resume_payload={
+            "action": "answer",
+            "answers": [
+                {
+                    "question_id": "mode",
+                    "selected_option_ids": ["fast"],
+                    "custom_text": "Keep it direct.",
+                }
+            ],
+            "summary": "User answers:\n- Mode: Fast, Keep it direct.",
+        },
+    )
+    assert request.resume_payload is not None
+    assert request.resume_payload.action == "answer"
+    assert isinstance(request.resume_payload, AskUserAnswerResumePayload)
+    assert request.resume_payload.answers[0].question_id == "mode"
+
+
 def test_api_plan_resume_payload_uses_shared_schema() -> None:
     assert PlanResumePayload is PlanModeResumePayload
+    assert HumanResumePayload is not PlanResumePayload
 
 
 def test_chat_sync_returns_response_payload(monkeypatch):

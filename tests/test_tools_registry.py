@@ -192,6 +192,7 @@ class TestBuiltinToolSource:
             "echo",
             "get_current_time",
             "write_todos",
+            "ask_user",
             "plan_mode_respond",
             "call_agent",
             "schedule_task",
@@ -225,6 +226,7 @@ class TestBuiltinToolSource:
         assert ToolCapability.EXEC_SHELL in by_name["bash"].capabilities
         assert ToolCapability.NETWORK in by_name["web_search"].capabilities
         assert ToolCapability.MUTATES_STATE in by_name["write_todos"].capabilities
+        assert ToolCapability.MUTATES_STATE in by_name["ask_user"].capabilities
         assert ToolCapability.MUTATES_STATE in by_name["plan_mode_respond"].capabilities
 
     def test_load_is_idempotent_in_id_space(self) -> None:

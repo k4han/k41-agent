@@ -15,6 +15,12 @@ from agent.modules.tools.builtin.delegation.call_agent import (
     call_agent,
 )
 from agent.modules.tools.builtin.utility.write_todos import write_todos
+from agent.modules.tools.builtin.utility.ask_user import (
+    ASK_USER_INTERRUPT_TYPE,
+    ASK_USER_TOOL_NAME,
+    AskUserAnswerResumePayload,
+    ask_user,
+)
 from agent.modules.tools.builtin.utility.plan_mode import (
     PLAN_MODE_TOOL_NAME,
     PLAN_REVIEW_APPROVED_PREFIX,
@@ -362,9 +368,72 @@ async def test_tool_node_allows_pending_plan_mode_tool_after_agent_switch(monkey
     assert captured["tool_names"] == ["read_file", PLAN_MODE_TOOL_NAME]
 
 
+@pytest.mark.asyncio
+async def test_tool_node_allows_pending_ask_user_tool_after_agent_switch(monkeypatch):
+    captured: dict = {}
+
+    class _FakeToolNode:
+        def __init__(self, tools):
+            captured["tool_names"] = [tool.name for tool in tools]
+
+        async def ainvoke(self, state, *, config):
+            captured["state"] = state
+            captured["config"] = config
+            return {"messages": []}
+
+    monkeypatch.setattr(tool_node_module, "ToolNode", _FakeToolNode)
+
+    async def _fake_resolve(self, agent_name, *, override_tool_names=None):
+        return [SimpleNamespace(name="read_file")]
+
+    monkeypatch.setattr(
+        tool_node_module.ToolResolver,
+        "aresolve_for_agent",
+        _fake_resolve,
+    )
+
+    state = {
+        "messages": [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": ASK_USER_TOOL_NAME,
+                        "args": {
+                            "questions": [
+                                {
+                                    "id": "choice",
+                                    "question": "Pick one",
+                                    "options": [{"id": "a", "label": "A"}],
+                                }
+                            ]
+                        },
+                        "id": "call-ask",
+                    }
+                ],
+            )
+        ]
+    }
+
+    result = await tool_node_module.tool_node(
+        state,
+        config={"configurable": {"thread_id": "thread-1"}},
+        runtime=SimpleNamespace(
+            context={
+                "agent_name": "worker",
+                "allowed_tool_names": ["read_file"],
+            }
+        ),
+    )
+
+    assert result == {"messages": []}
+    assert captured["tool_names"] == ["read_file", ASK_USER_TOOL_NAME]
+
+
 def test_default_tool_registry_includes_runtime_tools():
     assert "call_agent" in get_default_tool_names()
     assert "write_todos" in get_default_tool_names()
+    assert ASK_USER_TOOL_NAME in get_default_tool_names()
     assert PLAN_MODE_TOOL_NAME in get_default_tool_names()
 
 
@@ -445,6 +514,201 @@ def test_plan_mode_resume_payload_accepts_revision() -> None:
     assert payload.feedback == "Make it shorter."
 
 
+def test_ask_user_tool_validates_input_schema() -> None:
+    assert ask_user.args_schema is not None
+
+    text_only = ask_user.args_schema.model_validate(
+        {
+            "questions": [
+                {
+                    "id": "text",
+                    "question": "What should happen next?",
+                }
+            ]
+        }
+    )
+    assert text_only.questions[0].free_text.enabled is True
+
+    with pytest.raises(ValidationError):
+        ask_user.args_schema.model_validate({"questions": []})
+    with pytest.raises(ValidationError):
+        ask_user.args_schema.model_validate(
+            {
+                "questions": [
+                    {
+                        "id": "choice",
+                        "question": "Pick one",
+                        "options": [
+                            {"id": "a", "label": "A"},
+                            {"id": "a", "label": "A again"},
+                        ],
+                    }
+                ]
+            }
+        )
+    with pytest.raises(ValidationError):
+        AskUserAnswerResumePayload.model_validate({"action": "revise"})
+
+
+@pytest.mark.asyncio
+async def test_ask_user_tool_interrupts_and_resumes() -> None:
+    questions = [
+        {
+            "id": "framework",
+            "question": "Which framework should be used?",
+            "selection_mode": "single",
+            "required": True,
+            "options": [
+                {"id": "solid", "label": "Solid"},
+                {"id": "react", "label": "React"},
+            ],
+            "free_text": {"enabled": True, "label": "Notes"},
+        },
+        {
+            "id": "features",
+            "question": "Which features are needed?",
+            "selection_mode": "multiple",
+            "required": True,
+            "options": [
+                {"id": "search", "label": "Search"},
+                {"id": "export", "label": "Export"},
+            ],
+        },
+    ]
+
+    def _request_user_input(_state):
+        return {
+            "messages": [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": ASK_USER_TOOL_NAME,
+                            "args": {
+                                "title": "Implementation choices",
+                                "questions": questions,
+                                "submit_label": "Continue",
+                            },
+                            "id": "call-ask",
+                        }
+                    ],
+                )
+            ]
+        }
+
+    graph = StateGraph(BaseState)
+    graph.add_node("request_user_input", _request_user_input)
+    graph.add_node("tools", LangGraphToolNode([ask_user]))
+    graph.add_edge(START, "request_user_input")
+    graph.add_edge("request_user_input", "tools")
+    graph.add_edge("tools", END)
+
+    compiled = graph.compile(checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "ask-thread"}}
+
+    interrupts = []
+    async for event in compiled.astream(
+        {"messages": []},
+        config=config,
+        stream_mode="values",
+    ):
+        interrupts.extend(event.get("__interrupt__", ()))
+
+    assert len(interrupts) == 1
+    interrupt_value = interrupts[0].value
+    assert interrupt_value["type"] == ASK_USER_INTERRUPT_TYPE
+    assert interrupt_value["tool_call_id"] == "call-ask"
+    assert interrupt_value["questions"][0]["id"] == "framework"
+
+    result = await compiled.ainvoke(
+        Command(
+            resume={
+                "action": "answer",
+                "answers": [
+                    {
+                        "question_id": "framework",
+                        "selected_option_ids": ["solid"],
+                        "custom_text": "Use existing dashboard patterns.",
+                    },
+                    {
+                        "question_id": "features",
+                        "selected_option_ids": ["search", "export"],
+                    },
+                ],
+                "summary": "User answers:\n- Framework: Solid\n- Features: Search, Export",
+            }
+        ),
+        config=config,
+    )
+
+    tool_message = result["messages"][-1]
+    assert tool_message.name == ASK_USER_TOOL_NAME
+    assert '"type": "ask_user_answer"' in tool_message.content
+    assert '"question_id": "framework"' in tool_message.content
+
+
+@pytest.mark.asyncio
+async def test_ask_user_tool_rejects_invalid_resume_answer() -> None:
+    question = {
+        "id": "choice",
+        "question": "Pick one",
+        "selection_mode": "single",
+        "required": True,
+        "options": [
+            {"id": "a", "label": "A"},
+            {"id": "b", "label": "B"},
+        ],
+    }
+
+    def _request_user_input(_state):
+        return {
+            "messages": [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": ASK_USER_TOOL_NAME,
+                            "args": {"questions": [question]},
+                            "id": "call-ask",
+                        }
+                    ],
+                )
+            ]
+        }
+
+    graph = StateGraph(BaseState)
+    graph.add_node("request_user_input", _request_user_input)
+    graph.add_node("tools", LangGraphToolNode([ask_user]))
+    graph.add_edge(START, "request_user_input")
+    graph.add_edge("request_user_input", "tools")
+    graph.add_edge("tools", END)
+
+    compiled = graph.compile(checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "ask-invalid-thread"}}
+    async for _ in compiled.astream({"messages": []}, config=config, stream_mode="values"):
+        pass
+
+    result = await compiled.ainvoke(
+        Command(
+            resume={
+                "action": "answer",
+                "answers": [
+                    {
+                        "question_id": "choice",
+                        "selected_option_ids": ["a", "b"],
+                    }
+                ],
+                "summary": "Invalid",
+            }
+        ),
+        config=config,
+    )
+
+    tool_message = result["messages"][-1]
+    assert tool_message.name == ASK_USER_TOOL_NAME
+    assert "allows only one selected option" in tool_message.content
+
+
 def test_write_todos_tool_validates_status() -> None:
     assert write_todos.args_schema is not None
 
@@ -514,6 +778,27 @@ def test_build_llm_system_prompt_injects_write_todos_section_only_when_bound() -
     assert prompt_builders.WRITE_TODOS_PROMPT not in without_tool
 
 
+def test_build_llm_system_prompt_injects_ask_user_section_only_when_bound() -> None:
+    prompt = prompt_builders.build_llm_system_prompt(
+        system_prompt_template="Base prompt",
+        working_dir="",
+        agent_name="default",
+        tools=[SimpleNamespace(name=ASK_USER_TOOL_NAME)],
+        catalog=SimpleNamespace(),
+    )
+
+    without_tool = prompt_builders.build_llm_system_prompt(
+        system_prompt_template="Base prompt",
+        working_dir="",
+        agent_name="default",
+        tools=[SimpleNamespace(name="read_file")],
+        catalog=SimpleNamespace(),
+    )
+
+    assert prompt_builders.ASK_USER_PROMPT in prompt
+    assert prompt_builders.ASK_USER_PROMPT not in without_tool
+
+
 @pytest.mark.asyncio
 async def test_tool_node_rejects_parallel_write_todos_calls():
     state = {
@@ -545,4 +830,54 @@ async def test_tool_node_rejects_parallel_write_todos_calls():
     messages = result["messages"]
     assert [message.tool_call_id for message in messages] == ["call-1", "call-2"]
     assert [message.status for message in messages] == ["error", "error"]
+
+
+@pytest.mark.asyncio
+async def test_tool_node_rejects_parallel_ask_user_calls():
+    state = {
+        "messages": [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": ASK_USER_TOOL_NAME,
+                        "args": {
+                            "questions": [
+                                {
+                                    "id": "one",
+                                    "question": "Pick one",
+                                    "options": [{"id": "a", "label": "A"}],
+                                }
+                            ]
+                        },
+                        "id": "call-1",
+                    },
+                    {
+                        "name": ASK_USER_TOOL_NAME,
+                        "args": {
+                            "questions": [
+                                {
+                                    "id": "two",
+                                    "question": "Pick two",
+                                    "options": [{"id": "b", "label": "B"}],
+                                }
+                            ]
+                        },
+                        "id": "call-2",
+                    },
+                ],
+            )
+        ]
+    }
+
+    result = await tool_node_module.tool_node(
+        state,
+        config={"configurable": {"thread_id": "thread-1"}},
+        runtime=SimpleNamespace(context={}),
+    )
+
+    messages = result["messages"]
+    assert [message.tool_call_id for message in messages] == ["call-1", "call-2"]
+    assert [message.status for message in messages] == ["error", "error"]
+    assert "one ask_user call" in messages[0].content
     assert "should not be called multiple times" in messages[0].content
