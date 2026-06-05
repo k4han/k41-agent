@@ -1,5 +1,6 @@
 import { A, useLocation } from "@solidjs/router";
 import {
+  ArrowLeft,
   BarChart3,
   BookOpen,
   Bot,
@@ -12,11 +13,13 @@ import {
   Link2,
   Network,
   Palette,
+  Search,
   ServerCog,
   Users,
   Workflow,
+  X,
 } from "lucide-solid";
-import { createMemo, createSignal, JSX, onMount, Show } from "solid-js";
+import { createMemo, createSignal, For, JSX, onMount, Show } from "solid-js";
 
 import { STORAGE_KEYS } from "@/lib/uiConstants";
 
@@ -56,6 +59,7 @@ export function SettingsLayout(props: {
 }) {
   const location = useLocation();
   const [collapsed, setCollapsed] = createSignal(false);
+  const [navQuery, setNavQuery] = createSignal("");
 
   const isActive = (href: string) => location.pathname === href;
 
@@ -72,6 +76,15 @@ export function SettingsLayout(props: {
   });
 
   const settingsHomeHref = "/settings/config";
+  const homeHref = "/";
+
+  const filteredNavItems = createMemo<SettingsNavItem[]>(() => {
+    const query = navQuery().trim().toLowerCase();
+    if (!query) {
+      return settingsNavItems;
+    }
+    return settingsNavItems.filter((item) => item.label.toLowerCase().includes(query));
+  });
 
   const segments = createMemo<BreadcrumbSegment[]>(() => {
     if (props.breadcrumbSegments && props.breadcrumbSegments.length > 0) {
@@ -118,17 +131,55 @@ export function SettingsLayout(props: {
           </Show>
         </div>
         <nav class="nav">
+          <A
+            href={homeHref}
+            class="nav-link settings-back-home"
+            title="Back to home"
+            aria-label="Back to home"
+          >
+            <ArrowLeft size={15} />
+            <span class="nav-label">Back to home</span>
+          </A>
           <div class="nav-section-title">Settings</div>
-          {settingsNavItems.map((item) => (
-            <A
-              href={item.href}
-              class={`nav-link ${isActive(item.href) ? "active" : ""}`}
-              title={item.label}
-            >
-              {item.icon}
-              <span class="nav-label">{item.label}</span>
-            </A>
-          ))}
+          <Show when={!collapsed()}>
+            <div class="settings-nav-search">
+              <Search size={13} class="settings-nav-search-icon" />
+              <input
+                type="text"
+                class="settings-nav-search-input"
+                placeholder="Search settings..."
+                value={navQuery()}
+                aria-label="Search settings"
+                onInput={(event) => setNavQuery(event.currentTarget.value)}
+              />
+              <Show when={navQuery().length > 0}>
+                <button
+                  type="button"
+                  class="settings-nav-search-clear"
+                  title="Clear search"
+                  aria-label="Clear search"
+                  onClick={() => setNavQuery("")}
+                >
+                  <X size={12} />
+                </button>
+              </Show>
+            </div>
+          </Show>
+          <For each={filteredNavItems()}>
+            {(item) => (
+              <A
+                href={item.href}
+                class={`nav-link ${isActive(item.href) ? "active" : ""}`}
+                title={item.label}
+              >
+                {item.icon}
+                <span class="nav-label">{item.label}</span>
+              </A>
+            )}
+          </For>
+          <Show when={filteredNavItems().length === 0}>
+            <div class="settings-nav-empty">No matches</div>
+          </Show>
         </nav>
       </aside>
       <main class="main">
