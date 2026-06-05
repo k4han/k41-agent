@@ -296,6 +296,64 @@ async def test_run_agent_passes_model_override_to_context(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_agent_resume_payload_marks_run_as_resume(monkeypatch):
+    captured: dict = {}
+    recorded: list[dict] = []
+
+    class _FakeCatalog:
+        def get_agent(self, name: str):
+            return SimpleNamespace(
+                graph_type="react_agent",
+                max_context_tokens=1234,
+                tools=["list_dir"],
+            )
+
+    class _FakeGraph:
+        async def astream(self, payload, **kwargs):
+            captured["payload"] = payload
+            captured["kwargs"] = kwargs
+            yield {"messages": [AIMessage(content="revised done", id="ai-final")]}
+
+    async def _fake_record_conversation_thread(**kwargs):
+        recorded.append(kwargs)
+
+    monkeypatch.setattr(
+        "agent.modules.agents.get_catalog_service",
+        lambda: _FakeCatalog(),
+    )
+    monkeypatch.setattr(runner_module, "get_workflow_graph", lambda name: _FakeGraph())
+    monkeypatch.setattr(runner_module, "make_run_context", lambda **kwargs: kwargs)
+    monkeypatch.setattr(
+        runner_module,
+        "make_run_config",
+        lambda **kwargs: {"configurable": {"thread_id": kwargs["thread_id"]}},
+    )
+    monkeypatch.setattr(
+        runner_module,
+        "_record_conversation_thread",
+        _fake_record_conversation_thread,
+    )
+
+    chunks = [
+        chunk
+        async for chunk in runner_module.run_agent(
+            user_input="",
+            thread_id="thread-1",
+            agent_name="default",
+            resume_payload={"action": "revise", "feedback": "Make it shorter."},
+        )
+    ]
+
+    assert chunks == ["revised done"]
+    assert isinstance(captured["payload"], Command)
+    assert captured["payload"].resume == {
+        "action": "revise",
+        "feedback": "Make it shorter.",
+    }
+    assert recorded == []
+
+
+@pytest.mark.asyncio
 async def test_run_agent_stream_builds_multimodal_user_message(monkeypatch):
     captured: dict = {}
 
@@ -986,9 +1044,15 @@ async def test_run_agent_stream_resume_payload_switches_agent(monkeypatch):
             )
 
         def get_agent_card(self, name: str):
-            if name != "worker":
-                return None
-            return SimpleNamespace(hidden=False, valid=True)
+            if name == "planner":
+                return SimpleNamespace(
+                    hidden=False,
+                    valid=True,
+                    plan_approval_targets=["worker"],
+                )
+            if name == "worker":
+                return SimpleNamespace(hidden=False, valid=True)
+            return None
 
     class _FakeGraph:
         async def aget_state(self, config):
@@ -1091,6 +1155,35 @@ async def test_run_agent_stream_resume_payload_rejects_disallowed_plan_target(
                 resume_payload={"action": "approve", "target_agent": "worker"},
             )
         ]
+
+
+def test_plan_resume_rejects_missing_source_agent_card():
+    class _FakeCatalog:
+        def get_agent(self, name: str):
+            if name == "worker":
+                return SimpleNamespace(
+                    graph_type="react_agent",
+                    max_context_tokens=1234,
+                    tools=["read_file"],
+                )
+            return None
+
+        def get_agent_card(self, name: str):
+            if name == "worker":
+                return SimpleNamespace(hidden=False, valid=True)
+            return None
+
+    resume_payload = runner_module._normalize_plan_resume_payload(
+        {"action": "approve", "target_agent": "worker"}
+    )
+
+    with pytest.raises(ValueError, match="cannot be validated for plan approval"):
+        runner_module._resolve_agent_name_for_resume(
+            _FakeCatalog(),
+            "planner",
+            resume_payload,
+            source_agent_name="planner",
+        )
 
 
 @pytest.mark.asyncio

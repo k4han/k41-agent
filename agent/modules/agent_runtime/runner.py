@@ -453,6 +453,10 @@ def _resolve_agent_name_for_resume(
         if target_agent == source_agent:
             raise ValueError("Plan approval target cannot be the planner agent.")
         source_card = catalog.get_agent_card(source_agent)
+        if source_card is None:
+            raise ValueError(
+                f"Agent '{source_agent}' cannot be validated for plan approval."
+            )
         allowed_targets = list(getattr(source_card, "plan_approval_targets", []) or [])
         if allowed_targets and target_agent not in allowed_targets:
             raise ValueError(
@@ -715,6 +719,8 @@ async def run_agent(
         normalized_resume_payload,
         source_agent_name=source_agent_name,
     )
+    if normalized_resume_payload is not None:
+        resume = True
     agent_config = catalog.get_agent(agent_name)
     if agent_config is None:
         raise ValueError(f"Agent '{agent_name}' not found in catalog")

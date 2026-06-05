@@ -20,6 +20,8 @@ import type { AgentCard } from "@/types";
 export const PLAN_MODE_TOOL_NAME = "plan_mode_respond";
 export const PLAN_REVIEW_APPROVED_PREFIX = "PLAN_REVIEW_APPROVED";
 export const PLAN_REVIEW_REVISION_PREFIX = "PLAN_REVIEW_REVISION_REQUESTED";
+const PLAN_REVIEW_REVISION_INSTRUCTION =
+  "\n\nRevise the plan according to the feedback and call plan_mode_respond again.";
 
 export type TranscriptRole = "user" | "assistant" | "error" | "system";
 
@@ -168,10 +170,17 @@ export function parsePlanReviewToolResult(
     };
   }
   if (text.startsWith(PLAN_REVIEW_REVISION_PREFIX)) {
-    const feedbackMatch = text.match(/User feedback:\n([\s\S]*?)(?:\n\n|$)/);
+    const feedbackPrefix = `${PLAN_REVIEW_REVISION_PREFIX}\nUser feedback:\n`;
+    let feedback = "";
+    if (text.startsWith(feedbackPrefix)) {
+      feedback = text.slice(feedbackPrefix.length);
+      if (feedback.endsWith(PLAN_REVIEW_REVISION_INSTRUCTION)) {
+        feedback = feedback.slice(0, -PLAN_REVIEW_REVISION_INSTRUCTION.length);
+      }
+    }
     return {
       status: "revision_requested",
-      feedback: feedbackMatch?.[1]?.trim() || undefined,
+      feedback: feedback.trim() || undefined,
       result,
     };
   }

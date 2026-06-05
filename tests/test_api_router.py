@@ -7,8 +7,9 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from agent.modules.admin_auth import get_current_admin
-from agent.delivery.http.api.schemas import ChatRequest
+from agent.delivery.http.api.schemas import ChatRequest, PlanResumePayload
 from agent.modules.providers.models import ModelOption, ProviderModelCatalog
+from agent.modules.tools.langchain.utility_tools.plan_mode import PlanModeResumePayload
 
 
 router_module = importlib.import_module("agent.delivery.http.api.router")
@@ -47,6 +48,10 @@ def test_chat_request_validates_plan_resume_payload() -> None:
     assert request.resume_payload is not None
     assert request.resume_payload.action == "approve"
     assert request.resume_payload.target_agent == "worker"
+
+
+def test_api_plan_resume_payload_uses_shared_schema() -> None:
+    assert PlanResumePayload is PlanModeResumePayload
 
 
 def test_chat_sync_returns_response_payload(monkeypatch):

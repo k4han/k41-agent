@@ -1,12 +1,16 @@
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from langgraph.prebuilt import ToolRuntime
 from langgraph.types import interrupt
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCapability, ToolCategory
+from agent.modules.tools.langchain.utility_tools.plan_resume import (
+    PlanResumeAction,
+    PlanResumePayload,
+)
 
 
 PLAN_MODE_TOOL_NAME = "plan_mode_respond"
@@ -25,24 +29,7 @@ class PlanModeRespondInput(BaseModel):
     )
 
 
-PlanResumeAction = Literal["approve", "revise"]
-
-
-class PlanModeResumePayload(BaseModel):
-    """Payload supplied by the dashboard when resuming a plan review."""
-
-    action: PlanResumeAction
-    target_agent: str | None = None
-    feedback: str | None = None
-
-    @model_validator(mode="after")
-    def _validate_action_payload(self) -> "PlanModeResumePayload":
-        if self.action == "approve":
-            if not str(self.target_agent or "").strip():
-                raise ValueError("target_agent is required when approving a plan.")
-        elif not str(self.feedback or "").strip():
-            raise ValueError("feedback is required when revising a plan.")
-        return self
+PlanModeResumePayload = PlanResumePayload
 
 
 PLAN_MODE_RESPOND_DESCRIPTION = (
@@ -118,6 +105,7 @@ __all__ = [
     "PLAN_REVIEW_APPROVED_PREFIX",
     "PLAN_REVIEW_INTERRUPT_TYPE",
     "PLAN_REVIEW_REVISION_PREFIX",
+    "PlanResumeAction",
     "PlanModeRespondInput",
     "PlanModeResumePayload",
     "plan_mode_respond",

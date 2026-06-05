@@ -199,6 +199,13 @@ export function toThreadTranscript(messages: ThreadMessage[]): ThreadTranscriptI
       msg.tool_calls.forEach((toolCall, toolCallIndex) => {
         if (toolCall.name === PLAN_MODE_TOOL_NAME) {
           const args = toolCall.args as { plan?: unknown } | null;
+          const existingPlanReview = findTranscriptPlanReviewTarget(items, toolCall.id);
+          if (existingPlanReview) {
+            if (!existingPlanReview.plan && typeof args?.plan === "string") {
+              existingPlanReview.plan = args.plan;
+            }
+            return;
+          }
           items.push({
             key: `plan-review-${messageIndex}-${toolCallIndex}-${toolCall.id || "unknown"}`,
             ...createTranscriptPlanReview({
