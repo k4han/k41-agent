@@ -1,48 +1,94 @@
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
-import { Edit3, Eye, Plus, RefreshCw, Save, Trash2 } from "lucide-solid";
+import { Edit3, Eye, Plus, RefreshCw, Save, Trash2, X } from "lucide-solid";
 
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DashboardTable } from "@/components/DashboardTable";
 import { Dialog } from "@/components/Dialog";
+import { Markdown } from "@/components/Markdown";
 import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
+import {
+  parseSkillMarkdown,
+  serializeSkillMarkdown,
+  type ParsedSkill,
+  type SkillFrontmatter,
+} from "@/lib/skillMarkdown";
 import { truncateText } from "@/lib/utils";
 import type { SkillInfo, SkillsPayload } from "@/types";
 
 import { SettingsLayout } from "./SettingsLayout";
 
+type MetadataEntry = { key: string; value: string };
+
 type SkillForm = {
   name: string;
-  content: string;
+  description: string;
+  license: string;
+  compatibility: string;
+  body: string;
+  allowedTools: string[];
+  metadata: MetadataEntry[];
   resources: string[];
 };
 
 const repositoryDirKey = "skills.repository_dir";
 
-const blankSkillContent = (name: string) => `---
-name: ${name || "new-skill"}
-description: Describe when this skill should be used.
----
-# Instructions
-
-Add the skill instructions here.
-`;
-
 const blankForm = (): SkillForm => ({
   name: "",
-  content: blankSkillContent(""),
+  description: "",
+  license: "",
+  compatibility: "",
+  body: "",
+  allowedTools: [],
+  metadata: [],
   resources: [],
 });
 
-function skillToForm(skill: SkillInfo): SkillForm {
-  return {
-    name: skill.name,
-    content: skill.content || blankSkillContent(skill.name),
-    resources: skill.resources || [],
+const normalizeMetadata = (
+  raw: Record<string, string> | null | undefined,
+): MetadataEntry[] =>
+  Object.entries(raw ?? {})
+    .map(([key, value]) => ({ key, value: value ?? "" }))
+    .sort((a, b) => a.key.localeCompare(b.key));
+
+const parsedToForm = (parsed: ParsedSkill, resources: string[]): SkillForm => ({
+  name: parsed.frontmatter.name,
+  description: parsed.frontmatter.description,
+  license: parsed.frontmatter.license ?? "",
+  compatibility: parsed.frontmatter.compatibility ?? "",
+  body: parsed.body,
+  allowedTools: [...(parsed.frontmatter.allowed_tools ?? [])],
+  metadata: normalizeMetadata(parsed.frontmatter.metadata),
+  resources,
+});
+
+const formToFrontmatter = (form: SkillForm): SkillFrontmatter => {
+  const frontmatter: SkillFrontmatter = {
+    name: form.name,
+    description: form.description,
   };
-}
+  if (form.license.trim()) {
+    frontmatter.license = form.license;
+  }
+  if (form.compatibility.trim()) {
+    frontmatter.compatibility = form.compatibility;
+  }
+  const allowedTools = form.allowedTools.map((tool) => tool.trim()).filter(Boolean);
+  if (allowedTools.length > 0) {
+    frontmatter.allowed_tools = allowedTools;
+  }
+  const metadataEntries = form.metadata
+    .map((entry) => ({ key: entry.key.trim(), value: entry.value }))
+    .filter((entry) => entry.key.length > 0);
+  if (metadataEntries.length > 0) {
+    frontmatter.metadata = Object.fromEntries(
+      metadataEntries.map((entry) => [entry.key, entry.value]),
+    );
+  }
+  return frontmatter;
+};
 
 export function SkillsPage() {
   const [data, setData] = createSignal<SkillsPayload>();
@@ -51,6 +97,7 @@ export function SkillsPage() {
   const [modalMode, setModalMode] = createSignal<"create" | "edit" | "view" | null>(null);
   const [currentName, setCurrentName] = createSignal("");
   const [form, setForm] = createSignal<SkillForm>(blankForm());
+  const [allowedToolDraft, setAllowedToolDraft] = createSignal("");
   const [deleteTargetName, setDeleteTargetName] = createSignal<string | null>(null);
   const [repositoryDirDraft, setRepositoryDirDraft] = createSignal(".agent/skills");
   const [busy, setBusy] = createSignal("");
@@ -105,6 +152,7 @@ export function SkillsPage() {
   const openCreate = () => {
     setCurrentName("");
     setForm(blankForm());
+    setAllowedToolDraft("");
     setModalMode("create");
   };
 
@@ -113,15 +161,60 @@ export function SkillsPage() {
       const detail = await apiFetch<{ skill: SkillInfo }>(
         `/dashboard-api/skills/${encodeURIComponent(skill.name)}`,
       );
-      setCurrentName(skill.name);
-      setForm(skillToForm(detail.skill));
+      const content = detail.skill.content || "";
+      const parsed = parseSkillMarkdown(content);
+      setCurrentName(detail.skill.name);
+      setForm(parsedToForm(parsed, detail.skill.resources || []));
+      setAllowedToolDraft("");
       setModalMode(mode);
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to load skill", "error");
     }
   };
 
-  const closeModal = () => setModalMode(null);
+  const closeModal = () => {
+    setModalMode(null);
+    setAllowedToolDraft("");
+  };
+
+  const addAllowedTool = () => {
+    const raw = allowedToolDraft().trim();
+    if (!raw) {
+      return;
+    }
+    const current = form().allowedTools;
+    if (current.includes(raw)) {
+      setAllowedToolDraft("");
+      return;
+    }
+    updateForm("allowedTools", [...current, raw]);
+    setAllowedToolDraft("");
+  };
+
+  const removeAllowedTool = (tool: string) => {
+    updateForm(
+      "allowedTools",
+      form().allowedTools.filter((entry) => entry !== tool),
+    );
+  };
+
+  const addMetadataEntry = () => {
+    updateForm("metadata", [...form().metadata, { key: "", value: "" }]);
+  };
+
+  const updateMetadataEntry = (index: number, patch: Partial<MetadataEntry>) => {
+    updateForm(
+      "metadata",
+      form().metadata.map((entry, idx) => (idx === index ? { ...entry, ...patch } : entry)),
+    );
+  };
+
+  const removeMetadataEntry = (index: number) => {
+    updateForm(
+      "metadata",
+      form().metadata.filter((_, idx) => idx !== index),
+    );
+  };
 
   const saveSkill = async () => {
     const current = form();
@@ -129,13 +222,20 @@ export function SkillsPage() {
       showToast("Skill name is required.", "error");
       return;
     }
-    if (!current.content.trim()) {
-      showToast("SKILL.md content is required.", "error");
+    if (!current.description.trim()) {
+      showToast("Description is required.", "error");
       return;
     }
+    if (!current.body.trim()) {
+      showToast("Instructions (body) are required.", "error");
+      return;
+    }
+
+    const frontmatter = formToFrontmatter(current);
+    const content = serializeSkillMarkdown(frontmatter, current.body);
     const payload = {
-      name: current.name,
-      content: current.content,
+      name: current.name.trim(),
+      content,
     };
 
     setBusy("skill");
@@ -193,6 +293,8 @@ export function SkillsPage() {
 
   onMount(load);
 
+  const isReadOnly = () => modalMode() === "view";
+
   return (
     <SettingsLayout
       title="Skills"
@@ -214,15 +316,6 @@ export function SkillsPage() {
                   <div class="panel-title">Repository-local skills</div>
                   <div class="hint">Global skills live in <span class="mono">{payload.skills_root}</span>.</div>
                 </div>
-                <button
-                  class="btn btn-primary"
-                  type="button"
-                  disabled={busy() === "setting"}
-                  onClick={saveRepositoryDir}
-                >
-                  <Save size={14} />
-                  {busy() === "setting" ? "Saving..." : "Save"}
-                </button>
               </div>
               <div class="panel-body">
                 <div class="field">
@@ -231,8 +324,25 @@ export function SkillsPage() {
                     class="input mono"
                     value={repositoryDirDraft()}
                     onInput={(event) => setRepositoryDirDraft(event.currentTarget.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void saveRepositoryDir();
+                      }
+                    }}
                   />
                   <span class="hint">Relative path inside each repository. Repo-local skills override global skills with the same name.</span>
+                  <div class="row" style={{ "justify-content": "flex-end", "margin-top": "4px" }}>
+                    <button
+                      class="btn btn-primary"
+                      type="button"
+                      disabled={busy() === "setting"}
+                      onClick={() => void saveRepositoryDir()}
+                    >
+                      <Save size={14} />
+                      {busy() === "setting" ? "Saving..." : "Save"}
+                    </button>
+                  </div>
                 </div>
               </div>
             </section>
@@ -306,7 +416,13 @@ export function SkillsPage() {
 
             <Dialog
               open={modalMode() !== null}
-              title={modalMode() === "create" ? "New Skill" : modalMode() === "edit" ? `Edit ${currentName()}` : `View ${currentName()}`}
+              title={
+                modalMode() === "create"
+                  ? "New Skill"
+                  : modalMode() === "edit"
+                    ? `Edit ${currentName()}`
+                    : `View ${currentName()}`
+              }
               wide
               onClose={closeModal}
               footer={
@@ -314,7 +430,7 @@ export function SkillsPage() {
                   <button class="btn" type="button" onClick={closeModal}>
                     Close
                   </button>
-                  <Show when={modalMode() !== "view"}>
+                  <Show when={!isReadOnly()}>
                     <button
                       class="btn btn-primary"
                       type="button"
@@ -328,31 +444,223 @@ export function SkillsPage() {
               }
             >
               <div class="stack">
-                <div class="field">
-                  <label>Name</label>
-                  <input
-                    class="input mono"
-                    value={form().name}
-                    disabled={modalMode() === "view"}
-                    onInput={(event) => {
-                      const nextName = event.currentTarget.value;
-                      updateForm("name", nextName);
-                      if (modalMode() === "create") {
-                        updateForm("content", blankSkillContent(nextName));
-                      }
-                    }}
-                  />
+                <div class="grid-2">
+                  <div class="field">
+                    <label>Name</label>
+                    <input
+                      class="input mono"
+                      value={form().name}
+                      disabled={isReadOnly()}
+                      placeholder="my-skill"
+                      onInput={(event) => updateForm("name", event.currentTarget.value)}
+                    />
+                    <span class="hint">Lowercase letters, numbers, and single hyphens (1-64 chars).</span>
+                  </div>
+                  <div class="field">
+                    <label>Description</label>
+                    <input
+                      class="input"
+                      value={form().description}
+                      disabled={isReadOnly()}
+                      placeholder="Describe when this skill should be used."
+                      onInput={(event) => updateForm("description", event.currentTarget.value)}
+                    />
+                    <span class="hint">Shown in the skill catalog so the LLM can decide when to load it.</span>
+                  </div>
                 </div>
-                <div class="field">
-                  <label>SKILL.md</label>
-                  <textarea
-                    class="textarea mono"
-                    rows={18}
-                    value={form().content}
-                    disabled={modalMode() === "view"}
-                    onInput={(event) => updateForm("content", event.currentTarget.value)}
-                  />
+
+                <div class="grid-2">
+                  <div class="field">
+                    <label>License <span class="hint">(optional)</span></label>
+                    <input
+                      class="input"
+                      value={form().license}
+                      disabled={isReadOnly()}
+                      placeholder="MIT"
+                      onInput={(event) => updateForm("license", event.currentTarget.value)}
+                    />
+                  </div>
+                  <div class="field">
+                    <label>Compatibility <span class="hint">(optional)</span></label>
+                    <input
+                      class="input"
+                      value={form().compatibility}
+                      disabled={isReadOnly()}
+                      placeholder=">=1.0"
+                      onInput={(event) => updateForm("compatibility", event.currentTarget.value)}
+                    />
+                  </div>
                 </div>
+
+                <div class="field">
+                  <label>Allowed tools <span class="hint">(optional)</span></label>
+                  <Show
+                    when={!isReadOnly()}
+                    fallback={
+                      <Show
+                        when={form().allowedTools.length > 0}
+                        fallback={<span class="hint">No tools declared.</span>}
+                      >
+                        <div class="chips">
+                          <For each={form().allowedTools}>
+                            {(tool) => <span class="chip">{tool}</span>}
+                          </For>
+                        </div>
+                      </Show>
+                    }
+                  >
+                    <div class="row-wrap">
+                      <Show when={form().allowedTools.length > 0}>
+                        <div class="chips">
+                          <For each={form().allowedTools}>
+                            {(tool) => (
+                              <span class="chip" style={{ display: "inline-flex", gap: "4px", "align-items": "center" }}>
+                                {tool}
+                                <button
+                                  class="btn btn-icon btn-sm"
+                                  type="button"
+                                  style={{ "min-height": "18px", height: "18px", width: "18px", padding: "0", border: "0", background: "transparent", color: "var(--muted)" }}
+                                  aria-label={`Remove ${tool}`}
+                                  onClick={() => removeAllowedTool(tool)}
+                                >
+                                  <X size={11} />
+                                </button>
+                              </span>
+                            )}
+                          </For>
+                        </div>
+                      </Show>
+                      <input
+                        class="input mono"
+                        style={{ "max-width": "260px" }}
+                        placeholder="Type a tool name and press Enter"
+                        value={allowedToolDraft()}
+                        onInput={(event) => setAllowedToolDraft(event.currentTarget.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === ",") {
+                            event.preventDefault();
+                            addAllowedTool();
+                          } else if (event.key === "Backspace" && allowedToolDraft() === "" && form().allowedTools.length > 0) {
+                            const next = [...form().allowedTools];
+                            next.pop();
+                            updateForm("allowedTools", next);
+                          }
+                        }}
+                      />
+                      <button
+                        class="btn btn-sm"
+                        type="button"
+                        disabled={!allowedToolDraft().trim()}
+                        onClick={addAllowedTool}
+                      >
+                        <Plus size={12} />
+                        Add
+                      </button>
+                    </div>
+                    <span class="hint">Tools the skill may invoke. Press Enter or comma to add.</span>
+                  </Show>
+                </div>
+
+                <div class="field">
+                  <label>Metadata <span class="hint">(optional)</span></label>
+                  <Show
+                    when={!isReadOnly()}
+                    fallback={
+                      <Show
+                        when={form().metadata.length > 0}
+                        fallback={<span class="hint">No metadata.</span>}
+                      >
+                        <div class="stack" style={{ gap: "6px" }}>
+                          <For each={form().metadata}>
+                            {(entry) => (
+                              <div class="row" style={{ gap: "8px" }}>
+                                <span class="mono" style={{ "min-width": "120px" }}>{entry.key}</span>
+                                <span class="hint">{entry.value || "(empty)"}</span>
+                              </div>
+                            )}
+                          </For>
+                        </div>
+                      </Show>
+                    }
+                  >
+                    <Show
+                      when={form().metadata.length > 0}
+                      fallback={<div class="hint" style={{ "margin-bottom": "6px" }}>No metadata entries yet.</div>}
+                    >
+                      <div class="stack" style={{ gap: "6px" }}>
+                        <For each={form().metadata}>
+                          {(entry, index) => (
+                            <div class="row" style={{ gap: "6px" }}>
+                              <input
+                                class="input mono"
+                                style={{ "max-width": "220px" }}
+                                placeholder="key"
+                                value={entry.key}
+                                onInput={(event) =>
+                                  updateMetadataEntry(index(), { key: event.currentTarget.value })
+                                }
+                              />
+                              <input
+                                class="input"
+                                placeholder="value"
+                                value={entry.value}
+                                onInput={(event) =>
+                                  updateMetadataEntry(index(), { value: event.currentTarget.value })
+                                }
+                              />
+                              <button
+                                class="btn btn-icon btn-sm"
+                                type="button"
+                                aria-label="Remove entry"
+                                onClick={() => removeMetadataEntry(index())}
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          )}
+                        </For>
+                      </div>
+                    </Show>
+                    <button
+                      class="btn btn-sm"
+                      type="button"
+                      style={{ "margin-top": "8px" }}
+                      onClick={addMetadataEntry}
+                    >
+                      <Plus size={12} />
+                      Add entry
+                    </button>
+                  </Show>
+                </div>
+
+                <div class="field">
+                  <label>Instructions (markdown body)</label>
+                  <Show
+                    when={isReadOnly()}
+                    fallback={
+                      <textarea
+                        class="textarea mono"
+                        rows={14}
+                        value={form().body}
+                        placeholder="Add the skill instructions here. Markdown is supported."
+                        onInput={(event) => updateForm("body", event.currentTarget.value)}
+                      />
+                    }
+                  >
+                    <Show
+                      when={form().body.trim()}
+                      fallback={<div class="hint">No instructions.</div>}
+                    >
+                      <div
+                        class="panel"
+                        style={{ padding: "12px", background: "var(--surface-2)", "border-radius": "8px" }}
+                      >
+                        <Markdown text={form().body} />
+                      </div>
+                    </Show>
+                  </Show>
+                </div>
+
                 <Show when={form().resources.length > 0}>
                   <div class="field">
                     <label>Resources</label>

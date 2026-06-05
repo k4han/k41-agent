@@ -1,3 +1,44 @@
+/* ============================================================
+   Responsive layout
+   - Desktop (default): ≥1025px
+   - Tablet:            981–1024px
+   - Compact:           ≤980px  (sidebar collapses to top bar)
+   - Mobile:            ≤640px   (sidebar becomes a drawer)
+   - Touch devices:     (hover: none) and (pointer: coarse)
+   ============================================================ */
+
+/* --- Tablet landscape (981–1024px) ----------------------------------- */
+@media (min-width: 981px) and (max-width: 1024px) {
+  .app-layout {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+
+  .sidebar-collapsed {
+    grid-template-columns: 56px minmax(0, 1fr);
+  }
+
+  .nav {
+    padding: 8px;
+  }
+
+  .nav-history-list {
+    padding-right: 2px;
+  }
+
+  .topbar {
+    padding: 0 18px;
+  }
+
+  .content {
+    padding: 18px;
+  }
+
+  .chat-shell {
+    grid-template-columns: 260px minmax(0, 1fr);
+  }
+}
+
+/* --- Compact (≤980px) — sidebar collapses to top bar ----------------- */
 @media (max-width: 980px) {
   .app-layout {
     grid-template-columns: 1fr;
@@ -117,15 +158,196 @@
   }
 }
 
+/* --- Mobile (≤640px) — drawer + safe area + touch targets ------------ */
 @media (max-width: 640px) {
-  .content {
-    padding: 14px;
+  .app-layout {
+    grid-template-columns: 1fr;
   }
 
-  .topbar {
-    align-items: flex-start;
+  /* Promote sidebar into a slide-in drawer. */
+  .app-layout .sidebar,
+  .app-layout.sidebar-collapsed .sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 60;
+    width: min(300px, 86vw);
+    height: 100vh;
+    height: 100dvh;
+    border-right: 1px solid var(--border);
+    box-shadow: var(--shadow);
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition:
+      transform 220ms ease,
+      visibility 220ms ease;
+    will-change: transform, visibility;
+  }
+
+  .app-layout--drawer-open .sidebar {
+    transform: translate3d(0, 0, 0);
+    visibility: visible;
+  }
+
+  .app-layout .sidebar .brand-collapse-btn,
+  .app-layout.sidebar-collapsed .sidebar .brand-collapse-btn {
+    display: none;
+  }
+
+  .app-layout .sidebar .sidebar-footer {
+    display: flex;
+  }
+
+  .app-layout .sidebar .nav {
     flex-direction: column;
-    padding: 12px 14px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 10px;
+  }
+
+  .app-layout .sidebar .nav-link,
+  .app-layout .sidebar .nav-history-link,
+  .app-layout .sidebar .nav-history-workspace-toggle,
+  .app-layout .sidebar .nav-history-item {
+    min-height: 44px;
+  }
+
+  .app-layout .sidebar .nav-label {
+    display: inline;
+  }
+
+  .app-layout .sidebar .nav-section-title {
+    display: block;
+  }
+
+  .app-layout .sidebar .nav-history-list {
+    width: auto;
+    max-height: none;
+    flex: 0 0 auto;
+  }
+
+  .app-layout .sidebar .nav-history-flat-threads {
+    max-height: 50vh;
+    overflow-y: auto;
+  }
+
+  /* Backdrop rendered on the .app-layout itself. Default state stays
+     rendered (opacity 0 + visibility hidden) so the closing transition
+     can fade it out smoothly. */
+  .app-layout::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    background: rgba(0, 0, 0, 0.42);
+    opacity: 0;
+    visibility: hidden;
+    transition:
+      opacity 180ms ease,
+      visibility 180ms ease;
+  }
+
+  .app-layout--drawer-open::before {
+    opacity: 1;
+    visibility: visible;
+  }
+
+  /* Topbar gets a hamburger button slot and safe area. */
+  .topbar {
+    height: auto;
+    min-height: 56px;
+    align-items: center;
+    padding: calc(var(--safe-top) + 8px) 14px 8px;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .topbar > * {
+    min-width: 0;
+    flex-shrink: 1;
+  }
+
+  .topbar .page-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Subtitle with badges is too wide for a single mobile row — keep it
+     available visually as a thin meta strip under the topbar. */
+  .topbar .page-subtitle {
+    display: none;
+  }
+
+  .topbar-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px 8px;
+    color: var(--muted);
+    font-size: 12px;
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+  }
+
+  .topbar-meta:empty {
+    display: none;
+  }
+
+  .topbar .topbar-menu-toggle {
+    display: inline-grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    margin-right: 2px;
+    flex-shrink: 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--fg);
+  }
+
+  .topbar .topbar-menu-toggle:hover {
+    background: var(--surface-2);
+  }
+
+  .topbar .topbar-menu-toggle:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .content {
+    padding: 14px;
+    padding-bottom: calc(var(--safe-bottom) + 14px);
+  }
+
+  /* Larger touch targets for primary actions. */
+  .btn {
+    min-height: 40px;
+  }
+
+  .btn-sm {
+    min-height: 34px;
+  }
+
+  .btn-icon {
+    width: 40px;
+    min-height: 40px;
+  }
+
+  .input,
+  .textarea,
+  .select,
+  .select-control-trigger,
+  .settings-resource-search input {
+    min-height: 40px;
+    font-size: 16px;
+  }
+
+  .textarea {
+    min-height: 96px;
   }
 
   .split {
@@ -140,7 +362,13 @@
   .dialog {
     width: 100%;
     max-height: 100vh;
+    max-height: 100dvh;
+    height: 100%;
     border-radius: 0;
+    padding-top: var(--safe-top);
+    padding-bottom: var(--safe-bottom);
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
   }
 
   .settings-resource-toolbar {
@@ -156,4 +384,64 @@
     justify-content: flex-start;
   }
 
+  .toast-region {
+    right: 12px;
+    bottom: calc(var(--safe-bottom) + 12px);
+    left: 12px;
+  }
+
+  .toast {
+    max-width: none;
+  }
+
+  /* Chat composer should be roomy enough to type with thumbs. */
+  .chat-composer {
+    padding: 10px 12px calc(var(--safe-bottom) + 10px);
+  }
+
+  /* Stack the agent-summary and model-picker columns; the 260px min column
+     otherwise blows out the viewport on phones. */
+  .chat-composer-options {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  /* Stack chat header chips so they don't truncate awkwardly. */
+  .topbar .row-wrap {
+    width: 100%;
+  }
+}
+
+/* --- Touch devices: disable hover-only affordances ------------------- */
+@media (hover: none) and (pointer: coarse) {
+  /* The .nav-history-action and similar are revealed only on hover. */
+  .nav-history-action,
+  .message-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* .select-control-trigger:hover background change becomes confusing
+     on touch — keep the resting state. */
+  .select-control-trigger:hover,
+  .btn:hover,
+  .model-picker-star:hover,
+  .brand-collapse-btn:hover,
+  .nav-history-all-btn:hover,
+  .settings-tab:hover,
+  .topbar .topbar-menu-toggle:hover,
+  .agent-config-option:hover {
+    background: inherit;
+  }
+}
+
+/* --- Reduced motion: disable transitions/animations ------------------ */
+@media (prefers-reduced-motion: reduce) {
+  .app-layout .sidebar,
+  .app-layout.sidebar-collapsed .sidebar,
+  .app-layout::before,
+  .app-layout--drawer-open::before {
+    animation: none !important;
+    transition: none !important;
+  }
 }

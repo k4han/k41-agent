@@ -18,6 +18,11 @@
   --success: #059669;
   --info: #2563eb;
   --shadow: 0 20px 50px rgba(0, 0, 0, 0.08);
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --touch-target: 34px;
 }
 
 .dark {

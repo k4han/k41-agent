@@ -11,6 +11,7 @@ import {
   Cog,
   KeyRound,
   Link2,
+  Menu,
   Network,
   Palette,
   Search,
@@ -19,9 +20,10 @@ import {
   Workflow,
   X,
 } from "lucide-solid";
-import { createMemo, createSignal, For, JSX, onMount, Show } from "solid-js";
+import { createMemo, createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
 
 import { STORAGE_KEYS } from "@/lib/uiConstants";
+import { useMobileDrawer } from "@/lib/useMobileDrawer";
 
 type SettingsNavItem = {
   href: string;
@@ -60,6 +62,14 @@ export function SettingsLayout(props: {
   const location = useLocation();
   const [collapsed, setCollapsed] = createSignal(false);
   const [navQuery, setNavQuery] = createSignal("");
+  const {
+    isMobileViewport,
+    mobileDrawerOpen,
+    setMobileDrawerOpen,
+    closeMobileDrawer,
+    handleAppLayoutClick,
+    handleKeydown,
+  } = useMobileDrawer({ sidebarId: "settings-layout-sidebar" });
 
   const isActive = (href: string) => location.pathname === href;
 
@@ -73,6 +83,11 @@ export function SettingsLayout(props: {
     if (window.localStorage.getItem(STORAGE_KEYS.SIDEBAR_COLLAPSED) === "collapsed") {
       setCollapsed(true);
     }
+    document.addEventListener("keydown", handleKeydown);
+  });
+
+  onCleanup(() => {
+    document.removeEventListener("keydown", handleKeydown);
   });
 
   const settingsHomeHref = "/settings/config";
@@ -97,8 +112,11 @@ export function SettingsLayout(props: {
   });
 
   return (
-    <div class={`app-layout ${collapsed() ? "sidebar-collapsed" : ""}`}>
-      <aside class="sidebar">
+    <div
+      class={`app-layout ${collapsed() ? "sidebar-collapsed" : ""} ${isMobileViewport() && mobileDrawerOpen() ? "app-layout--drawer-open" : ""}`}
+      onClick={handleAppLayoutClick}
+    >
+      <aside id="settings-layout-sidebar" class="sidebar">
         <div class="brand">
           <Show
             when={!collapsed()}
@@ -184,6 +202,21 @@ export function SettingsLayout(props: {
       </aside>
       <main class="main">
         <header class="topbar settings-topbar">
+          <Show when={isMobileViewport()}>
+            <button
+              class="topbar-menu-toggle"
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                setMobileDrawerOpen(true);
+              }}
+              aria-label="Open navigation"
+              aria-expanded={mobileDrawerOpen()}
+              aria-controls="settings-layout-sidebar"
+            >
+              <Menu size={18} />
+            </button>
+          </Show>
           <nav class="settings-breadcrumb" aria-label="Breadcrumb">
             {segments().map((segment, index) => {
               const isLast = index === segments().length - 1;

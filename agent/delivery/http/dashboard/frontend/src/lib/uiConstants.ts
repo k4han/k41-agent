@@ -27,6 +27,9 @@ export type ThemeOption = (typeof THEME_OPTIONS)[keyof typeof THEME_OPTIONS];
 
 export const RESTART_REQUIRED_NOTICE = "Restart required to apply bootstrap changes.";
 
+export const MOBILE_MAX_PX = 640;
+export const MOBILE_MEDIA_QUERY = `(max-width: ${MOBILE_MAX_PX}px)`;
+
 export const KAKA_LOGO_LETTER = "K";
 
 export const UI_COLORS = {

@@ -11,6 +11,7 @@ import {
   History,
   Home,
   LogOut,
+  Menu,
   MessageSquare,
   MoreHorizontal,
   Pencil,
@@ -42,6 +43,7 @@ import {
   SSE_RECONNECT_DELAY_MS,
   STORAGE_KEYS,
 } from "@/lib/uiConstants";
+import { useMobileDrawer } from "@/lib/useMobileDrawer";
 import { ALL_WORKSPACES_KEY } from "@/lib/workspaceConstants";
 import { truncateText } from "@/lib/utils";
 import { useToast } from "@/components/Toast";
@@ -112,6 +114,14 @@ export function AppShell(props: {
   const [deleteTarget, setDeleteTarget] = createSignal<ThreadSummary | null>(null);
   const [deleting, setDeleting] = createSignal(false);
   const [activeSessions, setActiveSessions] = createSignal<ActiveSession[]>([]);
+  const {
+    isMobileViewport,
+    mobileDrawerOpen,
+    setMobileDrawerOpen,
+    closeMobileDrawer,
+    handleAppLayoutClick,
+    handleKeydown,
+  } = useMobileDrawer({ sidebarId: "app-shell-sidebar" });
   let disposed = false;
 
   let sessionEventSource: EventSource | null = null;
@@ -432,7 +442,7 @@ export function AppShell(props: {
   const historyGroups = createMemo(() => groupThreadsByWorkspace(historyThreads()));
 
   const [selectedWorkspaceFilter, setSelectedWorkspaceFilter] = createSignal<string>(
-    window.localStorage.getItem(STORAGE_KEYS.WORKSPACE_FILTER) || ALL_WORKSPACES_KEY
+    window.localStorage.getItem(STORAGE_KEYS.WORKSPACE_FILTER) || ALL_WORKSPACES_KEY,
   );
 
   const runningThreads = createMemo(() => {
@@ -753,6 +763,7 @@ export function AppShell(props: {
       void loadHistory(true);
     }
     document.addEventListener("click", handleClickOutside);
+    document.addEventListener("keydown", handleKeydown);
     window.addEventListener(CUSTOM_DOM_EVENTS.THREADS_CHANGED, handleThreadsChanged);
     window.addEventListener(CUSTOM_DOM_EVENTS.THREAD_START_RUNNING, handleThreadStartRunning);
     window.addEventListener(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, handleThreadStopRunning);
@@ -767,14 +778,18 @@ export function AppShell(props: {
       sessionEventSource = null;
     }
     document.removeEventListener("click", handleClickOutside);
+    document.removeEventListener("keydown", handleKeydown);
     window.removeEventListener(CUSTOM_DOM_EVENTS.THREADS_CHANGED, handleThreadsChanged);
     window.removeEventListener(CUSTOM_DOM_EVENTS.THREAD_START_RUNNING, handleThreadStartRunning);
     window.removeEventListener(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, handleThreadStopRunning);
   });
 
   return (
-    <div class={`app-layout ${collapsed() ? "sidebar-collapsed" : ""}`}>
-      <aside class="sidebar">
+    <div
+      class={`app-layout ${collapsed() ? "sidebar-collapsed" : ""} ${isMobileViewport() && mobileDrawerOpen() ? "app-layout--drawer-open" : ""}`}
+      onClick={handleAppLayoutClick}
+    >
+      <aside id="app-shell-sidebar" class="sidebar">
         <div class="brand">
           <Show
             when={!collapsed()}
@@ -996,12 +1011,30 @@ export function AppShell(props: {
       </aside>
       <main class="main">
         <header class="topbar">
+          <Show when={isMobileViewport()}>
+            <button
+              class="topbar-menu-toggle"
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                setMobileDrawerOpen(true);
+              }}
+              aria-label="Open navigation"
+              aria-expanded={mobileDrawerOpen()}
+              aria-controls="app-shell-sidebar"
+            >
+              <Menu size={18} />
+            </button>
+          </Show>
           <div>
             <h1 class="page-title">{props.title}</h1>
             {props.subtitle ? <p class="page-subtitle">{props.subtitle}</p> : null}
           </div>
           <div class="row-wrap">{props.actions}</div>
         </header>
+        <Show when={isMobileViewport() && props.subtitle}>
+          <div class="topbar-meta">{props.subtitle}</div>
+        </Show>
         <div class="content">{props.children}</div>
       </main>
 
