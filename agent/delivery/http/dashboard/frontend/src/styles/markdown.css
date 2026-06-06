@@ -178,6 +178,7 @@
   color: #d8dee9;
   font-size: 13px;
   line-height: 1.65;
+  overflow-x: auto;
 }
 
 .message-markdown .markdown-code-frame pre code {
@@ -356,5 +357,50 @@
 .message-markdown img {
   max-width: 100%;
   border-radius: 8px;
+}
+
+/* --- Mobile specific optimizations for markdown responses ------------ */
+@media (max-width: 640px) {
+  /* Reduce border radius to save screen space */
+  .message-markdown .markdown-code-frame,
+  .message-markdown .markdown-mermaid-frame {
+    border-radius: 10px;
+    margin-bottom: 10px;
+  }
+
+  /* Compact padding in code frame headers and pre blocks */
+  .message-markdown .markdown-code-header {
+    padding: 8px 10px 2px 12px;
+    min-height: 36px;
+  }
+
+  .message-markdown .markdown-code-frame pre {
+    padding: 10px 12px 12px;
+    font-size: 12px;
+  }
+
+  /* Compact padding in Mermaid frame headers and render blocks */
+  .message-markdown .markdown-mermaid-header {
+    padding: 8px 10px 2px 12px;
+    min-height: 36px;
+  }
+
+  .message-markdown .markdown-mermaid,
+  .message-markdown .markdown-mermaid-raw {
+    padding: 10px 12px 12px;
+  }
+
+  /* Optimize table scrolling and styling on mobile */
+  .message-markdown table {
+    width: 100%;
+    margin-bottom: 8px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .message-markdown th,
+  .message-markdown td {
+    padding: 4px 8px;
+    font-size: 12px;
+  }
 }
 

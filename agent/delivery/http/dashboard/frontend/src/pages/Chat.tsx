@@ -1407,6 +1407,34 @@ export function ChatPage() {
     window.removeEventListener(CUSTOM_DOM_EVENTS.SESSION_STOPPED, handleSessionStopped);
   });
 
+  let touchStartX = 0;
+  let touchStartY = 0;
+
+  const handleShellClick = (event: MouseEvent) => {
+    if (explorer.open() && event.target === chatShellRef) {
+      explorer.toggle();
+    }
+  };
+
+  const handleTouchStart = (event: TouchEvent) => {
+    if (!explorer.open()) return;
+    touchStartX = event.touches[0].clientX;
+    touchStartY = event.touches[0].clientY;
+  };
+
+  const handleTouchEnd = (event: TouchEvent) => {
+    if (!explorer.open()) return;
+    const touchEndX = event.changedTouches[0].clientX;
+    const touchEndY = event.changedTouches[0].clientY;
+    const deltaX = touchEndX - touchStartX;
+    const deltaY = touchEndY - touchStartY;
+
+    // Close when swiping right (finger moves from left to right on panel)
+    if (deltaX > 80 && Math.abs(deltaY) < 45) {
+      explorer.toggle();
+    }
+  };
+
   return (
     <AppShell
       title={currentThreadId() ? "Thread Chat" : "Agent Chat"}
@@ -1447,6 +1475,9 @@ export function ChatPage() {
             ref={chatShellRef}
             class={`chat-shell chat-shell-resizable ${explorer.open() ? "workspace-open" : "workspace-closed"} ${explorer.resizing() ? "workspace-resizing" : ""}`}
             style={`--workspace-explorer-width: ${explorer.width()}px;`}
+            onClick={handleShellClick}
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
           >
             <section class="panel chat-panel">
               <Show when={threadError() || backgroundStreamError()}>
