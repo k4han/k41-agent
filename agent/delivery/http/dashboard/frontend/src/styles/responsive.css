@@ -328,7 +328,7 @@
     align-items: center;
     padding: calc(var(--safe-top) + 8px) 14px 8px;
     gap: 10px;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
   }
 
   .topbar > * {
@@ -336,8 +336,9 @@
     flex-shrink: 1;
   }
 
-  .topbar > div:not(.row-wrap) {
-    flex: 1;
+  .topbar > div:not(.row-wrap),
+  .topbar > nav.settings-breadcrumb {
+    flex: 1 1 auto;
     min-width: 0;
   }
 
@@ -481,7 +482,8 @@
 
   /* Stack chat header chips so they don't truncate awkwardly. */
   .topbar .row-wrap {
-    width: 100%;
+    flex-basis: 100%;
+    justify-content: flex-start;
   }
 
   /* Plan Review Stacked Controls on Mobile */
@@ -500,6 +502,45 @@
     width: 100% !important;
     max-width: 100% !important;
     flex: 1 1 auto !important;
+  }
+
+  /* Dashboard tables (Agents, Prompt Variables, Paired Identities, ...).
+     Force horizontal scroll by giving the table a min-width wider than the
+     narrowest phone, and let the user scroll to see the rightmost columns. */
+  .table-wrap {
+    max-width: 100%;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .table {
+    min-width: 720px;
+    table-layout: auto;
+  }
+
+  .table th,
+  .table td {
+    overflow-wrap: anywhere;
+  }
+
+  .prompt-variable-preview {
+    max-width: 240px;
+  }
+
+  /* Tab pills used by Settings > Channels / Connections. Allow horizontal
+     scroll when the labels don't fit on a single row. */
+  .settings-tabs {
+    display: flex;
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .settings-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .settings-tab {
+    flex: 0 0 auto;
   }
 }
 
