@@ -1,6 +1,6 @@
 import { Show } from "solid-js";
 
-import type { AgentsPayload, PromptVariable } from "@/types";
+import type { AgentMcpInstall, AgentsPayload, PromptVariable } from "@/types";
 
 import { type AgentForm, type AgentTab } from "./agentForm";
 import { AgentGeneralTab } from "./AgentGeneralTab";
@@ -17,15 +17,18 @@ export function AgentEditTabs(props: {
   toolGroups: AgentToolGroup[];
   totalBuiltInTools: number;
   mcpServerOptions: string[];
+  mcpInstalls: AgentMcpInstall[];
+  mcpUpdating: boolean;
   subAgentOptions: string[];
   planApprovalTargetOptions: string[];
   onUpdate: <K extends keyof AgentForm>(key: K, value: AgentForm[K]) => void;
   onToggleListValue: (
-    key: "tools" | "sub_agents" | "mcp_servers" | "plan_approval_targets",
+    key: "tools" | "sub_agents" | "plan_approval_targets",
     value: string,
     checked: boolean,
   ) => void;
   onToggleToolGroup: (tools: string[], checked: boolean) => void;
+  onToggleMcpInstall: (serverName: string, checked: boolean) => void;
   onInsertVariable: (name: string) => void;
 }) {
   return (
@@ -72,10 +75,13 @@ export function AgentEditTabs(props: {
               toolGroups={props.toolGroups}
               totalBuiltInTools={props.totalBuiltInTools}
               mcpServerOptions={props.mcpServerOptions}
+              mcpInstalls={props.mcpInstalls}
+              mcpUpdating={props.mcpUpdating}
               subAgentOptions={props.subAgentOptions}
               planApprovalTargetOptions={props.planApprovalTargetOptions}
               onToggleListValue={props.onToggleListValue}
               onToggleToolGroup={props.onToggleToolGroup}
+              onToggleMcpInstall={props.onToggleMcpInstall}
             />
           </Show>
           <Show when={props.activeTab === "prompt"}>

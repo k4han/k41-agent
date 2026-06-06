@@ -24,6 +24,11 @@ from agent.modules.mcp.repository import (
     parse_mcp_server_key,
 )
 from agent.modules.mcp.service import MCPService
+from agent.modules.mcp.db_models import AgentMCPInstall, MCPCredential, MCPServerInstall
+from agent.modules.mcp.install_repository import McpInstallRepository
+from agent.modules.mcp.installer import McpMarketplaceService, McpInstallError
+from agent.modules.mcp.migrations import migrate_mcp_tables
+from agent.modules.mcp.registry_client import McpRegistryClient
 
 
 _mcp_service: MCPService | None = None
@@ -70,19 +75,63 @@ async def test_mcp_connection(config: MCPServerConfig) -> MCPTestResult:
     return await _get_mcp_service().test_connection(config)
 
 
+def list_agent_mcp_server_names(agent_name: str) -> list[str]:
+    repo = McpInstallRepository()
+    try:
+        return repo.list_agent_server_names(agent_name)
+    finally:
+        repo.close()
+
+
+def list_agent_mcp_installs(agent_name: str) -> list[dict[str, object]]:
+    repo = McpInstallRepository()
+    try:
+        return repo.list_agent_installs(agent_name)
+    finally:
+        repo.close()
+
+
+def list_all_agent_mcp_installs() -> dict[str, list[dict[str, object]]]:
+    repo = McpInstallRepository()
+    try:
+        return repo.list_all_agent_installs()
+    finally:
+        repo.close()
+
+
+def list_mcp_installs() -> list[dict[str, object]]:
+    repo = McpInstallRepository()
+    try:
+        return repo.list_all_installs()
+    finally:
+        repo.close()
+
+
 __all__ = [
+    "AgentMCPInstall",
     "ConfigMcpServerRepository",
     "MCPService",
+    "MCPCredential",
     "MCPServerConfig",
+    "MCPServerInstall",
     "MCPServerStatus",
     "MCPTestResult",
     "MCPToolInfo",
     "MCPTransport",
+    "McpInstallError",
+    "McpInstallRepository",
+    "McpMarketplaceService",
+    "McpRegistryClient",
     "POPULAR_MCP_SERVERS",
     "PopularMcpEnvField",
     "PopularMcpServer",
+    "migrate_mcp_tables",
     "parse_mcp_server_key",
     "reload_mcp_service",
+    "list_agent_mcp_installs",
+    "list_agent_mcp_server_names",
+    "list_all_agent_mcp_installs",
+    "list_mcp_installs",
     "list_mcp_servers",
     "get_mcp_server",
     "list_mcp_server_status",

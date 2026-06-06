@@ -12,8 +12,12 @@ export const API_PATHS = {
   chatHistory: "/dashboard-api/chat-history",
   promptVariables: "/dashboard-api/prompt-variables",
   mcpServers: "/dashboard-api/mcp/servers",
-  mcpPopular: "/dashboard-api/mcp/popular",
-  mcpTest: "/dashboard-api/mcp/test",
+  mcpSearch: "/api/mcp/search",
+  mcpInstall: "/api/mcp/install",
+  mcpAgentInstallBind: (agentName: string) =>
+    `/api/mcp/agents/${encodeURIComponent(agentName)}/installs`,
+  mcpAgentInstallToggle: (agentName: string, installId: number) =>
+    `/api/mcp/agents/${encodeURIComponent(agentName)}/installs/${encodeURIComponent(String(installId))}/toggle`,
   githubRepositories: "/dashboard-api/github/repositories",
   usage: "/dashboard-api/usage",
   usageWorkspaces: "/dashboard-api/usage/workspaces",

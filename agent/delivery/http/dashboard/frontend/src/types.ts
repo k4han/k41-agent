@@ -170,6 +170,7 @@ export type AgentsPayload = {
   model_catalogs: ModelCatalog[];
   model_catalog_error: string;
   mcp_server_options?: string[];
+  mcp_installs?: Record<string, AgentMcpInstall[]>;
 };
 
 export type PromptVariable = {
@@ -519,28 +520,77 @@ export type GitHubRepositoryDetailPayload = {
 
 export type McpTransport = "stdio" | "streamable_http";
 
-export type McpEnvField = {
+export type McpRegistryInput = {
   key: string;
   label: string;
   description: string;
   required: boolean;
   secret: boolean;
+  default: string;
+  placeholder: string;
+  source: string;
 };
 
-export type McpPopularServer = {
+export type McpInstallTarget = {
   id: string;
-  name: string;
-  description: string;
+  label: string;
   transport: McpTransport;
+  registry_type: string;
+  runtime_hint: string;
   command: string;
   args: string[];
   url: string;
-  homepage: string;
-  env_fields: McpEnvField[];
+  env_template: Record<string, string>;
+  headers_template: Record<string, string>;
+  required_inputs: McpRegistryInput[];
 };
 
-export type McpPopularPayload = {
-  servers: McpPopularServer[];
+export type McpSearchResult = {
+  registry_name: string;
+  title: string;
+  description: string;
+  version: string;
+  is_latest: boolean;
+  verified: boolean;
+  repository_url: string;
+  website_url: string;
+  install_targets: McpInstallTarget[];
+  required_inputs: McpRegistryInput[];
+  auth_summary: string;
+};
+
+export type McpSearchPayload = {
+  servers: McpSearchResult[];
+  next_cursor: string;
+  count: number;
+};
+
+export type AgentMcpInstall = {
+  id: number;
+  install_id: number;
+  agent_name: string;
+  server_name: string;
+  registry_name: string;
+  registry_version: string;
+  source_type: string;
+  title: string;
+  description: string;
+  verified: boolean;
+  transport: McpTransport;
+  enabled: boolean;
+  agent_enabled: boolean;
+};
+
+export type AgentMcpInstallsPayload = {
+  installs: AgentMcpInstall[];
+};
+
+export type McpInstallResponse = {
+  status: "installed" | "auth_required";
+  install_id: number | null;
+  credential_ref: string;
+  redirect_url?: string;
+  server_name?: string;
 };
 
 export type McpToolInfo = {

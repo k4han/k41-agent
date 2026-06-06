@@ -14,6 +14,11 @@ def load_orm_models() -> tuple[type[object], ...]:
         GitHubRepositoryBinding,
         GitHubWebhookDelivery,
     )
+    from agent.modules.mcp import (
+        AgentMCPInstall,
+        MCPCredential,
+        MCPServerInstall,
+    )
     from agent.modules.prompt_variables import PromptVariable
     from agent.modules.usage import LLMUsageEvent
     from agent.modules.workspaces import ThreadWorkspace
@@ -31,6 +36,9 @@ def load_orm_models() -> tuple[type[object], ...]:
         GitHubInstallation,
         GitHubRepositoryBinding,
         GitHubWebhookDelivery,
+        MCPCredential,
+        MCPServerInstall,
+        AgentMCPInstall,
         ThreadWorkspace,
         PromptVariable,
         LLMUsageEvent,

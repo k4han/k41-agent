@@ -5,6 +5,7 @@ import { ArrowLeft, Bot, Save } from "lucide-solid";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ErrorPanel } from "@/components/State";
 import { useToast } from "@/components/Toast";
+import { API_PATHS } from "@/lib/endpoints";
 import { apiFetch, postJson, putJson } from "@/lib/api";
 import { uniqueSorted } from "@/lib/utils";
 import { SettingsLayout } from "@/pages/settings/SettingsLayout";
@@ -43,6 +44,7 @@ export function AgentEditPage(props: { agentName?: string }) {
   const [confirmDiscardOpen, setConfirmDiscardOpen] = createSignal(false);
   const [savedRef, setSavedRef] = createSignal(false);
   const [createInitialized, setCreateInitialized] = createSignal(false);
+  const [mcpUpdating, setMcpUpdating] = createSignal(false);
 
   let pendingRetry: (() => void) | null = null;
 
@@ -65,7 +67,7 @@ export function AgentEditPage(props: { agentName?: string }) {
   };
 
   const toggleListValue = (
-    key: "tools" | "sub_agents" | "mcp_servers" | "plan_approval_targets",
+    key: "tools" | "sub_agents" | "plan_approval_targets",
     value: string,
     checked: boolean,
   ) => {
@@ -144,8 +146,18 @@ export function AgentEditPage(props: { agentName?: string }) {
     ]),
   );
   const mcpServerOptions = createMemo(() =>
-    uniqueSorted([...(payload()?.mcp_server_options || []), ...form().mcp_servers]),
+    uniqueSorted([
+      ...(payload()?.mcp_server_options || []),
+      ...(mcpInstalls().map((install) => install.server_name) || []),
+    ]),
   );
+  const mcpInstalls = createMemo(() => {
+    const name = props.agentName || form().name;
+    if (!name) {
+      return [];
+    }
+    return payload()?.mcp_installs?.[name] || [];
+  });
   const toolGroups = createMemo(() => {
     const p = payload();
     if (!p) {
@@ -237,6 +249,37 @@ export function AgentEditPage(props: { agentName?: string }) {
     }
   };
 
+  const toggleMcpInstall = async (serverName: string, checked: boolean) => {
+    const name = props.agentName || form().name;
+    if (!name) {
+      showToast("Save the agent before enabling MCP servers.", "warning");
+      return;
+    }
+    const install = mcpInstalls().find((item) => item.server_name === serverName);
+    setMcpUpdating(true);
+    try {
+      if (install) {
+        await putJson(API_PATHS.mcpAgentInstallToggle(name, install.install_id), {
+          enabled: checked,
+        });
+      } else if (checked) {
+        await postJson(API_PATHS.mcpAgentInstallBind(name), {
+          server_name: serverName,
+          enabled: true,
+        });
+      }
+      showToast(`${checked ? "Enabled" : "Disabled"} MCP server "${serverName}".`);
+      await load();
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : "Failed to update MCP server binding",
+        "error",
+      );
+    } finally {
+      setMcpUpdating(false);
+    }
+  };
+
   // In-app navigation guard (back button, sidebar link, etc.)
   useBeforeLeave((e) => {
     if (savedRef() || !isDirty() || confirmDiscardOpen()) {
@@ -322,11 +365,14 @@ export function AgentEditPage(props: { agentName?: string }) {
         toolGroups={toolGroups()}
         totalBuiltInTools={totalBuiltInTools()}
         mcpServerOptions={mcpServerOptions()}
+        mcpInstalls={mcpInstalls()}
+        mcpUpdating={mcpUpdating()}
         subAgentOptions={subAgentOptions()}
         planApprovalTargetOptions={planApprovalTargetOptions()}
         onUpdate={updateForm}
         onToggleListValue={toggleListValue}
         onToggleToolGroup={toggleToolGroup}
+        onToggleMcpInstall={toggleMcpInstall}
         onInsertVariable={handleInsertVariable}
       />
     );

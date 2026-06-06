@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
+
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
 from agent.modules.mcp.models import MCPServerConfig, MCPTransport
 from agent.shared.config import get_config_service
 from agent.shared.infrastructure.config_file import coerce_bool
 from agent.shared.infrastructure.parsing import parse_string_or_list
+
+logger = logging.getLogger(__name__)
 
 
 _PROVIDER_KEY_PATTERN = re.compile(
@@ -112,31 +117,80 @@ def _config_fingerprint(flat_config: dict[str, Any]) -> tuple[tuple[str, str], .
     )
 
 
+# Module-level version counter that the install repository bumps on every
+# mutation. The config repository includes this in its cache key so any
+# out-of-band DB change invalidates the in-memory cache without a manual
+# ``reload()`` call (e.g. background migration, tests).
+_DB_REVISION = 0
+
+
+def bump_db_revision() -> None:
+    """Invalidate the config cache by bumping the DB revision counter."""
+    global _DB_REVISION
+    _DB_REVISION += 1
+
+
+def _db_revision() -> int:
+    return _DB_REVISION
+
+
 class ConfigMcpServerRepository:
-    """Resolve MCP server configs from the centralized config service."""
+    """Resolve MCP server configs from DB installs with legacy config fallback."""
 
     def __init__(self) -> None:
         self._cache: tuple[
             dict[str, MCPServerConfig],
             tuple[tuple[str, str], ...],
+            int,
         ] | None = None
 
     def reload(self) -> None:
         self._cache = None
+        bump_db_revision()
 
-    def _load(self) -> dict[str, MCPServerConfig]:
+    def _load_legacy(self) -> dict[str, MCPServerConfig]:
         config = get_config_service()
         flat_config = config.get_all()
-        fingerprint = _config_fingerprint(flat_config)
-        if self._cache is not None and self._cache[1] == fingerprint:
-            return self._cache[0]
 
         entries = _extract_server_entries(flat_config)
         servers: dict[str, MCPServerConfig] = {}
         for key, values in entries.items():
             servers[key] = _build_server_config(key, values)
+        return servers
 
-        self._cache = (servers, fingerprint)
+    def _load_db(self) -> dict[str, MCPServerConfig]:
+        from agent.modules.mcp.install_repository import McpInstallRepository
+
+        try:
+            repo = McpInstallRepository()
+        except (OperationalError, SQLAlchemyError) as exc:
+            logger.warning("Falling back to legacy MCP config (DB unavailable): %s", exc)
+            return {}
+        try:
+            try:
+                configs = repo.list_server_configs()
+            finally:
+                repo.close()
+        except (OperationalError, SQLAlchemyError) as exc:
+            logger.warning("Falling back to legacy MCP config (DB unavailable): %s", exc)
+            return {}
+        return {
+            _normalize_server_name(config.name): config
+            for config in configs
+        }
+
+    def _load(self) -> dict[str, MCPServerConfig]:
+        config = get_config_service()
+        flat_config = config.get_all()
+        config_fp = _config_fingerprint(flat_config)
+        db_fp = _db_revision()
+        if self._cache is not None and self._cache[1] == config_fp and self._cache[2] == db_fp:
+            return self._cache[0]
+
+        servers = self._load_legacy()
+        servers.update(self._load_db())
+
+        self._cache = (servers, config_fp, db_fp)
         return servers
 
     def list_servers(self) -> list[MCPServerConfig]:
@@ -152,5 +206,6 @@ class ConfigMcpServerRepository:
 
 __all__ = [
     "ConfigMcpServerRepository",
+    "bump_db_revision",
     "parse_mcp_server_key",
 ]

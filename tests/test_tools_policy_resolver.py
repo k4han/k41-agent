@@ -107,6 +107,40 @@ class TestToolPolicy:
         policy = ToolPolicy.from_agent_config(config)
         assert policy.is_allowed(_builtin_descriptor("call_agent", _t_call_agent_stub))
 
+    def test_default_agent_auto_includes_mcp_when_empty_list(self, monkeypatch) -> None:
+        monkeypatch.setattr(
+            "agent.modules.mcp.list_agent_mcp_server_names",
+            lambda name: [],
+        )
+        config = SimpleNamespace(
+            name="default",
+            tools=["echo"],
+            mcp_servers=[],
+            sub_agents=None,
+        )
+        policy = ToolPolicy.from_agent_config(config)
+        d_gh = _mcp_descriptor("mcp__github__list_repos", _t_read_stub)
+        assert policy.is_allowed(d_gh)
+        assert policy.auto_include_all_mcp is True
+
+    def test_default_agent_auto_includes_mcp_when_mcp_servers_missing(
+        self, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(
+            "agent.modules.mcp.list_agent_mcp_server_names",
+            lambda name: [],
+        )
+        config = SimpleNamespace(
+            name="default",
+            tools=["echo"],
+            mcp_servers=None,
+            sub_agents=None,
+        )
+        policy = ToolPolicy.from_agent_config(config)
+        d_gh = _mcp_descriptor("mcp__github__list_repos", _t_read_stub)
+        assert policy.is_allowed(d_gh)
+        assert policy.auto_include_all_mcp is True
+
     def test_mcp_server_allow_list(self) -> None:
         policy = ToolPolicy(
             agent_name="x",

@@ -3,27 +3,20 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from agent.delivery.http.dashboard.routes.shared import (
-    _delete_config_tree,
-    _get_config_service,
-    _update_config_settings,
-)
 from agent.modules.mcp import (
-    POPULAR_MCP_SERVERS,
     MCPServerConfig,
     MCPServerStatus,
     MCPTestResult,
     MCPTransport,
-    PopularMcpServer,
     list_mcp_server_status,
-    parse_mcp_server_key,
     reload_mcp_server_tools,
-    reload_mcp_service,
     test_mcp_connection,
+    McpInstallRepository,
 )
+from agent.modules.tools import reload_mcp_descriptors
 
 
 router = APIRouter()
@@ -108,74 +101,13 @@ def _body_to_config(name: str, body: McpServerBody) -> MCPServerConfig:
     )
 
 
-def _server_config_keys(name: str) -> dict[str, Any | None]:
-    return {
-        f"mcp.servers.{name}.transport": None,
-        f"mcp.servers.{name}.command": None,
-        f"mcp.servers.{name}.args": None,
-        f"mcp.servers.{name}.url": None,
-        f"mcp.servers.{name}.enabled": None,
-    }
-
-
-def _config_to_flat_updates(config: MCPServerConfig) -> dict[str, Any | None]:
-    name = config.name
-    values: dict[str, Any | None] = {
-        f"mcp.servers.{name}.transport": str(config.transport),
-        f"mcp.servers.{name}.enabled": bool(config.enabled),
-    }
-
-    if config.transport == MCPTransport.STDIO:
-        values[f"mcp.servers.{name}.command"] = config.command
-        values[f"mcp.servers.{name}.args"] = list(config.args)
-        values[f"mcp.servers.{name}.url"] = None
-    else:
-        values[f"mcp.servers.{name}.url"] = config.url
-        values[f"mcp.servers.{name}.command"] = None
-        values[f"mcp.servers.{name}.args"] = None
-
-    for key, value in config.env.items():
-        values[f"mcp.servers.{name}.env.{key}"] = value
-    for key, value in config.headers.items():
-        values[f"mcp.servers.{name}.headers.{key}"] = value
-    return values
-
-
-def _existing_server_names(service) -> dict[str, str]:
-    """Return a mapping of normalized-name -> original-name from current config."""
-    found: dict[str, str] = {}
-    for key in service.get_all().keys():
-        parsed = parse_mcp_server_key(key)
-        if parsed is None:
-            continue
-        raw_name, _ = parsed
-        normalized = raw_name.strip().lower().replace("-", "_")
-        if normalized and normalized not in found:
-            found[normalized] = raw_name.strip() or normalized
-    return found
-
-
-def _serialize_popular(server: PopularMcpServer) -> dict[str, Any]:
-    return {
-        "id": server.id,
-        "name": server.name,
-        "description": server.description,
-        "transport": str(server.transport),
-        "command": server.command,
-        "args": list(server.args),
-        "url": server.url,
-        "homepage": server.homepage,
-        "env_fields": [
-            {
-                "key": field.key,
-                "label": field.label,
-                "description": field.description,
-                "required": field.required,
-                "secret": field.secret,
-            }
-            for field in server.env_fields
-        ],
-    }
+def _credential_payload_from_config(config: MCPServerConfig) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    if config.env:
+        payload["env"] = dict(config.env)
+    if config.headers:
+        payload["headers"] = dict(config.headers)
+    return payload
 
 
 def _serialize_status(status: MCPServerStatus) -> dict[str, Any]:
@@ -196,9 +128,9 @@ def _serialize_status(status: MCPServerStatus) -> dict[str, Any]:
         "error": status.error,
         "command": status.command,
         "args": list(status.args),
-        "env": status.env,
+        "env": dict(status.env),
         "url": status.url,
-        "headers": status.headers,
+        "headers": dict(status.headers),
     }
 
 
@@ -220,11 +152,6 @@ def _serialize_test_result(result: MCPTestResult) -> dict[str, Any]:
 # --- Routes ---
 
 
-@router.get("/dashboard-api/mcp/popular")
-async def list_popular_mcp_servers() -> dict[str, Any]:
-    return {"servers": [_serialize_popular(server) for server in POPULAR_MCP_SERVERS]}
-
-
 @router.get("/dashboard-api/mcp/servers")
 async def list_dashboard_mcp_servers() -> dict[str, Any]:
     statuses = await list_mcp_server_status()
@@ -234,24 +161,25 @@ async def list_dashboard_mcp_servers() -> dict[str, Any]:
 @router.post("/dashboard-api/mcp/servers")
 async def create_dashboard_mcp_server(
     body: CreateMcpServerBody,
-    request: Request,
 ) -> dict[str, Any]:
-    service = _get_config_service(request)
     name = _validate_server_name(body.name)
-    existing = _existing_server_names(service)
-    if name.lower().replace("-", "_") in existing:
-        raise HTTPException(
-            status_code=409,
-            detail=f"MCP server already exists: {name}.",
-        )
+    repo = McpInstallRepository()
+    try:
+        if repo.get_server_config(name) is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"MCP server already exists: {name}.",
+            )
 
-    config = _body_to_config(name, body)
-    _update_config_settings(
-        service,
-        _config_to_flat_updates(config),
-        require_writable=True,
-    )
-    reload_mcp_service()
+        config = _body_to_config(name, body)
+        repo.create_custom_server(
+            server_name=name,
+            config=config,
+            credential_payload=_credential_payload_from_config(config),
+        )
+    finally:
+        repo.close()
+    await reload_mcp_descriptors()
     return {"status": "created", "name": name}
 
 
@@ -259,45 +187,35 @@ async def create_dashboard_mcp_server(
 async def update_dashboard_mcp_server(
     server_name: str,
     body: McpServerBody,
-    request: Request,
 ) -> dict[str, Any]:
-    service = _get_config_service(request)
-    existing = _existing_server_names(service)
-    normalized = server_name.strip().lower().replace("-", "_")
-    if normalized not in existing:
-        raise HTTPException(status_code=404, detail=f"MCP server not found: {server_name}.")
-
-    canonical_name = existing[normalized]
-    # Drop the entire subtree first so removed env/header keys do not linger.
-    _delete_config_tree(service, f"mcp.servers.{canonical_name}")
-
-    config = _body_to_config(canonical_name, body)
-    _update_config_settings(
-        service,
-        _config_to_flat_updates(config),
-        require_writable=True,
-    )
-    reload_mcp_service()
-    return {"status": "updated", "name": canonical_name}
+    name = _validate_server_name(server_name)
+    config = _body_to_config(name, body)
+    repo = McpInstallRepository()
+    try:
+        if not repo.update_custom_server(
+            server_name=name,
+            config=config,
+            credential_payload=_credential_payload_from_config(config),
+        ):
+            raise HTTPException(status_code=404, detail=f"MCP server not found: {server_name}.")
+    finally:
+        repo.close()
+    await reload_mcp_descriptors()
+    return {"status": "updated", "name": name}
 
 
 @router.delete("/dashboard-api/mcp/servers/{server_name}")
 async def delete_dashboard_mcp_server(
     server_name: str,
-    request: Request,
 ) -> dict[str, Any]:
-    service = _get_config_service(request)
-    existing = _existing_server_names(service)
-    normalized = server_name.strip().lower().replace("-", "_")
-    if normalized not in existing:
-        raise HTTPException(status_code=404, detail=f"MCP server not found: {server_name}.")
-
-    canonical_name = existing[normalized]
-    deleted = _delete_config_tree(service, f"mcp.servers.{canonical_name}")
-    if not deleted:
-        raise HTTPException(status_code=404, detail=f"MCP server not found: {server_name}.")
-    reload_mcp_service()
-    return {"status": "deleted", "name": canonical_name}
+    repo = McpInstallRepository()
+    try:
+        if not repo.delete_server(server_name):
+            raise HTTPException(status_code=404, detail=f"MCP server not found: {server_name}.")
+    finally:
+        repo.close()
+    await reload_mcp_descriptors()
+    return {"status": "deleted", "name": server_name}
 
 
 class ToggleMcpServerBody(BaseModel):
@@ -325,19 +243,12 @@ async def reload_dashboard_mcp_server(server_name: str) -> dict[str, Any]:
 async def toggle_dashboard_mcp_server(
     server_name: str,
     body: ToggleMcpServerBody,
-    request: Request,
 ) -> dict[str, Any]:
-    service = _get_config_service(request)
-    existing = _existing_server_names(service)
-    normalized = server_name.strip().lower().replace("-", "_")
-    if normalized not in existing:
-        raise HTTPException(status_code=404, detail=f"MCP server not found: {server_name}.")
-
-    canonical_name = existing[normalized]
-    _update_config_settings(
-        service,
-        {f"mcp.servers.{canonical_name}.enabled": bool(body.enabled)},
-        require_writable=True,
-    )
-    reload_mcp_service()
-    return {"status": "updated", "name": canonical_name, "enabled": body.enabled}
+    repo = McpInstallRepository()
+    try:
+        if not repo.toggle_server(server_name, body.enabled):
+            raise HTTPException(status_code=404, detail=f"MCP server not found: {server_name}.")
+    finally:
+        repo.close()
+    await reload_mcp_descriptors()
+    return {"status": "updated", "name": server_name, "enabled": body.enabled}

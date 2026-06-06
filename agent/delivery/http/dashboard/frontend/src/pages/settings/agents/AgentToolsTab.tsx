@@ -1,7 +1,7 @@
 import { For, Show } from "solid-js";
 
 import { uniqueSorted } from "@/lib/utils";
-import type { AgentsPayload } from "@/types";
+import type { AgentMcpInstall, AgentsPayload } from "@/types";
 
 import type { AgentForm } from "./agentForm";
 
@@ -26,15 +26,23 @@ export function AgentToolsTab(props: {
   toolGroups: AgentToolGroup[];
   totalBuiltInTools: number;
   mcpServerOptions: string[];
+  mcpInstalls: AgentMcpInstall[];
+  mcpUpdating: boolean;
   subAgentOptions: string[];
   planApprovalTargetOptions: string[];
   onToggleListValue: (
-    key: "tools" | "sub_agents" | "mcp_servers" | "plan_approval_targets",
+    key: "tools" | "sub_agents" | "plan_approval_targets",
     value: string,
     checked: boolean,
   ) => void;
   onToggleToolGroup: (tools: string[], checked: boolean) => void;
+  onToggleMcpInstall: (serverName: string, checked: boolean) => void;
 }) {
+  const activeMcpCount = () =>
+    props.mcpInstalls.filter((install) => install.agent_enabled).length;
+  const installForServer = (serverName: string) =>
+    props.mcpInstalls.find((install) => install.server_name === serverName);
+
   return (
     <div class="agent-config-tools">
       <div class="agent-config-summary">
@@ -44,7 +52,7 @@ export function AgentToolsTab(props: {
         </div>
         <div class="agent-config-stat">
           <span>MCP servers</span>
-          <strong>{`${props.form.mcp_servers.length}/${props.mcpServerOptions.length}`}</strong>
+          <strong>{`${activeMcpCount()}/${props.mcpServerOptions.length}`}</strong>
         </div>
         <div class="agent-config-stat">
           <span>Sub-agents</span>
@@ -124,23 +132,24 @@ export function AgentToolsTab(props: {
             <div>
               <div class="agent-config-eyebrow">External context</div>
               <h3>MCP Servers</h3>
-              <p class="hint">Connect this agent to configured MCP server toolsets.</p>
+              <p class="hint">Connect this agent to installed MCP server toolsets.</p>
             </div>
-            <span class="badge badge-info">{`${props.form.mcp_servers.length} selected`}</span>
+            <span class="badge badge-info">{`${activeMcpCount()} selected`}</span>
           </div>
           <div class="agent-config-section-body">
             <div class="agent-config-option-grid">
               <For each={props.mcpServerOptions}>
                 {(server) => {
-                  const isChecked = () => props.form.mcp_servers.includes(server);
+                  const install = () => installForServer(server);
+                  const isChecked = () => Boolean(install()?.agent_enabled);
                   return (
-                    <label class={optionCardClass(isChecked(), props.readOnly)}>
+                    <label class={optionCardClass(isChecked(), props.mcpUpdating)}>
                       <input
                         type="checkbox"
                         checked={isChecked()}
-                        disabled={props.readOnly}
+                        disabled={props.mcpUpdating}
                         onChange={(event) =>
-                          props.onToggleListValue("mcp_servers", server, event.currentTarget.checked)
+                          props.onToggleMcpInstall(server, event.currentTarget.checked)
                         }
                       />
                       <span class="agent-config-option-text mono">{server}</span>

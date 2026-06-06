@@ -20,6 +20,7 @@ from agent.modules.tools.policy import ToolPolicy
 from agent.modules.tools.registry_service import (
     ensure_mcp_loaded,
     get_registry_service,
+    reload_mcp_descriptors,
 )
 from agent.modules.tools.resolver import ToolResolver
 from agent.modules.tools.result import (
@@ -183,6 +184,7 @@ __all__ = [
     "aresolve_tools_for_agent",
     "close_thread_shell_sessions",
     "ensure_mcp_loaded",
+    "reload_mcp_descriptors",
     "find_descriptors",
     "find_tools",
     "format_tool_error",

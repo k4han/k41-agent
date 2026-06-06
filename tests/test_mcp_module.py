@@ -192,6 +192,10 @@ def test_repository_reads_mcp_servers_from_runtime_config(
         encoding="utf-8",
     )
     _set_config_path(monkeypatch, config_path)
+    monkeypatch.setattr(
+        "agent.modules.mcp.repository.ConfigMcpServerRepository._load_db",
+        lambda self: {},
+    )
 
     repo = ConfigMcpServerRepository()
     servers = {server.name.lower(): server for server in repo.list_servers()}
@@ -221,6 +225,10 @@ def test_repository_returns_empty_when_no_servers(
     config_path = tmp_path / "config.yaml"
     config_path.write_text("llm: {}\n", encoding="utf-8")
     _set_config_path(monkeypatch, config_path)
+    monkeypatch.setattr(
+        "agent.modules.mcp.repository.ConfigMcpServerRepository._load_db",
+        lambda self: {},
+    )
 
     repo = ConfigMcpServerRepository()
     assert repo.list_servers() == []

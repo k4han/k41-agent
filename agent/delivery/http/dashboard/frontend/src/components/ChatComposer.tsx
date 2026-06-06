@@ -182,7 +182,7 @@ export function ChatComposer(props: ChatComposerProps) {
                 : "Ask Kaka to build features, fix bugs, or work on your code"
         }
         inputMode="text"
-        enterKeyHint="send"
+        enterkeyhint="send"
         onInput={(event) => {
           props.onPromptChange(event.currentTarget.value);
           resizeChatPromptInput();

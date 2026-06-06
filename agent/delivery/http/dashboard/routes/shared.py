@@ -705,10 +705,19 @@ async def _agent_card_options(cards: list[AgentCard] | None = None) -> dict[str,
     tool_groups = _build_tool_groups(tool_names, tool_categories)
 
     try:
-        from agent.modules.mcp import list_mcp_servers
-        mcp_servers = [server.name for server in list_mcp_servers()]
+        from agent.modules.mcp import list_all_agent_mcp_installs, list_mcp_installs
+
+        mcp_installs = list_mcp_installs()
+        mcp_servers = [str(item.get("server_name") or "") for item in mcp_installs]
+        all_agent_installs = list_all_agent_mcp_installs()
+        agent_mcp_installs = {
+            card.name: all_agent_installs.get(card.name, [])
+            for card in cards
+            if card.valid
+        }
     except Exception:
         mcp_servers = []
+        agent_mcp_installs = {}
 
     return {
         "cards": [_serialize_agent_card(card) for card in cards],
@@ -717,6 +726,7 @@ async def _agent_card_options(cards: list[AgentCard] | None = None) -> dict[str,
         "workflows": workflows,
         "agent_names": sorted(agent_names),
         "mcp_server_options": mcp_servers,
+        "mcp_installs": agent_mcp_installs,
         **await _provider_model_options(),
     }
 

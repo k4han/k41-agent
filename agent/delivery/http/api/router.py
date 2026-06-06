@@ -12,6 +12,7 @@ from agent.delivery.http.api.schemas import (
     PairingCodeResponse,
     ReconnectRequest,
 )
+from agent.delivery.http.api.mcp import router as mcp_router
 from agent.modules.agent_runtime import (
     build_run_params,
     run_agent,
@@ -42,6 +43,8 @@ router = APIRouter(
     tags=["agent"],
     dependencies=[Depends(get_current_admin)],
 )
+
+router.include_router(mcp_router)
 
 
 def _request_to_run_params(request: ChatRequest) -> dict[str, object]:

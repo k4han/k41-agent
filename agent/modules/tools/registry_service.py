@@ -38,6 +38,10 @@ class ToolRegistryService:
                 continue
             self._registry.add(desc)
 
+    def remove_by_source(self, source: ToolSource) -> None:
+        for desc in list(self._registry.find(source=source)):
+            self._registry.remove(desc.id)
+
     def get_tool_by_name(self, name: str) -> BaseTool | None:
         return self._registry.get_tool(name)
 
@@ -113,9 +117,21 @@ async def ensure_mcp_loaded(*, force: bool = False) -> None:
     from agent.modules.tools.sources.mcp import McpToolSource
 
     service = get_registry_service()
+    if force:
+        service.remove_by_source(ToolSource.MCP)
     descriptors = await McpToolSource().load()
     service.load_descriptors(descriptors)
     _mcp_loaded = True
+
+
+async def reload_mcp_descriptors() -> None:
+    """Reload MCP service state and replace MCP descriptors in the registry."""
+    from agent.modules.mcp import reload_mcp_service
+
+    global _mcp_loaded
+    reload_mcp_service()
+    _mcp_loaded = False
+    await ensure_mcp_loaded(force=True)
 
 
 def _reset_registry_service_for_tests() -> None:

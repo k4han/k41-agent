@@ -1,15 +1,18 @@
 import { createSignal, For, Show } from "solid-js";
-import { Plus, RefreshCw, Trash2 } from "lucide-solid";
+import { Plus, RefreshCw, Search, Trash2 } from "lucide-solid";
 
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DashboardTable } from "@/components/DashboardTable";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
+import { API_PATHS } from "@/lib/endpoints";
 import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
 import { useCatalogAndLoad } from "@/lib/useCatalogAndLoad";
 import type {
-  McpPopularPayload,
-  McpPopularServer,
+  AgentsPayload,
+  McpInstallResponse,
+  McpSearchPayload,
+  McpSearchResult,
   McpServerInput,
   McpServerStatus,
   McpServersPayload,
@@ -20,23 +23,101 @@ import { McpServerDialog } from "./McpServerDialog";
 import { getServerIcon } from "./mcpIcons";
 
 export function McpTab() {
-  const [popular, setPopular] = createSignal<McpPopularServer[]>([]);
   const [servers, setServers] = createSignal<McpServerStatus[]>([]);
+  const [agentNames, setAgentNames] = createSignal<string[]>([]);
+  const [results, setResults] = createSignal<McpSearchResult[]>([]);
+  const [query, setQuery] = createSignal("");
+  const [nextCursor, setNextCursor] = createSignal("");
   const [loadError, setLoadError] = createSignal("");
+  const [searching, setSearching] = createSignal(false);
   const [showCreate, setShowCreate] = createSignal(false);
   const [selectedServer, setSelectedServer] = createSignal<McpServerStatus | null>(null);
-  const [installTarget, setInstallTarget] = createSignal<McpPopularServer | null>(
-    null,
-  );
+  const [installTarget, setInstallTarget] = createSignal<McpSearchResult | null>(null);
   const [deleteTargetName, setDeleteTargetName] = createSignal<string | null>(null);
   const { showToast } = useToast();
 
+  const load = async () => {
+    setLoadError("");
+    try {
+      const [serversPayload, agentsPayload] = await Promise.all([
+        apiFetch<McpServersPayload>(API_PATHS.mcpServers),
+        apiFetch<AgentsPayload>(API_PATHS.agents),
+      ]);
+      setServers(serversPayload.servers);
+      setAgentNames(agentsPayload.agent_names || []);
+      if (results().length === 0 && !nextCursor()) {
+        await searchMarketplace();
+      }
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Failed to load MCP servers");
+    }
+  };
+
+  const searchMarketplace = async (cursor = "") => {
+    setSearching(true);
+    try {
+      const params = new URLSearchParams();
+      if (query().trim()) params.set("q", query().trim());
+      if (cursor) params.set("cursor", cursor);
+      params.set("limit", "12");
+      const payload = await apiFetch<McpSearchPayload>(
+        `${API_PATHS.mcpSearch}?${params.toString()}`,
+      );
+      setResults(cursor ? [...results(), ...payload.servers] : payload.servers);
+      setNextCursor(payload.next_cursor || "");
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : "Failed to search MCP registry.",
+        "error",
+      );
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const installServer = async (payload: {
+    agent_name: string;
+    registry_name: string;
+    version: string;
+    target_id: string;
+    server_name: string;
+    input_values: Record<string, string>;
+    auth_method: string;
+  }) => {
+    try {
+      const result = await postJson<McpInstallResponse>(API_PATHS.mcpInstall, payload);
+      if (result.status === "installed") {
+        showToast(`Installed MCP server "${result.server_name || payload.server_name}".`);
+        setInstallTarget(null);
+        await load();
+      }
+      return result;
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : "Failed to install MCP server.",
+        "error",
+      );
+      throw err;
+    }
+  };
+
+  const createServer = async (payload: McpServerInput) => {
+    try {
+      await postJson(API_PATHS.mcpServers, payload);
+      showToast(`Created MCP server "${payload.name}".`);
+      setShowCreate(false);
+      await load();
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : "Failed to create MCP server.",
+        "error",
+      );
+    }
+  };
+
   const updateServer = async (payload: McpServerInput) => {
     try {
-      await putJson(
-        `/dashboard-api/mcp/servers/${encodeURIComponent(payload.name)}`,
-        payload,
-      );
+      await putJson(API_PATHS.mcpServer(payload.name), payload);
       showToast(`Updated MCP server "${payload.name}".`);
       setSelectedServer(null);
       await load();
@@ -48,46 +129,11 @@ export function McpTab() {
     }
   };
 
-  const load = async () => {
-    setLoadError("");
-    try {
-      const [popularPayload, serversPayload] = await Promise.all([
-        apiFetch<McpPopularPayload>("/dashboard-api/mcp/popular"),
-        apiFetch<McpServersPayload>("/dashboard-api/mcp/servers"),
-      ]);
-      setPopular(popularPayload.servers);
-      setServers(serversPayload.servers);
-    } catch (err) {
-      setLoadError(err instanceof Error ? err.message : "Failed to load MCP servers");
-    }
-  };
-
-  const createServer = async (payload: McpServerInput) => {
-    try {
-      await postJson("/dashboard-api/mcp/servers", payload);
-      showToast(`Created MCP server "${payload.name}".`);
-      setShowCreate(false);
-      setInstallTarget(null);
-      await load();
-    } catch (err) {
-      showToast(
-        err instanceof Error ? err.message : "Failed to create MCP server.",
-        "error",
-      );
-    }
-  };
-
-  const requestDeleteServer = (name: string) => {
-    setDeleteTargetName(name);
-  };
-
   const confirmDeleteServer = async () => {
     const name = deleteTargetName();
-    if (!name) {
-      return;
-    }
+    if (!name) return;
     try {
-      await deleteJson(`/dashboard-api/mcp/servers/${encodeURIComponent(name)}`);
+      await deleteJson(API_PATHS.mcpServer(name));
       showToast(`Deleted MCP server "${name}".`);
       await load();
     } catch (err) {
@@ -102,9 +148,7 @@ export function McpTab() {
 
   const reloadServer = async (name: string) => {
     try {
-      await postJson(
-        `/dashboard-api/mcp/servers/${encodeURIComponent(name)}/reload`,
-      );
+      await postJson(`${API_PATHS.mcpServer(name)}/reload`);
       showToast(`Reloaded "${name}".`);
       await load();
     } catch (err) {
@@ -117,10 +161,7 @@ export function McpTab() {
 
   const toggleServer = async (name: string, enabled: boolean) => {
     try {
-      await putJson(
-        `/dashboard-api/mcp/servers/${encodeURIComponent(name)}/toggle`,
-        { enabled },
-      );
+      await putJson(`${API_PATHS.mcpServer(name)}/toggle`, { enabled });
       showToast(`${enabled ? "Enabled" : "Disabled"} MCP server "${name}".`);
       await load();
     } catch (err) {
@@ -136,20 +177,13 @@ export function McpTab() {
   return (
     <div class="stack">
       <div class="row-wrap-end">
-        <button
-          class="btn btn-primary"
-          type="button"
-          onClick={() => setShowCreate(true)}
-        >
+        <button class="btn btn-primary" type="button" onClick={() => setShowCreate(true)}>
           <Plus size={14} />
           Add custom server
         </button>
       </div>
-      <DataGate
-        data={loadError() ? undefined : popular()}
-        error={loadError()}
-        onRetry={load}
-      >
+
+      <DataGate data={loadError() ? undefined : servers()} error={loadError()} onRetry={load}>
         {() => (
           <>
             <section class="panel">
@@ -157,8 +191,7 @@ export function McpTab() {
                 <div>
                   <div class="panel-title">Your MCP servers</div>
                   <div class="hint">
-                    Tools from these servers are exposed to agents with the
-                    <code> mcp__&lt;server&gt;__&lt;tool&gt; </code>prefix.
+                    Installed servers are enabled per agent from the agent tools page.
                   </div>
                 </div>
               </div>
@@ -171,7 +204,7 @@ export function McpTab() {
                   {},
                 ]}
                 rows={servers()}
-                emptyMessage="No MCP servers configured yet. Install one from the catalog below or add a custom server."
+                emptyMessage="No MCP servers configured yet. Install one from the marketplace below or add a custom server."
               >
                 {(server) => (
                   <tr
@@ -198,37 +231,19 @@ export function McpTab() {
                         <button
                           type="button"
                           class={`toggle-control ${server.enabled ? "active" : ""}`}
-                          onClick={(e) => { e.stopPropagation(); toggleServer(server.name, !server.enabled); }}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void toggleServer(server.name, !server.enabled);
+                          }}
                           title={server.enabled ? "Disable server" : "Enable server"}
                         >
                           <div class="toggle-track">
                             <div class="toggle-thumb" />
                           </div>
                         </button>
-                        <Show
-                          when={server.enabled}
-                          fallback={
-                            <span class="badge badge-warning">disabled</span>
-                          }
-                        >
-                          <Show
-                            when={!server.error}
-                            fallback={
-                              <span
-                                class="badge badge-danger"
-                                title={server.error}
-                              >
-                                error
-                              </span>
-                            }
-                          >
-                            <span
-                              class={
-                                server.loaded
-                                  ? "badge badge-success"
-                                  : "badge"
-                              }
-                            >
+                        <Show when={server.enabled} fallback={<span class="badge badge-warning">disabled</span>}>
+                          <Show when={!server.error} fallback={<span class="badge badge-danger" title={server.error}>error</span>}>
+                            <span class={server.loaded ? "badge badge-success" : "badge"}>
                               {server.loaded ? "loaded" : "pending"}
                             </span>
                           </Show>
@@ -241,7 +256,10 @@ export function McpTab() {
                         <button
                           class="btn btn-sm"
                           type="button"
-                          onClick={(e) => { e.stopPropagation(); reloadServer(server.name); }}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void reloadServer(server.name);
+                          }}
                           title="Reload tools"
                         >
                           <RefreshCw size={13} />
@@ -249,7 +267,10 @@ export function McpTab() {
                         <button
                           class="btn btn-sm"
                           type="button"
-                          onClick={(e) => { e.stopPropagation(); requestDeleteServer(server.name); }}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setDeleteTargetName(server.name);
+                          }}
                           title="Delete"
                         >
                           <Trash2 size={13} />
@@ -264,31 +285,49 @@ export function McpTab() {
             <section class="panel">
               <div class="panel-header">
                 <div>
-                  <div class="panel-title">Popular MCP servers</div>
-                  <div class="hint">Install with one click. You may still need to provide credentials.</div>
+                  <div class="panel-title">MCP Marketplace</div>
+                  <div class="hint">Search the official MCP registry and install servers per agent.</div>
                 </div>
               </div>
-              <div class="panel-body">
+              <div class="panel-body stack">
+                <div class="row-wrap">
+                  <input
+                    class="input"
+                    placeholder="Search MCP servers"
+                    value={query()}
+                    onInput={(event) => setQuery(event.currentTarget.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") void searchMarketplace();
+                    }}
+                  />
+                  <button class="btn" type="button" onClick={() => void searchMarketplace()} disabled={searching()}>
+                    <Search size={14} />
+                    {searching() ? "Searching..." : "Search"}
+                  </button>
+                </div>
                 <div class="grid-3">
-                  <For each={popular()}>
+                  <For each={results()} fallback={<div class="empty">No marketplace results.</div>}>
                     {(server) => (
                       <div class="panel mcp-popular-card">
                         <div class="setting-title mcp-popular-card-title">
-                          {getServerIcon(server.name)}
-                          {server.name}
+                          {getServerIcon(server.title)}
+                          {server.title}
+                        </div>
+                        <div class="hint mono" style={{ "font-size": "11px" }}>
+                          {server.registry_name}
                         </div>
                         <div class="hint mcp-popular-card-description">
                           {server.description}
                         </div>
-                        <div class="mcp-popular-card-footer">
-                          <span class="mono mcp-popular-card-transport">
-                            {server.transport}
+                        <div class="row-wrap">
+                          <span class={server.verified ? "badge badge-success" : "badge badge-warning"}>
+                            {server.verified ? "verified" : "unverified"}
                           </span>
-                          <button
-                            class="btn btn-sm"
-                            type="button"
-                            onClick={() => setInstallTarget(server)}
-                          >
+                          <span class="badge">{server.version || "latest"}</span>
+                        </div>
+                        <div class="mcp-popular-card-footer">
+                          <span class="hint">{server.auth_summary}</span>
+                          <button class="btn btn-sm" type="button" onClick={() => setInstallTarget(server)}>
                             Install
                           </button>
                         </div>
@@ -296,6 +335,13 @@ export function McpTab() {
                     )}
                   </For>
                 </div>
+                <Show when={nextCursor()}>
+                  <div class="row-wrap-end">
+                    <button class="btn" type="button" onClick={() => void searchMarketplace(nextCursor())} disabled={searching()}>
+                      Load more
+                    </button>
+                  </div>
+                </Show>
               </div>
             </section>
           </>
@@ -303,12 +349,7 @@ export function McpTab() {
       </DataGate>
 
       <Show when={showCreate()}>
-        <McpServerDialog
-          open={true}
-          mode="create"
-          onClose={() => setShowCreate(false)}
-          onSubmit={createServer}
-        />
+        <McpServerDialog open={true} mode="create" onClose={() => setShowCreate(false)} onSubmit={createServer} />
       </Show>
 
       <Show when={selectedServer() !== null}>
@@ -324,8 +365,9 @@ export function McpTab() {
       <McpInstallDialog
         open={installTarget() !== null}
         server={installTarget()}
+        agentNames={agentNames()}
         onClose={() => setInstallTarget(null)}
-        onSubmit={createServer}
+        onSubmit={installServer}
       />
 
       <ConfirmDialog
