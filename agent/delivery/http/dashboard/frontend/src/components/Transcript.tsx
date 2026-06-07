@@ -2,6 +2,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  Download,
   FileText,
   Image as ImageIcon,
   Pencil,
@@ -12,6 +13,7 @@ import { AgentPicker } from "@/components/AgentPicker";
 import { CopyButton } from "@/components/CopyButton";
 import { Markdown } from "@/components/Markdown";
 import { StatusIndicator } from "@/components/StatusIndicator";
+import { useToast } from "@/components/Toast";
 import { isChatStatusText } from "@/lib/chatStatus";
 import { formatValue } from "@/lib/utils";
 import {
@@ -565,6 +567,35 @@ export function PlanReviewView(props: {
 
   const pending = () => props.status === "pending";
   const canAct = () => pending() && !props.actionsDisabled;
+  const { showToast } = useToast();
+  const buildFileName = () => {
+    const stamp = new Date()
+      .toISOString()
+      .replace(/[:.]/g, "-")
+      .replace(/T/, "_")
+      .replace(/Z$/, "");
+    return `plan-${stamp}.md`;
+  };
+  const downloadPlan = () => {
+    const text = (props.plan || "").trim();
+    if (!text) {
+      return;
+    }
+    try {
+      const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = buildFileName();
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      showToast("Plan downloaded.");
+    } catch (_error) {
+      showToast("Download failed", "error");
+    }
+  };
   const submitFeedback = () => {
     const nextFeedback = feedback().trim();
     if (!nextFeedback || !canAct()) {
@@ -605,6 +636,29 @@ export function PlanReviewView(props: {
               </Show>
             </div>
           </Show>
+        </div>
+        <div class="plan-review-actions" aria-label="Plan actions">
+          <CopyButton
+            value={() => props.plan}
+            class="message-action-btn plan-review-action-btn"
+            title="Copy plan"
+            ariaLabel="Copy plan"
+            copiedTitle="Copied"
+            successMessage="Plan copied."
+            failureMessage="Copy failed"
+            iconSize={15}
+            disabled={!props.plan.trim()}
+          />
+          <button
+            class="message-action-btn plan-review-action-btn"
+            type="button"
+            onClick={downloadPlan}
+            disabled={!props.plan.trim()}
+            title="Download plan"
+            aria-label="Download plan"
+          >
+            <Download size={15} />
+          </button>
         </div>
       </div>
       <Markdown text={props.plan} class="message-markdown plan-review-markdown" />

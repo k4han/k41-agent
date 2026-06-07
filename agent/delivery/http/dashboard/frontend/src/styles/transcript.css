@@ -137,6 +137,21 @@
   overflow-wrap: anywhere;
 }
 
+.plan-review-actions {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 4px;
+}
+
+.plan-review-action-btn {
+  color: var(--muted);
+}
+
+.plan-review-action-btn:hover:not(:disabled) {
+  color: var(--fg);
+}
+
 .plan-review-markdown {
   max-width: 100%;
   min-width: 0;
