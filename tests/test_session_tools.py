@@ -260,7 +260,7 @@ def test_daytona_session_manager_passes_root_thread_id_to_backend(monkeypatch):
         def __init__(self, workspace, thread_id=None):
             captured_thread_ids.append(thread_id)
 
-    monkeypatch.setattr(module, "DaytonaWorkspaceBackend", FakeDaytonaBackend)
+    monkeypatch.setattr(module, "_get_daytona_backend_type", lambda: FakeDaytonaBackend)
 
     manager = module.DaytonaTerminalSessionManager()
     workspace = SimpleNamespace(

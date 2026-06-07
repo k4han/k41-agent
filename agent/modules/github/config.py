@@ -74,7 +74,9 @@ def get_github_settings() -> GitHubSettings:
     default_backend = config.get_str(
         "channels.github.default_workspace_backend", DEFAULT_WORKSPACE_BACKEND
     ).strip()
-    if default_backend not in ("local", "daytona", "modal"):
+    from agent.modules.workspaces import get_workspace_backend_registry
+
+    if default_backend not in get_workspace_backend_registry().names():
         default_backend = DEFAULT_WORKSPACE_BACKEND
 
     return GitHubSettings(

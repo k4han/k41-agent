@@ -2,9 +2,9 @@ import logging
 
 from agent.bootstrap.settings import BootstrapConfig
 from agent.modules.channels import (
-    BUILTIN_CHANNEL_SPECS,
+    BUILTIN_CHANNEL_DESCRIPTORS,
     ChannelManager,
-    ChannelSpec,
+    ChannelDescriptor,
     register_channels,
     start_enabled_channels,
     stop_all_channels,
@@ -27,8 +27,8 @@ from agent.shared.infrastructure.db.engine import (
 )
 from agent.modules.workspaces import (
     migrate_workspace_tables,
-    start_daytona_lifecycle_sweeper,
-    stop_daytona_lifecycle_sweeper,
+    start_enabled_workspace_background_services,
+    stop_workspace_background_services,
 )
 from agent.modules.github import migrate_github_tables
 from agent.modules.mcp import migrate_mcp_tables
@@ -37,8 +37,8 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "AppRuntime",
-    "BUILTIN_CHANNEL_SPECS",
-    "ChannelSpec",
+    "BUILTIN_CHANNEL_DESCRIPTORS",
+    "ChannelDescriptor",
     "close_persistence",
     "initialize_persistence",
 ]
@@ -112,8 +112,8 @@ class AppRuntime:
             logger.info("Restoring background task history...")
             await get_background_task_manager().restore_from_persistence()
 
-            logger.info("Starting Daytona lifecycle sweeper...")
-            start_daytona_lifecycle_sweeper()
+            logger.info("Starting workspace background services...")
+            await start_enabled_workspace_background_services()
 
             self._started = True
             logger.info("Application runtime is ready.")
@@ -130,8 +130,8 @@ class AppRuntime:
         logger.info("Stopping background scheduler...")
         await stop_scheduler()
 
-        logger.info("Stopping Daytona lifecycle sweeper...")
-        await stop_daytona_lifecycle_sweeper()
+        logger.info("Stopping workspace background services...")
+        await stop_workspace_background_services()
 
         if self._persistence_ready:
             logger.info("Closing persistence...")
@@ -146,13 +146,13 @@ class AppRuntime:
             return
 
         logger.info("Registering configured channels...")
-        register_channels(self.channel_manager, BUILTIN_CHANNEL_SPECS)
+        register_channels(self.channel_manager, BUILTIN_CHANNEL_DESCRIPTORS)
         self._channels_registered = True
 
     async def _start_enabled_channels(self) -> None:
         await start_enabled_channels(
             self.channel_manager,
             self.runtime_settings.channel_enabled,
-            BUILTIN_CHANNEL_SPECS,
+            BUILTIN_CHANNEL_DESCRIPTORS,
         )
 

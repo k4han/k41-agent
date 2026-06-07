@@ -3,9 +3,12 @@ import logging
 from collections.abc import Awaitable, Callable
 from enum import Enum
 
+from agent.shared.integrations import IntegrationUnavailableError
+
 logger = logging.getLogger(__name__)
 
 ChannelRunner = Callable[[], Awaitable[None]]
+ChannelRunnerLoader = Callable[[], ChannelRunner]
 
 
 class ChannelStatus(str, Enum):
@@ -19,12 +22,13 @@ class ChannelStatus(str, Enum):
 class ManagedChannel:
     """Represent a background channel managed within the app runtime."""
 
-    def __init__(self, name: str, runner: ChannelRunner):
+    def __init__(self, name: str, runner_loader: ChannelRunnerLoader):
         self.name = name
-        self.runner = runner
+        self.runner_loader = runner_loader
         self.status = ChannelStatus.STOPPED
         self.error: str | None = None
         self._task: asyncio.Task[None] | None = None
+        self._runner: ChannelRunner | None = None
         self._lock = asyncio.Lock()
 
     async def start(self) -> None:
@@ -35,6 +39,19 @@ class ManagedChannel:
 
             self.status = ChannelStatus.STARTING
             self.error = None
+            try:
+                runner = self.runner_loader()
+            except IntegrationUnavailableError as exc:
+                self.status = ChannelStatus.ERROR
+                self.error = str(exc)
+                logger.warning("[%s] Cannot start: %s", self.name, exc)
+                raise
+            except Exception as exc:
+                self.status = ChannelStatus.ERROR
+                self.error = str(exc)
+                logger.exception("[%s] Failed to create channel runner.", self.name)
+                raise
+            self._runner = runner
             self._task = asyncio.create_task(self._run(), name=f"channel:{self.name}")
             logger.info("[%s] Starting...", self.name)
 
@@ -58,6 +75,7 @@ class ManagedChannel:
         async with self._lock:
             self.status = ChannelStatus.STOPPED
             self._task = None
+            self._runner = None
             logger.info("[%s] Stopped.", self.name)
 
     async def _run(self) -> None:
@@ -67,7 +85,9 @@ class ManagedChannel:
                 logger.info("[%s] Running.", self.name)
 
         try:
-            await self.runner()
+            if self._runner is None:
+                raise RuntimeError(f"Channel '{self.name}' runner was not initialized.")
+            await self._runner()
         except asyncio.CancelledError:
             logger.info("[%s] Cancelled.", self.name)
             raise
@@ -79,6 +99,7 @@ class ManagedChannel:
         finally:
             async with self._lock:
                 self._task = None
+                self._runner = None
                 if self.status not in (ChannelStatus.STOPPING, ChannelStatus.ERROR):
                     self.status = ChannelStatus.STOPPED
 
@@ -97,9 +118,12 @@ class ChannelManager:
         self._channels: dict[str, ManagedChannel] = {}
 
     def register(self, name: str, runner: ChannelRunner) -> None:
+        self.register_loader(name, lambda: runner)
+
+    def register_loader(self, name: str, runner_loader: ChannelRunnerLoader) -> None:
         if name in self._channels:
             raise ValueError(f"Channel '{name}' is already registered.")
-        self._channels[name] = ManagedChannel(name, runner)
+        self._channels[name] = ManagedChannel(name, runner_loader)
         logger.info("[ChannelManager] Registered: %s", name)
 
     async def start(self, name: str) -> None:
@@ -109,10 +133,22 @@ class ChannelManager:
         await self._get_or_raise(name).stop()
 
     async def start_many(self, names: list[str] | tuple[str, ...]) -> None:
-        await asyncio.gather(*(self.start(name) for name in names))
+        for name in names:
+            try:
+                await self.start(name)
+            except IntegrationUnavailableError as exc:
+                logger.warning(
+                    "[ChannelManager] Channel '%s' is unavailable: %s",
+                    name,
+                    exc,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "[ChannelManager] Channel '%s' failed to start: %s", name, exc
+                )
 
     async def start_all(self) -> None:
-        await asyncio.gather(*(channel.start() for channel in self._channels.values()))
+        await self.start_many(tuple(self._channels.keys()))
 
     async def stop_all(self) -> None:
         for channel in reversed(tuple(self._channels.values())):

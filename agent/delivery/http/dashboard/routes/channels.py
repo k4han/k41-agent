@@ -12,6 +12,7 @@ from agent.modules.channels import (
     test_channel_connection,
 )
 from agent.modules.users import get_pairing_service
+from agent.shared.integrations import IntegrationUnavailableError
 
 
 router = APIRouter()
@@ -52,6 +53,8 @@ async def start_service(name: str, request: Request) -> dict[str, str | None]:
     try:
         status = await start_channel(channel_manager, name)
         return {"message": f"'{name}' is starting.", **status}
+    except IntegrationUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=exc.to_dict()) from exc
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -75,7 +78,10 @@ async def test_service(name: str) -> dict[str, object]:
 @router.post("/services/start-all")
 async def start_all_services(request: Request) -> dict[str, list[dict[str, str | None]]]:
     channel_manager = _get_channel_manager(request)
-    services = await start_all_channels(channel_manager)
+    try:
+        services = await start_all_channels(channel_manager)
+    except IntegrationUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=exc.to_dict()) from exc
     return {"services": services}
 
 

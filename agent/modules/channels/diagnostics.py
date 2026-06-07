@@ -10,6 +10,7 @@ import jwt
 
 from agent.shared.config import get_config_service
 from agent.shared.infrastructure.validation import is_placeholder_value
+from agent.shared.integrations import IntegrationUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -48,25 +49,48 @@ async def test_channel_connection(name: str) -> TestResult:
     if normalized == "github":
         return await test_github_connection()
     try:
-        from agent.modules.channels import get_channel_registry, register_builtin_channel_adapters
+        from agent.modules.channels import load_channel_adapter, register_builtin_channel_adapters
 
         register_builtin_channel_adapters()
-        adapter = get_channel_registry().get(normalized)
-        if adapter is not None:
-            result = await adapter.test_connection()
-            if isinstance(result, TestResult):
-                return result
-            if hasattr(result, "to_dict"):
-                payload = result.to_dict()
-                return TestResult(
-                    ok=bool(payload.get("ok")),
-                    message=str(payload.get("message") or ""),
-                    latency_ms=payload.get("latency_ms"),
-                    details=payload.get("details"),
-                )
+        adapter = load_channel_adapter(normalized)
+        result = await adapter.test_connection()
+        if isinstance(result, TestResult):
+            return result
+        if hasattr(result, "to_dict"):
+            payload = result.to_dict()
+            return TestResult(
+                ok=bool(payload.get("ok")),
+                message=str(payload.get("message") or ""),
+                latency_ms=payload.get("latency_ms"),
+                details=payload.get("details"),
+            )
+    except IntegrationUnavailableError as exc:
+        return TestResult(
+            ok=False,
+            message=str(exc),
+            details=exc.to_dict(),
+        )
     except Exception as exc:
         logger.warning("Channel adapter connection test failed for %s: %s", name, exc)
     return TestResult(ok=False, message=f"Channel '{name}' does not support connection testing.")
+
+
+def _ensure_channel_dependency(name: str) -> TestResult | None:
+    from agent.modules.channels.registry import get_channel_registry
+
+    registry = get_channel_registry()
+    descriptor = registry.descriptor(name)
+    if descriptor is None:
+        return None
+    try:
+        registry.ensure_available(name)
+        return None
+    except IntegrationUnavailableError as error:
+        return TestResult(
+            ok=False,
+            message=str(error),
+            details=error.to_dict(),
+        )
 
 
 async def test_telegram_connection() -> TestResult:
@@ -77,6 +101,9 @@ async def test_telegram_connection() -> TestResult:
             ok=False,
             message="Telegram bot token is not configured.",
         )
+    missing_dependency = _ensure_channel_dependency("telegram")
+    if missing_dependency is not None:
+        return missing_dependency
 
     url = f"{TELEGRAM_API_URL}/bot{token}/getMe"
     started = time.perf_counter()
@@ -138,6 +165,9 @@ async def test_discord_connection() -> TestResult:
             ok=False,
             message="Discord bot token is not configured.",
         )
+    missing_dependency = _ensure_channel_dependency("discord")
+    if missing_dependency is not None:
+        return missing_dependency
 
     url = f"{DISCORD_API_URL}/users/@me"
     headers = {"Authorization": f"Bot {token}"}

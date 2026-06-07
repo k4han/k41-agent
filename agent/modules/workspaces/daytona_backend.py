@@ -299,6 +299,58 @@ def attach_daytona_workspace(
     return ref
 
 
+def list_daytona_cloud_sandboxes() -> list[dict[str, Any]]:
+    """List Daytona sandboxes directly from the cloud provider."""
+    try:
+        client = get_daytona_client()
+    except Exception as exc:
+        logger.debug("Daytona client unavailable for list_sandboxes: %s", exc)
+        return []
+
+    results: list[dict[str, Any]] = []
+    try:
+        iterator = client.list()
+    except Exception as exc:
+        logger.warning("Daytona list() failed: %s", exc)
+        return results
+
+    for sandbox in iterator:
+        sandbox_id = str(getattr(sandbox, "id", "") or "").strip()
+        if not sandbox_id:
+            continue
+        status = _sandbox_state(sandbox)
+
+        labels: dict[str, str] = {}
+        try:
+            label_value = getattr(sandbox, "labels", None)
+            if isinstance(label_value, dict):
+                labels = {str(k): str(v) for k, v in label_value.items()}
+        except Exception:
+            labels = {}
+
+        results.append(
+            {
+                "sandbox_id": sandbox_id,
+                "backend": DAYTONA_BACKEND,
+                "label": labels.get("name") or f"daytona:{sandbox_id}",
+                "root": labels.get("root") or DEFAULT_DAYTONA_ROOT,
+                "status": status,
+                "thread_id": labels.get("thread_id") or None,
+                "repository_full_name": labels.get("repository_full_name") or None,
+                "last_used_at": labels.get("last_used_at") or None,
+                "last_started_at": labels.get("last_started_at") or None,
+                "last_stopped_at": labels.get("last_stopped_at") or None,
+                "last_archived_at": labels.get("last_archived_at") or None,
+                "created_at": labels.get("created_at") or None,
+                "updated_at": labels.get("updated_at") or None,
+                "on_cloud": status != DAYTONA_STATUS_DESTROYED,
+                "is_orphan": True,
+                "metadata": labels,
+            }
+        )
+    return results
+
+
 def daytona_lifecycle_metadata(
     *,
     root: str | None = None,
@@ -576,6 +628,15 @@ def archive_daytona_workspace(
         archived=status == DAYTONA_STATUS_ARCHIVED,
     )
     return status
+
+
+def create_daytona_backend(
+    ref: WorkspaceRef,
+    *,
+    thread_id: str | None = None,
+) -> "DaytonaWorkspaceBackend":
+    """Factory used by ``WorkspaceBackendDescriptor.backend_factory_loader``."""
+    return DaytonaWorkspaceBackend(ref, thread_id=thread_id)
 
 
 def delete_daytona_workspace(
@@ -1493,6 +1554,7 @@ __all__ = [
     "delete_daytona_workspace",
     "ensure_daytona_workspace_active",
     "get_daytona_client",
+    "list_daytona_cloud_sandboxes",
     "resolve_daytona_path",
     "start_daytona_lifecycle_sweeper",
     "stop_daytona_lifecycle_sweeper",

@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 from pathlib import Path, PureWindowsPath
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 DEFAULT_LOCAL_WORKSPACE = str(Path.home() / "kaka-agent")
 
 
-WorkspaceBackendName = Literal["local", "daytona", "modal"]
+# ``str`` (rather than ``Literal["local", "daytona", "modal"]``) so plugin
+# backends registered through the registry don't require updating this alias.
+# Validation happens at runtime via ``is_registered_workspace_backend``.
+WorkspaceBackendName = str
 
 
 class WorkspaceRef(BaseModel):
@@ -120,7 +123,9 @@ def normalize_workspace_ref(
         data = _model_dump(workspace)
 
     backend = str(data.get("backend") or "local").strip().lower()
-    if backend not in {"local", "daytona", "modal"}:
+    from agent.modules.workspaces.registry import is_registered_workspace_backend
+
+    if not is_registered_workspace_backend(backend):
         raise ValueError(f"Unsupported workspace backend: {backend}")
 
     raw_locator = str(data.get("locator") or default_locator).strip()
@@ -133,7 +138,7 @@ def normalize_workspace_ref(
 
     raw_label = label if label is not None else data.get("label")
 
-    if backend in {"daytona", "modal"}:
+    if backend != "local":
         locator = raw_locator.strip()
         if not locator:
             backend_label = "Daytona" if backend == "daytona" else "Modal"
@@ -214,7 +219,9 @@ def workspace_ref_from_columns(
             parsed_metadata = data
 
     normalized_backend = (backend or "local").strip().lower()
-    if normalized_backend not in {"local", "daytona", "modal"}:
+    from agent.modules.workspaces.registry import is_registered_workspace_backend
+
+    if not is_registered_workspace_backend(normalized_backend):
         normalized_backend = "local"
 
     return WorkspaceRef(

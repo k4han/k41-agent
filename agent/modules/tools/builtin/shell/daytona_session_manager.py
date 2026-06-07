@@ -18,12 +18,17 @@ from agent.modules.tools.builtin.shell.session_manager import (
     _strip_ansi,
 )
 from agent.modules.workspaces import (
-    DaytonaWorkspaceBackend,
+    DAYTONA_BACKEND,
     WorkspaceRef,
     get_workspace_command_executor,
+    get_workspace_backend_registry,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _get_daytona_backend_type() -> Any:
+    return get_workspace_backend_registry().load_backend_type(DAYTONA_BACKEND)
 
 
 @dataclass
@@ -33,7 +38,7 @@ class DaytonaTerminalSession:
     scope_id: str | None
     workspace: WorkspaceRef
     working_dir: str
-    backend: DaytonaWorkspaceBackend
+    backend: Any
     pty_handle: Any
     output_queue: Queue[str]
     error_queue: Queue[str]
@@ -93,7 +98,8 @@ class DaytonaTerminalSessionManager:
         session_id = session_name or f"term_{uuid.uuid4().hex[:8]}"
         normalized_scope_id = self._normalize_scope_id(scope_id)
         session_key = self._session_key(session_id, normalized_scope_id)
-        backend = DaytonaWorkspaceBackend(
+        backend_type = _get_daytona_backend_type()
+        backend = backend_type(
             workspace,
             thread_id=self._thread_id_from_scope(normalized_scope_id),
         )
@@ -120,7 +126,7 @@ class DaytonaTerminalSessionManager:
         return session_id
 
     def _create_or_connect_pty(
-        self, backend: DaytonaWorkspaceBackend, pty_id: str
+        self, backend: Any, pty_id: str
     ) -> Any:
         try:
             return backend.process.create_pty_session(

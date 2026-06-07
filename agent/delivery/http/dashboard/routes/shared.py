@@ -47,6 +47,7 @@ from agent.shared.config import (
     parse_provider_key,
 )
 from agent.shared.infrastructure.config_file import coerce_bool
+from agent.shared.integrations import IntegrationUnavailableError
 from agent.shared.timezone import resolve_display_timezone
 
 if TYPE_CHECKING:
@@ -949,7 +950,7 @@ async def _workspace_ref_from_request(
         return resolve_workspace_ref(workspace)
     if locator and locator.strip():
         metadata: dict[str, Any] = {}
-        if (backend or "").strip().lower() in {"daytona", "modal"} and root and root.strip():
+        if (backend or "").strip().lower() != "local" and root and root.strip():
             metadata["root"] = root.strip()
         return resolve_workspace_ref(
             {
@@ -966,6 +967,8 @@ async def _workspace_ref_from_request(
 
 
 def _workspace_http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, IntegrationUnavailableError):
+        return HTTPException(status_code=503, detail=exc.to_dict())
     if isinstance(exc, WorkspaceUnavailableError):
         return HTTPException(status_code=410, detail=str(exc))
     if isinstance(exc, UnsupportedWorkspaceCapabilityError):

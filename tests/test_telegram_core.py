@@ -1,6 +1,47 @@
+import sys
+import types
+from importlib.machinery import ModuleSpec
+
+import importlib.util
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+
+@pytest.fixture(autouse=True)
+def fake_aiogram(monkeypatch):
+    original_find_spec = importlib.util.find_spec
+
+    class FakeUpdate:
+        def __init__(self, update_id: int) -> None:
+            self.update_id = update_id
+
+        @classmethod
+        def model_validate(cls, payload, context=None):
+            del context
+            return cls(update_id=int(payload["update_id"]))
+
+    class FakeBotCommand:
+        def __init__(self, *, command: str, description: str) -> None:
+            self.command = command
+            self.description = description
+
+    aiogram_module = types.ModuleType("aiogram")
+    aiogram_module.__path__ = []
+    types_module = types.ModuleType("aiogram.types")
+    types_module.Update = FakeUpdate
+    types_module.BotCommand = FakeBotCommand
+    aiogram_module.types = types_module
+
+    monkeypatch.setitem(sys.modules, "aiogram", aiogram_module)
+    monkeypatch.setitem(sys.modules, "aiogram.types", types_module)
+
+    def fake_find_spec(name: str, package: str | None = None):
+        if name in {"aiogram", "aiogram.types"}:
+            return ModuleSpec(name, loader=None)
+        return original_find_spec(name, package)
+
+    monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
 
 
 class DummyUser:

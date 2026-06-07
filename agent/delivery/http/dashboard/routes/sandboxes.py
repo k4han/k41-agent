@@ -21,6 +21,7 @@ from agent.modules.workspaces import (
     list_sandboxes,
     stop_sandbox,
 )
+from agent.shared.integrations import IntegrationUnavailableError
 
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,8 @@ async def list_sandboxes_endpoint(
     normalized = _normalize_backend(backend)
     try:
         return await list_sandboxes(normalized, include_all=include_all)
+    except IntegrationUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=exc.to_dict()) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -89,6 +92,8 @@ async def delete_sandbox_endpoint(backend: str, sandbox_id: str) -> dict[str, An
         raise HTTPException(status_code=400, detail="Sandbox id is required.")
     try:
         result = await delete_sandbox(normalized, sandbox_id)
+    except IntegrationUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=exc.to_dict()) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -107,6 +112,8 @@ async def stop_sandbox_endpoint(backend: str, sandbox_id: str) -> dict[str, Any]
         raise HTTPException(status_code=400, detail="Sandbox id is required.")
     try:
         status = await stop_sandbox(normalized, sandbox_id)
+    except IntegrationUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=exc.to_dict()) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -130,6 +137,8 @@ async def archive_sandbox_endpoint(backend: str, sandbox_id: str) -> dict[str, A
         raise HTTPException(status_code=400, detail="Sandbox id is required.")
     try:
         status = await archive_sandbox(normalized, sandbox_id)
+    except IntegrationUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=exc.to_dict()) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:

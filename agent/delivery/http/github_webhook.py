@@ -5,12 +5,6 @@ from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Request
 
-from agent.modules.github import (
-    get_github_automation_service,
-    get_github_settings,
-    verify_webhook_signature,
-)
-
 router = APIRouter(tags=["github"])
 logger = logging.getLogger(__name__)
 
@@ -22,6 +16,12 @@ async def github_webhook(
     delivery_id: str | None = Header(default=None, alias="X-GitHub-Delivery"),
     signature: str | None = Header(default=None, alias="X-Hub-Signature-256"),
 ) -> dict[str, Any]:
+    from agent.modules.github import (
+        get_github_automation_service,
+        get_github_settings,
+        verify_webhook_signature,
+    )
+
     settings = get_github_settings()
     if not settings.enabled:
         raise HTTPException(status_code=503, detail="GitHub webhook is disabled.")

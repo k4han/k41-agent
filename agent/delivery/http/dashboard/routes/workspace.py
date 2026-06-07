@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-import inspect
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
-from starlette.concurrency import run_in_threadpool
 
 from agent.modules.workspaces import WorkspaceRef
 from agent.delivery.http.dashboard.routes.shared import (
@@ -15,19 +13,20 @@ from agent.delivery.http.dashboard.routes.shared import (
 )
 from agent.modules.github import get_github_automation_service
 from agent.modules.workspaces import (
-    attach_daytona_workspace,
     attach_github_repository_to_workspace,
-    attach_modal_workspace,
-    create_daytona_workspace,
-    create_modal_workspace,
+    attach_workspace_backend,
+    create_workspace_backend,
+    DAYTONA_BACKEND,
     ensure_workspace_directory,
     get_workspace_browser,
     get_workspace_change_inspector,
     get_workspace_entry_mutator,
     is_github_workspace,
     list_workspace_directories,
+    MODAL_BACKEND,
     remember_thread_workspace_ref,
     resolve_workspace_ref,
+    get_workspace_backend_registry,
 )
 
 
@@ -44,10 +43,40 @@ async def _run_workspace_capability_operation(
     return await operation(capability)
 
 
-async def _maybe_await(value: Any) -> Any:
-    if inspect.isawaitable(value):
-        return await value
-    return value
+async def create_daytona_workspace(*, label: str | None = None) -> WorkspaceRef:
+    return await create_workspace_backend(DAYTONA_BACKEND, label=label)
+
+
+async def attach_daytona_workspace(
+    sandbox_id: str,
+    *,
+    label: str | None = None,
+    root: str | None = None,
+) -> WorkspaceRef:
+    return await attach_workspace_backend(
+        DAYTONA_BACKEND,
+        sandbox_id,
+        label=label,
+        root=root,
+    )
+
+
+async def create_modal_workspace(*, label: str | None = None) -> WorkspaceRef:
+    return await create_workspace_backend(MODAL_BACKEND, label=label)
+
+
+async def attach_modal_workspace(
+    sandbox_id: str,
+    *,
+    label: str | None = None,
+    root: str | None = None,
+) -> WorkspaceRef:
+    return await attach_workspace_backend(
+        MODAL_BACKEND,
+        sandbox_id,
+        label=label,
+        root=root,
+    )
 
 
 def _workspace_metadata_root(workspace: WorkspaceRef | None) -> str | None:
@@ -223,11 +252,12 @@ def _resolve_backend(body: WorkspaceResolveBody, kind: str) -> str:
     ``workspace`` hint, then the request ``kind`` so that ``kind="github"``
     continues to work for the local-only flow.
     """
-    if body.backend and body.backend.strip().lower() in {"local", "daytona", "modal"}:
+    known_backends = set(get_workspace_backend_registry().names())
+    if body.backend and body.backend.strip().lower() in known_backends:
         return body.backend.strip().lower()
-    if body.workspace and body.workspace.backend in {"local", "daytona", "modal"}:
+    if body.workspace and body.workspace.backend in known_backends:
         return body.workspace.backend
-    if kind in {"local", "daytona", "modal"}:
+    if kind in known_backends:
         return kind
     return "local"
 
@@ -304,13 +334,12 @@ async def resolve_dashboard_workspace(body: WorkspaceResolveBody) -> dict[str, A
             sandbox_id = body.locator or (body.workspace.locator if body.workspace else "")
             if sandbox_id and sandbox_id.strip():
                 root = _workspace_metadata_root(body.workspace)
-                workspace = await run_in_threadpool(
-                    attach_daytona_workspace,
+                workspace = await attach_daytona_workspace(
                     sandbox_id,
                     root=root,
                 )
             else:
-                workspace = await run_in_threadpool(create_daytona_workspace)
+                workspace = await create_daytona_workspace()
             if repository_id is not None:
                 workspace = await attach_github_repository_to_workspace(
                     workspace,
@@ -327,14 +356,12 @@ async def resolve_dashboard_workspace(body: WorkspaceResolveBody) -> dict[str, A
             sandbox_id = body.locator or (body.workspace.locator if body.workspace else "")
             if sandbox_id and sandbox_id.strip():
                 root = _workspace_metadata_root(body.workspace)
-                workspace = await _maybe_await(
-                    attach_modal_workspace(
-                        sandbox_id,
-                        root=root,
-                    )
+                workspace = await attach_modal_workspace(
+                    sandbox_id,
+                    root=root,
                 )
             else:
-                workspace = await _maybe_await(create_modal_workspace())
+                workspace = await create_modal_workspace()
             if repository_id is not None:
                 workspace = await attach_github_repository_to_workspace(
                     workspace,
@@ -365,25 +392,22 @@ async def _resolve_github_in_sandbox(
         sandbox_id = body.locator or (body.workspace.locator if body.workspace else "")
         if sandbox_id and sandbox_id.strip():
             root = _workspace_metadata_root(body.workspace)
-            workspace = await run_in_threadpool(
-                attach_daytona_workspace,
+            workspace = await attach_daytona_workspace(
                 sandbox_id,
                 root=root,
             )
         else:
-            workspace = await run_in_threadpool(create_daytona_workspace)
+            workspace = await create_daytona_workspace()
     elif backend == "modal":
         sandbox_id = body.locator or (body.workspace.locator if body.workspace else "")
         if sandbox_id and sandbox_id.strip():
             root = _workspace_metadata_root(body.workspace)
-            workspace = await _maybe_await(
-                attach_modal_workspace(
-                    sandbox_id,
-                    root=root,
-                )
+            workspace = await attach_modal_workspace(
+                sandbox_id,
+                root=root,
             )
         else:
-            workspace = await _maybe_await(create_modal_workspace())
+            workspace = await create_modal_workspace()
     else:
         raise ValueError(f"Unsupported sandbox backend: {backend}")
     return await attach_github_repository_to_workspace(

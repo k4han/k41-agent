@@ -9,29 +9,33 @@ view of every cloud sandbox the agent knows about.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from agent.modules.workspaces.daytona_backend import (
-    DAYTONA_BACKEND,
-    DEFAULT_DAYTONA_ROOT,
-    thread_root_id,
-)
-from agent.modules.workspaces.modal_backend import (
-    DEFAULT_MODAL_ROOT,
-    MODAL_BACKEND,
-)
 from agent.modules.workspaces.refs import (
     DEFAULT_LOCAL_WORKSPACE,
     WorkspaceRef,
     normalize_workspace_ref,
 )
+from agent.modules.workspaces.registry import (
+    DAYTONA_BACKEND,
+    MODAL_BACKEND,
+    call_workspace_backend_loader,
+    get_workspace_backend_registry,
+)
 from agent.modules.workspaces.repository import get_thread_workspace_repository
+from agent.modules.workspaces.service import _workspace_backend_uses_thread_loader
 
 logger = logging.getLogger(__name__)
 
-TERMINAL_STATUSES = {"destroyed", "deleted", "removed"}
+
+def thread_root_id(thread_id: str | None) -> str | None:
+    normalized = str(thread_id or "").strip()
+    if not normalized:
+        return None
+    return normalized.split(":sub:", 1)[0]
 
 
 def _normalize_status(value: Any) -> str:
@@ -53,10 +57,6 @@ def _normalize_status(value: Any) -> str:
     if raw in {"error", "build_failed"}:
         return "error"
     return raw
-
-
-def _is_terminal(status: str) -> bool:
-    return status in TERMINAL_STATUSES
 
 
 def _thread_workspace_payload(record: dict[str, Any]) -> dict[str, Any] | None:
@@ -137,164 +137,29 @@ async def _modal_sandboxes_from_thread_records() -> list[dict[str, Any]]:
 
 def _daytona_sandboxes_from_cloud() -> list[dict[str, Any]]:
     """List Daytona sandboxes directly from the cloud provider."""
-    from agent.modules.workspaces.daytona_backend import (
-        DAYTONA_STATUS_DESTROYED,
-        DAYTONA_STATUS_UNKNOWN,
-        get_daytona_client,
-    )
-
-    try:
-        client = get_daytona_client()
-    except Exception as exc:
-        logger.debug("Daytona client unavailable for list_sandboxes: %s", exc)
+    descriptor = get_workspace_backend_registry().require(DAYTONA_BACKEND)
+    if not descriptor.inventory_loader:
         return []
-
-    results: list[dict[str, Any]] = []
-    try:
-        iterator = client.list()
-    except Exception as exc:
-        logger.warning("Daytona list() failed: %s", exc)
-        return results
-
-    for sandbox in iterator:
-        sandbox_id = str(getattr(sandbox, "id", "") or "").strip()
-        if not sandbox_id:
-            continue
-        state = getattr(sandbox, "state", None)
-        if state is not None:
-            value = getattr(state, "value", None) or getattr(state, "name", None)
-            status = _normalize_status(value or state)
-        else:
-            status = DAYTONA_STATUS_UNKNOWN
-
-        labels: dict[str, str] = {}
-        try:
-            label_value = getattr(sandbox, "labels", None)
-            if isinstance(label_value, dict):
-                labels = {str(k): str(v) for k, v in label_value.items()}
-        except Exception:
-            labels = {}
-
-        results.append(
-            {
-                "sandbox_id": sandbox_id,
-                "backend": DAYTONA_BACKEND,
-                "label": labels.get("name") or f"daytona:{sandbox_id}",
-                "root": labels.get("root") or DEFAULT_DAYTONA_ROOT,
-                "status": status,
-                "thread_id": labels.get("thread_id") or None,
-                "repository_full_name": labels.get("repository_full_name") or None,
-                "last_used_at": labels.get("last_used_at") or None,
-                "last_started_at": labels.get("last_started_at") or None,
-                "last_stopped_at": labels.get("last_stopped_at") or None,
-                "last_archived_at": labels.get("last_archived_at") or None,
-                "created_at": labels.get("created_at") or None,
-                "updated_at": labels.get("updated_at") or None,
-                "on_cloud": status != DAYTONA_STATUS_DESTROYED,
-                "is_orphan": True,
-                "metadata": labels,
-            }
-        )
-    return results
+    lister = get_workspace_backend_registry().resolve_loader(
+        DAYTONA_BACKEND,
+        descriptor.inventory_loader,
+    )
+    return lister()
 
 
 async def _modal_sandboxes_from_cloud() -> list[dict[str, Any]]:
     """List Modal sandboxes directly from the cloud provider."""
-    from agent.modules.workspaces.modal_backend import get_modal_client
-
-    try:
-        client = await get_modal_client()
-    except Exception as exc:
-        logger.debug("Modal client unavailable for list_sandboxes: %s", exc)
+    descriptor = get_workspace_backend_registry().require(MODAL_BACKEND)
+    if not descriptor.inventory_loader:
         return []
-
-    import modal
-
-    try:
-        iterator = modal.Sandbox.list.aio(client=client)
-        items = [item async for item in iterator]
-    except AttributeError:
-        try:
-            iterator = modal.Sandbox.list(client=client)
-            items = list(iterator)
-        except Exception as exc:
-            logger.warning("Modal Sandbox.list failed: %s", exc)
-            return []
-    except Exception as exc:
-        logger.warning("Modal Sandbox.list.aio failed: %s", exc)
-        return []
-
-    results: list[dict[str, Any]] = []
-    for sandbox in items:
-        sandbox_id = str(
-            getattr(sandbox, "object_id", None) or getattr(sandbox, "id", "") or ""
-        ).strip()
-        if not sandbox_id:
-            continue
-
-        # ``modal.Sandbox.list`` defaults to ``include_finished=False``, so any
-        # sandbox surfaced here is still running on Modal. The SDK does not
-        # expose a ``state`` attribute publicly, so we cross-check with
-        # ``poll()`` / ``returncode``: ``None`` means running, an ``int`` exit
-        # code means the sandbox has finished.
-        status = "started"
-        try:
-            returncode: Any = getattr(sandbox, "returncode", None)
-            if returncode is None:
-                poller = getattr(sandbox, "poll", None)
-                if callable(poller):
-                    poll_result = poller()
-                    if asyncio.iscoroutine(poll_result):
-                        try:
-                            poll_result = await poll_result
-                        except Exception as exc:
-                            logger.debug(
-                                "Modal poll() failed for %s: %s", sandbox_id, exc
-                            )
-                            poll_result = None
-                    if isinstance(poll_result, int):
-                        returncode = poll_result
-            if isinstance(returncode, int):
-                status = "stopped"
-        except Exception as exc:
-            logger.debug("Modal status probe failed for %s: %s", sandbox_id, exc)
-
-        tags: dict[str, str] = {}
-        try:
-            getter = getattr(sandbox, "get_tags", None)
-            if callable(getter):
-                maybe = getter()
-                if asyncio.iscoroutine(maybe):
-                    try:
-                        maybe = await maybe
-                    except Exception:
-                        maybe = None
-                if isinstance(maybe, dict):
-                    tags = {str(k): str(v) for k, v in maybe.items()}
-        except Exception:
-            tags = {}
-
-        results.append(
-            {
-                "sandbox_id": sandbox_id,
-                "backend": MODAL_BACKEND,
-                "label": tags.get("name") or f"modal:{sandbox_id}",
-                "root": tags.get("root") or DEFAULT_MODAL_ROOT,
-                "status": status,
-                "thread_id": tags.get("thread_id") or None,
-                "repository_full_name": tags.get("repository_full_name") or None,
-                "last_used_at": tags.get("last_used_at") or None,
-                "last_started_at": tags.get("last_started_at") or None,
-                "last_stopped_at": tags.get("last_stopped_at") or None,
-                "last_archived_at": None,
-                "created_at": tags.get("created_at") or None,
-                "updated_at": tags.get("updated_at") or None,
-                "on_cloud": not _is_terminal(status),
-                "is_orphan": True,
-                "metadata": tags,
-            }
-        )
-    return results
+    lister = get_workspace_backend_registry().resolve_loader(
+        MODAL_BACKEND,
+        descriptor.inventory_loader,
+    )
+    result = lister()
+    if inspect.isawaitable(result):
+        return await result
+    return result
 
 
 def _merge_sandbox_lists(
@@ -431,26 +296,52 @@ def _build_workspace_ref(backend: str, sandbox_id: str) -> WorkspaceRef:
     )
 
 
+async def _run_lifecycle_loader(
+    backend: str,
+    loader: str,
+    ref: WorkspaceRef,
+    *,
+    in_thread: bool = False,
+) -> Any:
+    """Invoke a registered lifecycle loader, running blocking callables in a
+    thread so the event loop is never stalled.
+    """
+    return await call_workspace_backend_loader(
+        backend,
+        loader,
+        ref,
+        in_thread=in_thread,
+    )
+
+
 async def stop_sandbox(backend: str, sandbox_id: str) -> str:
     normalized = str(backend or "").strip().lower()
-    if normalized != DAYTONA_BACKEND:
-        raise ValueError(f"Stop is only supported on Daytona (got {backend!r}).")
-    from agent.modules.workspaces.daytona_backend import stop_daytona_workspace
-
+    registry = get_workspace_backend_registry()
+    descriptor = registry.require(normalized)
+    if not descriptor.stop_loader:
+        raise ValueError(f"Stop is not supported on {backend!r}.")
     ref = _build_workspace_ref(normalized, sandbox_id)
-    return await asyncio.to_thread(stop_daytona_workspace, ref)
+    return await _run_lifecycle_loader(
+        normalized,
+        descriptor.stop_loader,
+        ref,
+        in_thread=_workspace_backend_uses_thread_loader(normalized),
+    )
 
 
 async def archive_sandbox(backend: str, sandbox_id: str) -> str:
     normalized = str(backend or "").strip().lower()
-    if normalized != DAYTONA_BACKEND:
-        raise ValueError(
-            f"Archive is only supported on Daytona (got {backend!r})."
-        )
-    from agent.modules.workspaces.daytona_backend import archive_daytona_workspace
-
+    registry = get_workspace_backend_registry()
+    descriptor = registry.require(normalized)
+    if not descriptor.archive_loader:
+        raise ValueError(f"Archive is not supported on {backend!r}.")
     ref = _build_workspace_ref(normalized, sandbox_id)
-    return await asyncio.to_thread(archive_daytona_workspace, ref)
+    return await _run_lifecycle_loader(
+        normalized,
+        descriptor.archive_loader,
+        ref,
+        in_thread=_workspace_backend_uses_thread_loader(normalized),
+    )
 
 
 async def delete_sandbox(backend: str, sandbox_id: str) -> dict[str, Any]:
@@ -458,24 +349,21 @@ async def delete_sandbox(backend: str, sandbox_id: str) -> dict[str, Any]:
     threads that reference it.
     """
     normalized = str(backend or "").strip().lower()
-    if normalized not in {DAYTONA_BACKEND, MODAL_BACKEND}:
-        raise ValueError(f"Unsupported sandbox backend: {backend!r}")
     normalized_id = str(sandbox_id or "").strip()
     if not normalized_id:
         raise ValueError("Sandbox id is required.")
 
-    if normalized == DAYTONA_BACKEND:
-        from agent.modules.workspaces.daytona_backend import delete_daytona_workspace
-
-        ref = _build_workspace_ref(normalized, normalized_id)
-        cloud_status = await asyncio.to_thread(
-            delete_daytona_workspace, ref
-        )
-    else:
-        from agent.modules.workspaces.modal_backend import delete_modal_workspace
-
-        ref = _build_workspace_ref(normalized, normalized_id)
-        cloud_status = await delete_modal_workspace(ref)
+    registry = get_workspace_backend_registry()
+    descriptor = registry.require(normalized)
+    if not descriptor.delete_loader:
+        raise ValueError(f"Delete is not supported on {backend!r}.")
+    ref = _build_workspace_ref(normalized, normalized_id)
+    cloud_status = await _run_lifecycle_loader(
+        normalized,
+        descriptor.delete_loader,
+        ref,
+        in_thread=_workspace_backend_uses_thread_loader(normalized),
+    )
 
     detached_threads = await _detach_sandbox_from_threads(normalized, normalized_id)
     return {

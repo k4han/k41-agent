@@ -3,10 +3,24 @@ import asyncio
 import pytest
 
 import agent.bootstrap.runtime as runtime_module
-from agent.bootstrap.runtime import AppRuntime, ChannelSpec
+from agent.bootstrap.runtime import AppRuntime, ChannelDescriptor
+from agent.modules.channels import service as channel_service
 from agent.bootstrap.settings import BootstrapConfig
 from agent.modules.channels import ChannelStatus
 from agent.shared.config import RuntimeSettings
+
+
+@pytest.fixture(autouse=True)
+def restore_builtin_channel_descriptors():
+    yield
+    from agent.modules.channels.registry import get_channel_registry
+    from agent.modules.channels.service_specs import BUILTIN_CHANNEL_DESCRIPTORS
+
+    registry = get_channel_registry()
+    for descriptor in BUILTIN_CHANNEL_DESCRIPTORS:
+        registry.register_descriptor(descriptor, replace=True)
+        registry.unregister(descriptor.name)
+    registry._lazy.clear_instances()
 
 
 async def wait_for_status(runtime: AppRuntime, name: str, expected: ChannelStatus) -> None:
@@ -47,6 +61,25 @@ def build_runner(started_event: asyncio.Event):
     return runner
 
 
+class FakeChannelAdapter:
+    def __init__(self, runner):
+        self._runner = runner
+
+    def create_runner(self):
+        return self._runner
+
+
+def build_channel_descriptor(name: str) -> ChannelDescriptor:
+    return ChannelDescriptor(
+        kind="channel",
+        name=name,
+        title=name.title(),
+        config_prefix=f"channels.{name}",
+        loader="",
+        has_runner=True,
+    )
+
+
 def test_runtime_registers_all_channels_even_when_boot_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -55,10 +88,17 @@ def test_runtime_registers_all_channels_even_when_boot_disabled(
 
     monkeypatch.setattr(
         runtime_module,
-        "BUILTIN_CHANNEL_SPECS",
+        "BUILTIN_CHANNEL_DESCRIPTORS",
         (
-            ChannelSpec("telegram", lambda: build_runner(telegram_started)),
-            ChannelSpec("discord", lambda: build_runner(discord_started)),
+            build_channel_descriptor("telegram"),
+            build_channel_descriptor("discord"),
+        ),
+    )
+    monkeypatch.setattr(
+        channel_service,
+        "load_channel_adapter",
+        lambda name: FakeChannelAdapter(
+            build_runner(telegram_started if name == "telegram" else discord_started)
         ),
     )
 
@@ -77,10 +117,17 @@ async def test_runtime_starts_only_channels_enabled_for_boot(
 
     monkeypatch.setattr(
         runtime_module,
-        "BUILTIN_CHANNEL_SPECS",
+        "BUILTIN_CHANNEL_DESCRIPTORS",
         (
-            ChannelSpec("telegram", lambda: build_runner(telegram_started)),
-            ChannelSpec("discord", lambda: build_runner(discord_started)),
+            build_channel_descriptor("telegram"),
+            build_channel_descriptor("discord"),
+        ),
+    )
+    monkeypatch.setattr(
+        channel_service,
+        "load_channel_adapter",
+        lambda name: FakeChannelAdapter(
+            build_runner(telegram_started if name == "telegram" else discord_started)
         ),
     )
 

@@ -13,15 +13,10 @@ from agent.modules.prompt_variables import (
     PROMPT_VARIABLE_NAME_PATTERN,
     PromptVariableService,
 )
-from agent.modules.workspaces import WorkspaceBackendName
+from agent.modules.workspaces import list_workspace_backend_catalog
 
 
 router = APIRouter()
-
-BACKEND_CATALOG: list[dict[str, Any]] = [
-    {"name": name, "title": name.title()}
-    for name in WorkspaceBackendName.__args__
-]
 
 TRIGGER_TYPE_OPTIONS: list[dict[str, str]] = [
     {"value": "date", "label": "Run once at a time"},
@@ -44,10 +39,11 @@ MCP_TRANSPORT_OPTIONS: list[dict[str, str]] = [
 @router.get("/dashboard-api/catalog")
 async def get_catalog() -> dict[str, Any]:
     channel_catalog = get_registered_channel_catalog()
+    backend_catalog = list_workspace_backend_catalog()
     return {
         "provider_types": PROVIDER_TYPE_OPTIONS,
         "channels": channel_catalog,
-        "backends": BACKEND_CATALOG,
+        "backends": backend_catalog,
         "trigger_types": TRIGGER_TYPE_OPTIONS,
         "channel_statuses": CHANNEL_STATUS_OPTIONS,
         "platforms": [

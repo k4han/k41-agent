@@ -348,7 +348,10 @@ def test_dashboard_workspace_resolve_creates_daytona_workspace(
         metadata={"root": "workspace"},
     )
 
-    _patch_dashboard_attr(monkeypatch, "create_daytona_workspace", lambda: workspace)
+    async def fake_create():
+        return workspace
+
+    _patch_dashboard_attr(monkeypatch, "create_daytona_workspace", fake_create)
     client = _create_dashboard_client(ChannelManager())
 
     response = client.post(
@@ -371,7 +374,9 @@ def test_dashboard_workspace_resolve_attaches_daytona_workspace(
 
     calls: dict[str, object] = {}
 
-    def fake_attach(sandbox_id: str, *, root: str | None = None, label: str | None = None):
+    async def fake_attach(
+        sandbox_id: str, *, root: str | None = None, label: str | None = None
+    ):
         calls["sandbox_id"] = sandbox_id
         calls["root"] = root
         calls["label"] = label
@@ -434,7 +439,10 @@ def test_dashboard_workspace_resolve_creates_modal_workspace(
         metadata={"root": "/workspace"},
     )
 
-    _patch_dashboard_attr(monkeypatch, "create_modal_workspace", lambda: workspace)
+    async def fake_create():
+        return workspace
+
+    _patch_dashboard_attr(monkeypatch, "create_modal_workspace", fake_create)
     client = _create_dashboard_client(ChannelManager())
 
     response = client.post(
@@ -457,7 +465,9 @@ def test_dashboard_workspace_resolve_attaches_modal_workspace(
 
     calls: dict[str, object] = {}
 
-    def fake_attach(sandbox_id: str, *, root: str | None = None, label: str | None = None):
+    async def fake_attach(
+        sandbox_id: str, *, root: str | None = None, label: str | None = None
+    ):
         calls["sandbox_id"] = sandbox_id
         calls["root"] = root
         calls["label"] = label
@@ -591,8 +601,11 @@ def test_dashboard_workspace_resolve_github_daytona_clones_inside_sandbox(
         },
     )
 
+    async def fake_create_daytona():
+        return sandbox
+
     _patch_dashboard_attr(
-        monkeypatch, "create_daytona_workspace", lambda: sandbox
+        monkeypatch, "create_daytona_workspace", fake_create_daytona
     )
 
     async def fake_attach(workspace, *, repository_id, install_token=None):
@@ -659,8 +672,11 @@ def test_dashboard_workspace_resolve_github_modal_clones_inside_sandbox(
         },
     )
 
+    async def fake_create_modal():
+        return sandbox
+
     _patch_dashboard_attr(
-        monkeypatch, "create_modal_workspace", lambda: sandbox
+        monkeypatch, "create_modal_workspace", fake_create_modal
     )
 
     async def fake_attach(workspace, *, repository_id, install_token=None):
@@ -703,7 +719,7 @@ def test_dashboard_workspace_resolve_github_attaches_existing_daytona_sandbox(
 
     calls: dict[str, object] = {}
 
-    def fake_attach(sandbox_id, *, root=None, label=None):
+    async def fake_attach(sandbox_id, *, root=None, label=None):
         calls["sandbox_id"] = sandbox_id
         calls["root"] = root
         return WorkspaceRef(
@@ -790,8 +806,11 @@ def test_dashboard_workspace_resolve_daytona_with_repository_id(
         },
     )
 
+    async def fake_create_daytona():
+        return sandbox
+
     _patch_dashboard_attr(
-        monkeypatch, "create_daytona_workspace", lambda: sandbox
+        monkeypatch, "create_daytona_workspace", fake_create_daytona
     )
 
     async def fake_attach(workspace, *, repository_id, install_token=None):
@@ -844,8 +863,11 @@ def test_dashboard_workspace_resolve_modal_with_repository_id(
         },
     )
 
+    async def fake_create_modal():
+        return sandbox
+
     _patch_dashboard_attr(
-        monkeypatch, "create_modal_workspace", lambda: sandbox
+        monkeypatch, "create_modal_workspace", fake_create_modal
     )
 
     async def fake_attach(workspace, *, repository_id, install_token=None):

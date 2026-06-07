@@ -31,6 +31,12 @@ MAX_LIST_FILES_ENTRIES = 5000
 GIT_STATUS_CACHE_TTL = 2.0
 
 
+def create_local_backend(ref: WorkspaceRef, *, thread_id: str | None = None) -> "LocalWorkspaceBackend":
+    """Factory used by ``WorkspaceBackendDescriptor.backend_factory_loader``."""
+    del thread_id
+    return LocalWorkspaceBackend(ref)
+
+
 class LocalWorkspaceBackend:
     """Workspace backend backed by the host filesystem."""
 

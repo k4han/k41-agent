@@ -8,22 +8,30 @@ logger = logging.getLogger(__name__)
 NotificationFormat = Literal["markdown", "html", "plain"]
 
 
+def _inject_channel_attribute(name: str, attr: str, value: Any | None) -> None:
+    """Apply ``set_<attr>`` on the registered adapter, re-registering when the
+    setter returns a new instance so callers always see the latest reference.
+    """
+    from agent.modules.channels import get_channel_registry, load_channel_adapter
+
+    adapter = load_channel_adapter(name)
+    setter = getattr(adapter, f"set_{attr}", None)
+    if not callable(setter):
+        return
+    result = setter(value)
+    replacement = result if result is not None and result is not adapter else adapter
+    if replacement is not adapter:
+        get_channel_registry().register(replacement, replace=True)
+
+
 def set_telegram_bot(bot: Any | None) -> None:
     """Compatibility shim for older callers that injected Telegram directly."""
-    from agent.modules.channels import get_channel_registry, get_telegram_adapter
-
-    adapter = get_telegram_adapter()
-    adapter.set_bot(bot)
-    get_channel_registry().register(adapter, replace=True)
+    _inject_channel_attribute("telegram", "bot", bot)
 
 
 def set_discord_client(client: Any | None) -> None:
     """Compatibility shim for older callers that injected Discord directly."""
-    from agent.modules.channels import get_channel_registry, get_discord_adapter
-
-    adapter = get_discord_adapter()
-    adapter.set_client(client)
-    get_channel_registry().register(adapter, replace=True)
+    _inject_channel_attribute("discord", "client", client)
 
 
 async def send_notification(
@@ -40,16 +48,13 @@ async def send_notification(
     try:
         from agent.modules.channels import (
             OutboundMessage,
-            get_channel_registry,
+            load_channel_adapter,
             register_builtin_channel_adapters,
         )
 
         platform_name = str(getattr(platform, "value", platform) or "").strip().lower()
         register_builtin_channel_adapters()
-        adapter = get_channel_registry().get(platform_name)
-        if adapter is None:
-            logger.warning("No channel adapter for platform %s.", platform_name)
-            return False
+        adapter = load_channel_adapter(platform_name)
 
         return await adapter.send(
             external_id,

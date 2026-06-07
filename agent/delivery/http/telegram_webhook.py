@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Request, Response
 
-from agent.modules.channels import get_telegram_webhook_runtime
+from agent.modules.channels import get_channel_webhook_runtime
 from agent.shared.config import get_config_service
 
 router = APIRouter(tags=["telegram"])
@@ -15,7 +15,7 @@ TELEGRAM_WEBHOOK_SECRET_HEADER = "X-Telegram-Bot-Api-Secret-Token"
 
 
 def _expected_webhook_secret() -> str:
-    runtime = get_telegram_webhook_runtime()
+    runtime = get_channel_webhook_runtime("telegram")
     if runtime is not None:
         return runtime.secret
 
@@ -35,7 +35,7 @@ async def telegram_webhook(
     if expected_secret and secret_token != expected_secret:
         raise HTTPException(status_code=401, detail="Invalid Telegram webhook secret.")
 
-    runtime = get_telegram_webhook_runtime()
+    runtime = get_channel_webhook_runtime("telegram")
     if runtime is None:
         raise HTTPException(status_code=503, detail="Telegram webhook runtime is not active.")
 

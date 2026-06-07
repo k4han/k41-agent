@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import difflib
+import inspect
 import logging
 import mimetypes
 import shutil
@@ -27,6 +28,14 @@ from agent.modules.workspaces.refs import (
     WorkspaceRef,
     normalize_workspace_ref,
 )
+from agent.modules.workspaces.registry import (
+    DAYTONA_BACKEND,
+    LOCAL_BACKEND,
+    MODAL_BACKEND,
+    call_workspace_backend_loader,
+    get_workspace_backend_registry,
+)
+from agent.shared.integrations import IntegrationUnavailableError
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
@@ -69,7 +78,7 @@ def workspace_ref_from_local_path(
     default_locator = str(get_config_service().get_path("workspace.root", "~/kaka-agent"))
     return normalize_workspace_ref(
         {
-            "backend": "local",
+            "backend": LOCAL_BACKEND,
             "locator": working_dir,
             "label": label,
             "metadata": metadata or {},
@@ -84,21 +93,21 @@ async def _create_workspace_runtime_backend(
     thread_id: str | None = None,
 ):
     ref = resolve_workspace_ref(workspace)
-    if ref.backend == "local":
-        from agent.modules.workspaces.local_backend import LocalWorkspaceBackend
-
-        return LocalWorkspaceBackend(ref)
-    if ref.backend == "daytona":
-        from agent.modules.workspaces.daytona_backend import DaytonaWorkspaceBackend
-
-        return DaytonaWorkspaceBackend(ref, thread_id=thread_id)
-    if ref.backend == "modal":
-        from agent.modules.workspaces.modal_backend import ModalWorkspaceBackend
-
-        if thread_id:
-            return _RecoveringModalWorkspaceBackend(ref, thread_id=thread_id)
-        return await ModalWorkspaceBackend.create(ref)
-    raise ValueError(f"Unsupported workspace backend: {ref.backend}")
+    descriptor = get_workspace_backend_registry().require(ref.backend)
+    if not descriptor.backend_factory_loader:
+        raise UnsupportedWorkspaceCapabilityError(
+            backend=ref.backend,
+            capability="runtime backend instantiation",
+            locator=ref.locator,
+        )
+    factory = get_workspace_backend_registry().resolve_loader(
+        ref.backend,
+        descriptor.backend_factory_loader,
+    )
+    result = factory(ref, thread_id=thread_id)
+    if inspect.isawaitable(result):
+        result = await result
+    return result
 
 
 async def get_workspace_file_io(
@@ -147,20 +156,23 @@ async def get_workspace_repository_cloner(
     thread_id: str | None = None,
 ) -> WorkspaceRepositoryCloner:
     ref = resolve_workspace_ref(workspace)
-    if ref.backend == "daytona":
+    descriptor = get_workspace_backend_registry().require(ref.backend)
+    if not descriptor.supports_repository_clone:
+        raise UnsupportedWorkspaceCapabilityError(
+            backend=ref.backend,
+            capability="repository clone",
+            locator=ref.locator,
+        )
+    if ref.backend == DAYTONA_BACKEND:
         return _DaytonaWorkspaceRepositoryCloner(ref, thread_id=thread_id)
-    if ref.backend == "modal":
+    if ref.backend == MODAL_BACKEND:
         if thread_id:
             return _RecoveringModalWorkspaceRepositoryCloner(
                 ref,
                 thread_id=thread_id,
             )
         return _ModalWorkspaceRepositoryCloner(ref)
-    raise UnsupportedWorkspaceCapabilityError(
-        backend=ref.backend,
-        capability="repository clone",
-        locator=ref.locator,
-    )
+    return _WorkspaceBackendRepositoryCloner(ref, thread_id=thread_id)
 
 
 async def get_workspace_lifecycle_manager(
@@ -169,15 +181,18 @@ async def get_workspace_lifecycle_manager(
     thread_id: str | None = None,
 ) -> WorkspaceLifecycleManager:
     ref = resolve_workspace_ref(workspace)
-    if ref.backend == "daytona":
+    descriptor = get_workspace_backend_registry().require(ref.backend)
+    if not descriptor.supports_lifecycle:
+        raise UnsupportedWorkspaceCapabilityError(
+            backend=ref.backend,
+            capability="lifecycle",
+            locator=ref.locator,
+        )
+    if ref.backend == DAYTONA_BACKEND:
         return _DaytonaWorkspaceLifecycleManager(ref, thread_id=thread_id)
-    if ref.backend == "modal":
+    if ref.backend == MODAL_BACKEND:
         return _ModalWorkspaceLifecycleManager(ref)
-    raise UnsupportedWorkspaceCapabilityError(
-        backend=ref.backend,
-        capability="lifecycle",
-        locator=ref.locator,
-    )
+    return _WorkspaceBackendLifecycleManager(ref, thread_id=thread_id)
 
 
 async def ensure_workspace_ready(
@@ -186,43 +201,191 @@ async def ensure_workspace_ready(
     thread_id: str | None = None,
 ) -> WorkspaceRef:
     ref = resolve_workspace_ref(workspace)
-    if ref.backend == "local":
+    if ref.backend == LOCAL_BACKEND:
         ensure_workspace_directory(ref.locator)
         if thread_id and thread_id.strip():
             return await remember_thread_workspace_ref(thread_id, ref)
         return ref
 
-    if ref.backend == "daytona":
-        from agent.modules.workspaces.daytona_backend import attach_daytona_workspace
-
-        ready = await asyncio.to_thread(
-            attach_daytona_workspace,
+    descriptor = get_workspace_backend_registry().require(ref.backend)
+    if not descriptor.attach_loader:
+        raise UnsupportedWorkspaceCapabilityError(
+            backend=ref.backend,
+            capability="workspace attach",
+            locator=ref.locator,
+        )
+    try:
+        ready = await attach_workspace_backend(
+            descriptor.name,
             ref.locator,
             label=_replacement_workspace_label(ref),
             root=str(ref.metadata.get("root") or "").strip() or None,
         )
         ready = _merge_ready_workspace_metadata(ref, ready)
-        if thread_id and thread_id.strip():
-            return await remember_thread_workspace_ref(thread_id, ready)
-        return ready
+    except WorkspaceUnavailableError:
+        if ref.backend == MODAL_BACKEND and thread_id and thread_id.strip():
+            return await _recover_modal_thread_workspace(ref, thread_id=thread_id)
+        raise
+    if thread_id and thread_id.strip():
+        return await remember_thread_workspace_ref(thread_id, ready)
+    return ready
 
-    if ref.backend == "modal":
+
+async def create_workspace_backend(
+    backend: str,
+    *,
+    label: str | None = None,
+) -> WorkspaceRef:
+    descriptor = get_workspace_backend_registry().require(backend)
+    if not descriptor.create_loader:
+        raise UnsupportedWorkspaceCapabilityError(
+            backend=descriptor.name,
+            capability="workspace creation",
+        )
+    creator = get_workspace_backend_registry().resolve_loader(
+        descriptor.name,
+        descriptor.create_loader,
+    )
+    if descriptor.name == DAYTONA_BACKEND:
+        result = await asyncio.to_thread(creator, label=label)
+    else:
+        result = creator(label=label)
+    if inspect.isawaitable(result):
+        result = await result
+    return result
+
+
+async def attach_workspace_backend(
+    backend: str,
+    sandbox_id: str,
+    *,
+    label: str | None = None,
+    root: str | None = None,
+) -> WorkspaceRef:
+    descriptor = get_workspace_backend_registry().require(backend)
+    if not descriptor.attach_loader:
+        raise UnsupportedWorkspaceCapabilityError(
+            backend=descriptor.name,
+            capability="workspace attach",
+        )
+    attacher = get_workspace_backend_registry().resolve_loader(
+        descriptor.name,
+        descriptor.attach_loader,
+    )
+    if descriptor.name == DAYTONA_BACKEND:
+        result = await asyncio.to_thread(
+            attacher,
+            sandbox_id,
+            label=label,
+            root=root,
+        )
+    else:
+        result = attacher(sandbox_id, label=label, root=root)
+    if inspect.isawaitable(result):
+        result = await result
+    return result
+
+
+async def start_enabled_workspace_background_services() -> None:
+    from agent.shared.config.service import get_config_service
+
+    registry = get_workspace_backend_registry()
+    config = get_config_service()
+    for descriptor in registry.list():
+        if not descriptor.sweeper_start_loader:
+            continue
+        enabled = config.get_bool(f"{descriptor.config_prefix}.enabled", False)
+        if not enabled:
+            continue
+        api_key = config.get_str(f"{descriptor.config_prefix}.api_key", "").strip()
+        if descriptor.requires_api_key and not api_key:
+            logger.info(
+                "%s lifecycle sweeper disabled because API key is missing.",
+                descriptor.title,
+            )
+            continue
         try:
-            from agent.modules.workspaces.modal_backend import ModalWorkspaceBackend
+            starter = registry.resolve_loader(
+                descriptor.name,
+                descriptor.sweeper_start_loader,
+            )
+        except IntegrationUnavailableError as exc:
+            logger.warning(
+                "Workspace backend '%s' background service is unavailable: %s",
+                descriptor.name,
+                exc,
+            )
+            continue
+        result = starter()
+        if inspect.isawaitable(result):
+            await result
 
-            backend = await ModalWorkspaceBackend.create(ref)
-            await backend.ensure_git()
-            await backend.ensure_root()
-            ready = _merge_ready_workspace_metadata(ref, backend.ref)
-        except WorkspaceUnavailableError:
-            if thread_id and thread_id.strip():
-                return await _recover_modal_thread_workspace(ref, thread_id=thread_id)
-            raise
-        if thread_id and thread_id.strip():
-            return await remember_thread_workspace_ref(thread_id, ready)
-        return ready
 
-    raise ValueError(f"Unsupported workspace backend: {ref.backend}")
+async def stop_workspace_background_services() -> None:
+    registry = get_workspace_backend_registry()
+    for descriptor in registry.list():
+        if not descriptor.sweeper_stop_loader:
+            continue
+        availability = registry.availability(descriptor.name)
+        if not availability.available:
+            continue
+        try:
+            stopper = registry.resolve_loader(descriptor.name, descriptor.sweeper_stop_loader)
+        except IntegrationUnavailableError:
+            continue
+        result = stopper()
+        if inspect.isawaitable(result):
+            await result
+
+
+async def _call_workspace_backend_loader(
+    backend: str,
+    loader: str,
+    *args: Any,
+    in_thread: bool = False,
+    **kwargs: Any,
+) -> Any:
+    return await call_workspace_backend_loader(
+        backend,
+        loader,
+        *args,
+        in_thread=in_thread,
+        **kwargs,
+    )
+
+
+def _workspace_backend_uses_thread_loader(backend: str) -> bool:
+    return backend == DAYTONA_BACKEND
+
+
+class _WorkspaceBackendRepositoryCloner:
+    def __init__(self, ref: WorkspaceRef, *, thread_id: str | None = None) -> None:
+        self.ref = ref
+        self.thread_id = thread_id
+
+    async def clone_repository(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        default_branch: str = "main",
+        token: str | None = None,
+        depth: int = 1,
+    ) -> str:
+        backend = await _create_workspace_runtime_backend(
+            self.ref,
+            thread_id=self.thread_id,
+        )
+        result = backend.clone_repository(
+            owner=owner,
+            repo=repo,
+            default_branch=default_branch,
+            token=token,
+            depth=depth,
+        )
+        if inspect.isawaitable(result):
+            return await result
+        return result
 
 
 class _DaytonaWorkspaceRepositoryCloner:
@@ -240,9 +403,10 @@ class _DaytonaWorkspaceRepositoryCloner:
         depth: int = 1,
     ) -> str:
         def clone() -> str:
-            from agent.modules.workspaces.daytona_backend import DaytonaWorkspaceBackend
-
-            backend = DaytonaWorkspaceBackend(self.ref, thread_id=self.thread_id)
+            backend_type = get_workspace_backend_registry().load_backend_type(
+                DAYTONA_BACKEND
+            )
+            backend = backend_type(self.ref, thread_id=self.thread_id)
             return backend.clone_repository(
                 owner=owner,
                 repo=repo,
@@ -267,9 +431,8 @@ class _ModalWorkspaceRepositoryCloner:
         token: str | None = None,
         depth: int = 1,
     ) -> str:
-        from agent.modules.workspaces.modal_backend import ModalWorkspaceBackend
-
-        backend = await ModalWorkspaceBackend.create(self.ref)
+        backend_type = get_workspace_backend_registry().load_backend_type(MODAL_BACKEND)
+        backend = await backend_type.create(self.ref)
         return await backend.clone_repository(
             owner=owner,
             repo=repo,
@@ -285,9 +448,8 @@ class _RecoveringModalWorkspaceBackend:
         self.thread_id = thread_id
 
     async def _create_backend(self):
-        from agent.modules.workspaces.modal_backend import ModalWorkspaceBackend
-
-        return await ModalWorkspaceBackend.create(self.ref)
+        backend_type = get_workspace_backend_registry().load_backend_type(MODAL_BACKEND)
+        return await backend_type.create(self.ref)
 
     async def _run(
         self,
@@ -393,7 +555,7 @@ async def _recover_modal_thread_workspace(
     thread_id: str,
 ) -> WorkspaceRef:
     normalized_thread_id = str(thread_id or "").strip()
-    if ref.backend != "modal" or not normalized_thread_id:
+    if ref.backend != MODAL_BACKEND or not normalized_thread_id:
         raise WorkspaceUnavailableError(
             (
                 f"Modal sandbox {ref.locator} is no longer available. "
@@ -406,10 +568,14 @@ async def _recover_modal_thread_workspace(
     lock = _modal_recovery_locks.setdefault(normalized_thread_id, asyncio.Lock())
     async with lock:
         current = await get_thread_workspace_ref(normalized_thread_id)
-        if current and current.backend == "modal" and current.locator != ref.locator:
+        if (
+            current
+            and current.backend == MODAL_BACKEND
+            and current.locator != ref.locator
+        ):
             return current
 
-        source_ref = current if current and current.backend == "modal" else ref
+        source_ref = current if current and current.backend == MODAL_BACKEND else ref
         replacement = await _provision_modal_replacement(source_ref)
         replacement = await remember_thread_workspace_ref(
             normalized_thread_id,
@@ -428,15 +594,14 @@ async def _provision_modal_replacement(ref: WorkspaceRef) -> WorkspaceRef:
     from agent.modules.workspaces.github_clone import (
         attach_github_repository_to_workspace,
     )
-    from agent.modules.workspaces.modal_backend import (
-        ModalWorkspaceBackend,
-        create_modal_workspace,
-    )
 
-    replacement = await create_modal_workspace(label=_replacement_workspace_label(ref))
+    replacement = await create_workspace_backend(
+        MODAL_BACKEND,
+        label=_replacement_workspace_label(ref),
+    )
     replacement = _merge_ready_workspace_metadata(ref, replacement)
 
-    backend = await ModalWorkspaceBackend.create(replacement)
+    backend = await _create_workspace_runtime_backend(replacement)
     await backend.ensure_git()
     await backend.ensure_root()
     replacement = backend.ref
@@ -501,31 +666,52 @@ class _DaytonaWorkspaceLifecycleManager:
         self.thread_id = thread_id
 
     async def delete_workspace(self) -> str:
-        from agent.modules.workspaces.daytona_backend import delete_daytona_workspace
-
-        return await asyncio.to_thread(
-            delete_daytona_workspace,
+        descriptor = get_workspace_backend_registry().require(DAYTONA_BACKEND)
+        if not descriptor.delete_loader:
+            raise UnsupportedWorkspaceCapabilityError(
+                backend=self.ref.backend,
+                capability="workspace deletion",
+                locator=self.ref.locator,
+            )
+        return await _call_workspace_backend_loader(
+            DAYTONA_BACKEND,
+            descriptor.delete_loader,
             self.ref,
             thread_id=self.thread_id,
+            in_thread=True,
         )
 
     async def stop_workspace(self, *, force: bool = False) -> str:
-        from agent.modules.workspaces.daytona_backend import stop_daytona_workspace
-
-        return await asyncio.to_thread(
-            stop_daytona_workspace,
+        descriptor = get_workspace_backend_registry().require(DAYTONA_BACKEND)
+        if not descriptor.stop_loader:
+            raise UnsupportedWorkspaceCapabilityError(
+                backend=self.ref.backend,
+                capability="workspace stop",
+                locator=self.ref.locator,
+            )
+        return await _call_workspace_backend_loader(
+            DAYTONA_BACKEND,
+            descriptor.stop_loader,
             self.ref,
             thread_id=self.thread_id,
             force=force,
+            in_thread=True,
         )
 
     async def archive_workspace(self) -> str:
-        from agent.modules.workspaces.daytona_backend import archive_daytona_workspace
-
-        return await asyncio.to_thread(
-            archive_daytona_workspace,
+        descriptor = get_workspace_backend_registry().require(DAYTONA_BACKEND)
+        if not descriptor.archive_loader:
+            raise UnsupportedWorkspaceCapabilityError(
+                backend=self.ref.backend,
+                capability="workspace archive",
+                locator=self.ref.locator,
+            )
+        return await _call_workspace_backend_loader(
+            DAYTONA_BACKEND,
+            descriptor.archive_loader,
             self.ref,
             thread_id=self.thread_id,
+            in_thread=True,
         )
 
 
@@ -534,9 +720,45 @@ class _ModalWorkspaceLifecycleManager:
         self.ref = ref
 
     async def delete_workspace(self) -> str:
-        from agent.modules.workspaces.modal_backend import delete_modal_workspace
+        descriptor = get_workspace_backend_registry().require(MODAL_BACKEND)
+        if not descriptor.delete_loader:
+            raise UnsupportedWorkspaceCapabilityError(
+                backend=self.ref.backend,
+                capability="workspace deletion",
+                locator=self.ref.locator,
+            )
+        return await _call_workspace_backend_loader(
+            MODAL_BACKEND,
+            descriptor.delete_loader,
+            self.ref,
+        )
 
-        return await delete_modal_workspace(self.ref)
+
+class _WorkspaceBackendLifecycleManager:
+    def __init__(self, ref: WorkspaceRef, *, thread_id: str | None = None) -> None:
+        self.ref = ref
+        self.thread_id = thread_id
+
+    async def delete_workspace(self) -> str:
+        descriptor = get_workspace_backend_registry().require(self.ref.backend)
+        if not descriptor.delete_loader:
+            raise UnsupportedWorkspaceCapabilityError(
+                backend=self.ref.backend,
+                capability="workspace deletion",
+                locator=self.ref.locator,
+            )
+        kwargs: dict[str, Any] = {}
+        if self.thread_id is not None and _workspace_backend_uses_thread_loader(
+            descriptor.name
+        ):
+            kwargs["thread_id"] = self.thread_id
+        return await _call_workspace_backend_loader(
+            descriptor.name,
+            descriptor.delete_loader,
+            self.ref,
+            in_thread=_workspace_backend_uses_thread_loader(descriptor.name),
+            **kwargs,
+        )
 
 
 def resolve_workspace_root(working_dir: str | None = None) -> Path:
@@ -704,8 +926,22 @@ async def delete_thread_workspace(thread_id: str) -> WorkspaceRef | None:
         )
     except UnsupportedWorkspaceCapabilityError:
         lifecycle = None
+    except IntegrationUnavailableError as exc:
+        logger.warning(
+            "Skipping cloud cleanup for thread %s: %s",
+            thread_id,
+            exc,
+        )
+        lifecycle = None
     if lifecycle is not None:
-        await lifecycle.delete_workspace()
+        try:
+            await lifecycle.delete_workspace()
+        except IntegrationUnavailableError as exc:
+            logger.warning(
+                "Cloud backend for thread %s is unavailable; dropping local record only: %s",
+                thread_id,
+                exc,
+            )
 
     await get_thread_workspace_repository().delete(thread_id)
     return workspace

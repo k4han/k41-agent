@@ -45,7 +45,9 @@ async def prepare_workspace_for_binding(
     Returns a WorkspaceRef ready to be passed to BackgroundTaskManager.
     """
     backend = getattr(binding, "workspace_backend", "local") or "local"
-    if backend not in ("local", "daytona", "modal"):
+    from agent.modules.workspaces import get_workspace_backend_registry
+
+    if backend not in get_workspace_backend_registry().names():
         backend = "local"
 
     installation_id = int(getattr(binding, "installation_id", 0) or 0)
@@ -161,16 +163,16 @@ async def _prepare_remote_workspace(
 
 async def _create_daytona_workspace(label: str) -> WorkspaceRef:
     """Create a new Daytona sandbox and return its WorkspaceRef."""
-    from agent.modules.workspaces import create_daytona_workspace
+    from agent.modules.workspaces import DAYTONA_BACKEND, create_workspace_backend
 
-    return await asyncio.to_thread(create_daytona_workspace, label=label)
+    return await create_workspace_backend(DAYTONA_BACKEND, label=label)
 
 
 async def _create_modal_workspace(label: str) -> WorkspaceRef:
     """Create a new Modal sandbox and return its WorkspaceRef."""
-    from agent.modules.workspaces import create_modal_workspace
+    from agent.modules.workspaces import MODAL_BACKEND, create_workspace_backend
 
-    return await create_modal_workspace(label=label)
+    return await create_workspace_backend(MODAL_BACKEND, label=label)
 
 
 async def remote_has_changes(ref: WorkspaceRef) -> bool:

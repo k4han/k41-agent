@@ -1,8 +1,10 @@
 import json
 from datetime import datetime, timedelta, timezone
+from importlib.machinery import ModuleSpec
 from types import SimpleNamespace
 from typing import Any
 
+import importlib.util
 import pytest
 from sqlalchemy import create_engine, text
 
@@ -43,6 +45,25 @@ def _clear_workspace_metadata_cache():
     clear_workspace_metadata_cache()
     yield
     clear_workspace_metadata_cache()
+
+
+@pytest.fixture(autouse=True)
+def _fake_optional_workspace_sdks(monkeypatch):
+    # Tell the lazy integration registry that the optional daytona/modal SDKs
+    # are present so ``load_backend_type`` proceeds to import the
+    # ``daytona_backend`` / ``modal_backend`` modules (which don't import the
+    # SDKs at module top level). The tests use fakes for the actual SDK calls
+    # so the real packages are never exercised. If a future test triggers a
+    # real SDK import path it will fail with ``AttributeError`` -- prefer
+    # monkeypatching the backend class directly in that test.
+    original_find_spec = importlib.util.find_spec
+
+    def fake_find_spec(name: str, package: str | None = None):
+        if name in {"daytona", "modal"}:
+            return ModuleSpec(name, loader=None)
+        return original_find_spec(name, package)
+
+    monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
 
 
 class FakeDaytonaFs:

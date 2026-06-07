@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 import logging
 import posixpath
@@ -191,6 +192,99 @@ async def attach_modal_workspace(
     return ref
 
 
+async def list_modal_cloud_sandboxes() -> list[dict[str, Any]]:
+    """List Modal sandboxes directly from the cloud provider."""
+    try:
+        client = await get_modal_client()
+    except Exception as exc:
+        logger.debug("Modal client unavailable for list_sandboxes: %s", exc)
+        return []
+
+    modal = get_modal_module()
+    try:
+        iterator = modal.Sandbox.list.aio(client=client)
+        items = [item async for item in iterator]
+    except AttributeError:
+        try:
+            iterator = modal.Sandbox.list(client=client)
+            items = list(iterator)
+        except Exception as exc:
+            logger.warning("Modal Sandbox.list failed: %s", exc)
+            return []
+    except Exception as exc:
+        logger.warning("Modal Sandbox.list.aio failed: %s", exc)
+        return []
+
+    results: list[dict[str, Any]] = []
+    for sandbox in items:
+        sandbox_id = str(
+            getattr(sandbox, "object_id", None) or getattr(sandbox, "id", "") or ""
+        ).strip()
+        if not sandbox_id:
+            continue
+
+        status = "started"
+        try:
+            returncode: Any = getattr(sandbox, "returncode", None)
+            if returncode is None:
+                poller = getattr(sandbox, "poll", None)
+                if callable(poller):
+                    poll_result = poller()
+                    if asyncio.iscoroutine(poll_result):
+                        try:
+                            poll_result = await poll_result
+                        except Exception as exc:
+                            logger.debug(
+                                "Modal poll() failed for %s: %s",
+                                sandbox_id,
+                                exc,
+                            )
+                            poll_result = None
+                    if isinstance(poll_result, int):
+                        returncode = poll_result
+            if isinstance(returncode, int):
+                status = "stopped"
+        except Exception as exc:
+            logger.debug("Modal status probe failed for %s: %s", sandbox_id, exc)
+
+        tags: dict[str, str] = {}
+        try:
+            getter = getattr(sandbox, "get_tags", None)
+            if callable(getter):
+                maybe = getter()
+                if asyncio.iscoroutine(maybe):
+                    try:
+                        maybe = await maybe
+                    except Exception:
+                        maybe = None
+                if isinstance(maybe, dict):
+                    tags = {str(k): str(v) for k, v in maybe.items()}
+        except Exception:
+            tags = {}
+
+        results.append(
+            {
+                "sandbox_id": sandbox_id,
+                "backend": MODAL_BACKEND,
+                "label": tags.get("name") or f"modal:{sandbox_id}",
+                "root": tags.get("root") or DEFAULT_MODAL_ROOT,
+                "status": status,
+                "thread_id": tags.get("thread_id") or None,
+                "repository_full_name": tags.get("repository_full_name") or None,
+                "last_used_at": tags.get("last_used_at") or None,
+                "last_started_at": tags.get("last_started_at") or None,
+                "last_stopped_at": tags.get("last_stopped_at") or None,
+                "last_archived_at": None,
+                "created_at": tags.get("created_at") or None,
+                "updated_at": tags.get("updated_at") or None,
+                "on_cloud": status not in {"destroyed", "deleted", "removed"},
+                "is_orphan": True,
+                "metadata": tags,
+            }
+        )
+    return results
+
+
 def modal_metadata(
     *,
     root: str | None = None,
@@ -223,6 +317,24 @@ async def get_modal_sandbox(ref: WorkspaceRef, *, client: Any | None = None):
     client = client or await get_modal_client()
     modal = get_modal_module()
     return await modal.Sandbox.from_id.aio(ref.locator, client=client)
+
+
+async def create_modal_backend(
+    ref: WorkspaceRef,
+    *,
+    thread_id: str | None = None,
+) -> Any:
+    """Factory used by ``WorkspaceBackendDescriptor.backend_factory_loader``.
+
+    When a ``thread_id`` is provided, the returned backend automatically
+    recreates a Modal sandbox on ``WorkspaceUnavailableError`` so per-thread
+    workspaces stay available across idle timeouts.
+    """
+    if thread_id:
+        from agent.modules.workspaces.service import _RecoveringModalWorkspaceBackend
+
+        return _RecoveringModalWorkspaceBackend(ref, thread_id=thread_id)
+    return await ModalWorkspaceBackend.create(ref)
 
 
 async def delete_modal_workspace(ref: WorkspaceRef) -> str:
@@ -1227,5 +1339,6 @@ __all__ = [
     "get_modal_client",
     "get_modal_module",
     "get_modal_sandbox",
+    "list_modal_cloud_sandboxes",
     "resolve_modal_path",
 ]

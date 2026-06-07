@@ -10,7 +10,6 @@ readme = "README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [
     "aiofiles>=24.1.0,<24.2.0",
-    "aiogram>=3.26.0",
     "aiosqlite>=0.22.1",
     "apscheduler>=3.11.2",
     "asyncpg>=0.31.0",
@@ -39,9 +38,35 @@ dependencies = [
     "httpx>=0.28.0",
     "beautifulsoup4>=4.13.0",
     "markdownify>=0.14.1",
-    "modal>=1.4.0",
     "psutil>=7.2.2",
+]
+
+[project.optional-dependencies]
+channel-telegram = [
+    "aiogram>=3.26.0",
+]
+channel-discord = [
+    "discord.py>=2.4.0",
+]
+sandbox-daytona = [
     "daytona==0.183.0",
+]
+sandbox-modal = [
+    "modal>=1.4.0",
+]
+channels = [
+    "aiogram>=3.26.0",
+    "discord.py>=2.4.0",
+]
+sandboxes = [
+    "daytona==0.183.0",
+    "modal>=1.4.0",
+]
+integrations = [
+    "aiogram>=3.26.0",
+    "discord.py>=2.4.0",
+    "daytona==0.183.0",
+    "modal>=1.4.0",
 ]
 
 [project.scripts]
