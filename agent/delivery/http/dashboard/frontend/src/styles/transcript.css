@@ -3,6 +3,14 @@
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 8px;
+  border-radius: 8px;
+  padding: 4px;
+  margin: 8px -4px 0;
+  transition: background 120ms ease;
+}
+
+.message-attachments:hover {
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
 }
 
 .message-attachment {

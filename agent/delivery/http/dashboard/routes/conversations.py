@@ -242,14 +242,17 @@ def _serialize_message_attachments(msg: Any) -> list[dict[str, Any]]:
     for attachment in raw_attachments:
         if not isinstance(attachment, dict):
             continue
-        attachments.append(
-            {
-                "name": str(attachment.get("name") or ""),
-                "mime_type": str(attachment.get("mime_type") or ""),
-                "size": int(attachment.get("size") or 0),
-                "kind": str(attachment.get("kind") or ""),
-            }
-        )
+        entry: dict[str, Any] = {
+            "name": str(attachment.get("name") or ""),
+            "mime_type": str(attachment.get("mime_type") or ""),
+            "size": int(attachment.get("size") or 0),
+            "kind": str(attachment.get("kind") or ""),
+        }
+        if attachment.get("content"):
+            entry["content"] = str(attachment["content"])
+        if attachment.get("base64"):
+            entry["base64"] = str(attachment["base64"])
+        attachments.append(entry)
     return attachments
 
 

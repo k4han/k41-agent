@@ -19,7 +19,7 @@ import {
   type UserInputRequestSubmitPayload,
 } from "@/components/UserInputRequestCard";
 import { formatBytes } from "@/lib/chatAttachments";
-import type { PendingAttachment } from "@/lib/chatTypes";
+import { PASTE_AS_ATTACHMENT_THRESHOLD, type PendingAttachment } from "@/lib/chatTypes";
 import type { TranscriptUserInputRequest } from "@/components/Transcript";
 import type { AgentCard, AgentsPayload, ModelCatalog } from "@/types";
 
@@ -30,6 +30,7 @@ export interface ChatComposerProps {
   onStop: () => void;
   onResume: () => void;
   onAddFiles: (files: FileList | null) => Promise<void>;
+  onPasteAsAttachment: (text: string) => void;
   onRemoveAttachment: (id: number) => void;
   streaming: boolean;
   composerDisabled: boolean;
@@ -62,6 +63,7 @@ export function ChatComposer(props: ChatComposerProps) {
   let chatPromptRef: HTMLTextAreaElement | undefined;
   let fileInputRef: HTMLInputElement | undefined;
   const [composerOptionsOpen, setComposerOptionsOpen] = createSignal(false);
+  const [previewAttachment, setPreviewAttachment] = createSignal<PendingAttachment | null>(null);
 
   const resizeChatPromptInput = () => {
     if (!chatPromptRef) {
@@ -129,7 +131,18 @@ export function ChatComposer(props: ChatComposerProps) {
         <div class="chat-attachment-list">
           <For each={props.attachments}>
             {(attachment) => (
-              <div class="chat-attachment-chip">
+              <div
+                class="chat-attachment-chip"
+                role="button"
+                tabIndex={0}
+                onClick={() => setPreviewAttachment(attachment)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setPreviewAttachment(attachment);
+                  }
+                }}
+              >
                 <Show
                   when={attachment.kind === "image" && attachment.preview_url}
                   fallback={
@@ -186,6 +199,13 @@ export function ChatComposer(props: ChatComposerProps) {
         onInput={(event) => {
           props.onPromptChange(event.currentTarget.value);
           resizeChatPromptInput();
+        }}
+        onPaste={(event) => {
+          const pastedText = event.clipboardData?.getData("text/plain") || "";
+          if (pastedText.length > PASTE_AS_ATTACHMENT_THRESHOLD) {
+            event.preventDefault();
+            props.onPasteAsAttachment(pastedText);
+          }
         }}
         onKeyDown={(event) => {
           if (event.key === "Enter" && !event.ctrlKey && !event.shiftKey) {
@@ -295,6 +315,49 @@ export function ChatComposer(props: ChatComposerProps) {
                   return `${resolvedProv}/${resolvedMod}`;
                 })()}
               </span>
+            </div>
+          </div>
+        </div>
+      </Show>
+      <Show when={previewAttachment()}>
+        <div class="dialog-backdrop" onClick={() => setPreviewAttachment(null)}>
+          <div class="dialog" onClick={(e) => e.stopPropagation()}>
+            <div class="dialog-header">
+              <span style={{ "font-weight": 600, "font-size": "13px" }}>
+                {previewAttachment()?.name}
+              </span>
+              <button
+                class="btn btn-icon"
+                type="button"
+                onClick={() => setPreviewAttachment(null)}
+                aria-label="Close"
+              >
+                <X size={15} />
+              </button>
+            </div>
+            <div class="dialog-body">
+              <Show
+                when={previewAttachment()?.kind === "image"}
+                fallback={
+                  <pre style={{
+                    "white-space": "pre-wrap",
+                    "word-break": "break-all",
+                    "font-size": "12px",
+                    "line-height": "1.5",
+                    "margin": 0,
+                    "max-height": "60vh",
+                    "overflow-y": "auto",
+                  }}>
+                    {previewAttachment()?.content || "(empty)"}
+                  </pre>
+                }
+              >
+                <img
+                  src={previewAttachment()?.preview_url}
+                  alt={previewAttachment()?.name}
+                  style={{ "max-width": "100%", "max-height": "60vh", "border-radius": "6px" }}
+                />
+              </Show>
             </div>
           </div>
         </div>

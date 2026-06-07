@@ -219,15 +219,20 @@ def _normalize_chat_attachments(attachments: list[Any] | None) -> list[dict[str,
 
 
 def _attachment_metadata(attachments: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [
-        {
+    result = []
+    for attachment in attachments:
+        meta: dict[str, Any] = {
             "name": attachment["name"],
             "mime_type": attachment["mime_type"],
             "size": attachment["size"],
             "kind": attachment["kind"],
         }
-        for attachment in attachments
-    ]
+        if attachment["kind"] == "text":
+            meta["content"] = attachment.get("content", "")
+        elif attachment["kind"] == "image":
+            meta["base64"] = attachment.get("base64", "")
+        result.append(meta)
+    return result
 
 
 def _text_attachment_block(attachment: dict[str, Any]) -> dict[str, str]:

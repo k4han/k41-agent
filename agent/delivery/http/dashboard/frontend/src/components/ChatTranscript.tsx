@@ -1,7 +1,7 @@
 import { ArrowDown } from "lucide-solid";
 import { For, Show } from "solid-js";
 
-import { TranscriptItemView } from "@/components/Transcript";
+import { TranscriptItemView, type TranscriptAttachment, type TranscriptRole } from "@/components/Transcript";
 import { WorkspaceSelector } from "@/components/WorkspaceSelector";
 import type { WorkspaceSelectionDraft } from "@/components/WorkspaceSelector";
 import type { ChatTranscriptItem } from "@/lib/chatStreamStore";
@@ -46,6 +46,7 @@ export interface ChatTranscriptProps {
     plan: string;
     feedback: string;
   }) => void;
+  onMessageClick?: (payload: { text: string; role: TranscriptRole; attachments?: TranscriptAttachment[] }) => void;
 }
 
 export function ChatTranscript(props: ChatTranscriptProps) {
@@ -93,6 +94,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                 onBranchSelect={props.onBranchSelect}
                 onApprovePlanReview={props.onApprovePlanReview}
                 onRevisePlanReview={props.onRevisePlanReview}
+                onMessageClick={props.onMessageClick}
               />
             )}
           </For>

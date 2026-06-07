@@ -37,6 +37,8 @@ export type TranscriptAttachment = {
   mime_type: string;
   size: number;
   kind: "text" | "image";
+  content?: string;
+  base64?: string;
   preview_url?: string;
 };
 
@@ -297,6 +299,7 @@ export function TranscriptMessageView(props: {
     text: string;
   }) => void;
   onBranchSelect?: (checkpointId: string) => void;
+  onMessageClick?: (payload: { text: string; role: TranscriptRole; attachments?: TranscriptAttachment[] }) => void;
 }) {
   const [editing, setEditing] = createSignal(false);
   const [draft, setDraft] = createSignal(props.text);
@@ -418,7 +421,15 @@ export function TranscriptMessageView(props: {
           </Show>
         </Show>
         <Show when={props.attachments?.length}>
-          <div class="message-attachments">
+          <div
+            class="message-attachments"
+            onClick={() => {
+              if (!editing()) {
+                props.onMessageClick?.({ text: props.text, role: props.role, attachments: props.attachments });
+              }
+            }}
+            style="cursor: pointer;"
+          >
             <For each={props.attachments || []}>
               {(attachment) => (
                 <div class="message-attachment">
@@ -451,7 +462,7 @@ export function TranscriptMessageView(props: {
           </div>
         </Show>
         <Show when={props.role === "user"}>
-          <div class="message-actions" aria-label="Message actions">
+          <div class="message-actions" aria-label="Message actions" onClick={(e) => e.stopPropagation()}>
             <CopyButton
               value={props.text}
               class="message-action-btn"
@@ -768,6 +779,7 @@ export function TranscriptItemView(props: {
     plan: string;
     feedback: string;
   }) => void;
+  onMessageClick?: (payload: { text: string; role: TranscriptRole; attachments?: TranscriptAttachment[] }) => void;
 }) {
   if (props.item.type === "message") {
     return (
@@ -784,6 +796,7 @@ export function TranscriptItemView(props: {
       actionsDisabled={props.actionsDisabled}
       onEdit={props.onEditMessage}
       onBranchSelect={props.onBranchSelect}
+      onMessageClick={props.onMessageClick}
     />
     );
   }

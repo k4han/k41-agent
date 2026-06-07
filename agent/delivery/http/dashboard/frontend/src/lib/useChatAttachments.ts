@@ -146,9 +146,45 @@ export function useChatAttachments(params: UseChatAttachmentsParams) {
     attachments().forEach(revokeAttachmentPreview);
   });
 
+  const addTextContent = (
+    text: string,
+    fileName?: string,
+  ) => {
+    const size = new TextEncoder().encode(text).length;
+
+    if (size > MAX_TEXT_ATTACHMENT_BYTES) {
+      showToast(`Content exceeds ${formatBytes(MAX_TEXT_ATTACHMENT_BYTES)}.`, "warning");
+      return;
+    }
+
+    let nextAttachments = [...attachments()];
+    if (nextAttachments.length >= MAX_ATTACHMENTS) {
+      showToast(`Attach up to ${MAX_ATTACHMENTS} files.`, "warning");
+      return;
+    }
+
+    let totalSize = nextAttachments.reduce((sum, attachment) => sum + attachment.size, 0);
+    if (totalSize + size > MAX_TOTAL_ATTACHMENT_BYTES) {
+      showToast(`Attached files exceed ${formatBytes(MAX_TOTAL_ATTACHMENT_BYTES)}.`, "warning");
+      return;
+    }
+
+    nextAttachments.push({
+      id: nextAttachmentId++,
+      name: fileName || `pasted-content-${Date.now()}.txt`,
+      mime_type: "text/plain",
+      size,
+      kind: "text",
+      content: text,
+    });
+
+    setAttachments(nextAttachments);
+  };
+
   return {
     attachments,
     addFiles,
+    addTextContent,
     removeAttachment,
     clearAttachments,
     clearAllAttachments,

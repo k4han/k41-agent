@@ -50,6 +50,7 @@ export function toTranscriptAttachment(attachment: PendingAttachment): Transcrip
     mime_type: attachment.mime_type,
     size: attachment.size,
     kind: attachment.kind,
+    content: attachment.content,
   };
 }
 

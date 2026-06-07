@@ -87,6 +87,7 @@ export type WorkspaceBrowsePayload = {
 // ── Constants ──
 
 export const MAX_ATTACHMENTS = 5;
+export const PASTE_AS_ATTACHMENT_THRESHOLD = 200;
 export const MAX_TEXT_ATTACHMENT_BYTES = 100 * 1024;
 export const MAX_IMAGE_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 export const MAX_TOTAL_ATTACHMENT_BYTES = 8 * 1024 * 1024;

@@ -3,14 +3,16 @@ import {
   GripVertical,
   PanelRightClose,
   PanelRightOpen,
+  X,
 } from "lucide-solid";
-import { createEffect, createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 
 import { AppShell } from "@/components/AppShell";
 import { ChatComposer } from "@/components/ChatComposer";
+import { Markdown } from "@/components/Markdown";
 import { ChatThreadBadges } from "@/components/ChatThreadBadges";
 import { ChatTranscript } from "@/components/ChatTranscript";
-import { PLAN_MODE_TOOL_NAME, type TranscriptUserInputRequest } from "@/components/Transcript";
+import { PLAN_MODE_TOOL_NAME, type TranscriptAttachment, type TranscriptRole, type TranscriptUserInputRequest } from "@/components/Transcript";
 import type { UserInputRequestSubmitPayload } from "@/components/UserInputRequestCard";
 import type { WorkspaceSelectionDraft } from "@/components/WorkspaceSelector";
 import { DataGate } from "@/components/State";
@@ -181,6 +183,7 @@ export function ChatPage() {
   const [recursionLimitReached, setRecursionLimitReached] = createSignal(false);
   const [activeSession, setActiveSession] = createSignal<ActiveSession | null>(null);
   const [initializedWorkspaces, setInitializedWorkspaces] = createSignal(new Set<string>());
+  const [viewingMessage, setViewingMessage] = createSignal<{ text: string; role: TranscriptRole; attachments?: TranscriptAttachment[] } | null>(null);
 
   let transcriptRef: HTMLDivElement | undefined;
   let chatShellRef: HTMLDivElement | undefined;
@@ -268,7 +271,7 @@ export function ChatPage() {
     getModelSupportsImage: modelSupportsImage,
     showToast,
   });
-  const { attachments, addFiles, removeAttachment, clearAttachments, clearAllAttachments } = attach;
+  const { attachments, addFiles, addTextContent, removeAttachment, clearAttachments, clearAllAttachments } = attach;
 
   const { contextWindowData } = useContextWindow({
     getCurrentThreadId: currentThreadId,
@@ -1092,6 +1095,10 @@ export function ChatPage() {
   const handleResume = () => {
     void sendMessage(true);
   };
+  const handlePasteAsAttachment = (text: string) => {
+    addTextContent(text);
+    showToast("Long content attached as a file.", "success");
+  };
   const handleApprovePlanReview = (payload: {
     toolCallId?: string | null;
     interruptId?: string | null;
@@ -1436,6 +1443,7 @@ export function ChatPage() {
   };
 
   return (
+    <>
     <AppShell
       title={currentThreadId() ? "Thread Chat" : "Agent Chat"}
       subtitle={
@@ -1514,6 +1522,7 @@ export function ChatPage() {
                 onBranchSelect={handleBranchSelect}
                 onApprovePlanReview={handleApprovePlanReview}
                 onRevisePlanReview={handleRevisePlanReview}
+                onMessageClick={setViewingMessage}
               />
               <ChatComposer
                 prompt={prompt()}
@@ -1522,6 +1531,7 @@ export function ChatPage() {
                 onStop={stopChat}
                 onResume={handleResume}
                 onAddFiles={addFiles}
+                onPasteAsAttachment={handlePasteAsAttachment}
                 onRemoveAttachment={removeAttachment}
                 streaming={streaming()}
                 composerDisabled={composerDisabled()}
@@ -1581,5 +1591,93 @@ export function ChatPage() {
         )}
       </DataGate>
     </AppShell>
+    <Show when={viewingMessage()}>
+      <div class="dialog-backdrop" onClick={() => setViewingMessage(null)}>
+        <div class="dialog dialog-wide" onClick={(e) => e.stopPropagation()}>
+          <div class="dialog-header">
+            <span style={{ "font-weight": 600, "font-size": "13px", "text-transform": "capitalize" }}>
+              {viewingMessage()?.role}
+            </span>
+            <button
+              class="btn btn-icon"
+              type="button"
+              onClick={() => setViewingMessage(null)}
+              aria-label="Close"
+            >
+              <X size={15} />
+            </button>
+          </div>
+          <div class="dialog-body">
+            <Show
+              when={viewingMessage()?.role === "assistant"}
+              fallback={
+                <div style={{ "max-height": "70vh", "overflow-y": "auto" }}>
+                  <pre style={{
+                    "white-space": "pre-wrap",
+                    "word-break": "break-all",
+                    "font-size": "13px",
+                    "line-height": "1.6",
+                    "margin": 0,
+                  }}>
+                    {viewingMessage()?.text}
+                  </pre>
+                </div>
+              }
+            >
+              <div style={{ "max-height": "70vh", "overflow-y": "auto" }}>
+                <Markdown text={viewingMessage()?.text || ""} class="message-markdown" />
+              </div>
+            </Show>
+            <Show when={viewingMessage()?.attachments?.length}>
+              <div style={{ "margin-top": "12px", "border-top": "1px solid var(--border)", "padding-top": "12px" }}>
+                <For each={viewingMessage()?.attachments || []}>
+                  {(attachment) => (
+                    <div style={{ "margin-bottom": "8px" }}>
+                      <div style={{
+                        "font-size": "12px",
+                        "font-weight": 600,
+                        "color": "var(--muted)",
+                        "margin-bottom": "4px",
+                      }}>
+                        {attachment.name}
+                      </div>
+                      <Show
+                        when={attachment.kind === "image" && attachment.preview_url}
+                        fallback={
+                          <Show when={attachment.content}>
+                            <pre style={{
+                              "white-space": "pre-wrap",
+                              "word-break": "break-all",
+                              "font-size": "12px",
+                              "line-height": "1.5",
+                              "margin": 0,
+                              "background": "var(--surface-2)",
+                              "border": "1px solid var(--border)",
+                              "border-radius": "6px",
+                              "padding": "8px",
+                              "max-height": "300px",
+                              "overflow-y": "auto",
+                            }}>
+                              {attachment.content}
+                            </pre>
+                          </Show>
+                        }
+                      >
+                        <img
+                          src={attachment.preview_url}
+                          alt={attachment.name}
+                          style={{ "max-width": "100%", "border-radius": "6px" }}
+                        />
+                      </Show>
+                    </div>
+                  )}
+                </For>
+              </div>
+            </Show>
+          </div>
+        </div>
+      </div>
+    </Show>
+    </>
   );
 }

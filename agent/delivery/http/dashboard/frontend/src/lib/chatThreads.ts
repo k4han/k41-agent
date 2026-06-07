@@ -220,6 +220,12 @@ export function toThreadTranscript(messages: ThreadMessage[]): ThreadTranscriptI
     }
 
     if (msg.content || !msg.tool_calls?.length) {
+      const resolvedAttachments = msg.attachments?.map((att) => {
+        if (att.kind === "image" && att.base64 && !att.preview_url) {
+          return { ...att, preview_url: `data:${att.mime_type};base64,${att.base64}` };
+        }
+        return att;
+      });
       items.push({
         key: `message-${messageIndex}-${msg.id || "unknown"}`,
         type: "message",
@@ -229,7 +235,7 @@ export function toThreadTranscript(messages: ThreadMessage[]): ThreadTranscriptI
         sourceCheckpointId: msg.source_checkpoint_id,
         parentCheckpointId: msg.parent_checkpoint_id,
         branch: msg.branch,
-        attachments: msg.attachments,
+        attachments: resolvedAttachments,
       });
     }
 
