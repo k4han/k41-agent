@@ -122,6 +122,23 @@
     display: none;
   }
 
+  .main:has(.chat-shell-resizable) {
+    height: 100vh;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .content:has(.chat-shell-resizable) {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 14px;
+    padding-bottom: calc(var(--safe-bottom) + 14px);
+  }
+
   .chat-panel {
     min-height: 0;
   }
@@ -130,23 +147,68 @@
   .chat-shell-resizable.workspace-open,
   .chat-shell-resizable.workspace-closed {
     grid-template-columns: 1fr;
-    gap: 16px;
+    column-gap: 0;
+    gap: 0;
     width: 100%;
-    height: auto;
-    min-height: calc(100vh - 114px);
-    min-height: calc(100dvh - 114px);
+    height: 100%;
+    min-height: 0;
+    position: relative;
+  }
+
+  /* Backdrop for workspace explorer on mobile/compact */
+  .chat-shell-resizable::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 55;
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(2px);
+    opacity: 0;
+    visibility: hidden;
+    transition:
+      opacity 180ms ease,
+      visibility 180ms ease;
+    pointer-events: none;
+  }
+
+  .chat-shell-resizable.workspace-open::before {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
   }
 
   .workspace-drawer {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    z-index: 60;
+    width: min(320px, 86vw);
+    height: 100vh;
+    height: 100dvh;
+    border-left: 1px solid var(--border);
+    box-shadow: var(--shadow);
+    background: var(--surface);
+    transform: translateX(100%);
+    visibility: hidden;
+    transition:
+      transform 220ms ease,
+      visibility 220ms ease;
+    will-change: transform, visibility;
     opacity: 1;
     overflow: visible;
     pointer-events: auto;
-    transform: none;
+  }
+
+  .chat-shell-resizable.workspace-open .workspace-drawer {
+    transform: translate3d(0, 0, 0);
     visibility: visible;
   }
 
   .workspace-closed .workspace-drawer {
-    display: none;
+    display: block;
+    transform: translate3d(100%, 0, 0);
+    visibility: hidden;
   }
 
   .workspace-resize-handle {
@@ -154,7 +216,13 @@
   }
 
   .workspace-explorer {
-    min-height: 520px;
+    height: 100%;
+    min-height: 0;
+  }
+
+  .chat-shell-flat .transcript,
+  .chat-shell-resizable .transcript {
+    padding-inline: 14px;
   }
 }
 
@@ -266,6 +334,12 @@
   .topbar > * {
     min-width: 0;
     flex-shrink: 1;
+  }
+
+  .topbar > div:not(.row-wrap),
+  .topbar > nav.settings-breadcrumb {
+    flex: 1 1 auto;
+    min-width: 0;
   }
 
   .topbar .page-title {
@@ -408,7 +482,65 @@
 
   /* Stack chat header chips so they don't truncate awkwardly. */
   .topbar .row-wrap {
+    flex-basis: 100%;
+    justify-content: flex-start;
+  }
+
+  /* Plan Review Stacked Controls on Mobile */
+  .plan-review-approve-row,
+  .plan-review-feedback-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
     width: 100%;
+  }
+
+  .plan-review-agent-picker,
+  .plan-review-approve-btn,
+  .plan-review-feedback-input,
+  .plan-review-feedback-btn {
+    width: 100% !important;
+    max-width: 100% !important;
+    flex: 1 1 auto !important;
+  }
+
+  /* Dashboard tables (Agents, Prompt Variables, Paired Identities, ...).
+     Force horizontal scroll by giving the table a min-width wider than the
+     narrowest phone, and let the user scroll to see the rightmost columns. */
+  .table-wrap {
+    max-width: 100%;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .table {
+    min-width: 720px;
+    table-layout: auto;
+  }
+
+  .table th,
+  .table td {
+    overflow-wrap: anywhere;
+  }
+
+  .prompt-variable-preview {
+    max-width: 240px;
+  }
+
+  /* Tab pills used by Settings > Channels / Connections. Allow horizontal
+     scroll when the labels don't fit on a single row. */
+  .settings-tabs {
+    display: flex;
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .settings-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .settings-tab {
+    flex: 0 0 auto;
   }
 }
 
