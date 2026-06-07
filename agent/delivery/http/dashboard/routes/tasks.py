@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from agent.modules.agent_runtime import NotifyChannel
 from agent.modules.workspaces import WorkspaceRef
 from agent.modules.agent_runtime import get_background_task_manager
+from agent.modules.conversations import get_conversation_thread_repository
 from agent.modules.workspaces import resolve_workspace_ref
 
 
@@ -27,6 +28,15 @@ class SubmitTaskBody(BaseModel):
 async def list_background_tasks() -> dict[str, Any]:
     manager = get_background_task_manager()
     tasks = manager.list_all()
+
+    thread_ids = [t["thread_id"] for t in tasks if t.get("thread_id")]
+    repo = get_conversation_thread_repository()
+    active_threads = await repo.list_active_thread_ids(thread_ids)
+
+    for task in tasks:
+        tid = task.get("thread_id")
+        task["thread_deleted"] = bool(tid) and tid not in active_threads
+
     return {"tasks": tasks}
 
 

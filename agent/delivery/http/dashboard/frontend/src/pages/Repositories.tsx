@@ -1097,7 +1097,7 @@ function RepositoryActivity(props: { tasks: BackgroundTask[] }) {
               <div class="row-wrap repository-task-actions">
                 <StatusBadge status={task.status} />
                 <span class="badge">{task.elapsed_display}</span>
-                <Show when={task.thread_id}>
+                <Show when={task.thread_id && !task.thread_deleted}>
                   <A class="btn btn-sm" href={`/c/${encodeURIComponent(task.thread_id)}`}>
                     <MessageSquare size={13} />
                     Open Chat

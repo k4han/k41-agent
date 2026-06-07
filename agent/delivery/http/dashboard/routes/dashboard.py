@@ -23,6 +23,7 @@ from agent.modules.agent_runtime import (
     get_background_task_manager,
 )
 from agent.modules.agents import get_catalog_service
+from agent.modules.conversations import get_conversation_thread_repository
 from agent.modules.channels import (
     get_registered_channel_catalog,
     list_channel_statuses,
@@ -388,8 +389,18 @@ async def get_dashboard_agents() -> dict[str, Any]:
 async def get_dashboard_tasks() -> dict[str, Any]:
     manager = get_background_task_manager()
     catalog = get_catalog_service()
+    tasks = manager.list_all()
+
+    thread_ids = [t["thread_id"] for t in tasks if t.get("thread_id")]
+    repo = get_conversation_thread_repository()
+    active_threads = await repo.list_active_thread_ids(thread_ids)
+
+    for task in tasks:
+        tid = task.get("thread_id")
+        task["thread_deleted"] = bool(tid) and tid not in active_threads
+
     return {
-        "tasks": manager.list_all(),
+        "tasks": tasks,
         "agents": [_serialize_agent_config(agent) for agent in catalog.list_agents()],
         "identities": await _paired_identities(),
     }

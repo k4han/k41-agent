@@ -209,6 +209,7 @@ export type BackgroundTask = {
   elapsed_seconds: number;
   elapsed_display: string;
   thread_id: string;
+  thread_deleted: boolean;
   notify_channel: {
     platform: string;
     external_id: string;

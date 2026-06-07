@@ -542,7 +542,7 @@ export function TasksPage() {
                               )}
                             </Show>
                             <div class="row-wrap">
-                              <Show when={task.thread_id}>
+                              <Show when={task.thread_id && !task.thread_deleted}>
                                 <A
                                   class="btn btn-sm"
                                   href={`/c/${encodeURIComponent(task.thread_id)}`}
