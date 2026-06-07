@@ -83,15 +83,15 @@ type PairingResponse = {
 type TabKey = "channels" | "pairing";
 
 const TAB_ITEMS: ReadonlyArray<SettingsTabItem<TabKey>> = [
-  { value: "channels", label: "Channels", icon: <Network size={13} /> },
-  { value: "pairing", label: "Pairing", icon: <Fingerprint size={13} /> },
+  { value: "channels", label: "Channels", icon: () => <Network size={13} /> },
+  { value: "pairing", label: "Pairing", icon: () => <Fingerprint size={13} /> },
 ];
 
 type DrawerSection = {
   id: string;
   title: string;
   subtitle?: string;
-  icon?: JSX.Element;
+  icon?: () => JSX.Element;
   fields: string[];
   defaultCollapsed?: boolean;
   visibleWhen?: (
@@ -133,7 +133,7 @@ const CHANNEL_DEFS: ChannelDefinition[] = [
         id: "webhook",
         title: "Update Mode",
         subtitle: "Polling or webhook delivery",
-        icon: <Webhook size={14} />,
+        icon: () => <Webhook size={14} />,
         fields: ["update_mode", "webhook_url", "webhook_secret"],
         helper: (valueFor) => {
           const mode = String(valueFor("update_mode") ?? "polling").toLowerCase();
@@ -1102,7 +1102,7 @@ function DrawerSection(props: {
       >
         <div>
           <div class="channel-drawer-section-title">
-            <Show when={props.section.icon}>{props.section.icon}</Show>
+            <Show when={props.section.icon}>{props.section.icon!()}</Show>
             {props.section.title}
             <Show when={dirtyCount() > 0}>
               <span class="badge badge-warning">{dirtyCount()}</span>

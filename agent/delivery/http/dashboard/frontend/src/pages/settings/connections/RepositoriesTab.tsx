@@ -41,7 +41,7 @@ type DrawerSection = {
   id: string;
   title: string;
   subtitle?: string;
-  icon?: JSX.Element;
+  icon?: () => JSX.Element;
   fields: string[];
 };
 
@@ -72,7 +72,7 @@ const GITHUB_SECTIONS: DrawerSection[] = [
     id: "webhook",
     title: "Webhook",
     subtitle: "Shared secret for webhook signature verification",
-    icon: <Webhook size={14} />,
+    icon: () => <Webhook size={14} />,
     fields: ["webhook_secret"],
   },
 ];
@@ -560,7 +560,7 @@ function DrawerSection(props: {
       >
         <div>
           <div class="channel-drawer-section-title">
-            <Show when={props.section.icon}>{props.section.icon}</Show>
+            <Show when={props.section.icon}>{props.section.icon!()}</Show>
             {props.section.title}
           </div>
           <Show when={props.section.subtitle}>

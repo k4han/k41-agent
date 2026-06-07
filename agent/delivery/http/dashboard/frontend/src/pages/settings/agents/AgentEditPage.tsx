@@ -145,12 +145,6 @@ export function AgentEditPage(props: { agentName?: string }) {
       ...form().plan_approval_targets.filter((name) => name !== form().name),
     ]),
   );
-  const mcpServerOptions = createMemo(() =>
-    uniqueSorted([
-      ...(payload()?.mcp_server_options || []),
-      ...(mcpInstalls().map((install) => install.server_name) || []),
-    ]),
-  );
   const mcpInstalls = createMemo(() => {
     const name = props.agentName || form().name;
     if (!name) {
@@ -158,6 +152,12 @@ export function AgentEditPage(props: { agentName?: string }) {
     }
     return payload()?.mcp_installs?.[name] || [];
   });
+  const mcpServerOptions = createMemo(() =>
+    uniqueSorted([
+      ...(payload()?.mcp_server_options || []),
+      ...(mcpInstalls().map((install) => install.server_name) || []),
+    ]),
+  );
   const toolGroups = createMemo(() => {
     const p = payload();
     if (!p) {

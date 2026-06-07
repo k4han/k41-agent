@@ -28,22 +28,22 @@ import { useMobileDrawer } from "@/lib/useMobileDrawer";
 type SettingsNavItem = {
   href: string;
   label: string;
-  icon: JSX.Element;
+  icon: () => JSX.Element;
 };
 
 const settingsNavItems: SettingsNavItem[] = [
-  { href: "/settings/config", label: "Runtime", icon: <Cog size={15} /> },
-  { href: "/settings/backends", label: "Backends", icon: <ServerCog size={15} /> },
-  { href: "/settings/sandboxes", label: "Sandboxes", icon: <CloudCog size={15} /> },
-  { href: "/settings/providers", label: "Providers", icon: <Workflow size={15} /> },
-  { href: "/settings/connections", label: "Connections", icon: <Link2 size={15} /> },
-  { href: "/settings/channels", label: "Channels", icon: <Network size={15} /> },
-  { href: "/settings/agents", label: "Agents", icon: <Users size={15} /> },
-  { href: "/settings/skills", label: "Skills", icon: <BookOpen size={15} /> },
-  { href: "/settings/prompt-variables", label: "Prompt Variables", icon: <Braces size={15} /> },
-  { href: "/settings/security", label: "Security", icon: <KeyRound size={15} /> },
-  { href: "/settings/usage", label: "Usage", icon: <BarChart3 size={15} /> },
-  { href: "/settings/appearance", label: "Appearance", icon: <Palette size={15} /> },
+  { href: "/settings/config", label: "Runtime", icon: () => <Cog size={15} /> },
+  { href: "/settings/backends", label: "Backends", icon: () => <ServerCog size={15} /> },
+  { href: "/settings/sandboxes", label: "Sandboxes", icon: () => <CloudCog size={15} /> },
+  { href: "/settings/providers", label: "Providers", icon: () => <Workflow size={15} /> },
+  { href: "/settings/connections", label: "Connections", icon: () => <Link2 size={15} /> },
+  { href: "/settings/channels", label: "Channels", icon: () => <Network size={15} /> },
+  { href: "/settings/agents", label: "Agents", icon: () => <Users size={15} /> },
+  { href: "/settings/skills", label: "Skills", icon: () => <BookOpen size={15} /> },
+  { href: "/settings/prompt-variables", label: "Prompt Variables", icon: () => <Braces size={15} /> },
+  { href: "/settings/security", label: "Security", icon: () => <KeyRound size={15} /> },
+  { href: "/settings/usage", label: "Usage", icon: () => <BarChart3 size={15} /> },
+  { href: "/settings/appearance", label: "Appearance", icon: () => <Palette size={15} /> },
 ];
 
 type BreadcrumbSegment = {
@@ -190,7 +190,7 @@ export function SettingsLayout(props: {
                 class={`nav-link ${isActive(item.href) ? "active" : ""}`}
                 title={item.label}
               >
-                {item.icon}
+                {item.icon()}
                 <span class="nav-label">{item.label}</span>
               </A>
             )}

@@ -52,15 +52,15 @@ import type { ActiveSession, WorkspaceRef } from "@/types";
 type NavItem = {
   href: string;
   label: string;
-  icon: JSX.Element;
+  icon: () => JSX.Element;
 };
 
 const navItems: NavItem[] = [
-  { href: "/", label: "Home", icon: <Home size={15} /> },
-  { href: "/chat", label: "Chat", icon: <MessageSquare size={15} /> },
-  { href: "/repositories", label: "Repositories", icon: <GitPullRequest size={15} /> },
-  { href: "/tasks", label: "Background Tasks", icon: <PlaySquare size={15} /> },
-  { href: "/scheduler", label: "Scheduler", icon: <CalendarClock size={15} /> },
+  { href: "/", label: "Home", icon: () => <Home size={15} /> },
+  { href: "/chat", label: "Chat", icon: () => <MessageSquare size={15} /> },
+  { href: "/repositories", label: "Repositories", icon: () => <GitPullRequest size={15} /> },
+  { href: "/tasks", label: "Background Tasks", icon: () => <PlaySquare size={15} /> },
+  { href: "/scheduler", label: "Scheduler", icon: () => <CalendarClock size={15} /> },
 ];
 
 const HISTORY_PANEL_STORAGE_KEY = STORAGE_KEYS.HISTORY_PANEL;
@@ -832,7 +832,7 @@ export function AppShell(props: {
                 class={`nav-link ${isActive(item.href) ? "active" : ""}`}
                 title={item.label}
               >
-                {item.icon}
+                {item.icon()}
                 <span class="nav-label">{item.label}</span>
               </A>
             )}

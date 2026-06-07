@@ -10,8 +10,8 @@ import { SettingsTabBar, type SettingsTabItem } from "./shared";
 type TabKey = "repositories" | "mcp";
 
 const TAB_ITEMS: ReadonlyArray<SettingsTabItem<TabKey>> = [
-  { value: "repositories", label: "Repositories", icon: <FolderGit2 size={13} /> },
-  { value: "mcp", label: "MCP Servers", icon: <PlugZap size={13} /> },
+  { value: "repositories", label: "Repositories", icon: () => <FolderGit2 size={13} /> },
+  { value: "mcp", label: "MCP Servers", icon: () => <PlugZap size={13} /> },
 ];
 
 export function ConnectionsPage() {

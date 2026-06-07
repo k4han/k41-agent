@@ -421,7 +421,7 @@ export function SettingsConfirmDialog(props: {
 export type SettingsTabItem<T extends string> = {
   value: T;
   label: string;
-  icon: JSX.Element;
+  icon: () => JSX.Element;
 };
 
 export function SettingsTabBar<T extends string>(props: {
@@ -442,7 +442,7 @@ export function SettingsTabBar<T extends string>(props: {
             onClick={() => props.onChange(item.value)}
           >
             <span class="settings-tab-icon" aria-hidden="true">
-              {item.icon}
+              {item.icon()}
             </span>
             <span>{item.label}</span>
           </button>
