@@ -1,167 +1,167 @@
 # K41 Agent
 
-K41 Agent là một AI agent runtime chạy trên máy của bạn. Bạn có thể dùng qua dashboard web, API nội bộ, hoặc kết nối thêm các kênh như Telegram, Discord và GitHub.
+K41 Agent is an AI agent runtime that runs on your machine. You can use it through the web dashboard, the internal API, or additional channels such as Telegram, Discord, and GitHub.
 
-Dự án được xây bằng Python, FastAPI, LangGraph và dashboard Solid/Vite. Python/dependency được quản lý bằng `uv`.
+The project is built with Python, FastAPI, LangGraph, and a Solid/Vite dashboard. Python and dependencies are managed with `uv`.
 
-## Dùng để làm gì?
+## What is it for?
 
-- Trò chuyện với agent qua dashboard.
-- Chọn workspace để agent đọc, tìm kiếm và chỉnh sửa file.
-- Quản lý LLM provider, model, MCP server, skills và agent profile.
-- Chạy task nền, lịch chạy tự động và theo dõi trạng thái runtime.
-- Kết nối Telegram, Discord hoặc GitHub để nhận việc từ bên ngoài dashboard.
+- Chat with the agent through the dashboard.
+- Select a workspace so the agent can read, search, and edit files.
+- Manage LLM providers, models, MCP servers, skills, and agent profiles.
+- Run background tasks, schedule automatic runs, and monitor runtime status.
+- Connect Telegram, Discord, or GitHub to receive work from outside the dashboard.
 
-## Cài nhanh trên Windows
+## Quick Install on Windows
 
-Mở PowerShell tại thư mục source của dự án, rồi chạy:
+Open PowerShell in the project source directory, then run:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-Nếu PowerShell trên máy đã cho phép chạy script, có thể dùng lệnh ngắn hơn:
+If PowerShell already allows script execution on your machine, you can use the shorter command:
 
 ```powershell
 .\install.ps1
 ```
 
-Script cài đặt sẽ:
+The installer will:
 
-- Tạo thư mục cài đặt tại `%LOCALAPPDATA%\k41-agent`.
-- Tải `uv` nếu máy chưa có bản dùng riêng cho K41 Agent.
-- Cài Python 3.13 và dependency theo `uv.lock`.
-- Copy source vào thư mục app runtime.
-- Chạy `k41 init` để tạo `~/.k41-agent/config.yaml` và database.
-- Thêm `%LOCALAPPDATA%\k41-agent\bin` vào user `PATH`.
+- Create the installation directory at `%LOCALAPPDATA%\k41-agent`.
+- Download `uv` if the machine does not already have the K41 Agent private copy.
+- Install Python 3.13 and dependencies from `uv.lock`.
+- Copy the source into the runtime app directory.
+- Run `k41 init` to create `~/.k41-agent/config.yaml` and the database.
+- Add `%LOCALAPPDATA%\k41-agent\bin` to the user `PATH`.
 
-Sau khi cài xong, mở một terminal mới và đặt mật khẩu admin:
+After installation finishes, open a new terminal and set the admin password:
 
 ```powershell
 k41 reset-password
 ```
 
-Khởi động K41 Agent:
+Start K41 Agent:
 
 ```powershell
 k41
 ```
 
-Dashboard mặc định chạy tại:
+The dashboard runs at this address by default:
 
 ```text
 http://127.0.0.1:8000
 ```
 
-Đăng nhập bằng mật khẩu admin vừa đặt.
+Sign in with the admin password you just set.
 
-## Thiết lập lần đầu
+## First-Time Setup
 
-1. Vào `Settings > Providers`.
-2. Thêm LLM provider, API key, default model và danh sách model cần dùng.
-3. Vào `Settings > Agents` nếu muốn chỉnh prompt, tool hoặc model cho từng agent.
-4. Vào `Settings > Connections` để thêm MCP server hoặc GitHub repository.
-5. Vào `Settings > Channels` nếu muốn bật Telegram, Discord hoặc GitHub webhook.
+1. Go to `Settings > Providers`.
+2. Add an LLM provider, API key, default model, and the list of models you want to use.
+3. Go to `Settings > Agents` if you want to adjust the prompt, tools, or model for each agent.
+4. Go to `Settings > Connections` to add an MCP server or GitHub repository.
+5. Go to `Settings > Channels` if you want to enable Telegram, Discord, or GitHub webhooks.
 
-Nếu chỉ muốn dùng dashboard để chat/coding trong workspace local, bạn thường chỉ cần cấu hình provider trước.
+If you only want to use the dashboard for chat or coding in a local workspace, you usually only need to configure a provider first.
 
-## Lệnh thường dùng
+## Common Commands
 
 ```powershell
-k41                 # Chạy server nền
-k41 --foreground    # Chạy server ở foreground để xem log trực tiếp
-k41 status          # Kiểm tra server, dashboard, API và health endpoint
-k41 stop            # Dừng server
-k41 cli             # Mở chat CLI
-k41 reset-password  # Đặt lại mật khẩu admin
-k41 pair-code       # Tạo mã ghép tài khoản cho Telegram/Discord
+k41                 # Run the server in the background
+k41 --foreground    # Run the server in the foreground to view logs directly
+k41 status          # Check the server, dashboard, API, and health endpoint
+k41 stop            # Stop the server
+k41 cli             # Open the chat CLI
+k41 reset-password  # Reset the admin password
+k41 pair-code       # Create an account pairing code for Telegram/Discord
 ```
 
-Log server nằm tại:
+Server logs are stored at:
 
 ```text
 ~/.k41-agent/server.log
 ```
 
-Dữ liệu runtime mặc định nằm tại:
+Runtime data is stored here by default:
 
 ```text
 ~/.k41-agent/
 ```
 
-## Cập nhật hoặc cài lại
+## Update or Reinstall
 
-Chạy lại installer từ source mới:
+Run the installer again from the new source:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-Installer sẽ dừng app đang chạy, copy source mới, sync dependency và giữ lại dữ liệu runtime trong `~/.k41-agent`.
+The installer will stop the running app, copy the new source, sync dependencies, and keep the runtime data in `~/.k41-agent`.
 
-## Gỡ cài đặt
+## Uninstall
 
-Gỡ app nhưng giữ dữ liệu runtime:
+Uninstall the app while keeping runtime data:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\uninstall.ps1
 ```
 
-Gỡ app và xóa cả dữ liệu runtime:
+Uninstall the app and remove runtime data:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\uninstall.ps1 -RemoveRuntimeData
 ```
 
-## Chạy từ source để phát triển
+## Run from Source for Development
 
-Cài dependency Python:
+Install Python dependencies:
 
 ```powershell
 uv sync
 ```
 
-Cài dependency frontend:
+Install frontend dependencies:
 
 ```powershell
 pnpm install
 ```
 
-Khởi tạo runtime local:
+Initialize the local runtime:
 
 ```powershell
 uv run k41 init
 uv run k41 reset-password
 ```
 
-Build dashboard:
+Build the dashboard:
 
 ```powershell
 pnpm dashboard:check
 pnpm dashboard:build
 ```
 
-Chạy app từ source:
+Run the app from source:
 
 ```powershell
 uv run python main.py
 ```
 
-Hoặc chạy CLI entrypoint trực tiếp:
+Or run the CLI entrypoint directly:
 
 ```powershell
 uv run k41 --foreground
 ```
 
-## Cấu hình chính
+## Main Configuration
 
-File bootstrap config nằm tại:
+The bootstrap config file is located at:
 
 ```text
 ~/.k41-agent/config.yaml
 ```
 
-Các giá trị thường chỉnh trong file này:
+Common values to edit in this file:
 
 ```yaml
 host: "0.0.0.0"
@@ -171,49 +171,49 @@ enable_api: true
 enable_dashboard: true
 ```
 
-Các cấu hình runtime như LLM provider, API key, MCP server, channel token, GitHub private key, timezone và recursion limit được quản lý trong dashboard và lưu vào database. Secret được mã hóa khi lưu.
+Runtime settings such as LLM providers, API keys, MCP servers, channel tokens, GitHub private keys, timezone, and recursion limit are managed in the dashboard and saved to the database. Secrets are encrypted when stored.
 
 ## API
 
-API nằm dưới `/api` và yêu cầu phiên đăng nhập admin giống dashboard.
+The API is available under `/api` and requires the same admin login session as the dashboard.
 
-Một số endpoint chính:
+Some main endpoints:
 
-| Method | Endpoint | Mục đích |
+| Method | Endpoint | Purpose |
 | --- | --- | --- |
-| `POST` | `/api/chat` | Chat đồng bộ |
-| `POST` | `/api/chat/stream` | Chat streaming dạng text |
-| `POST` | `/api/chat/events` | Chat streaming dạng event cho UI |
-| `GET` | `/api/graphs` | Xem workflow đã đăng ký |
-| `GET` | `/api/providers` | Xem provider đã cấu hình |
-| `GET` | `/api/providers/models` | Xem model options |
-| `GET` | `/health` | Kiểm tra trạng thái app |
+| `POST` | `/api/chat` | Synchronous chat |
+| `POST` | `/api/chat/stream` | Text streaming chat |
+| `POST` | `/api/chat/events` | Event streaming chat for the UI |
+| `GET` | `/api/graphs` | View registered workflows |
+| `GET` | `/api/providers` | View configured providers |
+| `GET` | `/api/providers/models` | View model options |
+| `GET` | `/health` | Check app status |
 
-## Workflows và agent
+## Workflows and Agents
 
-K41 Agent có các workflow mặc định:
+K41 Agent includes these default workflows:
 
-| Workflow | Mục đích |
+| Workflow | Purpose |
 | --- | --- |
-| `react_agent` | Agent chính có thể gọi tool, đọc/sửa file, chạy shell và dùng skill |
-| `research_chain` | Workflow nghiên cứu và tổng hợp |
-| `router` | Phân loại yêu cầu rồi chuyển sang workflow phù hợp |
+| `react_agent` | Main agent that can call tools, read/edit files, run shell commands, and use skills |
+| `research_chain` | Research and synthesis workflow |
+| `router` | Classifies requests and routes them to the appropriate workflow |
 
-Agent profile được load từ:
+Agent profiles are loaded from:
 
 ```text
 ~/.k41-agent/agents/
 ```
 
-Ví dụ và hướng dẫn chi tiết nằm trong:
+Examples and detailed guidance are available in:
 
 - `agent/modules/agents/README.md`
 - `agent/modules/agents/examples/`
 - `docs/agent-quick-reference.md`
 
-## Tài liệu thêm
+## Additional Documentation
 
-- `docs/configuration.md`: cấu hình chi tiết.
-- `docs/deployment-verification.md`: checklist kiểm tra triển khai.
-- `docs/graph-registration.md`: cách đăng ký workflow.
-- `docs/refactor-agent-centric-api.md`: ghi chú API theo hướng agent-centric.
+- `docs/configuration.md`: detailed configuration.
+- `docs/deployment-verification.md`: deployment verification checklist.
+- `docs/graph-registration.md`: how to register workflows.
+- `docs/refactor-agent-centric-api.md`: notes about the agent-centric API.
