@@ -14,9 +14,10 @@ The project is built with Python, FastAPI, LangGraph, and a Solid/Vite dashboard
 
 ## Quick Install on Windows
 
-Open PowerShell in the project source directory, then run:
+Open PowerShell in a temporary directory, then download and run the installer:
 
 ```powershell
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/k4han/k41-agent/main/install.ps1" -OutFile ".\install.ps1"
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
@@ -26,14 +27,23 @@ If PowerShell already allows script execution on your machine, you can use the s
 .\install.ps1
 ```
 
+By default, the installer downloads the latest GitHub Release artifact named `k41-agent-release.zip`. The release artifact already includes the built dashboard frontend, so user machines do not need Node.js, `pnpm`, `pip`, `poetry`, or `conda`.
+
+To install a specific release tag:
+
+```powershell
+.\install.ps1 -ReleaseTag v0.1.1
+```
+
 The installer will:
 
 - Create the installation directory at `%LOCALAPPDATA%\k41-agent`.
-- Download `uv` if the machine does not already have the K41 Agent private copy.
+- Download the private `uv` copy into `%LOCALAPPDATA%\k41-agent\tools`.
 - Install Python 3.13 and dependencies from `uv.lock`.
-- Copy the source into the runtime app directory.
+- Download the release artifact and copy the app into the runtime app directory.
 - Run `k41 init` to create `~/.k41-agent/config.yaml` and the database.
 - Create the `k41.cmd` command launcher in `%LOCALAPPDATA%\k41-agent\bin`.
+- Create the uninstaller at `%LOCALAPPDATA%\k41-agent\uninstall.cmd`.
 - Add `%LOCALAPPDATA%\k41-agent\bin` to the user `PATH`.
 
 After installation finishes, open a new terminal and set the admin password:
@@ -92,29 +102,31 @@ Runtime data is stored here by default:
 
 ## Update or Reinstall
 
-Run the installer again from the new source:
+Run the installer again:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-The installer will stop the running app, copy the new source, sync dependencies, and keep the runtime data in `~/.k41-agent`.
+The installer will stop the running app, download the latest release artifact, sync dependencies, and keep the runtime data in `~/.k41-agent`.
 
 ## Uninstall
 
 Uninstall the app while keeping runtime data:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\uninstall.ps1
+& "$env:LOCALAPPDATA\k41-agent\uninstall.cmd"
 ```
 
 Uninstall the app and remove runtime data:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\uninstall.ps1 -RemoveRuntimeData
+& "$env:LOCALAPPDATA\k41-agent\uninstall.cmd" --remove-runtime-data
 ```
 
 ## Run from Source for Development
+
+Development installs use the local source tree. Build the dashboard before running `install.ps1` from a clone, because `agent/delivery/http/dashboard/static/` is generated and is not tracked in git.
 
 Install Python dependencies:
 
@@ -140,6 +152,12 @@ Build the dashboard:
 ```powershell
 pnpm dashboard:check
 pnpm dashboard:build
+```
+
+Install from the local source tree:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
 Run the app from source:

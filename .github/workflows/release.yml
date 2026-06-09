@@ -1,0 +1,121 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to create or update, for example v0.1.1"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  ARTIFACT_NAME: k41-agent-release.zip
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+
+jobs:
+  build-release-artifact:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable pnpm
+        shell: pwsh
+        run: |
+          corepack enable
+          corepack prepare pnpm@latest --activate
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check frontend
+        run: pnpm dashboard:check
+
+      - name: Build dashboard
+        run: pnpm dashboard:build
+
+      - name: Sync Python dependencies
+        run: uv sync --frozen --no-dev
+
+      - name: Run tests
+        run: uv run pytest
+
+      - name: Package release artifact
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stagingDir = Join-Path $env:RUNNER_TEMP "k41-agent"
+          $artifactPath = Join-Path $env:GITHUB_WORKSPACE $env:ARTIFACT_NAME
+
+          if (Test-Path -LiteralPath $stagingDir) {
+            Remove-Item -LiteralPath $stagingDir -Recurse -Force
+          }
+          if (Test-Path -LiteralPath $artifactPath) {
+            Remove-Item -LiteralPath $artifactPath -Force
+          }
+
+          New-Item -ItemType Directory -Force -Path $stagingDir | Out-Null
+
+          $excludedDirs = @(
+            ".git",
+            ".github",
+            ".venv",
+            "__pycache__",
+            ".pytest_cache",
+            ".ruff_cache",
+            ".mypy_cache",
+            ".tmp_*",
+            "build",
+            "dist",
+            "node_modules",
+            "wheels",
+            "local-dev",
+            "data",
+            "*.egg-info"
+          )
+          $excludedFiles = @("*.pyc", "*.pyo", ".env", ".env.*")
+
+          & robocopy $env:GITHUB_WORKSPACE $stagingDir /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /NP /XD $excludedDirs /XF $excludedFiles | Out-Host
+          $robocopyExitCode = $LASTEXITCODE
+          if ($robocopyExitCode -gt 7) {
+            throw "robocopy failed with exit code $robocopyExitCode."
+          }
+          $global:LASTEXITCODE = 0
+
+          $dashboardIndex = Join-Path $stagingDir "agent\delivery\http\dashboard\static\index.html"
+          if (-not (Test-Path -LiteralPath $dashboardIndex -PathType Leaf)) {
+            throw "Dashboard build is missing from the release artifact."
+          }
+
+          Compress-Archive -LiteralPath $stagingDir -DestinationPath $artifactPath -Force
+
+      - name: Upload artifact to workflow run
+        uses: actions/upload-artifact@v4
+        with:
+          name: k41-agent-release
+          path: ${{ env.ARTIFACT_NAME }}
+
+      - name: Upload artifact to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          files: ${{ env.ARTIFACT_NAME }}
+          fail_on_unmatched_files: true
