@@ -4,6 +4,7 @@ import os
 import selectors
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Request
@@ -29,6 +30,8 @@ logging.basicConfig(
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+SHUTDOWN_SIGNAL = Path.home() / ".kaka-agent" / "shutdown.signal"
 
 
 def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:
@@ -114,15 +117,32 @@ async def main() -> None:
             loop="asyncio",
         )
         server = uvicorn.Server(config)
+
+        async def monitor_shutdown_signal():
+            while True:
+                if SHUTDOWN_SIGNAL.exists():
+                    logger.info("Shutdown signal received. Stopping server...")
+                    SHUTDOWN_SIGNAL.unlink(missing_ok=True)
+                    server.should_exit = True
+                    return
+                await asyncio.sleep(0.5)
+
+        shutdown_task = asyncio.create_task(monitor_shutdown_signal())
         logger.info("Starting web host on %s:%s", settings.host, settings.port)
         await server.serve()
+        shutdown_task.cancel()
         return
 
     logger.info("Web host disabled. Running managed channels only.")
     runtime: AppRuntime = app.state.runtime
     await runtime.startup()
     try:
-        await asyncio.Event().wait()
+        while True:
+            if SHUTDOWN_SIGNAL.exists():
+                logger.info("Shutdown signal received. Stopping server...")
+                SHUTDOWN_SIGNAL.unlink(missing_ok=True)
+                break
+            await asyncio.sleep(0.5)
     finally:
         await runtime.shutdown()
 
