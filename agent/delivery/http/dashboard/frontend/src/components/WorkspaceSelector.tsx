@@ -721,7 +721,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
                           class="input workspace-selector-input"
                           value={modalSandboxId()}
                           disabled={props.disabled}
-                          placeholder="Sandbox ID"
+                          placeholder="sandbox ID (leave empty to create new)"
                           onInput={(event) => setModalSandboxId(event.currentTarget.value)}
                           onKeyDown={(event) => {
                             if (event.key === "Enter") {
@@ -751,7 +751,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
                       class="input workspace-selector-input"
                       value={daytonaSandboxId()}
                       disabled={props.disabled}
-                      placeholder="Sandbox ID"
+                      placeholder="sandbox ID (leave empty to create new)"
                       onInput={(event) => setDaytonaSandboxId(event.currentTarget.value)}
                       onKeyDown={(event) => {
                         if (event.key === "Enter") {
