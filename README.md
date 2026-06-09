@@ -1,58 +1,67 @@
 # K41 Agent
 
-K41 Agent is an AI agent runtime that runs on your machine. You can use it through the web dashboard, the internal API, or additional channels such as Telegram, Discord, and GitHub.
+K41 Agent is a local AI workspace assistant with a web dashboard. It can chat, work with files in selected workspaces, run background tasks, and connect to external channels such as Telegram, Discord, and GitHub.
 
-The project is built with Python, FastAPI, LangGraph, and a Solid/Vite dashboard. Python and dependencies are managed with `uv`.
+Use it when you want a private agent runtime on your own machine instead of a hosted workspace.
 
-## What is it for?
+## Highlights
 
-- Chat with the agent through the dashboard.
-- Select a workspace so the agent can read, search, and edit files.
-- Manage LLM providers, models, MCP servers, skills, and agent profiles.
-- Run background tasks, schedule automatic runs, and monitor runtime status.
-- Connect Telegram, Discord, or GitHub to receive work from outside the dashboard.
+- Web dashboard for chat, workspace selection, settings, and runtime monitoring.
+- Local runtime data under your user profile.
+- Provider settings for OpenAI-compatible and other supported LLM services.
+- Optional channel integrations for Telegram, Discord, and GitHub.
+- One-command install, update, and uninstall on Windows, macOS, and Linux.
 
-## Quick Install on Windows
+## Install
 
-Open PowerShell in a temporary directory, then download and run the installer:
+The installer downloads the latest release package and prepares everything needed to run K41 Agent.
+
+### Windows
+
+Open PowerShell and run:
 
 ```powershell
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/k4han/k41-agent/main/install.ps1" -OutFile ".\install.ps1"
-powershell -ExecutionPolicy Bypass -File .\install.ps1
+irm https://k4han.github.io/k41-agent/install.ps1 | iex
 ```
 
-If PowerShell already allows script execution on your machine, you can use the shorter command:
+To install a specific release:
 
 ```powershell
-.\install.ps1
+Invoke-WebRequest -Uri "https://k4han.github.io/k41-agent/install.ps1" -OutFile ".\install.ps1"
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -ReleaseTag v0.1.1
 ```
 
-By default, the installer downloads the latest GitHub Release artifact named `k41-agent-release.zip`. The release artifact already includes the built dashboard frontend, so user machines do not need Node.js, `pnpm`, `pip`, `poetry`, or `conda`.
+### macOS or Linux
 
-To install a specific release tag:
+Open a terminal and run:
 
-```powershell
-.\install.ps1 -ReleaseTag v0.1.1
+```sh
+curl -fsSL https://k4han.github.io/k41-agent/install.sh | bash
 ```
 
-The installer will:
+If `curl` is not available:
 
-- Create the installation directory at `%LOCALAPPDATA%\k41-agent`.
-- Download the private `uv` copy into `%LOCALAPPDATA%\k41-agent\tools`.
-- Install Python 3.13 and dependencies from `uv.lock`.
-- Download the release artifact and copy the app into the runtime app directory.
-- Run `k41 init` to create `~/.k41-agent/config.yaml` and the database.
-- Create the `k41.cmd` command launcher in `%LOCALAPPDATA%\k41-agent\bin`.
-- Create the uninstaller at `%LOCALAPPDATA%\k41-agent\uninstall.cmd`.
-- Add `%LOCALAPPDATA%\k41-agent\bin` to the user `PATH`.
+```sh
+wget -qO- https://k4han.github.io/k41-agent/install.sh | bash
+```
 
-Start K41 Agent:
+To install a specific release:
 
-```powershell
+```sh
+curl -fsSL https://k4han.github.io/k41-agent/install.sh -o install.sh
+chmod +x install.sh
+./install.sh --release-tag v0.1.1
+```
+
+## Start
+
+Open a new terminal after installation and run:
+
+```sh
 k41
 ```
 
-The dashboard runs at this address by default:
+Then open:
 
 ```text
 http://127.0.0.1:8000
@@ -64,97 +73,153 @@ Sign in with the default admin password shown on the login page:
 1234
 ```
 
-To change it later, run:
+Change the password after the first login:
 
-```powershell
+```sh
 k41 reset-password
 ```
 
-## First-Time Setup
+## First Setup
 
-1. Go to `Settings > Providers`.
-2. Add an LLM provider, API key, default model, and the list of models you want to use.
-3. Go to `Settings > Agents` if you want to adjust the prompt, tools, or model for each agent.
-4. Go to `Settings > Connections` to add an MCP server or GitHub repository.
-5. Go to `Settings > Channels` if you want to enable Telegram, Discord, or GitHub webhooks.
+1. Open `Settings > Providers`.
+2. Add your LLM provider, API key, default model, and enabled models.
+3. Open `Settings > Agents` if you want to adjust agent behavior.
+4. Open `Settings > Connections` if you want to add MCP servers or GitHub repositories.
+5. Open `Settings > Channels` if you want to enable Telegram, Discord, or GitHub webhooks.
 
-If you only want to use the dashboard for chat or coding in a local workspace, you usually only need to configure a provider first.
+For a basic local setup, configuring a provider is usually enough.
 
-## Common Commands
+## Daily Commands
 
-```powershell
-k41                 # Run the server in the background
-k41 --foreground    # Run the server in the foreground to view logs directly
-k41 status          # Check the server, dashboard, API, and health endpoint
+```sh
+k41                 # Start the server in the background
+k41 --foreground    # Start the server in the current terminal
+k41 status          # Check server and dashboard status
 k41 stop            # Stop the server
 k41 cli             # Open the chat CLI
 k41 reset-password  # Reset the admin password
-k41 pair-code       # Create an account pairing code for Telegram/Discord
+k41 pair-code       # Create a pairing code for Telegram or Discord
 ```
 
-Server logs are stored at:
+## Update
 
-```text
-~/.k41-agent/server.log
-```
+Run the installer again. Your configuration, database, and runtime data are kept.
 
-Runtime data is stored here by default:
-
-```text
-~/.k41-agent/
-```
-
-## Update or Reinstall
-
-Run the installer again:
+Windows:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\install.ps1
+irm https://k4han.github.io/k41-agent/install.ps1 | iex
 ```
 
-The installer will stop the running app, download the latest release artifact, sync dependencies, and keep the runtime data in `~/.k41-agent`.
+macOS or Linux:
+
+```sh
+curl -fsSL https://k4han.github.io/k41-agent/install.sh | bash
+```
 
 ## Uninstall
 
-Uninstall the app while keeping runtime data:
+Uninstall keeps runtime data by default.
+
+Windows:
 
 ```powershell
 & "$env:LOCALAPPDATA\k41-agent\uninstall.cmd"
 ```
 
-Uninstall the app and remove runtime data:
+macOS or Linux:
+
+```sh
+"${XDG_DATA_HOME:-$HOME/.local/share}/k41-agent/uninstall.sh"
+```
+
+Remove runtime data too:
 
 ```powershell
 & "$env:LOCALAPPDATA\k41-agent\uninstall.cmd" --remove-runtime-data
 ```
 
-## Run from Source for Development
+```sh
+"${XDG_DATA_HOME:-$HOME/.local/share}/k41-agent/uninstall.sh" --remove-runtime-data
+```
 
-Development installs use the local source tree. Build the dashboard before running `install.ps1` from a clone, because `agent/delivery/http/dashboard/static/` is generated and is not tracked in git.
+## Installed Files
 
-Install Python dependencies:
+Windows:
 
-```powershell
+```text
+%LOCALAPPDATA%\k41-agent
+```
+
+macOS or Linux:
+
+```text
+${XDG_DATA_HOME:-~/.local/share}/k41-agent
+```
+
+Runtime data:
+
+```text
+~/.k41-agent
+```
+
+Server log:
+
+```text
+~/.k41-agent/server.log
+```
+
+## Troubleshooting
+
+Check the running service:
+
+```sh
+k41 status
+```
+
+Stop and start again:
+
+```sh
+k41 stop
+k41
+```
+
+View logs:
+
+```text
+~/.k41-agent/server.log
+```
+
+If the `k41` command is not found after installation, open a new terminal. On macOS or Linux, also make sure your shell profile has been reloaded.
+
+## Development
+
+Development installs use the local source tree. Build the dashboard before running `install.ps1` or `install.sh` from a clone, because `agent/delivery/http/dashboard/static/` is generated and is not tracked in git.
+
+Install dependencies:
+
+```sh
 uv sync
-```
-
-Install frontend dependencies:
-
-```powershell
 pnpm install
-```
-
-Initialize the local runtime:
-
-```powershell
-uv run k41 init
 ```
 
 Build the dashboard:
 
-```powershell
+```sh
 pnpm dashboard:check
 pnpm dashboard:build
+```
+
+Initialize the local runtime:
+
+```sh
+uv run k41 init
+```
+
+Run from source:
+
+```sh
+uv run k41 --foreground
 ```
 
 Install from the local source tree:
@@ -163,79 +228,12 @@ Install from the local source tree:
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-Run the app from source:
-
-```powershell
-uv run python main.py
+```sh
+./install.sh
 ```
 
-Or run the CLI entrypoint directly:
+## Documentation
 
-```powershell
-uv run k41 --foreground
-```
-
-## Main Configuration
-
-The bootstrap config file is located at:
-
-```text
-~/.k41-agent/config.yaml
-```
-
-Common values to edit in this file:
-
-```yaml
-host: "0.0.0.0"
-port: 8000
-enable_web: true
-enable_api: true
-enable_dashboard: true
-```
-
-Runtime settings such as LLM providers, API keys, MCP servers, channel tokens, GitHub private keys, timezone, and recursion limit are managed in the dashboard and saved to the database. Secrets are encrypted when stored.
-
-## API
-
-The API is available under `/api` and requires the same admin login session as the dashboard.
-
-Some main endpoints:
-
-| Method | Endpoint | Purpose |
-| --- | --- | --- |
-| `POST` | `/api/chat` | Synchronous chat |
-| `POST` | `/api/chat/stream` | Text streaming chat |
-| `POST` | `/api/chat/events` | Event streaming chat for the UI |
-| `GET` | `/api/graphs` | View registered workflows |
-| `GET` | `/api/providers` | View configured providers |
-| `GET` | `/api/providers/models` | View model options |
-| `GET` | `/health` | Check app status |
-
-## Workflows and Agents
-
-K41 Agent includes these default workflows:
-
-| Workflow | Purpose |
-| --- | --- |
-| `react_agent` | Main agent that can call tools, read/edit files, run shell commands, and use skills |
-| `research_chain` | Research and synthesis workflow |
-| `router` | Classifies requests and routes them to the appropriate workflow |
-
-Agent profiles are loaded from:
-
-```text
-~/.k41-agent/agents/
-```
-
-Examples and detailed guidance are available in:
-
-- `agent/modules/agents/README.md`
-- `agent/modules/agents/examples/`
+- `docs/configuration.md`
+- `docs/deployment-verification.md`
 - `docs/agent-quick-reference.md`
-
-## Additional Documentation
-
-- `docs/configuration.md`: detailed configuration.
-- `docs/deployment-verification.md`: deployment verification checklist.
-- `docs/graph-registration.md`: how to register workflows.
-- `docs/refactor-agent-centric-api.md`: notes about the agent-centric API.
