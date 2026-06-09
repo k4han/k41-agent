@@ -1,4 +1,4 @@
-# Kaka Agent Configuration Guide
+# Kai Agent Configuration Guide
 
 ## Quick Start
 
@@ -11,19 +11,19 @@ uv tool install --force .
 ### 2. Khởi tạo
 
 ```bash
-kaka init
+k41 init
 ```
 
 Lệnh này sẽ tạo:
-- `~/.kaka-agent/` - Thư mục chính
-- `~/.kaka-agent/config.yaml` - File cấu hình
-- `~/.kaka-agent/data/` - Database và dữ liệu
-- `~/.kaka-agent/agents/` - Custom agents
-- `~/.kaka-agent/skills/` - Custom skills
+- `~/.k41-agent/` - Thư mục chính
+- `~/.k41-agent/config.yaml` - File cấu hình
+- `~/.k41-agent/data/` - Database và dữ liệu
+- `~/.k41-agent/agents/` - Custom agents
+- `~/.k41-agent/skills/` - Custom skills
 
 ### 3. Cấu hình
 
-Chỉnh các cấu hình khởi động, database URL và display timezone trong `~/.kaka-agent/config.yaml`.
+Chỉnh các cấu hình khởi động, database URL và display timezone trong `~/.k41-agent/config.yaml`.
 JWT secret là secret nội bộ, app tự sinh và lưu khi thiếu.
 Provider LLM, MCP servers, default model, toàn bộ channel config và `recursion_limit` được lưu trong DB và quản trị qua dashboard.
 
@@ -49,9 +49,9 @@ Với GitHub App automation, đặt toàn bộ GitHub App config trong dashboard
 ### 4. Chạy
 
 ```bash
-kaka
+k41
 # hoặc
-kaka serve
+k41 serve
 ```
 
 ## Configuration Priority
@@ -60,7 +60,7 @@ Hệ thống đọc cấu hình theo thứ tự ưu tiên:
 
 1. **Defaults** (priority 0)
 
-2. **Config file** (`~/.kaka-agent/config.yaml`, priority 100)
+2. **Config file** (`~/.k41-agent/config.yaml`, priority 100)
   Dành cho bootstrap, database URL, system credentials và secrets không thuộc runtime DB.
 
 3. **Database** (priority 200)
@@ -71,13 +71,13 @@ Hệ thống đọc cấu hình theo thứ tự ưu tiên:
 ### SQLite (default)
 ```yaml
 database:
-  url: "sqlite+aiosqlite://~/.kaka-agent/data/agent_state.db"
+  url: "sqlite+aiosqlite://~/.k41-agent/data/agent_state.db"
 ```
 
 ### PostgreSQL
 ```yaml
 database:
-  url: "postgresql+asyncpg://user:password@localhost:5432/kaka_agent"
+  url: "postgresql+asyncpg://user:password@localhost:5432/k41_agent"
 ```
 
 ## Examples

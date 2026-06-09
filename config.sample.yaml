@@ -1,5 +1,5 @@
-# Kaka Agent Configuration
-# Copy this file to ~/.kaka-agent/config.yaml and customize
+# Kai Agent Configuration
+# Copy this file to ~/.k41-agent/config.yaml and customize
 
 # Server configuration
 host: "0.0.0.0"
@@ -11,10 +11,10 @@ enable_api: true
 enable_dashboard: true
 
 # Database configuration (optional)
-# By default, SQLite is used at ~/.kaka-agent/data/agent_state.db
+# By default, SQLite is used at ~/.k41-agent/data/agent_state.db
 # Only configure this if you want to use PostgreSQL
 # database:
-#   url: "postgresql+asyncpg://user:password@localhost:5432/kaka_agent"
+#   url: "postgresql+asyncpg://user:password@localhost:5432/k41_agent"
 
 # Runtime/admin configuration is stored in the database and managed from the dashboard:
 # - LLM providers, default model, provider API keys, models, and enabled state
@@ -35,11 +35,11 @@ security:
 
 # Security (optional)
 # persistence:
-#   allow_any_path: false  # Set to true to allow database outside ~/.kaka-agent/
+#   allow_any_path: false  # Set to true to allow database outside ~/.k41-agent/
 
 # Workspace settings (optional)
 # workspace:
-#   root: "~/kaka-agent"
+#   root: "~/k41-agent"
 # Workspace backend credentials are configured in the dashboard at Settings > Backends.
 
 # Dashboard display settings (e.g. IANA timezone) are runtime configuration

@@ -67,7 +67,7 @@ database.url mặc định:
 ```bash
 uv sync
 pnpm install
-uv run kaka init
+uv run k41 init
 # Mở dashboard và thêm provider tại Settings > Providers
 ```
 
@@ -105,11 +105,11 @@ enable_dashboard: true
 
 Quy ước hiện tại:
 - `enable_web`, `enable_api`, `enable_dashboard`: bật các capability của web host khi app khởi động.
-- `database.url` vẫn đọc từ `~/.kaka-agent/config.yaml`; `security.jwt_secret` là secret nội bộ và app tự sinh khi thiếu.
+- `database.url` vẫn đọc từ `~/.k41-agent/config.yaml`; `security.jwt_secret` là secret nội bộ và app tự sinh khi thiếu.
 - `llm.providers.*`, `llm.default_model`, `mcp.servers.*`, `channels.*`, `display.timezone` và `recursion_limit` được lưu trong DB để dashboard quản trị runtime. Provider API key, MCP `env.*`/`headers.*`, channel token/secret và GitHub private key được mã hóa khi lưu.
 - Cấu hình Telegram/Discord/GitHub nằm ở Settings > Channels. Nếu enabled và đủ credential thì channel sẽ tự khởi động cùng app.
 - Nếu dùng Telegram webhook, cần `enable_web: true`, `channels.telegram.webhook_url` trỏ tới `/channels/telegram/webhook`, và `channels.telegram.webhook_secret` trong dashboard để kiểm tra header `X-Telegram-Bot-Api-Secret-Token`.
-- Khi nâng cấp từ YAML cũ, runtime key channel còn thiếu trong DB sẽ được seed một lần từ `~/.kaka-agent/config.yaml`.
+- Khi nâng cấp từ YAML cũ, runtime key channel còn thiếu trong DB sẽ được seed một lần từ `~/.k41-agent/config.yaml`.
 - Với dashboard chạy ở prefix gốc `/`, alias cũ `/bots/*` đã bị loại bỏ. Chỉ dùng `/services/*`.
 - LLM config dùng `llm.providers.*` + `llm.default_model` trong DB; `llm.default_provider` cũ chỉ còn là giá trị tổng hợp cho UI.
 - Backend đang hỗ trợ: `openai_compatible` (dùng `ChatOpenAI`) và `google` (dùng `ChatGoogleGenerativeAI`, bỏ qua `base_url`).

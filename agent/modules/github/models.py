@@ -40,7 +40,7 @@ class GitHubRepositoryBinding(BaseModel):
     tool_policy_mode = Column(String(50), nullable=False, default="inherit")
     allowed_tools_json = Column(Text, nullable=False, default="[]")
     allowed_skills_json = Column(Text, nullable=False, default="[]")
-    branch_prefix = Column(String(80), nullable=False, default="kaka")
+    branch_prefix = Column(String(80), nullable=False, default="k41")
     workspace_backend = Column(String(50), nullable=False, default="local")
     last_synced_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)

@@ -528,15 +528,15 @@ def test_workspace_display_label_compacts_local_root(tmp_path):
 
 
 def test_workspace_display_label_disambiguates_repeated_local_root(tmp_path):
-    parent = tmp_path / "kaka-agent"
-    nested = parent / "kaka-agent"
+    parent = tmp_path / "k41-agent"
+    nested = parent / "k41-agent"
     nested.mkdir(parents=True)
 
     parent_workspace = workspace_ref_from_local_path(str(parent))
     nested_workspace = workspace_ref_from_local_path(str(nested))
 
-    assert parent_workspace.display_label() == "kaka-agent/"
-    assert nested_workspace.display_label() == "kaka-agent/kaka-agent/"
+    assert parent_workspace.display_label() == "k41-agent/"
+    assert nested_workspace.display_label() == "k41-agent/k41-agent/"
 
 
 def test_workspace_display_label_keeps_custom_label(tmp_path):
@@ -1141,7 +1141,7 @@ async def test_modal_capability_recovers_unavailable_thread_workspace(monkeypatc
         backend="modal",
         locator="sb-new",
         label="acme/widgets",
-        metadata={"root": "/workspace", "app_name": "kaka-agent-sandboxes"},
+        metadata={"root": "/workspace", "app_name": "k41-agent-sandboxes"},
     )
     stored: dict[str, WorkspaceRef] = {"thread-old": expired}
     upserts: list[WorkspaceRef] = []

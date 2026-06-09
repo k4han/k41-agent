@@ -146,9 +146,9 @@ class GitHubWorkspaceManager:
         await _run_git(
             [
                 "-c",
-                "user.name=Kaka Agent",
+                "user.name=Kai Agent",
                 "-c",
-                "user.email=kaka-agent@users.noreply.github.com",
+                "user.email=k41-agent@users.noreply.github.com",
                 "commit",
                 "-m",
                 message,
@@ -167,7 +167,7 @@ class GitHubWorkspaceManager:
 def sanitize_branch_name(value: str) -> str:
     branch = BRANCH_SAFE_RE.sub("-", value.strip()).strip("/.")
     branch = re.sub(r"/+", "/", branch)
-    return branch or "kaka/github-task"
+    return branch or "k41/github-task"
 
 
 def _split_full_name(full_name: str) -> tuple[str, str]:

@@ -31,7 +31,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-SHUTDOWN_SIGNAL = Path.home() / ".kaka-agent" / "shutdown.signal"
+SHUTDOWN_SIGNAL = Path.home() / ".k41-agent" / "shutdown.signal"
 
 
 def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:

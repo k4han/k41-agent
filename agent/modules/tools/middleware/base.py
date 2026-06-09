@@ -10,7 +10,7 @@ from typing import Any
 
 from langchain_core.tools import BaseTool
 
-MIDDLEWARE_APPLIED_ATTR = "__kaka_middleware_applied__"
+MIDDLEWARE_APPLIED_ATTR = "__k41_middleware_applied__"
 
 
 @dataclass

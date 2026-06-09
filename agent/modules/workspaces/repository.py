@@ -38,7 +38,7 @@ def _workspace_from_record(record: ThreadWorkspace) -> WorkspaceRef:
     from agent.shared.config.service import get_config_service
 
     default_locator = str(
-        get_config_service().get_path("workspace.root", "~/kaka-agent")
+        get_config_service().get_path("workspace.root", "~/k41-agent")
     )
     locator = record.workspace_locator or record.working_dir or default_locator
     return workspace_ref_from_columns(
@@ -61,7 +61,7 @@ class ThreadWorkspaceRepository:
         from agent.shared.config.service import get_config_service
 
         default_locator = str(
-            get_config_service().get_path("workspace.root", "~/kaka-agent")
+            get_config_service().get_path("workspace.root", "~/k41-agent")
         )
         workspace_ref = normalize_workspace_ref(
             workspace,

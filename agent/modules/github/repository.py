@@ -95,7 +95,7 @@ def _serialize_binding(binding: GitHubRepositoryBinding) -> dict[str, Any]:
         "allowed_skills": load_allowed_skills(
             getattr(binding, "allowed_skills_json", "") or "[]"
         ),
-        "branch_prefix": binding.branch_prefix or "kaka",
+        "branch_prefix": binding.branch_prefix or "k41",
         "workspace_backend": getattr(binding, "workspace_backend", "local") or "local",
         "last_synced_at": binding.last_synced_at.isoformat() if binding.last_synced_at else None,
         "created_at": binding.created_at.isoformat() if binding.created_at else None,
@@ -157,7 +157,7 @@ class GitHubRepositoryStore:
         tool_policy_mode: str = "inherit",
         allowed_tools: list[str] | None = None,
         allowed_skills: list[str] | None = None,
-        branch_prefix: str = "kaka",
+        branch_prefix: str = "k41",
         workspace_backend: str = "local",
     ) -> dict[str, Any]:
         session = await get_async_session()
@@ -197,7 +197,7 @@ class GitHubRepositoryStore:
             binding.allowed_skills_json = _json_list(
                 load_allowed_skills(_json_list(allowed_skills or []))
             )
-            binding.branch_prefix = branch_prefix.strip() or "kaka"
+            binding.branch_prefix = branch_prefix.strip() or "k41"
             normalized_backend = (workspace_backend or "local").strip().lower()
             if normalized_backend not in ("local", "daytona", "modal"):
                 normalized_backend = "local"
@@ -274,7 +274,7 @@ class GitHubRepositoryStore:
                     agent_name=default_agent,
                     trigger_label=default_trigger_label,
                     mention_triggers_json=_json_list(default_mention_triggers),
-                    branch_prefix="kaka",
+                    branch_prefix="k41",
                 )
                 session.add(binding)
 

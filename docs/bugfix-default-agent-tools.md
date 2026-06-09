@@ -56,12 +56,12 @@ if agent_name:
 
 ### Before Fix
 - ❌ Telegram default agent had NO tools
-- ❌ Tools from `~/.kaka-agent/agents/default.md` were ignored
+- ❌ Tools from `~/.k41-agent/agents/default.md` were ignored
 - ❌ Any agent named "default" couldn't use tools
 
 ### After Fix
 - ✅ Telegram default agent has tools: `['list_dir', 'read_file', 'write_file', 'search_files']`
-- ✅ Tools from `~/.kaka-agent/agents/default.md` are loaded
+- ✅ Tools from `~/.k41-agent/agents/default.md` are loaded
 - ✅ All agents work correctly regardless of name
 
 ## Why This Bug Existed

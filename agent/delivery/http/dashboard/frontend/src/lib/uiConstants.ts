@@ -1,8 +1,8 @@
 export const STORAGE_KEYS = {
-  SIDEBAR_COLLAPSED: "kaka-dashboard-sidebar",
-  HISTORY_PANEL: "kaka-dashboard-history",
-  WORKSPACE_FILTER: "kaka-dashboard-workspace-filter",
-  THEME: "kaka-dashboard-theme",
+  SIDEBAR_COLLAPSED: "k41-dashboard-sidebar",
+  HISTORY_PANEL: "k41-dashboard-history",
+  WORKSPACE_FILTER: "k41-dashboard-workspace-filter",
+  THEME: "k41-dashboard-theme",
 } as const;
 
 export const HISTORY_PAGE_SIZE = 20;
@@ -30,7 +30,7 @@ export const RESTART_REQUIRED_NOTICE = "Restart required to apply bootstrap chan
 export const MOBILE_MAX_PX = 640;
 export const MOBILE_MEDIA_QUERY = `(max-width: ${MOBILE_MAX_PX}px)`;
 
-export const KAKA_LOGO_LETTER = "K";
+export const K41_LOGO_LETTER = "K";
 
 export const UI_COLORS = {
   SUCCESS: "#10b981",

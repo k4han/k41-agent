@@ -18,7 +18,7 @@ def get_workspace(runtime: ToolRuntime[Any, Any]) -> WorkspaceRef:
     raw_workspace = get_context_value(runtime.context, "workspace", None)
     raw_working_dir = get_context_value(runtime.context, "working_dir", None)
     from agent.shared.config.service import get_config_service
-    default_locator = str(get_config_service().get_path("workspace.root", "~/kaka-agent"))
+    default_locator = str(get_config_service().get_path("workspace.root", "~/k41-agent"))
     return normalize_workspace_ref(
         raw_workspace if raw_workspace is not None else raw_working_dir,
         default_locator=default_locator,

@@ -4,7 +4,7 @@ import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-j
 import { classNames } from "@/lib/utils";
 import type { ModelCatalog } from "@/types";
 
-const favoritesStorageKey = "kaka.dashboard.modelFavorites";
+const favoritesStorageKey = "k41.dashboard.modelFavorites";
 const keySeparator = "\u001f";
 
 type ModelFavorite = {

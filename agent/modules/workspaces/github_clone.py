@@ -117,7 +117,7 @@ async def attach_github_repository_to_local_workspace_async(
     """Clone a GitHub repository to a local path and return a local WorkspaceRef.
 
     Mirrors the historical behavior where GitHub repos were always materialized
-    under ``~/kaka-agent/github-workspaces/{owner}/{repo}``.
+    under ``~/k41-agent/github-workspaces/{owner}/{repo}``.
     """
     manager = manager or _get_github_workspace_manager_cls()()
     _split_full_name(selection.full_name)

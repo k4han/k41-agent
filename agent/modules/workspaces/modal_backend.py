@@ -43,7 +43,7 @@ from agent.modules.workspaces.search_utils import (
 logger = logging.getLogger(__name__)
 
 MODAL_BACKEND = "modal"
-DEFAULT_MODAL_APP_NAME = "kaka-agent-sandboxes"
+DEFAULT_MODAL_APP_NAME = "k41-agent-sandboxes"
 DEFAULT_MODAL_ROOT = "/workspace"
 DEFAULT_MODAL_IMAGE = "python:3.13-slim"
 DEFAULT_MODAL_SANDBOX_TIMEOUT_SECONDS = 3600

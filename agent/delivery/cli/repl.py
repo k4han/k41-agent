@@ -1,4 +1,4 @@
-"""Interactive chat REPL for the Kaka agent CLI."""
+"""Interactive chat REPL for the Kai agent CLI."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ from agent.modules.agent_runtime import run_agent_stream
 logger = logging.getLogger(__name__)
 console = Console()
 
-_HISTORY_FILE = os.path.join(os.path.expanduser("~"), ".kaka-agent", ".cli_history")
+_HISTORY_FILE = os.path.join(os.path.expanduser("~"), ".k41-agent", ".cli_history")
 
 _PROMPT_STYLE = Style.from_dict({
     "prompt": "bold cyan",
@@ -34,7 +34,7 @@ _PROMPT_STYLE = Style.from_dict({
 })
 
 _BANNER = (
-    "[bold cyan]Kaka Agent CLI[/bold cyan] — interactive chat\n"
+    "[bold cyan]Kai Agent CLI[/bold cyan] — interactive chat\n"
     "Type your message, or [bold]/help[/bold] to list commands. Use [bold]/quit[/bold] to exit.\n"
 )
 

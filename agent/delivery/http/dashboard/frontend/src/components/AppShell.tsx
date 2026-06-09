@@ -809,7 +809,7 @@ export function AppShell(props: {
               <Bot size={16} />
             </div>
             <div class="brand-text">
-              <div class="brand-title">Kaka Console</div>
+              <div class="brand-title">Kai Console</div>
               {/* <div class="brand-subtitle">Agent control plane</div> */}
             </div>
             <button

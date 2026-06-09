@@ -155,7 +155,7 @@ class TestRegisterToolDecorator:
             """local."""
             return text
 
-        meta = getattr(my_local_tool, "__kaka_tool_meta__", None)
+        meta = getattr(my_local_tool, "__k41_tool_meta__", None)
         assert isinstance(meta, PendingToolMeta)
         assert meta.category is ToolCategory.UTILITY
         assert ToolCapability.MUTATES_STATE in meta.capabilities

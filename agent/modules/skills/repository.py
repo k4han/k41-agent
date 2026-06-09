@@ -1,6 +1,6 @@
 """Filesystem-based skill repository.
 
-Scans ``~/.kaka-agent/skills/`` for subdirectories containing SKILL.md
+Scans ``~/.k41-agent/skills/`` for subdirectories containing SKILL.md
 files and caches the results.
 """
 
@@ -16,7 +16,7 @@ from agent.modules.skills.parser import parse_skill_md
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SKILLS_ROOT = Path.home() / ".kaka-agent" / "skills"
+DEFAULT_SKILLS_ROOT = Path.home() / ".k41-agent" / "skills"
 
 # Directories to skip during scanning
 _SKIP_DIRS = frozenset({".git", "node_modules", "__pycache__", ".venv", "venv"})

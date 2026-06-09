@@ -16,9 +16,9 @@ def test_load_bootstrap_config_reads_config_file(monkeypatch: MonkeyPatch, tmp_p
     monkeypatch.setattr(service_module, "_config_service", None)
 
     # Create test config
-    kaka_dir = tmp_path / ".kaka-agent"
-    kaka_dir.mkdir()
-    config_path = kaka_dir / "config.yaml"
+    k41_dir = tmp_path / ".k41-agent"
+    k41_dir.mkdir()
+    config_path = k41_dir / "config.yaml"
     config_path.write_text(
         textwrap.dedent("""\
         host: 127.0.0.1

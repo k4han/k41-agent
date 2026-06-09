@@ -120,7 +120,7 @@ export function HomePage() {
   return (
     <AppShell
       title="Home"
-      subtitle="Command center for the Kaka Agent runtime."
+      subtitle="Command center for the Kai Agent runtime."
       actions={
         <>
           <A class="btn" href="/chat">

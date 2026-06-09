@@ -47,7 +47,7 @@ def register_builtin_workflows() -> None:
 - research_chain
 - router
 
-**✓ Agent configs: N** (loaded from `~/.kaka-agent/agents/*.md`)
+**✓ Agent configs: N** (loaded from `~/.k41-agent/agents/*.md`)
 
 **✓ Architecture:**
 - Shared graph templates (3 graphs)

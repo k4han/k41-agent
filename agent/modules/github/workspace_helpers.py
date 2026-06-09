@@ -189,8 +189,8 @@ async def remote_commit_all(ref: WorkspaceRef, message: str) -> None:
     from agent.modules.workspaces import get_workspace_command_executor
 
     executor = await get_workspace_command_executor(ref)
-    await executor.execute("git config user.email 'bot@kaka-agent.local'")
-    await executor.execute("git config user.name 'Kaka Agent'")
+    await executor.execute("git config user.email 'bot@k41-agent.local'")
+    await executor.execute("git config user.name 'Kai Agent'")
     await executor.execute("git add -A")
     result = await executor.execute(f"git commit -m '{_escape_shell(message)}'")
     if result.exit_code != 0 and "nothing to commit" not in (result.output or ""):

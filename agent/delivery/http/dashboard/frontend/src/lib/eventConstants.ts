@@ -27,16 +27,16 @@ export const BACKGROUND_TASK_EVENTS = {
 } as const;
 
 export const CUSTOM_DOM_EVENTS = {
-  SESSION_STARTED: "kaka:session-started",
-  SESSION_STOPPED: "kaka:session-stopped",
-  SESSION_UPDATED: "kaka:session-updated",
-  THREAD_START_RUNNING: "kaka:thread-start-running",
-  THREAD_STOP_RUNNING: "kaka:thread-stop-running",
-  THREAD_EXTERNAL_ABORT: "kaka:thread-external-abort",
-  THREADS_CHANGED: "kaka:threads-changed",
-  TASKS_CHANGED: "kaka:tasks-changed",
+  SESSION_STARTED: "k41:session-started",
+  SESSION_STOPPED: "k41:session-stopped",
+  SESSION_UPDATED: "k41:session-updated",
+  THREAD_START_RUNNING: "k41:thread-start-running",
+  THREAD_STOP_RUNNING: "k41:thread-stop-running",
+  THREAD_EXTERNAL_ABORT: "k41:thread-external-abort",
+  THREADS_CHANGED: "k41:threads-changed",
+  TASKS_CHANGED: "k41:tasks-changed",
 } as const;
 
 export function recursionLimitStorageKey(threadId: string): string {
-  return `kaka:recursion-limit-reached:${threadId}`;
+  return `k41:recursion-limit-reached:${threadId}`;
 }

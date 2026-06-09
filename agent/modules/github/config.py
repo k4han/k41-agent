@@ -8,10 +8,10 @@ from agent.shared.infrastructure.parsing import parse_string_or_list
 from agent.shared.infrastructure.validation import is_placeholder_value
 
 
-DEFAULT_TRIGGER_LABEL = "kaka-agent"
-DEFAULT_MENTION_TRIGGERS = ("@kaka-agent", "/kaka")
+DEFAULT_TRIGGER_LABEL = "k41-agent"
+DEFAULT_MENTION_TRIGGERS = ("@k41-agent", "/k41")
 DEFAULT_WORKSPACE_BACKEND = "local"
-GITHUB_WORKSPACE_ROOT = Path.home() / "kaka-agent" / "github-workspaces"
+GITHUB_WORKSPACE_ROOT = Path.home() / "k41-agent" / "github-workspaces"
 
 
 @dataclass(frozen=True, slots=True)

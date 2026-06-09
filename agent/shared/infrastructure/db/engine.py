@@ -17,7 +17,7 @@ from agent.shared.infrastructure.db.base import Base
 def _get_default_db_path() -> str:
     """Get default database path in user's home directory."""
     home = Path.home()
-    db_path = home / ".kaka-agent" / "data" / "agent_state.db"
+    db_path = home / ".k41-agent" / "data" / "agent_state.db"
     # Use forward slashes for SQLite URL even on Windows
     return f"sqlite+aiosqlite:///{db_path.as_posix()}"
 
@@ -34,7 +34,7 @@ def get_database_url() -> str:
     """Return effective database URL based on policy.
 
     Policy:
-    - If database.url is empty, use internal SQLite path in ~/.kaka-agent/data/
+    - If database.url is empty, use internal SQLite path in ~/.k41-agent/data/
     - If database.url is set, only PostgreSQL URLs are allowed
     """
     global _cached_database_url
@@ -129,7 +129,7 @@ def get_postgres_conn_string() -> str:
     if "postgresql" not in parsed.drivername:
         raise ValueError(
             "PostgreSQL checkpointer requires a postgresql URL. "
-            "Set 'database.url' in ~/.kaka-agent/config.yaml. "
+            "Set 'database.url' in ~/.k41-agent/config.yaml. "
             f"Current database URL: {get_database_url()}"
         )
 

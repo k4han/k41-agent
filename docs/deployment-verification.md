@@ -12,7 +12,7 @@
 - [ ] Service deployed successfully
 - [ ] No startup errors in logs
 - [ ] All 3 graphs registered (check logs for "[Registry] All graphs ready.")
-- [ ] Agents loaded from ~/.kaka-agent/agents/
+- [ ] Agents loaded from ~/.k41-agent/agents/
 
 ## Smoke Tests
 
@@ -163,7 +163,7 @@ curl -X POST http://localhost:8000/api/chat \
 If issues occur:
 
 1. Check logs for errors
-2. Verify agent files in ~/.kaka-agent/agents/
+2. Verify agent files in ~/.k41-agent/agents/
 3. Test agent loading manually
 4. If critical: rollback to previous commit
    ```bash

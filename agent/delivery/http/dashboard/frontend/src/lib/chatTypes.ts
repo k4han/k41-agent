@@ -93,8 +93,8 @@ export const MAX_IMAGE_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 export const MAX_TOTAL_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 export const DEFAULT_ATTACHMENT_MESSAGE = "Please review the attached file(s).";
 
-export const WORKSPACE_EXPLORER_OPEN_KEY = "kaka-dashboard-workspace-explorer-open";
-export const WORKSPACE_EXPLORER_WIDTH_KEY = "kaka-dashboard-workspace-explorer-width";
+export const WORKSPACE_EXPLORER_OPEN_KEY = "k41-dashboard-workspace-explorer-open";
+export const WORKSPACE_EXPLORER_WIDTH_KEY = "k41-dashboard-workspace-explorer-width";
 export const WORKSPACE_EXPLORER_DEFAULT_WIDTH = 560;
 export const WORKSPACE_EXPLORER_MIN_WIDTH = 340;
 export const WORKSPACE_EXPLORER_MAX_WIDTH = 920;

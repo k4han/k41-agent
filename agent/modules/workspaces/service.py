@@ -65,7 +65,7 @@ _modal_recovery_locks: dict[str, asyncio.Lock] = {}
 
 def resolve_workspace_ref(workspace: WorkspaceRef | dict[str, Any] | str | None = None) -> WorkspaceRef:
     from agent.shared.config.service import get_config_service
-    default_locator = str(get_config_service().get_path("workspace.root", "~/kaka-agent"))
+    default_locator = str(get_config_service().get_path("workspace.root", "~/k41-agent"))
     return normalize_workspace_ref(workspace, default_locator=default_locator)
 
 
@@ -76,7 +76,7 @@ def workspace_ref_from_local_path(
     metadata: dict[str, Any] | None = None,
 ) -> WorkspaceRef:
     from agent.shared.config.service import get_config_service
-    default_locator = str(get_config_service().get_path("workspace.root", "~/kaka-agent"))
+    default_locator = str(get_config_service().get_path("workspace.root", "~/k41-agent"))
     return normalize_workspace_ref(
         {
             "backend": LOCAL_BACKEND,
@@ -764,7 +764,7 @@ class _WorkspaceBackendLifecycleManager:
 
 def resolve_workspace_root(working_dir: str | None = None) -> Path:
     from agent.shared.config.service import get_config_service
-    default_locator = str(get_config_service().get_path("workspace.root", "~/kaka-agent"))
+    default_locator = str(get_config_service().get_path("workspace.root", "~/k41-agent"))
     source = str(working_dir or "").strip() or default_locator
     return Path(source).expanduser().resolve()
 
@@ -780,7 +780,7 @@ def ensure_workspace_directory(working_dir: str | None = None) -> Path:
 
 def list_workspace_directories(path: str | None = None) -> dict[str, Any]:
     from agent.shared.config.service import get_config_service
-    workspace_root = get_config_service().get_path("workspace.root", "~/kaka-agent").expanduser().resolve()
+    workspace_root = get_config_service().get_path("workspace.root", "~/k41-agent").expanduser().resolve()
     
     # Ensure the configured workspace root exists
     workspace_root.mkdir(parents=True, exist_ok=True)
@@ -839,7 +839,7 @@ def list_workspace_directories(path: str | None = None) -> dict[str, Any]:
             roots_list = [Path("/")]
         roots = [{"name": str(root), "path": str(root)} for root in roots_list]
     else:
-        roots = [{"name": workspace_root.name or "kaka-agent", "path": str(workspace_root)}]
+        roots = [{"name": workspace_root.name or "k41-agent", "path": str(workspace_root)}]
 
     return {
         "path": str(target),

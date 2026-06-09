@@ -64,7 +64,7 @@ Can use {working_dir} placeholder.
 Agents được load theo thứ tự ưu tiên (sau ghi đè trước):
 
 1. **Builtin agents** — `agent/modules/agents/infrastructure/_builtin/*.md` (bundled cùng package)
-2. **User agents** — `~/.kaka-agent/agents/*.md` (primary)
+2. **User agents** — `~/.k41-agent/agents/*.md` (primary)
 
 **Override rule**: Nếu user tạo agent có cùng `name` với builtin (ví dụ `name: "default"`),
 phiên bản của user sẽ được ưu tiên và ghi đè hoàn toàn builtin. Log sẽ ghi:

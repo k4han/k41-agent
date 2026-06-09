@@ -80,7 +80,7 @@ function toDraft(repo: GitHubRepositoryBinding): RepositoryDraft {
     tool_policy_mode: repo.tool_policy_mode === "custom" ? "custom" : "inherit",
     allowed_tools: repo.allowed_tools || [],
     allowed_skills: repo.allowed_skills || [],
-    branch_prefix: repo.branch_prefix || "kaka",
+    branch_prefix: repo.branch_prefix || "k41",
     workspace_backend: repo.workspace_backend || "local",
   };
 }
@@ -717,7 +717,7 @@ function RepositoryOverview(props: {
           </div>
           <div class="repository-summary-row">
             <span class="hint">Branch prefix</span>
-            <span class="mono">{props.draft.branch_prefix || "kaka"}</span>
+            <span class="mono">{props.draft.branch_prefix || "k41"}</span>
           </div>
         </div>
       </section>
@@ -962,7 +962,7 @@ function RepositoryOptimization(props: {
             <input
               class="input"
               value={props.draft.branch_prefix}
-              placeholder="kaka"
+              placeholder="k41"
               onInput={(event) => props.onChange("branch_prefix", event.currentTarget.value)}
             />
           </div>

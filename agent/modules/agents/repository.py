@@ -11,7 +11,7 @@ from agent.modules.agents.parser import parse_agent_file_with_error, serialize_a
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_AGENTS_DIR = str(Path.home() / ".kaka-agent" / "agents")
+DEFAULT_AGENTS_DIR = str(Path.home() / ".k41-agent" / "agents")
 
 # Directory containing agents shipped with the package (bundled defaults).
 _BUILTIN_DIR = Path(__file__).parent / "_builtin"
@@ -86,7 +86,7 @@ class FilesystemAgentRepository:
 
         Load order (later entries override earlier ones on name collision):
         1. Bundled agents from the package _builtin directory.
-        2. User-defined agents from ~/.kaka-agent/agents.
+        2. User-defined agents from ~/.k41-agent/agents.
 
         This means a user can shadow any builtin agent (including "default") by
         creating a file with the same ``name`` field in their agents directory.

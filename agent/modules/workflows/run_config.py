@@ -39,7 +39,7 @@ class WorkflowContext:
         model: str | None = None,
     ) -> None:
         from agent.shared.config.service import get_config_service
-        default_locator = str(get_config_service().get_path("workspace.root", "~/kaka-agent"))
+        default_locator = str(get_config_service().get_path("workspace.root", "~/k41-agent"))
         self.workspace = normalize_workspace_ref(
             workspace if workspace is not None else working_dir,
             default_locator=default_locator,
@@ -127,7 +127,7 @@ def make_context(
         allowed_tool_names = get_default_tool_names()
 
     from agent.shared.config.service import get_config_service
-    default_locator = str(get_config_service().get_path("workspace.root", "~/kaka-agent"))
+    default_locator = str(get_config_service().get_path("workspace.root", "~/k41-agent"))
     resolved_workspace = normalize_workspace_ref(
         workspace if workspace is not None else working_dir,
         default_locator=default_locator,

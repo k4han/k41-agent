@@ -208,7 +208,7 @@ class GitHubAutomationService:
         tool_policy_mode: str = "inherit",
         allowed_tools: list[str] | None = None,
         allowed_skills: list[str] | None = None,
-        branch_prefix: str = "kaka",
+        branch_prefix: str = "k41",
         workspace_backend: str = "local",
     ) -> dict[str, Any]:
         resolved_agent = resolve_catalog_agent_name(agent_name, self.settings.default_agent, "default")
@@ -587,7 +587,7 @@ class GitHubAutomationService:
         if not has_changes:
             await self._post_completion_comment(
                 context,
-                body="Kaka Agent finished running but did not produce any repository changes.",
+                body="Kai Agent finished running but did not produce any repository changes.",
             )
             task.result = f"{task.result}\n\nNo repository changes were produced.".strip()
             return
@@ -595,7 +595,7 @@ class GitHubAutomationService:
         if completion_mode == COMPLETION_UPDATE_PULL_REQUEST:
             commit_message = f"Address review feedback on PR #{context.issue_number}"
         else:
-            commit_message = f"Kaka Agent changes for issue #{context.issue_number}"
+            commit_message = f"Kai Agent changes for issue #{context.issue_number}"
 
         if workspace_backend == "local":
             await self.workspace_manager.commit_all(
@@ -634,7 +634,7 @@ class GitHubAutomationService:
                 installation_id=context.installation_id,
                 full_name=context.repository_full_name,
                 issue_number=context.issue_number,
-                body=f"Kaka Agent opened a pull request: {pr_url}",
+                body=f"Kai Agent opened a pull request: {pr_url}",
             )
             task.result = f"{task.result}\n\nPull request: {pr_url}".strip()
 
@@ -786,7 +786,7 @@ def _pr_title(issue_number: int, issue_title: str) -> str:
 
 
 def _pr_body(context: GitHubTaskContext, result: str) -> str:
-    summary = result.strip() or "Kaka Agent completed the requested changes."
+    summary = result.strip() or "Kai Agent completed the requested changes."
     return (
         f"Automated changes for {context.issue_url}\n\n"
         f"Agent summary:\n\n{summary}\n"
@@ -796,8 +796,8 @@ def _pr_body(context: GitHubTaskContext, result: str) -> str:
 def _review_update_body(result: str) -> str:
     summary = result.strip()
     if not summary:
-        return "Kaka Agent pushed updates for this review comment."
-    return f"Kaka Agent pushed updates for this review comment.\n\nAgent summary:\n\n{summary}"
+        return "Kai Agent pushed updates for this review comment."
+    return f"Kai Agent pushed updates for this review comment.\n\nAgent summary:\n\n{summary}"
 
 
 def _optional_int(value: Any) -> int | None:
@@ -856,9 +856,9 @@ async def _validate_allowed_global_skills(values: list[str]) -> list[str]:
 
 
 def _branch_prefix(binding: Any) -> str:
-    prefix = str(getattr(binding, "branch_prefix", "") or "").strip() or "kaka"
+    prefix = str(getattr(binding, "branch_prefix", "") or "").strip() or "k41"
     safe_prefix = sanitize_branch_name(prefix).strip("/.")
-    return safe_prefix or "kaka"
+    return safe_prefix or "k41"
 
 
 _service: GitHubAutomationService | None = None

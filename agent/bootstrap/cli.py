@@ -24,15 +24,15 @@ from agent.modules.users import get_pairing_service
 logger = logging.getLogger(__name__)
 
 app = typer.Typer(
-    name="kaka",
-    help="Kaka Agent CLI — manage and interact with your AI agent.",
+    name="k41",
+    help="Kai Agent CLI — manage and interact with your AI agent.",
     no_args_is_help=False,
     add_completion=False,
 )
 
-PID_FILE = Path.home() / ".kaka-agent" / "server.pid"
-SHUTDOWN_SIGNAL = Path.home() / ".kaka-agent" / "shutdown.signal"
-SERVER_LOG_FILE = Path.home() / ".kaka-agent" / "server.log"
+PID_FILE = Path.home() / ".k41-agent" / "server.pid"
+SHUTDOWN_SIGNAL = Path.home() / ".k41-agent" / "shutdown.signal"
+SERVER_LOG_FILE = Path.home() / ".k41-agent" / "server.log"
 
 
 def _echo_info(message: str) -> None:
@@ -89,14 +89,14 @@ def _print_runtime_files() -> None:
 
 def _print_common_commands() -> None:
     _print_section("Commands")
-    _print_key_value("Check", "kaka status")
-    _print_key_value("Stop", "kaka stop")
+    _print_key_value("Check", "k41 status")
+    _print_key_value("Stop", "k41 stop")
 
 
 def _daemonize() -> None:
     """Detach process and run in background."""
     env = os.environ.copy()
-    env["KAKA_DAEMONIZED"] = "1"
+    env["K41_DAEMONIZED"] = "1"
     cmd = _daemon_command()
     SERVER_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     with SERVER_LOG_FILE.open("ab") as log_file:
@@ -168,8 +168,8 @@ def _is_process_alive(pid: int) -> bool:
             return False
 
 
-def _is_kaka_process(pid: int) -> bool:
-    """Check if PID belongs to a kaka server process."""
+def _is_k41_process(pid: int) -> bool:
+    """Check if PID belongs to a k41 server process."""
     try:
         if os.name == "nt":
             result = subprocess.run(
@@ -186,7 +186,7 @@ def _is_kaka_process(pid: int) -> bool:
             )
             output = result.stdout.lower()
 
-        return "kaka" in output or "agent.bootstrap.cli" in output
+        return "k41" in output or "agent.bootstrap.cli" in output
     except Exception:
         return False
 
@@ -234,9 +234,9 @@ def main(
         False, "--foreground", "-f", help="Run in foreground (don't daemonize)."
     ),
 ) -> None:
-    """Kaka Agent CLI."""
+    """Kai Agent CLI."""
     if version:
-        typer.echo("kaka-agent 0.1.1")
+        typer.echo("k41-agent 0.1.1")
         raise typer.Exit()
     _set_log_level(verbose, quiet)
     if ctx.invoked_subcommand is None:
@@ -245,16 +245,16 @@ def main(
 
 @app.command()
 def init() -> None:
-    """Initialize kaka-agent directory structure and database."""
-    _echo_info("Initializing Kaka Agent...")
+    """Initialize k41-agent directory structure and database."""
+    _echo_info("Initializing Kai Agent...")
 
     home = Path.home()
-    kaka_dir = home / ".kaka-agent"
+    k41_dir = home / ".k41-agent"
     dirs = [
-        kaka_dir,
-        kaka_dir / "data",
-        kaka_dir / "agents",
-        kaka_dir / "skills",
+        k41_dir,
+        k41_dir / "data",
+        k41_dir / "agents",
+        k41_dir / "skills",
     ]
 
     for directory in dirs:
@@ -271,7 +271,7 @@ def init() -> None:
         _echo_error(f"Database initialization failed: {e}")
         raise typer.Exit(1)
 
-    config_file = kaka_dir / "config.yaml"
+    config_file = k41_dir / "config.yaml"
     if not config_file.exists():
         try:
             project_root = Path(__file__).parent.parent.parent
@@ -283,7 +283,7 @@ def init() -> None:
                 _echo_warning("Add an LLM provider from the dashboard Providers page.")
             else:
                 minimal_config = (
-                    "# Kaka Agent Configuration\n"
+                    "# Kai Agent Configuration\n"
                     "# Runtime provider, MCP, and channel policy settings live in the database.\n\n"
                     'host: "0.0.0.0"\n'
                     "port: 8000\n"
@@ -306,12 +306,12 @@ def init() -> None:
 
     _echo_success("Initialization complete.")
     _print_section("Next steps")
-    _print_key_value("Home", kaka_dir)
-    _print_key_value("Start", "kaka")
+    _print_key_value("Home", k41_dir)
+    _print_key_value("Start", "k41")
 
 
 def serve(foreground: bool = False) -> None:
-    """Start the kaka-agent server.
+    """Start the k41-agent server.
 
     Args:
         foreground: If True, run in foreground. If False, daemonize.
@@ -324,7 +324,7 @@ def serve(foreground: bool = False) -> None:
     if PID_FILE.exists():
         try:
             old_pid = int(PID_FILE.read_text().strip())
-            if _is_process_alive(old_pid) and _is_kaka_process(old_pid):
+            if _is_process_alive(old_pid) and _is_k41_process(old_pid):
                 _echo_error(f"Server is already running (PID {old_pid}).")
                 _print_server_endpoints(config)
                 _print_common_commands()
@@ -332,8 +332,8 @@ def serve(foreground: bool = False) -> None:
         except (ValueError, OSError):
             pass
 
-    if not foreground and os.environ.get("KAKA_DAEMONIZED") != "1":
-        _echo_info("Starting Kaka Agent in background...")
+    if not foreground and os.environ.get("K41_DAEMONIZED") != "1":
+        _echo_info("Starting Kai Agent in background...")
         _print_server_endpoints(config)
         _print_runtime_files()
         _print_common_commands()
@@ -341,7 +341,7 @@ def serve(foreground: bool = False) -> None:
         return
 
     if foreground:
-        _echo_info("Starting Kaka Agent in foreground. Press Ctrl+C to stop.")
+        _echo_info("Starting Kai Agent in foreground. Press Ctrl+C to stop.")
         _print_server_endpoints(config)
 
     PID_FILE.write_text(str(os.getpid()))
@@ -408,15 +408,15 @@ async def reset_quota() -> None:
 
 @app.command()
 def status() -> None:
-    """Show the status of the kaka-agent server."""
+    """Show the status of the k41-agent server."""
     import httpx
 
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    typer.echo("Kaka Agent Status")
+    typer.echo("Kai Agent Status")
     if not PID_FILE.exists():
         _echo_warning("Server is not running.")
         _print_section("Next steps")
-        _print_key_value("Start", "kaka")
+        _print_key_value("Start", "k41")
         _print_key_value("PID file", PID_FILE)
         raise typer.Exit(1)
 
@@ -436,8 +436,8 @@ def status() -> None:
         _print_key_value("PID file", PID_FILE)
         raise typer.Exit(1)
 
-    if not _is_kaka_process(pid):
-        _echo_error("Process is not a Kaka Agent server. PID file may be stale.")
+    if not _is_k41_process(pid):
+        _echo_error("Process is not a Kai Agent server. PID file may be stale.")
         _print_key_value("PID file", PID_FILE)
         raise typer.Exit(1)
 
@@ -474,8 +474,8 @@ def status() -> None:
 
 @app.command()
 def stop() -> None:
-    """Stop the running kaka-agent server."""
-    typer.echo("Kaka Agent Stop")
+    """Stop the running k41-agent server."""
+    typer.echo("Kai Agent Stop")
     if not PID_FILE.exists():
         _echo_warning("Server is not running.")
         _print_key_value("PID file", PID_FILE)
@@ -494,8 +494,8 @@ def stop() -> None:
         PID_FILE.unlink(missing_ok=True)
         raise typer.Exit(1)
 
-    if not _is_kaka_process(pid):
-        _echo_warning(f"Process {pid} is not a Kaka Agent server. Cleaning up PID file.")
+    if not _is_k41_process(pid):
+        _echo_warning(f"Process {pid} is not a Kai Agent server. Cleaning up PID file.")
         PID_FILE.unlink(missing_ok=True)
         raise typer.Exit(1)
 

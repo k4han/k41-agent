@@ -207,7 +207,7 @@ async def cmd_agents(message: InboundMessage, parsed: ParsedCommand) -> None:
         await _reply(
             message,
             "No custom agents defined.\n"
-            "Use /code or /research, or create .md files in ~/.kaka-agent/agents/.",
+            "Use /code or /research, or create .md files in ~/.k41-agent/agents/.",
         )
         return
 

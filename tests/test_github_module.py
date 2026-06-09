@@ -127,8 +127,8 @@ def binding(**overrides):
         "full_name": "octo/example",
         "default_branch": "main",
         "agent_name": "default",
-        "trigger_label": "kaka-agent",
-        "mention_triggers_json": '["@kaka-agent", "/kaka"]',
+        "trigger_label": "k41-agent",
+        "mention_triggers_json": '["@k41-agent", "/k41"]',
         "notify_platform": None,
         "notify_external_id": None,
         "notify_channel_id": None,
@@ -148,7 +148,7 @@ def issue_payload(**overrides):
             "title": "Fix failing test",
             "body": "The test fails.",
             "html_url": "https://github.com/octo/example/issues/7",
-            "labels": [{"name": "kaka-agent"}],
+            "labels": [{"name": "k41-agent"}],
         },
     }
     payload.update(overrides)
@@ -166,7 +166,7 @@ def review_comment_payload(**overrides):
             "title": "Fix failing test",
             "html_url": "https://github.com/octo/example/pull/2",
             "head": {
-                "ref": "kaka/default/issue-7-delivery",
+                "ref": "k41/default/issue-7-delivery",
                 "sha": "abc123",
                 "repo": {"full_name": "octo/example"},
             },
@@ -243,7 +243,7 @@ async def test_issue_label_trigger_submits_agent_task(
     assert submission["workspace"].label == "octo/example"
     assert submission["workspace"].metadata["source"] == "github"
     assert submission["workspace"].metadata["repository_full_name"] == "octo/example"
-    assert submission["workspace"].metadata["branch"] == "kaka/default/issue-7-abcdef12"
+    assert submission["workspace"].metadata["branch"] == "k41/default/issue-7-abcdef12"
     assert "Fix failing test" in submission["request"]
 
 
@@ -272,7 +272,7 @@ async def test_comment_mention_trigger_submits_agent_task(
     service = make_service(tmp_path, FakeStore(binding()))
     payload = issue_payload(
         action="created",
-        comment={"body": "@kaka-agent please handle this"},
+        comment={"body": "@k41-agent please handle this"},
     )
 
     result = await service.handle_webhook(
@@ -289,7 +289,7 @@ async def test_comment_scope_can_disable_repository_automation(tmp_path: Path) -
     service = make_service(tmp_path, FakeStore(binding(issue_comment_enabled=False)))
     payload = issue_payload(
         action="created",
-        comment={"body": "@kaka-agent please handle this"},
+        comment={"body": "@k41-agent please handle this"},
     )
 
     result = await service.handle_webhook(
@@ -321,13 +321,13 @@ async def test_review_comment_submits_agent_task_on_pr_branch(
     )
 
     assert result == {"status": "submitted", "task_id": "task-1"}
-    assert workspace.prepared[0]["branch"] == "kaka/default/issue-7-delivery"
+    assert workspace.prepared[0]["branch"] == "k41/default/issue-7-delivery"
     assert workspace.prepared[0]["base_branch"] == "main"
     submission = task_manager.submissions[0]
     assert submission["workspace"].locator == str(tmp_path)
     assert submission["workspace"].label == "octo/example"
     assert submission["workspace"].metadata["repository_full_name"] == "octo/example"
-    assert submission["workspace"].metadata["branch"] == "kaka/default/issue-7-delivery"
+    assert submission["workspace"].metadata["branch"] == "k41/default/issue-7-delivery"
     assert "Review comment:" in submission["request"]
     assert "Please handle the None case here." in submission["request"]
     assert "agent/example.py" in submission["request"]
@@ -417,8 +417,8 @@ async def test_sync_installations_upserts_repositories(tmp_path: Path) -> None:
     service.settings = SimpleNamespace(
         is_configured=True,
         default_agent="default",
-        trigger_label="kaka-agent",
-        mention_triggers=("@kaka-agent", "/kaka"),
+        trigger_label="k41-agent",
+        mention_triggers=("@k41-agent", "/k41"),
     )
 
     result = await service.sync_installations()
@@ -526,14 +526,14 @@ async def test_workspace_prepare_uses_reusable_repo_path(
     prepared = await manager.prepare(
         full_name="octo/example",
         default_branch="main",
-        branch="kaka/default/issue-1-delivery",
+        branch="k41/default/issue-1-delivery",
         token="secret-token",
     )
 
     assert prepared.path == tmp_path / "octo" / "example"
     assert calls[0]["args"][0] == "clone"
     assert calls[0]["token"] == "secret-token"
-    assert calls[2]["args"] == ["checkout", "-B", "kaka/default/issue-1-delivery", "origin/main"]
+    assert calls[2]["args"] == ["checkout", "-B", "k41/default/issue-1-delivery", "origin/main"]
 
 
 @pytest.mark.asyncio
@@ -554,19 +554,19 @@ async def test_workspace_prepare_existing_branch_uses_remote_pr_branch(
 
     prepared = await manager.prepare_existing_branch(
         full_name="octo/example",
-        branch="kaka/default/issue-7-delivery",
+        branch="k41/default/issue-7-delivery",
         base_branch="main",
         token="secret-token",
     )
 
     assert prepared.path == tmp_path / "octo" / "example"
-    assert prepared.branch == "kaka/default/issue-7-delivery"
+    assert prepared.branch == "k41/default/issue-7-delivery"
     assert calls[0]["args"][0] == "clone"
     assert calls[2]["args"] == [
         "checkout",
         "-B",
-        "kaka/default/issue-7-delivery",
-        "origin/kaka/default/issue-7-delivery",
+        "k41/default/issue-7-delivery",
+        "origin/k41/default/issue-7-delivery",
     ]
 
 
@@ -581,7 +581,7 @@ async def test_publish_task_result_opens_pr_when_diff_exists(tmp_path: Path) -> 
         issue_number=7,
         issue_title="Fix failing test",
         issue_url="https://github.com/octo/example/issues/7",
-        branch="kaka/default/issue-7-delivery",
+        branch="k41/default/issue-7-delivery",
         base_branch="main",
         workspace_path=tmp_path,
     )
@@ -591,7 +591,7 @@ async def test_publish_task_result_opens_pr_when_diff_exists(tmp_path: Path) -> 
 
     assert workspace.commits
     assert workspace.pushes
-    assert client.pull_requests[0]["head"] == "kaka/default/issue-7-delivery"
+    assert client.pull_requests[0]["head"] == "k41/default/issue-7-delivery"
     assert "Pull request:" in task.result
 
 
@@ -606,7 +606,7 @@ async def test_publish_task_result_updates_existing_pr_for_review_comment(tmp_pa
         issue_number=2,
         issue_title="Fix failing test",
         issue_url="https://github.com/octo/example/pull/2",
-        branch="kaka/default/issue-7-delivery",
+        branch="k41/default/issue-7-delivery",
         base_branch="main",
         workspace_path=tmp_path,
         completion_mode="update_pull_request",
@@ -617,7 +617,7 @@ async def test_publish_task_result_updates_existing_pr_for_review_comment(tmp_pa
     await service.publish_task_result(task, context)
 
     assert workspace.commits[0]["message"] == "Address review feedback on PR #2"
-    assert workspace.pushes[0]["branch"] == "kaka/default/issue-7-delivery"
+    assert workspace.pushes[0]["branch"] == "k41/default/issue-7-delivery"
     assert not client.pull_requests
     assert client.review_comment_replies[0]["comment_id"] == 123
     assert "Pull request updated:" in task.result
@@ -634,7 +634,7 @@ async def test_publish_task_result_comments_when_no_diff(tmp_path: Path) -> None
         issue_number=7,
         issue_title="Fix failing test",
         issue_url="https://github.com/octo/example/issues/7",
-        branch="kaka/default/issue-7-delivery",
+        branch="k41/default/issue-7-delivery",
         base_branch="main",
         workspace_path=tmp_path,
     )

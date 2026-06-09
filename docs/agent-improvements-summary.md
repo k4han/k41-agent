@@ -25,7 +25,7 @@ Hệ thống agent cần cải thiện để:
 
 ### 3. Agent MD Files
 - 5 examples trong project (`agent/modules/agents/examples/`)
-- 3 user agents trong `~/.kaka-agent/agents/`
+- 3 user agents trong `~/.k41-agent/agents/`
 - README hướng dẫn chi tiết
 - **Impact:** Users dễ dàng tạo agents mới
 

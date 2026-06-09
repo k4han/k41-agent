@@ -50,7 +50,7 @@ def test_version_flag():
 def test_help_output():
     result = runner.invoke(cli_module.app, ["--help"])
     assert result.exit_code == 0
-    assert "Kaka Agent CLI" in result.output
+    assert "Kai Agent CLI" in result.output
 
 
 def test_daemon_command_uses_module_entrypoint(monkeypatch):
@@ -58,7 +58,7 @@ def test_daemon_command_uses_module_entrypoint(monkeypatch):
     monkeypatch.setattr(
         cli_module.sys,
         "argv",
-        [r"C:\venv\Scripts\kaka.exe", "--verbose"],
+        [r"C:\venv\Scripts\k41.exe", "--verbose"],
     )
 
     assert cli_module._daemon_command() == [

@@ -19,7 +19,7 @@ from langchain_core.tools import BaseTool
 
 from agent.modules.tools.domain import ToolCapability, ToolCategory
 
-META_ATTR = "__kaka_tool_meta__"
+META_ATTR = "__k41_tool_meta__"
 
 
 @dataclass(frozen=True)

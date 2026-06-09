@@ -127,7 +127,7 @@ class GitHubRepositoryBindingBody(BaseModel):
     tool_policy_mode: str = "inherit"
     allowed_tools: list[str] = Field(default_factory=list)
     allowed_skills: list[str] = Field(default_factory=list)
-    branch_prefix: str = "kaka"
+    branch_prefix: str = "k41"
     workspace_backend: str = "local"
 
 

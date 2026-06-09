@@ -119,7 +119,7 @@ class BackgroundTaskRepository:
         now = utcnow()
         normalized_task_id = _trim(task_id, 64)
         from agent.shared.config.service import get_config_service
-        default_locator = str(get_config_service().get_path("workspace.root", "~/kaka-agent"))
+        default_locator = str(get_config_service().get_path("workspace.root", "~/k41-agent"))
         workspace_ref = (
             normalize_workspace_ref(
                 workspace if workspace is not None else working_dir,

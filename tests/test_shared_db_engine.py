@@ -52,14 +52,14 @@ def test_canonical_get_postgres_conn_string_preserves_query_params(
 ):
     _set_database_url(
         monkeypatch,
-        "postgresql+asyncpg://user:pass@db.example.com:5432/appdb?sslmode=require&application_name=kaka",
+        "postgresql+asyncpg://user:pass@db.example.com:5432/appdb?sslmode=require&application_name=k41",
     )
 
     conn = get_postgres_conn_string()
 
     assert conn.startswith("postgresql://user:pass@db.example.com:5432/appdb")
     assert "sslmode=require" in conn
-    assert "application_name=kaka" in conn
+    assert "application_name=k41" in conn
 
 
 def test_canonical_get_sqlite_conn_string_uses_internal_sqlite(monkeypatch: pytest.MonkeyPatch):

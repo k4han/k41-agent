@@ -2173,10 +2173,10 @@ def test_dashboard_api_github_returns_repository_bindings(monkeypatch: pytest.Mo
     _patch_dashboard_attr(monkeypatch, "get_github_settings", lambda: SimpleNamespace(
             is_configured=True,
             enabled=True,
-            app_slug="kaka-agent",
+            app_slug="k41-agent",
             default_agent="default",
-            trigger_label="kaka-agent",
-            mention_triggers=("@kaka-agent", "/kaka"),
+            trigger_label="k41-agent",
+            mention_triggers=("@k41-agent", "/k41"),
         ),
     )
     _patch_dashboard_attr(monkeypatch, "get_github_automation_service", lambda: FakeService(),
@@ -2190,7 +2190,7 @@ def test_dashboard_api_github_returns_repository_bindings(monkeypatch: pytest.Mo
     assert response.status_code == 200
     data = response.json()
     assert data["configured"] is True
-    assert data["install_url"] == "https://github.com/apps/kaka-agent/installations/new"
+    assert data["install_url"] == "https://github.com/apps/k41-agent/installations/new"
     assert data["repositories"] == [{"repository_id": 100, "full_name": "octo/example"}]
     assert data["agent_names"] == ["default"]
 
@@ -2212,8 +2212,8 @@ def test_dashboard_api_github_repository_detail_and_task(
                 "full_name": "octo/example",
                 "enabled": True,
                 "agent_name": "default",
-                "trigger_label": "kaka-agent",
-                "mention_triggers": ["@kaka-agent"],
+                "trigger_label": "k41-agent",
+                "mention_triggers": ["@k41-agent"],
                 "allowed_tools": ["read_file"],
                 "allowed_skills": ["code-style"],
             }

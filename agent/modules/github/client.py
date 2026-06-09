@@ -186,7 +186,7 @@ class GitHubAppClient:
             "Accept": "application/vnd.github+json",
             "Authorization": f"Bearer {token}",
             "X-GitHub-Api-Version": GITHUB_API_VERSION,
-            "User-Agent": "kaka-agent",
+            "User-Agent": "k41-agent",
         }
 
 

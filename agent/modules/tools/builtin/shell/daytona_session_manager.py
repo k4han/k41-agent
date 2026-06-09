@@ -83,7 +83,7 @@ class DaytonaTerminalSessionManager:
     @staticmethod
     def _pty_id(session_key: str) -> str:
         digest = hashlib.sha1(session_key.encode("utf-8")).hexdigest()[:16]
-        return f"kaka-{digest}"
+        return f"k41-{digest}"
 
     def has_session(self, session_id: str, scope_id: str | None = None) -> bool:
         return self._session_key(session_id, scope_id) in self.sessions

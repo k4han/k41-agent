@@ -28,10 +28,10 @@ curl -X POST http://localhost:8000/api/chat \
 
 ## Tạo Agent Mới
 
-### 1. Tạo file MD trong ~/.kaka-agent/agents/
+### 1. Tạo file MD trong ~/.k41-agent/agents/
 
 ```bash
-nano ~/.kaka-agent/agents/my-agent.md
+nano ~/.k41-agent/agents/my-agent.md
 ```
 
 ### 2. Định nghĩa agent config
@@ -57,7 +57,7 @@ Working directory: {working_dir}
 ### 3. Restart service để load agent
 
 ```bash
-# Service sẽ tự động load agents từ ~/.kaka-agent/agents/
+# Service sẽ tự động load agents từ ~/.k41-agent/agents/
 ```
 
 ## Agent với Sub-agents
@@ -204,7 +204,7 @@ sub_agents: ["researcher", "coder"]
 ## Troubleshooting
 
 ### Agent not found
-- Check file exists in ~/.kaka-agent/agents/
+- Check file exists in ~/.k41-agent/agents/
 - Verify YAML frontmatter is valid
 - Check name field matches filename (optional but recommended)
 

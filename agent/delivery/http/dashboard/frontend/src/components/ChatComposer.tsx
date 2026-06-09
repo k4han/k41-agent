@@ -192,7 +192,7 @@ export function ChatComposer(props: ChatComposerProps) {
               ? "Select a workspace before sending..."
               : props.currentThreadId
                 ? "Continue this thread..."
-                : "Ask Kaka to build features, fix bugs, or work on your code"
+                : "Ask Kai to build features, fix bugs, or work on your code"
         }
         inputMode="text"
         enterkeyhint="send"
