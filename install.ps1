@@ -28,7 +28,6 @@ $DownloadDir = Join-Path $AgentHome "download"
 
 $UvExe = Join-Path $BinDir "uv.exe"
 $PythonExe = Join-Path $EnvsDir "Scripts\python.exe"
-$K41Ps1 = Join-Path $BinDir "k41.ps1"
 $K41Cmd = Join-Path $BinDir "k41.cmd"
 
 function Stage {
@@ -306,19 +305,11 @@ function Sync-App {
 }
 
 function Write-CommandWrappers {
-    @"
-`$ErrorActionPreference = "Stop"
-
-`$AgentHome = Join-Path `$env:LOCALAPPDATA "$AgentName"
-`$PythonExe = Join-Path `$AgentHome "envs\Scripts\python.exe"
-
-if (-not (Test-Path `$PythonExe)) {
-    throw "python.exe was not found at `$PythonExe. Run install.ps1 again."
-}
-
-& `$PythonExe -m agent.bootstrap.cli @args
-exit `$LASTEXITCODE
-"@ | Set-Content -LiteralPath $K41Ps1 -Encoding UTF8
+    $legacyPs1 = Join-Path $BinDir "k41.ps1"
+    if (Test-Path -LiteralPath $legacyPs1 -PathType Leaf) {
+        Remove-Item -LiteralPath $legacyPs1 -Force
+        Write-Host "Removed legacy PowerShell wrapper at $legacyPs1."
+    }
 
     @"
 @echo off

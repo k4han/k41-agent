@@ -33,6 +33,7 @@ The installer will:
 - Install Python 3.13 and dependencies from `uv.lock`.
 - Copy the source into the runtime app directory.
 - Run `k41 init` to create `~/.k41-agent/config.yaml` and the database.
+- Create the `k41.cmd` command launcher in `%LOCALAPPDATA%\k41-agent\bin`.
 - Add `%LOCALAPPDATA%\k41-agent\bin` to the user `PATH`.
 
 After installation finishes, open a new terminal and set the admin password:
