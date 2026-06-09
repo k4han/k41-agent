@@ -1,206 +1,219 @@
-# LangGraph Multi-Platform Agent
+# K41 Agent
 
-Multi-platform AI agent dùng LangGraph, hỗ trợ FastAPI, Telegram, Discord trong cùng một runtime.
+K41 Agent là một AI agent runtime chạy trên máy của bạn. Bạn có thể dùng qua dashboard web, API nội bộ, hoặc kết nối thêm các kênh như Telegram, Discord và GitHub.
 
-## Cấu trúc
+Dự án được xây bằng Python, FastAPI, LangGraph và dashboard Solid/Vite. Python/dependency được quản lý bằng `uv`.
 
-```
-agent/
-├── bootstrap/        # App wiring, settings, runtime lifecycle
-├── delivery/
-│   └── http/
-│       ├── api/      # FastAPI API router + schemas
-│       └── dashboard/ # Dashboard HTTP router
-├── shared/
-│   └── infrastructure/
-│       └── db/       # Shared DB primitives (URL, engine, session, metadata)
-├── modules/
-│   ├── agent_runtime/ # Platform-agnostic run facade
-│   ├── channels/     # Telegram/Discord channel management
-│   └── workflows/    # LangGraph graphs, nodes, state, tools, checkpoint store
-└── providers/
-    └── llm.py        # Cached LLM instances
+## Dùng để làm gì?
+
+- Trò chuyện với agent qua dashboard.
+- Chọn workspace để agent đọc, tìm kiếm và chỉnh sửa file.
+- Quản lý LLM provider, model, MCP server, skills và agent profile.
+- Chạy task nền, lịch chạy tự động và theo dõi trạng thái runtime.
+- Kết nối Telegram, Discord hoặc GitHub để nhận việc từ bên ngoài dashboard.
+
+## Cài nhanh trên Windows
+
+Mở PowerShell tại thư mục source của dự án, rồi chạy:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-## Thiết kế cốt lõi
+Nếu PowerShell trên máy đã cho phép chạy script, có thể dùng lệnh ngắn hơn:
 
-### 1 graph — nhiều service khác nhau
-```
-Cùng workflow (react/research)
-  → 1 graph instance
-  → Khác nhau qua context (working_dir, service_type)
-  → Chạy đồng thời, độc lập nhau ✅
-
-Khác workflow (nodes/edges khác nhau)
-  → Graph riêng, build 1 lần, lưu registry ✅
+```powershell
+.\install.ps1
 ```
 
-### Config vs Context vs State
-```
-config["configurable"]   → thread_id
-                           (khóa checkpoint thread)
+Script cài đặt sẽ:
 
-context                   → working_dir, service_type, max_context_tokens
-                           (run-scoped runtime knobs, không checkpoint)
+- Tạo thư mục cài đặt tại `%LOCALAPPDATA%\k41-agent`.
+- Tải `uv` nếu máy chưa có bản dùng riêng cho K41 Agent.
+- Cài Python 3.13 và dependency theo `uv.lock`.
+- Copy source vào thư mục app runtime.
+- Chạy `k41 init` để tạo `~/.k41-agent/config.yaml` và database.
+- Thêm `%LOCALAPPDATA%\k41-agent\bin` vào user `PATH`.
 
-state["messages"]        → nội dung hội thoại
-                           (thay đổi được, được checkpoint)
-```
+Sau khi cài xong, mở một terminal mới và đặt mật khẩu admin:
 
-### Checkpointer-level persistence
-```
-Graph compile có gắn checkpointer SQLite
-  → state hội thoại được lưu theo thread_id
-  → cùng thread_id sẽ tiếp tục ngữ cảnh sau mỗi request
-  → không tạo message log table riêng ở giai đoạn này
-
-Canonical ownership:
-  - shared DB engine/session/helpers: agent/shared/infrastructure/db/
-  - LangGraph checkpoint store: agent/modules/workflows/infrastructure/langgraph/checkpoint/
-
-database.url mặc định:
-  sqlite+aiosqlite:///data/agent_state.db
+```powershell
+k41 reset-password
 ```
 
-## Cài đặt
+Khởi động K41 Agent:
 
-```bash
+```powershell
+k41
+```
+
+Dashboard mặc định chạy tại:
+
+```text
+http://127.0.0.1:8000
+```
+
+Đăng nhập bằng mật khẩu admin vừa đặt.
+
+## Thiết lập lần đầu
+
+1. Vào `Settings > Providers`.
+2. Thêm LLM provider, API key, default model và danh sách model cần dùng.
+3. Vào `Settings > Agents` nếu muốn chỉnh prompt, tool hoặc model cho từng agent.
+4. Vào `Settings > Connections` để thêm MCP server hoặc GitHub repository.
+5. Vào `Settings > Channels` nếu muốn bật Telegram, Discord hoặc GitHub webhook.
+
+Nếu chỉ muốn dùng dashboard để chat/coding trong workspace local, bạn thường chỉ cần cấu hình provider trước.
+
+## Lệnh thường dùng
+
+```powershell
+k41                 # Chạy server nền
+k41 --foreground    # Chạy server ở foreground để xem log trực tiếp
+k41 status          # Kiểm tra server, dashboard, API và health endpoint
+k41 stop            # Dừng server
+k41 cli             # Mở chat CLI
+k41 reset-password  # Đặt lại mật khẩu admin
+k41 pair-code       # Tạo mã ghép tài khoản cho Telegram/Discord
+```
+
+Log server nằm tại:
+
+```text
+~/.k41-agent/server.log
+```
+
+Dữ liệu runtime mặc định nằm tại:
+
+```text
+~/.k41-agent/
+```
+
+## Cập nhật hoặc cài lại
+
+Chạy lại installer từ source mới:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+Installer sẽ dừng app đang chạy, copy source mới, sync dependency và giữ lại dữ liệu runtime trong `~/.k41-agent`.
+
+## Gỡ cài đặt
+
+Gỡ app nhưng giữ dữ liệu runtime:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\uninstall.ps1
+```
+
+Gỡ app và xóa cả dữ liệu runtime:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\uninstall.ps1 -RemoveRuntimeData
+```
+
+## Chạy từ source để phát triển
+
+Cài dependency Python:
+
+```powershell
 uv sync
-pnpm install
-uv run k41 init
-# Mở dashboard và thêm provider tại Settings > Providers
 ```
 
-## Dashboard frontend
+Cài dependency frontend:
 
-Dashboard hiện là SPA `Solid + Vite`, được FastAPI serve từ static build:
+```powershell
+pnpm install
+```
 
-```bash
+Khởi tạo runtime local:
+
+```powershell
+uv run k41 init
+uv run k41 reset-password
+```
+
+Build dashboard:
+
+```powershell
 pnpm dashboard:check
 pnpm dashboard:build
-uv run python app.py
 ```
 
-- Source frontend: `agent/delivery/http/dashboard/frontend`
-- Static build được xuất ra: `agent/delivery/http/dashboard/static`
-- Assets được serve tại `/dashboard-assets`
-- Các route dashboard như `/`, `/agents`, `/chat`, `/tasks`, `/scheduler`, `/config`, `/providers` trả cùng SPA shell.
-- Dữ liệu đọc cho dashboard nằm dưới `/dashboard-api/*`; các mutation cũ như `/agents/cards`, `/settings`, `/scheduler/jobs`, `/tasks` vẫn được giữ.
+Chạy app từ source:
 
-## Chạy
-
-### App duy nhất
-```bash
-uv run python app.py
-# Nếu ENABLE_WEB=true, server chạy tại http://localhost:8000
-# Nếu ENABLE_WEB=false, app chạy headless và chỉ giữ các background channels
+```powershell
+uv run python main.py
 ```
 
-### Một số cấu hình khởi động
+Hoặc chạy CLI entrypoint trực tiếp:
+
+```powershell
+uv run k41 --foreground
+```
+
+## Cấu hình chính
+
+File bootstrap config nằm tại:
+
+```text
+~/.k41-agent/config.yaml
+```
+
+Các giá trị thường chỉnh trong file này:
+
 ```yaml
+host: "0.0.0.0"
+port: 8000
 enable_web: true
 enable_api: true
 enable_dashboard: true
 ```
 
-Quy ước hiện tại:
-- `enable_web`, `enable_api`, `enable_dashboard`: bật các capability của web host khi app khởi động.
-- `database.url` vẫn đọc từ `~/.k41-agent/config.yaml`; `security.jwt_secret` là secret nội bộ và app tự sinh khi thiếu.
-- `llm.providers.*`, `llm.default_model`, `mcp.servers.*`, `channels.*`, `display.timezone` và `recursion_limit` được lưu trong DB để dashboard quản trị runtime. Provider API key, MCP `env.*`/`headers.*`, channel token/secret và GitHub private key được mã hóa khi lưu.
-- Cấu hình Telegram/Discord/GitHub nằm ở Settings > Channels. Nếu enabled và đủ credential thì channel sẽ tự khởi động cùng app.
-- Nếu dùng Telegram webhook, cần `enable_web: true`, `channels.telegram.webhook_url` trỏ tới `/channels/telegram/webhook`, và `channels.telegram.webhook_secret` trong dashboard để kiểm tra header `X-Telegram-Bot-Api-Secret-Token`.
-- Khi nâng cấp từ YAML cũ, runtime key channel còn thiếu trong DB sẽ được seed một lần từ `~/.k41-agent/config.yaml`.
-- Với dashboard chạy ở prefix gốc `/`, alias cũ `/bots/*` đã bị loại bỏ. Chỉ dùng `/services/*`.
-- LLM config dùng `llm.providers.*` + `llm.default_model` trong DB; `llm.default_provider` cũ chỉ còn là giá trị tổng hợp cho UI.
-- Backend đang hỗ trợ: `openai_compatible` (dùng `ChatOpenAI`) và `google` (dùng `ChatGoogleGenerativeAI`, bỏ qua `base_url`).
-- Model mặc định được resolve theo thứ tự: request override -> agent card -> `provider.default_model`.
-- Dropdown model lấy từ `llm.providers.<name>.models`, cộng thêm `default_model`; endpoint hỗ trợ refresh live nếu provider có API list model.
-- API key provider được lưu tại `llm.providers.<name>.api_key` trong DB và mã hóa.
+Các cấu hình runtime như LLM provider, API key, MCP server, channel token, GitHub private key, timezone và recursion limit được quản lý trong dashboard và lưu vào database. Secret được mã hóa khi lưu.
 
-## API Endpoints
+## API
 
-| Method | Endpoint          | Mô tả                    |
-|--------|-------------------|--------------------------|
-| POST   | /api/chat         | Chat sync                |
-| POST   | /api/chat/stream  | Chat với streaming       |
-| GET    | /api/graphs       | Liệt kê graphs           |
-| GET    | /api/providers    | Liệt kê providers        |
-| GET    | /api/providers/models | Liệt kê model options |
-| GET    | /api/health       | Health check             |
+API nằm dưới `/api` và yêu cầu phiên đăng nhập admin giống dashboard.
 
-## Dashboard Endpoints
+Một số endpoint chính:
 
-| Method | Endpoint                           | Mô tả                         |
-|--------|------------------------------------|-------------------------------|
-| GET    | /services                          | Liệt kê trạng thái services   |
-| GET    | /services/{name}                   | Xem trạng thái 1 service      |
-| POST   | /services/{name}/start             | Bật 1 service                 |
-| POST   | /services/{name}/stop              | Tắt 1 service                 |
-| POST   | /services/start-all                | Bật tất cả services           |
-| POST   | /services/stop-all                 | Tắt tất cả services           |
+| Method | Endpoint | Mục đích |
+| --- | --- | --- |
+| `POST` | `/api/chat` | Chat đồng bộ |
+| `POST` | `/api/chat/stream` | Chat streaming dạng text |
+| `POST` | `/api/chat/events` | Chat streaming dạng event cho UI |
+| `GET` | `/api/graphs` | Xem workflow đã đăng ký |
+| `GET` | `/api/providers` | Xem provider đã cấu hình |
+| `GET` | `/api/providers/models` | Xem model options |
+| `GET` | `/health` | Kiểm tra trạng thái app |
 
-### Ví dụ request
+## Workflows và agent
 
-```bash
-# Chat thông thường
-curl -X POST http://localhost:8000/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{
-    "message": "Xin chào!",
-    "user_id": "user_123",
-    "workflow": "react_agent",
-    "service_type": "default"
-  }'
+K41 Agent có các workflow mặc định:
 
-# React agent với service_type backend + working_dir
-curl -X POST http://localhost:8000/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{
-    "message": "Liệt kê các file trong thư mục",
-    "user_id": "dev_456",
-    "workflow": "react_agent",
-    "service_type": "backend",
-    "working_dir": "/home/myproject"
-  }'
+| Workflow | Mục đích |
+| --- | --- |
+| `react_agent` | Agent chính có thể gọi tool, đọc/sửa file, chạy shell và dùng skill |
+| `research_chain` | Workflow nghiên cứu và tổng hợp |
+| `router` | Phân loại yêu cầu rồi chuyển sang workflow phù hợp |
 
-# Research
-curl -X POST http://localhost:8000/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{
-    "message": "Phân tích ưu nhược điểm microservices vs monolith",
-    "user_id": "user_789",
-    "workflow": "research_chain"
-  }'
+Agent profile được load từ:
 
-# Streaming
-curl -X POST http://localhost:8000/api/chat/stream \
-  -H "Content-Type: application/json" \
-  -d '{"message": "Giải thích LangGraph", "user_id": "user_1"}'
+```text
+~/.k41-agent/agents/
 ```
 
-## Thêm platform mới (Slack, Zalo,...)
+Ví dụ và hướng dẫn chi tiết nằm trong:
 
-1. Tạo adapter trong `agent/modules/channels/<platform>/adapter.py` implement `ChatChannelAdapter`.
-2. Adapter khai báo `settings_schema`, `settings_sections`, `capabilities`, `create_runner()`, `send()` và normalize event thành `InboundMessage`.
-3. Gửi message vào pipeline chung bằng `process_inbound_message()`. Pipeline đã xử lý auth, `/pair`, command registry, streaming agent và default agent.
-4. Thêm `ChannelSpec` trong `agent/modules/channels/service_specs.py` trỏ tới adapter loader và runner.
-5. Nếu platform hỗ trợ command suggestion như Telegram, implement `sync_commands()` để map `CommandRegistry` sang API native.
-6. **Không cần** động vào `agent_runtime`, `workflows` hoặc dashboard UI cho các field settings cơ bản; dashboard đọc schema từ adapter catalog.
+- `agent/modules/agents/README.md`
+- `agent/modules/agents/examples/`
+- `docs/agent-quick-reference.md`
 
-## Thêm workflow mới
+## Tài liệu thêm
 
-1. Tạo graph mới trong `agent/modules/workflows/infrastructure/langgraph/graphs/`
-2. Đăng ký trong `agent/modules/workflows/application/register_builtin_workflows.py`
-3. **Không cần** động vào `delivery/http` hay `modules/channels`
-
-## Workflows
-
-| Workflow         | Mô tả                              | Tools                              |
-|------------------|------------------------------------|------------------------------------|
-| `react_agent`    | Hỏi đáp + coding + file/bash + skills | get_current_time, echo, skill, read_file, write_file, edit_file, bash, bash_send_input, bash_interrupt, list_dir |
-| `research_chain` | Nghiên cứu, tổng hợp (2 bước)      | (LLM only)                         |
-| `router`         | Tự phân loại → chuyển đúng workflow | (LLM classifier)                   |
-
-> **Chú ý về `bash` tools:** Các tool `bash`, `bash_send_input`, `bash_interrupt` hoạt động theo **session trong từng conversation thread** (mặc định `session_id="default"`). Trong cùng một thread, trạng thái terminal được giữ nguyên qua nhiều lần gọi: `cd` thay đổi thư mục hiện tại, biến môi trường được set tồn tại đến lần gọi sau, và tiến trình nền vẫn chạy. Thread mới sẽ có shell session riêng dù dùng cùng `session_id`; nếu muốn tách thêm bên trong cùng một thread, agent có thể chỉ định `session_id` khác.
-
-Các tool file/bash làm việc trực tiếp với đường dẫn vật lý tuyệt đối của workspace; path tương đối vẫn được chấp nhận nếu nằm trong workspace.
+- `docs/configuration.md`: cấu hình chi tiết.
+- `docs/deployment-verification.md`: checklist kiểm tra triển khai.
+- `docs/graph-registration.md`: cách đăng ký workflow.
+- `docs/refactor-agent-centric-api.md`: ghi chú API theo hướng agent-centric.
