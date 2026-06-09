@@ -1,4 +1,5 @@
 from agent.modules.conversations.models import ConversationThread
+from agent.modules.conversations.migrations import migrate_conversation_tables
 from agent.modules.conversations.repository import (
     ConversationThreadRepository,
     get_conversation_thread_repository,
@@ -42,6 +43,7 @@ __all__ = [
     "get_conversation_thread",
     "get_conversation_thread_repository",
     "infer_thread_kind",
+    "migrate_conversation_tables",
     "list_active_thread_ids",
     "list_conversation_threads",
     "mark_conversation_thread_deleted",

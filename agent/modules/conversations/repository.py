@@ -21,6 +21,8 @@ def serialize_thread(thread: ConversationThread) -> dict[str, Any]:
         "user_id": thread.user_id,
         "channel_id": thread.channel_id,
         "agent_name": thread.agent_name,
+        "provider": thread.provider,
+        "model": thread.model,
         "title": thread.title,
         "kind": thread.kind,
         "created_at": thread.created_at.isoformat() if thread.created_at else None,
@@ -57,6 +59,8 @@ class ConversationThreadRepository:
         user_id: str,
         channel_id: str = "",
         agent_name: str = "",
+        provider: str | None = None,
+        model: str | None = None,
         title: str = "",
         kind: str = "user",
     ) -> dict[str, Any]:
@@ -66,6 +70,8 @@ class ConversationThreadRepository:
         normalized_user_id = _trim(user_id, 255)
         normalized_channel_id = _trim(channel_id, 255)
         normalized_agent_name = _trim(agent_name, 255)
+        normalized_provider = _trim(provider, 255) if provider is not None else None
+        normalized_model = _trim(model, 255) if model is not None else None
         normalized_title = _trim(title or normalized_thread_id, 255)
         normalized_kind = _trim(kind or "user", 50) or "user"
         session = await get_async_session()
@@ -83,6 +89,8 @@ class ConversationThreadRepository:
                     user_id=normalized_user_id,
                     channel_id=normalized_channel_id,
                     agent_name=normalized_agent_name,
+                    provider=normalized_provider or "",
+                    model=normalized_model or "",
                     title=normalized_title,
                     kind=normalized_kind,
                     created_at=now,
@@ -95,6 +103,10 @@ class ConversationThreadRepository:
                 thread.channel_id = normalized_channel_id
                 if normalized_agent_name:
                     thread.agent_name = normalized_agent_name
+                if normalized_provider is not None:
+                    thread.provider = normalized_provider
+                if normalized_model is not None:
+                    thread.model = normalized_model
                 if normalized_title and (
                     not thread.title or thread.title == thread.thread_id
                 ):

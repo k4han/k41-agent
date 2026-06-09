@@ -26,6 +26,8 @@ export type ThreadSummary = {
   user_id: string;
   channel_id: string;
   agent_name?: string;
+  provider?: string;
+  model?: string;
   title?: string;
   kind?: string;
   created_at?: string | null;
@@ -80,6 +82,8 @@ export type ThreadMessagesPayload = {
   user_id: string;
   channel_id: string;
   agent_name?: string;
+  provider?: string;
+  model?: string;
   title?: string;
   kind?: string;
   workspace?: WorkspaceRef | null;

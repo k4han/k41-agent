@@ -11,6 +11,8 @@ class ConversationThread(BaseModel):
     user_id = Column(String(255), nullable=False, default="", index=True)
     channel_id = Column(String(255), nullable=False, default="")
     agent_name = Column(String(255), nullable=False, default="")
+    provider = Column(String(255), nullable=False, default="")
+    model = Column(String(255), nullable=False, default="")
     title = Column(String(255), nullable=False, default="")
     kind = Column(String(50), nullable=False, default="user", index=True)
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)

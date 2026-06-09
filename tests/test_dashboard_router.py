@@ -1409,6 +1409,69 @@ def test_dashboard_chat_history_pagination_keeps_workspace_fields(
     assert payload["threads"][0]["workspace_key"] == "no-workspace"
 
 
+def test_dashboard_chat_thread_messages_include_agent_and_model_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conversations_module = importlib.import_module("agent.modules.conversations")
+
+    async def fake_get_thread_messages_payload(
+        thread_id: str,
+        checkpoint_id=None,
+        include_branch_metadata=False,
+    ):
+        assert thread_id == "api_dashboard_123"
+        assert checkpoint_id is None
+        assert include_branch_metadata is True
+        return ([{"id": "user-1", "role": "user", "content": "hello"}], "checkpoint-1")
+
+    async def fake_get_conversation_thread(thread_id: str):
+        assert thread_id == "api_dashboard_123"
+        return {
+            "thread_id": thread_id,
+            "platform": "api",
+            "user_id": "dashboard",
+            "channel_id": "123",
+            "agent_name": "reviewer",
+            "provider": "anthropic-main",
+            "model": "claude-sonnet",
+            "title": "hello",
+            "kind": "user",
+            "created_at": None,
+            "updated_at": None,
+        }
+
+    async def fake_workspace_ref_for_thread(thread_id: str, include_default: bool):
+        assert thread_id == "api_dashboard_123"
+        assert include_default is False
+        return None
+
+    _patch_dashboard_attr(
+        monkeypatch,
+        "_get_thread_messages_payload",
+        fake_get_thread_messages_payload,
+    )
+    _patch_dashboard_attr(
+        monkeypatch,
+        "_workspace_ref_for_thread",
+        fake_workspace_ref_for_thread,
+    )
+    monkeypatch.setattr(
+        conversations_module,
+        "get_conversation_thread",
+        fake_get_conversation_thread,
+    )
+
+    client = _create_dashboard_client(ChannelManager())
+    response = client.get("/dashboard-api/chat-history/api_dashboard_123")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["agent_name"] == "reviewer"
+    assert payload["provider"] == "anthropic-main"
+    assert payload["model"] == "claude-sonnet"
+    assert payload["active_checkpoint_id"] == "checkpoint-1"
+
+
 def test_dashboard_api_renames_chat_thread(monkeypatch: pytest.MonkeyPatch) -> None:
     conversations_module = importlib.import_module("agent.modules.conversations")
 

@@ -342,6 +342,8 @@ class BackgroundTaskManager:
         await upsert_conversation_thread(
             thread_id=task.thread_id,
             agent_name=task.agent_name,
+            provider=task.provider,
+            model=task.model,
             title=task.request,
             kind=THREAD_KIND_BACKGROUND,
         )
@@ -424,6 +426,8 @@ class BackgroundTaskManager:
                 await upsert_conversation_thread(
                     thread_id=task.thread_id,
                     agent_name=task.agent_name,
+                    provider=task.provider,
+                    model=task.model,
                     title=task.request,
                     kind=THREAD_KIND_BACKGROUND,
                 )

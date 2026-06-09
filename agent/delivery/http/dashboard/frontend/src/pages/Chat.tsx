@@ -211,6 +211,56 @@ export function ChatPage() {
     validCards().find((card) => card.name === agentName()),
   );
 
+  const modelSelectionAvailable = (nextProvider: string, nextModel: string): boolean => {
+    const payload = data();
+    if (!payload) {
+      return false;
+    }
+    const providerName = (nextProvider || "default").trim();
+    const resolvedProvider = providerName === "default"
+      ? payload.default_provider
+      : providerName;
+    if (!resolvedProvider) {
+      return providerName === "default";
+    }
+    const catalog = payload.model_catalogs?.find((item) => item.provider === resolvedProvider);
+    const providerKnown = providerName === "default"
+      || payload.provider_names.includes(resolvedProvider)
+      || Boolean(catalog);
+    if (!providerKnown) {
+      return false;
+    }
+    const modelName = (nextModel || "").trim();
+    if (!modelName || modelName === "provider default") {
+      return true;
+    }
+    return Boolean(
+      catalog?.default_model === modelName
+      || catalog?.models?.some((item) => item.id === modelName),
+    );
+  };
+
+  const fallbackModelSelection = (card: AgentCard): { provider: string; model: string } => ({
+    provider: card.provider || "default",
+    model: card.model || "",
+  });
+
+  const restoredModelSelection = (
+    thread: ThreadMessagesPayload,
+    card: AgentCard,
+  ): { provider: string; model: string } => {
+    const threadProvider = String(thread.provider || "").trim();
+    const threadModel = String(thread.model || "").trim();
+    if (threadProvider && modelSelectionAvailable(threadProvider, threadModel)) {
+      return { provider: threadProvider, model: threadModel };
+    }
+    const cardSelection = fallbackModelSelection(card);
+    if (modelSelectionAvailable(cardSelection.provider, cardSelection.model)) {
+      return cardSelection;
+    }
+    return { provider: "default", model: "" };
+  };
+
   const selectedModelOption = createMemo<ModelOption | undefined>(() => {
     const payload = data();
     if (!payload) return undefined;
@@ -679,13 +729,37 @@ export function ChatPage() {
     }
   });
 
+  let restoredThreadModelKey = "";
+  let lastDefaultedAgentName = "";
+
   createEffect(() => {
     const card = selectedCard();
     if (!card) {
       return;
     }
-    setProvider(card.provider || "default");
-    setModel(card.model || "");
+    const td = threadData();
+    const threadKey = td
+      ? [
+          td.thread_id,
+          td.agent_name || "",
+          td.provider || "",
+          td.model || "",
+        ].join("\u001f")
+      : "";
+    if (td && threadKey && restoredThreadModelKey !== threadKey) {
+      const selection = restoredModelSelection(td, card);
+      setProvider(selection.provider);
+      setModel(selection.model);
+      restoredThreadModelKey = threadKey;
+      lastDefaultedAgentName = card.name;
+      return;
+    }
+    if (lastDefaultedAgentName !== card.name) {
+      const selection = fallbackModelSelection(card);
+      setProvider(selection.provider);
+      setModel(selection.model);
+      lastDefaultedAgentName = card.name;
+    }
   });
 
   createEffect(() => {

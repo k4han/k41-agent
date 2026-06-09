@@ -314,6 +314,8 @@ async def _record_conversation_thread(
     *,
     thread_id: str,
     agent_name: str,
+    provider: str | None = None,
+    model: str | None = None,
     title: str = "",
     attachments: list[Any] | None = None,
 ) -> None:
@@ -340,6 +342,8 @@ async def _record_conversation_thread(
         await upsert_conversation_thread(
             thread_id=thread_id,
             agent_name=agent_name,
+            provider=provider,
+            model=model,
             title=resolved_title,
             kind=kind,
         )
@@ -833,6 +837,8 @@ async def run_agent(
         await _record_conversation_thread(
             thread_id=thread_id,
             agent_name=agent_name,
+            provider=provider,
+            model=model,
             title=user_input,
             attachments=attachments,
         )
@@ -963,6 +969,8 @@ async def run_agent_stream(
         await _record_conversation_thread(
             thread_id=thread_id,
             agent_name=agent_name,
+            provider=provider,
+            model=model,
             title=user_input,
             attachments=attachments,
         )

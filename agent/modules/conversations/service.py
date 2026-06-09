@@ -238,6 +238,8 @@ async def upsert_conversation_thread(
     *,
     thread_id: str,
     agent_name: str = "",
+    provider: str | None = None,
+    model: str | None = None,
     title: str = "",
     kind: str | None = None,
     platform: str | None = None,
@@ -253,6 +255,8 @@ async def upsert_conversation_thread(
         user_id=user_id or parsed["user_id"],
         channel_id=channel_id if channel_id is not None else parsed["channel_id"],
         agent_name=agent_name,
+        provider=provider,
+        model=model,
         title=title or thread_id,
         kind=kind or infer_thread_kind(thread_id),
     )

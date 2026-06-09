@@ -108,6 +108,8 @@ async def test_record_conversation_thread_schedules_title_generation_for_user_th
     assert calls["upsert"] == {
         "thread_id": "api:dashboard:thread-1",
         "agent_name": "default",
+        "provider": None,
+        "model": None,
         "title": "How do I debug this login issue?",
         "kind": "user",
     }
@@ -157,6 +159,8 @@ async def test_record_conversation_thread_preserves_existing_manual_title(monkey
     assert calls["upsert"] == {
         "thread_id": "api:dashboard:thread-1",
         "agent_name": "default",
+        "provider": None,
+        "model": None,
         "title": "",
         "kind": "user",
     }
@@ -203,6 +207,8 @@ async def test_record_conversation_thread_skips_generation_for_background_thread
     assert calls["upsert"] == {
         "thread_id": "task_dashboard_123",
         "agent_name": "default",
+        "provider": None,
+        "model": None,
         "title": "Run background task",
         "kind": "background",
     }
