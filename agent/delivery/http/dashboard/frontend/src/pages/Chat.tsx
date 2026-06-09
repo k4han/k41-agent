@@ -38,6 +38,7 @@ import type {
   ModelOption,
   WorkspaceRef,
 } from "@/types";
+import { isSandboxBackend } from "@/types";
 import {
   persistedStreams,
   getOrCreateStreamSignals,
@@ -102,7 +103,7 @@ function workspaceSelectionReady(selection: WorkspaceSelectionDraft | null): boo
   if (selection.source === "github") {
     return selection.repositoryId !== null;
   }
-  return selection.backend === "daytona" || selection.backend === "modal";
+  return isSandboxBackend(selection.backend);
 }
 
 function workspaceSelectionLocator(selection: WorkspaceSelectionDraft): string {
@@ -135,7 +136,7 @@ function workspaceNeedsEnvironmentInitialization(
   if (!workspace) {
     return false;
   }
-  if (workspace.backend !== "daytona" && workspace.backend !== "modal") {
+  if (!isSandboxBackend(workspace.backend)) {
     return false;
   }
 

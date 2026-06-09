@@ -2,14 +2,11 @@ import { A, useNavigate, useParams } from "@solidjs/router";
 import { createMemo, createSignal, For, JSX, onMount, Show } from "solid-js";
 import {
   Bot,
-  CloudCog,
-  Cpu,
   GitBranch,
   GitPullRequest,
   MessageSquare,
   Play,
   Save,
-  Server,
   Settings2,
   SlidersHorizontal,
 } from "lucide-solid";
@@ -24,6 +21,8 @@ import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
 import { apiFetch, postJson, putJson } from "@/lib/api";
+import { getBackends } from "@/lib/catalogStore";
+import { getBackendIcon } from "@/lib/iconRegistry";
 import { truncateText } from "@/lib/utils";
 import type {
   BackgroundTask,
@@ -31,6 +30,7 @@ import type {
   GitHubRepositoryBinding,
   GitHubRepositoryDetailPayload,
   Identity,
+  WorkspaceBackendKey,
 } from "@/types";
 
 type RepositoryDraft = {
@@ -777,11 +777,11 @@ function RepositoryAutomation(props: {
   agentNames: string[];
   onChange: <K extends keyof RepositoryDraft>(key: K, value: RepositoryDraft[K]) => void;
 }) {
-  const backendOptions = [
-    { value: "local", label: "Local", icon: <Server size={14} /> },
-    { value: "daytona", label: "Daytona", icon: <CloudCog size={14} /> },
-    { value: "modal", label: "Modal", icon: <Cpu size={14} /> },
-  ];
+  const backendOptions = getBackends().map((b) => ({
+    value: b.name,
+    label: b.title,
+    icon: getBackendIcon(b.name)(),
+  }));
 
   return (
     <section class="panel">
@@ -819,16 +819,13 @@ function RepositoryAutomation(props: {
             <SelectControl
               value={props.draft.workspace_backend}
               options={backendOptions}
-              onChange={(value) => props.onChange("workspace_backend", value as "local" | "daytona" | "modal")}
+              onChange={(value) => props.onChange("workspace_backend", value as WorkspaceBackendKey)}
               ariaLabel="Workspace backend"
-              icon={<Server size={14} />}
+              icon={getBackendIcon(props.draft.workspace_backend)()}
             />
             <span class="hint">
-              {props.draft.workspace_backend === "local"
-                ? "Run agent on the host filesystem."
-                : props.draft.workspace_backend === "daytona"
-                  ? "Run agent inside a Daytona cloud sandbox."
-                  : "Run agent inside a Modal serverless sandbox."}
+              {getBackends().find((b) => b.name === props.draft.workspace_backend)?.summary
+                || `Run agent using the ${props.draft.workspace_backend} backend.`}
             </span>
           </div>
           <div />

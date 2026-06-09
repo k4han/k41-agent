@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import {
   FolderOpen,
   GitBranch,
@@ -9,14 +9,15 @@ import {
   ChevronRight,
   RefreshCw,
   Cloud,
-  Server,
-  Cpu,
 } from "lucide-solid";
 
 import { Dialog } from "@/components/Dialog";
 import { SelectControl } from "@/components/SelectControl";
 import { useToast } from "@/components/Toast";
 import { apiFetch, postJson } from "@/lib/api";
+import { getBackends } from "@/lib/catalogStore";
+import { getBackendIcon } from "@/lib/iconRegistry";
+import { useCatalogAndLoad } from "@/lib/useCatalogAndLoad";
 import {
   formatWorkspaceRoot,
   isGitHubWorkspace,
@@ -66,18 +67,26 @@ export interface WorkspaceSelectorProps {
   onSelectionChange: (selection: WorkspaceSelectionDraft) => void;
 }
 
-function sourceForBackend(backend: WorkspaceBackendKey): WorkspaceSourceKey[] {
-  if (backend === "local") {
-    return ["path", "github"];
+function sourceForBackend(backendName: string): WorkspaceSourceKey[] {
+  const backends = getBackends();
+  const info = backends.find((b) => b.name === backendName);
+  const caps = new Set(info?.capabilities ?? []);
+
+  const sources: WorkspaceSourceKey[] = [];
+  if (caps.has("sandbox_inventory")) {
+    sources.push("sandbox");
+  } else {
+    sources.push("path");
   }
-  return ["sandbox", "github"];
+  sources.push("github");
+  return sources;
 }
 
-function defaultSourceForBackend(backend: WorkspaceBackendKey): WorkspaceSourceKey {
-  if (backend === "local") {
-    return "path";
-  }
-  return "sandbox";
+function defaultSourceForBackend(backendName: string): WorkspaceSourceKey {
+  const backends = getBackends();
+  const info = backends.find((b) => b.name === backendName);
+  const caps = new Set(info?.capabilities ?? []);
+  return caps.has("sandbox_inventory") ? "sandbox" : "path";
 }
 
 function backendFromWorkspace(workspace: WorkspaceRef | null | undefined): WorkspaceBackendKey {
@@ -184,6 +193,18 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
       label: repository.full_name,
     })),
   );
+
+  const backendOptions = createMemo(() =>
+    getBackends().map((b) => ({
+      value: b.name,
+      label: b.title,
+    })),
+  );
+
+  const selectedBackendIcon = createMemo(() => {
+    const iconFn = getBackendIcon(backend());
+    return iconFn();
+  });
 
   const selectedRepository = createMemo(() =>
     repositories().find((repository) => String(repository.repository_id) === repositoryId()),
@@ -394,8 +415,8 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
     }
   });
 
-  onMount(() => {
-    void loadRepositories();
+  useCatalogAndLoad(async () => {
+    await loadRepositories();
   });
 
   return (
@@ -411,40 +432,16 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
 
       <Show when={!props.locked}>
         <div class="workspace-selector-controls">
-          <div class="workspace-selector-backends" role="tablist" aria-label="Workspace backend">
-            <button
-              class={`workspace-selector-mode ${backend() === "local" ? "active" : ""}`}
-              type="button"
+          <div class="workspace-selector-backends">
+            <SelectControl
+              value={backend()}
+              options={backendOptions()}
               disabled={props.disabled}
-              onClick={() => setBackend("local")}
-              aria-selected={backend() === "local"}
-              role="tab"
-            >
-              <HardDrive size={14} />
-              <span>Local</span>
-            </button>
-            <button
-              class={`workspace-selector-mode ${backend() === "daytona" ? "active" : ""}`}
-              type="button"
-              disabled={props.disabled}
-              onClick={() => setBackend("daytona")}
-              aria-selected={backend() === "daytona"}
-              role="tab"
-            >
-              <Server size={14} />
-              <span>Daytona</span>
-            </button>
-            <button
-              class={`workspace-selector-mode ${backend() === "modal" ? "active" : ""}`}
-              type="button"
-              disabled={props.disabled}
-              onClick={() => setBackend("modal")}
-              aria-selected={backend() === "modal"}
-              role="tab"
-            >
-              <Cpu size={14} />
-              <span>Modal</span>
-            </button>
+              onChange={(value) => setBackend(value as WorkspaceBackendKey)}
+              ariaLabel="Workspace backend"
+              title={backendOptions().find((b) => b.value === backend())?.label || backend()}
+              icon={selectedBackendIcon()}
+            />
           </div>
 
           <div class="workspace-selector-sources" role="tablist" aria-label="Workspace source">

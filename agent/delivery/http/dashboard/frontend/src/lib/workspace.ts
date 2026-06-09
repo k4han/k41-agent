@@ -1,4 +1,5 @@
 import type { WorkspaceRef } from "../types";
+import { isSandboxBackend } from "../types";
 
 function normalizePath(value: string): string {
   return value.trim().replace(/\\/g, "/").replace(/\/+$/, "");
@@ -107,7 +108,7 @@ export function workspaceDisplayLabelFromValues(
   metadata?: Record<string, unknown>,
   backend: WorkspaceRef["backend"] = "local",
 ): string {
-  if (backend === "daytona" || backend === "modal") {
+  if (isSandboxBackend(backend)) {
     const repository = metadataText(metadata, "repository_full_name");
     if (repository) {
       return repository;
@@ -175,7 +176,7 @@ export function resolveWorkspaceWorkingDir(
   if (!workspace) {
     return "";
   }
-  if (workspace.backend === "daytona" || workspace.backend === "modal") {
+  if (isSandboxBackend(workspace.backend)) {
     const root = metadataRoot(workspace.metadata);
     if (root) {
       return root;

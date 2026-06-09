@@ -2,15 +2,12 @@ import {
   ChevronDown,
   ChevronRight,
   Clipboard,
-  Cpu,
   File,
   Folder,
   GitCompare,
-  HardDrive,
   MoreHorizontal,
   Pencil,
   RefreshCw,
-  Server,
   Trash2,
   X,
   Zap,
@@ -22,9 +19,11 @@ import { useToast } from "@/components/Toast";
 import { apiFetch, postJson } from "@/lib/api";
 import { highlightCode, languageFromPath } from "@/lib/codeHighlight";
 import { renderUnifiedDiffHtml } from "@/lib/diffView";
+import { getBackendIcon } from "@/lib/iconRegistry";
 import { createDarkMode } from "@/lib/theme";
 import { formatWorkspaceRoot, localWorkspaceRef, workspaceDisplayLabel } from "@/lib/workspace";
-import type { WorkspaceRef, WorkspaceUsagePayload } from "@/types";
+import type { WorkspaceRef, WorkspaceUsagePayload, WorkspaceBackendKey } from "@/types";
+import { isSandboxBackend } from "@/types";
 
 type WorkspaceTreeEntry = {
   name: string;
@@ -87,8 +86,6 @@ type WorkspaceResolvePayload = {
 
 type WorkspaceTab = "changes" | "files" | `file:${string}`;
 
-type WorkspaceBackendKey = "local" | "daytona" | "modal";
-
 function workspaceQuery(threadId: string, workspace: WorkspaceRef | null, extra?: Record<string, string>) {
   const params = new URLSearchParams();
   if (threadId) {
@@ -99,7 +96,7 @@ function workspaceQuery(threadId: string, workspace: WorkspaceRef | null, extra?
     params.set("locator", workspace.locator.trim());
     const root = workspace.metadata?.root;
     if (
-      (workspace.backend === "daytona" || workspace.backend === "modal")
+      isSandboxBackend(workspace.backend)
       && typeof root === "string"
       && root.trim()
     ) {
@@ -170,18 +167,8 @@ function FileCodeView(props: { content: string; path: string; dark: boolean }) {
 }
 
 function BackendIcon(props: { backend: WorkspaceBackendKey }) {
-  return (
-    <Show
-      when={props.backend === "local"}
-      fallback={
-        <Show when={props.backend === "daytona"} fallback={<Cpu size={12} />}>
-          <Server size={12} />
-        </Show>
-      }
-    >
-      <HardDrive size={12} />
-    </Show>
-  );
+  const iconFn = getBackendIcon(props.backend);
+  return iconFn();
 }
 
 async function writeToClipboard(text: string): Promise<void> {
@@ -254,8 +241,8 @@ export function WorkspaceExplorer(props: {
   const isLocalWorkspace = () => (effectiveWorkspace()?.backend || "local") === "local";
   const effectiveBackend = (): WorkspaceBackendKey => {
     const backend = effectiveWorkspace()?.backend;
-    if (backend === "daytona" || backend === "modal") {
-      return backend;
+    if (backend && isSandboxBackend(backend)) {
+      return backend as WorkspaceBackendKey;
     }
     return "local";
   };

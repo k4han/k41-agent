@@ -188,6 +188,10 @@ export type PromptVariablesPayload = {
 
 export type WorkspaceBackendKey = "local" | "daytona" | "modal";
 
+export function isSandboxBackend(backend: string): boolean {
+  return backend !== "local";
+}
+
 export type WorkspaceRef = {
   backend: WorkspaceBackendKey;
   locator: string;
@@ -317,6 +321,10 @@ export type ChannelCatalogItem = {
 export type BackendCatalogItem = {
   name: string;
   title: string;
+  summary?: string;
+  capabilities?: string[];
+  availability?: Record<string, unknown>;
+  install_extra?: string;
 };
 
 export type SelectOption = {

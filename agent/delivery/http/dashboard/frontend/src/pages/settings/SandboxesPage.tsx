@@ -9,7 +9,6 @@ import {
   Archive,
   CircleStop,
   CloudCog,
-  Cpu,
   ExternalLink,
   HardDrive,
   PowerOff,
@@ -23,6 +22,7 @@ import { Dialog } from "@/components/Dialog";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson } from "@/lib/api";
 import { API_PATHS } from "@/lib/endpoints";
+import { getBackends } from "@/lib/catalogStore";
 import { getBackendIcon } from "@/lib/iconRegistry";
 import { useCatalogAndLoad } from "@/lib/useCatalogAndLoad";
 import { truncateText } from "@/lib/utils";
@@ -137,12 +137,13 @@ function sandboxDisplayId(value: string): string {
   return `${value.slice(0, 8)}…${value.slice(-6)}`;
 }
 
-function countByBackend(rows: SandboxRow[]): Record<SandboxBackendKey | "all", number> {
-  const counts: Record<SandboxBackendKey | "all", number> = {
-    all: rows.length,
-    daytona: 0,
-    modal: 0,
-  };
+function countByBackend(rows: SandboxRow[]): Record<string, number> {
+  const counts: Record<string, number> = { all: rows.length };
+  for (const backend of getBackends()) {
+    if (backend.name !== "local") {
+      counts[backend.name] = 0;
+    }
+  }
   for (const row of rows) {
     counts[row.backend] = (counts[row.backend] || 0) + 1;
   }
@@ -179,11 +180,13 @@ export function SandboxesPage() {
     setBusy(true);
     try {
       if (filter() === "all") {
-        const [daytonaRows, modalRows] = await Promise.all([
-          fetchBackend("daytona"),
-          fetchBackend("modal"),
-        ]);
-        const merged = [...daytonaRows, ...modalRows].sort((a, b) => {
+        const sandboxBackends = getBackends()
+          .filter((b) => b.name !== "local")
+          .map((b) => b.name);
+        const results = await Promise.all(
+          sandboxBackends.map((name) => fetchBackend(name as SandboxBackendKey)),
+        );
+        const merged = results.flat().sort((a, b) => {
           const aKey = a.last_used_at || a.updated_at || a.created_at || "";
           const bKey = b.last_used_at || b.updated_at || b.created_at || "";
           return bKey.localeCompare(aKey);
@@ -377,21 +380,21 @@ export function SandboxesPage() {
                   <span>All</span>
                   <span class="sandboxes-filter-count">{counts().all}</span>
                 </button>
-                <For each={(["daytona", "modal"] as SandboxBackendKey[])}>
+                <For each={getBackends().filter((b) => b.name !== "local")}>
                   {(backend) => (
                     <button
-                      class={`sandboxes-filter-chip sandboxes-filter-chip-${backend} ${filter() === backend ? "active" : ""}`}
+                      class={`sandboxes-filter-chip sandboxes-filter-chip-${backend.name} ${filter() === backend.name ? "active" : ""}`}
                       type="button"
                       role="tab"
-                      aria-selected={filter() === backend}
-                      onClick={() => void handleBackendChange(backend)}
+                      aria-selected={filter() === backend.name}
+                      onClick={() => void handleBackendChange(backend.name as SandboxBackendKey)}
                     >
                       <span class="sandboxes-filter-icon" aria-hidden="true">
-                        {backend === "daytona" ? <CloudCog size={13} /> : <Cpu size={13} />}
+                        {getBackendIcon(backend.name)()}
                       </span>
-                      <span>{backend === "daytona" ? "Daytona" : "Modal"}</span>
+                      <span>{backend.title}</span>
                       <span class="sandboxes-filter-count">
-                        {counts()[backend] || 0}
+                        {counts()[backend.name] || 0}
                       </span>
                     </button>
                   )}
