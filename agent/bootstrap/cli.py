@@ -89,8 +89,8 @@ def _print_runtime_files() -> None:
 
 def _print_common_commands() -> None:
     _print_section("Commands")
-    _print_key_value("Check", "uv run kaka status")
-    _print_key_value("Stop", "uv run kaka stop")
+    _print_key_value("Check", "kaka status")
+    _print_key_value("Stop", "kaka stop")
 
 
 def _daemonize() -> None:
@@ -307,7 +307,7 @@ def init() -> None:
     _echo_success("Initialization complete.")
     _print_section("Next steps")
     _print_key_value("Home", kaka_dir)
-    _print_key_value("Start", "uv run kaka")
+    _print_key_value("Start", "kaka")
 
 
 def serve(foreground: bool = False) -> None:
@@ -416,7 +416,7 @@ def status() -> None:
     if not PID_FILE.exists():
         _echo_warning("Server is not running.")
         _print_section("Next steps")
-        _print_key_value("Start", "uv run kaka")
+        _print_key_value("Start", "kaka")
         _print_key_value("PID file", PID_FILE)
         raise typer.Exit(1)
 

@@ -26,6 +26,7 @@ from agent.modules.workspaces.service import (
     rename_workspace_entry,
     resolve_workspace_root,
 )
+from agent.shared.infrastructure.subprocess_utils import hidden_subprocess_kwargs
 
 MAX_LIST_FILES_ENTRIES = 5000
 GIT_STATUS_CACHE_TTL = 2.0
@@ -232,6 +233,7 @@ class LocalWorkspaceBackend:
             text=True,
             encoding="utf-8",
             errors="replace",
+            **hidden_subprocess_kwargs(),
         )
 
         if session_id:

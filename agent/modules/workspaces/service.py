@@ -36,6 +36,7 @@ from agent.modules.workspaces.registry import (
     get_workspace_backend_registry,
 )
 from agent.shared.integrations import IntegrationUnavailableError
+from agent.shared.infrastructure.subprocess_utils import hidden_subprocess_kwargs
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
@@ -1198,6 +1199,7 @@ def _run_git(args: list[str], *, cwd: Path) -> str:
         text=True,
         errors="replace",
         timeout=GIT_TIMEOUT_SECONDS,
+        **hidden_subprocess_kwargs(),
     )
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()

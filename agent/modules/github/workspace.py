@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agent.modules.github.config import GITHUB_WORKSPACE_ROOT
+from agent.shared.infrastructure.subprocess_utils import hidden_subprocess_kwargs
 
 BRANCH_SAFE_RE = re.compile(r"[^A-Za-z0-9._/-]+")
 
@@ -200,6 +201,7 @@ async def _run_git(
             capture_output=True,
             text=True,
             timeout=120,
+            **hidden_subprocess_kwargs(),
         )
         if result.returncode != 0:
             detail = (result.stderr or result.stdout or "").strip()

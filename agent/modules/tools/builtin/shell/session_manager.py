@@ -18,6 +18,7 @@ from queue import Empty, Queue
 from typing import Any, Dict, List, Optional
 
 from agent.modules.tools.runtime.sandbox import build_safe_env
+from agent.shared.infrastructure.subprocess_utils import hidden_subprocess_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +112,7 @@ class TerminalSessionManager:
             text=True,
             bufsize=1,
             cwd=working_dir,
-            creationflags=creationflags,
+            **hidden_subprocess_kwargs(creationflags=creationflags),
             encoding="utf-8",
             errors="replace",
             env=safe_env,
@@ -579,6 +580,7 @@ class TerminalSessionManager:
                         ["taskkill", "/F", "/T", "/PID", str(session.process.pid)],
                         capture_output=True,
                         timeout=5,
+                        **hidden_subprocess_kwargs(),
                     )
                 else:
                     subprocess.run(

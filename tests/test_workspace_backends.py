@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import create_engine, text
 
 import agent.modules.workspaces.local_backend as local_backend_module
+import agent.modules.workspaces.service as workspace_service_module
 from agent.modules.workspaces import (
     UnsupportedWorkspaceCapabilityError,
     WorkspaceRef,
@@ -1537,6 +1538,39 @@ def test_local_workspace_backend_execute_uses_safe_workspace(
     assert captured["command"] == "echo ok"
     assert captured["cwd"] == str(tmp_path.resolve())
     assert captured["timeout"] == 12
+    if hasattr(local_backend_module.subprocess, "CREATE_NO_WINDOW"):
+        assert (
+            captured["creationflags"]
+            & local_backend_module.subprocess.CREATE_NO_WINDOW
+        )
+        assert (
+            captured["startupinfo"].wShowWindow
+            == local_backend_module.subprocess.SW_HIDE
+        )
+
+
+def test_workspace_git_commands_hide_console_on_windows(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured.update(kwargs)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(workspace_service_module.subprocess, "run", fake_run)
+
+    workspace_service_module._run_git(["status"], cwd=tmp_path)
+
+    assert captured["command"] == ["git", "status"]
+    if hasattr(workspace_service_module.subprocess, "CREATE_NO_WINDOW"):
+        assert (
+            captured["creationflags"]
+            & workspace_service_module.subprocess.CREATE_NO_WINDOW
+        )
+        assert (
+            captured["startupinfo"].wShowWindow
+            == workspace_service_module.subprocess.SW_HIDE
+        )
 
 
 def test_daytona_workspace_backend_execute_changes_and_untracked_diff():

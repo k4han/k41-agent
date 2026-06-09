@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agent.shared.infrastructure.subprocess_utils import hidden_subprocess_kwargs
+
 
 INSTALL_TIMEOUT_SECONDS = 600
 
@@ -150,6 +152,7 @@ def install_integration_extra(extra: str) -> IntegrationInstallResult:
                 text=True,
                 timeout=INSTALL_TIMEOUT_SECONDS,
                 check=False,
+                **hidden_subprocess_kwargs(),
             )
         except subprocess.TimeoutExpired as exc:
             return IntegrationInstallResult(
