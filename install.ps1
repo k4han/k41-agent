@@ -126,10 +126,32 @@ function Get-LocalSourceRoot {
 }
 
 function Get-UvDownloadUrl {
-    $architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
+    $architecture = $null
+    try {
+        $osArchitecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+        if ($null -ne $osArchitecture) {
+            $architecture = $osArchitecture.ToString()
+        }
+    } catch {
+        $architecture = $null
+    }
+
+    if ([string]::IsNullOrWhiteSpace($architecture)) {
+        $architecture = $env:PROCESSOR_ARCHITEW6432
+    }
+    if ([string]::IsNullOrWhiteSpace($architecture)) {
+        $architecture = $env:PROCESSOR_ARCHITECTURE
+    }
+    if ([string]::IsNullOrWhiteSpace($architecture)) {
+        throw "Unable to determine Windows architecture."
+    }
+
+    $architecture = $architecture.ToLowerInvariant()
 
     switch ($architecture) {
+        "amd64" { return "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip" }
         "x64" { return "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip" }
+        "aarch64" { return "https://github.com/astral-sh/uv/releases/latest/download/uv-aarch64-pc-windows-msvc.zip" }
         "arm64" { return "https://github.com/astral-sh/uv/releases/latest/download/uv-aarch64-pc-windows-msvc.zip" }
         default { throw "Unsupported Windows architecture: $architecture." }
     }
