@@ -99,6 +99,15 @@ class AppRuntime:
 
                 self.runtime_settings = get_config_service().get_runtime_settings()
 
+            logger.info("Ensuring provider catalog...")
+            from agent.modules.providers import ensure_catalog_available
+
+            catalog_ready, catalog_message = await ensure_catalog_available()
+            if catalog_ready:
+                logger.info(catalog_message)
+            else:
+                logger.warning(catalog_message)
+
             logger.info("Building workflows...")
             register_builtin_workflows()
 

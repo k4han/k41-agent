@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 import textwrap
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -10,12 +11,13 @@ from unittest.mock import MagicMock
 import pytest
 from pytest import MonkeyPatch
 
-from agent.modules.providers.service import ProviderService
+import agent.modules.providers.catalog as catalog_module
 from agent.modules.providers.resolve_chat_model import (
     _get_cached_model,
     _parse_temperature,
     resolve_chat_model,
 )
+from agent.modules.providers.service import ProviderService
 from agent.modules.providers.models import ModelConfig
 from agent.modules.providers.ports import ChatModelFactory
 from agent.modules.providers.provider import ProviderConfig, ProviderType
@@ -1181,6 +1183,156 @@ def test_parse_temperature_valid() -> None:
 def test_parse_temperature_invalid() -> None:
     with pytest.raises(ValueError, match="llm.providers.<provider>.temperature"):
         _parse_temperature("not-a-number", 0.5)
+
+
+# --- Provider catalog runtime file ---
+
+
+def test_provider_catalog_path_uses_home_data_dir(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(catalog_module.Path, "home", staticmethod(lambda: tmp_path))
+
+    assert Path(catalog_module.get_api_json_path()) == (
+        tmp_path / ".k41-agent" / "data" / "api.json"
+    )
+
+
+@pytest.mark.asyncio
+async def test_ensure_catalog_available_seeds_from_legacy_file(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(catalog_module.Path, "home", staticmethod(lambda: tmp_path))
+    monkeypatch.setattr(catalog_module, "_catalog_cache", None)
+
+    legacy_path = tmp_path / "legacy-api.json"
+    legacy_path.write_text(
+        '{"openai":{"name":"OpenAI","models":{"gpt-legacy":{"name":"GPT Legacy"}}}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(catalog_module, "_legacy_api_json_path", lambda: legacy_path)
+
+    success, message = await catalog_module.ensure_catalog_available()
+
+    catalog_path = tmp_path / ".k41-agent" / "data" / "api.json"
+    loaded_catalog = catalog_module.load_providers_catalog(force_reload=True)
+    assert success is True
+    assert "Provider catalog seeded" in message
+    assert catalog_path.exists()
+    assert loaded_catalog["openai"].models[0].id == "gpt-legacy"
+
+
+@pytest.mark.asyncio
+async def test_ensure_catalog_available_downloads_missing_runtime_file(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import httpx
+
+    monkeypatch.setattr(catalog_module.Path, "home", staticmethod(lambda: tmp_path))
+    monkeypatch.setattr(
+        catalog_module,
+        "_legacy_api_json_path",
+        lambda: tmp_path / "missing-api.json",
+    )
+    monkeypatch.setattr(catalog_module, "_catalog_cache", None)
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict[str, object]:
+            return {
+                "openai": {
+                    "name": "OpenAI",
+                    "npm": "",
+                    "api": "https://api.openai.com/v1",
+                    "models": {
+                        "gpt-test": {
+                            "name": "GPT Test",
+                            "modalities": {"input": ["text"], "output": ["text"]},
+                        }
+                    },
+                }
+            }
+
+    class FakeAsyncClient:
+        def __init__(self, timeout: float) -> None:
+            self.timeout = timeout
+
+        async def __aenter__(self) -> "FakeAsyncClient":
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            pass
+
+        async def get(self, url: str) -> FakeResponse:
+            assert url == catalog_module.MODELS_DEV_API_URL
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    success, message = await catalog_module.ensure_catalog_available()
+
+    catalog_path = tmp_path / ".k41-agent" / "data" / "api.json"
+    assert success is True
+    assert "Catalog updated successfully" in message
+    assert catalog_path.exists()
+    loaded_catalog = catalog_module.load_providers_catalog(force_reload=True)
+    assert loaded_catalog["openai"].models[0].id == "gpt-test"
+
+
+@pytest.mark.asyncio
+async def test_update_catalog_skips_write_when_content_is_unchanged(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import httpx
+
+    monkeypatch.setattr(catalog_module.Path, "home", staticmethod(lambda: tmp_path))
+    monkeypatch.setattr(
+        catalog_module,
+        "_legacy_api_json_path",
+        lambda: tmp_path / "missing-api.json",
+    )
+    monkeypatch.setattr(catalog_module, "_catalog_cache", None)
+
+    catalog_path = tmp_path / ".k41-agent" / "data" / "api.json"
+    catalog_path.parent.mkdir(parents=True)
+    content = {"openai": {"name": "OpenAI", "models": {"gpt-test": {"name": "GPT Test"}}}}
+    catalog_path.write_text(json.dumps(content, indent=2), encoding="utf-8")
+    original_stat = catalog_path.stat()
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict[str, object]:
+            return content
+
+    class FakeAsyncClient:
+        def __init__(self, timeout: float) -> None:
+            self.timeout = timeout
+
+        async def __aenter__(self) -> "FakeAsyncClient":
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            pass
+
+        async def get(self, url: str) -> FakeResponse:
+            assert url == catalog_module.MODELS_DEV_API_URL
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    success, message = await catalog_module.update_catalog_from_url()
+
+    assert success is True
+    assert "already up to date" in message
+    assert catalog_path.stat().st_mtime_ns == original_stat.st_mtime_ns
 
 
 # --- Public API import ---

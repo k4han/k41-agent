@@ -1,15 +1,16 @@
-"""Provider catalog management loaded from api.json."""
+"""Provider catalog management loaded from runtime api.json."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 import json
 import logging
-import os
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
+MODELS_DEV_API_URL = "https://models.dev/api.json"
 MODELS_DEV_LOGO_URL_TEMPLATE = "https://models.dev/logos/{provider_id}.svg"
 
 
@@ -48,9 +49,28 @@ _catalog_cache: dict[str, ProviderCatalogEntry] | None = None
 
 
 def get_api_json_path() -> str:
-    """Get absolute path to api.json in the providers module."""
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(current_dir, "api.json")
+    """Get the writable runtime path for the provider catalog."""
+    return str(_runtime_api_json_path())
+
+
+def _runtime_api_json_path() -> Path:
+    return Path.home() / ".k41-agent" / "data" / "api.json"
+
+
+def _legacy_api_json_path() -> Path:
+    return Path(__file__).resolve().parent / "api.json"
+
+
+def _read_api_json_path() -> Path:
+    runtime_path = _runtime_api_json_path()
+    if runtime_path.exists():
+        return runtime_path
+
+    legacy_path = _legacy_api_json_path()
+    if legacy_path.exists():
+        return legacy_path
+
+    return runtime_path
 
 
 def _resolve_provider_type_and_base_url(
@@ -136,14 +156,13 @@ def load_providers_catalog(force_reload: bool = False) -> dict[str, ProviderCata
     if _catalog_cache is not None and not force_reload:
         return _catalog_cache
 
-    json_path = get_api_json_path()
-    if not os.path.exists(json_path):
+    json_path = _read_api_json_path()
+    if not json_path.exists():
         logger.error("Provider api.json not found at: %s", json_path)
         return {}
 
     try:
-        with open(json_path, "r", encoding="utf-8") as f:
-            raw_data = json.load(f)
+        raw_data = json.loads(json_path.read_text(encoding="utf-8"))
     except Exception as exc:
         logger.error("Failed to load provider api.json: %s", exc)
         return {}
@@ -215,26 +234,67 @@ def get_provider_catalog_entry(provider_id: str) -> ProviderCatalogEntry | None:
     return None
 
 
+async def ensure_catalog_available() -> tuple[bool, str]:
+    """Download the provider catalog when the writable runtime file is missing."""
+    json_path = _runtime_api_json_path()
+    if json_path.exists():
+        return True, f"Provider catalog already exists at {json_path}."
+
+    legacy_path = _legacy_api_json_path()
+    if legacy_path.exists():
+        try:
+            json_path.parent.mkdir(parents=True, exist_ok=True)
+            json_path.write_text(
+                legacy_path.read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            load_providers_catalog(force_reload=True)
+            return True, f"Provider catalog seeded at {json_path}."
+        except Exception as exc:
+            logger.warning(
+                "Failed to seed provider catalog from %s: %s",
+                legacy_path,
+                exc,
+            )
+
+    return await update_catalog_from_url()
+
+
 async def update_catalog_from_url() -> tuple[bool, str]:
-    """Fetch the latest api.json from models.dev and save it."""
+    """Fetch the latest api.json from models.dev and save it to runtime data."""
     import httpx
-    
-    url = "https://models.dev/api.json"
+
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(url)
+            response = await client.get(MODELS_DEV_API_URL)
             response.raise_for_status()
             content = response.json()
     except Exception as exc:
         return False, f"Failed to download catalog: {exc}"
 
-    json_path = get_api_json_path()
+    json_path = _runtime_api_json_path()
     try:
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(content, f, ensure_ascii=False, indent=2)
+        if json_path.exists():
+            try:
+                existing_content = json.loads(json_path.read_text(encoding="utf-8"))
+            except Exception as exc:
+                logger.warning(
+                    "Existing provider catalog is invalid and will be replaced: %s",
+                    exc,
+                )
+            else:
+                if existing_content == content:
+                    load_providers_catalog(force_reload=True)
+                    return True, f"Catalog already up to date at {json_path}."
+
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+        json_path.write_text(
+            json.dumps(content, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
         
         # Clear cache and reload
         load_providers_catalog(force_reload=True)
-        return True, "Catalog updated successfully."
+        return True, f"Catalog updated successfully at {json_path}."
     except Exception as exc:
         return False, f"Failed to write catalog file: {exc}"

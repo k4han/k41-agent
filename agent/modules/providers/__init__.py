@@ -107,11 +107,12 @@ async def list_provider_model_catalogs(
 
 
 from agent.modules.providers.catalog import (
-    load_providers_catalog,
-    get_provider_catalog_entry,
-    update_catalog_from_url,
     ModelCatalogEntry,
     ProviderCatalogEntry,
+    ensure_catalog_available,
+    get_provider_catalog_entry,
+    load_providers_catalog,
+    update_catalog_from_url,
 )
 
 __all__ = [
@@ -124,6 +125,7 @@ __all__ = [
     "list_providers",
     "resolve_chat_model",
     "resolve_chat_model_info",
+    "ensure_catalog_available",
     "load_providers_catalog",
     "get_provider_catalog_entry",
     "update_catalog_from_url",
