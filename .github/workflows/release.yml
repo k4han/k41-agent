@@ -41,7 +41,8 @@ jobs:
         shell: pwsh
         run: |
           corepack enable
-          corepack prepare pnpm@latest --activate
+          corepack prepare pnpm@10.20.0 --activate
+          pnpm --version
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile

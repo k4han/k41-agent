@@ -1,3 +1,6 @@
 packages:
   - agent/delivery/http/dashboard/frontend
 
+onlyBuiltDependencies:
+  - esbuild
+
