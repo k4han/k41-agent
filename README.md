@@ -46,12 +46,6 @@ The installer will:
 - Create the uninstaller at `%LOCALAPPDATA%\k41-agent\uninstall.cmd`.
 - Add `%LOCALAPPDATA%\k41-agent\bin` to the user `PATH`.
 
-After installation finishes, open a new terminal and set the admin password:
-
-```powershell
-k41 reset-password
-```
-
 Start K41 Agent:
 
 ```powershell
@@ -64,7 +58,17 @@ The dashboard runs at this address by default:
 http://127.0.0.1:8000
 ```
 
-Sign in with the admin password you just set.
+Sign in with the default admin password shown on the login page:
+
+```text
+1234
+```
+
+To change it later, run:
+
+```powershell
+k41 reset-password
+```
 
 ## First-Time Setup
 
@@ -144,7 +148,6 @@ Initialize the local runtime:
 
 ```powershell
 uv run k41 init
-uv run k41 reset-password
 ```
 
 Build the dashboard:

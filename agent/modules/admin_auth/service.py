@@ -9,6 +9,7 @@ from agent.modules.admin_auth.models import AdminCredential
 from agent.shared.infrastructure.db.session import get_async_session
 
 DEFAULT_ADMIN_USERNAME: Final[str] = "admin"
+DEFAULT_ADMIN_PASSWORD: Final[str] = "1234"
 _admin_auth_service: "AdminAuthService | None" = None
 
 
@@ -53,7 +54,9 @@ class AdminAuthService:
     async def authenticate(self, password: str) -> AdminCredential | None:
         admin = await self.get_admin()
         if admin is None:
-            return None
+            if password != DEFAULT_ADMIN_PASSWORD:
+                return None
+            return await self.set_admin_password(DEFAULT_ADMIN_PASSWORD)
         if not self.verify_password(password, admin.password_hash):
             return None
         return admin

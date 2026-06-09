@@ -3,8 +3,10 @@ import { Bot, LogIn } from "lucide-solid";
 
 import { readError } from "@/lib/api";
 
+const DEFAULT_ADMIN_PASSWORD = "1234";
+
 export function LoginPage() {
-  const [password, setPassword] = createSignal("");
+  const [password, setPassword] = createSignal(DEFAULT_ADMIN_PASSWORD);
   const [error, setError] = createSignal("");
   const [loading, setLoading] = createSignal(false);
 
@@ -44,6 +46,9 @@ export function LoginPage() {
             <div>
               <h1 class="page-title">Kai Console</h1>
               <p class="page-subtitle">Sign in with the admin password.</p>
+              <p class="hint">
+                Default password: <span class="mono">{DEFAULT_ADMIN_PASSWORD}</span>
+              </p>
             </div>
           </div>
           <form class="stack" onSubmit={submit}>
