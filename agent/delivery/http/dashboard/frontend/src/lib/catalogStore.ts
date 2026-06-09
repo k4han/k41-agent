@@ -83,6 +83,11 @@ export function isLoading(): boolean {
   return loading();
 }
 
+export function getBackendDisplayName(name: string): string {
+  const backend = getBackends().find((b) => b.name === name);
+  return backend?.title ?? name;
+}
+
 export function getError(): string | null {
   return error();
 }

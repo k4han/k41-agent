@@ -26,9 +26,8 @@ import {
 } from "@/lib/chatThreads";
 import type { ThreadMessagesPayload } from "@/lib/chatThreads";
 import {
-  daytonaWorkspaceRef,
   localWorkspaceRef,
-  modalWorkspaceRef,
+  sandboxWorkspaceRef,
   resolveWorkspaceWorkingDir,
 } from "@/lib/workspace";
 import type {
@@ -36,6 +35,7 @@ import type {
   AgentCard,
   AgentsPayload,
   ModelOption,
+  SandboxBackendKey,
   WorkspaceRef,
 } from "@/types";
 import { isSandboxBackend } from "@/types";
@@ -113,10 +113,7 @@ function workspaceSelectionLocator(selection: WorkspaceSelectionDraft): string {
   if (selection.source === "github") {
     return selection.repositoryFullName || selection.label;
   }
-  const sandboxId = selection.backend === "daytona"
-    ? selection.daytonaSandboxId
-    : selection.modalSandboxId;
-  return sandboxId || selection.label;
+  return selection.sandboxId || selection.label;
 }
 
 function workspaceEnvironmentKey(workspace: WorkspaceRef | null | undefined): string {
@@ -393,39 +390,27 @@ export function ChatPage() {
         repository_id: selection.repositoryId ?? undefined,
         backend: selection.backend,
         workspace:
-          selection.backend === "local"
-            ? localWorkspaceRef(selection.localPath)
-            : selection.backend === "daytona"
-              ? daytonaWorkspaceRef(selection.daytonaSandboxId)
-              : modalWorkspaceRef(selection.modalSandboxId),
+          isSandboxBackend(selection.backend)
+            ? sandboxWorkspaceRef(selection.backend as SandboxBackendKey, selection.sandboxId)
+            : localWorkspaceRef(selection.localPath),
         locator:
-          selection.backend === "local"
-            ? selection.localPath || null
-            : selection.backend === "daytona"
-              ? selection.daytonaSandboxId || null
-              : selection.modalSandboxId || null,
+          isSandboxBackend(selection.backend)
+            ? selection.sandboxId || null
+            : selection.localPath || null,
       };
     }
-    if (selection.backend === "local") {
+    if (!isSandboxBackend(selection.backend)) {
       return {
         kind: "local",
         thread_id: threadId,
         workspace: localWorkspaceRef(selection.localPath),
       };
     }
-    if (selection.backend === "daytona") {
-      return {
-        kind: "daytona",
-        thread_id: threadId,
-        workspace: daytonaWorkspaceRef(selection.daytonaSandboxId),
-        locator: selection.daytonaSandboxId || null,
-      };
-    }
     return {
-      kind: "modal",
+      kind: selection.backend,
       thread_id: threadId,
-      workspace: modalWorkspaceRef(selection.modalSandboxId),
-      locator: selection.modalSandboxId || null,
+      workspace: sandboxWorkspaceRef(selection.backend as SandboxBackendKey, selection.sandboxId),
+      locator: selection.sandboxId || null,
     };
   };
 

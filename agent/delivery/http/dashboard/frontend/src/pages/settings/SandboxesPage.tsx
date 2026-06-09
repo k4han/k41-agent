@@ -22,7 +22,7 @@ import { Dialog } from "@/components/Dialog";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson } from "@/lib/api";
 import { API_PATHS } from "@/lib/endpoints";
-import { getBackends } from "@/lib/catalogStore";
+import { getBackends, getBackendDisplayName } from "@/lib/catalogStore";
 import { getBackendIcon } from "@/lib/iconRegistry";
 import { useCatalogAndLoad } from "@/lib/useCatalogAndLoad";
 import { truncateText } from "@/lib/utils";
@@ -75,6 +75,18 @@ const TERMINAL_STATUSES: ReadonlyArray<SandboxStatus> = [
   "error",
   "archived",
 ];
+
+const SANDBOX_BACKEND_CAPABILITIES: Partial<Record<SandboxBackendKey, { supportsStop: boolean; supportsArchive: boolean }>> = {
+  daytona: { supportsStop: true, supportsArchive: true },
+};
+
+function sandboxSupportsStop(backend: SandboxBackendKey): boolean {
+  return SANDBOX_BACKEND_CAPABILITIES[backend]?.supportsStop ?? false;
+}
+
+function sandboxSupportsArchive(backend: SandboxBackendKey): boolean {
+  return SANDBOX_BACKEND_CAPABILITIES[backend]?.supportsArchive ?? false;
+}
 
 function backendIcon(name: SandboxBackendKey) {
   return getBackendIcon(name)();
@@ -232,7 +244,7 @@ export function SandboxesPage() {
   };
 
   const handleStop = async (row: SandboxRow) => {
-    if (row.backend !== "daytona") {
+    if (!sandboxSupportsStop(row.backend)) {
       return;
     }
     setActionState(row, "stop");
@@ -256,7 +268,7 @@ export function SandboxesPage() {
   };
 
   const handleArchive = async (row: SandboxRow) => {
-    if (row.backend !== "daytona") {
+    if (!sandboxSupportsArchive(row.backend)) {
       return;
     }
     setActionState(row, "archive");
@@ -587,8 +599,8 @@ function SandboxRowView(props: {
   const isTerminal = () => TERMINAL_STATUSES.includes(props.row.status);
   const isStopped = () => props.row.status === "stopped";
   const isArchived = () => props.row.status === "archived";
-  const canStop = () => props.row.backend === "daytona" && !isTerminal() && !isStopped() && !isArchived();
-  const canArchive = () => props.row.backend === "daytona" && !isTerminal() && !isArchived();
+  const canStop = () => sandboxSupportsStop(props.row.backend) && !isTerminal() && !isStopped() && !isArchived();
+  const canArchive = () => sandboxSupportsArchive(props.row.backend) && !isTerminal() && !isArchived();
   const canDelete = () => !isTerminal() || props.row.on_cloud;
   const threadHref = () => {
     if (!props.row.thread_id || !props.row.thread_alive) {
@@ -609,7 +621,7 @@ function SandboxRowView(props: {
             {backendIcon(props.row.backend)}
           </span>
           <span class="sandbox-backend-name">
-            {props.row.backend === "daytona" ? "Daytona" : "Modal"}
+            {getBackendDisplayName(props.row.backend)}
           </span>
         </div>
       </td>

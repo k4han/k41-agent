@@ -424,8 +424,9 @@ export function WorkspaceExplorer(props: {
     props.onWorkingDirChange(draftWorkingDir().trim());
   };
 
-  const reconnectModalWorkspace = async () => {
-    if (props.disabled || reconnectingModal() || effectiveWorkspace()?.backend !== "modal") {
+  const reconnectSandboxWorkspace = async () => {
+    const ws = effectiveWorkspace();
+    if (props.disabled || reconnectingModal() || !ws || !isSandboxBackend(ws.backend)) {
       return;
     }
     setReconnectingModal(true);
@@ -433,7 +434,7 @@ export function WorkspaceExplorer(props: {
       const payload = await postJson<WorkspaceResolvePayload>(
         "/dashboard-api/workspace/resolve",
         {
-          kind: "modal",
+          kind: ws.backend,
           thread_id: props.threadId || null,
         },
       );
@@ -455,9 +456,9 @@ export function WorkspaceExplorer(props: {
         void loadTree("", targetGeneration);
         void loadChanges(targetGeneration);
       });
-      showToast("Modal workspace reconnected.", "success");
+      showToast(`${ws.backend} workspace reconnected.`, "success");
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to reconnect Modal workspace", "error");
+      showToast(err instanceof Error ? err.message : `Failed to reconnect ${ws.backend} workspace`, "error");
     } finally {
       setReconnectingModal(false);
     }

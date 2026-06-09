@@ -687,7 +687,12 @@ export type SandboxStatus =
   | "error"
   | "unknown";
 
-export type SandboxBackendKey = Extract<WorkspaceBackendKey, "daytona" | "modal">;
+export type SandboxBackendKey = Exclude<WorkspaceBackendKey, "local">;
+
+export function sandboxBackendDefaultRoot(backend: SandboxBackendKey): string {
+  if (backend === "modal") return "/workspace";
+  return "workspace";
+}
 
 export interface SandboxSummary {
   sandbox_id: string;

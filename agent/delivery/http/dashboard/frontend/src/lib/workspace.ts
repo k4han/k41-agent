@@ -1,5 +1,5 @@
-import type { WorkspaceRef } from "../types";
-import { isSandboxBackend } from "../types";
+import type { SandboxBackendKey, WorkspaceRef } from "../types";
+import { isSandboxBackend, sandboxBackendDefaultRoot } from "../types";
 
 function normalizePath(value: string): string {
   return value.trim().replace(/\\/g, "/").replace(/\/+$/, "");
@@ -66,30 +66,30 @@ export function localWorkspaceRef(locator: string): WorkspaceRef | null {
   };
 }
 
-export function daytonaWorkspaceRef(locator: string, root = "workspace"): WorkspaceRef | null {
+export function sandboxWorkspaceRef(
+  backend: SandboxBackendKey,
+  locator: string,
+  root?: string,
+): WorkspaceRef | null {
   const trimmed = locator.trim();
   if (!trimmed) {
     return null;
   }
+  const resolvedRoot = root?.trim() || sandboxBackendDefaultRoot(backend);
   return {
-    backend: "daytona",
+    backend,
     locator: trimmed,
-    label: `daytona:${trimmed}`,
-    metadata: { root: root.trim() || "workspace" },
+    label: `${backend}:${trimmed}`,
+    metadata: { root: resolvedRoot },
   };
 }
 
+export function daytonaWorkspaceRef(locator: string, root = "workspace"): WorkspaceRef | null {
+  return sandboxWorkspaceRef("daytona", locator, root);
+}
+
 export function modalWorkspaceRef(locator: string, root = "/workspace"): WorkspaceRef | null {
-  const trimmed = locator.trim();
-  if (!trimmed) {
-    return null;
-  }
-  return {
-    backend: "modal",
-    locator: trimmed,
-    label: `modal:${trimmed}`,
-    metadata: { root: root.trim() || "/workspace" },
-  };
+  return sandboxWorkspaceRef("modal", locator, root);
 }
 
 export function formatWorkspaceRoot(locator: string): string {
