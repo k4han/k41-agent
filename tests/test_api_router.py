@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from agent.modules.admin_auth import get_current_admin
+from agent.shared.infrastructure.http_errors import register_http_exception_handlers
 from agent.delivery.http.api.schemas import ChatRequest, HumanResumePayload, PlanResumePayload
 from agent.modules.providers.models import ModelOption, ProviderModelCatalog
 from agent.modules.tools.builtin.utility.ask_user import AskUserAnswerResumePayload
@@ -31,6 +32,14 @@ def _resolved_workspace(path: str | Path):
 
 def _create_client() -> TestClient:
     app = FastAPI()
+    register_http_exception_handlers(app)
+
+    @app.middleware("http")
+    async def redirect_legacy_api(request: Request, call_next):
+        if request.url.path.startswith("/api/") and not request.url.path.startswith("/v1/api/"):
+            request.scope["path"] = f"/v1{request.url.path}"
+        return await call_next(request)
+
     app.include_router(router_module.router)
 
     async def mock_admin(_: Request) -> str:

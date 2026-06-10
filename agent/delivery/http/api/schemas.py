@@ -43,17 +43,10 @@ class ChatResponse(BaseModel):
     workflow: str = Field(..., description="The workflow/graph that was executed.")
 
 
-class GraphSummary(BaseModel):
-    """Summary of a registered workflow graph."""
-
-    name: str = Field(..., description="Workflow graph name.")
-    description: str = Field(default="", description="Human-readable description of the workflow.")
-
-
 class GraphListResponse(BaseModel):
     """Response listing all registered workflow graphs."""
 
-    graphs: list[GraphSummary] = Field(..., description="List of registered workflow graphs.")
+    graphs: list[str] = Field(..., description="List of registered workflow graph names.")
 
 
 class ProviderSummary(BaseModel):
@@ -103,7 +96,7 @@ class HealthResponse(BaseModel):
     """Health check response."""
 
     status: str = Field(..., description="Service status ('ok' or 'error').")
-    graphs: list[GraphSummary] = Field(..., description="Registered workflow graphs.")
+    graphs: list[str] = Field(..., description="Registered workflow graph names.")
 
 
 class PairingCodeResponse(BaseModel):

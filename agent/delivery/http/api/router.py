@@ -41,8 +41,28 @@ from agent.modules.workspaces import (
     resolve_workspace_ref,
 )
 from agent.modules.workflows import list_registered_workflows
+from agent.shared.infrastructure.errors import classify_agent_error
 
 logger = logging.getLogger(__name__)
+
+
+def _agent_error_event(exc: BaseException) -> dict[str, str]:
+    agent_error = classify_agent_error(exc)
+    return {
+        "type": "error",
+        "code": agent_error.code,
+        "content": agent_error.message,
+    }
+
+
+async def _stream_agent_chunks(params: dict[str, object]):
+    try:
+        async for chunk in run_agent(**params):
+            yield chunk
+    except Exception as exc:
+        logger.exception("Failed to stream agent response")
+        yield json.dumps(_agent_error_event(exc), ensure_ascii=False) + "\n"
+
 
 router = APIRouter(
     prefix="/v1/api",
@@ -92,10 +112,7 @@ def _request_to_run_params(request: ChatRequest) -> dict[str, object]:
         ]
     if thread_id:
         params["thread_id"] = thread_id
-    try:
-        return build_run_params(**params)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return build_run_params(**params)
 
 
 async def _apply_workspace_to_run_params(
@@ -156,11 +173,7 @@ async def chat_stream(request: ChatRequest):
     params = _request_to_run_params(request)
     await _apply_workspace_to_run_params(request, params)
 
-    async def event_generator():
-        async for chunk in run_agent(**params):
-            yield chunk
-
-    return StreamingResponse(event_generator(), media_type="text/plain")
+    return StreamingResponse(_stream_agent_chunks(params), media_type="text/plain")
 
 
 @router.post("/chat/events")
@@ -192,20 +205,17 @@ async def chat_events_edit(request: EditChatRequest):
     if not request.message.strip():
         raise HTTPException(status_code=400, detail="Edited message cannot be empty.")
 
-    try:
-        params = build_run_params(
-            platform=Platform.API,
-            user_id=request.user_id,
-            user_input=request.message,
-            thread_id=request.thread_id,
-            workflow=request.workflow,
-            workspace=request.workspace,
-            agent_name=request.agent_name or "default",
-            provider=request.provider,
-            model=request.model,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    params = build_run_params(
+        platform=Platform.API,
+        user_id=request.user_id,
+        user_input=request.message,
+        thread_id=request.thread_id,
+        workflow=request.workflow,
+        workspace=request.workspace,
+        agent_name=request.agent_name or "default",
+        provider=request.provider,
+        model=request.model,
+    )
 
     params["message_index"] = request.message_index
     params["source_checkpoint_id"] = request.source_checkpoint_id
@@ -288,20 +298,14 @@ def _serialize_model_catalog(catalog) -> dict[str, object]:
 @router.get("/providers", response_model=ProviderListResponse)
 async def api_list_providers():
     """List all configured LLM providers and their available models."""
-    try:
-        providers = list_providers()
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    providers = list_providers()
     return {"providers": [_serialize_provider(provider) for provider in providers]}
 
 
 @router.get("/providers/models", response_model=ModelCatalogListResponse)
 async def api_list_provider_models(refresh: bool = False):
     """List model catalogs for all configured providers. Use refresh=true to re-fetch from upstream."""
-    try:
-        catalogs = await list_provider_model_catalogs(include_remote=refresh)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    catalogs = await list_provider_model_catalogs(include_remote=refresh)
     return {"providers": [_serialize_model_catalog(catalog) for catalog in catalogs]}
 
 
@@ -311,13 +315,10 @@ async def api_list_provider_models_for_provider(
     refresh: bool = False,
 ):
     """List model catalog for a specific provider. Use refresh=true to re-fetch from upstream."""
-    try:
-        catalog = await list_provider_model_catalog(
-            provider_name,
-            include_remote=refresh,
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    catalog = await list_provider_model_catalog(
+        provider_name,
+        include_remote=refresh,
+    )
     return _serialize_model_catalog(catalog)
 
 

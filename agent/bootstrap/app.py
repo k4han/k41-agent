@@ -13,6 +13,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 
 from agent.shared.infrastructure.http_logging import HTTPLoggingMiddleware
 from agent.shared.infrastructure.csrf_protection import CSRFProtectionMiddleware
+from agent.shared.infrastructure.http_errors import register_http_exception_handlers
 
 from agent.bootstrap.runtime import AppRuntime
 from agent.bootstrap.settings import BootstrapConfig, load_bootstrap_config
@@ -80,6 +81,8 @@ def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:
     fastapi_app.state.config_service = config_service
     fastapi_app.state.github_automation_service = get_github_automation_service()
     fastapi_app.state.started_at = time.time()
+
+    register_http_exception_handlers(fastapi_app)
 
     # CSRF protection middleware - protects against cross-site request forgery
     if bootstrap_config.csrf_protection_enabled:
