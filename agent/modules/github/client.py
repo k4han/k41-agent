@@ -29,8 +29,12 @@ class InstallationToken:
 
 class GitHubAppClient:
     def __init__(self, settings: GitHubSettings | None = None) -> None:
-        self.settings = settings or get_github_settings()
+        self._settings = settings
         self._tokens: dict[int, InstallationToken] = {}
+
+    @property
+    def settings(self) -> GitHubSettings:
+        return self._settings or get_github_settings()
 
     def app_jwt(self) -> str:
         private_key = self.settings.resolve_private_key()

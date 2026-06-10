@@ -14,6 +14,7 @@ from agent.modules.github.client import GitHubAppClient
 from agent.modules.github.config import (
     DEFAULT_TRIGGER_LABEL,
     get_github_settings,
+    GitHubSettings,
 )
 from agent.modules.github.repository import (
     get_github_repository_store,
@@ -112,10 +113,13 @@ class GitHubAutomationService:
         client: GitHubAppClient | None = None,
         workspace_manager: GitHubWorkspaceManager | None = None,
     ) -> None:
-        self.settings = get_github_settings()
-        self.client = client or GitHubAppClient(self.settings)
+        self.client = client or GitHubAppClient()
         self.store = get_github_repository_store()
         self.workspace_manager = workspace_manager or GitHubWorkspaceManager()
+
+    @property
+    def settings(self) -> GitHubSettings:
+        return get_github_settings()
 
     async def sync_installations(self) -> dict[str, int]:
         if not self.settings.is_configured:

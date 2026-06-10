@@ -411,14 +411,17 @@ async def test_repository_optimization_settings_flow_to_background_task(
 
 
 @pytest.mark.asyncio
-async def test_sync_installations_upserts_repositories(tmp_path: Path) -> None:
+async def test_sync_installations_upserts_repositories(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     store = FakeStore()
     service = make_service(tmp_path, store)
-    service.settings = SimpleNamespace(
-        is_configured=True,
-        default_agent="default",
-        trigger_label="k41-agent",
-        mention_triggers=("@k41-agent", "/k41"),
+    monkeypatch.setattr(
+        "agent.modules.github.service.get_github_settings",
+        lambda: SimpleNamespace(
+            is_configured=True,
+            default_agent="default",
+            trigger_label="k41-agent",
+            mention_triggers=("@k41-agent", "/k41"),
+        ),
     )
 
     result = await service.sync_installations()

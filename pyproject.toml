@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "k41-agent"
 version = "0.1.1"
-description = "Add your description here"
+description = "A modular, extensible agent framework for building AI agents with various capabilities and integrations."
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [
