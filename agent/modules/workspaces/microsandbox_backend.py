@@ -20,13 +20,6 @@ from agent.modules.workspaces.constants import (
     MAX_TREE_ENTRIES,
     MAX_UNTRACKED_FILE_CHARS,
 )
-from agent.modules.workspaces.file_info_utils import (
-    file_info_is_dir,
-    file_info_modified_at,
-    file_info_name,
-    file_info_path,
-    file_info_size,
-)
 from agent.modules.workspaces.git_utils import (
     git_relative_path,
     git_status_args,
@@ -665,30 +658,50 @@ class MicrosandboxWorkspaceBackend(SandboxBackendBase):
         cached, value = self._get_metadata_cache("tree", target)
         if cached:
             return value
-        info = await self._stat(target)
-        if not file_info_is_dir(info):
+        dir_check = await self._exec(
+            f"test -d {shlex.quote(target)}", cwd="/", timeout=10
+        )
+        if dir_check.exit_code != 0:
             raise NotADirectoryError(f"Path is not a directory: {path or '.'}")
+        ls_result = await self._exec(
+            f"ls -la {shlex.quote(target)}", cwd="/", timeout=GIT_TIMEOUT_SECONDS
+        )
+        if ls_result.exit_code not in (0, None):
+            raise RuntimeError(
+                ls_result.output.strip() or "Failed to list Microsandbox directory."
+            )
         entries: list[dict[str, Any]] = []
         truncated = False
-        items = await self._run_remote_aio(lambda: self.fs.list(target))
-        for item in items:
-            name = file_info_name(item)
-            if not name:
+        for line in ls_result.output.splitlines():
+            line = line.strip()
+            if not line.startswith(("d", "-")):
                 continue
-            is_dir = file_info_is_dir(item)
-            if is_dir and name in IGNORED_DIR_NAMES:
+            parts = line.split(None, 8)
+            if len(parts) < 9:
                 continue
+            permissions = parts[0]
+            size_str = parts[4]
+            name = parts[8]
+            if name in {".", ".."}:
+                continue
+            if name in IGNORED_DIR_NAMES:
+                continue
+            is_dir = permissions.startswith("d")
             if len(entries) >= MAX_TREE_ENTRIES:
                 truncated = True
                 break
-            entry_path = file_info_path(item, target)
+            entry_path = posixpath.join(target, name)
+            try:
+                size = int(size_str) if not is_dir else None
+            except ValueError:
+                size = None
             entries.append(
                 {
                     "name": name,
                     "path": entry_path,
                     "kind": "directory" if is_dir else "file",
-                    "size": file_info_size(item) if not is_dir else None,
-                    "modified_at": file_info_modified_at(item),
+                    "size": size,
+                    "modified_at": 0.0,
                 }
             )
         entries.sort(
@@ -706,9 +719,20 @@ class MicrosandboxWorkspaceBackend(SandboxBackendBase):
     async def file(self, path: str) -> dict[str, Any]:
         self.touch()
         remote_path = resolve_microsandbox_path(self.root, path)
-        info = await self._stat(remote_path)
-        if file_info_is_dir(info):
+        dir_check = await self._exec(
+            f"test -d {shlex.quote(remote_path)}", cwd="/", timeout=10
+        )
+        if dir_check.exit_code == 0:
             raise ValueError(f"Path is not a file: {path}")
+        size_result = await self._exec(
+            f"wc -c < {shlex.quote(remote_path)} 2>/dev/null || echo 0",
+            cwd="/",
+            timeout=10,
+        )
+        try:
+            file_size = int(size_result.output.strip())
+        except (ValueError, AttributeError):
+            file_size = 0
         raw_bytes = await self._read_bytes(remote_path)
         truncated = len(raw_bytes) > MAX_FILE_BYTES
         if truncated:
@@ -719,7 +743,7 @@ class MicrosandboxWorkspaceBackend(SandboxBackendBase):
                 "root": self.root,
                 "path": remote_path,
                 "mime_type": mime_type,
-                "size": file_info_size(info),
+                "size": file_size,
                 "content": "",
                 "truncated": truncated,
                 "binary": True,
@@ -729,7 +753,7 @@ class MicrosandboxWorkspaceBackend(SandboxBackendBase):
             "root": self.root,
             "path": remote_path,
             "mime_type": mime_type,
-            "size": file_info_size(info),
+            "size": file_size,
             "content": raw_bytes.decode("utf-8", errors="replace"),
             "truncated": truncated,
             "binary": False,
