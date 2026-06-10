@@ -15,7 +15,12 @@ import { Dialog } from "@/components/Dialog";
 import { SelectControl } from "@/components/SelectControl";
 import { useToast } from "@/components/Toast";
 import { apiFetch, postJson } from "@/lib/api";
-import { getBackends, getBackendDisplayName } from "@/lib/catalogStore";
+import {
+  getBackends,
+  getBackendDisplayName,
+  getEnabledBackends,
+  isBackendEnabled,
+} from "@/lib/catalogStore";
 import { getBackendIcon } from "@/lib/iconRegistry";
 import { useCatalogAndLoad } from "@/lib/useCatalogAndLoad";
 import {
@@ -73,7 +78,7 @@ function sourceForBackend(backendName: string): WorkspaceSourceKey[] {
   const caps = new Set(info?.capabilities ?? []);
 
   const sources: WorkspaceSourceKey[] = [];
-  if (caps.has("sandbox_inventory")) {
+  if (info && isBackendEnabled(info.name) && caps.has("sandbox_inventory")) {
     sources.push("sandbox");
   } else {
     sources.push("path");
@@ -86,11 +91,15 @@ function defaultSourceForBackend(backendName: string): WorkspaceSourceKey {
   const backends = getBackends();
   const info = backends.find((b) => b.name === backendName);
   const caps = new Set(info?.capabilities ?? []);
-  return caps.has("sandbox_inventory") ? "sandbox" : "path";
+  return info
+    && isBackendEnabled(info.name)
+    && caps.has("sandbox_inventory")
+    ? "sandbox"
+    : "path";
 }
 
 function backendFromWorkspace(workspace: WorkspaceRef | null | undefined): WorkspaceBackendKey {
-  if (workspace && isSandboxBackend(workspace.backend)) {
+  if (workspace && isSandboxBackend(workspace.backend) && isBackendEnabled(workspace.backend)) {
     return workspace.backend;
   }
   return "local";
@@ -194,7 +203,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
   );
 
   const backendOptions = createMemo(() =>
-    getBackends().map((b) => ({
+    getEnabledBackends().map((b) => ({
       value: b.name,
       label: b.title,
     })),
@@ -226,7 +235,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
       return !localDraft().trim();
     }
     if (src === "sandbox") {
-      return !isSandboxBackend(backend());
+      return !isSandboxBackend(backend()) || !isBackendEnabled(backend());
     }
     if (src === "github") {
       return !repositoryId();
@@ -383,12 +392,25 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
     if (!selection) {
       return;
     }
-    setBackend(selection.backend);
-    setSource(selection.source);
+    const nextBackend = isBackendEnabled(selection.backend) ? selection.backend : "local";
+    const allowedSources = sourceForBackend(nextBackend);
+    setBackend(nextBackend);
+    setSource(
+      allowedSources.includes(selection.source)
+        ? selection.source
+        : defaultSourceForBackend(nextBackend),
+    );
     setLocalDraft(selection.localPath);
-    setSandboxId(selection.sandboxId);
+    setSandboxId(isSandboxBackend(nextBackend) ? selection.sandboxId : "");
     setRepositoryId(selection.repositoryId === null ? "" : String(selection.repositoryId));
     setResolvedLabel(selection.label);
+  });
+
+  createEffect(() => {
+    const options = backendOptions();
+    if (options.length && !options.some((option) => option.value === backend())) {
+      setBackend(options[0].value as WorkspaceBackendKey);
+    }
   });
 
   createEffect(() => {

@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
-from agent.delivery.http.dashboard.routes.shared import PROVIDER_TYPE_OPTIONS
+from agent.delivery.http.dashboard.routes.shared import (
+    PROVIDER_TYPE_OPTIONS,
+    _get_config_service,
+)
 from agent.modules.channels import (
     ChannelStatus,
     get_registered_channel_catalog,
@@ -37,9 +40,11 @@ MCP_TRANSPORT_OPTIONS: list[dict[str, str]] = [
 
 
 @router.get("/dashboard-api/catalog")
-async def get_catalog() -> dict[str, Any]:
+async def get_catalog(request: Request) -> dict[str, Any]:
     channel_catalog = get_registered_channel_catalog()
-    backend_catalog = list_workspace_backend_catalog()
+    backend_catalog = list_workspace_backend_catalog(
+        config_service=_get_config_service(request),
+    )
     return {
         "provider_types": PROVIDER_TYPE_OPTIONS,
         "channels": channel_catalog,

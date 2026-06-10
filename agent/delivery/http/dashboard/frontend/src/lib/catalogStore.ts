@@ -55,6 +55,17 @@ export function getBackends(): BackendCatalogItem[] {
   return catalog()?.backends ?? [];
 }
 
+export function getEnabledBackends(): BackendCatalogItem[] {
+  return getBackends().filter((backend) => backend.enabled === true);
+}
+
+export function isBackendEnabled(name: string): boolean {
+  if (name === "local") {
+    return true;
+  }
+  return getBackends().find((backend) => backend.name === name)?.enabled === true;
+}
+
 export function getTriggerTypes(): SelectOption[] {
   return catalog()?.trigger_types ?? [];
 }

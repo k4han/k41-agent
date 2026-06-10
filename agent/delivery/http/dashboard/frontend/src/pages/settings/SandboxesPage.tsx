@@ -22,7 +22,7 @@ import { Dialog } from "@/components/Dialog";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson } from "@/lib/api";
 import { API_PATHS } from "@/lib/endpoints";
-import { getBackends, getBackendDisplayName } from "@/lib/catalogStore";
+import { getBackendDisplayName, getEnabledBackends } from "@/lib/catalogStore";
 import { getBackendIcon } from "@/lib/iconRegistry";
 import { useCatalogAndLoad } from "@/lib/useCatalogAndLoad";
 import { truncateText } from "@/lib/utils";
@@ -151,7 +151,7 @@ function sandboxDisplayId(value: string): string {
 
 function countByBackend(rows: SandboxRow[]): Record<string, number> {
   const counts: Record<string, number> = { all: rows.length };
-  for (const backend of getBackends()) {
+  for (const backend of getEnabledBackends()) {
     if (backend.name !== "local") {
       counts[backend.name] = 0;
     }
@@ -192,7 +192,7 @@ export function SandboxesPage() {
     setBusy(true);
     try {
       if (filter() === "all") {
-        const sandboxBackends = getBackends()
+        const sandboxBackends = getEnabledBackends()
           .filter((b) => b.name !== "local")
           .map((b) => b.name);
         const results = await Promise.all(
@@ -392,7 +392,7 @@ export function SandboxesPage() {
                   <span>All</span>
                   <span class="sandboxes-filter-count">{counts().all}</span>
                 </button>
-                <For each={getBackends().filter((b) => b.name !== "local")}>
+                <For each={getEnabledBackends().filter((b) => b.name !== "local")}>
                   {(backend) => (
                     <button
                       class={`sandboxes-filter-chip sandboxes-filter-chip-${backend.name} ${filter() === backend.name ? "active" : ""}`}

@@ -5,6 +5,7 @@ import inspect
 from dataclasses import dataclass
 from typing import Any
 
+from agent.shared.config.service import ConfigService, get_config_service
 from agent.shared.integrations import (
     IntegrationDescriptor,
     LazyIntegrationRegistry,
@@ -185,7 +186,23 @@ def ensure_builtin_workspace_backend_descriptors() -> None:
     _builtins_registered = True
 
 
-def list_workspace_backend_catalog() -> list[dict[str, Any]]:
+def _is_backend_enabled(
+    descriptor: WorkspaceBackendDescriptor,
+    *,
+    config_service: ConfigService | None = None,
+) -> bool:
+    if descriptor.name == LOCAL_BACKEND:
+        return True
+    if not descriptor.config_prefix:
+        return True
+    service = config_service or get_config_service()
+    return service.get_bool(f"{descriptor.config_prefix}.enabled", False)
+
+
+def list_workspace_backend_catalog(
+    *,
+    config_service: ConfigService | None = None,
+) -> list[dict[str, Any]]:
     registry = get_workspace_backend_registry()
     catalog: list[dict[str, Any]] = []
     for descriptor in registry.list():
@@ -198,6 +215,7 @@ def list_workspace_backend_catalog() -> list[dict[str, Any]]:
                 "capabilities": sorted(descriptor.capabilities),
                 "availability": availability.to_dict(),
                 "install_extra": descriptor.install_extra,
+                "enabled": _is_backend_enabled(descriptor, config_service=config_service),
             }
         )
     return catalog

@@ -325,6 +325,7 @@ export type BackendCatalogItem = {
   capabilities?: string[];
   availability?: Record<string, unknown>;
   install_extra?: string;
+  enabled: boolean;
 };
 
 export type SelectOption = {

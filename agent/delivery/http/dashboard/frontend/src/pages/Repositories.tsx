@@ -21,7 +21,11 @@ import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
 import { apiFetch, postJson, putJson } from "@/lib/api";
-import { getBackends } from "@/lib/catalogStore";
+import {
+  getBackends,
+  getEnabledBackends,
+  isBackendEnabled,
+} from "@/lib/catalogStore";
 import { getBackendIcon } from "@/lib/iconRegistry";
 import { truncateText } from "@/lib/utils";
 import type {
@@ -405,6 +409,9 @@ function RepositoryDetailPage(props: { repositoryId: string }) {
       );
       setData(payload);
       const nextDraft = toDraft(payload.repository);
+      if (!isBackendEnabled(nextDraft.workspace_backend)) {
+        nextDraft.workspace_backend = "local";
+      }
       setDraft(nextDraft);
       setTaskNotify(nextDraft.notify_identity);
     } catch (err) {
@@ -777,7 +784,7 @@ function RepositoryAutomation(props: {
   agentNames: string[];
   onChange: <K extends keyof RepositoryDraft>(key: K, value: RepositoryDraft[K]) => void;
 }) {
-  const backendOptions = getBackends().map((b) => ({
+  const backendOptions = getEnabledBackends().map((b) => ({
     value: b.name,
     label: b.title,
     icon: getBackendIcon(b.name)(),
