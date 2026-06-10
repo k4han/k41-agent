@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
 from agent.shared.infrastructure.http_logging import HTTPLoggingMiddleware
+from agent.shared.infrastructure.csrf_protection import CSRFProtectionMiddleware
 
 from agent.bootstrap.runtime import AppRuntime
 from agent.bootstrap.settings import BootstrapConfig, load_bootstrap_config
@@ -80,17 +81,54 @@ def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:
     fastapi_app.state.github_automation_service = get_github_automation_service()
     fastapi_app.state.started_at = time.time()
 
+    # CSRF protection middleware - protects against cross-site request forgery
+    if bootstrap_config.csrf_protection_enabled:
+        logger.info("CSRF protection is enabled")
+        fastapi_app.add_middleware(
+            CSRFProtectionMiddleware,
+            enabled=True,
+            exempt_paths={
+                "/health",
+                "/docs",
+                "/redoc",
+                "/openapi.json",
+                "/login",  # Login page needs to be accessible without CSRF token
+                "/github/webhook",  # Webhooks use signature verification instead
+                "/telegram/webhook",
+            },
+        )
+    else:
+        logger.warning("CSRF protection is disabled - not recommended for production")
+
     fastapi_app.add_middleware(HTTPLoggingMiddleware)
 
+    # CORS configuration - use whitelist from config instead of allowing all origins
+    cors_origins = bootstrap_config.cors_origins
+    logger.info("CORS allowed origins: %s", cors_origins)
     fastapi_app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_methods=["*"],
+        allow_origins=cors_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["*"],
     )
 
     if bootstrap_config.enable_api:
         fastapi_app.include_router(api_router)
+        # Backward compatibility: redirect /api/* to /v1/api/*
+        @fastapi_app.middleware("http")
+        async def redirect_legacy_api(request: Request, call_next):
+            if request.url.path.startswith("/api/") and not request.url.path.startswith("/v1/api/"):
+                # Redirect to versioned endpoint
+                new_path = f"/v1{request.url.path}"
+                logger.warning(
+                    "Legacy API endpoint accessed: %s - please update to: %s",
+                    request.url.path,
+                    new_path,
+                )
+                from fastapi.responses import RedirectResponse
+                return RedirectResponse(url=new_path, status_code=307)
+            return await call_next(request)
 
     fastapi_app.include_router(telegram_webhook_router)
     fastapi_app.include_router(github_webhook_router)

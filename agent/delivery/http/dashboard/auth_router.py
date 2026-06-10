@@ -92,7 +92,20 @@ async def change_password_post(
             )
         return RedirectResponse(url="/change-password?error=invalid", status_code=302)
 
-    await auth_service.set_admin_password(new_password_value)
+    try:
+        await auth_service.set_admin_password(new_password_value)
+    except ValueError as exc:
+        # Password policy validation failed
+        if _wants_json(request):
+            return JSONResponse(
+                {"detail": str(exc)},
+                status_code=400,
+            )
+        return RedirectResponse(
+            url=f"/change-password?error=policy&message={str(exc)}",
+            status_code=302,
+        )
+
     if _wants_json(request):
         return JSONResponse({"status": "success"})
     return RedirectResponse(url="/change-password?status=success", status_code=302)

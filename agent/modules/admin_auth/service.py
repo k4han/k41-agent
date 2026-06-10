@@ -6,6 +6,7 @@ import bcrypt
 from sqlalchemy import select
 
 from agent.modules.admin_auth.models import AdminCredential
+from agent.modules.admin_auth.password_policy import validate_password_or_raise
 from agent.shared.infrastructure.db.session import get_async_session
 
 DEFAULT_ADMIN_USERNAME: Final[str] = "admin"
@@ -68,6 +69,9 @@ class AdminAuthService:
         return self.verify_password(password, admin.password_hash)
 
     async def set_admin_password(self, password: str) -> AdminCredential:
+        # Validate password against security policy
+        validate_password_or_raise(password)
+
         session = await get_async_session()
         async with session:
             try:

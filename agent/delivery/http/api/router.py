@@ -45,7 +45,7 @@ from agent.modules.workflows import list_registered_workflows
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
-    prefix="/api",
+    prefix="/v1/api",
     tags=["agent"],
     dependencies=[Depends(get_current_admin)],
 )

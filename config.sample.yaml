@@ -29,6 +29,19 @@ security:
   # This value is not exposed in the dashboard.
   jwt_secret: ""
 
+  # CORS allowed origins (list of URLs or comma-separated string)
+  # Default: ["http://localhost:8000", "http://127.0.0.1:8000"]
+  # For production, specify your actual frontend domains
+  # Example: ["https://app.example.com", "https://www.example.com"]
+  cors_origins:
+    - "http://localhost:8000"
+    - "http://127.0.0.1:8000"
+
+  # CSRF (Cross-Site Request Forgery) protection for cookie-based authentication
+  # Default: true (enabled)
+  # Note: Requests using Bearer token authentication automatically bypass CSRF checks
+  csrf_protection_enabled: true
+
 # Channel integrations are configured in the dashboard at Settings > Channels.
 # Existing channel values in config.yaml are copied into the database once when
 # the runtime database source is attached, but new edits should be made there.
