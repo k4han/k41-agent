@@ -43,8 +43,8 @@ DEFAULT_MICROSANDBOX_ROOT = "/workspace"
 DEFAULT_MICROSANDBOX_IMAGE = "python:3.13-slim"
 DEFAULT_MICROSANDBOX_CPUS = 1
 DEFAULT_MICROSANDBOX_MEMORY = 512
-DEFAULT_MICROSANDBOX_START_TIMEOUT_SECONDS = 30
-DEFAULT_MICROSANDBOX_STOP_TIMEOUT_SECONDS = 10
+DEFAULT_MICROSANDBOX_START_TIMEOUT_SECONDS = 60
+DEFAULT_MICROSANDBOX_STOP_TIMEOUT_SECONDS = 60
 
 def _config() -> dict[str, Any]:
     from agent.shared.config.service import get_config_service
@@ -79,26 +79,26 @@ def _config() -> dict[str, Any]:
                 DEFAULT_MICROSANDBOX_MEMORY,
             ),
         ),
-        "max_duration_seconds": max(
+        "max_duration_minutes": max(
             0,
-            service.get_int("workspace.microsandbox.max_duration_seconds", 0),
+            service.get_int("workspace.microsandbox.max_duration_minutes", 0),
         ),
-        "idle_timeout_seconds": max(
+        "idle_timeout_minutes": max(
             0,
-            service.get_int("workspace.microsandbox.idle_timeout_seconds", 0),
+            service.get_int("workspace.microsandbox.idle_timeout_minutes", 10),
         ),
-        "start_timeout_seconds": max(
+        "start_timeout_minutes": max(
             1,
             service.get_int(
-                "workspace.microsandbox.start_timeout_seconds",
-                DEFAULT_MICROSANDBOX_START_TIMEOUT_SECONDS,
+                "workspace.microsandbox.start_timeout_minutes",
+                1,
             ),
         ),
-        "stop_timeout_seconds": max(
+        "stop_timeout_minutes": max(
             1,
             service.get_int(
-                "workspace.microsandbox.stop_timeout_seconds",
-                DEFAULT_MICROSANDBOX_STOP_TIMEOUT_SECONDS,
+                "workspace.microsandbox.stop_timeout_minutes",
+                1,
             ),
         ),
         "replace_existing": service.get_bool(
@@ -299,7 +299,7 @@ async def get_microsandbox_sandbox(ref: WorkspaceRef) -> Any:
         if status == "stopped":
             return await _maybe_await(handle.start(detached=True))
         return await _maybe_await(
-            handle.connect(timeout=float(cfg["start_timeout_seconds"]))
+            handle.connect(timeout=float(cfg["start_timeout_minutes"] * 60))
         )
     except Exception as exc:
         _raise_if_microsandbox_unavailable(ref, exc)
@@ -317,10 +317,10 @@ async def create_microsandbox_workspace(*, label: str | None = None) -> Workspac
         "detached": True,
         "replace": cfg["replace_existing"],
     }
-    if cfg["max_duration_seconds"] > 0:
-        create_kwargs["max_duration"] = float(cfg["max_duration_seconds"])
-    if cfg["idle_timeout_seconds"] > 0:
-        create_kwargs["idle_timeout"] = float(cfg["idle_timeout_seconds"])
+    if cfg["max_duration_minutes"] > 0:
+        create_kwargs["max_duration"] = float(cfg["max_duration_minutes"] * 60)
+    if cfg["idle_timeout_minutes"] > 0:
+        create_kwargs["idle_timeout"] = float(cfg["idle_timeout_minutes"] * 60)
 
     sandbox = await _maybe_await(module.Sandbox.create(sandbox_name, **create_kwargs))
     ref = WorkspaceRef(
@@ -396,7 +396,7 @@ async def stop_microsandbox_workspace(ref: WorkspaceRef) -> str:
         raise
     status = _normalize_status(getattr(handle, "status", ""))
     if status != "stopped":
-        await _maybe_await(handle.stop(timeout=float(cfg["stop_timeout_seconds"])))
+        await _maybe_await(handle.stop(timeout=float(cfg["stop_timeout_minutes"] * 60)))
         status = "stopped"
     ref.metadata.update(
         microsandbox_metadata(
@@ -422,12 +422,12 @@ async def delete_microsandbox_workspace(ref: WorkspaceRef) -> str:
     status = _normalize_status(getattr(handle, "status", ""))
     if status != "stopped":
         try:
-            await _maybe_await(handle.stop(timeout=float(cfg["stop_timeout_seconds"])))
+            await _maybe_await(handle.stop(timeout=float(cfg["stop_timeout_minutes"] * 60)))
         except Exception as exc:
             logger.debug("Microsandbox stop before remove failed: %s", exc)
             killer = getattr(handle, "kill", None)
             if callable(killer):
-                await _maybe_await(killer(timeout=float(cfg["stop_timeout_seconds"])))
+                await _maybe_await(killer(timeout=float(cfg["stop_timeout_minutes"] * 60)))
     remover = getattr(handle, "remove", None)
     if callable(remover):
         await _maybe_await(remover())

@@ -1414,7 +1414,7 @@ def test_microsandbox_lifecycle_helpers_stop_delete_and_list(monkeypatch):
 
     monkeypatch.setattr(
         "agent.modules.workspaces.microsandbox_backend._require_enabled",
-        lambda: {"stop_timeout_seconds": 10},
+        lambda: {"stop_timeout_minutes": 1},
     )
     monkeypatch.setattr(
         "agent.modules.workspaces.microsandbox_backend.get_microsandbox_module",
@@ -1472,10 +1472,10 @@ def test_microsandbox_create_and_attach_workspace_helpers(monkeypatch):
             "image": "python:3.13-slim",
             "cpus": 2,
             "memory": 1024,
-            "max_duration_seconds": 3600,
-            "idle_timeout_seconds": 300,
-            "start_timeout_seconds": 30,
-            "stop_timeout_seconds": 10,
+            "max_duration_minutes": 60,
+            "idle_timeout_minutes": 5,
+            "start_timeout_minutes": 1,
+            "stop_timeout_minutes": 1,
             "replace_existing": False,
         },
     )
