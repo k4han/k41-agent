@@ -563,7 +563,7 @@ def test_dashboard_workspace_resolve_uses_github_service(
                 "workspace": _workspace_payload(tmp_path),
             }
 
-    _patch_dashboard_attr(monkeypatch, "get_github_automation_service", lambda: FakeGitHubService(),
+    _patch_dashboard_attr(monkeypatch, "get_github_automation_service", lambda _req=None: FakeGitHubService(),
     )
     client = _create_dashboard_client(ChannelManager())
 
@@ -2179,7 +2179,7 @@ def test_dashboard_api_github_returns_repository_bindings(monkeypatch: pytest.Mo
             mention_triggers=("@k41-agent", "/k41"),
         ),
     )
-    _patch_dashboard_attr(monkeypatch, "get_github_automation_service", lambda: FakeService(),
+    _patch_dashboard_attr(monkeypatch, "get_github_automation_service", lambda _req=None: FakeService(),
     )
     _patch_dashboard_attr(monkeypatch, "get_catalog_service", lambda: FakeCatalog(),
     )
@@ -2243,7 +2243,7 @@ def test_dashboard_api_github_repository_detail_and_task(
     async def fake_identities():
         return []
 
-    _patch_dashboard_attr(monkeypatch, "get_github_automation_service", lambda: fake_service)
+    _patch_dashboard_attr(monkeypatch, "get_github_automation_service", lambda _req=None: fake_service)
     _patch_dashboard_attr(monkeypatch, "_agent_card_options", fake_agent_options)
     _patch_dashboard_attr(monkeypatch, "_paired_identities", fake_identities)
     _patch_dashboard_attr(

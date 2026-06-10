@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from agent.modules.workspaces import WorkspaceRef
@@ -276,7 +276,7 @@ def _resolve_backend(body: WorkspaceResolveBody, kind: str) -> str:
 
 
 @router.post("/dashboard-api/workspace/resolve")
-async def resolve_dashboard_workspace(body: WorkspaceResolveBody) -> dict[str, Any]:
+async def resolve_dashboard_workspace(request: Request, body: WorkspaceResolveBody) -> dict[str, Any]:
     """Resolve a workspace from the given inputs. Supports local, GitHub, Daytona, and Modal backends."""
     kind_source = body.kind or (body.workspace.backend if body.workspace else "local")
     kind = kind_source.strip().lower()
@@ -308,7 +308,7 @@ async def resolve_dashboard_workspace(body: WorkspaceResolveBody) -> dict[str, A
                     workspace=workspace,
                     kind=backend,
                 )
-            result = await get_github_automation_service().resolve_repository_workspace(
+            result = await get_github_automation_service(request).resolve_repository_workspace(
                 repository_id,
             )
             if body.thread_id and body.thread_id.strip():

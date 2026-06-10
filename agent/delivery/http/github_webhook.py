@@ -42,7 +42,7 @@ async def github_webhook(
         raise HTTPException(status_code=400, detail="Invalid GitHub webhook payload.") from exc
 
     try:
-        service = get_github_automation_service()
+        service = get_github_automation_service(request)
         result = await service.handle_webhook(
             event=event or "",
             delivery_id=delivery_id or "",

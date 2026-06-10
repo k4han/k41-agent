@@ -66,7 +66,7 @@ def _patch_service(
     service = FakeGitHubAutomationService(binding, token=token)
     monkeypatch.setattr(
         "agent.modules.github.get_github_automation_service",
-        lambda: service,
+        lambda _req=None: service,
     )
     return service
 

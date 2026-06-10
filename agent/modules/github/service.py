@@ -868,7 +868,14 @@ def _branch_prefix(binding: Any) -> str:
 _service: GitHubAutomationService | None = None
 
 
-def get_github_automation_service() -> GitHubAutomationService:
+def get_github_automation_service(request: Any = None) -> GitHubAutomationService:
+    if request is not None:
+        app = getattr(request, "app", None)
+        if app is not None:
+            state_service = getattr(app.state, "github_automation_service", None)
+            if state_service is not None:
+                return state_service
+
     global _service
     if _service is None:
         _service = GitHubAutomationService()

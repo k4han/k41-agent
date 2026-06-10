@@ -11,6 +11,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
+from agent.shared.infrastructure.http_logging import HTTPLoggingMiddleware
+
 from agent.bootstrap.runtime import AppRuntime
 from agent.bootstrap.settings import BootstrapConfig, load_bootstrap_config
 from agent.delivery.http import (
@@ -22,6 +24,7 @@ from agent.delivery.http import (
 from agent.delivery.http.dashboard.auth_router import router as auth_router
 from agent.delivery.http.dashboard.spa import STATIC_DIR, CachedStaticFiles
 from agent.modules.channels import list_channel_statuses
+from agent.modules.github import get_github_automation_service
 from agent.shared.config import get_config_service
 
 log_level = "INFO"
@@ -74,7 +77,10 @@ def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:
     fastapi_app.state.bootstrap_config = bootstrap_config
     fastapi_app.state.runtime_settings = runtime_settings
     fastapi_app.state.config_service = config_service
+    fastapi_app.state.github_automation_service = get_github_automation_service()
     fastapi_app.state.started_at = time.time()
+
+    fastapi_app.add_middleware(HTTPLoggingMiddleware)
 
     fastapi_app.add_middleware(
         CORSMiddleware,
