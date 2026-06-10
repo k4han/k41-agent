@@ -31,7 +31,9 @@ router = APIRouter()
 
 
 class RenameThreadBody(BaseModel):
-    title: str = Field(min_length=1, max_length=255)
+    """Request body for renaming a conversation thread."""
+
+    title: str = Field(..., min_length=1, max_length=255, description="New title for the thread (1-255 characters).")
 
 
 def _get_checkpointer():
@@ -623,9 +625,10 @@ async def _get_thread_messages(thread_id: str) -> list[dict[str, Any]]:
 
 @router.get("/dashboard-api/chat-history")
 async def get_chat_history(
-    limit: int | None = Query(default=None, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
+    limit: int | None = Query(default=None, ge=1, le=100, description="Max threads to return."),
+    offset: int = Query(default=0, ge=0, description="Number of threads to skip."),
 ) -> dict[str, Any]:
+    """List conversation threads with pagination."""
     fetch_limit = limit + 1 if limit is not None else None
     threads = await _list_threads_from_db(limit=fetch_limit, offset=offset)
     has_more = limit is not None and len(threads) > limit
@@ -643,8 +646,9 @@ async def get_chat_history(
 @router.get("/dashboard-api/chat-history/{thread_id:path}")
 async def get_chat_thread_messages(
     thread_id: str,
-    checkpoint_id: str | None = Query(default=None, min_length=1),
+    checkpoint_id: str | None = Query(default=None, min_length=1, description="Specific checkpoint ID to load."),
 ) -> dict[str, Any]:
+    """Get all messages and metadata for a specific conversation thread."""
     messages, active_checkpoint_id = await _get_thread_messages_payload(
         thread_id,
         checkpoint_id=checkpoint_id,
@@ -669,6 +673,7 @@ async def rename_chat_thread(
     thread_id: str,
     body: RenameThreadBody,
 ) -> dict[str, Any]:
+    """Rename a conversation thread."""
     from agent.modules.conversations import rename_conversation_thread
 
     title = body.title.strip()
@@ -687,6 +692,7 @@ async def rename_chat_thread(
 
 @router.delete("/dashboard-api/chat-history/{thread_id:path}")
 async def delete_chat_thread(thread_id: str) -> dict[str, str]:
+    """Delete a conversation thread and all its checkpoints."""
     from agent.modules.conversations import mark_conversation_thread_deleted
     from agent.modules.tools import close_thread_shell_sessions
     from agent.modules.workspaces import delete_thread_workspace
@@ -734,9 +740,10 @@ async def _list_background_threads_from_db(
 
 @router.get("/dashboard-api/background-tasks")
 async def list_background_task_threads(
-    limit: int | None = Query(default=None, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
+    limit: int | None = Query(default=None, ge=1, le=100, description="Max tasks to return."),
+    offset: int = Query(default=0, ge=0, description="Number of tasks to skip."),
 ) -> dict[str, Any]:
+    """List background task threads with pagination."""
     fetch_limit = limit + 1 if limit is not None else None
     threads = await _list_background_threads_from_db(limit=fetch_limit, offset=offset)
     has_more = limit is not None and len(threads) > limit
@@ -753,6 +760,7 @@ async def list_background_task_threads(
 
 @router.get("/dashboard-api/background-tasks/{thread_id:path}")
 async def get_background_task_messages(thread_id: str) -> dict[str, Any]:
+    """Get all messages for a specific background task thread."""
     messages = await _get_thread_messages(thread_id)
     from agent.modules.conversations import get_conversation_thread
 
@@ -821,8 +829,9 @@ async def _background_task_snapshot(
 
 @router.get("/dashboard-api/background-task-events")
 async def stream_background_task_events(
-    thread_id: str = Query(..., min_length=1),
+    thread_id: str = Query(..., min_length=1, description="Background task thread ID to stream events for."),
 ) -> StreamingResponse:
+    """Stream real-time events (messages, status updates) for a background task via SSE."""
     manager = get_background_task_manager()
     task, metadata = await _get_background_task_stream_metadata(thread_id)
     queue = manager.subscribe(thread_id)
@@ -881,6 +890,7 @@ async def stream_background_task_events(
 
 @router.delete("/dashboard-api/background-tasks/{thread_id:path}")
 async def delete_background_task_thread(thread_id: str) -> dict[str, str]:
+    """Delete a background task thread and its associated resources."""
     from agent.modules.conversations import mark_conversation_thread_deleted
     from agent.modules.agent_runtime import get_background_task_repository
     from agent.modules.tools import close_thread_shell_sessions

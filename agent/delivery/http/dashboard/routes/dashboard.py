@@ -204,11 +204,13 @@ def _build_upcoming_jobs(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 @router.get("/dashboard-api/session")
 async def get_dashboard_session(current_admin: str = Depends(get_current_admin)) -> dict[str, Any]:
+    """Check if the current session is authenticated."""
     return {"authenticated": True, "admin_id": current_admin}
 
 
 @router.get("/dashboard-api/home")
 async def get_dashboard_home(request: Request) -> dict[str, Any]:
+    """Get dashboard home data including system status, counters, recent items, and onboarding state."""
     channel_manager = _get_channel_manager(request)
     services = list_channel_statuses(channel_manager)
 
@@ -335,6 +337,7 @@ async def get_dashboard_home(request: Request) -> dict[str, Any]:
 
 @router.get("/dashboard-api/channels")
 async def get_dashboard_channels(request: Request) -> dict[str, Any]:
+    """Get channel settings, runtime statuses, and paired identities."""
     service = _get_config_service(request)
     settings_raw, settings_sources_raw = service.get_settings_overview_and_sources()
     settings = {
@@ -382,11 +385,13 @@ async def get_dashboard_channels(request: Request) -> dict[str, Any]:
 
 @router.get("/dashboard-api/agents")
 async def get_dashboard_agents() -> dict[str, Any]:
+    """Get agent card options for the dashboard."""
     return await _agent_card_options()
 
 
 @router.get("/dashboard-api/tasks")
 async def get_dashboard_tasks() -> dict[str, Any]:
+    """Get background tasks with agent and identity context."""
     manager = get_background_task_manager()
     catalog = get_catalog_service()
     tasks = manager.list_all()
@@ -408,6 +413,7 @@ async def get_dashboard_tasks() -> dict[str, Any]:
 
 @router.get("/dashboard-api/scheduler")
 async def get_dashboard_scheduler() -> dict[str, Any]:
+    """Get scheduled jobs with timezone information."""
     try:
         scheduler = get_scheduler()
         jobs = _list_all_jobs()
@@ -425,6 +431,7 @@ async def get_dashboard_scheduler() -> dict[str, Any]:
 
 @router.get("/dashboard-api/sessions")
 async def get_dashboard_sessions() -> dict[str, Any]:
+    """List currently active agent sessions."""
     registry = get_active_session_registry()
     sessions = registry.list_active()
     return {"sessions": sessions, "count": len(sessions)}
@@ -432,37 +439,39 @@ async def get_dashboard_sessions() -> dict[str, Any]:
 
 @router.post("/dashboard-api/sessions/stop")
 async def stop_dashboard_session(payload: dict[str, Any]) -> dict[str, Any]:
+    """Stop an active session by session ID or thread ID."""
     session_id = payload.get("session_id")
     thread_id = payload.get("thread_id")
     registry = get_active_session_registry()
-    
+
     success = False
     if session_id:
         success = registry.cancel_session(session_id)
     elif thread_id:
         success = registry.cancel_by_thread(thread_id)
-        
+
     if not success:
         raise HTTPException(status_code=400, detail="No active session found to cancel.")
-        
+
     return {"success": success}
 
 
 @router.get("/dashboard-api/sessions/events")
 async def stream_session_events() -> StreamingResponse:
+    """Stream real-time session events (start, stop, status changes) via SSE."""
     from fastapi.responses import StreamingResponse
     from agent.delivery.http.dashboard.routes.shared import _sse_event, SSE_HEARTBEAT_SECONDS
     import asyncio
-    
+
     registry = get_active_session_registry()
     queue = registry.subscribe()
-    
+
     async def event_generator():
         try:
             # Yield initial snapshot first
             initial_sessions = registry.list_active()
             yield _sse_event("snapshot", {"sessions": initial_sessions})
-            
+
             while True:
                 try:
                     event = await asyncio.wait_for(

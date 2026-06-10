@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from agent.delivery.http.dashboard.routes.shared import (
     _ensure_runtime_keys,
     _get_config_service,
@@ -19,22 +19,28 @@ router = APIRouter()
 
 @router.get("/settings")
 async def get_settings(request: Request) -> dict[str, dict[str, Any]]:
+    """Get all runtime settings as key-value pairs."""
     service = _get_config_service(request)
     return {"settings": service.get_settings_overview()}
 
 
 @router.get("/settings/sources")
 async def get_settings_sources(request: Request) -> dict[str, dict[str, Any]]:
+    """Get the source (config file, environment, etc.) for each setting."""
     service = _get_config_service(request)
     return {"sources": service.get_settings_sources()}
 
 
 class UpdateSettingBody(BaseModel):
-    value: Any | None
+    """Request body for updating a single setting."""
+
+    value: Any | None = Field(..., description="New value for the setting. Use null to reset to default.")
 
 
 class UpdateSettingsBody(BaseModel):
-    values: dict[str, Any | None]
+    """Request body for batch-updating multiple settings."""
+
+    values: dict[str, Any | None] = Field(..., description="Mapping of setting keys to new values.")
 
 
 @router.put("/settings/{key:path}")
@@ -43,6 +49,7 @@ async def update_setting(
     body: UpdateSettingBody,
     request: Request,
 ) -> dict[str, Any | None]:
+    """Update a single runtime setting by key."""
     service = _get_config_service(request)
 
     if key == "llm.default_provider":
@@ -61,6 +68,7 @@ async def update_setting(
 
 @router.put("/settings")
 async def update_settings(body: UpdateSettingsBody, request: Request) -> dict[str, Any]:
+    """Batch update multiple runtime settings at once."""
     if not body.values:
         return {"status": "success", "updated": []}
 

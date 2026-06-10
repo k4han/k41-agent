@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from agent.modules.agent_runtime import NotifyChannel
 from agent.modules.workspaces import WorkspaceRef
@@ -16,16 +16,19 @@ router = APIRouter()
 
 
 class SubmitTaskBody(BaseModel):
-    request: str
-    agent_name: str = "default"
-    workspace: WorkspaceRef | None = None
-    notify_platform: str | None = None
-    notify_external_id: str | None = None
-    notify_channel_id: str | None = None
+    """Request body for submitting a background coding task."""
+
+    request: str = Field(..., description="Task description or instruction for the agent.")
+    agent_name: str = Field(default="default", description="Agent card name to use.")
+    workspace: WorkspaceRef | None = Field(default=None, description="Workspace reference. Defaults to the default workspace.")
+    notify_platform: str | None = Field(default=None, description="Notification platform (e.g. 'telegram', 'discord').")
+    notify_external_id: str | None = Field(default=None, description="External user/channel ID for notifications.")
+    notify_channel_id: str | None = Field(default=None, description="Channel ID for notifications.")
 
 
 @router.get("/tasks/list")
 async def list_background_tasks() -> dict[str, Any]:
+    """List all background tasks with their current status and thread information."""
     manager = get_background_task_manager()
     tasks = manager.list_all()
 
@@ -42,6 +45,7 @@ async def list_background_tasks() -> dict[str, Any]:
 
 @router.post("/tasks")
 async def submit_background_task(body: SubmitTaskBody) -> dict[str, Any]:
+    """Submit a background coding task to be executed by an agent."""
     if not body.request.strip():
         raise HTTPException(status_code=400, detail="Request cannot be empty.")
 
@@ -65,6 +69,7 @@ async def submit_background_task(body: SubmitTaskBody) -> dict[str, Any]:
 
 @router.post("/tasks/{task_id}/cancel")
 async def cancel_background_task(task_id: str) -> dict[str, str]:
+    """Cancel a currently running background task."""
     manager = get_background_task_manager()
     result = manager.cancel(task_id)
     if result == "not_found":
@@ -76,6 +81,7 @@ async def cancel_background_task(task_id: str) -> dict[str, str]:
 
 @router.delete("/tasks/{task_id}")
 async def remove_background_task(task_id: str) -> dict[str, str]:
+    """Remove a background task from the task list. Cannot remove running tasks."""
     manager = get_background_task_manager()
     removed = await manager.remove(task_id)
     if not removed:

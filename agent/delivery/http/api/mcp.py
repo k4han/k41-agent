@@ -13,22 +13,28 @@ router = APIRouter(prefix="/mcp", tags=["mcp"])
 
 
 class McpInstallBody(BaseModel):
-    agent_name: str = Field(..., min_length=1)
-    registry_name: str = Field(..., min_length=1)
-    version: str = "latest"
-    target_id: str = ""
-    server_name: str = ""
-    input_values: dict[str, Any] = Field(default_factory=dict)
-    auth_method: str = "secret"
+    """Request body for installing an MCP server from the registry."""
+
+    agent_name: str = Field(..., min_length=1, description="Target agent name to install the MCP server for.")
+    registry_name: str = Field(..., min_length=1, description="Full registry name (namespace/name) of the MCP server.")
+    version: str = Field(default="latest", description="Version to install. Use 'latest' for the most recent version.")
+    target_id: str = Field(default="", description="Optional target ID for the install.")
+    server_name: str = Field(default="", description="Custom server name override. Uses registry name if empty.")
+    input_values: dict[str, Any] = Field(default_factory=dict, description="Input values to pass to the MCP server configuration.")
+    auth_method: str = Field(default="secret", description="Authentication method ('secret', 'oauth', or 'none').")
 
 
 class ToggleAgentMcpInstallBody(BaseModel):
-    enabled: bool
+    """Request body to enable or disable an MCP install for an agent."""
+
+    enabled: bool = Field(..., description="Whether the MCP install should be enabled or disabled.")
 
 
 class BindAgentMcpInstallBody(BaseModel):
-    server_name: str = Field(..., min_length=1)
-    enabled: bool = True
+    """Request body to bind an existing MCP server to an agent."""
+
+    server_name: str = Field(..., min_length=1, description="Name of the MCP server to bind.")
+    enabled: bool = Field(default=True, description="Whether the bind should be enabled.")
 
 
 def _marketplace_service() -> McpMarketplaceService:
@@ -57,6 +63,7 @@ async def search_mcp_registry(
     cursor: str = "",
     limit: int = 20,
 ) -> dict[str, Any]:
+    """Search the MCP server registry by keyword."""
     service = _marketplace_service()
     try:
         return await service.search(q, cursor=cursor, limit=limit)
@@ -72,11 +79,13 @@ async def get_mcp_registry_server_by_parts(
     name: str,
     version: str,
 ) -> dict[str, Any]:
+    """Get a specific MCP server version by namespace, name, and version."""
     return await get_mcp_registry_server(f"{namespace}/{name}", version)
 
 
 @router.get("/servers/{server_name:path}/versions/{version}")
 async def get_mcp_registry_server(server_name: str, version: str) -> dict[str, Any]:
+    """Get a specific MCP server version by full server name."""
     service = _marketplace_service()
     try:
         return await service.get_server_version(server_name, version)
@@ -88,6 +97,7 @@ async def get_mcp_registry_server(server_name: str, version: str) -> dict[str, A
 
 @router.post("/install")
 async def install_mcp_server(body: McpInstallBody) -> dict[str, Any]:
+    """Install an MCP server from the registry and bind it to an agent."""
     service = _marketplace_service()
     try:
         result = await service.install(
@@ -110,6 +120,7 @@ async def install_mcp_server(body: McpInstallBody) -> dict[str, Any]:
 
 @router.get("/agents/{agent_name}/installs")
 async def list_agent_mcp_installs(agent_name: str) -> dict[str, Any]:
+    """List all MCP server installs for a specific agent."""
     repo = _repo()
     try:
         return {"installs": repo.list_agent_installs(agent_name)}
@@ -122,6 +133,7 @@ async def bind_agent_mcp_install(
     agent_name: str,
     body: BindAgentMcpInstallBody,
 ) -> dict[str, Any]:
+    """Bind an existing MCP server to an agent."""
     repo = _repo()
     try:
         install = repo.bind_agent_server(
@@ -143,6 +155,7 @@ async def toggle_agent_mcp_install(
     install_id: int,
     body: ToggleAgentMcpInstallBody,
 ) -> dict[str, Any]:
+    """Toggle an MCP server install on or off for an agent."""
     repo = _repo()
     try:
         if not repo.toggle_agent_install(agent_name, install_id, body.enabled):
@@ -155,6 +168,7 @@ async def toggle_agent_mcp_install(
 
 @router.delete("/agents/{agent_name}/installs/{install_id}")
 async def delete_agent_mcp_install(agent_name: str, install_id: int) -> dict[str, Any]:
+    """Delete an MCP server install from an agent."""
     repo = _repo()
     try:
         if not repo.delete_agent_install(agent_name, install_id):

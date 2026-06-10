@@ -4,7 +4,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from agent.delivery.http.dashboard.routes.shared import _get_config_service
 from agent.modules.skills import (
@@ -23,8 +23,10 @@ router = APIRouter()
 
 
 class SkillBody(BaseModel):
-    name: str
-    content: str
+    """Request body for creating or updating a skill."""
+
+    name: str = Field(..., description="Skill name (used as identifier and directory name).")
+    content: str = Field(..., description="Markdown content of the SKILL.md file.")
 
 
 def _handle_skill_error(exc: Exception) -> HTTPException:
@@ -69,6 +71,7 @@ def _skills_settings(request: Request) -> tuple[dict[str, Any], dict[str, Any]]:
 
 @router.get("/dashboard-api/skills")
 async def get_dashboard_skills(request: Request) -> dict[str, Any]:
+    """List all available skills with their metadata and settings."""
     settings, sources = _skills_settings(request)
     return {
         "skills_root": str(DEFAULT_SKILLS_ROOT),
@@ -83,6 +86,7 @@ async def get_dashboard_skills(request: Request) -> dict[str, Any]:
 
 @router.get("/dashboard-api/skills/{name}")
 async def get_dashboard_skill(name: str) -> dict[str, Any]:
+    """Get detailed information for a specific skill including its content."""
     try:
         return {"skill": _serialize_skill(name, include_content=True)}
     except Exception as exc:
@@ -91,6 +95,7 @@ async def get_dashboard_skill(name: str) -> dict[str, Any]:
 
 @router.post("/dashboard-api/skills")
 async def create_dashboard_skill(body: SkillBody) -> dict[str, Any]:
+    """Create a new skill with the given name and markdown content."""
     try:
         skill = create_skill(body.name, body.content)
         return {"status": "created", "skill": _serialize_skill(skill.name)}
@@ -100,6 +105,7 @@ async def create_dashboard_skill(body: SkillBody) -> dict[str, Any]:
 
 @router.put("/dashboard-api/skills/{name}")
 async def update_dashboard_skill(name: str, body: SkillBody) -> dict[str, Any]:
+    """Update an existing skill's name and/or content."""
     try:
         skill = update_skill(name, body.name, body.content)
         return {"status": "updated", "skill": _serialize_skill(skill.name)}
@@ -109,6 +115,7 @@ async def update_dashboard_skill(name: str, body: SkillBody) -> dict[str, Any]:
 
 @router.delete("/dashboard-api/skills/{name}")
 async def delete_dashboard_skill(name: str) -> dict[str, str]:
+    """Delete a skill by name."""
     try:
         delete_skill(name)
         return {"status": "deleted", "name": name}
@@ -118,5 +125,6 @@ async def delete_dashboard_skill(name: str) -> dict[str, str]:
 
 @router.post("/dashboard-api/skills/reload")
 async def reload_dashboard_skills(request: Request) -> dict[str, Any]:
+    """Reload all skills from disk and return the updated list."""
     reload_skills()
     return {"status": "reloaded", **await get_dashboard_skills(request)}

@@ -9,7 +9,13 @@ from agent.delivery.http.api.schemas import (
     ChatRequest,
     ChatResponse,
     EditChatRequest,
+    GraphListResponse,
+    HealthResponse,
+    ModelCatalog,
+    ModelCatalogListResponse,
     PairingCodeResponse,
+    ProviderListResponse,
+    ProviderSummary,
     ReconnectRequest,
 )
 from agent.delivery.http.api.mcp import router as mcp_router
@@ -133,8 +139,7 @@ async def _apply_workspace_to_run_params(
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat_sync(request: ChatRequest):
-    """Return the full response for a chat request."""
-
+    """Send a chat message and return the full agent response synchronously."""
     params = _request_to_run_params(request)
     await _apply_workspace_to_run_params(request, params)
     response = await run_agent_full(**params)
@@ -147,8 +152,7 @@ async def chat_sync(request: ChatRequest):
 
 @router.post("/chat/stream")
 async def chat_stream(request: ChatRequest):
-    """Stream the response for a chat request."""
-
+    """Stream the agent response as plain text chunks."""
     params = _request_to_run_params(request)
     await _apply_workspace_to_run_params(request, params)
 
@@ -161,8 +165,7 @@ async def chat_stream(request: ChatRequest):
 
 @router.post("/chat/events")
 async def chat_events(request: ChatRequest):
-    """Stream UI events for a chat request as newline-delimited JSON."""
-
+    """Stream UI events (thread created, message deltas, tool calls, etc.) as newline-delimited JSON."""
     params = _request_to_run_params(request)
     await _apply_workspace_to_run_params(request, params)
     created_thread = bool(request.new_thread and not request.thread_id)
@@ -185,7 +188,7 @@ async def chat_events(request: ChatRequest):
 
 @router.post("/chat/events/edit")
 async def chat_events_edit(request: EditChatRequest):
-    """Fork a thread from an edited user message and stream UI events."""
+    """Fork a thread from an edited user message and stream UI events as newline-delimited JSON."""
     if not request.message.strip():
         raise HTTPException(status_code=400, detail="Edited message cannot be empty.")
 
@@ -224,7 +227,7 @@ async def chat_events_edit(request: EditChatRequest):
 
 @router.post("/chat/events/reconnect")
 async def chat_events_reconnect(request: ReconnectRequest):
-    """Reconnect and stream UI events for an already running background chat stream."""
+    """Reconnect to an active chat stream and continue receiving UI events."""
     thread_id = request.thread_id
     manager = get_chat_stream_manager()
     session = await manager.get_session(thread_id)
@@ -244,8 +247,9 @@ async def chat_events_reconnect(request: ReconnectRequest):
     return StreamingResponse(event_generator(), media_type="application/x-ndjson")
 
 
-@router.get("/graphs")
+@router.get("/graphs", response_model=GraphListResponse)
 async def list_graphs():
+    """List all registered workflow graphs."""
     return {"graphs": list_registered_workflows()}
 
 
@@ -281,8 +285,9 @@ def _serialize_model_catalog(catalog) -> dict[str, object]:
     }
 
 
-@router.get("/providers")
+@router.get("/providers", response_model=ProviderListResponse)
 async def api_list_providers():
+    """List all configured LLM providers and their available models."""
     try:
         providers = list_providers()
     except Exception as exc:
@@ -290,8 +295,9 @@ async def api_list_providers():
     return {"providers": [_serialize_provider(provider) for provider in providers]}
 
 
-@router.get("/providers/models")
+@router.get("/providers/models", response_model=ModelCatalogListResponse)
 async def api_list_provider_models(refresh: bool = False):
+    """List model catalogs for all configured providers. Use refresh=true to re-fetch from upstream."""
     try:
         catalogs = await list_provider_model_catalogs(include_remote=refresh)
     except Exception as exc:
@@ -299,11 +305,12 @@ async def api_list_provider_models(refresh: bool = False):
     return {"providers": [_serialize_model_catalog(catalog) for catalog in catalogs]}
 
 
-@router.get("/providers/{provider_name}/models")
+@router.get("/providers/{provider_name}/models", response_model=ModelCatalog)
 async def api_list_provider_models_for_provider(
     provider_name: str,
     refresh: bool = False,
 ):
+    """List model catalog for a specific provider. Use refresh=true to re-fetch from upstream."""
     try:
         catalog = await list_provider_model_catalog(
             provider_name,
@@ -314,13 +321,15 @@ async def api_list_provider_models_for_provider(
     return _serialize_model_catalog(catalog)
 
 
-@router.get("/health")
+@router.get("/health", response_model=HealthResponse)
 async def health():
+    """Health check endpoint returning service status and registered graphs."""
     return {"status": "ok", "graphs": list_registered_workflows()}
 
 
 @router.post("/users/pairing-code", response_model=PairingCodeResponse)
 async def generate_pairing_code():
+    """Generate a one-time pairing code for client authentication."""
     pairing_service = get_pairing_service()
     pairing_code, user_id = await pairing_service.create_pairing_root_user_and_code()
     return PairingCodeResponse(user_id=str(user_id), pairing_code=pairing_code)

@@ -29,21 +29,27 @@ _SERVER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 class McpServerBody(BaseModel):
-    transport: str = Field(..., min_length=1)
-    command: str = ""
-    args: list[str] = Field(default_factory=list)
-    env: dict[str, str] = Field(default_factory=dict)
-    url: str = ""
-    headers: dict[str, str] = Field(default_factory=dict)
-    enabled: bool = True
+    """Base request body for MCP server configuration."""
+
+    transport: str = Field(..., min_length=1, description="Transport type: 'stdio' or 'streamable_http'.")
+    command: str = Field(default="", description="Command to run for stdio transport (e.g. 'npx', 'uvx').")
+    args: list[str] = Field(default_factory=list, description="Command arguments for stdio transport.")
+    env: dict[str, str] = Field(default_factory=dict, description="Environment variables for the MCP server process.")
+    url: str = Field(default="", description="URL for streamable_http transport.")
+    headers: dict[str, str] = Field(default_factory=dict, description="HTTP headers for streamable_http transport.")
+    enabled: bool = Field(default=True, description="Whether this MCP server is enabled.")
 
 
 class CreateMcpServerBody(McpServerBody):
-    name: str = Field(..., min_length=1)
+    """Request body for creating a new MCP server."""
+
+    name: str = Field(..., min_length=1, description="Unique server name (letters, numbers, underscores, hyphens).")
 
 
 class TestMcpServerBody(McpServerBody):
-    name: str = "test"
+    """Request body for testing an MCP server connection without saving."""
+
+    name: str = Field(default="test", description="Name label for the test connection.")
 
 
 # --- Helpers ---
@@ -154,6 +160,7 @@ def _serialize_test_result(result: MCPTestResult) -> dict[str, Any]:
 
 @router.get("/dashboard-api/mcp/servers")
 async def list_dashboard_mcp_servers() -> dict[str, Any]:
+    """List all configured MCP servers with their status and available tools."""
     statuses = await list_mcp_server_status()
     return {"servers": [_serialize_status(status) for status in statuses]}
 
@@ -162,6 +169,7 @@ async def list_dashboard_mcp_servers() -> dict[str, Any]:
 async def create_dashboard_mcp_server(
     body: CreateMcpServerBody,
 ) -> dict[str, Any]:
+    """Create a new custom MCP server configuration."""
     name = _validate_server_name(body.name)
     repo = McpInstallRepository()
     try:
@@ -188,6 +196,7 @@ async def update_dashboard_mcp_server(
     server_name: str,
     body: McpServerBody,
 ) -> dict[str, Any]:
+    """Update an existing MCP server configuration."""
     name = _validate_server_name(server_name)
     config = _body_to_config(name, body)
     repo = McpInstallRepository()
@@ -208,6 +217,7 @@ async def update_dashboard_mcp_server(
 async def delete_dashboard_mcp_server(
     server_name: str,
 ) -> dict[str, Any]:
+    """Delete an MCP server configuration."""
     repo = McpInstallRepository()
     try:
         if not repo.delete_server(server_name):
@@ -219,11 +229,14 @@ async def delete_dashboard_mcp_server(
 
 
 class ToggleMcpServerBody(BaseModel):
-    enabled: bool
+    """Request body to enable or disable an MCP server."""
+
+    enabled: bool = Field(..., description="Whether the MCP server should be enabled or disabled.")
 
 
 @router.post("/dashboard-api/mcp/servers/test")
 async def test_dashboard_mcp_server(body: TestMcpServerBody) -> dict[str, Any]:
+    """Test an MCP server connection and list its available tools without saving."""
     name = _validate_server_name(body.name or "test")
     config = _body_to_config(name, body)
     result = await test_mcp_connection(config)
@@ -232,6 +245,7 @@ async def test_dashboard_mcp_server(body: TestMcpServerBody) -> dict[str, Any]:
 
 @router.post("/dashboard-api/mcp/servers/{server_name}/reload")
 async def reload_dashboard_mcp_server(server_name: str) -> dict[str, Any]:
+    """Reload an MCP server's tools from its source."""
     try:
         status = await reload_mcp_server_tools(server_name)
     except KeyError as exc:
@@ -244,6 +258,7 @@ async def toggle_dashboard_mcp_server(
     server_name: str,
     body: ToggleMcpServerBody,
 ) -> dict[str, Any]:
+    """Toggle an MCP server on or off."""
     repo = McpInstallRepository()
     try:
         if not repo.toggle_server(server_name, body.enabled):

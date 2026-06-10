@@ -72,6 +72,7 @@ def _task_repository_full_name(task: dict[str, Any]) -> str:
 
 @router.get("/dashboard-api/github")
 async def get_dashboard_github(request: Request) -> dict[str, Any]:
+    """Get GitHub integration overview including settings, repositories, and activity."""
     settings = get_github_settings()
     service = get_github_automation_service()
     cards = get_catalog_service().list_agent_cards()
@@ -101,6 +102,7 @@ async def get_dashboard_github(request: Request) -> dict[str, Any]:
 
 @router.post("/dashboard-api/github/sync")
 async def sync_dashboard_github() -> dict[str, Any]:
+    """Sync GitHub installations and repositories from the GitHub App."""
     service = get_github_automation_service()
     try:
         result = await service.sync_installations()
@@ -110,36 +112,41 @@ async def sync_dashboard_github() -> dict[str, Any]:
 
 
 class GitHubRepositoryBindingBody(BaseModel):
-    enabled: bool = False
-    agent_name: str = ""
-    trigger_label: str = ""
-    mention_triggers: list[str] = Field(default_factory=list)
-    notify_platform: str = ""
-    notify_external_id: str = ""
-    notify_channel_id: str = ""
-    issue_label_enabled: bool = True
-    issue_comment_enabled: bool = True
-    pr_review_comment_enabled: bool = True
-    repository_instructions: str = ""
-    provider_name: str = ""
-    model_name: str = ""
-    context_trim_threshold: int | None = None
-    tool_policy_mode: str = "inherit"
-    allowed_tools: list[str] = Field(default_factory=list)
-    allowed_skills: list[str] = Field(default_factory=list)
-    branch_prefix: str = "k41"
-    workspace_backend: str = "local"
+    """Request body for updating a GitHub repository binding configuration."""
+
+    enabled: bool = Field(default=False, description="Enable or disable the binding.")
+    agent_name: str = Field(default="", description="Agent card name to use for this repository.")
+    trigger_label: str = Field(default="", description="GitHub issue label that triggers the agent.")
+    mention_triggers: list[str] = Field(default_factory=list, description="Keywords in issue comments that trigger the agent.")
+    notify_platform: str = Field(default="", description="Notification platform (e.g. 'telegram', 'discord').")
+    notify_external_id: str = Field(default="", description="External user/channel ID for notifications.")
+    notify_channel_id: str = Field(default="", description="Channel ID for notifications.")
+    issue_label_enabled: bool = Field(default=True, description="Whether to respond to issue label triggers.")
+    issue_comment_enabled: bool = Field(default=True, description="Whether to respond to issue comment triggers.")
+    pr_review_comment_enabled: bool = Field(default=True, description="Whether to respond to PR review comment triggers.")
+    repository_instructions: str = Field(default="", description="Custom instructions appended to agent prompts for this repo.")
+    provider_name: str = Field(default="", description="LLM provider name override.")
+    model_name: str = Field(default="", description="LLM model name override.")
+    context_trim_threshold: int | None = Field(default=None, description="Token threshold for context trimming.")
+    tool_policy_mode: str = Field(default="inherit", description="Tool policy mode ('inherit' or 'custom').")
+    allowed_tools: list[str] = Field(default_factory=list, description="Allowed tools when tool_policy_mode is 'custom'.")
+    allowed_skills: list[str] = Field(default_factory=list, description="Allowed skills for this repository.")
+    branch_prefix: str = Field(default="k41", description="Branch name prefix for agent-created branches.")
+    workspace_backend: str = Field(default="local", description="Workspace backend ('local', 'daytona', or 'modal').")
 
 
 class SubmitGitHubRepositoryTaskBody(BaseModel):
-    request: str
-    notify_platform: str = ""
-    notify_external_id: str = ""
-    notify_channel_id: str = ""
+    """Request body for submitting a manual task to a GitHub repository."""
+
+    request: str = Field(..., description="Task description or instruction for the agent.")
+    notify_platform: str = Field(default="", description="Notification platform override.")
+    notify_external_id: str = Field(default="", description="External user/channel ID for notifications.")
+    notify_channel_id: str = Field(default="", description="Channel ID for notifications.")
 
 
 @router.get("/dashboard-api/github/repositories/{repository_id}")
 async def get_dashboard_github_repository(repository_id: int) -> dict[str, Any]:
+    """Get detailed information for a specific GitHub repository binding."""
     service = get_github_automation_service()
     try:
         repository = await service.get_repository_binding(repository_id)
@@ -176,6 +183,7 @@ async def update_dashboard_github_repository_binding(
     repository_id: int,
     body: GitHubRepositoryBindingBody,
 ) -> dict[str, Any]:
+    """Update the binding configuration for a GitHub repository."""
     service = get_github_automation_service()
     try:
         binding = await service.update_repository_binding(
@@ -212,6 +220,7 @@ async def submit_dashboard_github_repository_task(
     repository_id: int,
     body: SubmitGitHubRepositoryTaskBody,
 ) -> dict[str, Any]:
+    """Submit a manual coding task to a GitHub repository. The agent will work on the repository and open or update a PR."""
     service = get_github_automation_service()
     try:
         task_id = await service.submit_repository_task(

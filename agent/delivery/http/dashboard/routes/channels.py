@@ -20,6 +20,7 @@ router = APIRouter()
 
 @router.post("/channels/pair")
 async def generate_pairing_code() -> dict[str, str]:
+    """Generate a one-time pairing code for client authentication."""
     pairing_service = get_pairing_service()
     code, user_id = await pairing_service.create_pairing_root_user_and_code()
     return {"code": code, "user_id": str(user_id)}
@@ -27,6 +28,7 @@ async def generate_pairing_code() -> dict[str, str]:
 
 @router.delete("/channels/identities/{identity_id}")
 async def unpair_identity(identity_id: int) -> dict[str, str]:
+    """Unpair a previously paired client identity."""
     pairing_service = get_pairing_service()
     await pairing_service.unpair_identity(identity_id)
     return {"status": "success"}
@@ -34,12 +36,14 @@ async def unpair_identity(identity_id: int) -> dict[str, str]:
 
 @router.get("/services")
 async def get_services(request: Request) -> dict[str, list[dict[str, str | None]]]:
+    """List all channel services and their current status."""
     channel_manager = _get_channel_manager(request)
     return {"services": list_channel_statuses(channel_manager)}
 
 
 @router.get("/services/{name}")
 async def get_service(name: str, request: Request) -> dict[str, str | None]:
+    """Get the status of a specific channel service."""
     channel_manager = _get_channel_manager(request)
     try:
         return get_channel_status(channel_manager, name)
@@ -49,6 +53,7 @@ async def get_service(name: str, request: Request) -> dict[str, str | None]:
 
 @router.post("/services/{name}/start")
 async def start_service(name: str, request: Request) -> dict[str, str | None]:
+    """Start a channel service."""
     channel_manager = _get_channel_manager(request)
     try:
         status = await start_channel(channel_manager, name)
@@ -61,6 +66,7 @@ async def start_service(name: str, request: Request) -> dict[str, str | None]:
 
 @router.post("/services/{name}/stop")
 async def stop_service(name: str, request: Request) -> dict[str, str | None]:
+    """Stop a running channel service."""
     channel_manager = _get_channel_manager(request)
     try:
         status = await stop_channel(channel_manager, name)
@@ -71,12 +77,14 @@ async def stop_service(name: str, request: Request) -> dict[str, str | None]:
 
 @router.post("/services/{name}/test")
 async def test_service(name: str) -> dict[str, object]:
+    """Test the connection for a channel service without starting it."""
     result = await test_channel_connection(name)
     return result.to_dict()
 
 
 @router.post("/services/start-all")
 async def start_all_services(request: Request) -> dict[str, list[dict[str, str | None]]]:
+    """Start all configured channel services."""
     channel_manager = _get_channel_manager(request)
     try:
         services = await start_all_channels(channel_manager)
@@ -87,6 +95,7 @@ async def start_all_services(request: Request) -> dict[str, list[dict[str, str |
 
 @router.post("/services/stop-all")
 async def stop_all_services(request: Request) -> dict[str, list[dict[str, str | None]]]:
+    """Stop all running channel services."""
     channel_manager = _get_channel_manager(request)
     services = await stop_all_channels(channel_manager)
     return {"services": services}

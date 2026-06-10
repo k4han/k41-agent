@@ -50,10 +50,23 @@ def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:
             await runtime.shutdown()
 
     fastapi_app = FastAPI(
-        title="LangGraph Multi-Platform Agent",
-        description="AI agent runtime with optional web, dashboard, and managed channels.",
+        title="Kaka Agent API",
+        description=(
+            "AI agent runtime with multi-platform chat, GitHub automation, "
+            "MCP server integration, and a full management dashboard."
+        ),
         version="2.0.0",
         lifespan=lifespan,
+        docs_url="/docs",
+        redoc_url="/redoc",
+        openapi_tags=[
+            {"name": "agent", "description": "Chat, streaming, and core agent API endpoints."},
+            {"name": "mcp", "description": "MCP server marketplace: search, install, and manage servers."},
+            {"name": "github", "description": "GitHub webhook receiver."},
+            {"name": "telegram", "description": "Telegram webhook receiver."},
+            {"name": "auth", "description": "Admin login, logout, and password management."},
+            {"name": "dashboard", "description": "Dashboard overview, sessions, and channel management."},
+        ],
     )
 
     fastapi_app.state.runtime = runtime
