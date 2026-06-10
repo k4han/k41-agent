@@ -55,6 +55,10 @@ function ModalIcon() {
   return <Cpu size={20} />;
 }
 
+function OpenShellIcon() {
+  return <Cpu size={20} />;
+}
+
 function FallbackChannelIcon() {
   return <DiscordIcon />;
 }
@@ -72,6 +76,7 @@ const BACKEND_BRAND_ICONS: Record<string, () => JSX.Element> = {
   local: LocalIcon,
   daytona: DaytonaIcon,
   modal: ModalIcon,
+  openshell: OpenShellIcon,
 };
 
 export function getChannelIcon(name: string): () => JSX.Element {

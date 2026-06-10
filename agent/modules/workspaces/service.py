@@ -32,6 +32,7 @@ from agent.modules.workspaces.registry import (
     DAYTONA_BACKEND,
     LOCAL_BACKEND,
     MODAL_BACKEND,
+    OPEN_SHELL_BACKEND,
     call_workspace_backend_loader,
     get_workspace_backend_registry,
 )
@@ -247,7 +248,7 @@ async def create_workspace_backend(
         descriptor.name,
         descriptor.create_loader,
     )
-    if descriptor.name == DAYTONA_BACKEND:
+    if descriptor.name == DAYTONA_BACKEND or _workspace_backend_uses_thread_loader(descriptor.name):
         result = await asyncio.to_thread(creator, label=label)
     else:
         result = creator(label=label)
@@ -273,7 +274,7 @@ async def attach_workspace_backend(
         descriptor.name,
         descriptor.attach_loader,
     )
-    if descriptor.name == DAYTONA_BACKEND:
+    if descriptor.name == DAYTONA_BACKEND or _workspace_backend_uses_thread_loader(descriptor.name):
         result = await asyncio.to_thread(
             attacher,
             sandbox_id,
@@ -356,7 +357,11 @@ async def _call_workspace_backend_loader(
 
 
 def _workspace_backend_uses_thread_loader(backend: str) -> bool:
-    return backend == DAYTONA_BACKEND
+    return backend in {DAYTONA_BACKEND, OPEN_SHELL_BACKEND}
+
+
+def _workspace_backend_supports_thread_recovery(backend: str) -> bool:
+    return backend == MODAL_BACKEND
 
 
 class _WorkspaceBackendRepositoryCloner:
@@ -749,7 +754,7 @@ class _WorkspaceBackendLifecycleManager:
                 locator=self.ref.locator,
             )
         kwargs: dict[str, Any] = {}
-        if self.thread_id is not None and _workspace_backend_uses_thread_loader(
+        if self.thread_id is not None and _workspace_backend_supports_thread_recovery(
             descriptor.name
         ):
             kwargs["thread_id"] = self.thread_id

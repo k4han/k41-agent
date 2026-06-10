@@ -1,7 +1,7 @@
 """Helpers that attach a GitHub repository to any workspace backend.
 
 The previous design treated GitHub repositories as a separate workspace kind
-alongside ``local``/``daytona``/``modal`` which forced every GitHub-backed
+alongside ``local``/``daytona``/``modal``/``openshell`` which forced every GitHub-backed
 task to run on the host filesystem. This module keeps the same business
 semantics for local workspaces but also supports cloning the repository
 inside a Daytona or Modal sandbox so the agent can pick the execution
@@ -22,6 +22,7 @@ from agent.modules.workspaces.refs import (
     WorkspaceRef,
     normalize_workspace_ref,
 )
+from agent.modules.workspaces.registry import get_workspace_backend_registry
 from agent.modules.workspaces.service import workspace_ref_from_local_path
 
 if TYPE_CHECKING:
@@ -207,7 +208,7 @@ def _with_github_metadata(
     metadata.update(
         _github_workspace_metadata(selection, repository_path=repository_path)
     )
-    if workspace.backend in {"daytona", "modal"}:
+    if workspace.backend in {"daytona", "modal", "openshell"}:
         metadata["root"] = _join_sandbox_repository_root(
             metadata.get("root"),
             repository_path,
@@ -292,9 +293,10 @@ async def attach_github_repository_to_workspace(
     """Attach a GitHub repository to any workspace backend.
 
     For local workspaces the repository is cloned to a shared local path.
-    For Daytona/Modal sandboxes the repository is cloned inside the sandbox.
-    The returned :class:`WorkspaceRef` keeps the original ``backend`` and
-    ``locator`` and stores the GitHub source under ``metadata.source``.
+    For sandbox backends that support repository cloning, the repository is
+    cloned inside the sandbox. The returned :class:`WorkspaceRef` keeps the
+    original ``backend`` and ``locator`` and stores the GitHub source under
+    ``metadata.source``.
     """
     selection = await _resolve_selection(repository_id)
     backend = workspace.backend
@@ -306,19 +308,20 @@ async def attach_github_repository_to_workspace(
             selection,
             token=token or None,
         )
-    if backend == "daytona":
-        return await attach_github_repository_to_daytona_workspace(
-            workspace,
-            selection,
-            token=token or None,
-        )
-    if backend == "modal":
-        return await attach_github_repository_to_modal_workspace(
-            workspace,
-            selection,
-            token=token or None,
-        )
-    raise ValueError(f"Unsupported workspace backend: {backend}")
+    descriptor = get_workspace_backend_registry().require(backend)
+    if not descriptor.supports_repository_clone:
+        raise ValueError(f"Workspace backend does not support repository cloning: {backend}")
+    from agent.modules.workspaces.service import get_workspace_repository_cloner
+
+    cloner = await get_workspace_repository_cloner(workspace)
+    owner, repo = _split_full_name(selection.full_name)
+    repository_path = await cloner.clone_repository(
+        owner=owner,
+        repo=repo,
+        default_branch=selection.default_branch,
+        token=token or None,
+    )
+    return _with_github_metadata(workspace, selection, repository_path=repository_path)
 
 
 def is_github_workspace(workspace: WorkspaceRef | dict[str, Any] | None) -> bool:

@@ -32,6 +32,7 @@ RUNTIME_KEY_PATTERNS = [
     r"^workspace\.root$",
     r"^workspace\.daytona\.(enabled|api_key|default_root|target|image|cpu|memory|disk|language|auto_stop_minutes|auto_archive_days|sweeper_interval_seconds|start_timeout_seconds|stop_timeout_seconds|sandbox_auto_stop_minutes|sandbox_auto_archive_minutes|sandbox_auto_delete_minutes|ephemeral|network_block_all|network_allow_list)$",
     r"^workspace\.modal\.(enabled|token_id|token_secret|app_name|default_root|image|sandbox_timeout_seconds|idle_timeout_seconds)$",
+    r"^workspace\.openshell\.(enabled|cli_path|default_root|image|cpu|memory|create_timeout_seconds|exec_timeout_seconds|delete_timeout_seconds|list_timeout_seconds)$",
     rf"^{re.escape(REPOSITORY_SKILLS_DIR_KEY)}$",
     r"^database\.url$",
     rf"^{re.escape(DISPLAY_TIMEZONE_CONFIG_KEY)}$",
@@ -52,6 +53,7 @@ DATABASE_RUNTIME_KEY_PATTERNS = [
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.headers\.[A-Za-z0-9_-]+$",
     r"^workspace\.daytona\.(enabled|api_key|default_root|target|image|cpu|memory|disk|language|auto_stop_minutes|auto_archive_days|sweeper_interval_seconds|start_timeout_seconds|stop_timeout_seconds|sandbox_auto_stop_minutes|sandbox_auto_archive_minutes|sandbox_auto_delete_minutes|ephemeral|network_block_all|network_allow_list)$",
     r"^workspace\.modal\.(enabled|token_id|token_secret|app_name|default_root|image|sandbox_timeout_seconds|idle_timeout_seconds)$",
+    r"^workspace\.openshell\.(enabled|cli_path|default_root|image|cpu|memory|create_timeout_seconds|exec_timeout_seconds|delete_timeout_seconds|list_timeout_seconds)$",
     rf"^{re.escape(REPOSITORY_SKILLS_DIR_KEY)}$",
     rf"^{re.escape(DISPLAY_TIMEZONE_CONFIG_KEY)}$",
     r"^recursion_limit$",
@@ -154,6 +156,16 @@ def _expand_runtime_keys() -> set[str]:
     keys.add("workspace.modal.image")
     keys.add("workspace.modal.sandbox_timeout_seconds")
     keys.add("workspace.modal.idle_timeout_seconds")
+    keys.add("workspace.openshell.enabled")
+    keys.add("workspace.openshell.cli_path")
+    keys.add("workspace.openshell.default_root")
+    keys.add("workspace.openshell.image")
+    keys.add("workspace.openshell.cpu")
+    keys.add("workspace.openshell.memory")
+    keys.add("workspace.openshell.create_timeout_seconds")
+    keys.add("workspace.openshell.exec_timeout_seconds")
+    keys.add("workspace.openshell.delete_timeout_seconds")
+    keys.add("workspace.openshell.list_timeout_seconds")
     keys.add(REPOSITORY_SKILLS_DIR_KEY)
     keys.add(DISPLAY_TIMEZONE_CONFIG_KEY)
     keys.add("recursion_limit")
@@ -228,6 +240,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "workspace.modal.image": "python:3.13-slim",
     "workspace.modal.sandbox_timeout_seconds": 3600,
     "workspace.modal.idle_timeout_seconds": 900,
+    "workspace.openshell.enabled": False,
+    "workspace.openshell.cli_path": "openshell",
+    "workspace.openshell.default_root": "/sandbox",
+    "workspace.openshell.image": "base",
+    "workspace.openshell.cpu": 0,
+    "workspace.openshell.memory": "",
+    "workspace.openshell.create_timeout_seconds": 300,
+    "workspace.openshell.exec_timeout_seconds": 120,
+    "workspace.openshell.delete_timeout_seconds": 120,
+    "workspace.openshell.list_timeout_seconds": 30,
     REPOSITORY_SKILLS_DIR_KEY: ".agent/skills",
     DISPLAY_TIMEZONE_CONFIG_KEY: DEFAULT_DISPLAY_TIMEZONE,
     "security.jwt_secret": "",
@@ -480,6 +502,76 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "label": "Modal Idle Timeout Seconds",
         "min": 0,
         "max": 86400,
+        "step": 1,
+    },
+    "workspace.openshell.enabled": {
+        "type": "boolean",
+        "description": "Enable NVIDIA OpenShell sandbox workspaces.",
+        "category": "workspace",
+        "label": "OpenShell Enabled",
+    },
+    "workspace.openshell.cli_path": {
+        "type": "text",
+        "description": "Path to the OpenShell CLI. Leave as openshell when it is available on PATH.",
+        "category": "workspace",
+        "label": "OpenShell CLI Path",
+    },
+    "workspace.openshell.default_root": {
+        "type": "text",
+        "description": "Default writable root directory inside OpenShell sandboxes.",
+        "category": "workspace",
+        "label": "OpenShell Default Root",
+    },
+    "workspace.openshell.image": {
+        "type": "text",
+        "description": "OpenShell sandbox image or community image name used for new workspaces.",
+        "category": "workspace",
+        "label": "OpenShell Image",
+    },
+    "workspace.openshell.cpu": {
+        "type": "number",
+        "description": "CPU cores for new OpenShell sandboxes. Use 0 for OpenShell defaults.",
+        "category": "workspace",
+        "label": "OpenShell CPU Cores",
+        "min": 0,
+        "step": 1,
+    },
+    "workspace.openshell.memory": {
+        "type": "text",
+        "description": "Memory limit for new OpenShell sandboxes, such as 2Gi or 4096Mi. Leave empty for defaults.",
+        "category": "workspace",
+        "label": "OpenShell Memory",
+    },
+    "workspace.openshell.create_timeout_seconds": {
+        "type": "number",
+        "description": "Maximum seconds to wait while creating an OpenShell sandbox.",
+        "category": "workspace",
+        "label": "OpenShell Create Timeout Seconds",
+        "min": 1,
+        "step": 1,
+    },
+    "workspace.openshell.exec_timeout_seconds": {
+        "type": "number",
+        "description": "Default timeout for OpenShell command execution.",
+        "category": "workspace",
+        "label": "OpenShell Exec Timeout Seconds",
+        "min": 1,
+        "step": 1,
+    },
+    "workspace.openshell.delete_timeout_seconds": {
+        "type": "number",
+        "description": "Maximum seconds to wait while deleting an OpenShell sandbox.",
+        "category": "workspace",
+        "label": "OpenShell Delete Timeout Seconds",
+        "min": 1,
+        "step": 1,
+    },
+    "workspace.openshell.list_timeout_seconds": {
+        "type": "number",
+        "description": "Maximum seconds to wait while listing OpenShell sandboxes.",
+        "category": "workspace",
+        "label": "OpenShell List Timeout Seconds",
+        "min": 1,
         "step": 1,
     },
     REPOSITORY_SKILLS_DIR_KEY: {

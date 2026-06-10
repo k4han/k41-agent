@@ -58,7 +58,7 @@ class SandboxBackendBase(ABC):
     # ------------------------------------------------------------------ #
 
     def __init__(self, ref: WorkspaceRef) -> None:
-        if ref.backend not in {"daytona", "modal"}:
+        if ref.backend not in {"daytona", "modal", "openshell"}:
             raise ValueError(f"Unsupported sandbox backend: {ref.backend}")
         self.ref = ref
         self.root: str = ""

@@ -24,6 +24,7 @@ from agent.modules.workspaces import (
     is_github_workspace,
     list_workspace_directories,
     MODAL_BACKEND,
+    OPEN_SHELL_BACKEND,
     remember_thread_workspace_ref,
     resolve_workspace_ref,
     get_workspace_backend_registry,
@@ -73,6 +74,24 @@ async def attach_modal_workspace(
 ) -> WorkspaceRef:
     return await attach_workspace_backend(
         MODAL_BACKEND,
+        sandbox_id,
+        label=label,
+        root=root,
+    )
+
+
+async def create_open_shell_workspace(*, label: str | None = None) -> WorkspaceRef:
+    return await create_workspace_backend(OPEN_SHELL_BACKEND, label=label)
+
+
+async def attach_open_shell_workspace(
+    sandbox_id: str,
+    *,
+    label: str | None = None,
+    root: str | None = None,
+) -> WorkspaceRef:
+    return await attach_workspace_backend(
+        OPEN_SHELL_BACKEND,
         sandbox_id,
         label=label,
         root=root,
@@ -374,6 +393,28 @@ async def resolve_dashboard_workspace(body: WorkspaceResolveBody) -> dict[str, A
                 "label": workspace.label,
                 "workspace": workspace.model_dump(),
             }
+        if kind == "openshell":
+            sandbox_id = body.locator or (body.workspace.locator if body.workspace else "")
+            if sandbox_id and sandbox_id.strip():
+                root = _workspace_metadata_root(body.workspace)
+                workspace = await attach_open_shell_workspace(
+                    sandbox_id,
+                    root=root,
+                )
+            else:
+                workspace = await create_open_shell_workspace()
+            if repository_id is not None:
+                workspace = await attach_github_repository_to_workspace(
+                    workspace,
+                    repository_id=repository_id,
+                )
+            if body.thread_id and body.thread_id.strip():
+                workspace = await remember_thread_workspace_ref(body.thread_id, workspace)
+            return {
+                "kind": "openshell",
+                "label": workspace.label,
+                "workspace": workspace.model_dump(),
+            }
         raise ValueError(f"Unsupported workspace kind: {body.kind}")
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -408,6 +449,16 @@ async def _resolve_github_in_sandbox(
             )
         else:
             workspace = await create_modal_workspace()
+    elif backend == "openshell":
+        sandbox_id = body.locator or (body.workspace.locator if body.workspace else "")
+        if sandbox_id and sandbox_id.strip():
+            root = _workspace_metadata_root(body.workspace)
+            workspace = await attach_open_shell_workspace(
+                sandbox_id,
+                root=root,
+            )
+        else:
+            workspace = await create_open_shell_workspace()
     else:
         raise ValueError(f"Unsupported sandbox backend: {backend}")
     return await attach_github_repository_to_workspace(

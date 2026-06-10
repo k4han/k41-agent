@@ -186,7 +186,7 @@ export type PromptVariablesPayload = {
   variables: PromptVariable[];
 };
 
-export type WorkspaceBackendKey = "local" | "daytona" | "modal";
+export type WorkspaceBackendKey = "local" | "daytona" | "modal" | "openshell";
 
 export function isSandboxBackend(backend: string): boolean {
   return backend !== "local";
@@ -485,7 +485,7 @@ export type GitHubRepositoryBinding = {
   allowed_tools: string[];
   allowed_skills: string[];
   branch_prefix: string;
-  workspace_backend: "local" | "daytona" | "modal";
+  workspace_backend: "local" | "daytona" | "modal" | "openshell";
   last_synced_at: string | null;
   created_at: string | null;
   updated_at: string | null;
@@ -691,6 +691,7 @@ export type SandboxBackendKey = Exclude<WorkspaceBackendKey, "local">;
 
 export function sandboxBackendDefaultRoot(backend: SandboxBackendKey): string {
   if (backend === "modal") return "/workspace";
+  if (backend === "openshell") return "/sandbox";
   return "workspace";
 }
 

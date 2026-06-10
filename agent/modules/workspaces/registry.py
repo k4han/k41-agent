@@ -13,6 +13,7 @@ from agent.shared.integrations import (
 LOCAL_BACKEND = "local"
 DAYTONA_BACKEND = "daytona"
 MODAL_BACKEND = "modal"
+OPEN_SHELL_BACKEND = "openshell"
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +119,36 @@ BUILTIN_WORKSPACE_BACKEND_DESCRIPTORS = (
         attach_loader="agent.modules.workspaces.modal_backend:attach_modal_workspace",
         delete_loader="agent.modules.workspaces.modal_backend:delete_modal_workspace",
         inventory_loader="agent.modules.workspaces.modal_backend:list_modal_cloud_sandboxes",
+    ),
+    WorkspaceBackendDescriptor(
+        kind="workspace_backend",
+        name=OPEN_SHELL_BACKEND,
+        title="OpenShell",
+        summary="Run workspaces in NVIDIA OpenShell sandboxes.",
+        config_prefix="workspace.openshell",
+        loader="agent.modules.workspaces.openshell_backend:OpenShellWorkspaceBackend",
+        capabilities=frozenset(
+            {
+                "file_io",
+                "commands",
+                "browser",
+                "changes",
+                "repository_clone",
+                "sandbox_inventory",
+            }
+        ),
+        dependency_imports=(),
+        install_extra="",
+        supports_sandbox_inventory=True,
+        supports_lifecycle=True,
+        supports_repository_clone=True,
+        backend_factory_loader=(
+            "agent.modules.workspaces.openshell_backend:create_open_shell_backend"
+        ),
+        create_loader="agent.modules.workspaces.openshell_backend:create_openshell_workspace",
+        attach_loader="agent.modules.workspaces.openshell_backend:attach_openshell_workspace",
+        delete_loader="agent.modules.workspaces.openshell_backend:delete_openshell_workspace",
+        inventory_loader="agent.modules.workspaces.openshell_backend:list_openshell_cloud_sandboxes",
     ),
 )
 
@@ -235,6 +266,7 @@ __all__ = [
     "DAYTONA_BACKEND",
     "LOCAL_BACKEND",
     "MODAL_BACKEND",
+    "OPEN_SHELL_BACKEND",
     "WorkspaceBackendDescriptor",
     "WorkspaceBackendRegistry",
     "call_workspace_backend_loader",

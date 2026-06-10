@@ -37,13 +37,13 @@ async def get_file_io(runtime: ToolRuntime[Any, Any]) -> WorkspaceFileIO:
 def get_working_dir(runtime: ToolRuntime[Any, Any]) -> str:
     """Return the physical workspace path for prompt/tool compatibility.
 
-    For Daytona/Modal sandboxes the workspace ``locator`` is a sandbox ID and
+    For Daytona/Modal/OpenShell sandboxes the workspace ``locator`` is a sandbox ID and
     is not a usable filesystem path. Prefer ``metadata["root"]`` so the value
     reflects the actual cwd used by the backend (which may sit inside a
     cloned repository).
     """
     workspace = get_workspace(runtime)
-    if workspace.backend in {"daytona", "modal"}:
+    if workspace.backend in {"daytona", "modal", "openshell"}:
         root = str(workspace.metadata.get("root") or "").strip()
         if root:
             return root

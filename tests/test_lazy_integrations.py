@@ -15,7 +15,7 @@ from agent.shared.integrations import (
 )
 
 
-OPTIONAL_MODULES = ("aiogram", "discord", "modal", "daytona")
+OPTIONAL_MODULES = ("aiogram", "discord", "modal", "daytona", "openshell")
 
 
 def build_demo_instance() -> object:
@@ -58,6 +58,7 @@ def test_public_imports_do_not_load_optional_integration_sdks() -> None:
         "discord": False,
         "modal": False,
         "daytona": False,
+        "openshell": False,
     }
 
 

@@ -168,6 +168,45 @@ const BACKEND_DEFS_BY_NAME: Record<string, BackendDefinition> = {
       },
     ],
   },
+  openshell: {
+    name: "openshell",
+    title: "OpenShell",
+    summary: "Policy-enforced workspaces powered by NVIDIA OpenShell sandboxes.",
+    tagline: "Sandbox provider",
+    toggleable: true,
+    configuredPredicate: (settings, drafts) => {
+      const enabled = Boolean(drafts["workspace.openshell.enabled"] ?? settings["workspace.openshell.enabled"]?.value);
+      const cliPath = drafts["workspace.openshell.cli_path"] ?? settings["workspace.openshell.cli_path"]?.value;
+      return enabled || String(cliPath ?? "").length > 0;
+    },
+    sections: [
+      {
+        id: "runtime",
+        title: "Runtime",
+        subtitle: "OpenShell CLI and sandbox defaults",
+        fields: [ENABLED_SUFFIX, "cli_path", "default_root", "image"],
+      },
+      {
+        id: "resources",
+        title: "Resources",
+        subtitle: "CPU and memory for new OpenShell sandboxes",
+        fields: ["cpu", "memory"],
+        defaultCollapsed: true,
+      },
+      {
+        id: "timeouts",
+        title: "Timeouts",
+        subtitle: "Create, exec, delete, and list timeout policy",
+        fields: [
+          "create_timeout_seconds",
+          "exec_timeout_seconds",
+          "delete_timeout_seconds",
+          "list_timeout_seconds",
+        ],
+        defaultCollapsed: true,
+      },
+    ],
+  },
 };
 
 function settingKey(backend: string, suffix: string): string {

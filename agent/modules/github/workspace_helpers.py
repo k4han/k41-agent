@@ -147,6 +147,13 @@ async def _prepare_remote_workspace(
             selection,
             token=token,
         )
+    elif backend == "openshell":
+        workspace_ref = await _create_open_shell_workspace(binding.full_name)
+        ref = await attach_github_repository_to_workspace(
+            workspace_ref,
+            repository_id=selection.repository_id,
+            install_token=token,
+        )
     else:
         raise ValueError(f"Unsupported remote backend: {backend}")
 
@@ -173,6 +180,13 @@ async def _create_modal_workspace(label: str) -> WorkspaceRef:
     from agent.modules.workspaces import MODAL_BACKEND, create_workspace_backend
 
     return await create_workspace_backend(MODAL_BACKEND, label=label)
+
+
+async def _create_open_shell_workspace(label: str) -> WorkspaceRef:
+    """Create a new OpenShell sandbox and return its WorkspaceRef."""
+    from agent.modules.workspaces import OPEN_SHELL_BACKEND, create_workspace_backend
+
+    return await create_workspace_backend(OPEN_SHELL_BACKEND, label=label)
 
 
 async def remote_has_changes(ref: WorkspaceRef) -> bool:

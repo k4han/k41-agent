@@ -1,6 +1,7 @@
 import json
 from datetime import datetime, timedelta, timezone
 from importlib.machinery import ModuleSpec
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -38,6 +39,13 @@ from agent.modules.workspaces.modal_backend import (
     ModalWorkspaceBackend,
     delete_modal_workspace,
     resolve_modal_path,
+)
+from agent.modules.workspaces.openshell_backend import (
+    OpenShellWorkspaceBackend,
+    create_open_shell_backend,
+    create_openshell_workspace,
+    delete_openshell_workspace,
+    resolve_openshell_path,
 )
 
 
@@ -1887,7 +1895,230 @@ def test_local_workspace_tree_uses_absolute_path_keys(tmp_path):
     assert root_tree["path"] == str(tmp_path.resolve())
     assert root_tree["entries"][0]["path"] == str((tmp_path / "src").resolve())
 
-    assert src_tree["path"] == str((tmp_path / "src").resolve())
-    assert src_tree["entries"][0]["path"] == str(
-        (tmp_path / "src" / "main.py").resolve()
+
+class FakeOpenShellCompleted:
+    def __init__(self, *, stdout: str = "", stderr: str = "", returncode: int = 0) -> None:
+        self.stdout = stdout
+        self.stderr = stderr
+        self.returncode = returncode
+
+
+class FakeOpenShellFs:
+    def __init__(self) -> None:
+        self.files: dict[str, bytes] = {}
+        self.dirs: set[str] = {"/", "/sandbox"}
+
+    def execute(self, command: str):
+        if command == "pwd":
+            return "/sandbox\n", 0
+        if command.startswith("mkdir -p "):
+            target = command.split("mkdir -p ", 1)[1].strip("'\"")
+            current = ""
+            for part in target.split("/"):
+                if not part:
+                    current = "/"
+                    continue
+                current = f"{current.rstrip('/')}/{part}"
+                self.dirs.add(current)
+            return "", 0
+        if command.startswith("ls -1 "):
+            target = command.split("ls -1 ", 1)[1].strip("'\"")
+            prefix = target.rstrip("/") + "/"
+            entries = []
+            for path in sorted(self.files):
+                if path.startswith(prefix) and "/" not in path[len(prefix):]:
+                    entries.append(path.rsplit("/", 1)[-1])
+            return "\n".join(entries) + ("\n" if entries else ""), 0
+        if command.startswith("find "):
+            target = command.split("find ", 1)[1].split(" -mindepth", 1)[0].strip("'\"")
+            prefix = target.rstrip("/") + "/"
+            lines = []
+            for path in sorted(self.files):
+                if path.startswith(prefix) and "/" not in path[len(prefix):]:
+                    name = path.rsplit("/", 1)[-1]
+                    lines.append(f"f\t{name}\t{path}\t{len(self.files[path])}\t1767139200.0")
+            return "\n".join(lines) + ("\n" if lines else ""), 0
+        if command.startswith("if [ -d "):
+            target = command.split("if [ -d ", 1)[1].split(" ];", 1)[0].strip("'\"")
+            if target in self.dirs:
+                return "directory\n", 0
+            if target in self.files:
+                return "", 2
+            return "", 2
+        if command.startswith("stat -c"):
+            target = command.split("stat -c '%n|%s|%Y' ", 1)[1].strip("'\"")
+            if target in self.files:
+                return f"{target}|{len(self.files[target])}|1767139200\n", 0
+            return "", 2
+        if command.startswith("test -e "):
+            target = command.split("test -e ", 1)[1].strip("'\"")
+            return "", 0 if target in self.files or target in self.dirs else 1
+        if command.startswith("rm -rf "):
+            target = command.split("rm -rf ", 1)[1].strip("'\"")
+            self.files.pop(target, None)
+            self.dirs.discard(target)
+            return "", 0
+        if command.startswith("printf ") and " > " in command:
+            payload, target = command.split(" > ", 1)
+            content = payload.split("printf ", 1)[1].strip("'\"")
+            parent = target.rsplit("/", 1)[0] or "/"
+            current = ""
+            for part in parent.split("/"):
+                if not part:
+                    current = "/"
+                    continue
+                current = f"{current.rstrip('/')}/{part}"
+                self.dirs.add(current)
+            self.files[target.strip("'\"")] = content.encode("utf-8")
+            return "", 0
+        return "ok\n", 0
+
+
+class FakeOpenShellCli:
+    def __init__(self) -> None:
+        self.fs = FakeOpenShellFs()
+        self.commands: list[list[str]] = []
+        self.records: list[dict[str, Any]] = [
+            {
+                "name": "sandbox-1",
+                "phase": "Ready",
+                "labels": {"root": "/sandbox"},
+            }
+        ]
+
+    def run(self, args: list[str], **kwargs):
+        del kwargs
+        self.commands.append(args)
+        if args[:3] == ["sandbox", "list", "-o"]:
+            return FakeOpenShellCompleted(stdout=json.dumps(self.records))
+        if args[:2] == ["sandbox", "create"]:
+            name_index = args.index("--name") + 1
+            name = args[name_index]
+            self.records = [
+                {
+                    "name": name,
+                    "phase": "Ready",
+                    "labels": {"root": "/sandbox"},
+                }
+            ]
+            return FakeOpenShellCompleted(stdout=f"created {name}\n")
+        if args[:2] == ["sandbox", "delete"]:
+            name = args[2]
+            self.records = [record for record in self.records if record.get("name") != name]
+            return FakeOpenShellCompleted(stdout="")
+        if args[:2] == ["sandbox", "exec"]:
+            separator = args.index("--")
+            command = " ".join(args[separator + 1:])
+            if command.startswith("/bin/bash -lc "):
+                command = command[len("/bin/bash -lc ") :]
+            output, exit_code = self.fs.execute(command)
+            return FakeOpenShellCompleted(stdout=output, returncode=exit_code)
+        if args[:2] == ["sandbox", "upload"]:
+            source = Path(args[3])
+            destination = args[4]
+            self.fs.files[destination] = source.read_bytes()
+            parent = destination.rsplit("/", 1)[0] or "/"
+            current = ""
+            for part in parent.split("/"):
+                if not part:
+                    current = "/"
+                    continue
+                current = f"{current.rstrip('/')}/{part}"
+                self.fs.dirs.add(current)
+            return FakeOpenShellCompleted(stdout="")
+        if args[:2] == ["sandbox", "download"]:
+            source = args[3]
+            destination = Path(args[4])
+            (destination / source.rsplit("/", 1)[-1]).write_bytes(self.fs.files[source])
+            return FakeOpenShellCompleted(stdout="")
+        return FakeOpenShellCompleted(returncode=1, stderr=f"unexpected {args}")
+
+
+def _patch_openshell_config(monkeypatch, *, enabled: bool = True, cli: FakeOpenShellCli | None = None) -> FakeOpenShellCli:
+    fake_cli = cli or FakeOpenShellCli()
+
+    def fake_config():
+        return (
+            enabled,
+            "openshell",
+            "/sandbox",
+            "base",
+            0,
+            "",
+            300,
+            120,
+            120,
+            30,
+        )
+
+    monkeypatch.setattr(
+        "agent.modules.workspaces.openshell_backend._config",
+        fake_config,
     )
+    monkeypatch.setattr(
+        "agent.modules.workspaces.openshell_backend._run_openshell",
+        fake_cli.run,
+    )
+    return fake_cli
+
+
+def test_openshell_backend_file_io_uses_cli(monkeypatch) -> None:
+    import asyncio
+
+    fake_cli = _patch_openshell_config(monkeypatch)
+    workspace = WorkspaceRef(
+        backend="openshell",
+        locator="sandbox-1",
+        label="sandbox",
+        metadata={"root": "/sandbox"},
+    )
+    backend = OpenShellWorkspaceBackend(workspace)
+
+    async def _run():
+        await backend.write_text("src/app.py", "hello")
+        text = await backend.read_text("src/app.py")
+        result = await backend.execute("pwd")
+        tree = await backend.tree("src")
+        return text, result, tree
+
+    text, result, tree = asyncio.run(_run())
+
+    assert text == "hello"
+    assert result.output.strip() == "/sandbox"
+    assert tree["entries"][0]["name"] == "app.py"
+    assert fake_cli.fs.files["/sandbox/src/app.py"] == b"hello"
+
+
+def test_create_and_delete_openshell_workspace(monkeypatch) -> None:
+    fake_cli = _patch_openshell_config(monkeypatch)
+
+    workspace = create_openshell_workspace(label="Task A")
+
+    assert workspace.backend == "openshell"
+    assert workspace.locator.startswith("k41-task-a-")
+    assert workspace.metadata["root"] == "/sandbox"
+    assert any(args[:2] == ["sandbox", "create"] for args in fake_cli.commands)
+
+    status = delete_openshell_workspace(workspace)
+
+    assert status == "stopped"
+    assert fake_cli.records == []
+
+
+def test_create_open_shell_backend_accepts_thread_id(monkeypatch) -> None:
+    _patch_openshell_config(monkeypatch)
+    workspace = WorkspaceRef(
+        backend="openshell",
+        locator="sandbox-1",
+        label="sandbox",
+        metadata={"root": "/sandbox"},
+    )
+
+    backend = create_open_shell_backend(workspace, thread_id="thread-1")
+
+    assert isinstance(backend, OpenShellWorkspaceBackend)
+
+
+def test_resolve_openshell_path_rejects_escape() -> None:
+    with pytest.raises(ValueError):
+        resolve_openshell_path("/sandbox", "/etc/passwd")

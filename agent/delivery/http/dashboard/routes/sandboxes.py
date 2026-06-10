@@ -1,8 +1,8 @@
 """HTTP routes exposing cloud sandbox inventory and lifecycle actions.
 
 These endpoints back the ``/settings/sandboxes`` dashboard page and only
-operate on the cloud-capable backends (Daytona, Modal). ``local`` is not
-listed because there is no remote resource to manage.
+operate on sandbox-capable remote backends. ``local`` is not listed because
+there is no remote resource to manage.
 """
 
 from __future__ import annotations
@@ -13,14 +13,13 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 
 from agent.modules.workspaces import (
-    DAYTONA_BACKEND,
-    MODAL_BACKEND,
     archive_sandbox,
     delete_sandbox,
     get_sandbox,
     list_sandboxes,
     stop_sandbox,
 )
+from agent.modules.workspaces import get_workspace_backend_registry
 from agent.shared.integrations import IntegrationUnavailableError
 
 
@@ -30,17 +29,23 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-SUPPORTED_BACKENDS = {DAYTONA_BACKEND, MODAL_BACKEND}
+def _supported_backends() -> set[str]:
+    return {
+        descriptor.name
+        for descriptor in get_workspace_backend_registry().list()
+        if descriptor.supports_sandbox_inventory
+    }
 
 
 def _normalize_backend(value: str) -> str:
+    supported = _supported_backends()
     normalized = str(value or "").strip().lower()
-    if normalized not in SUPPORTED_BACKENDS:
+    if normalized not in supported:
         raise HTTPException(
             status_code=400,
             detail=(
                 f"Unsupported sandbox backend: {value!r}. "
-                f"Supported values: {sorted(SUPPORTED_BACKENDS)}."
+                f"Supported values: {sorted(supported)}."
             ),
         )
     return normalized
@@ -48,13 +53,13 @@ def _normalize_backend(value: str) -> str:
 
 @router.get("/dashboard-api/sandboxes")
 async def list_sandboxes_endpoint(
-    backend: str = Query(default=DAYTONA_BACKEND, min_length=1),
+    backend: str = Query(default="daytona", min_length=1),
     include_all: bool = Query(default=False),
 ) -> dict[str, Any]:
     """List sandboxes known to the agent for a given backend.
 
     Args:
-        backend: ``daytona`` or ``modal``.
+        backend: Sandbox backend name.
         include_all: When true, also return cloud sandboxes that are not
             attached to any conversation thread.
     """
@@ -156,8 +161,5 @@ async def archive_sandbox_endpoint(backend: str, sandbox_id: str) -> dict[str, A
 
 
 __all__ = [
-    "DAYTONA_BACKEND",
-    "MODAL_BACKEND",
-    "SUPPORTED_BACKENDS",
     "router",
 ]
