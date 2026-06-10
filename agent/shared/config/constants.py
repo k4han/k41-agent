@@ -32,6 +32,7 @@ RUNTIME_KEY_PATTERNS = [
     r"^workspace\.root$",
     r"^workspace\.daytona\.(enabled|api_key|default_root|target|image|cpu|memory|disk|language|auto_stop_minutes|auto_archive_days|sweeper_interval_seconds|start_timeout_seconds|stop_timeout_seconds|sandbox_auto_stop_minutes|sandbox_auto_archive_minutes|sandbox_auto_delete_minutes|ephemeral|network_block_all|network_allow_list)$",
     r"^workspace\.modal\.(enabled|token_id|token_secret|app_name|default_root|image|sandbox_timeout_seconds|idle_timeout_seconds)$",
+    r"^workspace\.microsandbox\.(enabled|default_root|image|cpus|memory|max_duration_seconds|idle_timeout_seconds|start_timeout_seconds|stop_timeout_seconds|replace_existing)$",
     rf"^{re.escape(REPOSITORY_SKILLS_DIR_KEY)}$",
     r"^database\.url$",
     rf"^{re.escape(DISPLAY_TIMEZONE_CONFIG_KEY)}$",
@@ -52,6 +53,7 @@ DATABASE_RUNTIME_KEY_PATTERNS = [
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.headers\.[A-Za-z0-9_-]+$",
     r"^workspace\.daytona\.(enabled|api_key|default_root|target|image|cpu|memory|disk|language|auto_stop_minutes|auto_archive_days|sweeper_interval_seconds|start_timeout_seconds|stop_timeout_seconds|sandbox_auto_stop_minutes|sandbox_auto_archive_minutes|sandbox_auto_delete_minutes|ephemeral|network_block_all|network_allow_list)$",
     r"^workspace\.modal\.(enabled|token_id|token_secret|app_name|default_root|image|sandbox_timeout_seconds|idle_timeout_seconds)$",
+    r"^workspace\.microsandbox\.(enabled|default_root|image|cpus|memory|max_duration_seconds|idle_timeout_seconds|start_timeout_seconds|stop_timeout_seconds|replace_existing)$",
     rf"^{re.escape(REPOSITORY_SKILLS_DIR_KEY)}$",
     rf"^{re.escape(DISPLAY_TIMEZONE_CONFIG_KEY)}$",
     r"^recursion_limit$",
@@ -154,6 +156,16 @@ def _expand_runtime_keys() -> set[str]:
     keys.add("workspace.modal.image")
     keys.add("workspace.modal.sandbox_timeout_seconds")
     keys.add("workspace.modal.idle_timeout_seconds")
+    keys.add("workspace.microsandbox.enabled")
+    keys.add("workspace.microsandbox.default_root")
+    keys.add("workspace.microsandbox.image")
+    keys.add("workspace.microsandbox.cpus")
+    keys.add("workspace.microsandbox.memory")
+    keys.add("workspace.microsandbox.max_duration_seconds")
+    keys.add("workspace.microsandbox.idle_timeout_seconds")
+    keys.add("workspace.microsandbox.start_timeout_seconds")
+    keys.add("workspace.microsandbox.stop_timeout_seconds")
+    keys.add("workspace.microsandbox.replace_existing")
     keys.add(REPOSITORY_SKILLS_DIR_KEY)
     keys.add(DISPLAY_TIMEZONE_CONFIG_KEY)
     keys.add("recursion_limit")
@@ -228,6 +240,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "workspace.modal.image": "python:3.13-slim",
     "workspace.modal.sandbox_timeout_seconds": 3600,
     "workspace.modal.idle_timeout_seconds": 900,
+    "workspace.microsandbox.enabled": False,
+    "workspace.microsandbox.default_root": "/workspace",
+    "workspace.microsandbox.image": "python:3.13-slim",
+    "workspace.microsandbox.cpus": 1,
+    "workspace.microsandbox.memory": 512,
+    "workspace.microsandbox.max_duration_seconds": 0,
+    "workspace.microsandbox.idle_timeout_seconds": 0,
+    "workspace.microsandbox.start_timeout_seconds": 30,
+    "workspace.microsandbox.stop_timeout_seconds": 10,
+    "workspace.microsandbox.replace_existing": False,
     REPOSITORY_SKILLS_DIR_KEY: ".agent/skills",
     DISPLAY_TIMEZONE_CONFIG_KEY: DEFAULT_DISPLAY_TIMEZONE,
     "security.jwt_secret": "",
@@ -481,6 +503,84 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "min": 0,
         "max": 86400,
         "step": 1,
+    },
+    "workspace.microsandbox.enabled": {
+        "type": "boolean",
+        "description": "Enable Microsandbox microVM workspaces.",
+        "category": "workspace",
+        "label": "Microsandbox Enabled",
+    },
+    "workspace.microsandbox.default_root": {
+        "type": "text",
+        "description": "Default root directory inside Microsandbox microVMs.",
+        "category": "workspace",
+        "label": "Microsandbox Default Root",
+    },
+    "workspace.microsandbox.image": {
+        "type": "text",
+        "description": "Container image used for new Microsandbox microVMs.",
+        "category": "workspace",
+        "label": "Microsandbox Image",
+    },
+    "workspace.microsandbox.cpus": {
+        "type": "number",
+        "description": "CPU cores for new Microsandbox microVMs.",
+        "category": "workspace",
+        "label": "Microsandbox CPU Cores",
+        "min": 1,
+        "max": 16,
+        "step": 1,
+    },
+    "workspace.microsandbox.memory": {
+        "type": "number",
+        "description": "Memory in MiB for new Microsandbox microVMs.",
+        "category": "workspace",
+        "label": "Microsandbox Memory MiB",
+        "min": 128,
+        "max": 32768,
+        "step": 128,
+    },
+    "workspace.microsandbox.max_duration_seconds": {
+        "type": "number",
+        "description": "Maximum lifetime in seconds for new Microsandbox microVMs. Use 0 for SDK default behavior.",
+        "category": "workspace",
+        "label": "Microsandbox Max Duration Seconds",
+        "min": 0,
+        "max": 86400,
+        "step": 1,
+    },
+    "workspace.microsandbox.idle_timeout_seconds": {
+        "type": "number",
+        "description": "Stop idle Microsandbox microVMs after this many seconds. Use 0 for SDK default behavior.",
+        "category": "workspace",
+        "label": "Microsandbox Idle Timeout Seconds",
+        "min": 0,
+        "max": 86400,
+        "step": 1,
+    },
+    "workspace.microsandbox.start_timeout_seconds": {
+        "type": "number",
+        "description": "Maximum seconds to wait when connecting to a Microsandbox microVM.",
+        "category": "workspace",
+        "label": "Microsandbox Start Timeout Seconds",
+        "min": 1,
+        "max": 3600,
+        "step": 1,
+    },
+    "workspace.microsandbox.stop_timeout_seconds": {
+        "type": "number",
+        "description": "Maximum seconds to wait when stopping a Microsandbox microVM.",
+        "category": "workspace",
+        "label": "Microsandbox Stop Timeout Seconds",
+        "min": 1,
+        "max": 3600,
+        "step": 1,
+    },
+    "workspace.microsandbox.replace_existing": {
+        "type": "boolean",
+        "description": "Replace an existing Microsandbox with the same generated name if one exists.",
+        "category": "workspace",
+        "label": "Microsandbox Replace Existing",
     },
     REPOSITORY_SKILLS_DIR_KEY: {
         "type": "text",

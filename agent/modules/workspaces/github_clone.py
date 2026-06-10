@@ -1,12 +1,4 @@
-"""Helpers that attach a GitHub repository to any workspace backend.
-
-The previous design treated GitHub repositories as a separate workspace kind
-alongside ``local``/``daytona``/``modal`` which forced every GitHub-backed
-task to run on the host filesystem. This module keeps the same business
-semantics for local workspaces but also supports cloning the repository
-inside a Daytona or Modal sandbox so the agent can pick the execution
-backend independently of the source repository.
-"""
+"""Helpers that attach a GitHub repository to any workspace backend."""
 
 from __future__ import annotations
 
@@ -163,17 +155,11 @@ async def attach_github_repository_to_daytona_workspace(
     token: str | None = None,
 ) -> WorkspaceRef:
     """Clone a GitHub repository inside a Daytona sandbox."""
-    from agent.modules.workspaces.service import get_workspace_repository_cloner
-
-    owner, repo = _split_full_name(selection.full_name)
-    cloner = await get_workspace_repository_cloner(workspace)
-    relative_path = await cloner.clone_repository(
-        owner=owner,
-        repo=repo,
-        default_branch=selection.default_branch,
-        token=(token or selection.token or "").strip() or None,
+    return await attach_github_repository_to_sandbox_workspace(
+        workspace,
+        selection,
+        token=token,
     )
-    return _with_github_metadata(workspace, selection, repository_path=relative_path)
 
 
 async def attach_github_repository_to_modal_workspace(
@@ -183,6 +169,20 @@ async def attach_github_repository_to_modal_workspace(
     token: str | None = None,
 ) -> WorkspaceRef:
     """Clone a GitHub repository inside a Modal sandbox."""
+    return await attach_github_repository_to_sandbox_workspace(
+        workspace,
+        selection,
+        token=token,
+    )
+
+
+async def attach_github_repository_to_sandbox_workspace(
+    workspace: WorkspaceRef,
+    selection: GitHubRepositorySelection,
+    *,
+    token: str | None = None,
+) -> WorkspaceRef:
+    """Clone a GitHub repository inside any repository-capable sandbox."""
     from agent.modules.workspaces.service import get_workspace_repository_cloner
 
     owner, repo = _split_full_name(selection.full_name)
@@ -207,7 +207,7 @@ def _with_github_metadata(
     metadata.update(
         _github_workspace_metadata(selection, repository_path=repository_path)
     )
-    if workspace.backend in {"daytona", "modal"}:
+    if workspace.backend != "local":
         metadata["root"] = _join_sandbox_repository_root(
             metadata.get("root"),
             repository_path,
@@ -230,7 +230,7 @@ def _join_sandbox_repository_root(
 ) -> str:
     """Return the sandbox ``root`` updated to live inside the cloned repository.
 
-    For Daytona/Modal sandboxes the repository is cloned at
+    For sandbox backends the repository is cloned at
     ``<sandbox_root>/<repository_path>``. The agent's working directory must
     follow that move so the subprocess cwd sits inside the repository instead
     of at the bare sandbox root.
@@ -292,7 +292,8 @@ async def attach_github_repository_to_workspace(
     """Attach a GitHub repository to any workspace backend.
 
     For local workspaces the repository is cloned to a shared local path.
-    For Daytona/Modal sandboxes the repository is cloned inside the sandbox.
+    For repository-capable sandbox backends the repository is cloned inside
+    the sandbox.
     The returned :class:`WorkspaceRef` keeps the original ``backend`` and
     ``locator`` and stores the GitHub source under ``metadata.source``.
     """
@@ -318,7 +319,11 @@ async def attach_github_repository_to_workspace(
             selection,
             token=token or None,
         )
-    raise ValueError(f"Unsupported workspace backend: {backend}")
+    return await attach_github_repository_to_sandbox_workspace(
+        workspace,
+        selection,
+        token=token or None,
+    )
 
 
 def is_github_workspace(workspace: WorkspaceRef | dict[str, Any] | None) -> bool:
@@ -378,6 +383,7 @@ __all__ = [
     "attach_github_repository_to_local_workspace",
     "attach_github_repository_to_local_workspace_async",
     "attach_github_repository_to_modal_workspace",
+    "attach_github_repository_to_sandbox_workspace",
     "attach_github_repository_to_workspace",
     "is_github_workspace",
     "normalize_github_workspace_ref",

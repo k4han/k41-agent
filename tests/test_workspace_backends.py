@@ -39,6 +39,15 @@ from agent.modules.workspaces.modal_backend import (
     delete_modal_workspace,
     resolve_modal_path,
 )
+from agent.modules.workspaces.microsandbox_backend import (
+    MicrosandboxWorkspaceBackend,
+    attach_microsandbox_workspace,
+    create_microsandbox_workspace,
+    delete_microsandbox_workspace,
+    list_microsandbox_sandboxes,
+    resolve_microsandbox_path,
+    stop_microsandbox_workspace,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -50,9 +59,9 @@ def _clear_workspace_metadata_cache():
 
 @pytest.fixture(autouse=True)
 def _fake_optional_workspace_sdks(monkeypatch):
-    # Tell the lazy integration registry that the optional daytona/modal SDKs
+    # Tell the lazy integration registry that optional workspace SDKs
     # are present so ``load_backend_type`` proceeds to import the
-    # ``daytona_backend`` / ``modal_backend`` modules (which don't import the
+    # backend modules (which don't import the
     # SDKs at module top level). The tests use fakes for the actual SDK calls
     # so the real packages are never exercised. If a future test triggers a
     # real SDK import path it will fail with ``AttributeError`` -- prefer
@@ -60,7 +69,7 @@ def _fake_optional_workspace_sdks(monkeypatch):
     original_find_spec = importlib.util.find_spec
 
     def fake_find_spec(name: str, package: str | None = None):
-        if name in {"daytona", "modal"}:
+        if name in {"daytona", "modal", "microsandbox"}:
             return ModuleSpec(name, loader=None)
         return original_find_spec(name, package)
 
@@ -511,6 +520,234 @@ class FakeUnavailableModalSandbox(FakeModalSandbox):
     exec = _AioWrapper(_exec_impl)  # type: ignore[assignment]
 
 
+class FakeMicrosandboxFs:
+    def __init__(self) -> None:
+        self.files: dict[str, bytes] = {}
+        self.dirs: set[str] = {"/", "/workspace"}
+        self.list_calls = 0
+
+    def make_directory(self, path: str) -> None:
+        current = ""
+        for part in path.split("/"):
+            if not part:
+                current = "/"
+                continue
+            current = f"{current.rstrip('/')}/{part}"
+            self.dirs.add(current)
+
+    async def write(self, path: str, data: bytes | bytearray | memoryview | str) -> None:
+        parent = path.rsplit("/", 1)[0] or "/"
+        self.make_directory(parent)
+        self.files[path] = data.encode("utf-8") if isinstance(data, str) else bytes(data)
+
+    async def read_text(self, path: str) -> str:
+        return self.files[path].decode("utf-8")
+
+    async def read(self, path: str) -> bytes:
+        return self.files[path]
+
+    async def list(self, path: str):
+        self.list_calls += 1
+        prefix = path.rstrip("/") + "/"
+        entries = []
+        seen: set[str] = set()
+        for directory in sorted(self.dirs):
+            if directory == path or not directory.startswith(prefix):
+                continue
+            remainder = directory[len(prefix) :]
+            if "/" in remainder or not remainder:
+                continue
+            seen.add(remainder)
+            entries.append(
+                SimpleNamespace(
+                    name=remainder,
+                    path=directory,
+                    is_dir=True,
+                    size=0,
+                    modified_at="2026-01-01T00:00:00Z",
+                )
+            )
+        for file_path, content in sorted(self.files.items()):
+            if not file_path.startswith(prefix):
+                continue
+            remainder = file_path[len(prefix) :]
+            if "/" in remainder or not remainder or remainder in seen:
+                continue
+            entries.append(
+                SimpleNamespace(
+                    name=remainder,
+                    path=file_path,
+                    is_dir=False,
+                    size=len(content),
+                    modified_at="2026-01-01T00:00:00Z",
+                )
+            )
+        return entries
+
+    async def stat(self, path: str):
+        if path in self.files:
+            return SimpleNamespace(
+                name=path.rsplit("/", 1)[-1],
+                path=path,
+                is_dir=False,
+                size=len(self.files[path]),
+                modified_at="2026-01-01T00:00:00Z",
+            )
+        if path in self.dirs:
+            return SimpleNamespace(
+                name=path.rsplit("/", 1)[-1],
+                path=path,
+                is_dir=True,
+                size=0,
+                modified_at="2026-01-01T00:00:00Z",
+            )
+        raise FileNotFoundError(path)
+
+
+class FakeMicrosandboxExecOutput:
+    def __init__(
+        self,
+        stdout: str = "",
+        *,
+        stderr: str = "",
+        exit_code: int = 0,
+    ) -> None:
+        self.stdout_text = stdout
+        self.stderr_text = stderr
+        self.stdout_bytes = stdout.encode("utf-8")
+        self.stderr_bytes = stderr.encode("utf-8")
+        self.exit_code = exit_code
+
+
+class FakeMicrosandboxSandbox:
+    def __init__(self, *, git_root: str | None = None) -> None:
+        self.fs = FakeMicrosandboxFs()
+        self.git_root = git_root
+        self.git_status_output = ""
+        self.git_diff_output = ""
+        self.git_numstat_output = ""
+        self.commands: list[tuple[str, str | None, float | None]] = []
+        self.detach_calls = 0
+
+    async def shell(
+        self,
+        command: str,
+        *,
+        cwd: str | None = None,
+        timeout: float | None = None,
+    ) -> FakeMicrosandboxExecOutput:
+        self.commands.append((command, cwd, timeout))
+        result = "ok\n"
+        exit_code = 0
+        if command.startswith("command -v git"):
+            result = "/usr/bin/git\n"
+        elif command.startswith("mkdir -p "):
+            self.fs.make_directory(command.split("mkdir -p ", 1)[1].strip("'\""))
+            result = ""
+        elif command.startswith("ls -1 "):
+            target = command.split("ls -1 ", 1)[1].strip("'\"")
+            entries = [item.name for item in await self.fs.list(target)]
+            result = "\n".join(entries) + ("\n" if entries else "")
+        elif command.startswith("find "):
+            result = (
+                "\n".join(sorted(self.fs.files))
+                + ("\n" if self.fs.files else "")
+            )
+        elif command.startswith("git rev-parse --show-toplevel"):
+            if self.git_root is None:
+                result = ""
+                exit_code = 128
+            else:
+                result = f"{self.git_root}\n"
+        elif command.startswith("git -c status.relativePaths=false status"):
+            result = self.git_status_output
+        elif command.startswith("git diff --numstat"):
+            result = self.git_numstat_output
+        elif command.startswith("git diff"):
+            result = self.git_diff_output
+        elif command.startswith("test -e "):
+            target = command.split("test -e ", 1)[1].strip("'\"")
+            exists = target in self.fs.files or target in self.fs.dirs
+            result = ""
+            exit_code = 0 if exists else 1
+        elif command.startswith("mv "):
+            import shlex
+
+            _, source, destination = shlex.split(command)
+            self.fs.files[destination] = self.fs.files.pop(source)
+            result = ""
+        elif command.startswith("if [ -d "):
+            target = command.split("if [ -d ", 1)[1].split(" ];", 1)[0].strip("'\"")
+            if target in self.fs.dirs:
+                result = "directory\n"
+            elif target in self.fs.files:
+                result = "file\n"
+            else:
+                result = ""
+                exit_code = 44
+        elif command.startswith("rm -rf "):
+            target = command.split("rm -rf ", 1)[1].strip("'\"")
+            self.fs.files.pop(target, None)
+            self.fs.dirs.discard(target)
+            result = ""
+        elif command.startswith("cd ") and "git rev-parse --is-inside-work-tree" in command:
+            result = "true\n"
+        elif command.startswith("git clone "):
+            import shlex
+
+            destination = shlex.split(command)[-1]
+            self.fs.make_directory(destination)
+            self.git_root = destination
+            result = ""
+        return FakeMicrosandboxExecOutput(result, exit_code=exit_code)
+
+    async def detach(self) -> None:
+        self.detach_calls += 1
+
+
+class FakeMicrosandboxHandle:
+    def __init__(
+        self,
+        name: str = "msb-1",
+        *,
+        status: str = "running",
+        sandbox: FakeMicrosandboxSandbox | None = None,
+    ) -> None:
+        self.name = name
+        self.status = status
+        self.config_json = json.dumps(
+            {"image": "python:3.13-slim", "workdir": "/workspace"}
+        )
+        self.created_at = 1767225600000
+        self.updated_at = 1767229200000
+        self.sandbox = sandbox or FakeMicrosandboxSandbox()
+        self.start_calls = 0
+        self.stop_calls = 0
+        self.remove_calls = 0
+        self.connect_calls = 0
+
+    async def connect(self, timeout: float | None = None):
+        del timeout
+        self.connect_calls += 1
+        self.status = "running"
+        return self.sandbox
+
+    async def start(self, detached: bool = True):
+        del detached
+        self.start_calls += 1
+        self.status = "running"
+        return self.sandbox
+
+    async def stop(self, timeout: float | None = None):
+        del timeout
+        self.stop_calls += 1
+        self.status = "stopped"
+
+    async def remove(self):
+        self.remove_calls += 1
+        self.status = "removed"
+
+
 def test_workspace_ref_normalizes_local_path(tmp_path):
     workspace = workspace_ref_from_local_path(str(tmp_path), label="repo")
 
@@ -603,6 +840,22 @@ def test_workspace_ref_normalizes_modal_without_resolving_local_path():
     assert workspace.display_label() == "modal:sb-123"
 
 
+def test_workspace_ref_normalizes_microsandbox_without_resolving_local_path():
+    workspace = resolve_workspace_ref(
+        {
+            "backend": "microsandbox",
+            "locator": "msb-123",
+            "metadata": {},
+        }
+    )
+
+    assert workspace.backend == "microsandbox"
+    assert workspace.locator == "msb-123"
+    assert workspace.label == "microsandbox:msb-123"
+    assert workspace.metadata["root"] == "/workspace"
+    assert workspace.display_label() == "microsandbox:msb-123"
+
+
 def test_workspace_ref_from_columns_preserves_daytona_backend():
     workspace = workspace_ref_from_columns(
         backend="daytona",
@@ -627,6 +880,20 @@ def test_workspace_ref_from_columns_preserves_modal_backend():
 
     assert workspace.backend == "modal"
     assert workspace.locator == "sb-123"
+    assert workspace.label == "remote"
+    assert workspace.metadata == {"root": "/repo"}
+
+
+def test_workspace_ref_from_columns_preserves_microsandbox_backend():
+    workspace = workspace_ref_from_columns(
+        backend="microsandbox",
+        locator="msb-123",
+        label="remote",
+        metadata_json='{"root": "/repo"}',
+    )
+
+    assert workspace.backend == "microsandbox"
+    assert workspace.locator == "msb-123"
     assert workspace.label == "remote"
     assert workspace.metadata == {"root": "/repo"}
 
@@ -664,6 +931,28 @@ def test_resolve_modal_path_blocks_remote_root_escape():
         resolve_modal_path("/workspace", "src/../secret.txt")
     with pytest.raises(ValueError, match="Path escapes workspace"):
         resolve_modal_path("/workspace", "/etc/passwd")
+
+
+def test_resolve_microsandbox_path_blocks_remote_root_escape():
+    assert (
+        resolve_microsandbox_path("/workspace", "src/app.py")
+        == "/workspace/src/app.py"
+    )
+    assert (
+        resolve_microsandbox_path("/workspace", "/workspace/src/app.py")
+        == "/workspace/src/app.py"
+    )
+    assert (
+        resolve_microsandbox_path("/", "workspace/src/app.py")
+        == "/workspace/src/app.py"
+    )
+
+    with pytest.raises(ValueError, match="Path escapes workspace"):
+        resolve_microsandbox_path("/workspace", "../secret.txt")
+    with pytest.raises(ValueError, match="Path escapes workspace"):
+        resolve_microsandbox_path("/workspace", "src/../secret.txt")
+    with pytest.raises(ValueError, match="Path escapes workspace"):
+        resolve_microsandbox_path("/workspace", "/etc/passwd")
 
 
 def test_local_workspace_backend_file_operations_and_path_guard(tmp_path):
@@ -731,6 +1020,38 @@ def test_modal_workspace_backend_file_operations_and_path_guard():
             metadata={"root": "/workspace"},
         )
         backend = ModalWorkspaceBackend(workspace, sandbox=sandbox, fs=fs)
+
+        result = await backend.write_text("src/app.py", "print('hello')\n")
+
+        assert result == "[OK] Wrote file: /workspace/src/app.py"
+        assert await backend.read_text("src/app.py") == "print('hello')\n"
+        assert await backend.list_dir("src") == "app.py"
+        tree = await backend.tree()
+        assert tree["root"] == "/workspace"
+        assert tree["entries"][0]["path"] == "/workspace/src"
+        assert (await backend.file("src/app.py"))["content"] == "print('hello')\n"
+        assert (await backend.rename(path="src/app.py", new_name="main.py"))["new_path"] == (
+            "/workspace/src/main.py"
+        )
+        assert (await backend.delete(path="src/main.py"))["kind"] == "file"
+        with pytest.raises(ValueError, match="Path escapes workspace"):
+            await backend.read_text("../secret.txt")
+
+    asyncio.run(_run())
+
+
+def test_microsandbox_workspace_backend_file_operations_and_path_guard():
+    import asyncio
+
+    async def _run():
+        sandbox = FakeMicrosandboxSandbox()
+        workspace = WorkspaceRef(
+            backend="microsandbox",
+            locator="msb-1",
+            label="sandbox",
+            metadata={"root": "/workspace"},
+        )
+        backend = MicrosandboxWorkspaceBackend(workspace, sandbox=sandbox)
 
         result = await backend.write_text("src/app.py", "print('hello')\n")
 
@@ -1073,6 +1394,124 @@ def test_delete_modal_workspace_handles_invalid_sandbox_id(monkeypatch):
         assert await delete_modal_workspace(workspace) == "terminated"
 
     asyncio.run(_run())
+
+
+def test_microsandbox_lifecycle_helpers_stop_delete_and_list(monkeypatch):
+    import asyncio
+
+    handle = FakeMicrosandboxHandle(status="running")
+    captured_names: list[str] = []
+
+    class FakeSandboxApi:
+        @staticmethod
+        async def get(name: str):
+            captured_names.append(name)
+            return handle
+
+        @staticmethod
+        async def list():
+            return [handle]
+
+    monkeypatch.setattr(
+        "agent.modules.workspaces.microsandbox_backend._require_enabled",
+        lambda: {"stop_timeout_seconds": 10},
+    )
+    monkeypatch.setattr(
+        "agent.modules.workspaces.microsandbox_backend.get_microsandbox_module",
+        lambda: SimpleNamespace(Sandbox=FakeSandboxApi),
+    )
+
+    workspace = WorkspaceRef(
+        backend="microsandbox",
+        locator="msb-1",
+        label="sandbox",
+        metadata={"root": "/workspace"},
+    )
+
+    async def _run():
+        stopped = await stop_microsandbox_workspace(workspace)
+        rows = await list_microsandbox_sandboxes()
+        deleted = await delete_microsandbox_workspace(workspace)
+        return stopped, rows, deleted
+
+    stopped, rows, deleted = asyncio.run(_run())
+
+    assert stopped == "stopped"
+    assert deleted == "removed"
+    assert captured_names == ["msb-1", "msb-1"]
+    assert handle.stop_calls == 1
+    assert handle.remove_calls == 1
+    assert workspace.metadata["status"] == "destroyed"
+    assert rows[0]["backend"] == "microsandbox"
+    assert rows[0]["sandbox_id"] == "msb-1"
+    assert rows[0]["root"] == "/workspace"
+
+
+def test_microsandbox_create_and_attach_workspace_helpers(monkeypatch):
+    import asyncio
+
+    created_sandbox = FakeMicrosandboxSandbox()
+    attached_sandbox = FakeMicrosandboxSandbox()
+    create_call: dict[str, Any] = {}
+
+    class FakeSandboxApi:
+        @staticmethod
+        async def create(name: str, **kwargs):
+            create_call["name"] = name
+            create_call["kwargs"] = kwargs
+            return created_sandbox
+
+        @staticmethod
+        async def get(name: str):
+            return FakeMicrosandboxHandle(name=name, sandbox=attached_sandbox)
+
+    monkeypatch.setattr(
+        "agent.modules.workspaces.microsandbox_backend._require_enabled",
+        lambda: {
+            "default_root": "/workspace",
+            "image": "python:3.13-slim",
+            "cpus": 2,
+            "memory": 1024,
+            "max_duration_seconds": 3600,
+            "idle_timeout_seconds": 300,
+            "start_timeout_seconds": 30,
+            "stop_timeout_seconds": 10,
+            "replace_existing": False,
+        },
+    )
+    monkeypatch.setattr(
+        "agent.modules.workspaces.microsandbox_backend.get_microsandbox_module",
+        lambda: SimpleNamespace(Sandbox=FakeSandboxApi),
+    )
+
+    async def _run():
+        created = await create_microsandbox_workspace(label="octo/example")
+        attached = await attach_microsandbox_workspace(
+            "existing",
+            label="attached",
+            root="/repo",
+        )
+        return created, attached
+
+    created, attached = asyncio.run(_run())
+
+    assert create_call["name"].startswith("octo-example-")
+    assert create_call["kwargs"]["image"] == "python:3.13-slim"
+    assert create_call["kwargs"]["cpus"] == 2
+    assert create_call["kwargs"]["memory"] == 1024
+    assert create_call["kwargs"]["workdir"] == "/workspace"
+    assert create_call["kwargs"]["detached"] is True
+    assert create_call["kwargs"]["max_duration"] == 3600.0
+    assert create_call["kwargs"]["idle_timeout"] == 300.0
+    assert created.backend == "microsandbox"
+    assert created.label == "octo/example"
+    assert created.metadata["root"] == "/workspace"
+    assert created_sandbox.detach_calls == 1
+    assert attached.backend == "microsandbox"
+    assert attached.locator == "existing"
+    assert attached.label == "attached"
+    assert attached.metadata["root"] == "/repo"
+    assert attached_sandbox.detach_calls == 1
 
 
 def test_modal_backend_reports_unavailable_sandbox():
@@ -1696,6 +2135,47 @@ def test_modal_workspace_backend_execute_changes_and_untracked_diff():
     ) == 1
 
 
+def test_microsandbox_workspace_backend_execute_changes_and_untracked_diff():
+    import asyncio
+
+    sandbox = FakeMicrosandboxSandbox(git_root="/workspace")
+
+    async def _seed_file():
+        await sandbox.fs.write("/workspace/notes.txt", b"hello\nworld\n")
+
+    asyncio.run(_seed_file())
+    sandbox.git_status_output = "?? notes.txt\0"
+    workspace = WorkspaceRef(
+        backend="microsandbox",
+        locator="msb-1",
+        label="sandbox",
+        metadata={"root": "/workspace"},
+    )
+    backend = MicrosandboxWorkspaceBackend(workspace, sandbox=sandbox)
+
+    async def _run():
+        result = await backend.execute("echo ok", timeout=12)
+        changes = await backend.changes()
+        diff = await backend.diff("/workspace/notes.txt")
+        return result, changes, diff
+
+    result, changes, diff = asyncio.run(_run())
+
+    assert result.output == "ok\n"
+    assert result.exit_code == 0
+    assert ("echo ok", "/workspace", 12.0) in sandbox.commands
+    assert changes["is_git_repo"] is True
+    assert changes["changes"][0]["path"] == "/workspace/notes.txt"
+    assert changes["changes"][0]["status"] == "untracked"
+    assert changes["changes"][0]["additions"] == 2
+    assert "+hello" in diff["diff"]
+    assert "+world" in diff["diff"]
+    assert _count_commands(
+        sandbox.commands,
+        "git -c status.relativePaths=false status",
+    ) == 1
+
+
 def test_modal_workspace_backend_changes_batches_tracked_line_stats():
     import asyncio
 
@@ -1867,6 +2347,34 @@ def test_get_workspace_command_executor_returns_modal_backend(monkeypatch):
     backend = asyncio.run(_run())
 
     assert isinstance(backend, ModalWorkspaceBackend)
+
+
+def test_get_workspace_command_executor_returns_microsandbox_backend(monkeypatch):
+    import asyncio
+
+    sandbox = FakeMicrosandboxSandbox()
+    workspace = WorkspaceRef(
+        backend="microsandbox",
+        locator="msb-1",
+        label="sandbox",
+        metadata={"root": "/workspace"},
+    )
+
+    async def fake_get_microsandbox_sandbox(ref):
+        assert ref == workspace
+        return sandbox
+
+    monkeypatch.setattr(
+        "agent.modules.workspaces.microsandbox_backend.get_microsandbox_sandbox",
+        fake_get_microsandbox_sandbox,
+    )
+
+    async def _run():
+        return await get_workspace_command_executor(workspace)
+
+    backend = asyncio.run(_run())
+
+    assert isinstance(backend, MicrosandboxWorkspaceBackend)
 
 
 def test_local_workspace_tree_uses_absolute_path_keys(tmp_path):

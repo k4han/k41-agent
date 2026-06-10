@@ -1642,7 +1642,11 @@ export function ChatPage() {
                   || !workspaceRef()
                   || !(workspaceRef()?.locator || workingDir()).trim()
                   || !currentThreadId()
-                  || (workspaceLocked() && workspaceRef()?.backend !== "modal")
+                  || (
+                    workspaceLocked()
+                    && workspaceRef()?.backend !== "modal"
+                    && workspaceRef()?.backend !== "microsandbox"
+                  )
                 }
                 onWorkingDirChange={setWorkspace}
               />

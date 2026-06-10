@@ -1,13 +1,6 @@
-"""Helpers for preparing GitHub workspaces across different backends.
-
-This module provides unified workspace preparation for GitHub automation,
-supporting local, Daytona, and Modal backends. It also provides remote
-git operations (commit, push) for non-local backends.
-"""
+"""Helpers for preparing GitHub workspaces across different backends."""
 
 from __future__ import annotations
-
-import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -34,9 +27,9 @@ async def prepare_workspace_for_binding(
 ) -> WorkspaceRef:
     """Prepare a workspace based on the binding's backend choice.
 
-    For local backspaces, uses the existing GitHubWorkspaceManager to clone
-    to the local filesystem. For Daytona/Modal backends, uses the
-    github_clone adapter to clone inside the sandbox.
+    For local workspaces, uses the existing GitHubWorkspaceManager to clone
+    to the local filesystem. For sandbox backends, uses the github_clone
+    adapter to clone inside the sandbox.
 
     When ``existing_branch`` is True, the workspace is prepared by checking
     out the existing branch (for review comment tasks). Otherwise, a new
@@ -118,11 +111,11 @@ async def _prepare_remote_workspace(
     branch: str,
     default_branch: str | None = None,
 ) -> WorkspaceRef:
-    """Clone repository inside a Daytona/Modal sandbox and return WorkspaceRef."""
+    """Clone repository inside a sandbox backend and return WorkspaceRef."""
     from agent.modules.workspaces import (
         GitHubRepositorySelection,
-        attach_github_repository_to_daytona_workspace,
-        attach_github_repository_to_modal_workspace,
+        attach_github_repository_to_sandbox_workspace,
+        create_workspace_backend,
     )
 
     selection = GitHubRepositorySelection(
@@ -133,22 +126,12 @@ async def _prepare_remote_workspace(
         token=token,
     )
 
-    if backend == "daytona":
-        workspace_ref = await _create_daytona_workspace(binding.full_name)
-        ref = await attach_github_repository_to_daytona_workspace(
-            workspace_ref,
-            selection,
-            token=token,
-        )
-    elif backend == "modal":
-        workspace_ref = await _create_modal_workspace(binding.full_name)
-        ref = await attach_github_repository_to_modal_workspace(
-            workspace_ref,
-            selection,
-            token=token,
-        )
-    else:
-        raise ValueError(f"Unsupported remote backend: {backend}")
+    workspace_ref = await create_workspace_backend(backend, label=binding.full_name)
+    ref = await attach_github_repository_to_sandbox_workspace(
+        workspace_ref,
+        selection,
+        token=token,
+    )
 
     metadata = dict(ref.metadata or {})
     metadata["branch"] = branch

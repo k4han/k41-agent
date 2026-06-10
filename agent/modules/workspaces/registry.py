@@ -13,6 +13,7 @@ from agent.shared.integrations import (
 LOCAL_BACKEND = "local"
 DAYTONA_BACKEND = "daytona"
 MODAL_BACKEND = "modal"
+MICROSANDBOX_BACKEND = "microsandbox"
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +119,57 @@ BUILTIN_WORKSPACE_BACKEND_DESCRIPTORS = (
         attach_loader="agent.modules.workspaces.modal_backend:attach_modal_workspace",
         delete_loader="agent.modules.workspaces.modal_backend:delete_modal_workspace",
         inventory_loader="agent.modules.workspaces.modal_backend:list_modal_cloud_sandboxes",
+    ),
+    WorkspaceBackendDescriptor(
+        kind="workspace_backend",
+        name=MICROSANDBOX_BACKEND,
+        title="Microsandbox",
+        summary="Run workspaces in local Microsandbox microVMs.",
+        config_prefix="workspace.microsandbox",
+        loader=(
+            "agent.modules.workspaces.microsandbox_backend:"
+            "MicrosandboxWorkspaceBackend"
+        ),
+        capabilities=frozenset(
+            {
+                "file_io",
+                "commands",
+                "browser",
+                "changes",
+                "repository_clone",
+                "lifecycle",
+                "sandbox_inventory",
+            }
+        ),
+        dependency_imports=("microsandbox",),
+        install_extra="sandbox-microsandbox",
+        supports_sandbox_inventory=True,
+        supports_lifecycle=True,
+        supports_repository_clone=True,
+        backend_factory_loader=(
+            "agent.modules.workspaces.microsandbox_backend:"
+            "create_microsandbox_backend"
+        ),
+        create_loader=(
+            "agent.modules.workspaces.microsandbox_backend:"
+            "create_microsandbox_workspace"
+        ),
+        attach_loader=(
+            "agent.modules.workspaces.microsandbox_backend:"
+            "attach_microsandbox_workspace"
+        ),
+        delete_loader=(
+            "agent.modules.workspaces.microsandbox_backend:"
+            "delete_microsandbox_workspace"
+        ),
+        stop_loader=(
+            "agent.modules.workspaces.microsandbox_backend:"
+            "stop_microsandbox_workspace"
+        ),
+        inventory_loader=(
+            "agent.modules.workspaces.microsandbox_backend:"
+            "list_microsandbox_sandboxes"
+        ),
     ),
 )
 
@@ -234,6 +286,7 @@ __all__ = [
     "BUILTIN_WORKSPACE_BACKEND_DESCRIPTORS",
     "DAYTONA_BACKEND",
     "LOCAL_BACKEND",
+    "MICROSANDBOX_BACKEND",
     "MODAL_BACKEND",
     "WorkspaceBackendDescriptor",
     "WorkspaceBackendRegistry",

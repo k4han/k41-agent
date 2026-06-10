@@ -57,6 +57,11 @@
   color: #8b5cf6;
 }
 
+.backend-brand-icon[data-brand="microsandbox"] {
+  background: color-mix(in srgb, #0ea5e9 14%, var(--surface));
+  color: #0ea5e9;
+}
+
 .backend-card-title {
   display: grid;
   min-width: 0;

@@ -166,7 +166,7 @@ async def bash(
                 force=force,
                 scope_id=scope_id,
             )
-        elif workspace.backend == "modal":
+        elif workspace.backend != "local":
             res = await modal_session_manager.execute_command(
                 session_id=session_id,
                 command=command,

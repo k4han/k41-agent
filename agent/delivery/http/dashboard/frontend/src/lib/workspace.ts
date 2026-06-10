@@ -168,10 +168,10 @@ export function resolveWorkspaceWorkingDir(
   /*
    * Return the on-disk path the workspace backend uses as its cwd.
    *
-   * For Daytona/Modal sandboxes the locator is a sandbox ID and is not a
-   * usable filesystem path. Prefer metadata.root (which is updated to live
-   * inside a cloned repository when a GitHub repo is attached) so the value
-   * shown to the user matches the actual subprocess cwd.
+   * For sandbox backends the locator is a sandbox ID and is not a usable
+   * filesystem path. Prefer metadata.root (which is updated to live inside a
+   * cloned repository when a GitHub repo is attached) so the value shown to
+   * the user matches the actual subprocess cwd.
    */
   if (!workspace) {
     return "";

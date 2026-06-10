@@ -72,12 +72,12 @@ class WorkflowContext:
     def get_working_dir(self) -> str:
         """Get working directory from context.
 
-        For Daytona/Modal sandboxes the ``locator`` is a sandbox ID and is not
-        a usable filesystem path. Prefer ``metadata["root"]`` so the value
-        reflects the actual cwd used by the workspace backend (which may sit
-        inside a cloned repository).
+        For sandbox backends the ``locator`` is a sandbox ID and is not a usable
+        filesystem path. Prefer ``metadata["root"]`` so the value reflects the
+        actual cwd used by the workspace backend (which may sit inside a cloned
+        repository).
         """
-        if self.workspace.backend in {"daytona", "modal"}:
+        if self.workspace.backend != "local":
             root = str(self.workspace.metadata.get("root") or "").strip()
             if root:
                 return root

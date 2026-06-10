@@ -199,7 +199,9 @@ class GitHubRepositoryStore:
             )
             binding.branch_prefix = branch_prefix.strip() or "k41"
             normalized_backend = (workspace_backend or "local").strip().lower()
-            if normalized_backend not in ("local", "daytona", "modal"):
+            from agent.modules.workspaces import get_workspace_backend_registry
+
+            if normalized_backend not in get_workspace_backend_registry().names():
                 normalized_backend = "local"
             binding.workspace_backend = normalized_backend
             await session.commit()

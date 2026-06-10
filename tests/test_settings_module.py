@@ -375,6 +375,9 @@ class TestDatabaseConfigSource:
         assert is_database_runtime_key("workspace.modal.token_id")
         assert is_database_runtime_key("workspace.modal.token_secret")
         assert is_database_runtime_key("workspace.modal.default_root")
+        assert is_database_runtime_key("workspace.microsandbox.enabled")
+        assert is_database_runtime_key("workspace.microsandbox.default_root")
+        assert is_database_runtime_key("workspace.microsandbox.image")
         assert not is_database_runtime_key("database.url")
 
 
@@ -537,6 +540,10 @@ class TestRuntimeKeyMetadata:
         assert is_runtime_key("workspace.modal.token_id")
         assert is_runtime_key("workspace.modal.token_secret")
         assert is_runtime_key("workspace.modal.default_root")
+        assert is_runtime_key("workspace.microsandbox.enabled")
+        assert is_runtime_key("workspace.microsandbox.default_root")
+        assert is_runtime_key("workspace.microsandbox.image")
+        assert is_runtime_key("workspace.microsandbox.cpus")
         assert is_runtime_key("workspace.root")
         assert not is_runtime_key("llm.providers.openai-main.random_field")
 
@@ -586,6 +593,17 @@ class TestRuntimeKeyMetadata:
         assert token_meta["category"] == "workspace"
         assert enabled_meta["type"] == "boolean"
         assert image_meta["type"] == "text"
+
+    def test_microsandbox_setting_metadata(self) -> None:
+        enabled_meta = get_setting_metadata("workspace.microsandbox.enabled")
+        image_meta = get_setting_metadata("workspace.microsandbox.image")
+        cpus_meta = get_setting_metadata("workspace.microsandbox.cpus")
+
+        assert enabled_meta["type"] == "boolean"
+        assert enabled_meta["category"] == "workspace"
+        assert image_meta["type"] == "text"
+        assert cpus_meta["type"] == "number"
+        assert cpus_meta["min"] == 1
 
 
 # =====================================================================

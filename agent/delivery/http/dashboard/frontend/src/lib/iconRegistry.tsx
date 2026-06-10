@@ -1,4 +1,4 @@
-import { CloudCog, Cpu } from "lucide-solid";
+import { Box, CloudCog, Cpu } from "lucide-solid";
 import type { JSX } from "solid-js";
 
 function TelegramIcon() {
@@ -55,6 +55,10 @@ function ModalIcon() {
   return <Cpu size={20} />;
 }
 
+function MicrosandboxIcon() {
+  return <Box size={20} />;
+}
+
 function FallbackChannelIcon() {
   return <DiscordIcon />;
 }
@@ -72,6 +76,7 @@ const BACKEND_BRAND_ICONS: Record<string, () => JSX.Element> = {
   local: LocalIcon,
   daytona: DaytonaIcon,
   modal: ModalIcon,
+  microsandbox: MicrosandboxIcon,
 };
 
 export function getChannelIcon(name: string): () => JSX.Element {

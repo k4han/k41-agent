@@ -168,6 +168,42 @@ const BACKEND_DEFS_BY_NAME: Record<string, BackendDefinition> = {
       },
     ],
   },
+  microsandbox: {
+    name: "microsandbox",
+    title: "Microsandbox",
+    summary: "Local microVM workspaces powered by Microsandbox.",
+    tagline: "MicroVM sandbox",
+    toggleable: true,
+    configuredPredicate: () => true,
+    sections: [
+      {
+        id: "runtime",
+        title: "Runtime",
+        subtitle: "MicroVM defaults for new workspaces",
+        fields: [ENABLED_SUFFIX, "default_root", "image"],
+      },
+      {
+        id: "resources",
+        title: "Resources",
+        subtitle: "CPU and memory allocation",
+        fields: ["cpus", "memory"],
+        defaultCollapsed: true,
+      },
+      {
+        id: "lifecycle",
+        title: "Lifecycle",
+        subtitle: "Timeouts and replacement policy",
+        fields: [
+          "max_duration_seconds",
+          "idle_timeout_seconds",
+          "start_timeout_seconds",
+          "stop_timeout_seconds",
+          "replace_existing",
+        ],
+        defaultCollapsed: true,
+      },
+    ],
+  },
 };
 
 function settingKey(backend: string, suffix: string): string {

@@ -23,6 +23,7 @@ from agent.modules.workspaces import (
     get_workspace_entry_mutator,
     is_github_workspace,
     list_workspace_directories,
+    MICROSANDBOX_BACKEND,
     MODAL_BACKEND,
     remember_thread_workspace_ref,
     resolve_workspace_ref,
@@ -77,6 +78,64 @@ async def attach_modal_workspace(
         label=label,
         root=root,
     )
+
+
+async def create_microsandbox_workspace(*, label: str | None = None) -> WorkspaceRef:
+    return await create_workspace_backend(MICROSANDBOX_BACKEND, label=label)
+
+
+async def attach_microsandbox_workspace(
+    sandbox_id: str,
+    *,
+    label: str | None = None,
+    root: str | None = None,
+) -> WorkspaceRef:
+    return await attach_workspace_backend(
+        MICROSANDBOX_BACKEND,
+        sandbox_id,
+        label=label,
+        root=root,
+    )
+
+
+async def _create_sandbox_workspace(
+    backend: str,
+    *,
+    label: str | None = None,
+) -> WorkspaceRef:
+    if backend == DAYTONA_BACKEND:
+        if label is None:
+            return await create_daytona_workspace()
+        return await create_daytona_workspace(label=label)
+    if backend == MODAL_BACKEND:
+        if label is None:
+            return await create_modal_workspace()
+        return await create_modal_workspace(label=label)
+    if backend == MICROSANDBOX_BACKEND:
+        if label is None:
+            return await create_microsandbox_workspace()
+        return await create_microsandbox_workspace(label=label)
+    return await create_workspace_backend(backend, label=label)
+
+
+async def _attach_sandbox_workspace(
+    backend: str,
+    sandbox_id: str,
+    *,
+    label: str | None = None,
+    root: str | None = None,
+) -> WorkspaceRef:
+    if backend == DAYTONA_BACKEND:
+        return await attach_daytona_workspace(sandbox_id, label=label, root=root)
+    if backend == MODAL_BACKEND:
+        return await attach_modal_workspace(sandbox_id, label=label, root=root)
+    if backend == MICROSANDBOX_BACKEND:
+        return await attach_microsandbox_workspace(
+            sandbox_id,
+            label=label,
+            root=root,
+        )
+    return await attach_workspace_backend(backend, sandbox_id, label=label, root=root)
 
 
 def _workspace_metadata_root(workspace: WorkspaceRef | None) -> str | None:
@@ -272,18 +331,8 @@ async def resolve_dashboard_workspace(body: WorkspaceResolveBody) -> dict[str, A
             if repository_id is None:
                 raise ValueError("Repository ID is required.")
             backend = _resolve_backend(body, kind)
-            if backend == "daytona":
-                workspace = await _resolve_github_in_sandbox(
-                    body,
-                    backend=backend,
-                    repository_id=repository_id,
-                )
-                return await _remember_and_respond(
-                    body=body,
-                    workspace=workspace,
-                    kind=backend,
-                )
-            if backend == "modal":
+            descriptor = get_workspace_backend_registry().require(backend)
+            if backend != "local" and descriptor.supports_repository_clone:
                 workspace = await _resolve_github_in_sandbox(
                     body,
                     backend=backend,
@@ -330,16 +379,18 @@ async def resolve_dashboard_workspace(body: WorkspaceResolveBody) -> dict[str, A
                 "label": workspace.label,
                 "workspace": workspace.model_dump(),
             }
-        if kind == "daytona":
+        descriptor = get_workspace_backend_registry().descriptor(kind)
+        if (
+            descriptor is not None
+            and kind != "local"
+            and (descriptor.create_loader or descriptor.attach_loader)
+        ):
             sandbox_id = body.locator or (body.workspace.locator if body.workspace else "")
             if sandbox_id and sandbox_id.strip():
                 root = _workspace_metadata_root(body.workspace)
-                workspace = await attach_daytona_workspace(
-                    sandbox_id,
-                    root=root,
-                )
+                workspace = await _attach_sandbox_workspace(kind, sandbox_id, root=root)
             else:
-                workspace = await create_daytona_workspace()
+                workspace = await _create_sandbox_workspace(kind)
             if repository_id is not None:
                 workspace = await attach_github_repository_to_workspace(
                     workspace,
@@ -348,29 +399,7 @@ async def resolve_dashboard_workspace(body: WorkspaceResolveBody) -> dict[str, A
             if body.thread_id and body.thread_id.strip():
                 workspace = await remember_thread_workspace_ref(body.thread_id, workspace)
             return {
-                "kind": "daytona",
-                "label": workspace.label,
-                "workspace": workspace.model_dump(),
-            }
-        if kind == "modal":
-            sandbox_id = body.locator or (body.workspace.locator if body.workspace else "")
-            if sandbox_id and sandbox_id.strip():
-                root = _workspace_metadata_root(body.workspace)
-                workspace = await attach_modal_workspace(
-                    sandbox_id,
-                    root=root,
-                )
-            else:
-                workspace = await create_modal_workspace()
-            if repository_id is not None:
-                workspace = await attach_github_repository_to_workspace(
-                    workspace,
-                    repository_id=repository_id,
-                )
-            if body.thread_id and body.thread_id.strip():
-                workspace = await remember_thread_workspace_ref(body.thread_id, workspace)
-            return {
-                "kind": "modal",
+                "kind": kind,
                 "label": workspace.label,
                 "workspace": workspace.model_dump(),
             }
@@ -388,28 +417,15 @@ async def _resolve_github_in_sandbox(
     repository_id: int,
 ) -> WorkspaceRef:
     """Create or attach a sandbox then clone a GitHub repository inside it."""
-    if backend == "daytona":
-        sandbox_id = body.locator or (body.workspace.locator if body.workspace else "")
-        if sandbox_id and sandbox_id.strip():
-            root = _workspace_metadata_root(body.workspace)
-            workspace = await attach_daytona_workspace(
-                sandbox_id,
-                root=root,
-            )
-        else:
-            workspace = await create_daytona_workspace()
-    elif backend == "modal":
-        sandbox_id = body.locator or (body.workspace.locator if body.workspace else "")
-        if sandbox_id and sandbox_id.strip():
-            root = _workspace_metadata_root(body.workspace)
-            workspace = await attach_modal_workspace(
-                sandbox_id,
-                root=root,
-            )
-        else:
-            workspace = await create_modal_workspace()
-    else:
+    descriptor = get_workspace_backend_registry().descriptor(backend)
+    if descriptor is None or backend == "local" or not descriptor.supports_repository_clone:
         raise ValueError(f"Unsupported sandbox backend: {backend}")
+    sandbox_id = body.locator or (body.workspace.locator if body.workspace else "")
+    if sandbox_id and sandbox_id.strip():
+        root = _workspace_metadata_root(body.workspace)
+        workspace = await _attach_sandbox_workspace(backend, sandbox_id, root=root)
+    else:
+        workspace = await _create_sandbox_workspace(backend)
     return await attach_github_repository_to_workspace(
         workspace,
         repository_id=repository_id,

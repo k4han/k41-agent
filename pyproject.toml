@@ -56,6 +56,9 @@ sandbox-daytona = [
 sandbox-modal = [
     "modal>=1.4.0",
 ]
+sandbox-microsandbox = [
+    "microsandbox>=0.5.6",
+]
 channels = [
     "aiogram>=3.26.0",
     "discord.py>=2.4.0",
@@ -63,12 +66,14 @@ channels = [
 sandboxes = [
     "daytona==0.183.0",
     "modal>=1.4.0",
+    "microsandbox>=0.5.6",
 ]
 integrations = [
     "aiogram>=3.26.0",
     "discord.py>=2.4.0",
     "daytona==0.183.0",
     "modal>=1.4.0",
+    "microsandbox>=0.5.6",
 ]
 
 [project.scripts]

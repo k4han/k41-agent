@@ -99,6 +99,14 @@
   color: #1f8a70;
 }
 
+.sandboxes-filter-chip-microsandbox.active {
+  color: #0ea5e9;
+}
+
+.sandboxes-filter-chip-microsandbox.active .sandboxes-filter-icon {
+  color: #0ea5e9;
+}
+
 .sandboxes-toggle {
   display: inline-flex;
   align-items: center;
@@ -277,6 +285,11 @@
 .sandbox-backend-icon[data-brand="modal"] {
   background: color-mix(in srgb, #1f8a70 14%, var(--surface));
   color: #1f8a70;
+}
+
+.sandbox-backend-icon[data-brand="microsandbox"] {
+  background: color-mix(in srgb, #0ea5e9 14%, var(--surface));
+  color: #0ea5e9;
 }
 
 .sandbox-backend-name {

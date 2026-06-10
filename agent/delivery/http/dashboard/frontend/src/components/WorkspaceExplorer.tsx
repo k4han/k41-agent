@@ -226,7 +226,7 @@ export function WorkspaceExplorer(props: {
   const [deleteTarget, setDeleteTarget] = createSignal<WorkspaceTreeEntry | null>(null);
   const [deleting, setDeleting] = createSignal(false);
   const [workspaceRoot, setWorkspaceRoot] = createSignal("");
-  const [reconnectingModal, setReconnectingModal] = createSignal(false);
+  const [reconnectingSandbox, setReconnectingSandbox] = createSignal(false);
   let generation = 0;
 
   const effectiveWorkspace = createMemo(() => props.workspace || localWorkspaceRef(props.workingDir));
@@ -426,10 +426,10 @@ export function WorkspaceExplorer(props: {
 
   const reconnectSandboxWorkspace = async () => {
     const ws = effectiveWorkspace();
-    if (props.disabled || reconnectingModal() || !ws || !isSandboxBackend(ws.backend)) {
+    if (props.disabled || reconnectingSandbox() || !ws || !isSandboxBackend(ws.backend)) {
       return;
     }
-    setReconnectingModal(true);
+    setReconnectingSandbox(true);
     try {
       const payload = await postJson<WorkspaceResolvePayload>(
         "/dashboard-api/workspace/resolve",
@@ -460,7 +460,7 @@ export function WorkspaceExplorer(props: {
     } catch (err) {
       showToast(err instanceof Error ? err.message : `Failed to reconnect ${ws.backend} workspace`, "error");
     } finally {
-      setReconnectingModal(false);
+      setReconnectingSandbox(false);
     }
   };
 

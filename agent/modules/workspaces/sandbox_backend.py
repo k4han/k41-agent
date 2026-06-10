@@ -1,4 +1,4 @@
-"""Abstract base class for cloud sandbox backends (Daytona, Modal)."""
+"""Abstract base class for POSIX-style sandbox backends."""
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 
 class SandboxBackendBase(ABC):
-    """Shared implementation for cloud sandbox backends.
+    """Shared implementation for POSIX-style sandbox backends.
 
     Subclasses **must** implement the abstract methods that touch the
     remote sandbox (``_exec``, ``_read_file_bytes``, ``_write_file_bytes``,
@@ -58,7 +58,7 @@ class SandboxBackendBase(ABC):
     # ------------------------------------------------------------------ #
 
     def __init__(self, ref: WorkspaceRef) -> None:
-        if ref.backend not in {"daytona", "modal"}:
+        if ref.backend == "local":
             raise ValueError(f"Unsupported sandbox backend: {ref.backend}")
         self.ref = ref
         self.root: str = ""

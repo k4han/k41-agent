@@ -240,6 +240,53 @@ async def test_bash_routes_modal_workspace_to_modal_manager(monkeypatch):
     assert captured["scope_id"] == "thread-1"
 
 
+@pytest.mark.asyncio
+async def test_bash_routes_microsandbox_workspace_to_sandbox_manager(monkeypatch):
+    import agent.modules.tools.builtin.shell.session_tools as session_tools_module
+
+    captured = {}
+
+    class FakeSandboxSessionManager:
+        sessions = {}
+
+        async def execute_command(self, **kwargs):
+            captured.update(kwargs)
+            return {"status": "completed", "output": "remote", "stderr": ""}
+
+        def has_session(self, session_id, scope_id=None):
+            return False
+
+    monkeypatch.setattr(
+        session_tools_module.session_manager,
+        "execute_command",
+        lambda **kwargs: pytest.fail("local session manager should not be used"),
+    )
+    monkeypatch.setattr(
+        session_tools_module,
+        "modal_session_manager",
+        FakeSandboxSessionManager(),
+    )
+    runtime = SimpleNamespace(
+        context={
+            "workspace": {
+                "backend": "microsandbox",
+                "locator": "msb-1",
+                "label": "sandbox",
+                "metadata": {"root": "/workspace"},
+            },
+        },
+        config={"configurable": {"thread_id": "thread-1"}},
+    )
+
+    result = await bash.coroutine(command="pwd", runtime=runtime, timeout=2)
+
+    assert result == "STDOUT:\nremote"
+    assert captured["command"] == "pwd"
+    assert captured["workspace"].backend == "microsandbox"
+    assert captured["workspace"].locator == "msb-1"
+    assert captured["scope_id"] == "thread-1"
+
+
 def test_daytona_session_manager_passes_root_thread_id_to_backend(monkeypatch):
     import agent.modules.tools.builtin.shell.daytona_session_manager as module
 

@@ -50,7 +50,7 @@ type RepositoryDraft = {
   allowed_tools: string[];
   allowed_skills: string[];
   branch_prefix: string;
-  workspace_backend: "local" | "daytona" | "modal";
+  workspace_backend: WorkspaceBackendKey;
 };
 
 type RepositoryTab = "overview" | "automation" | "optimization" | "activity";

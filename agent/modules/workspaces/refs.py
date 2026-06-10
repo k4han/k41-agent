@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 DEFAULT_LOCAL_WORKSPACE = str(Path.home() / "k41-agent")
 
 
-# ``str`` (rather than ``Literal["local", "daytona", "modal"]``) so plugin
+# ``str`` (rather than a Literal of built-in backends) so plugin
 # backends registered through the registry don't require updating this alias.
 # Validation happens at runtime via ``is_registered_workspace_backend``.
 WorkspaceBackendName = str
@@ -25,7 +25,7 @@ class WorkspaceRef(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     def display_label(self) -> str:
-        if self.backend in {"daytona", "modal"}:
+        if self.backend != "local":
             repository = str(
                 self.metadata.get("repository_full_name") or ""
             ).strip()
@@ -141,8 +141,7 @@ def normalize_workspace_ref(
     if backend != "local":
         locator = raw_locator.strip()
         if not locator:
-            backend_label = "Daytona" if backend == "daytona" else "Modal"
-            raise ValueError(f"{backend_label} sandbox ID is required.")
+            raise ValueError(f"{backend.title()} sandbox ID is required.")
         normalized_metadata = dict(metadata)
         default_root = "workspace" if backend == "daytona" else "/workspace"
         root = (

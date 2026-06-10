@@ -78,6 +78,7 @@ const TERMINAL_STATUSES: ReadonlyArray<SandboxStatus> = [
 
 const SANDBOX_BACKEND_CAPABILITIES: Partial<Record<SandboxBackendKey, { supportsStop: boolean; supportsArchive: boolean }>> = {
   daytona: { supportsStop: true, supportsArchive: true },
+  microsandbox: { supportsStop: true, supportsArchive: false },
 };
 
 function sandboxSupportsStop(backend: SandboxBackendKey): boolean {
@@ -490,9 +491,9 @@ export function SandboxesPage() {
                                 when={includeAll()}
                                 fallback={
                                   <>
-                                    Attach a Daytona or Modal sandbox to a chat
-                                    thread, or toggle <strong>Show all on cloud</strong>
-                                    {" "}to scan the cloud provider.
+                                    Attach a sandbox to a chat thread, or toggle{" "}
+                                    <strong>Show all on cloud</strong> to scan
+                                    the provider.
                                   </>
                                 }
                               >
@@ -676,7 +677,7 @@ function SandboxRowView(props: {
               type="button"
               disabled={stopBusy()}
               onClick={() => props.onStop(props.row)}
-              title="Stop the sandbox (Daytona only)"
+              title="Stop the sandbox"
             >
               <CircleStop size={12} />
               {stopBusy() ? "Stopping…" : "Stop"}
@@ -688,7 +689,7 @@ function SandboxRowView(props: {
               type="button"
               disabled={archiveBusy()}
               onClick={() => props.onArchive(props.row)}
-              title="Archive the sandbox (Daytona only)"
+              title="Archive the sandbox"
             >
               <Archive size={12} />
               {archiveBusy() ? "Archiving…" : "Archive"}

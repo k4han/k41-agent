@@ -191,6 +191,8 @@ class TestDashboardSettingsEndpoints:
         assert "workspace.daytona.enabled" in data["settings"]
         assert "workspace.modal.enabled" in data["settings"]
         assert "workspace.modal.token_secret" in data["settings"]
+        assert "workspace.microsandbox.enabled" in data["settings"]
+        assert "workspace.microsandbox.image" in data["settings"]
         assert "workspace" in data["by_category"]
 
     def test_get_channels_api_includes_channel_settings(

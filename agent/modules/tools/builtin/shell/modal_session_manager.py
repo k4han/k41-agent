@@ -1,4 +1,4 @@
-"""Modal-backed shell command execution."""
+"""Sandbox-backed non-persistent shell command execution."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from agent.modules.workspaces import WorkspaceRef, get_workspace_command_executo
 
 
 class ModalCommandSessionManager:
-    """Executes shell commands in Modal sandboxes without persistent PTY state."""
+    """Executes shell commands in sandboxes without persistent PTY state."""
 
     def __init__(self) -> None:
         self.sessions: Dict[str, Any] = {}
@@ -53,7 +53,7 @@ class ModalCommandSessionManager:
         if run_in_background:
             return {
                 "error": (
-                    "Modal shell execution does not support background sessions yet."
+                    "Sandbox shell execution does not support background sessions yet."
                 ),
             }
         try:
