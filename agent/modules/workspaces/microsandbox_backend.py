@@ -321,7 +321,6 @@ async def create_microsandbox_workspace(*, label: str | None = None) -> Workspac
         "image": cfg["image"],
         "cpus": cfg["cpus"],
         "memory": cfg["memory"],
-        "workdir": cfg["default_root"],
         "detached": True,
         "replace": cfg["replace_existing"],
     }
