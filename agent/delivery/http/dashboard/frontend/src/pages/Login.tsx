@@ -6,7 +6,7 @@ import { readError } from "@/lib/api";
 const DEFAULT_ADMIN_PASSWORD = "1234";
 
 export function LoginPage() {
-  const [password, setPassword] = createSignal(DEFAULT_ADMIN_PASSWORD);
+  const [password, setPassword] = createSignal("");
   const [error, setError] = createSignal("");
   const [loading, setLoading] = createSignal(false);
 
