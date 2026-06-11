@@ -214,8 +214,8 @@ class UsageService:
     async def get_thread_usage(self, thread_id: str) -> dict[str, Any]:
         return await self._repository.aggregate_by_thread(thread_id)
 
-    async def get_workspace_usage(self, backend: str, locator: str) -> dict[str, Any]:
-        return await self._repository.aggregate_by_workspace(backend, locator)
+    async def get_workspace_usage(self, key: str) -> dict[str, Any]:
+        return await self._repository.aggregate_by_workspace(key)
 
 
 _service: UsageService | None = None

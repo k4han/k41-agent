@@ -163,7 +163,8 @@ function repoOwner(fullName: string): string {
 }
 
 function taskRepository(task: BackgroundTask): string {
-  const value = task.workspace?.metadata?.repository_full_name;
+  const value = task.workspace?.scope.metadata?.repository_full_name
+    ?? task.workspace?.execution.metadata?.repository_full_name;
   return typeof value === "string" ? value : "";
 }
 

@@ -843,9 +843,14 @@ async def test_usage_repository_aggregates_by_workspace(usage_db) -> None:
         session.add(
             ThreadWorkspace(
                 thread_id="workspace_thread_1",
-                workspace_backend="local",
-                workspace_locator="/path/to/project_a",
-                workspace_label="Project A",
+                scope_key="local:/path/to/project_a",
+                scope_kind="local",
+                scope_label="Project A",
+                scope_metadata_json="{}",
+                execution_backend="local",
+                execution_locator="/path/to/project_a",
+                execution_label="Project A",
+                execution_metadata_json="{}",
                 created_at=now,
                 updated_at=now,
             )
@@ -853,9 +858,14 @@ async def test_usage_repository_aggregates_by_workspace(usage_db) -> None:
         session.add(
             ThreadWorkspace(
                 thread_id="workspace_thread_2",
-                workspace_backend="local",
-                workspace_locator="/path/to/project_a",
-                workspace_label="Project A",
+                scope_key="local:/path/to/project_a",
+                scope_kind="local",
+                scope_label="Project A",
+                scope_metadata_json="{}",
+                execution_backend="local",
+                execution_locator="/path/to/project_a",
+                execution_label="Project A",
+                execution_metadata_json="{}",
                 created_at=now,
                 updated_at=now,
             )
@@ -863,9 +873,14 @@ async def test_usage_repository_aggregates_by_workspace(usage_db) -> None:
         session.add(
             ThreadWorkspace(
                 thread_id="workspace_thread_3",
-                workspace_backend="local",
-                workspace_locator="/path/to/project_b",
-                workspace_label="Project B",
+                scope_key="local:/path/to/project_b",
+                scope_kind="local",
+                scope_label="Project B",
+                scope_metadata_json="{}",
+                execution_backend="local",
+                execution_locator="/path/to/project_b",
+                execution_label="Project B",
+                execution_metadata_json="{}",
                 created_at=now,
                 updated_at=now,
             )
@@ -933,9 +948,8 @@ async def test_usage_repository_aggregates_by_workspace(usage_db) -> None:
         )
     )
 
-    data = await repository.aggregate_by_workspace("local", "/path/to/project_a")
-    assert data["backend"] == "local"
-    assert data["locator"] == "/path/to/project_a"
+    data = await repository.aggregate_by_workspace("local:/path/to/project_a")
+    assert data["key"] == "local:/path/to/project_a"
     assert data["total_tokens"] == 4500
     assert data["input_tokens"] == 3000
     assert data["output_tokens"] == 1500

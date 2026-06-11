@@ -3,7 +3,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 from agent.modules.tools import HumanResumePayload, PlanResumePayload
-from agent.modules.workspaces import WorkspaceRef
+from agent.modules.workspaces import WorkspaceBinding, WorkspaceRef
 
 
 class ChatAttachment(BaseModel):
@@ -26,7 +26,7 @@ class ChatRequest(BaseModel):
     new_thread: bool = Field(default=False, description="Force creation of a new conversation thread.")
     checkpoint_id: Optional[str] = Field(default=None, description="Specific checkpoint to resume from within a thread.")
     workflow: Optional[str] = Field(default=None, description="Workflow/graph name to use. Defaults to the agent's default workflow.")
-    workspace: Optional[WorkspaceRef] = Field(default=None, description="Workspace reference for file operations. Required for dashboard chats.")
+    workspace: Optional[WorkspaceRef | WorkspaceBinding] = Field(default=None, description="Workspace reference for file operations. Required for dashboard chats.")
     agent_name: Optional[str] = Field(default=None, description="Agent card name to use. Defaults to 'default'.")
     provider: Optional[str] = Field(default=None, description="LLM provider name override.")
     model: Optional[str] = Field(default=None, description="LLM model name override.")
@@ -122,7 +122,7 @@ class EditChatRequest(BaseModel):
     message_index: int = Field(..., ge=0, description="Index of the message to edit within the thread.")
     source_checkpoint_id: str = Field(..., min_length=1, description="Checkpoint ID to fork from.")
     workflow: Optional[str] = Field(default=None, description="Workflow/graph name to use.")
-    workspace: Optional[WorkspaceRef] = Field(default=None, description="Workspace reference for file operations.")
+    workspace: Optional[WorkspaceRef | WorkspaceBinding] = Field(default=None, description="Workspace reference for file operations.")
     agent_name: Optional[str] = Field(default=None, description="Agent card name. Defaults to 'default'.")
     provider: Optional[str] = Field(default=None, description="LLM provider name override.")
     model: Optional[str] = Field(default=None, description="LLM model name override.")

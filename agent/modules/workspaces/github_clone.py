@@ -327,6 +327,8 @@ def is_github_workspace(workspace: WorkspaceRef | dict[str, Any] | None) -> bool
     if isinstance(workspace, WorkspaceRef):
         return str(workspace.metadata.get("source") or "").strip().lower() == "github"
     if isinstance(workspace, dict):
+        if isinstance(workspace.get("execution"), dict):
+            return is_github_workspace(workspace["execution"])
         metadata = workspace.get("metadata") or {}
         if not isinstance(metadata, dict):
             return False
@@ -348,7 +350,8 @@ def normalize_github_workspace_ref(
     if not is_github_workspace(workspace) and not is_github_workspace(ref):
         return ref
     if isinstance(workspace, dict):
-        original_metadata = workspace.get("metadata") or {}
+        source_payload = workspace.get("execution") if isinstance(workspace.get("execution"), dict) else workspace
+        original_metadata = source_payload.get("metadata") or {}
     elif isinstance(workspace, WorkspaceRef):
         original_metadata = dict(workspace.metadata or {})
     else:

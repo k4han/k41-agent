@@ -14,6 +14,7 @@ from agent.modules.workspaces import (
     UnsupportedWorkspaceCapabilityError,
     WorkspaceRef,
     WorkspaceUnavailableError,
+    derive_workspace_scope,
     get_workspace_command_executor,
     get_workspace_file_io,
     get_workspace_lifecycle_manager,
@@ -569,6 +570,69 @@ def test_workspace_ref_normalizes_model_instances(tmp_path):
     assert workspace.locator == str(tmp_path.resolve())
     assert workspace.label == "repo"
     assert workspace.metadata == {"source": "ui"}
+
+
+def test_derive_workspace_scope_groups_github_repository_across_sandboxes():
+    daytona = WorkspaceRef(
+        backend="daytona",
+        locator="sandbox-a",
+        label="acme/widgets",
+        metadata={
+            "source": "github",
+            "repository_id": 42,
+            "repository_full_name": "acme/widgets",
+            "root": "/workspace/widgets",
+        },
+    )
+    modal = WorkspaceRef(
+        backend="modal",
+        locator="sandbox-b",
+        label="acme/widgets",
+        metadata={
+            "source": "github",
+            "repository_id": 42,
+            "repository_full_name": "acme/widgets",
+            "root": "/workspace/widgets",
+        },
+    )
+
+    assert derive_workspace_scope(daytona).key == "github:42"
+    assert derive_workspace_scope(modal).key == "github:42"
+    assert derive_workspace_scope(daytona).label == "acme/widgets"
+
+
+def test_derive_workspace_scope_falls_back_to_github_full_name():
+    workspace = WorkspaceRef(
+        backend="daytona",
+        locator="sandbox-a",
+        label="acme/widgets",
+        metadata={"source": "github", "repository_full_name": "Acme/Widgets"},
+    )
+
+    assert derive_workspace_scope(workspace).key == "github:acme/widgets"
+
+
+def test_derive_workspace_scope_for_local_path(tmp_path):
+    workspace = workspace_ref_from_local_path(str(tmp_path), label=str(tmp_path))
+
+    scope = derive_workspace_scope(workspace)
+
+    assert scope.key == f"local:{tmp_path.resolve()}"
+    assert scope.kind == "local"
+
+
+def test_derive_workspace_scope_for_plain_sandbox():
+    workspace = WorkspaceRef(
+        backend="modal",
+        locator="sandbox-a",
+        label="modal:sandbox-a",
+        metadata={"root": "/workspace"},
+    )
+
+    scope = derive_workspace_scope(workspace)
+
+    assert scope.key == "sandbox:modal:sandbox-a"
+    assert scope.kind == "sandbox"
 
 
 def test_workspace_ref_normalizes_daytona_without_resolving_local_path():
@@ -1722,7 +1786,7 @@ def test_modal_workspace_backend_changes_batches_tracked_line_stats():
     assert _count_commands(sandbox.commands, "git diff --numstat") == 2
 
 
-def test_workspace_migration_backfills_legacy_tables(tmp_path):
+def test_workspace_migration_resets_legacy_workspace_mappings(tmp_path):
     db_path = tmp_path / "legacy.db"
     database_url = f"sqlite:///{db_path.as_posix()}"
     engine = create_engine(database_url)
@@ -1774,29 +1838,23 @@ def test_workspace_migration_backfills_legacy_tables(tmp_path):
         with engine.connect() as conn:
             row = conn.execute(
                 text(
-                    "SELECT workspace_backend, workspace_locator, "
-                    "workspace_label, workspace_metadata_json "
+                    "SELECT COUNT(*) AS count "
                     "FROM thread_workspaces WHERE thread_id = 'thread-1'"
                 )
             ).one()
             task_row = conn.execute(
                 text(
-                    "SELECT workspace_backend, workspace_locator, "
-                    "workspace_label, workspace_metadata_json "
+                    "SELECT scope_key, execution_locator, workspace_locator "
                     "FROM background_tasks WHERE thread_id = 'task-1'"
                 )
             ).one()
     finally:
         engine.dispose()
 
-    assert row.workspace_backend == "local"
-    assert row.workspace_locator == str(tmp_path)
-    assert row.workspace_label == str(tmp_path)
-    assert json.loads(row.workspace_metadata_json) == {}
-    assert task_row.workspace_backend == "local"
-    assert task_row.workspace_locator == str(tmp_path / "task")
-    assert task_row.workspace_label == str(tmp_path / "task")
-    assert json.loads(task_row.workspace_metadata_json) == {}
+    assert row.count == 0
+    assert task_row.scope_key is None
+    assert task_row.execution_locator is None
+    assert task_row.workspace_locator is None
 
 
 def test_get_workspace_file_io_returns_physical_local_backend(tmp_path):

@@ -2,6 +2,7 @@ import type { TranscriptAttachment } from "@/components/Transcript";
 import type {
   BackgroundTask,
   ActiveSession,
+  WorkspaceBinding,
   WorkspaceRef,
 } from "@/types";
 import type { ThreadMessagesPayload } from "@/lib/chatThreads";
@@ -31,7 +32,7 @@ export type ChatPayload = {
   message: string;
   user_id: string;
   agent_name: string;
-  workspace?: WorkspaceRef;
+  workspace?: WorkspaceRef | WorkspaceBinding;
   provider?: string;
   model?: string;
   thread_id?: string;
@@ -62,13 +63,13 @@ export type BackgroundTaskSnapshot = ThreadMessagesPayload & {
 // ── Workspace ──
 
 export type DefaultWorkspacePayload = {
-  workspace: WorkspaceRef;
+  workspace: WorkspaceBinding;
 };
 
 export type WorkspaceResolvePayload = {
   kind: string;
   label: string;
-  workspace: WorkspaceRef;
+  workspace: WorkspaceBinding;
 };
 
 export type WorkspaceBrowseEntry = {

@@ -153,10 +153,14 @@ async def get_thread_usage(thread_id: str) -> dict[str, Any]:
 
 @router.get("/dashboard-api/usage/workspace")
 async def get_workspace_usage(
+    key: str = Query(default=""),
     backend: str = Query(default="local"),
     locator: str = Query(default=""),
 ) -> dict[str, Any]:
-    return await get_usage_service().get_workspace_usage(backend, locator)
+    scope_key = key.strip()
+    if not scope_key:
+        scope_key = f"local:{locator}" if backend == "local" else f"sandbox:{backend}:{locator}"
+    return await get_usage_service().get_workspace_usage(scope_key)
 
 
 __all__ = ["router"]

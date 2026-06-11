@@ -29,7 +29,7 @@ from agent.modules.github.workspace_helpers import (
     remote_has_changes,
     remote_push_branch,
 )
-from agent.modules.workspaces import WorkspaceRef, workspace_ref_from_local_path
+from agent.modules.workspaces import WorkspaceRef, resolve_workspace_ref, workspace_ref_from_local_path
 
 logger = logging.getLogger(__name__)
 
@@ -258,7 +258,7 @@ class GitHubAutomationService:
             raise KeyError(f"GitHub repository '{repository_id}' is not synced.")
 
         workspace_payload = await self.resolve_repository_workspace(repository_id)
-        workspace = WorkspaceRef(**workspace_payload["workspace"])
+        workspace = resolve_workspace_ref(workspace_payload["workspace"])
         agent_name = resolve_catalog_agent_name(
             binding.agent_name,
             self.settings.default_agent,

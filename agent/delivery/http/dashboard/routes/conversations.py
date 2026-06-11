@@ -37,6 +37,7 @@ from agent.modules.conversations import (
 )
 from agent.modules.tools import close_thread_shell_sessions
 from agent.modules.workspaces import (
+    bind_workspace_ref,
     delete_thread_workspace,
     get_thread_workspace_refs,
     resolve_workspace_ref,
@@ -65,10 +66,11 @@ def _workspace_summary(workspace: Any | None) -> dict[str, Any]:
             "workspace_key": NO_WORKSPACE_KEY,
             "workspace_label": NO_WORKSPACE_LABEL,
         }
+    binding = bind_workspace_ref(workspace)
     return {
-        "workspace": workspace.model_dump(),
-        "workspace_key": f"{workspace.backend}:{workspace.locator}",
-        "workspace_label": workspace.display_label(),
+        "workspace": binding.model_dump(),
+        "workspace_key": binding.scope.key,
+        "workspace_label": binding.scope.label,
     }
 
 

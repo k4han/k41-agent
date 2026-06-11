@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from agent.modules.workspaces import WorkspaceRef
+from agent.modules.workspaces import WorkspaceBinding, WorkspaceRef
 from agent.delivery.http.dashboard.routes.helpers.workspace import (
     workspace_http_error,
     workspace_ref_from_request,
@@ -15,6 +15,7 @@ from agent.modules.github import get_github_automation_service
 from agent.modules.workspaces import (
     attach_github_repository_to_workspace,
     attach_workspace_backend,
+    bind_workspace_ref,
     create_workspace_backend,
     DAYTONA_BACKEND,
     ensure_workspace_directory,
@@ -88,7 +89,7 @@ def _workspace_metadata_root(workspace: WorkspaceRef | None) -> str | None:
 @router.get("/dashboard-api/workspace/default")
 async def get_dashboard_default_workspace() -> dict[str, Any]:
     """Get the default workspace reference (typically the local working directory)."""
-    return {"workspace": resolve_workspace_ref(None).model_dump()}
+    return {"workspace": bind_workspace_ref(resolve_workspace_ref(None)).model_dump()}
 
 
 @router.get("/dashboard-api/workspace/browse")
@@ -213,7 +214,7 @@ class WorkspaceRenameBody(BaseModel):
     """Request body for renaming a file or directory in the workspace."""
 
     thread_id: str | None = Field(default=None, description="Thread ID to resolve workspace from.")
-    workspace: WorkspaceRef | None = Field(default=None, description="Workspace reference.")
+    workspace: WorkspaceRef | WorkspaceBinding | None = Field(default=None, description="Workspace reference.")
     path: str = Field(..., min_length=1, description="Current path of the file or directory to rename.")
     new_name: str = Field(..., min_length=1, description="New name for the file or directory.")
 
@@ -243,7 +244,7 @@ class WorkspaceDeleteBody(BaseModel):
     """Request body for deleting a file or directory in the workspace."""
 
     thread_id: str | None = Field(default=None, description="Thread ID to resolve workspace from.")
-    workspace: WorkspaceRef | None = Field(default=None, description="Workspace reference.")
+    workspace: WorkspaceRef | WorkspaceBinding | None = Field(default=None, description="Workspace reference.")
     path: str = Field(..., min_length=1, description="Path of the file or directory to delete.")
 
 
@@ -252,7 +253,7 @@ class WorkspaceResolveBody(BaseModel):
 
     kind: str | None = Field(default=None, description="Workspace kind hint (e.g. 'github', 'local').")
     backend: str | None = Field(default=None, description="Explicit backend name ('local', 'daytona', 'modal').")
-    workspace: WorkspaceRef | None = Field(default=None, description="Existing workspace reference.")
+    workspace: WorkspaceRef | WorkspaceBinding | None = Field(default=None, description="Existing workspace reference.")
     locator: str | None = Field(default=None, description="Backend-specific locator (e.g. sandbox ID).")
     repository_id: int | None = Field(default=None, description="GitHub repository ID to attach.")
     thread_id: str | None = Field(default=None, description="Thread ID to remember the resolved workspace for.")
@@ -268,8 +269,10 @@ def _resolve_backend(body: WorkspaceResolveBody, kind: str) -> str:
     known_backends = set(get_workspace_backend_registry().names())
     if body.backend and body.backend.strip().lower() in known_backends:
         return body.backend.strip().lower()
-    if body.workspace and body.workspace.backend in known_backends:
-        return body.workspace.backend
+    if body.workspace:
+        ref = resolve_workspace_ref(body.workspace)
+        if ref.backend in known_backends:
+            return ref.backend
     if kind in known_backends:
         return kind
     return "local"
@@ -278,7 +281,9 @@ def _resolve_backend(body: WorkspaceResolveBody, kind: str) -> str:
 @router.post("/dashboard-api/workspace/resolve")
 async def resolve_dashboard_workspace(request: Request, body: WorkspaceResolveBody) -> dict[str, Any]:
     """Resolve a workspace from the given inputs. Supports local, GitHub, Daytona, and Modal backends."""
-    kind_source = body.kind or (body.workspace.backend if body.workspace else "local")
+    kind_source = body.kind or (
+        resolve_workspace_ref(body.workspace).backend if body.workspace else "local"
+    )
     kind = kind_source.strip().lower()
     repository_id = body.repository_id
     try:
@@ -311,12 +316,18 @@ async def resolve_dashboard_workspace(request: Request, body: WorkspaceResolveBo
             result = await get_github_automation_service(request).resolve_repository_workspace(
                 repository_id,
             )
-            if body.thread_id and body.thread_id.strip():
-                payload = result.get("workspace")
-                if payload:
-                    workspace = await remember_thread_workspace_ref(body.thread_id, payload)
-                    result["workspace"] = workspace.model_dump()
-                    result["label"] = workspace.label
+            payload = result.get("workspace")
+            if payload:
+                if body.thread_id and body.thread_id.strip():
+                    workspace = await remember_thread_workspace_ref(
+                        body.thread_id,
+                        payload,
+                    )
+                else:
+                    workspace = resolve_workspace_ref(payload)
+                binding = bind_workspace_ref(workspace)
+                result["workspace"] = binding.model_dump()
+                result["label"] = binding.scope.label
             return result
         if kind == "local":
             ref = resolve_workspace_ref(
@@ -339,15 +350,17 @@ async def resolve_dashboard_workspace(request: Request, body: WorkspaceResolveBo
                 )
             if body.thread_id and body.thread_id.strip():
                 workspace = await remember_thread_workspace_ref(body.thread_id, workspace)
+            binding = bind_workspace_ref(workspace)
             return {
                 "kind": "local",
-                "label": workspace.label,
-                "workspace": workspace.model_dump(),
+                "label": binding.scope.label,
+                "workspace": binding.model_dump(),
             }
         if kind == "daytona":
-            sandbox_id = body.locator or (body.workspace.locator if body.workspace else "")
+            body_ref = resolve_workspace_ref(body.workspace) if body.workspace else None
+            sandbox_id = body.locator or (body_ref.locator if body_ref else "")
             if sandbox_id and sandbox_id.strip():
-                root = _workspace_metadata_root(body.workspace)
+                root = _workspace_metadata_root(body_ref)
                 workspace = await attach_daytona_workspace(
                     sandbox_id,
                     root=root,
@@ -361,15 +374,17 @@ async def resolve_dashboard_workspace(request: Request, body: WorkspaceResolveBo
                 )
             if body.thread_id and body.thread_id.strip():
                 workspace = await remember_thread_workspace_ref(body.thread_id, workspace)
+            binding = bind_workspace_ref(workspace)
             return {
                 "kind": "daytona",
-                "label": workspace.label,
-                "workspace": workspace.model_dump(),
+                "label": binding.scope.label,
+                "workspace": binding.model_dump(),
             }
         if kind == "modal":
-            sandbox_id = body.locator or (body.workspace.locator if body.workspace else "")
+            body_ref = resolve_workspace_ref(body.workspace) if body.workspace else None
+            sandbox_id = body.locator or (body_ref.locator if body_ref else "")
             if sandbox_id and sandbox_id.strip():
-                root = _workspace_metadata_root(body.workspace)
+                root = _workspace_metadata_root(body_ref)
                 workspace = await attach_modal_workspace(
                     sandbox_id,
                     root=root,
@@ -383,10 +398,11 @@ async def resolve_dashboard_workspace(request: Request, body: WorkspaceResolveBo
                 )
             if body.thread_id and body.thread_id.strip():
                 workspace = await remember_thread_workspace_ref(body.thread_id, workspace)
+            binding = bind_workspace_ref(workspace)
             return {
                 "kind": "modal",
-                "label": workspace.label,
-                "workspace": workspace.model_dump(),
+                "label": binding.scope.label,
+                "workspace": binding.model_dump(),
             }
         raise ValueError(f"Unsupported workspace kind: {body.kind}")
     except KeyError as exc:
@@ -403,9 +419,10 @@ async def _resolve_github_in_sandbox(
 ) -> WorkspaceRef:
     """Create or attach a sandbox then clone a GitHub repository inside it."""
     if backend == "daytona":
-        sandbox_id = body.locator or (body.workspace.locator if body.workspace else "")
+        body_ref = resolve_workspace_ref(body.workspace) if body.workspace else None
+        sandbox_id = body.locator or (body_ref.locator if body_ref else "")
         if sandbox_id and sandbox_id.strip():
-            root = _workspace_metadata_root(body.workspace)
+            root = _workspace_metadata_root(body_ref)
             workspace = await attach_daytona_workspace(
                 sandbox_id,
                 root=root,
@@ -413,9 +430,10 @@ async def _resolve_github_in_sandbox(
         else:
             workspace = await create_daytona_workspace()
     elif backend == "modal":
-        sandbox_id = body.locator or (body.workspace.locator if body.workspace else "")
+        body_ref = resolve_workspace_ref(body.workspace) if body.workspace else None
+        sandbox_id = body.locator or (body_ref.locator if body_ref else "")
         if sandbox_id and sandbox_id.strip():
-            root = _workspace_metadata_root(body.workspace)
+            root = _workspace_metadata_root(body_ref)
             workspace = await attach_modal_workspace(
                 sandbox_id,
                 root=root,
@@ -438,10 +456,11 @@ async def _remember_and_respond(
 ) -> dict[str, Any]:
     if body.thread_id and body.thread_id.strip():
         workspace = await remember_thread_workspace_ref(body.thread_id, workspace)
-    payload = workspace.model_dump()
+    binding = bind_workspace_ref(workspace)
+    payload = binding.model_dump()
     return {
         "kind": kind,
-        "label": workspace.display_label() or workspace.label,
+        "label": binding.scope.label,
         "workspace": payload,
         "is_github_source": is_github_workspace(payload),
     }

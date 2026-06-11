@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 from sqlalchemy import create_engine, inspect, text
 
 from agent.shared.infrastructure.db.engine import _normalize_url_to_sync
@@ -11,6 +9,17 @@ WORKSPACE_COLUMNS: dict[str, str] = {
     "workspace_locator": "TEXT",
     "workspace_label": "TEXT",
     "workspace_metadata_json": "TEXT",
+}
+
+WORKSPACE_IDENTITY_COLUMNS: dict[str, str] = {
+    "scope_key": "TEXT",
+    "scope_kind": "VARCHAR(50)",
+    "scope_label": "TEXT",
+    "scope_metadata_json": "TEXT",
+    "execution_backend": "VARCHAR(50)",
+    "execution_locator": "TEXT",
+    "execution_label": "TEXT",
+    "execution_metadata_json": "TEXT",
 }
 
 # Columns that only the background_tasks table needs (tool/skill whitelists).
@@ -45,33 +54,27 @@ def _ensure_columns(conn, inspector, table_name: str, columns: dict[str, str]) -
             _add_column(conn, table_name, column_name, column_type)
 
 
-def _backfill_workspace_columns(conn, table_name: str, metadata_default: str) -> None:
+def _delete_legacy_thread_workspaces(conn) -> None:
     conn.execute(
         text(
-            f"UPDATE {table_name} "
-            "SET workspace_backend = COALESCE(NULLIF(workspace_backend, ''), 'local'), "
-            "workspace_locator = COALESCE(NULLIF(workspace_locator, ''), working_dir), "
-            "workspace_label = COALESCE(NULLIF(workspace_label, ''), working_dir), "
-            "workspace_metadata_json = COALESCE(NULLIF(workspace_metadata_json, ''), :metadata) "
-            "WHERE working_dir IS NOT NULL "
-            "AND (workspace_locator IS NULL OR workspace_locator = '' "
-            "OR workspace_backend IS NULL OR workspace_backend = '' "
-            "OR workspace_label IS NULL OR workspace_label = '' "
-            "OR workspace_metadata_json IS NULL OR workspace_metadata_json = '')"
-        ),
-        {"metadata": metadata_default},
+            "DELETE FROM thread_workspaces "
+            "WHERE execution_locator IS NULL "
+            "AND (working_dir IS NOT NULL "
+            "OR workspace_locator IS NOT NULL "
+            "OR workspace_backend IS NOT NULL)"
+        )
     )
 
 
 def migrate_workspace_tables(database_url: str) -> None:
-    """Add workspace ref columns and backfill legacy local path columns."""
+    """Add workspace identity columns and reset legacy thread workspace mappings."""
     engine = create_engine(_normalize_url_to_sync(database_url), echo=False)
-    metadata_default = json.dumps({})
     try:
         with engine.begin() as conn:
             inspector = inspect(conn)
             for table_name in _TABLES_WITH_WORKSPACE_COLUMNS:
                 _ensure_columns(conn, inspector, table_name, WORKSPACE_COLUMNS)
+                _ensure_columns(conn, inspector, table_name, WORKSPACE_IDENTITY_COLUMNS)
 
             inspector = inspect(conn)
             if _has_table(inspector, "background_tasks"):
@@ -83,12 +86,8 @@ def migrate_workspace_tables(database_url: str) -> None:
                 )
 
             inspector = inspect(conn)
-            for table_name in _TABLES_WITH_WORKSPACE_COLUMNS:
-                if not _has_table(inspector, table_name):
-                    continue
-                if "working_dir" not in _column_names(inspector, table_name):
-                    continue
-                _backfill_workspace_columns(conn, table_name, metadata_default)
+            if _has_table(inspector, "thread_workspaces"):
+                _delete_legacy_thread_workspaces(conn)
     finally:
         engine.dispose()
 

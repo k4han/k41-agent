@@ -18,6 +18,7 @@ from agent.delivery.http.dashboard.router import router as dashboard_router
 from agent.delivery.http.dashboard.spa import STATIC_DIR
 from agent.modules.admin_auth import get_current_admin
 from agent.modules.channels import ChannelManager
+from agent.modules.workspaces import bind_workspace_ref
 
 _DASHBOARD_ROUTE_MODULES = (
     "agent.delivery.http.dashboard.routes.helpers.deps",
@@ -308,7 +309,7 @@ def test_dashboard_workspace_default_returns_absolute_path() -> None:
     response = client.get("/dashboard-api/workspace/default")
 
     assert response.status_code == 200
-    assert Path(response.json()["workspace"]["locator"]).is_absolute()
+    assert Path(response.json()["workspace"]["execution"]["locator"]).is_absolute()
 
 
 def test_dashboard_workspace_resolve_accepts_existing_local_path(tmp_path: Path) -> None:
@@ -320,15 +321,15 @@ def test_dashboard_workspace_resolve_accepts_existing_local_path(tmp_path: Path)
     )
 
     assert response.status_code == 200
-    assert response.json() == {
-        "kind": "local",
+    payload = response.json()
+    assert payload["kind"] == "local"
+    assert payload["workspace"]["scope"]["key"] == f"local:{tmp_path.resolve()}"
+    assert payload["workspace"]["scope"]["kind"] == "local"
+    assert payload["workspace"]["execution"] == {
+        "backend": "local",
+        "locator": str(tmp_path.resolve()),
         "label": str(tmp_path.resolve()),
-        "workspace": {
-            "backend": "local",
-            "locator": str(tmp_path.resolve()),
-            "label": str(tmp_path.resolve()),
-            "metadata": {},
-        },
+        "metadata": {},
     }
 
 
@@ -371,7 +372,7 @@ def test_dashboard_workspace_resolve_creates_daytona_workspace(
     assert response.json() == {
         "kind": "daytona",
         "label": "daytona:sandbox-new",
-        "workspace": workspace.model_dump(),
+        "workspace": bind_workspace_ref(workspace).model_dump(),
     }
 
 
@@ -413,8 +414,8 @@ def test_dashboard_workspace_resolve_attaches_daytona_workspace(
 
     assert response.status_code == 200
     assert calls == {"sandbox_id": "sandbox-existing", "root": "custom-root", "label": None}
-    assert response.json()["workspace"]["locator"] == "sandbox-existing"
-    assert response.json()["workspace"]["metadata"]["root"] == "custom-root"
+    assert response.json()["workspace"]["execution"]["locator"] == "sandbox-existing"
+    assert response.json()["workspace"]["execution"]["metadata"]["root"] == "custom-root"
 
 
 def test_dashboard_workspace_resolve_daytona_reports_missing_api_key(
@@ -462,7 +463,7 @@ def test_dashboard_workspace_resolve_creates_modal_workspace(
     assert response.json() == {
         "kind": "modal",
         "label": "modal:sb-new",
-        "workspace": workspace.model_dump(),
+        "workspace": bind_workspace_ref(workspace).model_dump(),
     }
 
 
@@ -504,8 +505,8 @@ def test_dashboard_workspace_resolve_attaches_modal_workspace(
 
     assert response.status_code == 200
     assert calls == {"sandbox_id": "sb-existing", "root": "/repo", "label": None}
-    assert response.json()["workspace"]["locator"] == "sb-existing"
-    assert response.json()["workspace"]["metadata"]["root"] == "/repo"
+    assert response.json()["workspace"]["execution"]["locator"] == "sb-existing"
+    assert response.json()["workspace"]["execution"]["metadata"]["root"] == "/repo"
 
 
 def test_dashboard_workspace_resolve_modal_reports_disabled_backend(
@@ -581,7 +582,7 @@ def test_dashboard_workspace_resolve_uses_github_service(
     )
 
     assert response.status_code == 200
-    assert response.json()["workspace"]["locator"] == str(tmp_path)
+    assert response.json()["workspace"]["execution"]["locator"] == str(tmp_path.resolve())
 
 
 def test_dashboard_workspace_resolve_github_daytona_clones_inside_sandbox(
@@ -650,8 +651,9 @@ def test_dashboard_workspace_resolve_github_daytona_clones_inside_sandbox(
     assert payload["kind"] == "daytona"
     assert payload["label"] == "acme/widgets"
     assert payload["is_github_source"] is True
-    assert payload["workspace"]["metadata"]["source"] == "github"
-    assert payload["workspace"]["metadata"]["repository_full_name"] == "acme/widgets"
+    assert payload["workspace"]["scope"]["key"] == "github:88"
+    assert payload["workspace"]["execution"]["metadata"]["source"] == "github"
+    assert payload["workspace"]["execution"]["metadata"]["repository_full_name"] == "acme/widgets"
     assert remember_calls == [("thread-1", attached)]
 
 
@@ -717,7 +719,8 @@ def test_dashboard_workspace_resolve_github_modal_clones_inside_sandbox(
     assert payload["kind"] == "modal"
     assert payload["label"] == "acme/widgets"
     assert payload["is_github_source"] is True
-    assert payload["workspace"]["locator"] == "sb-mod-1"
+    assert payload["workspace"]["scope"]["key"] == "github:89"
+    assert payload["workspace"]["execution"]["locator"] == "sb-mod-1"
 
 
 def test_dashboard_workspace_resolve_github_attaches_existing_daytona_sandbox(
@@ -785,7 +788,8 @@ def test_dashboard_workspace_resolve_github_attaches_existing_daytona_sandbox(
 
     assert response.status_code == 200
     assert calls == {"sandbox_id": "sb-existing", "root": "custom-root"}
-    assert response.json()["workspace"]["locator"] == "sb-existing"
+    assert response.json()["workspace"]["scope"]["key"] == "github:90"
+    assert response.json()["workspace"]["execution"]["locator"] == "sb-existing"
     assert response.json()["is_github_source"] is True
 
 
@@ -843,7 +847,8 @@ def test_dashboard_workspace_resolve_daytona_with_repository_id(
     )
 
     assert response.status_code == 200
-    assert response.json()["workspace"]["metadata"]["source"] == "github"
+    assert response.json()["workspace"]["scope"]["key"] == "github:91"
+    assert response.json()["workspace"]["execution"]["metadata"]["source"] == "github"
 
 
 def test_dashboard_workspace_resolve_modal_with_repository_id(
@@ -900,7 +905,8 @@ def test_dashboard_workspace_resolve_modal_with_repository_id(
     )
 
     assert response.status_code == 200
-    assert response.json()["workspace"]["metadata"]["source"] == "github"
+    assert response.json()["workspace"]["scope"]["key"] == "github:92"
+    assert response.json()["workspace"]["execution"]["metadata"]["source"] == "github"
 
 
 def test_dashboard_workspace_resolve_github_requires_repository_id(
@@ -1285,7 +1291,8 @@ def test_dashboard_chat_history_returns_workspace_metadata(
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["threads"][0]["workspace"] == workspace.model_dump()
+    binding = bind_workspace_ref(workspace)
+    assert payload["threads"][0]["workspace"] == binding.model_dump()
     assert payload["threads"][0]["workspace_key"] == f"local:{workspace.locator}"
     assert payload["threads"][0]["workspace_label"] == workspace.display_label()
     assert payload["threads"][1]["kind"] == "background"
@@ -1303,7 +1310,7 @@ def test_dashboard_chat_history_uses_background_task_workspace_fallback(
         {
             **_workspace_payload(tmp_path),
             "label": "octo/example",
-            "metadata": {"source": "github"},
+            "metadata": {"source": "github", "repository_full_name": "octo/example"},
         }
     )
     threads = [
@@ -1343,8 +1350,9 @@ def test_dashboard_chat_history_uses_background_task_workspace_fallback(
 
     assert response.status_code == 200
     thread = response.json()["threads"][0]
-    assert thread["workspace"] == workspace.model_dump()
-    assert thread["workspace_key"] == f"local:{workspace.locator}"
+    binding = bind_workspace_ref(workspace)
+    assert thread["workspace"] == binding.model_dump()
+    assert thread["workspace_key"] == "github:octo/example"
     assert thread["workspace_label"] == "octo/example"
 
 

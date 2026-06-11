@@ -557,7 +557,7 @@ function WorkspaceUsageTable(props: { list: WorkspaceUsageDetail[]; displayTimez
       </div>
       <DashboardTable
         columns={[
-          { header: "Workspace Directory", style: "width: 30%;" },
+          { header: "Workspace", style: "width: 30%;" },
           { header: "Threads", style: "width: 10%;" },
           { header: "Calls", style: "width: 10%;" },
           { header: "Total Tokens", style: "width: 15%;" },
@@ -573,8 +573,8 @@ function WorkspaceUsageTable(props: { list: WorkspaceUsageDetail[]; displayTimez
           <tr>
             <td>
               <div style="font-weight: 600; color: #fff;">{row.label}</div>
-              <div class="mono hint" style="font-size: 10px; color: #888; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 280px;" title={row.locator}>
-                {row.backend}:{row.locator}
+              <div class="mono hint" style="font-size: 10px; color: #888; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 280px;" title={row.key}>
+                {row.key}
               </div>
             </td>
             <td>{formatNumber(row.thread_count)}</td>

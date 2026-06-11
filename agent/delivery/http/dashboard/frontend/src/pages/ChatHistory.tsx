@@ -34,7 +34,7 @@ export function ChatHistoryListPage() {
 
   const workspaceGroups = createMemo(() => {
     return groupThreadsByWorkspace(data()?.threads || []).map((group) => {
-      const isRepo = group.threads.some((t) => t.workspace?.metadata?.repository_full_name);
+      const isRepo = group.threads.some((t) => t.workspace?.scope.kind === "github");
       return {
         ...group,
         isRepo,

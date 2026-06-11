@@ -235,18 +235,32 @@ export function isSandboxBackend(backend: string): boolean {
   return backend !== "local";
 }
 
-export type WorkspaceRef = {
+export type WorkspaceExecutionRef = {
   backend: WorkspaceBackendKey;
   locator: string;
   label: string;
   metadata: Record<string, unknown>;
 };
 
+export type WorkspaceRef = WorkspaceExecutionRef;
+
+export type WorkspaceScope = {
+  key: string;
+  kind: "github" | "local" | "sandbox" | string;
+  label: string;
+  metadata: Record<string, unknown>;
+};
+
+export type WorkspaceBinding = {
+  scope: WorkspaceScope;
+  execution: WorkspaceExecutionRef;
+};
+
 export type BackgroundTask = {
   task_id: string;
   request: string;
   agent_name: string;
-  workspace: WorkspaceRef | null;
+  workspace: WorkspaceBinding | null;
   status: string;
   result: string;
   error: string;
@@ -442,9 +456,10 @@ export type UsageFilterOption = {
 };
 
 export interface WorkspaceUsageDetail {
-  backend: string;
-  locator: string;
+  key: string;
+  kind: string;
   label: string;
+  metadata: Record<string, unknown>;
   thread_count: number;
   event_count: number;
   input_tokens: number;
@@ -717,8 +732,7 @@ export interface ThreadUsagePayload {
 }
 
 export interface WorkspaceUsagePayload {
-  backend: string;
-  locator: string;
+  key: string;
   total_tokens: number;
   input_tokens: number;
   output_tokens: number;

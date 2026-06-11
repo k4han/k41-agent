@@ -65,6 +65,8 @@ def _thread_workspace_payload(record: dict[str, Any]) -> dict[str, Any] | None:
         return None
     if not isinstance(workspace, dict):
         return None
+    if isinstance(workspace.get("execution"), dict):
+        workspace = workspace["execution"]
     if not workspace.get("backend") or not workspace.get("locator"):
         return None
     return workspace

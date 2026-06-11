@@ -8,7 +8,9 @@ from sqlalchemy import Engine, create_engine, select
 
 from agent.modules.workspaces.models import ThreadWorkspace
 from agent.modules.workspaces.refs import (
+    WorkspaceBinding,
     WorkspaceRef,
+    bind_workspace_ref,
     normalize_workspace_ref,
     workspace_ref_from_columns,
 )
@@ -25,28 +27,32 @@ def _trim(value: str | None, max_length: int) -> str:
 
 
 def serialize_thread_workspace(record: ThreadWorkspace) -> dict[str, Any]:
-    workspace = _workspace_from_record(record)
+    workspace = _binding_from_record(record)
     return {
         "thread_id": record.thread_id,
-        "workspace": workspace.model_dump(),
+        "workspace": workspace.model_dump() if workspace else None,
         "created_at": record.created_at.isoformat() if record.created_at else None,
         "updated_at": record.updated_at.isoformat() if record.updated_at else None,
     }
 
 
-def _workspace_from_record(record: ThreadWorkspace) -> WorkspaceRef:
-    from agent.shared.config.service import get_config_service
-
-    default_locator = str(
-        get_config_service().get_path("workspace.root", "~/k41-agent")
-    )
-    locator = record.workspace_locator or record.working_dir or default_locator
+def _execution_from_record(record: ThreadWorkspace) -> WorkspaceRef | None:
+    locator = record.execution_locator
+    if not locator:
+        return None
     return workspace_ref_from_columns(
-        backend=record.workspace_backend,
+        backend=record.execution_backend,
         locator=locator,
-        label=record.workspace_label,
-        metadata_json=record.workspace_metadata_json,
+        label=record.execution_label,
+        metadata_json=record.execution_metadata_json,
     )
+
+
+def _binding_from_record(record: ThreadWorkspace) -> WorkspaceBinding | None:
+    execution = _execution_from_record(record)
+    if execution is None:
+        return None
+    return bind_workspace_ref(execution)
 
 
 class ThreadWorkspaceRepository:
@@ -67,6 +73,7 @@ class ThreadWorkspaceRepository:
             workspace,
             default_locator=default_locator,
         )
+        binding = bind_workspace_ref(workspace_ref)
         if not normalized_thread_id:
             raise ValueError("Thread ID is required.")
         if not workspace_ref.locator:
@@ -91,14 +98,26 @@ class ThreadWorkspaceRepository:
             else:
                 record.working_dir = workspace_ref.locator
                 record.updated_at = now
-            record.workspace_backend = workspace_ref.backend
-            record.workspace_locator = workspace_ref.locator
-            record.workspace_label = workspace_ref.label
-            record.workspace_metadata_json = json.dumps(
-                workspace_ref.metadata,
+            record.scope_key = binding.scope.key
+            record.scope_kind = binding.scope.kind
+            record.scope_label = binding.scope.label
+            record.scope_metadata_json = json.dumps(
+                binding.scope.metadata,
                 ensure_ascii=False,
                 sort_keys=True,
             )
+            record.execution_backend = binding.execution.backend
+            record.execution_locator = binding.execution.locator
+            record.execution_label = binding.execution.label
+            record.execution_metadata_json = json.dumps(
+                binding.execution.metadata,
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            record.workspace_backend = None
+            record.workspace_locator = None
+            record.workspace_label = None
+            record.workspace_metadata_json = None
 
             await session.commit()
             await session.refresh(record)
@@ -174,7 +193,7 @@ class ThreadWorkspaceRepository:
         async with session:
             result = await session.execute(
                 select(ThreadWorkspace).where(
-                    ThreadWorkspace.workspace_backend == normalized_backend
+                    ThreadWorkspace.execution_backend == normalized_backend
                 )
             )
             return {
@@ -203,27 +222,38 @@ class ThreadWorkspaceRepository:
             record = result.scalar_one_or_none()
             if record is None:
                 return None
-            if expected_backend and record.workspace_backend != expected_backend:
+            if expected_backend and record.execution_backend != expected_backend:
                 return None
 
             current_metadata: dict[str, Any] = {}
-            if record.workspace_metadata_json:
+            if record.execution_metadata_json:
                 try:
-                    parsed = json.loads(record.workspace_metadata_json)
+                    parsed = json.loads(record.execution_metadata_json)
                 except (TypeError, ValueError):
                     parsed = None
                 if isinstance(parsed, dict):
                     current_metadata = parsed
             current_metadata.update(metadata)
-            record.workspace_metadata_json = json.dumps(
+            record.execution_metadata_json = json.dumps(
                 current_metadata,
                 ensure_ascii=False,
                 sort_keys=True,
             )
+            execution = _execution_from_record(record)
+            if execution is not None:
+                binding = bind_workspace_ref(execution)
+                record.scope_key = binding.scope.key
+                record.scope_kind = binding.scope.kind
+                record.scope_label = binding.scope.label
+                record.scope_metadata_json = json.dumps(
+                    binding.scope.metadata,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
             record.updated_at = utcnow()
             await session.commit()
             await session.refresh(record)
-            return _workspace_from_record(record)
+            return _execution_from_record(record)
 
 
 _sync_engine: Engine | None = None
@@ -288,27 +318,38 @@ def update_thread_workspace_metadata_sync(
         record = result.scalar_one_or_none()
         if record is None:
             return None
-        if expected_backend and record.workspace_backend != expected_backend:
+        if expected_backend and record.execution_backend != expected_backend:
             return None
 
         current_metadata: dict[str, Any] = {}
-        if record.workspace_metadata_json:
+        if record.execution_metadata_json:
             try:
-                parsed = json.loads(record.workspace_metadata_json)
+                parsed = json.loads(record.execution_metadata_json)
             except (TypeError, ValueError):
                 parsed = None
             if isinstance(parsed, dict):
                 current_metadata = parsed
         current_metadata.update(metadata)
-        record.workspace_metadata_json = json.dumps(
+        record.execution_metadata_json = json.dumps(
             current_metadata,
             ensure_ascii=False,
             sort_keys=True,
         )
+        execution = _execution_from_record(record)
+        if execution is not None:
+            binding = bind_workspace_ref(execution)
+            record.scope_key = binding.scope.key
+            record.scope_kind = binding.scope.kind
+            record.scope_label = binding.scope.label
+            record.scope_metadata_json = json.dumps(
+                binding.scope.metadata,
+                ensure_ascii=False,
+                sort_keys=True,
+            )
         record.updated_at = utcnow()
         session.commit()
         session.refresh(record)
-        return _workspace_from_record(record)
+        return _execution_from_record(record)
 
 
 _repository: ThreadWorkspaceRepository | None = None

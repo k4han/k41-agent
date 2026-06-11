@@ -1,4 +1,4 @@
-import type { SandboxBackendKey, WorkspaceRef } from "../types";
+import type { SandboxBackendKey, WorkspaceBinding, WorkspaceRef, WorkspaceScope } from "../types";
 import { isSandboxBackend, sandboxBackendDefaultRoot } from "../types";
 
 function normalizePath(value: string): string {
@@ -43,13 +43,91 @@ function metadataText(metadata: Record<string, unknown> | undefined, key: string
   return typeof value === "string" ? value.trim() : "";
 }
 
-export function isGitHubWorkspace(
-  workspace: WorkspaceRef | null | undefined,
-): boolean {
+export function workspaceExecution(
+  workspace: WorkspaceBinding | WorkspaceRef | null | undefined,
+): WorkspaceRef | null {
   if (!workspace) {
+    return null;
+  }
+  if ("execution" in workspace) {
+    return workspace.execution;
+  }
+  return workspace;
+}
+
+export function deriveWorkspaceScope(execution: WorkspaceRef): WorkspaceScope {
+  const source = typeof execution.metadata.source === "string"
+    ? execution.metadata.source.trim().toLowerCase()
+    : "";
+  if (source === "github") {
+    const repositoryId = String(execution.metadata.repository_id || "").trim();
+    const repositoryFullName = metadataText(execution.metadata, "repository_full_name")
+      || metadataText(execution.metadata, "repository");
+    return {
+      key: repositoryId
+        ? `github:${repositoryId}`
+        : `github:${repositoryFullName.toLowerCase() || `${execution.backend}:${execution.locator}`}`,
+      kind: "github",
+      label: repositoryFullName || execution.label || execution.locator,
+      metadata: {
+        source: "github",
+        repository_id: execution.metadata.repository_id,
+        repository_full_name: repositoryFullName,
+      },
+    };
+  }
+  if (execution.backend === "local") {
+    return {
+      key: `local:${execution.locator}`,
+      kind: "local",
+      label: workspaceDisplayLabelFromValues(
+        execution.label,
+        execution.locator,
+        execution.metadata,
+        execution.backend,
+      ),
+      metadata: {},
+    };
+  }
+  return {
+    key: `sandbox:${execution.backend}:${execution.locator}`,
+    kind: "sandbox",
+    label: workspaceDisplayLabelFromValues(
+      execution.label,
+      execution.locator,
+      execution.metadata,
+      execution.backend,
+    ),
+    metadata: {
+      backend: execution.backend,
+      root: metadataText(execution.metadata, "root"),
+    },
+  };
+}
+
+export function bindWorkspaceRef(
+  workspace: WorkspaceBinding | WorkspaceRef | null | undefined,
+): WorkspaceBinding | null {
+  if (!workspace) {
+    return null;
+  }
+  if ("scope" in workspace) {
+    return workspace;
+  }
+  return {
+    scope: deriveWorkspaceScope(workspace),
+    execution: workspace,
+  };
+}
+
+export function isGitHubWorkspace(
+  workspace: WorkspaceBinding | WorkspaceRef | null | undefined,
+): boolean {
+  const execution = workspaceExecution(workspace);
+  if (!execution) {
     return false;
   }
-  const source = workspace.metadata?.source;
+  const source = execution.metadata?.source;
   return typeof source === "string" && source.trim().toLowerCase() === "github";
 }
 
@@ -145,15 +223,24 @@ export function workspaceDisplayLabelFromValues(
   return formatWorkspaceRoot(trimmedLocator || trimmedLabel);
 }
 
-export function workspaceDisplayLabel(workspace: WorkspaceRef | null | undefined): string {
+export function workspaceDisplayLabel(
+  workspace: WorkspaceBinding | WorkspaceRef | null | undefined,
+): string {
   if (!workspace) {
     return "";
   }
+  if ("scope" in workspace) {
+    return workspace.scope.label;
+  }
+  const execution = workspaceExecution(workspace);
+  if (!execution) {
+    return "";
+  }
   return workspaceDisplayLabelFromValues(
-    workspace.label,
-    workspace.locator,
-    workspace.metadata,
-    workspace.backend,
+    execution.label,
+    execution.locator,
+    execution.metadata,
+    execution.backend,
   );
 }
 
@@ -163,7 +250,7 @@ function metadataRoot(metadata: Record<string, unknown> | undefined): string {
 }
 
 export function resolveWorkspaceWorkingDir(
-  workspace: WorkspaceRef | null | undefined,
+  workspace: WorkspaceBinding | WorkspaceRef | null | undefined,
 ): string {
   /*
    * Return the on-disk path the workspace backend uses as its cwd.
@@ -173,14 +260,15 @@ export function resolveWorkspaceWorkingDir(
    * inside a cloned repository when a GitHub repo is attached) so the value
    * shown to the user matches the actual subprocess cwd.
    */
-  if (!workspace) {
+  const execution = workspaceExecution(workspace);
+  if (!execution) {
     return "";
   }
-  if (isSandboxBackend(workspace.backend)) {
-    const root = metadataRoot(workspace.metadata);
+  if (isSandboxBackend(execution.backend)) {
+    const root = metadataRoot(execution.metadata);
     if (root) {
       return root;
     }
   }
-  return workspace.locator.trim();
+  return execution.locator.trim();
 }

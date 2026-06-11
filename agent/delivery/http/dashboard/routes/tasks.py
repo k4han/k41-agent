@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from agent.modules.agent_runtime import NotifyChannel
-from agent.modules.workspaces import WorkspaceRef
+from agent.modules.workspaces import WorkspaceBinding, WorkspaceRef
 from agent.modules.agent_runtime import get_background_task_manager
 from agent.modules.conversations import get_conversation_thread_repository
 from agent.modules.workspaces import resolve_workspace_ref
@@ -20,7 +20,7 @@ class SubmitTaskBody(BaseModel):
 
     request: str = Field(..., description="Task description or instruction for the agent.")
     agent_name: str = Field(default="default", description="Agent card name to use.")
-    workspace: WorkspaceRef | None = Field(default=None, description="Workspace reference. Defaults to the default workspace.")
+    workspace: WorkspaceRef | WorkspaceBinding | None = Field(default=None, description="Workspace reference. Defaults to the default workspace.")
     notify_platform: str | None = Field(default=None, description="Notification platform (e.g. 'telegram', 'discord').")
     notify_external_id: str | None = Field(default=None, description="External user/channel ID for notifications.")
     notify_channel_id: str | None = Field(default=None, description="Channel ID for notifications.")

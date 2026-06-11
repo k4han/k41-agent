@@ -61,6 +61,16 @@ def _json_or_none(value: dict[str, Any] | None) -> str | None:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
+def _json_dict(value: str | None) -> dict[str, Any]:
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
 
@@ -360,16 +370,14 @@ class LLMUsageRepository:
         )
         return root_result.scalars().first()
 
-    async def aggregate_by_workspace(self, backend: str, locator: str) -> dict[str, Any]:
+    async def aggregate_by_workspace(self, key: str) -> dict[str, Any]:
         from agent.modules.workspaces import ThreadWorkspace
 
+        scope_key = str(key or "").strip()
         session = await get_async_session()
         thread_stmt = (
             select(ThreadWorkspace.thread_id)
-            .where(
-                (ThreadWorkspace.workspace_backend == backend) &
-                (ThreadWorkspace.workspace_locator == locator)
-            )
+            .where(ThreadWorkspace.scope_key == scope_key)
         )
         async with session:
             thread_result = await session.execute(thread_stmt)
@@ -377,8 +385,7 @@ class LLMUsageRepository:
 
         if not thread_ids:
             return {
-                "backend": backend,
-                "locator": locator,
+                "key": scope_key,
                 "total_tokens": 0,
                 "input_tokens": 0,
                 "output_tokens": 0,
@@ -431,8 +438,7 @@ class LLMUsageRepository:
         models.sort(key=lambda x: x["total_tokens"], reverse=True)
 
         return {
-            "backend": backend,
-            "locator": locator,
+            "key": scope_key,
             "total_tokens": total_tokens,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
@@ -445,9 +451,10 @@ class LLMUsageRepository:
         session = await get_async_session()
         stmt = (
             select(
-                ThreadWorkspace.workspace_backend,
-                ThreadWorkspace.workspace_locator,
-                ThreadWorkspace.workspace_label,
+                ThreadWorkspace.scope_key,
+                ThreadWorkspace.scope_kind,
+                ThreadWorkspace.scope_label,
+                ThreadWorkspace.scope_metadata_json,
                 func.count(distinct(ThreadWorkspace.thread_id)).label("thread_count"),
                 func.count(LLMUsageEvent.id).label("event_count"),
                 func.coalesce(func.sum(LLMUsageEvent.input_tokens), 0).label("input_tokens"),
@@ -461,10 +468,12 @@ class LLMUsageRepository:
                 (LLMUsageEvent.root_thread_id == ThreadWorkspace.thread_id)
             )
             .where(*_where_clauses(query))
+            .where(ThreadWorkspace.scope_key.is_not(None))
             .group_by(
-                ThreadWorkspace.workspace_backend,
-                ThreadWorkspace.workspace_locator,
-                ThreadWorkspace.workspace_label
+                ThreadWorkspace.scope_key,
+                ThreadWorkspace.scope_kind,
+                ThreadWorkspace.scope_label,
+                ThreadWorkspace.scope_metadata_json,
             )
             .order_by(func.coalesce(func.sum(LLMUsageEvent.total_tokens), 0).desc())
         )
@@ -478,8 +487,7 @@ class LLMUsageRepository:
 
         breakdown_stmt = (
             select(
-                ThreadWorkspace.workspace_backend,
-                ThreadWorkspace.workspace_locator,
+                ThreadWorkspace.scope_key,
                 LLMUsageEvent.model_name,
                 LLMUsageEvent.provider_name,
                 func.coalesce(func.sum(LLMUsageEvent.total_tokens), 0).label("total_tokens"),
@@ -490,9 +498,9 @@ class LLMUsageRepository:
                 (LLMUsageEvent.root_thread_id == ThreadWorkspace.thread_id)
             )
             .where(*_where_clauses(query))
+            .where(ThreadWorkspace.scope_key.is_not(None))
             .group_by(
-                ThreadWorkspace.workspace_backend,
-                ThreadWorkspace.workspace_locator,
+                ThreadWorkspace.scope_key,
                 LLMUsageEvent.model_name,
                 LLMUsageEvent.provider_name
             )
@@ -504,7 +512,7 @@ class LLMUsageRepository:
 
         breakdowns = {}
         for r in breakdown_rows:
-            key = (r.workspace_backend, r.workspace_locator)
+            key = r.scope_key
             if key not in breakdowns:
                 breakdowns[key] = []
             breakdowns[key].append({
@@ -515,7 +523,7 @@ class LLMUsageRepository:
 
         workspaces = []
         for row in workspace_rows:
-            key = (row.workspace_backend, row.workspace_locator)
+            key = row.scope_key
             total = int(row.total_tokens or 0)
 
             model_details = breakdowns.get(key, [])
@@ -524,9 +532,10 @@ class LLMUsageRepository:
             model_details.sort(key=lambda x: x["total_tokens"], reverse=True)
 
             workspaces.append({
-                "backend": row.workspace_backend,
-                "locator": row.workspace_locator,
-                "label": row.workspace_label or row.workspace_locator,
+                "key": row.scope_key,
+                "kind": row.scope_kind,
+                "label": row.scope_label or row.scope_key,
+                "metadata": _json_dict(row.scope_metadata_json),
                 "thread_count": int(row.thread_count or 0),
                 "event_count": int(row.event_count or 0),
                 "input_tokens": int(row.input_tokens or 0),

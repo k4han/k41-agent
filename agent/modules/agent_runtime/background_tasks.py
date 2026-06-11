@@ -22,6 +22,7 @@ from typing import Any, Awaitable, Callable
 from agent.modules.notifications import send_notification as _send_notification
 from agent.modules.workspaces import (
     WorkspaceRef,
+    bind_workspace_ref,
     remember_thread_workspace_ref,
     resolve_workspace_ref,
 )
@@ -119,7 +120,11 @@ class BackgroundTask:
             "task_id": self.task_id,
             "request": self.request,
             "agent_name": self.agent_name,
-            "workspace": self.workspace.model_dump() if self.workspace else None,
+            "workspace": (
+                bind_workspace_ref(self.workspace).model_dump()
+                if self.workspace
+                else None
+            ),
             "status": self.status.value,
             "result": self.result,
             "error": self.error,

@@ -30,6 +30,7 @@ import {
   localWorkspaceRef,
   sandboxWorkspaceRef,
   resolveWorkspaceWorkingDir,
+  workspaceExecution,
 } from "@/lib/workspace";
 import type {
   ActiveSession,
@@ -495,16 +496,21 @@ export function ChatPage() {
       "/dashboard-api/workspace/resolve",
       payload,
     );
-    setWorkspace(response.workspace);
-    return response.workspace;
+    const execution = workspaceExecution(response.workspace);
+    if (!execution) {
+      throw new Error("Resolved workspace is missing its execution reference.");
+    }
+    setWorkspace(execution);
+    return execution;
   };
 
   const loadDefaultWorkspace = async () => {
     try {
       const payload = await apiFetch<DefaultWorkspacePayload>("/dashboard-api/workspace/default");
-      const fallback = payload.workspace?.locator || "";
+      const execution = workspaceExecution(payload.workspace);
+      const fallback = execution?.locator || "";
       setDefaultWorkingDir(fallback);
-      setDefaultWorkspace(payload.workspace || null);
+      setDefaultWorkspace(execution);
     } catch {
       setDefaultWorkingDir("");
       setDefaultWorkspace(null);
@@ -516,7 +522,7 @@ export function ChatPage() {
     setThreadData(payload);
     setCurrentThreadId(payload.thread_id);
     setActiveCheckpointId(payload.active_checkpoint_id || "");
-    setWorkspace(payload.workspace || null);
+    setWorkspace(workspaceExecution(payload.workspace) || null);
     if (!persistedStreams.has(payload.thread_id)) {
       setItems(
         toThreadTranscript(payload.messages).map((item) => ({

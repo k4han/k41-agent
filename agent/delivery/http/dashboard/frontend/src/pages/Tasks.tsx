@@ -13,7 +13,7 @@ import { apiFetch, deleteJson, postJson } from "@/lib/api";
 import { ACTIVE_TASK_STATUSES, TASK_PAGE_SIZE, TASK_POLL_INTERVAL_MS } from "@/lib/uiConstants";
 import { ALL_WORKSPACES_KEY, NO_WORKSPACE_KEY } from "@/lib/workspaceConstants";
 import { truncateText } from "@/lib/utils";
-import { formatWorkspaceRoot, workspaceDisplayLabelFromValues } from "@/lib/workspace";
+import { workspaceExecution } from "@/lib/workspace";
 import type { ActiveSession, AgentConfig, BackgroundTask, Identity } from "@/types";
 
 type TasksPayload = {
@@ -53,18 +53,22 @@ function hasActiveTasks(tasks: BackgroundTask[]): boolean {
 }
 
 function metadataText(task: BackgroundTask, key: string): string {
-  const value = task.workspace?.metadata?.[key];
+  const value = task.workspace?.execution.metadata?.[key] ?? task.workspace?.scope.metadata?.[key];
   return typeof value === "string" ? value.trim() : "";
 }
 
 function repositoryLabel(task: BackgroundTask): string {
+  if (task.workspace?.scope.kind === "github") {
+    return task.workspace.scope.label;
+  }
   const repository = metadataText(task, "repository_full_name");
   if (repository) {
     return repository;
   }
 
-  const label = task.workspace?.label?.trim() || "";
-  const locator = task.workspace?.locator?.trim() || "";
+  const execution = workspaceExecution(task.workspace);
+  const label = execution?.label?.trim() || "";
+  const locator = execution?.locator?.trim() || "";
   if (label && label !== locator && /^[^/\\\s]+\/[^/\\\s]+$/.test(label)) {
     return label;
   }
@@ -77,20 +81,14 @@ function workspaceLabel(task: BackgroundTask): string {
     return "";
   }
 
-  const repo = repositoryLabel(task);
-  const label = workspace.label?.trim() || "";
-  const locator = workspace.locator?.trim() || "";
-  if (label && label !== locator && label !== repo) {
-    return workspaceDisplayLabelFromValues(label, locator);
-  }
-  return formatWorkspaceRoot(locator || label);
+  return workspace.scope.label || repositoryLabel(task);
 }
 
 function taskWorkspaceKey(task: BackgroundTask): string {
   if (!task.workspace) {
     return NO_WORKSPACE_KEY;
   }
-  return `${task.workspace.backend}:${task.workspace.locator}`;
+  return task.workspace.scope.key;
 }
 
 function taskWorkspaceOptionLabel(task: BackgroundTask): string {
@@ -98,7 +96,7 @@ function taskWorkspaceOptionLabel(task: BackgroundTask): string {
 }
 
 function taskWorkspaceOptionTitle(task: BackgroundTask): string {
-  return task.workspace?.locator || taskWorkspaceOptionLabel(task);
+  return workspaceExecution(task.workspace)?.locator || taskWorkspaceOptionLabel(task);
 }
 
 function buildTaskWorkspaceOptions(tasks: BackgroundTask[]): TaskWorkspaceOption[] {
@@ -143,7 +141,7 @@ function taskMetaItems(task: BackgroundTask): TaskMetaItem[] {
       key: "workspace",
       label: "workspace",
       value: workspace,
-      title: task.workspace?.locator || workspace,
+      title: workspaceExecution(task.workspace)?.locator || workspace,
     });
   }
   if (task.notify_channel) {

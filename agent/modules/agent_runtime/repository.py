@@ -8,8 +8,8 @@ from sqlalchemy import select
 
 from agent.modules.agent_runtime.models import BackgroundTaskRecord
 from agent.modules.workspaces import (
-    DEFAULT_LOCAL_WORKSPACE,
     WorkspaceRef,
+    bind_workspace_ref,
     normalize_workspace_ref,
     workspace_ref_from_columns,
 )
@@ -48,7 +48,7 @@ def _dump_json_list(values: list[str] | None) -> str:
 
 
 def serialize_background_task(record: BackgroundTaskRecord) -> dict[str, Any]:
-    workspace = _workspace_from_record(record)
+    workspace = _binding_from_record(record)
     return {
         "task_id": record.task_id,
         "thread_id": record.thread_id,
@@ -83,15 +83,20 @@ def _parse_json_list(value: Any) -> list[str]:
 
 
 def _workspace_from_record(record: BackgroundTaskRecord) -> WorkspaceRef | None:
-    locator = record.workspace_locator or record.working_dir
+    locator = record.execution_locator
     if not locator:
         return None
     return workspace_ref_from_columns(
-        backend=record.workspace_backend,
+        backend=record.execution_backend,
         locator=locator,
-        label=record.workspace_label,
-        metadata_json=record.workspace_metadata_json,
+        label=record.execution_label,
+        metadata_json=record.execution_metadata_json,
     )
+
+
+def _binding_from_record(record: BackgroundTaskRecord):
+    workspace = _workspace_from_record(record)
+    return bind_workspace_ref(workspace) if workspace else None
 
 
 class BackgroundTaskRepository:
@@ -128,6 +133,7 @@ class BackgroundTaskRepository:
             if workspace is not None or working_dir
             else None
         )
+        workspace_binding = bind_workspace_ref(workspace_ref) if workspace_ref else None
         session = await get_async_session()
         async with session:
             stmt = select(BackgroundTaskRecord).where(
@@ -143,14 +149,26 @@ class BackgroundTaskRepository:
             record.request = str(request or "")
             record.agent_name = _trim(agent_name or "default", 255) or "default"
             record.working_dir = workspace_ref.locator if workspace_ref else None
-            record.workspace_backend = workspace_ref.backend if workspace_ref else None
-            record.workspace_locator = workspace_ref.locator if workspace_ref else None
-            record.workspace_label = workspace_ref.label if workspace_ref else None
-            record.workspace_metadata_json = (
+            record.scope_key = workspace_binding.scope.key if workspace_binding else None
+            record.scope_kind = workspace_binding.scope.kind if workspace_binding else None
+            record.scope_label = workspace_binding.scope.label if workspace_binding else None
+            record.scope_metadata_json = (
+                json.dumps(workspace_binding.scope.metadata, ensure_ascii=False, sort_keys=True)
+                if workspace_binding
+                else None
+            )
+            record.execution_backend = workspace_ref.backend if workspace_ref else None
+            record.execution_locator = workspace_ref.locator if workspace_ref else None
+            record.execution_label = workspace_ref.label if workspace_ref else None
+            record.execution_metadata_json = (
                 json.dumps(workspace_ref.metadata, ensure_ascii=False, sort_keys=True)
                 if workspace_ref
                 else None
             )
+            record.workspace_backend = None
+            record.workspace_locator = None
+            record.workspace_label = None
+            record.workspace_metadata_json = None
             record.notify_platform = _trim(notify_platform, 50)
             record.notify_external_id = _trim(notify_external_id, 255)
             record.notify_channel_id = _trim(notify_channel_id, 255)

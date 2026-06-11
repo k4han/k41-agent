@@ -15,7 +15,7 @@ WorkspaceBackendName = str
 
 
 class WorkspaceRef(BaseModel):
-    """Serializable reference to a workspace backend instance."""
+    """Serializable reference to a workspace execution instance."""
 
     backend: WorkspaceBackendName = "local"
     locator: str
@@ -59,6 +59,32 @@ class WorkspaceRef(BaseModel):
                 return _local_workspace_display_label(label)
             return label
         return _local_workspace_display_label(locator or label)
+
+
+WorkspaceExecutionRef = WorkspaceRef
+
+
+class WorkspaceScope(BaseModel):
+    """User-facing workspace identity used for grouping and reporting."""
+
+    key: str
+    kind: str
+    label: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class WorkspaceBinding(BaseModel):
+    """Pair a user-facing workspace scope with its execution instance."""
+
+    scope: WorkspaceScope
+    execution: WorkspaceExecutionRef
+
+    model_config = ConfigDict(extra="forbid")
+
+
+WorkspaceInput = WorkspaceRef | WorkspaceBinding | dict[str, Any] | str | None
 
 
 def _local_workspace_display_label(value: str) -> str:
@@ -106,13 +132,22 @@ def _model_dump(value: Any) -> dict[str, Any]:
     return {}
 
 
+def _extract_execution_payload(value: Any) -> Any:
+    if isinstance(value, WorkspaceBinding):
+        return value.execution
+    if isinstance(value, dict) and isinstance(value.get("execution"), dict):
+        return value["execution"]
+    return value
+
+
 def normalize_workspace_ref(
-    workspace: WorkspaceRef | dict[str, Any] | str | None,
+    workspace: WorkspaceInput,
     *,
     default_locator: str,
     label: str | None = None,
 ) -> WorkspaceRef:
     """Normalize supported workspace inputs into a canonical WorkspaceRef."""
+    workspace = _extract_execution_payload(workspace)
     if isinstance(workspace, WorkspaceRef):
         data = workspace.model_dump()
     elif isinstance(workspace, str):
@@ -194,6 +229,75 @@ def normalize_workspace_ref(
     )
 
 
+def _github_scope_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "source",
+        "repository_id",
+        "repository_full_name",
+        "default_branch",
+        "branch",
+        "base_branch",
+    )
+    return {key: metadata[key] for key in keys if key in metadata}
+
+
+def _local_scope_locator(value: str) -> str:
+    path = Path(value).expanduser()
+    if _is_absolute_local_path(value):
+        return str(path)
+    return str(path.resolve())
+
+
+def derive_workspace_scope(execution: WorkspaceRef) -> WorkspaceScope:
+    """Derive the stable user-facing workspace identity for an execution ref."""
+    metadata = dict(execution.metadata or {})
+    source = str(metadata.get("source") or "").strip().lower()
+    if source == "github":
+        repository_id = str(metadata.get("repository_id") or "").strip()
+        repository_full_name = str(
+            metadata.get("repository_full_name") or metadata.get("repository") or ""
+        ).strip()
+        if repository_id:
+            key = f"github:{repository_id}"
+        elif repository_full_name:
+            key = f"github:{repository_full_name.lower()}"
+        else:
+            key = f"github:{execution.backend}:{execution.locator}"
+        return WorkspaceScope(
+            key=key,
+            kind="github",
+            label=repository_full_name or execution.display_label() or execution.label,
+            metadata=_github_scope_metadata(metadata),
+        )
+
+    if execution.backend == "local":
+        locator = _local_scope_locator(execution.locator)
+        return WorkspaceScope(
+            key=f"local:{locator}",
+            kind="local",
+            label=execution.display_label() or execution.label or locator,
+            metadata={},
+        )
+
+    return WorkspaceScope(
+        key=f"sandbox:{execution.backend}:{execution.locator}",
+        kind="sandbox",
+        label=execution.display_label() or execution.label or execution.locator,
+        metadata={
+            "backend": execution.backend,
+            "root": str(metadata.get("root") or "").strip(),
+        },
+    )
+
+
+def bind_workspace_ref(execution: WorkspaceRef) -> WorkspaceBinding:
+    ref = execution
+    return WorkspaceBinding(
+        scope=derive_workspace_scope(ref),
+        execution=ref,
+    )
+
+
 def workspace_ref_from_columns(
     *,
     backend: str | None,
@@ -235,6 +339,12 @@ def workspace_ref_from_columns(
 __all__ = [
     "DEFAULT_LOCAL_WORKSPACE",
     "WorkspaceRef",
+    "WorkspaceExecutionRef",
+    "WorkspaceScope",
+    "WorkspaceBinding",
+    "WorkspaceInput",
+    "bind_workspace_ref",
+    "derive_workspace_scope",
     "WorkspaceBackendName",
     "normalize_workspace_ref",
     "workspace_ref_from_columns",

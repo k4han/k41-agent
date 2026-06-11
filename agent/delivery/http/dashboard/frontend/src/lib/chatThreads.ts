@@ -18,9 +18,8 @@ import {
   GENERATE_IMAGE_TOOL_NAME,
   generatedImageAttachmentFromToolResult,
 } from "@/lib/generatedImages";
-import { workspaceDisplayLabelFromValues } from "@/lib/workspace";
 import { NO_WORKSPACE_KEY, NO_WORKSPACE_LABEL } from "@/lib/workspaceConstants";
-import type { WorkspaceRef } from "@/types";
+import type { WorkspaceBinding } from "@/types";
 
 export type ThreadSummary = {
   thread_id: string;
@@ -36,7 +35,7 @@ export type ThreadSummary = {
   kind?: string;
   created_at?: string | null;
   updated_at?: string | null;
-  workspace?: WorkspaceRef | null;
+  workspace?: WorkspaceBinding | null;
   workspace_key?: string;
   workspace_label?: string;
 };
@@ -90,7 +89,7 @@ export type ThreadMessagesPayload = {
   model?: string;
   title?: string;
   kind?: string;
-  workspace?: WorkspaceRef | null;
+  workspace?: WorkspaceBinding | null;
 };
 
 export type ThreadTranscriptItem = TranscriptItem & { key: string };
@@ -112,24 +111,20 @@ export function threadWorkspaceKey(thread: ThreadSummary): string {
     return thread.workspace_key;
   }
   const workspace = thread.workspace;
-  if (!workspace || !workspace.backend) {
+  if (!workspace || !workspace.scope) {
     // Backend may return ``workspace: {}`` for legacy threads; treat that the
     // same as a missing workspace so the key stays a stable, comparable
     // sentinel rather than ``"undefined:undefined"``.
     return NO_WORKSPACE_KEY;
   }
-  return `${workspace.backend}:${workspace.locator ?? ""}`;
+  return workspace.scope.key || NO_WORKSPACE_KEY;
 }
 
 export function threadWorkspaceLabel(thread: ThreadSummary): string {
   if (!thread.workspace) {
     return thread.workspace_label || NO_WORKSPACE_LABEL;
   }
-  return workspaceDisplayLabelFromValues(
-    thread.workspace_label || thread.workspace.label,
-    thread.workspace.locator,
-    thread.workspace.metadata,
-  ) || NO_WORKSPACE_LABEL;
+  return thread.workspace_label || thread.workspace.scope.label || NO_WORKSPACE_LABEL;
 }
 
 export function groupThreadsByWorkspace(threads: ThreadSummary[]): ThreadWorkspaceGroup[] {

@@ -45,9 +45,10 @@ import {
 } from "@/lib/uiConstants";
 import { useMobileDrawer } from "@/lib/useMobileDrawer";
 import { ALL_WORKSPACES_KEY } from "@/lib/workspaceConstants";
+import { bindWorkspaceRef } from "@/lib/workspace";
 import { truncateText } from "@/lib/utils";
 import { useToast } from "@/components/Toast";
-import type { ActiveSession, WorkspaceRef } from "@/types";
+import type { ActiveSession, WorkspaceBinding, WorkspaceRef } from "@/types";
 
 type NavItem = {
   href: string;
@@ -248,10 +249,11 @@ export function AppShell(props: {
     const customEvent = event as CustomEvent<{
       threadId: string;
       title?: string;
-      workspace?: WorkspaceRef | null;
+      workspace?: WorkspaceBinding | WorkspaceRef | null;
       agent_name?: string;
     }>;
     const { threadId, title, workspace, agent_name } = customEvent.detail;
+    const workspaceBinding = bindWorkspaceRef(workspace);
     
     optimisticLocks.set(threadId, { state: "running", timestamp: Date.now() });
     
@@ -266,7 +268,7 @@ export function AppShell(props: {
             ? {
                 ...thread,
                 agent_name: agent_name || thread.agent_name,
-                workspace: workspace !== undefined ? workspace : thread.workspace,
+                workspace: workspace !== undefined ? workspaceBinding : thread.workspace,
                 updated_at: updatedAt,
               }
             : thread
@@ -282,7 +284,7 @@ export function AppShell(props: {
         platform: "dashboard",
         user_id: "dashboard",
         agent_name: agent_name || "default",
-        workspace: workspace || null,
+        workspace: workspaceBinding,
         kind: "interactive",
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -516,7 +518,7 @@ export function AppShell(props: {
 
   const availableWorkspaces = createMemo(() => {
     return historyGroups().map((group) => {
-      const isRepo = group.threads.some((t) => t.workspace?.metadata?.repository_full_name);
+      const isRepo = group.threads.some((t) => t.workspace?.scope.kind === "github");
       return {
         key: group.key,
         label: group.label,
