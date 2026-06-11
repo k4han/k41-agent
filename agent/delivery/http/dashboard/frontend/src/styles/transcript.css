@@ -1,3 +1,81 @@
+.message-generated-images {
+  display: grid;
+  gap: 10px;
+  margin: 4px 0 10px;
+}
+
+.message-generated-image-placeholder {
+  position: relative;
+  display: grid;
+  width: min(100%, 720px);
+  aspect-ratio: 1 / 1;
+  max-height: 70vh;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.message-generated-image-placeholder-shimmer {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(
+      110deg,
+      transparent 0%,
+      color-mix(in srgb, var(--fg) 8%, transparent) 42%,
+      color-mix(in srgb, var(--fg) 14%, transparent) 50%,
+      color-mix(in srgb, var(--fg) 8%, transparent) 58%,
+      transparent 100%
+    ),
+    color-mix(in srgb, var(--surface-3) 55%, transparent);
+  background-size: 220% 100%;
+  animation: generated-image-placeholder-shimmer 1.4s ease-in-out infinite;
+}
+
+.message-generated-image-placeholder-content {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+@keyframes generated-image-placeholder-shimmer {
+  from {
+    background-position: 140% 0;
+  }
+
+  to {
+    background-position: -80% 0;
+  }
+}
+
+.message-generated-image {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.message-generated-image img {
+  display: block;
+  width: auto;
+  max-width: min(100%, 720px);
+  max-height: 70vh;
+  object-fit: contain;
+}
+
 .message-attachments {
   display: flex;
   flex-wrap: wrap;

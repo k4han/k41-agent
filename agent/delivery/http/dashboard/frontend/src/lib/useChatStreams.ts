@@ -18,6 +18,10 @@ import {
   type ChatTranscriptItem,
 } from "@/lib/chatStreamStore";
 import type { AppendScrollMode } from "@/lib/chatTypes";
+import {
+  GENERATE_IMAGE_TOOL_NAME,
+  generatedImageAttachmentFromToolResult,
+} from "@/lib/generatedImages";
 import type { useChatScroll } from "@/lib/useChatScroll";
 
 type ChatScroll = ReturnType<typeof useChatScroll>;
@@ -160,6 +164,66 @@ export function useChatStreams(params: UseChatStreamsParams) {
     targetThreadId?: string,
   ) => {
     setItems((current) => {
+      if (name === GENERATE_IMAGE_TOOL_NAME) {
+        const attachment = generatedImageAttachmentFromToolResult(result);
+        const pendingTarget = current.find(
+          (item) =>
+            item.type === "message" &&
+            item.generatedImagePending &&
+            (
+              item.generatedImageToolCallId === toolCallId ||
+              !item.generatedImageToolCallId
+            ),
+        );
+        if (!attachment) {
+          if (!pendingTarget) {
+            return current;
+          }
+          return current.map((item) =>
+            item.id === pendingTarget.id && item.type === "message"
+              ? {
+                  ...item,
+                  generatedImagePending: false,
+                  text: "Image generation did not return an image.",
+                }
+              : item,
+          );
+        }
+        const exists = current.some(
+          (item) =>
+            item.type === "message" &&
+            item.attachments?.some(
+              (existing) => existing.preview_url === attachment.preview_url,
+            ),
+        );
+        if (exists) {
+          return pendingTarget
+            ? current.filter((item) => item.id !== pendingTarget.id)
+            : current;
+        }
+        if (pendingTarget) {
+          return current.map((item) =>
+            item.id === pendingTarget.id && item.type === "message"
+              ? {
+                  ...item,
+                  generatedImagePending: false,
+                  attachments: [attachment],
+                }
+              : item,
+          );
+        }
+        return [
+          ...current,
+          {
+            id: allocItemId(),
+            type: "message",
+            role: "assistant",
+            text: "",
+            attachments: [attachment],
+          } satisfies ChatTranscriptItem,
+        ];
+      }
+
       const target = findTranscriptToolTarget(current, toolCallId, name);
       if (!target) {
         return [

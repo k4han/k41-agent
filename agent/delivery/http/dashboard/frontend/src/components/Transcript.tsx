@@ -15,7 +15,10 @@ import { Markdown } from "@/components/Markdown";
 import { StatusIndicator } from "@/components/StatusIndicator";
 import { useToast } from "@/components/Toast";
 import { isChatStatusText } from "@/lib/chatStatus";
-import { generatedImageFromToolResult } from "@/lib/generatedImages";
+import {
+  GENERATE_IMAGE_TOOL_NAME,
+  generatedImageFromToolResult,
+} from "@/lib/generatedImages";
 import { formatValue } from "@/lib/utils";
 import {
   parseAskUserToolResult,
@@ -58,6 +61,8 @@ export type TranscriptMessage = {
   type: "message";
   role: TranscriptRole;
   text: string;
+  generatedImagePending?: boolean;
+  generatedImageToolCallId?: string | null;
   messageIndex?: number;
   sourceCheckpointId?: string;
   parentCheckpointId?: string;
@@ -285,6 +290,7 @@ function formatAttachmentSize(size: number): string {
 export function TranscriptMessageView(props: {
   role: TranscriptRole;
   text: string;
+  generatedImagePending?: boolean;
   attachments?: TranscriptAttachment[];
   messageIndex?: number;
   sourceCheckpointId?: string;
@@ -321,6 +327,24 @@ export function TranscriptMessageView(props: {
   const branchOptions = () => branch()?.options || [];
   const canShowBranchSwitcher = () =>
     props.role === "user" && !!branch() && branchOptions().length > 1;
+  const largeImageAttachments = () =>
+    (props.attachments || []).filter(
+      (attachment) =>
+        props.role === "assistant" &&
+        attachment.kind === "image" &&
+        Boolean(attachment.preview_url),
+    );
+  const compactAttachments = () =>
+    (props.attachments || []).filter(
+      (attachment) =>
+        !(
+          props.role === "assistant" &&
+          attachment.kind === "image" &&
+          Boolean(attachment.preview_url)
+        ),
+    );
+  const showGeneratedImagePlaceholder = () =>
+    props.role === "assistant" && Boolean(props.generatedImagePending);
   const selectBranch = (delta: number) => {
     if (props.actionsDisabled) {
       return;
@@ -421,17 +445,47 @@ export function TranscriptMessageView(props: {
             </Show>
           </Show>
         </Show>
-        <Show when={props.attachments?.length}>
+        <Show when={showGeneratedImagePlaceholder()}>
+          <div
+            class="message-generated-image-placeholder"
+            role="status"
+            aria-live="polite"
+          >
+            <div class="message-generated-image-placeholder-shimmer" />
+            <div class="message-generated-image-placeholder-content">
+              <ImageIcon size={22} />
+              <span>Generating image...</span>
+            </div>
+          </div>
+        </Show>
+        <Show when={largeImageAttachments().length}>
+          <div class="message-generated-images">
+            <For each={largeImageAttachments()}>
+              {(attachment) => (
+                <a
+                  class="message-generated-image"
+                  href={attachment.preview_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={attachment.name}
+                >
+                  <img src={attachment.preview_url} alt={attachment.name} />
+                </a>
+              )}
+            </For>
+          </div>
+        </Show>
+        <Show when={compactAttachments().length}>
           <div
             class="message-attachments"
             onClick={() => {
               if (!editing()) {
-                props.onMessageClick?.({ text: props.text, role: props.role, attachments: props.attachments });
+                props.onMessageClick?.({ text: props.text, role: props.role, attachments: compactAttachments() });
               }
             }}
             style="cursor: pointer;"
           >
-            <For each={props.attachments || []}>
+            <For each={compactAttachments()}>
               {(attachment) => (
                 <div class="message-attachment">
                   <Show
@@ -738,7 +792,7 @@ export function ToolCallDetail(props: {
   itemId?: number;
 }) {
   const generatedImage = () =>
-    props.name === "generate_image"
+    props.name === GENERATE_IMAGE_TOOL_NAME
       ? generatedImageFromToolResult(props.result)
       : null;
 
@@ -804,6 +858,7 @@ export function TranscriptItemView(props: {
     <TranscriptMessageView
       role={props.item.role}
       text={props.item.text}
+      generatedImagePending={props.item.generatedImagePending}
       attachments={props.item.attachments}
       messageIndex={props.item.messageIndex}
       sourceCheckpointId={props.item.sourceCheckpointId}

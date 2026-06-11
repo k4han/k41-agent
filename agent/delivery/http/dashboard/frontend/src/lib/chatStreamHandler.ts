@@ -7,6 +7,7 @@ import {
 } from "@/components/Transcript";
 import type { AppendScrollMode } from "@/lib/chatTypes";
 import { recursionLimitStorageKey, STREAM_ERROR_CODES, STREAM_EVENTS } from "@/lib/eventConstants";
+import { GENERATE_IMAGE_TOOL_NAME } from "@/lib/generatedImages";
 import {
   ASK_USER_TOOL_NAME,
   normalizeUserInputRequest,
@@ -74,7 +75,29 @@ export function handleStreamEvent(
 
   if (event.type === STREAM_EVENTS.TOOL_CALL) {
     const toolName = String(event.name || "unknown");
-    if (toolName === PLAN_MODE_TOOL_NAME || toolName === ASK_USER_TOOL_NAME) {
+    if (toolName === GENERATE_IMAGE_TOOL_NAME) {
+      if (assistantIdRef.id !== null && !streamedRef.received) {
+        callbacks.removeItem?.(assistantIdRef.id, streamThreadIdRef.id);
+      }
+      callbacks.appendItem(
+        {
+          type: "message",
+          role: "assistant",
+          text: "",
+          generatedImagePending: true,
+          generatedImageToolCallId: String(event.id || "") || null,
+        },
+        "bottom",
+        streamThreadIdRef.id,
+      );
+      assistantIdRef.id = null;
+      streamedRef.received = false;
+      return;
+    }
+    if (
+      toolName === PLAN_MODE_TOOL_NAME
+      || toolName === ASK_USER_TOOL_NAME
+    ) {
       return;
     }
     if (assistantIdRef.id !== null && !streamedRef.received) {

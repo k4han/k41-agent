@@ -30,6 +30,13 @@ from agent.modules.tools.result import ToolError, ToolErrorCode
 DEFAULT_IMAGE_MODEL = "gpt-image-1"
 DEFAULT_IMAGE_SIZE = "1024x1024"
 GENERATED_IMAGES_DIR = Path.home() / ".k41-agent" / "generated-images"
+GENERATE_IMAGE_TOOL_DESCRIPTION = (
+    "Generate an image from a text prompt and return the saved file path. "
+    "After a successful result, the client UI displays the generated image "
+    "automatically from the saved path. Do not repeat the image path, embed "
+    "the image, or include a second copy of it in your response; ask the user "
+    "what they want to adjust or create next."
+)
 
 _IMAGE_CONFIG_SCHEMA = ToolConfigSchema(
     fields=(
@@ -184,7 +191,7 @@ def _build_generate_image_tool(config: dict[str, ToolConfigValue]) -> BaseTool:
     return StructuredTool.from_function(
         func=_generate_image,
         name="generate_image",
-        description="Generate an image from a text prompt and return the saved file path.",
+        description=GENERATE_IMAGE_TOOL_DESCRIPTION,
     )
 
 
@@ -198,4 +205,4 @@ generate_image = register_tool(
 )(_build_generate_image_tool({}))
 
 
-__all__ = ["generate_image"]
+__all__ = ["GENERATE_IMAGE_TOOL_DESCRIPTION", "generate_image"]

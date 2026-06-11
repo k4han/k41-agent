@@ -14,6 +14,10 @@ import {
   ASK_USER_TOOL_NAME,
   normalizeUserQuestion,
 } from "@/lib/userInputRequest";
+import {
+  GENERATE_IMAGE_TOOL_NAME,
+  generatedImageAttachmentFromToolResult,
+} from "@/lib/generatedImages";
 import { workspaceDisplayLabelFromValues } from "@/lib/workspace";
 import { NO_WORKSPACE_KEY, NO_WORKSPACE_LABEL } from "@/lib/workspaceConstants";
 import type { WorkspaceRef } from "@/types";
@@ -156,6 +160,20 @@ export function toThreadTranscript(messages: ThreadMessage[]): ThreadTranscriptI
 
   messages.forEach((msg, messageIndex) => {
     if (msg.role === "tool") {
+      if (msg.name === GENERATE_IMAGE_TOOL_NAME) {
+        const attachment = generatedImageAttachmentFromToolResult(msg.content);
+        if (attachment) {
+          items.push({
+            key: `generated-image-${messageIndex}-${msg.tool_call_id || "unknown"}`,
+            type: "message",
+            role: "assistant",
+            text: "",
+            attachments: [attachment],
+          });
+        }
+        return;
+      }
+
       if (msg.name === ASK_USER_TOOL_NAME) {
         const parsed = parseUserInputRequestToolResult(msg.content);
         if (!parsed.valid) {
@@ -245,6 +263,9 @@ export function toThreadTranscript(messages: ThreadMessage[]): ThreadTranscriptI
 
     if (msg.tool_calls?.length) {
       msg.tool_calls.forEach((toolCall, toolCallIndex) => {
+        if (toolCall.name === GENERATE_IMAGE_TOOL_NAME) {
+          return;
+        }
         if (toolCall.name === ASK_USER_TOOL_NAME) {
           const args = toolCall.args as { title?: unknown; questions?: unknown; submit_label?: unknown } | null;
           const questions = Array.isArray(args?.questions)

@@ -60,6 +60,7 @@ import {
 } from "@/lib/chatStreamHandler";
 import { CUSTOM_DOM_EVENTS, recursionLimitStorageKey } from "@/lib/eventConstants";
 import { API_PATHS } from "@/lib/endpoints";
+import { GENERATE_IMAGE_TOOL_NAME } from "@/lib/generatedImages";
 import {
   type ChatAttachmentPayload,
   type ChatPayload,
@@ -341,6 +342,7 @@ export function ChatPage() {
             item.name === "write_todos"
             || item.name === PLAN_MODE_TOOL_NAME
             || item.name === ASK_USER_TOOL_NAME
+            || item.name === GENERATE_IMAGE_TOOL_NAME
           )
         ) && item.type !== "user_input_request",
     )
