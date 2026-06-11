@@ -3,7 +3,7 @@ import logging
 import os
 import selectors
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 import uvicorn
@@ -39,6 +39,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 SHUTDOWN_SIGNAL = Path.home() / ".k41-agent" / "shutdown.signal"
+SERVER_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 2
 
 
 def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:
@@ -166,6 +167,7 @@ async def main() -> None:
             port=settings.port,
             reload=False,
             loop="asyncio",
+            timeout_graceful_shutdown=SERVER_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS,
         )
         server = uvicorn.Server(config)
 
@@ -182,6 +184,8 @@ async def main() -> None:
         logger.info("Starting web host on %s:%s", settings.host, settings.port)
         await server.serve()
         shutdown_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await shutdown_task
         return
 
     logger.info("Web host disabled. Running managed channels only.")
