@@ -10,7 +10,6 @@ from typing import Any
 
 import typer
 
-from agent.bootstrap.app import run as run_server
 from agent.bootstrap.version import APP_VERSION
 from agent.modules.admin_auth import get_admin_auth_service
 from agent.shared.infrastructure.db import (
@@ -344,6 +343,8 @@ def serve(foreground: bool = False) -> None:
     if foreground:
         _echo_info("Starting Kai Agent in foreground. Press Ctrl+C to stop.")
         _print_server_endpoints(config)
+
+    from agent.bootstrap.app import run as run_server
 
     PID_FILE.write_text(str(os.getpid()))
     try:

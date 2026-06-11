@@ -1,4 +1,5 @@
 import shutil
+import subprocess
 import sys
 import uuid
 from pathlib import Path
@@ -46,6 +47,21 @@ def test_version_flag():
     result = runner.invoke(cli_module.app, ["--version"])
     assert result.exit_code == 0
     assert APP_VERSION in result.output
+
+
+def test_version_module_entrypoint_has_no_app_startup_logs():
+    result = subprocess.run(
+        [sys.executable, "-m", "agent.bootstrap.cli", "--version"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == f"k41-agent {APP_VERSION}"
+    assert result.stderr == ""
+    assert "CSRF protection" not in result.stdout
+    assert "CORS allowed origins" not in result.stdout
 
 
 def test_help_output():
