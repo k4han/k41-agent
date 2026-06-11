@@ -180,21 +180,41 @@ export type SkillsPayload = {
   skills: SkillInfo[];
 };
 
-export type AgentsPayload = {
+export type AgentCardsPayload = {
   cards: AgentCard[];
+  agent_names: string[];
+};
+
+export type AgentToolsPayload = {
   tools: string[];
   tool_groups?: ToolGroup[];
   tool_config_schemas?: Record<string, ToolConfigSchema>;
+};
+
+export type AgentWorkflowsPayload = {
   workflows: string[];
-  agent_names: string[];
+};
+
+export type AgentProviderOptionsPayload = {
   provider_names: string[];
   default_provider: string;
   default_model: string;
   model_catalogs: ModelCatalog[];
   model_catalog_error: string;
+};
+
+export type AgentMcpOptionsPayload = {
   mcp_server_options?: string[];
   mcp_installs?: Record<string, AgentMcpInstall[]>;
 };
+
+export type AgentsPayload = AgentCardsPayload
+  & AgentToolsPayload
+  & AgentWorkflowsPayload
+  & AgentProviderOptionsPayload
+  & AgentMcpOptionsPayload;
+
+export type AgentChatPayload = AgentCardsPayload & AgentProviderOptionsPayload;
 
 export type PromptVariable = {
   name: string;

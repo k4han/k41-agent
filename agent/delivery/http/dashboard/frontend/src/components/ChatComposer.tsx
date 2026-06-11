@@ -21,7 +21,7 @@ import {
 import { formatBytes } from "@/lib/chatAttachments";
 import { PASTE_AS_ATTACHMENT_THRESHOLD, type PendingAttachment } from "@/lib/chatTypes";
 import type { TranscriptUserInputRequest } from "@/components/Transcript";
-import type { AgentCard, AgentsPayload, ModelCatalog } from "@/types";
+import type { AgentCard, AgentChatPayload, ModelCatalog } from "@/types";
 
 export interface ChatComposerProps {
   prompt: string;
@@ -47,7 +47,7 @@ export interface ChatComposerProps {
   provider: string;
   model: string;
   onProviderModelChange: (provider: string, model: string) => void;
-  payload: AgentsPayload;
+  payload: AgentChatPayload;
   recursionLimitReached: boolean;
   currentTodos: Array<{ content: string; status: "pending" | "in_progress" | "completed" }> | null;
   todoProgress: TodoProgress;

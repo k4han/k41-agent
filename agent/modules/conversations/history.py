@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -17,6 +19,7 @@ from agent.modules.conversations.service import (
 from agent.shared.infrastructure.parsing import extract_final_text_content
 
 logger = logging.getLogger(__name__)
+CHECKPOINT_STATS_CONCURRENCY = 4
 
 
 class ConversationHistoryUnavailableError(RuntimeError):
@@ -126,11 +129,41 @@ async def list_legacy_threads_from_checkpoints(
     return rows
 
 
+async def _attach_checkpoint_stats(
+    threads: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    semaphore = asyncio.Semaphore(CHECKPOINT_STATS_CONCURRENCY)
+
+    async def load_one(thread: dict[str, Any]) -> dict[str, Any]:
+        async with semaphore:
+            stats = await get_checkpoint_stats(thread["thread_id"])
+        return stats
+
+    results = await asyncio.gather(
+        *(load_one(thread) for thread in threads),
+        return_exceptions=True,
+    )
+    attached: list[dict[str, Any]] = []
+    for thread, result in zip(threads, results, strict=True):
+        if isinstance(result, Exception):
+            logger.warning(
+                "Failed to attach checkpoint stats for %s: %s",
+                thread.get("thread_id", ""),
+                result,
+            )
+            stats = {"latest_checkpoint_id": "", "checkpoint_count": 0}
+        else:
+            stats = result
+        attached.append({**thread, **stats})
+    return attached
+
+
 async def list_user_threads_with_stats(
     limit: int | None = None,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
     """List user-facing conversation threads with checkpoint stats."""
+    started = time.perf_counter()
     try:
         threads = await list_conversation_threads(
             limit=limit,
@@ -140,17 +173,20 @@ async def list_user_threads_with_stats(
     except Exception as exc:
         logger.warning("Failed to list conversation threads: %s", exc)
         return []
+    threads_loaded = time.perf_counter()
 
     if not threads:
         return await list_legacy_threads_from_checkpoints(limit=limit, offset=offset)
 
-    result = []
-    for thread in threads:
-        stats = await get_checkpoint_stats(thread["thread_id"])
-        result.append({
-            **thread,
-            **stats,
-        })
+    result = await _attach_checkpoint_stats(threads)
+    logger.debug(
+        "Listed %d user thread(s) with checkpoint stats in %.1fms "
+        "(threads=%.1fms, checkpoint_stats=%.1fms)",
+        len(result),
+        (time.perf_counter() - started) * 1000,
+        (threads_loaded - started) * 1000,
+        (time.perf_counter() - threads_loaded) * 1000,
+    )
     return result
 
 
@@ -159,6 +195,7 @@ async def list_background_threads_with_stats(
     offset: int = 0,
 ) -> list[dict[str, Any]]:
     """List background task threads with checkpoint stats."""
+    started = time.perf_counter()
     try:
         threads = await list_conversation_threads(
             limit=limit,
@@ -168,17 +205,20 @@ async def list_background_threads_with_stats(
     except Exception as exc:
         logger.warning("Failed to list background task threads: %s", exc)
         return []
+    threads_loaded = time.perf_counter()
 
     if not threads:
         return []
 
-    result = []
-    for thread in threads:
-        stats = await get_checkpoint_stats(thread["thread_id"])
-        result.append({
-            **thread,
-            **stats,
-        })
+    result = await _attach_checkpoint_stats(threads)
+    logger.debug(
+        "Listed %d background thread(s) with checkpoint stats in %.1fms "
+        "(threads=%.1fms, checkpoint_stats=%.1fms)",
+        len(result),
+        (time.perf_counter() - started) * 1000,
+        (threads_loaded - started) * 1000,
+        (time.perf_counter() - threads_loaded) * 1000,
+    )
     return result
 
 

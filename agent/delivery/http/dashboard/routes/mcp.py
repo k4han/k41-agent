@@ -8,6 +8,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from agent.delivery.http.common.mcp import InstallRepository
+from agent.delivery.http.dashboard.routes.helpers.agents import (
+    invalidate_agent_mcp_cache,
+    invalidate_agent_tools_cache,
+)
 from agent.modules.mcp import (
     MCPServerConfig,
     MCPServerStatus,
@@ -187,6 +191,8 @@ async def create_dashboard_mcp_server(
         credential_payload=_credential_payload_from_config(config),
     )
     await reload_mcp_descriptors()
+    invalidate_agent_tools_cache()
+    invalidate_agent_mcp_cache()
     return {"status": "created", "name": name}
 
 
@@ -206,6 +212,8 @@ async def update_dashboard_mcp_server(
     ):
         raise HTTPException(status_code=404, detail=f"MCP server not found: {server_name}.")
     await reload_mcp_descriptors()
+    invalidate_agent_tools_cache()
+    invalidate_agent_mcp_cache()
     return {"status": "updated", "name": name}
 
 
@@ -218,6 +226,8 @@ async def delete_dashboard_mcp_server(
     if not repo.delete_server(server_name):
         raise HTTPException(status_code=404, detail=f"MCP server not found: {server_name}.")
     await reload_mcp_descriptors()
+    invalidate_agent_tools_cache()
+    invalidate_agent_mcp_cache()
     return {"status": "deleted", "name": server_name}
 
 
@@ -256,4 +266,6 @@ async def toggle_dashboard_mcp_server(
     if not repo.toggle_server(server_name, body.enabled):
         raise HTTPException(status_code=404, detail=f"MCP server not found: {server_name}.")
     await reload_mcp_descriptors()
+    invalidate_agent_tools_cache()
+    invalidate_agent_mcp_cache()
     return {"status": "updated", "name": server_name, "enabled": body.enabled}

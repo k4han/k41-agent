@@ -6,6 +6,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ErrorPanel } from "@/components/State";
 import { useToast } from "@/components/Toast";
 import { API_PATHS } from "@/lib/endpoints";
+import { fetchAgentEditorOptions } from "@/lib/agents";
 import { apiFetch, postJson, putJson } from "@/lib/api";
 import { uniqueSorted } from "@/lib/utils";
 import { SettingsLayout } from "@/pages/settings/SettingsLayout";
@@ -140,7 +141,7 @@ export function AgentEditPage(props: { agentName?: string }) {
   const load = async () => {
     setError("");
     try {
-      const data = await apiFetch<AgentsPayload>("/dashboard-api/agents");
+      const data = await fetchAgentEditorOptions();
       setPayload(data);
 
       if (isCreate) {

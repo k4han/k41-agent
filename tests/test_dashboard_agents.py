@@ -65,16 +65,23 @@ def test_agents_page_serves_spa_and_agent_api_returns_cards(dashboard_agent_clie
     assert '<div id="root">' in response.text
     assert "/dashboard-assets/" in response.text
 
-    api_response = client.get("/dashboard-api/agents")
-    assert api_response.status_code == 200
-    data = api_response.json()
-    assert any(card["name"] == "default" for card in data["cards"])
-    assert "react_agent" in data["workflows"]
-    assert "tools" in data
-    assert "write_todos" in data["tools"]
-    assert "ask_user" in data["tools"]
-    assert "tool_config_schemas" in data
-    assert "generate_image" in data["tool_config_schemas"]
+    cards_response = client.get("/dashboard-api/agents/cards")
+    assert cards_response.status_code == 200
+    cards_data = cards_response.json()
+    assert any(card["name"] == "default" for card in cards_data["cards"])
+
+    workflows_response = client.get("/dashboard-api/agents/workflows")
+    assert workflows_response.status_code == 200
+    assert "react_agent" in workflows_response.json()["workflows"]
+
+    tools_response = client.get("/dashboard-api/agents/tools")
+    assert tools_response.status_code == 200
+    tools_data = tools_response.json()
+    assert "tools" in tools_data
+    assert "write_todos" in tools_data["tools"]
+    assert "ask_user" in tools_data["tools"]
+    assert "tool_config_schemas" in tools_data
+    assert "generate_image" in tools_data["tool_config_schemas"]
 
     index_response = client.get("/")
     assert index_response.status_code == 200

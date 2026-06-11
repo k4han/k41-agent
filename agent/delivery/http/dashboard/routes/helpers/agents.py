@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException
@@ -20,6 +22,21 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+_agent_cards_cache: dict[str, Any] | None = None
+_agent_tools_cache: dict[str, Any] | None = None
+_agent_workflows_cache: dict[str, Any] | None = None
+_agent_mcp_cache: dict[str, Any] | None = None
+_agent_provider_options_cache: dict[str, Any] | None = None
+_agent_cards_cache_version = 0
+_agent_tools_cache_version = 0
+_agent_workflows_cache_version = 0
+_agent_mcp_cache_version = 0
+_agent_provider_options_cache_version = 0
+_agent_cards_lock = asyncio.Lock()
+_agent_tools_lock = asyncio.Lock()
+_agent_workflows_lock = asyncio.Lock()
+_agent_mcp_lock = asyncio.Lock()
+_agent_provider_options_lock = asyncio.Lock()
 
 _TOOL_CATEGORY_ORDER = (
     "file",
@@ -48,6 +65,215 @@ def serialize_agent_config(config: AgentConfig) -> dict[str, Any]:
     return _dump_model(config)
 
 
+def _payload_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
+    return payload.copy()
+
+
+def invalidate_agent_options_caches() -> None:
+    invalidate_agent_cards_cache()
+    invalidate_agent_tools_cache()
+    invalidate_agent_workflows_cache()
+    invalidate_agent_mcp_cache()
+    invalidate_agent_provider_options_cache()
+
+
+def invalidate_agent_card_related_caches() -> None:
+    invalidate_agent_cards_cache()
+    invalidate_agent_tools_cache()
+    invalidate_agent_mcp_cache()
+
+
+def invalidate_agent_cards_cache() -> None:
+    global _agent_cards_cache, _agent_cards_cache_version
+    _agent_cards_cache = None
+    _agent_cards_cache_version += 1
+
+
+def invalidate_agent_tools_cache() -> None:
+    global _agent_tools_cache, _agent_tools_cache_version
+    _agent_tools_cache = None
+    _agent_tools_cache_version += 1
+
+
+def invalidate_agent_workflows_cache() -> None:
+    global _agent_workflows_cache, _agent_workflows_cache_version
+    _agent_workflows_cache = None
+    _agent_workflows_cache_version += 1
+
+
+def invalidate_agent_mcp_cache() -> None:
+    global _agent_mcp_cache, _agent_mcp_cache_version
+    _agent_mcp_cache = None
+    _agent_mcp_cache_version += 1
+
+
+def invalidate_agent_provider_options_cache() -> None:
+    global _agent_provider_options_cache, _agent_provider_options_cache_version
+    _agent_provider_options_cache = None
+    _agent_provider_options_cache_version += 1
+
+
+async def warm_agent_options_caches() -> None:
+    await asyncio.gather(
+        agent_cards_payload(),
+        agent_tools_payload(),
+        agent_workflows_payload(),
+        agent_mcp_payload(),
+        agent_provider_options_payload(),
+    )
+
+
+async def agent_cards_payload() -> dict[str, Any]:
+    global _agent_cards_cache
+
+    if _agent_cards_cache is not None:
+        return _payload_snapshot(_agent_cards_cache)
+
+    async with _agent_cards_lock:
+        if _agent_cards_cache is not None:
+            return _payload_snapshot(_agent_cards_cache)
+
+        cache_version = _agent_cards_cache_version
+        started = time.perf_counter()
+        cards = get_catalog_service().list_agent_cards()
+        agent_names = sorted(card.name for card in cards if card.valid)
+        payload = {
+            "cards": [serialize_agent_card(card) for card in cards],
+            "agent_names": agent_names,
+        }
+        if cache_version == _agent_cards_cache_version:
+            _agent_cards_cache = payload
+        logger.debug(
+            "Built agent cards payload in %.1fms",
+            (time.perf_counter() - started) * 1000,
+        )
+        return payload
+
+
+async def agent_workflows_payload() -> dict[str, Any]:
+    global _agent_workflows_cache
+
+    if _agent_workflows_cache is not None:
+        return _payload_snapshot(_agent_workflows_cache)
+
+    async with _agent_workflows_lock:
+        if _agent_workflows_cache is not None:
+            return _payload_snapshot(_agent_workflows_cache)
+
+        cache_version = _agent_workflows_cache_version
+        workflows = list_registered_workflows()
+        for workflow_name in (REACT_AGENT_GRAPH_TYPE, ROUTER_GRAPH_TYPE):
+            if workflow_name not in workflows:
+                workflows.append(workflow_name)
+        payload = {"workflows": workflows}
+        if cache_version == _agent_workflows_cache_version:
+            _agent_workflows_cache = payload
+        return payload
+
+
+async def agent_tools_payload() -> dict[str, Any]:
+    global _agent_tools_cache
+
+    if _agent_tools_cache is not None:
+        return _payload_snapshot(_agent_tools_cache)
+
+    async with _agent_tools_lock:
+        if _agent_tools_cache is not None:
+            return _payload_snapshot(_agent_tools_cache)
+
+        cache_version = _agent_tools_cache_version
+        started = time.perf_counter()
+        cards = await agent_cards_payload()
+        builtin_descriptors = find_descriptors(source=ToolSource.BUILTIN)
+        tool_categories = {desc.name: desc.category.value for desc in builtin_descriptors}
+        tool_config_schemas = serialize_tool_config_schemas(builtin_descriptors)
+        tool_names = set(tool_categories)
+        for card in cards["cards"]:
+            if not card.get("valid"):
+                continue
+            tool_names.update(
+                name
+                for name in card.get("tools", [])
+                if not str(name).startswith("mcp__")
+            )
+
+        payload = {
+            "tools": sorted(tool_names),
+            "tool_groups": _build_tool_groups(tool_names, tool_categories),
+            "tool_config_schemas": tool_config_schemas,
+        }
+        if cache_version == _agent_tools_cache_version:
+            _agent_tools_cache = payload
+        logger.debug(
+            "Built agent tools payload in %.1fms",
+            (time.perf_counter() - started) * 1000,
+        )
+        return payload
+
+
+async def agent_mcp_payload() -> dict[str, Any]:
+    global _agent_mcp_cache
+
+    if _agent_mcp_cache is not None:
+        return _payload_snapshot(_agent_mcp_cache)
+
+    async with _agent_mcp_lock:
+        if _agent_mcp_cache is not None:
+            return _payload_snapshot(_agent_mcp_cache)
+
+        cache_version = _agent_mcp_cache_version
+        started = time.perf_counter()
+        cards = await agent_cards_payload()
+        try:
+            from agent.modules.mcp import list_all_agent_mcp_installs, list_mcp_installs
+
+            mcp_installs = list_mcp_installs()
+            mcp_servers = [str(item.get("server_name") or "") for item in mcp_installs]
+            all_agent_installs = list_all_agent_mcp_installs()
+            agent_mcp_installs = {
+                str(card.get("name") or ""): all_agent_installs.get(str(card.get("name") or ""), [])
+                for card in cards["cards"]
+                if card.get("valid") and card.get("name")
+            }
+        except Exception:
+            mcp_servers = []
+            agent_mcp_installs = {}
+
+        payload = {
+            "mcp_server_options": mcp_servers,
+            "mcp_installs": agent_mcp_installs,
+        }
+        if cache_version == _agent_mcp_cache_version:
+            _agent_mcp_cache = payload
+        logger.debug(
+            "Built agent MCP payload in %.1fms",
+            (time.perf_counter() - started) * 1000,
+        )
+        return payload
+
+
+async def agent_provider_options_payload() -> dict[str, Any]:
+    global _agent_provider_options_cache
+
+    if _agent_provider_options_cache is not None:
+        return _payload_snapshot(_agent_provider_options_cache)
+
+    async with _agent_provider_options_lock:
+        if _agent_provider_options_cache is not None:
+            return _payload_snapshot(_agent_provider_options_cache)
+
+        cache_version = _agent_provider_options_cache_version
+        started = time.perf_counter()
+        payload = await provider_model_options()
+        if cache_version == _agent_provider_options_cache_version:
+            _agent_provider_options_cache = payload
+        logger.debug(
+            "Built agent provider options payload in %.1fms",
+            (time.perf_counter() - started) * 1000,
+        )
+        return payload
+
+
 def _build_tool_groups(
     tool_names: set[str],
     tool_categories: dict[str, str],
@@ -64,58 +290,6 @@ def _build_tool_groups(
         {"category": category, "tools": sorted(grouped[category])}
         for category in ordered_categories
     ]
-
-
-async def agent_card_options(cards: list[AgentCard] | None = None) -> dict[str, Any]:
-    catalog = get_catalog_service()
-    cards = cards if cards is not None else catalog.list_agent_cards()
-
-    workflows = list_registered_workflows()
-    for workflow_name in (REACT_AGENT_GRAPH_TYPE, ROUTER_GRAPH_TYPE):
-        if workflow_name not in workflows:
-            workflows.append(workflow_name)
-
-    builtin_descriptors = find_descriptors(source=ToolSource.BUILTIN)
-    tool_categories = {desc.name: desc.category.value for desc in builtin_descriptors}
-    tool_config_schemas = serialize_tool_config_schemas(builtin_descriptors)
-    tool_names = set(tool_categories)
-    agent_names = []
-    for card in cards:
-        if not card.valid:
-            continue
-        agent_names.append(card.name)
-        tool_names.update(
-            name for name in card.tools if not name.startswith("mcp__")
-        )
-
-    tool_groups = _build_tool_groups(tool_names, tool_categories)
-
-    try:
-        from agent.modules.mcp import list_all_agent_mcp_installs, list_mcp_installs
-
-        mcp_installs = list_mcp_installs()
-        mcp_servers = [str(item.get("server_name") or "") for item in mcp_installs]
-        all_agent_installs = list_all_agent_mcp_installs()
-        agent_mcp_installs = {
-            card.name: all_agent_installs.get(card.name, [])
-            for card in cards
-            if card.valid
-        }
-    except Exception:
-        mcp_servers = []
-        agent_mcp_installs = {}
-
-    return {
-        "cards": [serialize_agent_card(card) for card in cards],
-        "tools": sorted(tool_names),
-        "tool_groups": tool_groups,
-        "tool_config_schemas": tool_config_schemas,
-        "workflows": workflows,
-        "agent_names": sorted(agent_names),
-        "mcp_server_options": mcp_servers,
-        "mcp_installs": agent_mcp_installs,
-        **await provider_model_options(),
-    }
 
 
 def handle_agent_card_error(exc: Exception) -> HTTPException:
@@ -154,7 +328,11 @@ def agent_config_from_body(body: "AgentCardBody") -> AgentConfig:
             for name, values in body.tool_configs.items()
             if name in body.tools and isinstance(values, dict)
         },
-        mcp_servers=list(body.mcp_servers) if hasattr(body, "mcp_servers") and body.mcp_servers is not None else None,
+        mcp_servers=(
+            list(body.mcp_servers)
+            if hasattr(body, "mcp_servers") and body.mcp_servers is not None
+            else None
+        ),
         sub_agents=list(body.sub_agents) if body.sub_agents is not None else None,
         plan_approval_targets=list(body.plan_approval_targets),
         hidden=body.hidden,

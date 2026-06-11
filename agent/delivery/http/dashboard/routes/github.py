@@ -6,7 +6,11 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from agent.modules.agents import get_catalog_service
 from agent.modules.agent_runtime import get_background_task_manager
-from agent.delivery.http.dashboard.routes.helpers.agents import agent_card_options
+from agent.delivery.http.dashboard.routes.helpers.agents import (
+    agent_cards_payload,
+    agent_provider_options_payload,
+    agent_tools_payload,
+)
 from agent.delivery.http.dashboard.routes.helpers.identities import paired_identities
 from agent.modules.github import (
     get_github_automation_service,
@@ -151,14 +155,16 @@ async def get_dashboard_github_repository(repository_id: int) -> dict[str, Any]:
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    options = await agent_card_options()
+    cards_options = await agent_cards_payload()
+    tools_options = await agent_tools_payload()
+    provider_options = await agent_provider_options_payload()
     return {
         "repository": repository,
         "activity": _repository_activity(repository, limit=10),
         "identities": await paired_identities(),
-        "agent_names": options["agent_names"],
-        "tools": options["tools"],
-        "tool_groups": options["tool_groups"],
+        "agent_names": cards_options["agent_names"],
+        "tools": tools_options["tools"],
+        "tool_groups": tools_options["tool_groups"],
         "skills": [
             {
                 "name": skill.name,
@@ -168,11 +174,11 @@ async def get_dashboard_github_repository(repository_id: int) -> dict[str, Any]:
             for skill in list_available_skills()
         ],
         "repository_skill_dir": get_repository_skill_dir(),
-        "provider_names": options["provider_names"],
-        "default_provider": options["default_provider"],
-        "default_model": options["default_model"],
-        "model_catalogs": options["model_catalogs"],
-        "model_catalog_error": options["model_catalog_error"],
+        "provider_names": provider_options["provider_names"],
+        "default_provider": provider_options["default_provider"],
+        "default_model": provider_options["default_model"],
+        "model_catalogs": provider_options["model_catalogs"],
+        "model_catalog_error": provider_options["model_catalog_error"],
     }
 
 

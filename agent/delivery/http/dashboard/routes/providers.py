@@ -4,6 +4,9 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
+from agent.delivery.http.dashboard.routes.helpers.agents import (
+    invalidate_agent_provider_options_cache,
+)
 from agent.delivery.http.dashboard.routes.helpers.deps import get_request_config_service
 from agent.delivery.http.dashboard.routes.helpers.providers import (
     normalize_provider_name,
@@ -88,6 +91,7 @@ async def create_dashboard_provider(
         values[f"llm.providers.{provider_name}.base_url"] = base_url
 
     update_config_settings(service, values, require_writable=True)
+    invalidate_agent_provider_options_cache()
     return {"status": "created", "name": provider_name, "type": provider_type}
 
 
@@ -116,6 +120,7 @@ async def delete_dashboard_provider(
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Provider not found: {provider_name}.")
 
+    invalidate_agent_provider_options_cache()
     return {"status": "deleted", "name": existing_name}
 
 @router.get("/providers/models")
@@ -151,4 +156,5 @@ async def update_providers_catalog() -> dict[str, str]:
     success, message = await update_catalog_from_url()
     if not success:
         raise HTTPException(status_code=500, detail=message)
+    invalidate_agent_provider_options_cache()
     return {"status": "success", "message": message}

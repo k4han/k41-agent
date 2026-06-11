@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from datetime import datetime
 from typing import Any
@@ -9,10 +10,7 @@ from fastapi import APIRouter, Depends, Request, HTTPException
 from fastapi.responses import StreamingResponse
 
 from agent.modules.admin_auth import get_current_admin
-from agent.delivery.http.dashboard.routes.helpers.agents import (
-    agent_card_options,
-    serialize_agent_config,
-)
+from agent.delivery.http.dashboard.routes.helpers.agents import serialize_agent_config
 from agent.delivery.http.dashboard.routes.helpers.deps import (
     get_channel_manager,
     get_request_config_service,
@@ -48,6 +46,7 @@ BACKGROUND_TASK_ACTIVE_STATUSES = {"pending", "running"}
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 HOME_RECENT_THREADS_LIMIT = 8
@@ -222,6 +221,16 @@ async def get_dashboard_session(current_admin: str = Depends(get_current_admin))
 @router.get("/dashboard-api/home")
 async def get_dashboard_home(request: Request) -> dict[str, Any]:
     """Get dashboard home data including system status, counters, recent items, and onboarding state."""
+    started = time.perf_counter()
+    last_timing = started
+    timings: list[str] = []
+
+    def record_timing(name: str) -> None:
+        nonlocal last_timing
+        now = time.perf_counter()
+        timings.append(f"{name}={(now - last_timing) * 1000:.1f}ms")
+        last_timing = now
+
     channel_manager = get_channel_manager(request)
     services = list_channel_statuses(channel_manager)
 
@@ -236,6 +245,7 @@ async def get_dashboard_home(request: Request) -> dict[str, Any]:
     registry = get_active_session_registry()
     sessions_active = registry.count()
     active_sessions = registry.list_active()
+    record_timing("runtime")
 
     try:
         jobs = list_all_jobs()
@@ -245,15 +255,18 @@ async def get_dashboard_home(request: Request) -> dict[str, Any]:
         jobs = []
         scheduler_timezone = "local time"
     upcoming_jobs = _build_upcoming_jobs(jobs)
+    record_timing("scheduler")
 
     catalog = get_catalog_service()
     agents = catalog.list_agents()
     agents_total = len(agents)
+    record_timing("agents")
 
     config_service = get_request_config_service(request)
     flat_config = config_service.get_all()
     providers_health = _build_providers_health(flat_config)
     ready_providers = sum(1 for p in providers_health if p.get("ready"))
+    record_timing("providers")
 
     try:
         mcp_statuses = await list_mcp_server_status()
@@ -265,6 +278,7 @@ async def get_dashboard_home(request: Request) -> dict[str, Any]:
         for status in mcp_statuses
         if status.enabled and status.loaded and not status.error
     )
+    record_timing("mcp")
 
     try:
         from agent.modules.conversations import (
@@ -278,6 +292,7 @@ async def get_dashboard_home(request: Request) -> dict[str, Any]:
         )
     except Exception:
         recent_threads = []
+    record_timing("recent_threads")
 
     started_at = float(getattr(request.app.state, "started_at", 0.0) or 0.0)
     uptime_seconds = max(0.0, time.time() - started_at) if started_at else 0.0
@@ -297,7 +312,7 @@ async def get_dashboard_home(request: Request) -> dict[str, Any]:
         agents_total=agents_total,
     )
 
-    return {
+    payload = {
         "services": services,
         "system": {
             "status": system_status,
@@ -344,6 +359,12 @@ async def get_dashboard_home(request: Request) -> dict[str, Any]:
         "scheduler_timezone": scheduler_timezone,
         "onboarding": onboarding,
     }
+    logger.debug(
+        "Dashboard home loaded in %.1fms (%s)",
+        (time.perf_counter() - started) * 1000,
+        ", ".join(timings),
+    )
+    return payload
 
 
 @router.get("/dashboard-api/channels")
@@ -392,12 +413,6 @@ async def get_dashboard_channels(request: Request) -> dict[str, Any]:
         "settings_sources": settings_sources,
         "runtimes": runtimes,
     }
-
-
-@router.get("/dashboard-api/agents")
-async def get_dashboard_agents() -> dict[str, Any]:
-    """Get agent card options for the dashboard."""
-    return await agent_card_options()
 
 
 @router.get("/dashboard-api/tasks")

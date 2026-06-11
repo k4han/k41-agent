@@ -7,10 +7,15 @@ from pydantic import BaseModel, Field
 
 from agent.modules.workflows import REACT_AGENT_GRAPH_TYPE
 from agent.delivery.http.dashboard.routes.helpers.agents import (
-    agent_card_options,
+    agent_cards_payload,
     agent_config_from_body,
+    agent_mcp_payload,
+    agent_provider_options_payload,
+    agent_tools_payload,
+    agent_workflows_payload,
     handle_agent_card_error,
     handle_prompt_variable_error,
+    invalidate_agent_card_related_caches,
     serialize_agent_card,
 )
 from agent.modules.agents import get_catalog_service
@@ -42,7 +47,37 @@ class AgentCardBody(BaseModel):
 @router.get("/agents/cards")
 async def list_agent_cards() -> dict[str, Any]:
     """List all agent cards with their configuration options."""
-    return await agent_card_options()
+    return await agent_cards_payload()
+
+
+@router.get("/dashboard-api/agents/cards")
+async def list_dashboard_agent_cards() -> dict[str, Any]:
+    """List agent card metadata and names."""
+    return await agent_cards_payload()
+
+
+@router.get("/dashboard-api/agents/tools")
+async def list_dashboard_agent_tools() -> dict[str, Any]:
+    """List built-in tool options and config schemas for agent editing."""
+    return await agent_tools_payload()
+
+
+@router.get("/dashboard-api/agents/workflows")
+async def list_dashboard_agent_workflows() -> dict[str, Any]:
+    """List available workflow graph types for agent editing."""
+    return await agent_workflows_payload()
+
+
+@router.get("/dashboard-api/agents/mcp")
+async def list_dashboard_agent_mcp_options() -> dict[str, Any]:
+    """List MCP server options and per-agent install bindings."""
+    return await agent_mcp_payload()
+
+
+@router.get("/dashboard-api/agents/providers")
+async def list_dashboard_agent_provider_options() -> dict[str, Any]:
+    """List provider/model options for agent model pickers."""
+    return await agent_provider_options_payload()
 
 
 @router.post("/agents/cards")
@@ -53,6 +88,7 @@ async def create_agent_card(body: AgentCardBody) -> dict[str, Any]:
         card = catalog.create_agent_card(agent_config_from_body(body))
     except Exception as exc:
         raise handle_agent_card_error(exc) from exc
+    invalidate_agent_card_related_caches()
     return {"status": "created", "card": serialize_agent_card(card)}
 
 
@@ -64,6 +100,7 @@ async def update_agent_card(name: str, body: AgentCardBody) -> dict[str, Any]:
         card = catalog.update_agent_card(name, agent_config_from_body(body))
     except Exception as exc:
         raise handle_agent_card_error(exc) from exc
+    invalidate_agent_card_related_caches()
     return {"status": "updated", "card": serialize_agent_card(card)}
 
 
@@ -75,6 +112,7 @@ async def delete_agent_card(name: str) -> dict[str, str]:
         catalog.delete_agent_card(name)
     except Exception as exc:
         raise handle_agent_card_error(exc) from exc
+    invalidate_agent_card_related_caches()
     return {"status": "deleted", "name": name}
 
 
@@ -86,6 +124,7 @@ async def clone_builtin_agent_card(name: str) -> dict[str, Any]:
         card = catalog.clone_builtin_agent(name)
     except Exception as exc:
         raise handle_agent_card_error(exc) from exc
+    invalidate_agent_card_related_caches()
     return {"status": "cloned", "card": serialize_agent_card(card)}
 
 
@@ -94,7 +133,8 @@ async def reload_agent_cards() -> dict[str, Any]:
     """Reload all agent cards from disk and return updated options."""
     catalog = get_catalog_service()
     catalog.reload_agents()
-    return {"status": "reloaded", **await agent_card_options()}
+    invalidate_agent_card_related_caches()
+    return {"status": "reloaded", **await agent_cards_payload()}
 
 
 class PromptVariableBody(BaseModel):

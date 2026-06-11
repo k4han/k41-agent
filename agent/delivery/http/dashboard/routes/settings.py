@@ -4,6 +4,9 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
+from agent.delivery.http.dashboard.routes.helpers.agents import (
+    invalidate_agent_provider_options_cache,
+)
 from agent.delivery.http.dashboard.routes.helpers.deps import get_request_config_service
 from agent.delivery.http.dashboard.routes.helpers.settings import (
     ensure_runtime_keys,
@@ -63,6 +66,7 @@ async def update_setting(
 
     validate_default_model_update(service, {key: value})
     service.update_setting(key, value)
+    invalidate_agent_provider_options_cache()
     return {"status": "success", "key": key, "value": value}
 
 
@@ -87,5 +91,6 @@ async def update_settings(body: UpdateSettingsBody, request: Request) -> dict[st
     service = get_request_config_service(request)
     validate_default_model_update(service, values)
     update_config_settings(service, values)
+    invalidate_agent_provider_options_cache()
 
     return {"status": "success", "updated": list(values.keys())}

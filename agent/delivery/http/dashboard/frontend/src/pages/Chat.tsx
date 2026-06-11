@@ -20,6 +20,7 @@ import { useToast } from "@/components/Toast";
 import { WorkspaceExplorer } from "@/components/WorkspaceExplorer";
 import type { TodoProgress } from "@/components/ChatTodos";
 import { apiFetch, fetchWithCsrf, postJson, readError } from "@/lib/api";
+import { fetchAgentChatOptions } from "@/lib/agents";
 import {
   threadApiPath,
   toThreadTranscript,
@@ -33,7 +34,7 @@ import {
 import type {
   ActiveSession,
   AgentCard,
-  AgentsPayload,
+  AgentChatPayload,
   ModelOption,
   SandboxBackendKey,
   WorkspaceRef,
@@ -161,7 +162,7 @@ export function ChatPage() {
 
   const { showToast } = useToast();
 
-  const [data, setData] = createSignal<AgentsPayload>();
+  const [data, setData] = createSignal<AgentChatPayload>();
   const [error, setError] = createSignal("");
   const [threadData, setThreadData] = createSignal<ThreadMessagesPayload>();
   const [threadError, setThreadError] = createSignal("");
@@ -400,7 +401,7 @@ export function ChatPage() {
   const load = async () => {
     setError("");
     try {
-      setData(await apiFetch<AgentsPayload>("/dashboard-api/agents"));
+      setData(await fetchAgentChatOptions());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load chat options");
     }

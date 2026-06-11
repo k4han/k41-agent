@@ -7,9 +7,9 @@ import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
 import { API_PATHS } from "@/lib/endpoints";
 import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
+import { fetchAgentCards } from "@/lib/agents";
 import { useCatalogAndLoad } from "@/lib/useCatalogAndLoad";
 import type {
-  AgentsPayload,
   McpInstallResponse,
   McpSearchPayload,
   McpSearchResult,
@@ -41,7 +41,7 @@ export function McpTab() {
     try {
       const [serversPayload, agentsPayload] = await Promise.all([
         apiFetch<McpServersPayload>(API_PATHS.mcpServers),
-        apiFetch<AgentsPayload>(API_PATHS.agents),
+        fetchAgentCards(),
       ]);
       setServers(serversPayload.servers);
       setAgentNames(agentsPayload.agent_names || []);

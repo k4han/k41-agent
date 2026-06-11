@@ -9,6 +9,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from agent.delivery.http.common.mcp import InstallRepository
+from agent.delivery.http.dashboard.routes.helpers.agents import (
+    invalidate_agent_mcp_cache,
+    invalidate_agent_tools_cache,
+)
 from agent.modules.mcp import McpInstallError, McpMarketplaceService
 from agent.modules.tools import reload_mcp_descriptors
 
@@ -122,6 +126,8 @@ async def install_mcp_server(
         )
         if result.get("status") == "installed":
             await reload_mcp_descriptors()
+            invalidate_agent_tools_cache()
+            invalidate_agent_mcp_cache()
         return result
     except Exception as exc:
         raise _http_error(exc) from exc
@@ -151,6 +157,8 @@ async def bind_agent_mcp_install(
     if install is None:
         raise HTTPException(status_code=404, detail="MCP server not found.")
     await reload_mcp_descriptors()
+    invalidate_agent_tools_cache()
+    invalidate_agent_mcp_cache()
     return {"status": "bound", "install": install}
 
 
@@ -165,6 +173,8 @@ async def toggle_agent_mcp_install(
     if not repo.toggle_agent_install(agent_name, install_id, body.enabled):
         raise HTTPException(status_code=404, detail="MCP install not found.")
     await reload_mcp_descriptors()
+    invalidate_agent_tools_cache()
+    invalidate_agent_mcp_cache()
     return {"status": "updated", "install_id": install_id, "enabled": body.enabled}
 
 
@@ -178,6 +188,8 @@ async def delete_agent_mcp_install(
     if not repo.delete_agent_install(agent_name, install_id):
         raise HTTPException(status_code=404, detail="MCP install not found.")
     await reload_mcp_descriptors()
+    invalidate_agent_tools_cache()
+    invalidate_agent_mcp_cache()
     return {"status": "deleted", "install_id": install_id}
 
 

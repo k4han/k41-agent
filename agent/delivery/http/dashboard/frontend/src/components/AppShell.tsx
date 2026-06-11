@@ -85,6 +85,16 @@ const historyCache: HistoryCache = {
   loaded: false,
 };
 
+type HistoryLoadMode = "immediate" | "deferred" | "none";
+type DeferredHistoryLoad = {
+  kind: "idle" | "timeout";
+  id: number;
+};
+type IdleSchedulerWindow = Window & {
+  requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
+  cancelIdleCallback?: (id: number) => void;
+};
+
 let historyLoadPromise: Promise<HistoryLoadResult> | null = null;
 let historyLoadKey = "";
 const optimisticLocks = new Map<string, { state: "running" | "stopped"; timestamp: number }>();
@@ -123,6 +133,7 @@ export function AppShell(props: {
     handleKeydown,
   } = useMobileDrawer({ sidebarId: "app-shell-sidebar" });
   let disposed = false;
+  let deferredHistoryLoad: DeferredHistoryLoad | null = null;
 
   let sessionEventSource: EventSource | null = null;
 
@@ -438,6 +449,51 @@ export function AppShell(props: {
   const isHistoryActive = () => (
     location.pathname.startsWith("/history") || Boolean(selectedChatThreadId())
   );
+
+  const cancelDeferredHistoryLoad = () => {
+    if (!deferredHistoryLoad) {
+      return;
+    }
+
+    const idleWindow = window as IdleSchedulerWindow;
+    if (deferredHistoryLoad.kind === "idle") {
+      idleWindow.cancelIdleCallback?.(deferredHistoryLoad.id);
+    } else {
+      window.clearTimeout(deferredHistoryLoad.id);
+    }
+    deferredHistoryLoad = null;
+  };
+
+  const scheduleDeferredHistoryLoad = (reset = true) => {
+    if (
+      disposed
+      || historyLoaded()
+      || historyLoading()
+      || deferredHistoryLoad
+      || collapsed()
+    ) {
+      return;
+    }
+
+    const run = () => {
+      deferredHistoryLoad = null;
+      void loadHistory(reset);
+    };
+    const idleWindow = window as IdleSchedulerWindow;
+    if (idleWindow.requestIdleCallback) {
+      deferredHistoryLoad = {
+        kind: "idle",
+        id: idleWindow.requestIdleCallback(run, { timeout: 1200 }),
+      };
+      return;
+    }
+
+    deferredHistoryLoad = {
+      kind: "timeout",
+      id: window.setTimeout(run, 120),
+    };
+  };
+
   const isThreadActive = (threadId: string) => selectedChatThreadId() === threadId;
   const historyGroups = createMemo(() => groupThreadsByWorkspace(historyThreads()));
 
@@ -499,12 +555,17 @@ export function AppShell(props: {
     window.localStorage.setItem(STORAGE_KEYS.WORKSPACE_FILTER, value);
   };
 
-  const setHistoryPanelOpen = (next: boolean) => {
+  const setHistoryPanelOpen = (next: boolean, loadMode: HistoryLoadMode = "immediate") => {
     setHistoryOpen(next);
     window.localStorage.setItem(HISTORY_PANEL_STORAGE_KEY, next ? "open" : "closed");
 
     if (next && !collapsed() && !historyLoaded()) {
-      void loadHistory(true);
+      if (loadMode === "immediate") {
+        cancelDeferredHistoryLoad();
+        void loadHistory(true);
+      } else if (loadMode === "deferred") {
+        scheduleDeferredHistoryLoad(true);
+      }
     }
   };
 
@@ -756,11 +817,11 @@ export function AppShell(props: {
       setCollapsed(true);
     }
     const savedHistoryState = window.localStorage.getItem(HISTORY_PANEL_STORAGE_KEY);
+    const loadMode = isHistoryActive() ? "immediate" : "deferred";
     if (savedHistoryState === "open" || isHistoryActive()) {
-      setHistoryPanelOpen(true);
-    }
-    if (!collapsed() && !historyLoaded()) {
-      void loadHistory(true);
+      setHistoryPanelOpen(true, loadMode);
+    } else if (!collapsed() && !historyLoaded()) {
+      scheduleDeferredHistoryLoad(true);
     }
     document.addEventListener("click", handleClickOutside);
     document.addEventListener("keydown", handleKeydown);
@@ -773,6 +834,7 @@ export function AppShell(props: {
 
   onCleanup(() => {
     disposed = true;
+    cancelDeferredHistoryLoad();
     if (sessionEventSource) {
       sessionEventSource.close();
       sessionEventSource = null;
@@ -949,10 +1011,14 @@ export function AppShell(props: {
                   </For>
                 </div>
 
-                <Show when={historyThreads().length === 0 && historyLoading()}>
-                  <div class="nav-history-status">Loading...</div>
+                <Show when={historyThreads().length === 0 && !historyError() && (!historyLoaded() || historyLoading())}>
+                  <div class="nav-history-skeleton" aria-label="Loading history">
+                    <span class="skeleton-line nav-history-skeleton-line" />
+                    <span class="skeleton-line nav-history-skeleton-line short" />
+                    <span class="skeleton-line nav-history-skeleton-line" />
+                  </div>
                 </Show>
-                <Show when={historyThreads().length === 0 && !historyLoading() && !historyError()}>
+                <Show when={historyThreads().length === 0 && historyLoaded() && !historyLoading() && !historyError()}>
                   <div class="nav-history-status">No history</div>
                 </Show>
                 <Show when={historyThreads().length > 0 && historyLoading()}>

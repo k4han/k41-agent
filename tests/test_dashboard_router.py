@@ -2209,11 +2209,18 @@ def test_dashboard_api_github_repository_detail_and_task(
 
     fake_service = FakeService()
 
-    async def fake_agent_options():
+    async def fake_agent_cards():
+        return {"agent_names": ["default"], "cards": []}
+
+    async def fake_agent_tools():
         return {
-            "agent_names": ["default"],
             "tools": ["read_file"],
             "tool_groups": [{"category": "file", "tools": ["read_file"]}],
+            "tool_config_schemas": {},
+        }
+
+    async def fake_agent_providers():
+        return {
             "provider_names": ["main"],
             "default_provider": "main",
             "default_model": "model",
@@ -2225,7 +2232,9 @@ def test_dashboard_api_github_repository_detail_and_task(
         return []
 
     _patch_dashboard_attr(monkeypatch, "get_github_automation_service", lambda _req=None: fake_service)
-    _patch_dashboard_attr(monkeypatch, "agent_card_options", fake_agent_options)
+    _patch_dashboard_attr(monkeypatch, "agent_cards_payload", fake_agent_cards)
+    _patch_dashboard_attr(monkeypatch, "agent_tools_payload", fake_agent_tools)
+    _patch_dashboard_attr(monkeypatch, "agent_provider_options_payload", fake_agent_providers)
     _patch_dashboard_attr(monkeypatch, "paired_identities", fake_identities)
     _patch_dashboard_attr(
         monkeypatch,

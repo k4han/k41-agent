@@ -7,15 +7,16 @@ import { DashboardTable } from "@/components/DashboardTable";
 import { DataGate } from "@/components/State";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
-import { apiFetch, deleteJson, postJson } from "@/lib/api";
+import { deleteJson, postJson } from "@/lib/api";
+import { fetchAgentCards } from "@/lib/agents";
 import { truncateText } from "@/lib/utils";
 import { SettingsLayout } from "@/pages/settings/SettingsLayout";
 import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
-import type { AgentsPayload } from "@/types";
+import type { AgentCardsPayload } from "@/types";
 
 export function AgentListPage() {
   const navigate = useNavigate();
-  const [data, setData] = createSignal<AgentsPayload>();
+  const [data, setData] = createSignal<AgentCardsPayload>();
   const [error, setError] = createSignal("");
   const [query, setQuery] = createSignal("");
   const [deleteTargetName, setDeleteTargetName] = createSignal<string | null>(null);
@@ -24,7 +25,7 @@ export function AgentListPage() {
   const load = async () => {
     setError("");
     try {
-      setData(await apiFetch<AgentsPayload>("/dashboard-api/agents"));
+      setData(await fetchAgentCards());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load agents");
     }
@@ -91,7 +92,7 @@ export function AgentListPage() {
 
   const reloadAgents = async () => {
     try {
-      const result = await postJson<AgentsPayload & { status: string }>("/agents/reload");
+      const result = await postJson<AgentCardsPayload & { status: string }>("/agents/reload");
       setData(result);
       showToast("Agents reloaded.");
     } catch (err) {

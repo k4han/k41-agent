@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -131,6 +132,7 @@ async def get_chat_history(
     offset: int = Query(default=0, ge=0, description="Number of threads to skip."),
 ) -> dict[str, Any]:
     """List conversation threads with pagination."""
+    started = time.perf_counter()
     fetch_limit = limit + 1 if limit is not None else None
     threads = await _list_threads_from_db(limit=fetch_limit, offset=offset)
     has_more = limit is not None and len(threads) > limit
@@ -138,11 +140,20 @@ async def get_chat_history(
     if limit is not None:
         threads = threads[:limit]
 
-    return {
+    payload = {
         "threads": threads,
         "has_more": has_more,
         "next_offset": offset + len(threads),
     }
+    logger.debug(
+        "Dashboard chat history loaded in %.1fms (limit=%s, offset=%s, rows=%d, has_more=%s)",
+        (time.perf_counter() - started) * 1000,
+        limit,
+        offset,
+        len(threads),
+        has_more,
+    )
+    return payload
 
 
 @router.get("/dashboard-api/chat-history/{thread_id:path}")

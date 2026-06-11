@@ -42,6 +42,22 @@ SHUTDOWN_SIGNAL = Path.home() / ".k41-agent" / "shutdown.signal"
 SERVER_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 2
 
 
+async def _warm_dashboard_caches() -> None:
+    try:
+        from agent.delivery.http.dashboard.routes.helpers.agents import (
+            warm_agent_options_caches,
+        )
+
+        started = time.perf_counter()
+        await warm_agent_options_caches()
+        logger.info(
+            "Dashboard agent options warmed in %.1fms.",
+            (time.perf_counter() - started) * 1000,
+        )
+    except Exception as exc:
+        logger.warning("Failed to warm dashboard agent options: %s", exc)
+
+
 def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:
     bootstrap_config = bootstrap_config or load_bootstrap_config()
     config_service = get_config_service()
@@ -51,6 +67,8 @@ def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(fastapi_app: FastAPI):
         await runtime.startup()
+        if bootstrap_config.enable_dashboard:
+            await _warm_dashboard_caches()
         fastapi_app.state.runtime_settings = runtime.runtime_settings
         try:
             yield

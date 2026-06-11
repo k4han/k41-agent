@@ -4,13 +4,13 @@ import type { ContextWindowData } from "@/components/ContextWindowIndicator";
 import { apiFetch } from "@/lib/api";
 import type { ChatTranscriptItem } from "@/lib/chatStreamStore";
 import type { PendingAttachment } from "@/lib/chatTypes";
-import type { AgentCard, AgentsPayload, ThreadUsagePayload } from "@/types";
+import type { AgentCard, AgentChatPayload, ThreadUsagePayload } from "@/types";
 
 export interface UseContextWindowParams {
   getCurrentThreadId: () => string;
   getStreaming: () => boolean;
   getSelectedCard: () => AgentCard | undefined;
-  getData: () => AgentsPayload | undefined;
+  getData: () => AgentChatPayload | undefined;
   getProvider: () => string;
   getModel: () => string;
   getAttachments: () => PendingAttachment[];

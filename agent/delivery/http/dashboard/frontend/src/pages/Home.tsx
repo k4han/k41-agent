@@ -1,5 +1,5 @@
 import { A } from "@solidjs/router";
-import { createSignal, onCleanup, onMount, Show } from "solid-js";
+import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { MessageSquarePlus, Play, Square } from "lucide-solid";
 
 import { AppShell } from "@/components/AppShell";
@@ -143,7 +143,7 @@ export function HomePage() {
       <Show
         when={data()}
         fallback={
-          <div class="stack" />
+          <HomeSkeleton />
         }
       >
         {(payload) => (
@@ -178,5 +178,84 @@ export function HomePage() {
         )}
       </Show>
     </AppShell>
+  );
+}
+
+function HomeSkeleton() {
+  return (
+    <div class="stack home-stack" aria-busy="true" aria-label="Loading dashboard">
+      <div class="grid-metrics">
+        <For each={Array.from({ length: 6 })}>
+          {() => (
+            <div class="panel metric metric-card home-skeleton-metric">
+              <span class="skeleton-line home-skeleton-value" />
+              <span class="skeleton-line home-skeleton-label" />
+            </div>
+          )}
+        </For>
+      </div>
+
+      <section class="panel onboarding-panel home-skeleton-panel">
+        <div class="panel-header">
+          <span class="skeleton-line home-skeleton-title" />
+          <span class="skeleton-line home-skeleton-subtitle" />
+        </div>
+        <div class="panel-body home-skeleton-list">
+          <For each={Array.from({ length: 3 })}>
+            {() => (
+              <div class="home-skeleton-row">
+                <span class="skeleton-line home-skeleton-dot" />
+                <div class="home-skeleton-row-main">
+                  <span class="skeleton-line home-skeleton-row-title" />
+                  <span class="skeleton-line home-skeleton-row-text" />
+                </div>
+                <span class="skeleton-line home-skeleton-action" />
+              </div>
+            )}
+          </For>
+        </div>
+      </section>
+
+      <div class="home-grid">
+        <div class="home-col">
+          <HomePanelSkeleton rows={3} />
+          <HomePanelSkeleton rows={3} />
+          <HomePanelSkeleton rows={4} />
+        </div>
+        <div class="home-col">
+          <HomePanelSkeleton rows={4} />
+          <HomePanelSkeleton rows={3} />
+          <HomePanelSkeleton rows={3} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HomePanelSkeleton(props: { rows: number }) {
+  return (
+    <section class="panel home-skeleton-panel">
+      <div class="panel-header split">
+        <div class="home-skeleton-heading">
+          <span class="skeleton-line home-skeleton-title" />
+          <span class="skeleton-line home-skeleton-subtitle" />
+        </div>
+        <span class="skeleton-line home-skeleton-button" />
+      </div>
+      <div class="panel-body home-skeleton-list">
+        <For each={Array.from({ length: props.rows })}>
+          {() => (
+            <div class="home-skeleton-row">
+              <span class="skeleton-line home-skeleton-icon" />
+              <div class="home-skeleton-row-main">
+                <span class="skeleton-line home-skeleton-row-title" />
+                <span class="skeleton-line home-skeleton-row-text" />
+              </div>
+              <span class="skeleton-line home-skeleton-badge" />
+            </div>
+          )}
+        </For>
+      </div>
+    </section>
   );
 }
