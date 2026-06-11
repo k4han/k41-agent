@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from agent.shared.config import get_config_service
 
@@ -19,8 +19,10 @@ class BootstrapConfig:
     enable_web: bool
     enable_api: bool
     enable_dashboard: bool
-    cors_origins: list[str]
-    csrf_protection_enabled: bool
+    cors_origins: list[str] = field(
+        default_factory=lambda: ["http://localhost:8000", "http://127.0.0.1:8000"]
+    )
+    csrf_protection_enabled: bool = True
 
 
 def load_bootstrap_config() -> BootstrapConfig:

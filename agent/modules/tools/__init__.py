@@ -90,6 +90,13 @@ def get_runtime_context_value(runtime_or_context, key: str, default: T) -> T:
     return get_context_value(runtime_or_context, key, default)
 
 
+def get_generated_images_dir():
+    """Return the directory used by the built-in image generation tool."""
+    from agent.modules.tools.builtin.image.generate_image import GENERATED_IMAGES_DIR
+
+    return GENERATED_IMAGES_DIR
+
+
 def close_thread_shell_sessions(thread_id: str) -> int:
     """Close local and remote shell sessions for a thread tree."""
     from agent.modules.tools.builtin.shell.daytona_session_manager import (
@@ -198,6 +205,7 @@ __all__ = [
     "get_default_descriptors",
     "get_default_tool_names",
     "get_default_tools",
+    "get_generated_images_dir",
     "get_runtime_context_value",
     "get_thread_id",
     "get_tool_by_name",

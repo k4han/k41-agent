@@ -6,11 +6,12 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
-from agent.modules.tools.builtin.image.generate_image import GENERATED_IMAGES_DIR
+from agent.modules.tools import get_generated_images_dir
 
 router = APIRouter()
 
 ALLOWED_IMAGE_EXTENSIONS = {".gif", ".jpeg", ".jpg", ".png", ".webp"}
+GENERATED_IMAGES_DIR = get_generated_images_dir()
 
 
 def resolve_generated_image(filename: str) -> Path:

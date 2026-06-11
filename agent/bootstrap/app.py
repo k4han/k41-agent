@@ -61,7 +61,7 @@ def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:
             "AI agent runtime with multi-platform chat, GitHub automation, "
             "MCP server integration, and a full management dashboard."
         ),
-        version="2.0.0",
+        version="0.1.2",
         lifespan=lifespan,
         docs_url="/docs",
         redoc_url="/redoc",

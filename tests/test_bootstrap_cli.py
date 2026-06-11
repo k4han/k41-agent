@@ -44,7 +44,7 @@ def test_init_registers_orm_models_before_creating_tables(
 def test_version_flag():
     result = runner.invoke(cli_module.app, ["--version"])
     assert result.exit_code == 0
-    assert "0.1.1" in result.output
+    assert "0.1.2" in result.output
 
 
 def test_help_output():

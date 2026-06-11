@@ -57,7 +57,10 @@ class AdminAuthService:
         if admin is None:
             if password != DEFAULT_ADMIN_PASSWORD:
                 return None
-            return await self.set_admin_password(DEFAULT_ADMIN_PASSWORD)
+            return await self.set_admin_password(
+                DEFAULT_ADMIN_PASSWORD,
+                validate_policy=False,
+            )
         if not self.verify_password(password, admin.password_hash):
             return None
         return admin
@@ -68,9 +71,14 @@ class AdminAuthService:
             return False
         return self.verify_password(password, admin.password_hash)
 
-    async def set_admin_password(self, password: str) -> AdminCredential:
-        # Validate password against security policy
-        validate_password_or_raise(password)
+    async def set_admin_password(
+        self,
+        password: str,
+        *,
+        validate_policy: bool = True,
+    ) -> AdminCredential:
+        if validate_policy:
+            validate_password_or_raise(password)
 
         session = await get_async_session()
         async with session:

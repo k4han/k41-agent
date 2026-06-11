@@ -61,10 +61,11 @@ async def test_wrong_initial_password_does_not_create_admin(admin_auth_db) -> No
 @pytest.mark.asyncio
 async def test_default_password_does_not_override_existing_admin(admin_auth_db) -> None:
     service = AdminAuthService()
-    await service.set_admin_password("custom")
+    custom_password = "Custom123!"
+    await service.set_admin_password(custom_password)
 
     default_admin = await service.authenticate(DEFAULT_ADMIN_PASSWORD)
-    custom_admin = await service.authenticate("custom")
+    custom_admin = await service.authenticate(custom_password)
 
     assert default_admin is None
     assert custom_admin is not None

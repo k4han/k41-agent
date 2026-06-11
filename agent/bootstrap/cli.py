@@ -236,7 +236,7 @@ def main(
 ) -> None:
     """Kai Agent CLI."""
     if version:
-        typer.echo("k41-agent 0.1.1")
+        typer.echo("k41-agent 0.1.2")
         raise typer.Exit()
     _set_log_level(verbose, quiet)
     if ctx.invoked_subcommand is None:
