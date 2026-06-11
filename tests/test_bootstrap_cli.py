@@ -6,6 +6,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 import agent.bootstrap.cli as cli_module
+from agent.bootstrap.version import APP_VERSION
 
 
 runner = CliRunner()
@@ -44,7 +45,7 @@ def test_init_registers_orm_models_before_creating_tables(
 def test_version_flag():
     result = runner.invoke(cli_module.app, ["--version"])
     assert result.exit_code == 0
-    assert "0.1.2" in result.output
+    assert APP_VERSION in result.output
 
 
 def test_help_output():
@@ -103,3 +104,23 @@ def test_health_url_uses_loopback_for_wildcard_hosts():
 
 def test_health_url_brackets_ipv6_hosts():
     assert cli_module._health_url("::1", 8000) == "http://[::1]:8000/health"
+
+
+def test_update_command_passes_options_to_updater(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_run_update(options, *, echo=None, confirm=None):
+        captured["options"] = options
+        if echo is not None:
+            echo("checked")
+
+    monkeypatch.setattr("agent.bootstrap.update.run_update", fake_run_update)
+
+    result = runner.invoke(cli_module.app, ["update", "--check", "--force", "--yes"])
+
+    assert result.exit_code == 0
+    assert "checked" in result.output
+    options = captured["options"]
+    assert options.check_only is True
+    assert options.force is True
+    assert options.yes is True

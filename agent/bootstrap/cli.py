@@ -11,6 +11,7 @@ from typing import Any
 import typer
 
 from agent.bootstrap.app import run as run_server
+from agent.bootstrap.version import APP_VERSION
 from agent.modules.admin_auth import get_admin_auth_service
 from agent.shared.infrastructure.db import (
     Base,
@@ -236,7 +237,7 @@ def main(
 ) -> None:
     """Kai Agent CLI."""
     if version:
-        typer.echo("k41-agent 0.1.2")
+        typer.echo(f"k41-agent {APP_VERSION}")
         raise typer.Exit()
     _set_log_level(verbose, quiet)
     if ctx.invoked_subcommand is None:
@@ -518,6 +519,39 @@ def stop() -> None:
     SHUTDOWN_SIGNAL.unlink(missing_ok=True)
 
 
+@app.command("update")
+def update_app(
+    check: bool = typer.Option(
+        False,
+        "--check",
+        help="Check for updates without changing the installation.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Install the latest release even when the local version matches.",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Confirm the update without prompting.",
+    ),
+) -> None:
+    """Update K41 Agent from the latest GitHub release."""
+    from agent.bootstrap.update import UpdateError, UpdateOptions, run_update
+
+    try:
+        run_update(
+            UpdateOptions(check_only=check, force=force, yes=yes),
+            echo=_echo_info,
+            confirm=lambda message: typer.confirm(message, abort=False),
+        )
+    except UpdateError as exc:
+        _echo_error(str(exc))
+        raise typer.Exit(1) from exc
+
+
 def run_main() -> None:
     app()
 
@@ -526,4 +560,4 @@ if __name__ == "__main__":
     run_main()
 
 
-__all__ = ["app", "run_main", "reset_password"]
+__all__ = ["app", "run_main", "reset_password", "update_app"]

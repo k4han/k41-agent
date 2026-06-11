@@ -11,6 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
+from agent.bootstrap.version import APP_VERSION
 from agent.shared.infrastructure.http_logging import HTTPLoggingMiddleware
 from agent.shared.infrastructure.csrf_protection import CSRFProtectionMiddleware, CSRF_HEADER_NAME
 from agent.shared.infrastructure.http_errors import register_http_exception_handlers
@@ -61,7 +62,7 @@ def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:
             "AI agent runtime with multi-platform chat, GitHub automation, "
             "MCP server integration, and a full management dashboard."
         ),
-        version="0.1.2",
+        version=APP_VERSION,
         lifespan=lifespan,
         docs_url="/docs",
         redoc_url="/redoc",

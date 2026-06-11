@@ -28,7 +28,7 @@ To install a specific release:
 
 ```powershell
 Invoke-WebRequest -Uri "https://k4han.github.io/k41-agent/install.ps1" -OutFile ".\install.ps1"
-powershell -ExecutionPolicy Bypass -File .\install.ps1 -ReleaseTag v0.1.2
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -ReleaseTag v0.1.3
 ```
 
 ### macOS or Linux
@@ -50,7 +50,7 @@ To install a specific release:
 ```sh
 curl -fsSL https://k4han.github.io/k41-agent/install.sh -o install.sh
 chmod +x install.sh
-./install.sh --release-tag v0.1.2
+./install.sh --release-tag v0.1.3
 ```
 
 ## Start
@@ -96,6 +96,7 @@ k41                 # Start the server in the background
 k41 --foreground    # Start the server in the current terminal
 k41 status          # Check server and dashboard status
 k41 stop            # Stop the server
+k41 update          # Update to the latest release
 k41 cli             # Open the chat CLI
 k41 reset-password  # Reset the admin password
 k41 pair-code       # Create a pairing code for Telegram or Discord
@@ -103,7 +104,21 @@ k41 pair-code       # Create a pairing code for Telegram or Discord
 
 ## Update
 
-Run the installer again. Your configuration, database, and runtime data are kept.
+Run:
+
+```sh
+k41 update
+```
+
+The updater checks the latest GitHub release, backs up the installed source, applies the update, and restarts the server if it was running.
+
+To only check whether a new release is available:
+
+```sh
+k41 update --check
+```
+
+If the installation is damaged and `k41 update` cannot run, run the installer again. Your configuration, database, and runtime data are kept.
 
 Windows:
 
