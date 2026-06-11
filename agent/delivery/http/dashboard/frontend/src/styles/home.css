@@ -2,93 +2,6 @@
   gap: 16px;
 }
 
-.health-strip {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  padding: 14px 18px;
-  min-height: 64px;
-}
-
-.health-strip-primary {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  flex-wrap: wrap;
-  width: 100%;
-}
-
-.health-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--surface-2);
-  color: var(--fg);
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.health-pill-healthy {
-  border-color: color-mix(in srgb, var(--success) 35%, transparent);
-  color: var(--success);
-  background: color-mix(in srgb, var(--success) 10%, var(--surface));
-}
-
-.health-pill-degraded {
-  border-color: color-mix(in srgb, var(--warning) 35%, transparent);
-  color: var(--warning);
-  background: color-mix(in srgb, var(--warning) 10%, var(--surface));
-}
-
-.health-pill-down {
-  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
-  color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
-}
-
-.health-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: currentColor;
-  box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 18%, transparent);
-}
-
-.health-strip-stats {
-  display: flex;
-  align-items: center;
-  gap: 22px;
-  flex-wrap: wrap;
-}
-
-.health-stat {
-  min-width: 0;
-}
-
-.health-stat-value {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--fg);
-  line-height: 1.2;
-}
-
-.health-stat-label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--muted);
-  margin-top: 2px;
-}
-
 .grid-metrics {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -382,8 +295,5 @@
 @media (max-width: 640px) {
   .grid-metrics {
     grid-template-columns: 1fr;
-  }
-  .health-strip-stats {
-    gap: 12px;
   }
 }

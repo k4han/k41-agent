@@ -1,4 +1,3 @@
-export { HealthStrip, HealthStripSkeleton } from "./HealthStrip";
 export { ActiveSessionsPanel } from "./ActiveSessionsPanel";
 export { OnboardingChecklist, HomeMetrics } from "./OnboardingAndMetrics";
 export { RecentTasksPanel } from "./RecentTasksPanel";

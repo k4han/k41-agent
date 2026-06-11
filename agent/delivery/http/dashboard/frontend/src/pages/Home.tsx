@@ -6,8 +6,6 @@ import { AppShell } from "@/components/AppShell";
 import { useToast } from "@/components/Toast";
 import {
   ActiveSessionsPanel,
-  HealthStrip,
-  HealthStripSkeleton,
   HomeMetrics,
   OnboardingChecklist,
   ProvidersHealthPanel,
@@ -145,20 +143,11 @@ export function HomePage() {
       <Show
         when={data()}
         fallback={
-          <div class="stack">
-            <HealthStripSkeleton />
-          </div>
+          <div class="stack" />
         }
       >
         {(payload) => (
           <div class="stack home-stack">
-            <HealthStrip
-              status={payload().system.status}
-              uptimeDisplay={payload().system.uptime_display}
-              version={payload().system.version}
-              sessionsActive={payload().counters.sessions_active}
-            />
-
             <HomeMetrics counters={payload().counters} />
 
             <OnboardingChecklist state={payload().onboarding} />
