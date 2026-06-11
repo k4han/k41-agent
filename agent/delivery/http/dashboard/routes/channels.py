@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
-from agent.delivery.http.dashboard.routes.shared import _get_channel_manager
+from agent.delivery.http.dashboard.routes.helpers.deps import get_channel_manager
 from agent.modules.channels import (
     get_channel_status,
     list_channel_statuses,
@@ -37,14 +37,14 @@ async def unpair_identity(identity_id: int) -> dict[str, str]:
 @router.get("/services")
 async def get_services(request: Request) -> dict[str, list[dict[str, str | None]]]:
     """List all channel services and their current status."""
-    channel_manager = _get_channel_manager(request)
+    channel_manager = get_channel_manager(request)
     return {"services": list_channel_statuses(channel_manager)}
 
 
 @router.get("/services/{name}")
 async def get_service(name: str, request: Request) -> dict[str, str | None]:
     """Get the status of a specific channel service."""
-    channel_manager = _get_channel_manager(request)
+    channel_manager = get_channel_manager(request)
     try:
         return get_channel_status(channel_manager, name)
     except KeyError as exc:
@@ -54,7 +54,7 @@ async def get_service(name: str, request: Request) -> dict[str, str | None]:
 @router.post("/services/{name}/start")
 async def start_service(name: str, request: Request) -> dict[str, str | None]:
     """Start a channel service."""
-    channel_manager = _get_channel_manager(request)
+    channel_manager = get_channel_manager(request)
     try:
         status = await start_channel(channel_manager, name)
         return {"message": f"'{name}' is starting.", **status}
@@ -67,7 +67,7 @@ async def start_service(name: str, request: Request) -> dict[str, str | None]:
 @router.post("/services/{name}/stop")
 async def stop_service(name: str, request: Request) -> dict[str, str | None]:
     """Stop a running channel service."""
-    channel_manager = _get_channel_manager(request)
+    channel_manager = get_channel_manager(request)
     try:
         status = await stop_channel(channel_manager, name)
         return {"message": f"'{name}' stopped.", **status}
@@ -85,7 +85,7 @@ async def test_service(name: str) -> dict[str, object]:
 @router.post("/services/start-all")
 async def start_all_services(request: Request) -> dict[str, list[dict[str, str | None]]]:
     """Start all configured channel services."""
-    channel_manager = _get_channel_manager(request)
+    channel_manager = get_channel_manager(request)
     try:
         services = await start_all_channels(channel_manager)
     except IntegrationUnavailableError as exc:
@@ -96,6 +96,6 @@ async def start_all_services(request: Request) -> dict[str, list[dict[str, str |
 @router.post("/services/stop-all")
 async def stop_all_services(request: Request) -> dict[str, list[dict[str, str | None]]]:
     """Stop all running channel services."""
-    channel_manager = _get_channel_manager(request)
+    channel_manager = get_channel_manager(request)
     services = await stop_all_channels(channel_manager)
     return {"services": services}

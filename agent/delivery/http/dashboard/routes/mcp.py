@@ -1,20 +1,22 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from collections.abc import Iterator
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from agent.delivery.http.common.mcp import InstallRepository
 from agent.modules.mcp import (
     MCPServerConfig,
     MCPServerStatus,
     MCPTestResult,
     MCPTransport,
+    McpInstallRepository,
     list_mcp_server_status,
     reload_mcp_server_tools,
     test_mcp_connection,
-    McpInstallRepository,
 )
 from agent.modules.tools import reload_mcp_descriptors
 
@@ -168,25 +170,22 @@ async def list_dashboard_mcp_servers() -> dict[str, Any]:
 @router.post("/dashboard-api/mcp/servers")
 async def create_dashboard_mcp_server(
     body: CreateMcpServerBody,
+    repo: InstallRepository,
 ) -> dict[str, Any]:
     """Create a new custom MCP server configuration."""
     name = _validate_server_name(body.name)
-    repo = McpInstallRepository()
-    try:
-        if repo.get_server_config(name) is not None:
-            raise HTTPException(
-                status_code=409,
-                detail=f"MCP server already exists: {name}.",
-            )
-
-        config = _body_to_config(name, body)
-        repo.create_custom_server(
-            server_name=name,
-            config=config,
-            credential_payload=_credential_payload_from_config(config),
+    if repo.get_server_config(name) is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"MCP server already exists: {name}.",
         )
-    finally:
-        repo.close()
+
+    config = _body_to_config(name, body)
+    repo.create_custom_server(
+        server_name=name,
+        config=config,
+        credential_payload=_credential_payload_from_config(config),
+    )
     await reload_mcp_descriptors()
     return {"status": "created", "name": name}
 
@@ -195,20 +194,17 @@ async def create_dashboard_mcp_server(
 async def update_dashboard_mcp_server(
     server_name: str,
     body: McpServerBody,
+    repo: InstallRepository,
 ) -> dict[str, Any]:
     """Update an existing MCP server configuration."""
     name = _validate_server_name(server_name)
     config = _body_to_config(name, body)
-    repo = McpInstallRepository()
-    try:
-        if not repo.update_custom_server(
-            server_name=name,
-            config=config,
-            credential_payload=_credential_payload_from_config(config),
-        ):
-            raise HTTPException(status_code=404, detail=f"MCP server not found: {server_name}.")
-    finally:
-        repo.close()
+    if not repo.update_custom_server(
+        server_name=name,
+        config=config,
+        credential_payload=_credential_payload_from_config(config),
+    ):
+        raise HTTPException(status_code=404, detail=f"MCP server not found: {server_name}.")
     await reload_mcp_descriptors()
     return {"status": "updated", "name": name}
 
@@ -216,14 +212,11 @@ async def update_dashboard_mcp_server(
 @router.delete("/dashboard-api/mcp/servers/{server_name}")
 async def delete_dashboard_mcp_server(
     server_name: str,
+    repo: InstallRepository,
 ) -> dict[str, Any]:
     """Delete an MCP server configuration."""
-    repo = McpInstallRepository()
-    try:
-        if not repo.delete_server(server_name):
-            raise HTTPException(status_code=404, detail=f"MCP server not found: {server_name}.")
-    finally:
-        repo.close()
+    if not repo.delete_server(server_name):
+        raise HTTPException(status_code=404, detail=f"MCP server not found: {server_name}.")
     await reload_mcp_descriptors()
     return {"status": "deleted", "name": server_name}
 
@@ -257,13 +250,10 @@ async def reload_dashboard_mcp_server(server_name: str) -> dict[str, Any]:
 async def toggle_dashboard_mcp_server(
     server_name: str,
     body: ToggleMcpServerBody,
+    repo: InstallRepository,
 ) -> dict[str, Any]:
     """Toggle an MCP server on or off."""
-    repo = McpInstallRepository()
-    try:
-        if not repo.toggle_server(server_name, body.enabled):
-            raise HTTPException(status_code=404, detail=f"MCP server not found: {server_name}.")
-    finally:
-        repo.close()
+    if not repo.toggle_server(server_name, body.enabled):
+        raise HTTPException(status_code=404, detail=f"MCP server not found: {server_name}.")
     await reload_mcp_descriptors()
     return {"status": "updated", "name": server_name, "enabled": body.enabled}

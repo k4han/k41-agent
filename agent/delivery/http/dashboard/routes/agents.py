@@ -6,12 +6,12 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from agent.modules.workflows import REACT_AGENT_GRAPH_TYPE
-from agent.delivery.http.dashboard.routes.shared import (
-    _agent_card_options,
-    _agent_config_from_body,
-    _handle_agent_card_error,
-    _handle_prompt_variable_error,
-    _serialize_agent_card,
+from agent.delivery.http.dashboard.routes.helpers.agents import (
+    agent_card_options,
+    agent_config_from_body,
+    handle_agent_card_error,
+    handle_prompt_variable_error,
+    serialize_agent_card,
 )
 from agent.modules.agents import get_catalog_service
 from agent.modules.prompt_variables import get_prompt_variable_service
@@ -41,7 +41,7 @@ class AgentCardBody(BaseModel):
 @router.get("/agents/cards")
 async def list_agent_cards() -> dict[str, Any]:
     """List all agent cards with their configuration options."""
-    return await _agent_card_options()
+    return await agent_card_options()
 
 
 @router.post("/agents/cards")
@@ -49,10 +49,10 @@ async def create_agent_card(body: AgentCardBody) -> dict[str, Any]:
     """Create a new agent card with the given configuration."""
     catalog = get_catalog_service()
     try:
-        card = catalog.create_agent_card(_agent_config_from_body(body))
+        card = catalog.create_agent_card(agent_config_from_body(body))
     except Exception as exc:
-        raise _handle_agent_card_error(exc) from exc
-    return {"status": "created", "card": _serialize_agent_card(card)}
+        raise handle_agent_card_error(exc) from exc
+    return {"status": "created", "card": serialize_agent_card(card)}
 
 
 @router.put("/agents/cards/{name}")
@@ -60,10 +60,10 @@ async def update_agent_card(name: str, body: AgentCardBody) -> dict[str, Any]:
     """Update an existing agent card configuration."""
     catalog = get_catalog_service()
     try:
-        card = catalog.update_agent_card(name, _agent_config_from_body(body))
+        card = catalog.update_agent_card(name, agent_config_from_body(body))
     except Exception as exc:
-        raise _handle_agent_card_error(exc) from exc
-    return {"status": "updated", "card": _serialize_agent_card(card)}
+        raise handle_agent_card_error(exc) from exc
+    return {"status": "updated", "card": serialize_agent_card(card)}
 
 
 @router.delete("/agents/cards/{name}")
@@ -73,7 +73,7 @@ async def delete_agent_card(name: str) -> dict[str, str]:
     try:
         catalog.delete_agent_card(name)
     except Exception as exc:
-        raise _handle_agent_card_error(exc) from exc
+        raise handle_agent_card_error(exc) from exc
     return {"status": "deleted", "name": name}
 
 
@@ -84,8 +84,8 @@ async def clone_builtin_agent_card(name: str) -> dict[str, Any]:
     try:
         card = catalog.clone_builtin_agent(name)
     except Exception as exc:
-        raise _handle_agent_card_error(exc) from exc
-    return {"status": "cloned", "card": _serialize_agent_card(card)}
+        raise handle_agent_card_error(exc) from exc
+    return {"status": "cloned", "card": serialize_agent_card(card)}
 
 
 @router.post("/agents/reload")
@@ -93,7 +93,7 @@ async def reload_agent_cards() -> dict[str, Any]:
     """Reload all agent cards from disk and return updated options."""
     catalog = get_catalog_service()
     catalog.reload_agents()
-    return {"status": "reloaded", **await _agent_card_options()}
+    return {"status": "reloaded", **await agent_card_options()}
 
 
 class PromptVariableBody(BaseModel):
@@ -120,7 +120,7 @@ async def create_prompt_variable(body: PromptVariableBody) -> dict[str, Any]:
             value=body.value,
         )
     except Exception as exc:
-        raise _handle_prompt_variable_error(exc) from exc
+        raise handle_prompt_variable_error(exc) from exc
     return {"status": "created", "variable": variable}
 
 
@@ -138,7 +138,7 @@ async def update_prompt_variable(
             value=body.value,
         )
     except Exception as exc:
-        raise _handle_prompt_variable_error(exc) from exc
+        raise handle_prompt_variable_error(exc) from exc
     return {"status": "updated", "variable": variable}
 
 
@@ -149,5 +149,5 @@ async def delete_prompt_variable(name: str) -> dict[str, str]:
     try:
         await service.delete_variable(name)
     except Exception as exc:
-        raise _handle_prompt_variable_error(exc) from exc
+        raise handle_prompt_variable_error(exc) from exc
     return {"status": "deleted", "name": name}

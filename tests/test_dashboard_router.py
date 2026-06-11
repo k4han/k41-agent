@@ -20,7 +20,15 @@ from agent.modules.admin_auth import get_current_admin
 from agent.modules.channels import ChannelManager
 
 _DASHBOARD_ROUTE_MODULES = (
-    "agent.delivery.http.dashboard.routes.shared",
+    "agent.delivery.http.dashboard.routes.helpers.deps",
+    "agent.delivery.http.dashboard.routes.helpers.sse",
+    "agent.delivery.http.dashboard.routes.helpers.workspace",
+    "agent.delivery.http.dashboard.routes.helpers.scheduler",
+    "agent.delivery.http.dashboard.routes.helpers.identities",
+    "agent.delivery.http.dashboard.routes.helpers.providers",
+    "agent.delivery.http.dashboard.routes.helpers.settings",
+    "agent.delivery.http.dashboard.routes.helpers.agents",
+    "agent.modules.conversations.history",
     "agent.delivery.http.dashboard.routes.conversations",
     "agent.delivery.http.dashboard.routes.scheduler",
     "agent.delivery.http.dashboard.routes.workspace",
@@ -1256,16 +1264,9 @@ def test_dashboard_chat_history_returns_workspace_metadata(
         ),
     ]
 
-    async def fake_list_conversation_threads(
-        limit=None,
-        offset=0,
-        kind=None,
-        kinds=None,
-    ):
+    async def fake_list_user_threads_with_stats(limit=None, offset=0):
         assert limit is None
         assert offset == 0
-        assert kind is None
-        assert kinds == ["user", "background"]
         return threads
 
     async def fake_get_checkpoint_stats(thread_id: str):
@@ -1275,12 +1276,8 @@ def test_dashboard_chat_history_returns_workspace_metadata(
         assert thread_ids == ["api_dashboard_with", "task_dashboard_without"]
         return {"api_dashboard_with": workspace}
 
-    monkeypatch.setattr(
-        conversations_module,
-        "list_conversation_threads",
-        fake_list_conversation_threads,
-    )
-    _patch_dashboard_attr(monkeypatch, "_get_checkpoint_stats", fake_get_checkpoint_stats)
+    _patch_dashboard_attr(monkeypatch, "list_user_threads_with_stats", fake_list_user_threads_with_stats)
+    _patch_dashboard_attr(monkeypatch, "get_checkpoint_stats", fake_get_checkpoint_stats)
     _patch_dashboard_attr(monkeypatch, "get_thread_workspace_refs", fake_get_thread_workspace_refs)
 
     client = _create_dashboard_client(ChannelManager())
@@ -1322,14 +1319,10 @@ def test_dashboard_chat_history_uses_background_task_workspace_fallback(
             assert thread_id == "task_dashboard_github"
             return {"workspace": workspace.model_dump()}
 
-    async def fake_list_conversation_threads(
+    async def fake_list_user_threads_with_stats(
         limit=None,
         offset=0,
-        kind=None,
-        kinds=None,
     ):
-        assert kind is None
-        assert kinds == ["user", "background"]
         return threads
 
     async def fake_get_checkpoint_stats(thread_id: str):
@@ -1339,12 +1332,8 @@ def test_dashboard_chat_history_uses_background_task_workspace_fallback(
         assert thread_ids == ["task_dashboard_github"]
         return {}
 
-    monkeypatch.setattr(
-        conversations_module,
-        "list_conversation_threads",
-        fake_list_conversation_threads,
-    )
-    _patch_dashboard_attr(monkeypatch, "_get_checkpoint_stats", fake_get_checkpoint_stats)
+    _patch_dashboard_attr(monkeypatch, "list_user_threads_with_stats", fake_list_user_threads_with_stats)
+    _patch_dashboard_attr(monkeypatch, "get_checkpoint_stats", fake_get_checkpoint_stats)
     _patch_dashboard_attr(monkeypatch, "get_thread_workspace_refs", fake_get_thread_workspace_refs)
     _patch_dashboard_attr(monkeypatch, "get_background_task_manager", lambda: FakeTaskManager(),
     )
@@ -1364,16 +1353,12 @@ def test_dashboard_chat_history_pagination_keeps_workspace_fields(
 ) -> None:
     conversations_module = importlib.import_module("agent.modules.conversations")
 
-    async def fake_list_conversation_threads(
+    async def fake_list_user_threads_with_stats(
         limit=None,
         offset=0,
-        kind=None,
-        kinds=None,
     ):
         assert limit == 2
         assert offset == 5
-        assert kind is None
-        assert kinds == ["user", "background"]
         return [
             _conversation_thread("api_dashboard_page_1", "Page 1"),
             _conversation_thread("api_dashboard_page_2", "Page 2"),
@@ -1386,12 +1371,8 @@ def test_dashboard_chat_history_pagination_keeps_workspace_fields(
         assert thread_ids == ["api_dashboard_page_1", "api_dashboard_page_2"]
         return {}
 
-    monkeypatch.setattr(
-        conversations_module,
-        "list_conversation_threads",
-        fake_list_conversation_threads,
-    )
-    _patch_dashboard_attr(monkeypatch, "_get_checkpoint_stats", fake_get_checkpoint_stats)
+    _patch_dashboard_attr(monkeypatch, "list_user_threads_with_stats", fake_list_user_threads_with_stats)
+    _patch_dashboard_attr(monkeypatch, "get_checkpoint_stats", fake_get_checkpoint_stats)
     _patch_dashboard_attr(monkeypatch, "get_thread_workspace_refs", fake_get_thread_workspace_refs)
 
     client = _create_dashboard_client(ChannelManager())
@@ -1447,16 +1428,16 @@ def test_dashboard_chat_thread_messages_include_agent_and_model_metadata(
 
     _patch_dashboard_attr(
         monkeypatch,
-        "_get_thread_messages_payload",
+        "get_thread_messages_payload",
         fake_get_thread_messages_payload,
     )
     _patch_dashboard_attr(
         monkeypatch,
-        "_workspace_ref_for_thread",
+        "workspace_ref_for_thread",
         fake_workspace_ref_for_thread,
     )
-    monkeypatch.setattr(
-        conversations_module,
+    _patch_dashboard_attr(
+        monkeypatch,
         "get_conversation_thread",
         fake_get_conversation_thread,
     )
@@ -1499,9 +1480,9 @@ def test_dashboard_api_renames_chat_thread(monkeypatch: pytest.MonkeyPatch) -> N
         assert include_default is False
         return None
 
-    monkeypatch.setattr(conversations_module, "rename_conversation_thread", fake_rename)
-    _patch_dashboard_attr(monkeypatch, "_get_checkpoint_stats", fake_stats)
-    _patch_dashboard_attr(monkeypatch, "_workspace_ref_for_thread", fake_workspace_ref_for_thread)
+    _patch_dashboard_attr(monkeypatch, "rename_conversation_thread", fake_rename)
+    _patch_dashboard_attr(monkeypatch, "get_checkpoint_stats", fake_stats)
+    _patch_dashboard_attr(monkeypatch, "workspace_ref_for_thread", fake_workspace_ref_for_thread)
 
     client = _create_dashboard_client(ChannelManager())
     response = client.patch(
@@ -1575,12 +1556,12 @@ def test_dashboard_background_task_events_streams_snapshot_and_done(
 
     manager = FakeManager()
     _patch_dashboard_attr(monkeypatch, "get_background_task_manager", lambda: manager)
-    monkeypatch.setattr(
-        conversations_module,
+    _patch_dashboard_attr(
+        monkeypatch,
         "get_conversation_thread",
         fake_get_conversation_thread,
     )
-    _patch_dashboard_attr(monkeypatch, "_get_thread_messages", fake_get_thread_messages)
+    _patch_dashboard_attr(monkeypatch, "get_thread_messages", fake_get_thread_messages)
     _patch_dashboard_attr(monkeypatch, "get_active_session_registry", lambda: SimpleNamespace(list_active=lambda: []),
     )
 
@@ -1617,8 +1598,8 @@ def test_dashboard_background_task_events_returns_404_for_unknown_thread(
 
     _patch_dashboard_attr(monkeypatch, "get_background_task_manager", lambda: FakeManager(),
     )
-    monkeypatch.setattr(
-        conversations_module,
+    _patch_dashboard_attr(
+        monkeypatch,
         "get_conversation_thread",
         fake_get_conversation_thread,
     )
@@ -1662,19 +1643,19 @@ async def test_dashboard_delete_chat_thread_deletes_workflow_tree(
     async def fake_delete_workspace(thread_id: str) -> None:
         calls.append(("delete_workspace", thread_id))
 
-    monkeypatch.setattr(
-        conversations_module,
+    _patch_dashboard_attr(
+        monkeypatch,
         "mark_conversation_thread_deleted",
         fake_mark_deleted,
     )
     monkeypatch.setattr(shell_manager_module, "session_manager", FakeSessionManager())
-    monkeypatch.setattr(
-        workflows_module,
+    _patch_dashboard_attr(
+        monkeypatch,
         "delete_workflow_thread_tree",
         fake_delete_tree,
     )
-    monkeypatch.setattr(
-        workspaces_module,
+    _patch_dashboard_attr(
+        monkeypatch,
         "delete_thread_workspace",
         fake_delete_workspace,
     )
@@ -1723,24 +1704,24 @@ async def test_dashboard_delete_background_task_thread_deletes_workflow_tree(
     async def fake_delete_workspace(thread_id: str) -> None:
         calls.append(("delete_workspace", thread_id))
 
-    monkeypatch.setattr(
-        agent_runtime_module,
+    _patch_dashboard_attr(
+        monkeypatch,
         "get_background_task_repository",
         lambda: FakeBackgroundTaskRepository(),
     )
-    monkeypatch.setattr(
-        conversations_module,
+    _patch_dashboard_attr(
+        monkeypatch,
         "mark_conversation_thread_deleted",
         fake_mark_deleted,
     )
     monkeypatch.setattr(shell_manager_module, "session_manager", FakeSessionManager())
-    monkeypatch.setattr(
-        workflows_module,
+    _patch_dashboard_attr(
+        monkeypatch,
         "delete_workflow_thread_tree",
         fake_delete_tree,
     )
-    monkeypatch.setattr(
-        workspaces_module,
+    _patch_dashboard_attr(
+        monkeypatch,
         "delete_thread_workspace",
         fake_delete_workspace,
     )
@@ -1844,9 +1825,9 @@ async def test_dashboard_thread_messages_include_checkpoint_branch_metadata(
             for checkpoint in reversed(checkpoints):
                 yield checkpoint
 
-    _patch_dashboard_attr(monkeypatch, "_get_checkpointer", lambda: FakeCheckpointer())
+    _patch_dashboard_attr(monkeypatch, "get_history_checkpointer", lambda: FakeCheckpointer())
 
-    messages, active_checkpoint_id = await _dashboard_attr("_get_thread_messages_payload")(
+    messages, active_checkpoint_id = await _dashboard_attr("get_thread_messages_payload")(
         "api_dashboard_123",
         include_branch_metadata=True,
     )
@@ -1920,9 +1901,9 @@ async def test_dashboard_thread_messages_can_load_specific_checkpoint(
             for checkpoint in reversed(checkpoints):
                 yield checkpoint
 
-    _patch_dashboard_attr(monkeypatch, "_get_checkpointer", lambda: FakeCheckpointer())
+    _patch_dashboard_attr(monkeypatch, "get_history_checkpointer", lambda: FakeCheckpointer())
 
-    messages, active_checkpoint_id = await _dashboard_attr("_get_thread_messages_payload")(
+    messages, active_checkpoint_id = await _dashboard_attr("get_thread_messages_payload")(
         "api_dashboard_123",
         checkpoint_id="c2",
         include_branch_metadata=True,
@@ -2003,9 +1984,9 @@ async def test_dashboard_branch_metadata_only_marks_changed_user_message(
             for checkpoint in reversed(checkpoints):
                 yield checkpoint
 
-    _patch_dashboard_attr(monkeypatch, "_get_checkpointer", lambda: FakeCheckpointer())
+    _patch_dashboard_attr(monkeypatch, "get_history_checkpointer", lambda: FakeCheckpointer())
 
-    messages, _ = await _dashboard_attr("_get_thread_messages_payload")(
+    messages, _ = await _dashboard_attr("get_thread_messages_payload")(
         "api_dashboard_123",
         include_branch_metadata=True,
     )
@@ -2063,10 +2044,10 @@ async def test_dashboard_thread_messages_preserve_assistant_text_with_tool_calls
                 }
             )
 
-    _patch_dashboard_attr(monkeypatch, "_get_checkpointer", lambda: FakeCheckpointer(),
+    _patch_dashboard_attr(monkeypatch, "get_history_checkpointer", lambda: FakeCheckpointer(),
     )
 
-    messages = await _dashboard_attr("_get_thread_messages")("api_dashboard_123")
+    messages = await _dashboard_attr("get_thread_messages")("api_dashboard_123")
 
     assert messages == [
         {
@@ -2137,10 +2118,10 @@ async def test_dashboard_thread_messages_hide_raw_image_data(monkeypatch: pytest
                 }
             )
 
-    _patch_dashboard_attr(monkeypatch, "_get_checkpointer", lambda: FakeCheckpointer(),
+    _patch_dashboard_attr(monkeypatch, "get_history_checkpointer", lambda: FakeCheckpointer(),
     )
 
-    messages = await _dashboard_attr("_get_thread_messages")("api_dashboard_123")
+    messages = await _dashboard_attr("get_thread_messages")("api_dashboard_123")
 
     assert messages == [
         {
@@ -2244,8 +2225,8 @@ def test_dashboard_api_github_repository_detail_and_task(
         return []
 
     _patch_dashboard_attr(monkeypatch, "get_github_automation_service", lambda _req=None: fake_service)
-    _patch_dashboard_attr(monkeypatch, "_agent_card_options", fake_agent_options)
-    _patch_dashboard_attr(monkeypatch, "_paired_identities", fake_identities)
+    _patch_dashboard_attr(monkeypatch, "agent_card_options", fake_agent_options)
+    _patch_dashboard_attr(monkeypatch, "paired_identities", fake_identities)
     _patch_dashboard_attr(
         monkeypatch,
         "list_available_skills",
@@ -2392,7 +2373,7 @@ async def test_create_scheduler_job_accepts_relative_trigger(monkeypatch) -> Non
     from agent.modules.scheduler import triggers as trigger_module
     scheduler = FakeScheduler()
     now = datetime(2026, 4, 13, 22, 30, 0, tzinfo=scheduler.timezone)
-    _patch_dashboard_attr(monkeypatch, "_get_scheduler", lambda: scheduler)
+    _patch_dashboard_attr(monkeypatch, "get_scheduler_or_503", lambda: scheduler)
     monkeypatch.setattr(trigger_module, "_scheduler_now", lambda _: now)
 
     body = _dashboard_attr("CreateJobBody")(
@@ -2420,7 +2401,7 @@ async def test_run_scheduler_job_now_queues_existing_job(monkeypatch) -> None:
         datetime(2026, 4, 14, 9, 0, 0, tzinfo=scheduler.timezone),
     )
     scheduler.jobs[job.id] = job
-    _patch_dashboard_attr(monkeypatch, "_get_scheduler", lambda: scheduler)
+    _patch_dashboard_attr(monkeypatch, "get_scheduler_or_503", lambda: scheduler)
 
     background_tasks = BackgroundTasks()
     result = await _dashboard_attr("run_scheduler_job_now")(job.id, background_tasks)

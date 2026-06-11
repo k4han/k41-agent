@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 from fastapi.responses import Response
-from agent.delivery.http.dashboard.routes.shared import _dashboard_spa
+
+from agent.delivery.http.dashboard.spa import spa_index_response
 
 
 router = APIRouter()
@@ -37,4 +38,4 @@ router = APIRouter()
 @router.get("/agents", include_in_schema=False)
 @router.get("/change-password", include_in_schema=False)
 async def dashboard_spa() -> Response:
-    return _dashboard_spa()
+    return spa_index_response()

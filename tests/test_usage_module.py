@@ -510,7 +510,7 @@ def test_dashboard_usage_endpoint_enriches_identity_labels(monkeypatch: pytest.M
         ]
 
     monkeypatch.setattr(route_module, "get_usage_service", lambda: FakeUsageService())
-    monkeypatch.setattr(route_module, "_paired_identities", fake_paired_identities)
+    monkeypatch.setattr(route_module, "paired_identities", fake_paired_identities)
     monkeypatch.setattr(
         route_module,
         "resolve_display_timezone",

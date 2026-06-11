@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Query
 
-from agent.delivery.http.dashboard.routes.shared import _paired_identities
+from agent.delivery.http.dashboard.routes.helpers.identities import paired_identities
 from agent.modules.usage import DEFAULT_USAGE_LIMIT, get_usage_service, normalize_usage_query
 from agent.shared.timezone import resolve_display_timezone
 
@@ -143,7 +143,7 @@ async def get_dashboard_usage(
         offset=offset,
     )
     payload = await get_usage_service().dashboard_payload(query, view=view)
-    return _enrich_usage_payload(payload, await _paired_identities())
+    return _enrich_usage_payload(payload, await paired_identities())
 
 
 @router.get("/dashboard-api/usage/thread/{thread_id:path}")

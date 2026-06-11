@@ -176,7 +176,7 @@ def test_dashboard_catalog_and_channels_include_adapter_schema(
     async def mock_admin(_: Request) -> str:
         return "admin"
 
-    monkeypatch.setattr(dashboard_routes, "_paired_identities", fake_paired_identities)
+    monkeypatch.setattr(dashboard_routes, "paired_identities", fake_paired_identities)
     registry = get_channel_registry()
     registry.register(FakeChannelAdapter(), replace=True)
     try:

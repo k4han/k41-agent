@@ -4,10 +4,8 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 
-from agent.delivery.http.dashboard.routes.shared import (
-    PROVIDER_TYPE_OPTIONS,
-    _get_config_service,
-)
+from agent.delivery.http.dashboard.routes.helpers.deps import get_request_config_service
+from agent.delivery.http.dashboard.routes.helpers.providers import PROVIDER_TYPE_OPTIONS
 from agent.modules.channels import (
     ChannelStatus,
     get_registered_channel_catalog,
@@ -43,7 +41,7 @@ MCP_TRANSPORT_OPTIONS: list[dict[str, str]] = [
 async def get_catalog(request: Request) -> dict[str, Any]:
     channel_catalog = get_registered_channel_catalog()
     backend_catalog = list_workspace_backend_catalog(
-        config_service=_get_config_service(request),
+        config_service=get_request_config_service(request),
     )
     return {
         "provider_types": PROVIDER_TYPE_OPTIONS,

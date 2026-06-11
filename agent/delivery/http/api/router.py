@@ -13,6 +13,7 @@ from agent.delivery.http.api.schemas import (
     HealthResponse,
     ModelCatalog,
     ModelCatalogListResponse,
+    ModelOption,
     PairingCodeResponse,
     ProviderListResponse,
     ProviderSummary,
@@ -44,6 +45,8 @@ from agent.modules.workflows import list_registered_workflows
 from agent.shared.infrastructure.errors import classify_agent_error
 
 logger = logging.getLogger(__name__)
+
+DASHBOARD_USER_ID = "dashboard"
 
 
 def _agent_error_event(exc: BaseException) -> dict[str, str]:
@@ -78,7 +81,7 @@ def _request_to_run_params(request: ChatRequest) -> dict[str, object]:
     if (
         request.new_thread
         and not thread_id
-        and request.user_id == "dashboard"
+        and request.user_id == DASHBOARD_USER_ID
         and request.workspace is None
     ):
         raise HTTPException(
@@ -154,11 +157,16 @@ async def _apply_workspace_to_run_params(
         )
 
 
+async def prepare_run_params(request: ChatRequest) -> dict[str, object]:
+    params = _request_to_run_params(request)
+    await _apply_workspace_to_run_params(request, params)
+    return params
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat_sync(request: ChatRequest):
     """Send a chat message and return the full agent response synchronously."""
-    params = _request_to_run_params(request)
-    await _apply_workspace_to_run_params(request, params)
+    params = await prepare_run_params(request)
     response = await run_agent_full(**params)
     return ChatResponse(
         response=response,
@@ -170,8 +178,7 @@ async def chat_sync(request: ChatRequest):
 @router.post("/chat/stream")
 async def chat_stream(request: ChatRequest):
     """Stream the agent response as plain text chunks."""
-    params = _request_to_run_params(request)
-    await _apply_workspace_to_run_params(request, params)
+    params = await prepare_run_params(request)
 
     return StreamingResponse(_stream_agent_chunks(params), media_type="text/plain")
 
@@ -179,8 +186,7 @@ async def chat_stream(request: ChatRequest):
 @router.post("/chat/events")
 async def chat_events(request: ChatRequest):
     """Stream UI events (thread created, message deltas, tool calls, etc.) as newline-delimited JSON."""
-    params = _request_to_run_params(request)
-    await _apply_workspace_to_run_params(request, params)
+    params = await prepare_run_params(request)
     created_thread = bool(request.new_thread and not request.thread_id)
     thread_id = str(params["thread_id"])
 
@@ -263,50 +269,54 @@ async def list_graphs():
     return {"graphs": list_registered_workflows()}
 
 
-def _serialize_provider(provider) -> dict[str, object]:
-    return {
-        "name": provider.name,
-        "type": str(provider.provider_type),
-        "default_model": provider.default_model,
-        "models": list(provider.models),
-        "enabled": provider.enabled,
-    }
+def _provider_summary(provider) -> ProviderSummary:
+    return ProviderSummary(
+        name=provider.name,
+        type=str(provider.provider_type),
+        default_model=provider.default_model,
+        models=list(provider.models),
+        enabled=provider.enabled,
+    )
 
 
-def _serialize_model_catalog(catalog) -> dict[str, object]:
-    return {
-        "provider": catalog.provider,
-        "provider_type": catalog.provider_type,
-        "default_model": catalog.default_model,
-        "can_list_models": catalog.can_list_models,
-        "models": [
-            {
-                "id": option.id,
-                "label": option.label,
-                "source": option.source,
-                "context_window": option.context_window,
-                "input_types": list(option.input_types)
+def _model_catalog(catalog) -> ModelCatalog:
+    return ModelCatalog(
+        provider=catalog.provider,
+        provider_type=catalog.provider_type,
+        default_model=catalog.default_model,
+        can_list_models=catalog.can_list_models,
+        models=[
+            ModelOption(
+                id=option.id,
+                label=option.label,
+                source=option.source,
+                context_window=option.context_window,
+                input_types=list(option.input_types)
                 if option.input_types is not None
                 else None,
-            }
+            )
             for option in catalog.models
         ],
-        "error": catalog.error,
-    }
+        error=catalog.error,
+    )
 
 
 @router.get("/providers", response_model=ProviderListResponse)
 async def api_list_providers():
     """List all configured LLM providers and their available models."""
     providers = list_providers()
-    return {"providers": [_serialize_provider(provider) for provider in providers]}
+    return ProviderListResponse(
+        providers=[_provider_summary(provider) for provider in providers]
+    )
 
 
 @router.get("/providers/models", response_model=ModelCatalogListResponse)
 async def api_list_provider_models(refresh: bool = False):
     """List model catalogs for all configured providers. Use refresh=true to re-fetch from upstream."""
     catalogs = await list_provider_model_catalogs(include_remote=refresh)
-    return {"providers": [_serialize_model_catalog(catalog) for catalog in catalogs]}
+    return ModelCatalogListResponse(
+        providers=[_model_catalog(catalog) for catalog in catalogs]
+    )
 
 
 @router.get("/providers/{provider_name}/models", response_model=ModelCatalog)
@@ -319,7 +329,7 @@ async def api_list_provider_models_for_provider(
         provider_name,
         include_remote=refresh,
     )
-    return _serialize_model_catalog(catalog)
+    return _model_catalog(catalog)
 
 
 @router.get("/health", response_model=HealthResponse)

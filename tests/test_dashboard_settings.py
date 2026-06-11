@@ -203,7 +203,7 @@ class TestDashboardSettingsEndpoints:
         async def fake_paired_identities() -> list[dict[str, object]]:
             return []
 
-        monkeypatch.setattr(dashboard_routes, "_paired_identities", fake_paired_identities)
+        monkeypatch.setattr(dashboard_routes, "paired_identities", fake_paired_identities)
         client = make_dashboard_client(ConfigService(sources=[DefaultConfigSource()]))
 
         resp = client.get("/dashboard-api/channels")

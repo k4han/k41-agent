@@ -1,5 +1,14 @@
 from agent.modules.conversations.models import ConversationThread
 from agent.modules.conversations.migrations import migrate_conversation_tables
+from agent.modules.conversations.history import (
+    CheckpointNotFoundError,
+    ConversationHistoryUnavailableError,
+    get_checkpoint_stats,
+    get_thread_messages,
+    get_thread_messages_payload,
+    list_background_threads_with_stats,
+    list_user_threads_with_stats,
+)
 from agent.modules.conversations.repository import (
     ConversationThreadRepository,
     get_conversation_thread_repository,
@@ -31,6 +40,8 @@ __all__ = [
     "CONVERSATION_TITLE_AGENT_NAME",
     "CONVERSATION_TITLE_MAX_CHARS",
     "CONVERSATION_TITLE_TIMEOUT_SECONDS",
+    "CheckpointNotFoundError",
+    "ConversationHistoryUnavailableError",
     "ConversationThread",
     "ConversationThreadRepository",
     "THREAD_KIND_BACKGROUND",
@@ -40,12 +51,17 @@ __all__ = [
     "count_conversation_threads",
     "create_thread_id",
     "generate_conversation_title",
+    "get_checkpoint_stats",
     "get_conversation_thread",
     "get_conversation_thread_repository",
+    "get_thread_messages",
+    "get_thread_messages_payload",
     "infer_thread_kind",
     "migrate_conversation_tables",
     "list_active_thread_ids",
+    "list_background_threads_with_stats",
     "list_conversation_threads",
+    "list_user_threads_with_stats",
     "mark_conversation_thread_deleted",
     "parse_thread_metadata",
     "rename_conversation_thread",

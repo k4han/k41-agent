@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from agent.delivery.http.dashboard.routes.shared import _get_config_service
+from agent.delivery.http.dashboard.routes.helpers.deps import get_request_config_service
 from agent.modules.skills import (
     create_skill,
     delete_skill,
@@ -61,7 +61,7 @@ def _serialize_skill(name: str, *, include_content: bool = False) -> dict[str, A
 
 
 def _skills_settings(request: Request) -> tuple[dict[str, Any], dict[str, Any]]:
-    service = _get_config_service(request)
+    service = get_request_config_service(request)
     settings, sources = service.get_settings_overview_and_sources()
     return (
         {key: value for key, value in settings.items() if key.startswith("skills.")},

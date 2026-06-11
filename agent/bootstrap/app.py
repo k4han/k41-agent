@@ -23,6 +23,7 @@ from agent.delivery.http import (
     github_webhook_router,
     telegram_webhook_router,
 )
+from agent.delivery.http.common import redirect_legacy_api
 from agent.delivery.http.dashboard.auth_router import router as auth_router
 from agent.delivery.http.dashboard.spa import STATIC_DIR, CachedStaticFiles
 from agent.modules.channels import list_channel_statuses
@@ -119,19 +120,7 @@ def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:
     if bootstrap_config.enable_api:
         fastapi_app.include_router(api_router)
         # Backward compatibility: redirect /api/* to /v1/api/*
-        @fastapi_app.middleware("http")
-        async def redirect_legacy_api(request: Request, call_next):
-            if request.url.path.startswith("/api/") and not request.url.path.startswith("/v1/api/"):
-                # Redirect to versioned endpoint
-                new_path = f"/v1{request.url.path}"
-                logger.warning(
-                    "Legacy API endpoint accessed: %s - please update to: %s",
-                    request.url.path,
-                    new_path,
-                )
-                from fastapi.responses import RedirectResponse
-                return RedirectResponse(url=new_path, status_code=307)
-            return await call_next(request)
+        fastapi_app.middleware("http")(redirect_legacy_api)
 
     fastapi_app.include_router(telegram_webhook_router)
     fastapi_app.include_router(github_webhook_router)

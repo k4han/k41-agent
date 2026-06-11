@@ -4,18 +4,20 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
-from agent.delivery.http.dashboard.routes.shared import (
-    _backend_settings_payload,
-    _delete_config_tree,
-    _get_config_service,
-    _normalize_provider_name,
-    _provider_config_name,
-    _provider_entries_from_flat_config,
-    _provider_type_from_body,
-    _serialize_model_catalog,
-    _settings_payload,
-    _update_config_settings,
-    _validate_provider_name,
+from agent.delivery.http.dashboard.routes.helpers.deps import get_request_config_service
+from agent.delivery.http.dashboard.routes.helpers.providers import (
+    normalize_provider_name,
+    provider_config_name,
+    provider_entries_from_flat_config,
+    provider_type_from_body,
+    serialize_model_catalog,
+    validate_provider_name,
+)
+from agent.delivery.http.dashboard.routes.helpers.settings import (
+    backend_settings_payload,
+    delete_config_tree,
+    settings_payload,
+    update_config_settings,
 )
 from agent.modules.providers import (
     list_provider_model_catalog,
@@ -28,17 +30,17 @@ router = APIRouter()
 
 @router.get("/dashboard-api/config")
 async def get_dashboard_config(request: Request) -> dict[str, Any]:
-    return await _settings_payload(request, include_provider_settings=False)
+    return await settings_payload(request, include_provider_settings=False)
 
 
 @router.get("/dashboard-api/backends")
 async def get_dashboard_backends(request: Request) -> dict[str, Any]:
-    return await _backend_settings_payload(request)
+    return await backend_settings_payload(request)
 
 
 @router.get("/dashboard-api/providers")
 async def get_dashboard_providers(request: Request) -> dict[str, Any]:
-    return await _settings_payload(request, include_provider_settings=True)
+    return await settings_payload(request, include_provider_settings=True)
 
 
 class CreateProviderBody(BaseModel):
@@ -53,12 +55,12 @@ async def create_dashboard_provider(
     body: CreateProviderBody,
     request: Request,
 ) -> dict[str, str]:
-    service = _get_config_service(request)
-    provider_name = _validate_provider_name(body.name)
-    provider_type = _provider_type_from_body(body.type)
+    service = get_request_config_service(request)
+    provider_name = validate_provider_name(body.name)
+    provider_type = provider_type_from_body(body.type)
 
-    providers = _provider_entries_from_flat_config(service.get_all())
-    if _normalize_provider_name(provider_name) in providers:
+    providers = provider_entries_from_flat_config(service.get_all())
+    if normalize_provider_name(provider_name) in providers:
         raise HTTPException(
             status_code=409,
             detail=f"Provider already exists: {provider_name}.",
@@ -85,7 +87,7 @@ async def create_dashboard_provider(
     if provider_type == "openai_compatible":
         values[f"llm.providers.{provider_name}.base_url"] = base_url
 
-    _update_config_settings(service, values, require_writable=True)
+    update_config_settings(service, values, require_writable=True)
     return {"status": "created", "name": provider_name, "type": provider_type}
 
 
@@ -94,8 +96,8 @@ async def delete_dashboard_provider(
     provider_name: str,
     request: Request,
 ) -> dict[str, str]:
-    service = _get_config_service(request)
-    existing_name = _provider_config_name(service, provider_name)
+    service = get_request_config_service(request)
+    existing_name = provider_config_name(service, provider_name)
     if existing_name is None:
         raise HTTPException(status_code=404, detail=f"Provider not found: {provider_name}.")
 
@@ -107,10 +109,10 @@ async def delete_dashboard_provider(
         else:
             configured_default = default_model_val
 
-    if configured_default and _normalize_provider_name(configured_default) == _normalize_provider_name(existing_name):
+    if configured_default and normalize_provider_name(configured_default) == normalize_provider_name(existing_name):
         raise HTTPException(status_code=400, detail="Default provider cannot be deleted.")
 
-    deleted = _delete_config_tree(service, f"llm.providers.{existing_name}")
+    deleted = delete_config_tree(service, f"llm.providers.{existing_name}")
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Provider not found: {provider_name}.")
 
@@ -123,7 +125,7 @@ async def list_dashboard_provider_models(
 ) -> dict[str, Any]:
     try:
         catalogs = await list_provider_model_catalogs(include_remote=refresh)
-        service = _get_config_service(request)
+        service = get_request_config_service(request)
         default_model_val = str(service.get("llm.default_model", "") or "").strip()
         default_provider = ""
         if default_model_val:
@@ -139,7 +141,7 @@ async def list_dashboard_provider_models(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
         "default_provider": default_provider,
-        "providers": [_serialize_model_catalog(catalog) for catalog in catalogs],
+        "providers": [serialize_model_catalog(catalog) for catalog in catalogs],
     }
 
 

@@ -7,9 +7,9 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from agent.modules.workspaces import WorkspaceRef
-from agent.delivery.http.dashboard.routes.shared import (
-    _workspace_http_error,
-    _workspace_ref_from_request,
+from agent.delivery.http.dashboard.routes.helpers.workspace import (
+    workspace_http_error,
+    workspace_ref_from_request,
 )
 from agent.modules.github import get_github_automation_service
 from agent.modules.workspaces import (
@@ -99,7 +99,7 @@ async def browse_dashboard_workspace(
     try:
         return list_workspace_directories(path)
     except Exception as exc:
-        raise _workspace_http_error(exc) from exc
+        raise workspace_http_error(exc) from exc
 
 
 @router.get("/dashboard-api/workspace/tree")
@@ -112,7 +112,7 @@ async def get_dashboard_workspace_tree(
 ) -> dict[str, Any]:
     """Get the file tree for a workspace at the given path."""
     try:
-        workspace = await _workspace_ref_from_request(
+        workspace = await workspace_ref_from_request(
             thread_id=thread_id,
             backend=backend,
             locator=locator,
@@ -126,7 +126,7 @@ async def get_dashboard_workspace_tree(
             _op,
         )
     except Exception as exc:
-        raise _workspace_http_error(exc) from exc
+        raise workspace_http_error(exc) from exc
 
 
 @router.get("/dashboard-api/workspace/changes")
@@ -138,7 +138,7 @@ async def get_dashboard_workspace_changes(
 ) -> dict[str, Any]:
     """Get the list of uncommitted changes in the workspace."""
     try:
-        workspace = await _workspace_ref_from_request(
+        workspace = await workspace_ref_from_request(
             thread_id=thread_id,
             backend=backend,
             locator=locator,
@@ -152,7 +152,7 @@ async def get_dashboard_workspace_changes(
             _op,
         )
     except Exception as exc:
-        raise _workspace_http_error(exc) from exc
+        raise workspace_http_error(exc) from exc
 
 
 @router.get("/dashboard-api/workspace/diff")
@@ -165,7 +165,7 @@ async def get_dashboard_workspace_diff(
 ) -> dict[str, Any]:
     """Get the diff for a specific file in the workspace."""
     try:
-        workspace = await _workspace_ref_from_request(
+        workspace = await workspace_ref_from_request(
             thread_id=thread_id,
             backend=backend,
             locator=locator,
@@ -179,7 +179,7 @@ async def get_dashboard_workspace_diff(
             _op,
         )
     except Exception as exc:
-        raise _workspace_http_error(exc) from exc
+        raise workspace_http_error(exc) from exc
 
 
 @router.get("/dashboard-api/workspace/file")
@@ -192,7 +192,7 @@ async def get_dashboard_workspace_file(
 ) -> dict[str, Any]:
     """Read the contents of a file in the workspace."""
     try:
-        workspace = await _workspace_ref_from_request(
+        workspace = await workspace_ref_from_request(
             thread_id=thread_id,
             backend=backend,
             locator=locator,
@@ -206,7 +206,7 @@ async def get_dashboard_workspace_file(
             _op,
         )
     except Exception as exc:
-        raise _workspace_http_error(exc) from exc
+        raise workspace_http_error(exc) from exc
 
 
 class WorkspaceRenameBody(BaseModel):
@@ -224,7 +224,7 @@ async def rename_dashboard_workspace_entry(
 ) -> dict[str, Any]:
     """Rename a file or directory in the workspace."""
     try:
-        workspace = await _workspace_ref_from_request(
+        workspace = await workspace_ref_from_request(
             thread_id=body.thread_id,
             workspace=body.workspace,
         )
@@ -236,7 +236,7 @@ async def rename_dashboard_workspace_entry(
             _op,
         )
     except Exception as exc:
-        raise _workspace_http_error(exc) from exc
+        raise workspace_http_error(exc) from exc
 
 
 class WorkspaceDeleteBody(BaseModel):
@@ -392,7 +392,7 @@ async def resolve_dashboard_workspace(request: Request, body: WorkspaceResolveBo
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
-        raise _workspace_http_error(exc) from exc
+        raise workspace_http_error(exc) from exc
 
 
 async def _resolve_github_in_sandbox(
@@ -484,7 +484,7 @@ async def create_dashboard_workspace_directory(
             "name": clean_name,
         }
     except Exception as exc:
-        raise _workspace_http_error(exc) from exc
+        raise workspace_http_error(exc) from exc
 
 
 @router.post("/dashboard-api/workspace/delete")
@@ -493,7 +493,7 @@ async def delete_dashboard_workspace_entry(
 ) -> dict[str, Any]:
     """Delete a file or directory in the workspace."""
     try:
-        workspace = await _workspace_ref_from_request(
+        workspace = await workspace_ref_from_request(
             thread_id=body.thread_id,
             workspace=body.workspace,
         )
@@ -505,4 +505,4 @@ async def delete_dashboard_workspace_entry(
             _op,
         )
     except Exception as exc:
-        raise _workspace_http_error(exc) from exc
+        raise workspace_http_error(exc) from exc

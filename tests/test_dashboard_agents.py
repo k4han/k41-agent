@@ -17,8 +17,8 @@ def dashboard_agent_client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     agents_routes_module = importlib.import_module(
         "agent.delivery.http.dashboard.routes.agents"
     )
-    shared_routes_module = importlib.import_module(
-        "agent.delivery.http.dashboard.routes.shared"
+    helpers_agents_module = importlib.import_module(
+        "agent.delivery.http.dashboard.routes.helpers.agents"
     )
 
     repo = FilesystemAgentRepository(tmp_path / "agents")
@@ -27,7 +27,7 @@ def dashboard_agent_client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     service._repository = repo
 
     monkeypatch.setattr(agents_routes_module, "get_catalog_service", lambda: service)
-    monkeypatch.setattr(shared_routes_module, "get_catalog_service", lambda: service)
+    monkeypatch.setattr(helpers_agents_module, "get_catalog_service", lambda: service)
 
     app = FastAPI()
     app.state.channel_manager = ChannelManager()

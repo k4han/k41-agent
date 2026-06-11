@@ -6,11 +6,11 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
 
 from agent.modules.scheduler import TriggerType
-from agent.delivery.http.dashboard.routes.shared import (
-    _get_job_or_404,
-    _get_scheduler,
-    _list_all_jobs,
-    _serialize_job,
+from agent.delivery.http.dashboard.routes.helpers.scheduler import (
+    get_job_or_404,
+    get_scheduler_or_503,
+    list_all_jobs,
+    serialize_job,
 )
 from agent.modules.scheduler import (
     execute_scheduled_task,
@@ -25,7 +25,7 @@ router = APIRouter()
 async def list_scheduler_jobs() -> dict[str, list[dict[str, Any]]]:
     """List all scheduled jobs with their triggers and status."""
     try:
-        jobs = _list_all_jobs()
+        jobs = list_all_jobs()
     except RuntimeError:
         jobs = []
     return {"jobs": jobs}
@@ -54,7 +54,7 @@ class UpdateJobBody(BaseModel):
 @router.post("/scheduler/jobs")
 async def create_scheduler_job(body: CreateJobBody) -> dict[str, Any]:
     """Create a new scheduled job with the given trigger configuration."""
-    scheduler = _get_scheduler()
+    scheduler = get_scheduler_or_503()
 
     try:
         trigger_type, trigger_args = normalize_trigger(
@@ -73,13 +73,13 @@ async def create_scheduler_job(body: CreateJobBody) -> dict[str, Any]:
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Failed to create job: {exc}") from exc
 
-    return {"status": "created", "job": _serialize_job(job)}
+    return {"status": "created", "job": serialize_job(job)}
 
 
 @router.put("/scheduler/jobs/{job_id}")
 async def update_scheduler_job(job_id: str, body: UpdateJobBody) -> dict[str, Any]:
     """Update an existing scheduled job's task, platform, user, or trigger."""
-    job = _get_job_or_404(job_id)
+    job = get_job_or_404(job_id)
 
     if body.task is None and body.platform is None and body.user_id is None and body.trigger_type is None:
         raise HTTPException(status_code=400, detail="No fields to update.")
@@ -96,7 +96,7 @@ async def update_scheduler_job(job_id: str, body: UpdateJobBody) -> dict[str, An
             job.modify(kwargs=new_kwargs)
 
         if body.trigger_type is not None and body.trigger_args is not None:
-            scheduler = _get_scheduler()
+            scheduler = get_scheduler_or_503()
             trigger_type, trigger_args = normalize_trigger(
                 body.trigger_type,
                 body.trigger_args,
@@ -110,13 +110,13 @@ async def update_scheduler_job(job_id: str, body: UpdateJobBody) -> dict[str, An
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Failed to update job: {exc}") from exc
 
-    return {"status": "updated", "job": _serialize_job(job)}
+    return {"status": "updated", "job": serialize_job(job)}
 
 
 @router.delete("/scheduler/jobs/{job_id}")
 async def delete_scheduler_job(job_id: str) -> dict[str, str]:
     """Delete a scheduled job permanently."""
-    job = _get_job_or_404(job_id)
+    job = get_job_or_404(job_id)
     job.remove()
     return {"status": "deleted", "job_id": job_id}
 
@@ -124,7 +124,7 @@ async def delete_scheduler_job(job_id: str) -> dict[str, str]:
 @router.post("/scheduler/jobs/{job_id}/pause")
 async def pause_scheduler_job(job_id: str) -> dict[str, str]:
     """Pause a scheduled job so it stops firing until resumed."""
-    job = _get_job_or_404(job_id)
+    job = get_job_or_404(job_id)
     job.pause()
     return {"status": "paused", "job_id": job_id}
 
@@ -132,7 +132,7 @@ async def pause_scheduler_job(job_id: str) -> dict[str, str]:
 @router.post("/scheduler/jobs/{job_id}/resume")
 async def resume_scheduler_job(job_id: str) -> dict[str, str]:
     """Resume a previously paused scheduled job."""
-    job = _get_job_or_404(job_id)
+    job = get_job_or_404(job_id)
     job.resume()
     return {"status": "resumed", "job_id": job_id}
 
@@ -143,7 +143,7 @@ async def run_scheduler_job_now(
     background_tasks: BackgroundTasks,
 ) -> dict[str, str]:
     """Trigger immediate execution of a scheduled job."""
-    job = _get_job_or_404(job_id)
+    job = get_job_or_404(job_id)
     platform = job.kwargs.get("platform")
     user_id = job.kwargs.get("user_id")
     task = job.kwargs.get("task")

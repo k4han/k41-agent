@@ -1,13 +1,18 @@
 from __future__ import annotations
 
-from typing import Any
+import logging
+from collections.abc import Iterator
+from typing import Annotated, Any
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from agent.modules.mcp import McpInstallError, McpInstallRepository, McpMarketplaceService
+from agent.delivery.http.common.mcp import InstallRepository
+from agent.modules.mcp import McpInstallError, McpMarketplaceService
 from agent.modules.tools import reload_mcp_descriptors
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
 
@@ -37,12 +42,15 @@ class BindAgentMcpInstallBody(BaseModel):
     enabled: bool = Field(default=True, description="Whether the bind should be enabled.")
 
 
-def _marketplace_service() -> McpMarketplaceService:
-    return McpMarketplaceService()
+def _marketplace_service() -> Iterator[McpMarketplaceService]:
+    service = McpMarketplaceService()
+    try:
+        yield service
+    finally:
+        service.close()
 
 
-def _repo() -> McpInstallRepository:
-    return McpInstallRepository()
+MarketplaceService = Annotated[McpMarketplaceService, Depends(_marketplace_service)]
 
 
 def _http_error(exc: Exception) -> HTTPException:
@@ -54,23 +62,22 @@ def _http_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=status if status < 500 else 502, detail=detail)
     if isinstance(exc, httpx.HTTPError):
         return HTTPException(status_code=502, detail=str(exc))
-    return HTTPException(status_code=500, detail=str(exc))
+    logger.exception("Unexpected error in MCP endpoint")
+    return HTTPException(status_code=500, detail="Internal server error.")
 
 
 @router.get("/search")
 async def search_mcp_registry(
+    service: MarketplaceService,
     q: str = "",
     cursor: str = "",
     limit: int = 20,
 ) -> dict[str, Any]:
     """Search the MCP server registry by keyword."""
-    service = _marketplace_service()
     try:
         return await service.search(q, cursor=cursor, limit=limit)
     except Exception as exc:
         raise _http_error(exc) from exc
-    finally:
-        service.close()
 
 
 @router.get("/servers/{namespace}/{name}/versions/{version}")
@@ -78,27 +85,31 @@ async def get_mcp_registry_server_by_parts(
     namespace: str,
     name: str,
     version: str,
+    service: MarketplaceService,
 ) -> dict[str, Any]:
     """Get a specific MCP server version by namespace, name, and version."""
-    return await get_mcp_registry_server(f"{namespace}/{name}", version)
+    return await get_mcp_registry_server(f"{namespace}/{name}", version, service)
 
 
 @router.get("/servers/{server_name:path}/versions/{version}")
-async def get_mcp_registry_server(server_name: str, version: str) -> dict[str, Any]:
+async def get_mcp_registry_server(
+    server_name: str,
+    version: str,
+    service: MarketplaceService,
+) -> dict[str, Any]:
     """Get a specific MCP server version by full server name."""
-    service = _marketplace_service()
     try:
         return await service.get_server_version(server_name, version)
     except Exception as exc:
         raise _http_error(exc) from exc
-    finally:
-        service.close()
 
 
 @router.post("/install")
-async def install_mcp_server(body: McpInstallBody) -> dict[str, Any]:
+async def install_mcp_server(
+    body: McpInstallBody,
+    service: MarketplaceService,
+) -> dict[str, Any]:
     """Install an MCP server from the registry and bind it to an agent."""
-    service = _marketplace_service()
     try:
         result = await service.install(
             agent_name=body.agent_name,
@@ -114,39 +125,33 @@ async def install_mcp_server(body: McpInstallBody) -> dict[str, Any]:
         return result
     except Exception as exc:
         raise _http_error(exc) from exc
-    finally:
-        service.close()
 
 
 @router.get("/agents/{agent_name}/installs")
-async def list_agent_mcp_installs(agent_name: str) -> dict[str, Any]:
+async def list_agent_mcp_installs(
+    agent_name: str,
+    repo: InstallRepository,
+) -> dict[str, Any]:
     """List all MCP server installs for a specific agent."""
-    repo = _repo()
-    try:
-        return {"installs": repo.list_agent_installs(agent_name)}
-    finally:
-        repo.close()
+    return {"installs": repo.list_agent_installs(agent_name)}
 
 
 @router.post("/agents/{agent_name}/installs")
 async def bind_agent_mcp_install(
     agent_name: str,
     body: BindAgentMcpInstallBody,
+    repo: InstallRepository,
 ) -> dict[str, Any]:
     """Bind an existing MCP server to an agent."""
-    repo = _repo()
-    try:
-        install = repo.bind_agent_server(
-            agent_name=agent_name,
-            server_name=body.server_name,
-            enabled=body.enabled,
-        )
-        if install is None:
-            raise HTTPException(status_code=404, detail="MCP server not found.")
-        await reload_mcp_descriptors()
-        return {"status": "bound", "install": install}
-    finally:
-        repo.close()
+    install = repo.bind_agent_server(
+        agent_name=agent_name,
+        server_name=body.server_name,
+        enabled=body.enabled,
+    )
+    if install is None:
+        raise HTTPException(status_code=404, detail="MCP server not found.")
+    await reload_mcp_descriptors()
+    return {"status": "bound", "install": install}
 
 
 @router.put("/agents/{agent_name}/installs/{install_id}/toggle")
@@ -154,29 +159,26 @@ async def toggle_agent_mcp_install(
     agent_name: str,
     install_id: int,
     body: ToggleAgentMcpInstallBody,
+    repo: InstallRepository,
 ) -> dict[str, Any]:
     """Toggle an MCP server install on or off for an agent."""
-    repo = _repo()
-    try:
-        if not repo.toggle_agent_install(agent_name, install_id, body.enabled):
-            raise HTTPException(status_code=404, detail="MCP install not found.")
-        await reload_mcp_descriptors()
-        return {"status": "updated", "install_id": install_id, "enabled": body.enabled}
-    finally:
-        repo.close()
+    if not repo.toggle_agent_install(agent_name, install_id, body.enabled):
+        raise HTTPException(status_code=404, detail="MCP install not found.")
+    await reload_mcp_descriptors()
+    return {"status": "updated", "install_id": install_id, "enabled": body.enabled}
 
 
 @router.delete("/agents/{agent_name}/installs/{install_id}")
-async def delete_agent_mcp_install(agent_name: str, install_id: int) -> dict[str, Any]:
+async def delete_agent_mcp_install(
+    agent_name: str,
+    install_id: int,
+    repo: InstallRepository,
+) -> dict[str, Any]:
     """Delete an MCP server install from an agent."""
-    repo = _repo()
-    try:
-        if not repo.delete_agent_install(agent_name, install_id):
-            raise HTTPException(status_code=404, detail="MCP install not found.")
-        await reload_mcp_descriptors()
-        return {"status": "deleted", "install_id": install_id}
-    finally:
-        repo.close()
+    if not repo.delete_agent_install(agent_name, install_id):
+        raise HTTPException(status_code=404, detail="MCP install not found.")
+    await reload_mcp_descriptors()
+    return {"status": "deleted", "install_id": install_id}
 
 
 __all__ = ["router"]

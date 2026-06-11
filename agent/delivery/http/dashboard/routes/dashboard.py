@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from datetime import datetime
 from typing import Any
@@ -8,15 +9,25 @@ from fastapi import APIRouter, Depends, Request, HTTPException
 from fastapi.responses import StreamingResponse
 
 from agent.modules.admin_auth import get_current_admin
-from agent.delivery.http.dashboard.routes.shared import (
-    _agent_card_options,
-    _get_channel_manager,
-    _get_config_service,
-    _list_all_jobs,
-    _paired_identities,
-    _provider_entries_from_flat_config,
-    _scheduler_timezone_label,
-    _serialize_agent_config,
+from agent.delivery.http.dashboard.routes.helpers.agents import (
+    agent_card_options,
+    serialize_agent_config,
+)
+from agent.delivery.http.dashboard.routes.helpers.deps import (
+    get_channel_manager,
+    get_request_config_service,
+)
+from agent.delivery.http.dashboard.routes.helpers.identities import paired_identities
+from agent.delivery.http.dashboard.routes.helpers.providers import (
+    provider_entries_from_flat_config,
+)
+from agent.delivery.http.dashboard.routes.helpers.scheduler import (
+    list_all_jobs,
+    scheduler_timezone_label,
+)
+from agent.delivery.http.dashboard.routes.helpers.sse import (
+    SSE_HEARTBEAT_SECONDS,
+    sse_event,
 )
 from agent.modules.agent_runtime import (
     get_active_session_registry,
@@ -143,7 +154,7 @@ def _is_provider_ready(entry: dict[str, Any]) -> bool:
 def _build_providers_health(
     flat_config: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    providers = _provider_entries_from_flat_config(flat_config)
+    providers = provider_entries_from_flat_config(flat_config)
     rows: list[dict[str, Any]] = []
     for entry in providers.values():
         name = str(entry.get("name") or "").strip()
@@ -211,7 +222,7 @@ async def get_dashboard_session(current_admin: str = Depends(get_current_admin))
 @router.get("/dashboard-api/home")
 async def get_dashboard_home(request: Request) -> dict[str, Any]:
     """Get dashboard home data including system status, counters, recent items, and onboarding state."""
-    channel_manager = _get_channel_manager(request)
+    channel_manager = get_channel_manager(request)
     services = list_channel_statuses(channel_manager)
 
     task_manager = get_background_task_manager()
@@ -227,9 +238,9 @@ async def get_dashboard_home(request: Request) -> dict[str, Any]:
     active_sessions = registry.list_active()
 
     try:
-        jobs = _list_all_jobs()
+        jobs = list_all_jobs()
         scheduler = get_scheduler()
-        scheduler_timezone = _scheduler_timezone_label(scheduler)
+        scheduler_timezone = scheduler_timezone_label(scheduler)
     except RuntimeError:
         jobs = []
         scheduler_timezone = "local time"
@@ -239,7 +250,7 @@ async def get_dashboard_home(request: Request) -> dict[str, Any]:
     agents = catalog.list_agents()
     agents_total = len(agents)
 
-    config_service = _get_config_service(request)
+    config_service = get_request_config_service(request)
     flat_config = config_service.get_all()
     providers_health = _build_providers_health(flat_config)
     ready_providers = sum(1 for p in providers_health if p.get("ready"))
@@ -338,7 +349,7 @@ async def get_dashboard_home(request: Request) -> dict[str, Any]:
 @router.get("/dashboard-api/channels")
 async def get_dashboard_channels(request: Request) -> dict[str, Any]:
     """Get channel settings, runtime statuses, and paired identities."""
-    service = _get_config_service(request)
+    service = get_request_config_service(request)
     settings_raw, settings_sources_raw = service.get_settings_overview_and_sources()
     settings = {
         key: value
@@ -375,7 +386,7 @@ async def get_dashboard_channels(request: Request) -> dict[str, Any]:
         for name in channel_names
     }
     return {
-        "identities": await _paired_identities(),
+        "identities": await paired_identities(),
         "settings": settings,
         "by_channel": by_channel,
         "settings_sources": settings_sources,
@@ -386,7 +397,7 @@ async def get_dashboard_channels(request: Request) -> dict[str, Any]:
 @router.get("/dashboard-api/agents")
 async def get_dashboard_agents() -> dict[str, Any]:
     """Get agent card options for the dashboard."""
-    return await _agent_card_options()
+    return await agent_card_options()
 
 
 @router.get("/dashboard-api/tasks")
@@ -406,8 +417,8 @@ async def get_dashboard_tasks() -> dict[str, Any]:
 
     return {
         "tasks": tasks,
-        "agents": [_serialize_agent_config(agent) for agent in catalog.list_agents()],
-        "identities": await _paired_identities(),
+        "agents": [serialize_agent_config(agent) for agent in catalog.list_agents()],
+        "identities": await paired_identities(),
     }
 
 
@@ -416,15 +427,15 @@ async def get_dashboard_scheduler() -> dict[str, Any]:
     """Get scheduled jobs with timezone information."""
     try:
         scheduler = get_scheduler()
-        jobs = _list_all_jobs()
-        scheduler_timezone = _scheduler_timezone_label(scheduler)
+        jobs = list_all_jobs()
+        scheduler_timezone = scheduler_timezone_label(scheduler)
     except RuntimeError:
         jobs = []
         scheduler_timezone = "local time"
 
     return {
         "jobs": jobs,
-        "identities": await _paired_identities(),
+        "identities": await paired_identities(),
         "scheduler_timezone": scheduler_timezone,
     }
 
@@ -459,10 +470,6 @@ async def stop_dashboard_session(payload: dict[str, Any]) -> dict[str, Any]:
 @router.get("/dashboard-api/sessions/events")
 async def stream_session_events() -> StreamingResponse:
     """Stream real-time session events (start, stop, status changes) via SSE."""
-    from fastapi.responses import StreamingResponse
-    from agent.delivery.http.dashboard.routes.shared import _sse_event, SSE_HEARTBEAT_SECONDS
-    import asyncio
-
     registry = get_active_session_registry()
     queue = registry.subscribe()
 
@@ -470,7 +477,7 @@ async def stream_session_events() -> StreamingResponse:
         try:
             # Yield initial snapshot first
             initial_sessions = registry.list_active()
-            yield _sse_event("snapshot", {"sessions": initial_sessions})
+            yield sse_event("snapshot", {"sessions": initial_sessions})
 
             while True:
                 try:
@@ -478,9 +485,9 @@ async def stream_session_events() -> StreamingResponse:
                         queue.get(),
                         timeout=SSE_HEARTBEAT_SECONDS,
                     )
-                    yield _sse_event(event["type"], event["data"])
+                    yield sse_event(event["type"], event["data"])
                 except asyncio.TimeoutError:
-                    yield _sse_event("heartbeat", {})
+                    yield sse_event("heartbeat", {})
         finally:
             registry.unsubscribe(queue)
 

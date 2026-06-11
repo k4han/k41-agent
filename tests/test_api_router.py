@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
+from agent.delivery.http.common import redirect_legacy_api
 from agent.modules.admin_auth import get_current_admin
 from agent.shared.infrastructure.http_errors import register_http_exception_handlers
 from agent.delivery.http.api.schemas import ChatRequest, HumanResumePayload, PlanResumePayload
@@ -34,11 +35,7 @@ def _create_client() -> TestClient:
     app = FastAPI()
     register_http_exception_handlers(app)
 
-    @app.middleware("http")
-    async def redirect_legacy_api(request: Request, call_next):
-        if request.url.path.startswith("/api/") and not request.url.path.startswith("/v1/api/"):
-            request.scope["path"] = f"/v1{request.url.path}"
-        return await call_next(request)
+    app.middleware("http")(redirect_legacy_api)
 
     app.include_router(router_module.router)
 

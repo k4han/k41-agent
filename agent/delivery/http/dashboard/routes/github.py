@@ -6,10 +6,8 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from agent.modules.agents import get_catalog_service
 from agent.modules.agent_runtime import get_background_task_manager
-from agent.delivery.http.dashboard.routes.shared import (
-    _agent_card_options,
-    _paired_identities,
-)
+from agent.delivery.http.dashboard.routes.helpers.agents import agent_card_options
+from agent.delivery.http.dashboard.routes.helpers.identities import paired_identities
 from agent.modules.github import (
     get_github_automation_service,
     get_github_settings,
@@ -153,11 +151,11 @@ async def get_dashboard_github_repository(repository_id: int) -> dict[str, Any]:
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    options = await _agent_card_options()
+    options = await agent_card_options()
     return {
         "repository": repository,
         "activity": _repository_activity(repository, limit=10),
-        "identities": await _paired_identities(),
+        "identities": await paired_identities(),
         "agent_names": options["agent_names"],
         "tools": options["tools"],
         "tool_groups": options["tool_groups"],
