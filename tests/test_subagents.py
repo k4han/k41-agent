@@ -182,6 +182,54 @@ class TestParseAgentFile:
         os.unlink(p)
         os.rmdir(d)
 
+    def test_parse_and_serialize_tool_configs(self):
+        d = tempfile.mkdtemp()
+        p = Path(d, "image_agent.md")
+        p.write_text(
+            (
+                "---\n"
+                "name: image_agent\n"
+                "graph_type: react_agent\n"
+                "provider: default\n"
+                "tools:\n"
+                "  - generate_image\n"
+                "tool_configs:\n"
+                "  generate_image:\n"
+                "    model: gpt-image-1\n"
+                "    size: 1024x1024\n"
+                "---\n"
+                "Generate images.\n"
+            ),
+            encoding="utf-8",
+        )
+        config = parse_agent_file(p)
+        assert config is not None
+        assert config.tool_configs == {
+            "generate_image": {
+                "model": "gpt-image-1",
+                "size": "1024x1024",
+            }
+        }
+        serialized = serialize_agent_config(config)
+        assert "tool_configs:" in serialized
+        assert "generate_image:" in serialized
+        os.unlink(p)
+        os.rmdir(d)
+
+    def test_serialize_drops_config_for_disabled_tools(self):
+        config = AgentConfig(
+            name="image_agent",
+            graph_type="react_agent",
+            provider="default",
+            tools=[],
+            tool_configs={"generate_image": {"model": "gpt-image-1"}},
+            system_prompt="Prompt.",
+        )
+
+        serialized = serialize_agent_config(config)
+
+        assert "tool_configs:" not in serialized
+
 
 # --- Repository tests ---
 

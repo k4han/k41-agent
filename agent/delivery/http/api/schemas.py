@@ -73,6 +73,7 @@ class ModelOption(BaseModel):
     source: str = Field(default="", description="Source of the model info.")
     context_window: int | None = Field(default=None, description="Context window size in tokens.")
     input_types: list[str] | None = Field(default=None, description="Supported input types (e.g. 'text', 'image').")
+    output_types: list[str] | None = Field(default=None, description="Supported output types (e.g. 'text', 'image').")
 
 
 class ModelCatalog(BaseModel):

@@ -15,6 +15,7 @@ import { Markdown } from "@/components/Markdown";
 import { StatusIndicator } from "@/components/StatusIndicator";
 import { useToast } from "@/components/Toast";
 import { isChatStatusText } from "@/lib/chatStatus";
+import { generatedImageFromToolResult } from "@/lib/generatedImages";
 import { formatValue } from "@/lib/utils";
 import {
   parseAskUserToolResult,
@@ -736,6 +737,11 @@ export function ToolCallDetail(props: {
   defaultOpen?: boolean;
   itemId?: number;
 }) {
+  const generatedImage = () =>
+    props.name === "generate_image"
+      ? generatedImageFromToolResult(props.result)
+      : null;
+
   return (
     <details
       class="tool-call"
@@ -747,6 +753,18 @@ export function ToolCallDetail(props: {
       </summary>
       <div class="tool-call-body">
         <pre>{formatValue(props.args)}</pre>
+        <Show when={generatedImage()}>
+          {(image) => (
+            <a
+              class="tool-generated-image"
+              href={image().url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <img src={image().url} alt={image().filename} />
+            </a>
+          )}
+        </Show>
         <pre>{props.result === null ? "Waiting for tool result..." : formatValue(props.result)}</pre>
       </div>
     </details>

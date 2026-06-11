@@ -117,6 +117,9 @@ class BuiltinToolSource:
                     tags=meta.tags,
                     version=meta.version,
                     args_schema=getattr(tool_obj, "args_schema", None),
+                    config_schema=meta.config_schema,
+                    default_config=meta.default_config,
+                    factory=meta.factory,
                 )
             )
         return out

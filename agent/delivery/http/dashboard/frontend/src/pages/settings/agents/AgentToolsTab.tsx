@@ -1,9 +1,11 @@
 import { For, Show } from "solid-js";
+import { RotateCcw } from "lucide-solid";
 
+import { ModelPicker } from "@/components/ModelPicker";
 import { uniqueSorted } from "@/lib/utils";
-import type { AgentMcpInstall, AgentsPayload } from "@/types";
+import type { AgentMcpInstall, AgentsPayload, ToolConfigField, ToolConfigSchema } from "@/types";
 
-import type { AgentForm } from "./agentForm";
+import type { AgentForm, ToolConfigValue } from "./agentForm";
 
 export type AgentToolGroup = {
   category: string;
@@ -20,6 +22,28 @@ function optionCardClass(checked: boolean, readOnly: boolean) {
   return `agent-config-option ${checked ? "active" : ""} ${readOnly ? "read-only" : ""}`;
 }
 
+function hasOverride(form: AgentForm, toolName: string, fieldName: string) {
+  return Object.prototype.hasOwnProperty.call(form.tool_configs[toolName] || {}, fieldName);
+}
+
+function fieldValue(form: AgentForm, toolName: string, field: ToolConfigField) {
+  if (hasOverride(form, toolName, field.name)) {
+    return form.tool_configs[toolName][field.name];
+  }
+  return field.input_type === "boolean" ? false : "";
+}
+
+function formatDefault(field: ToolConfigField) {
+  if (field.default === undefined || field.default === null || field.default === "") {
+    return "Inherit";
+  }
+  return `Inherit (${String(field.default)})`;
+}
+
+function isImageOutputModel(model: { output_types?: string[] | null }) {
+  return Boolean(model.output_types?.includes("image"));
+}
+
 export function AgentToolsTab(props: {
   form: AgentForm;
   readOnly: boolean;
@@ -30,6 +54,8 @@ export function AgentToolsTab(props: {
   mcpUpdating: boolean;
   subAgentOptions: string[];
   planApprovalTargetOptions: string[];
+  toolConfigSchemas: Record<string, ToolConfigSchema>;
+  payload: AgentsPayload;
   onToggleListValue: (
     key: "tools" | "sub_agents" | "plan_approval_targets",
     value: string,
@@ -37,6 +63,8 @@ export function AgentToolsTab(props: {
   ) => void;
   onToggleToolGroup: (tools: string[], checked: boolean) => void;
   onToggleMcpInstall: (serverName: string, checked: boolean) => void;
+  onUpdateToolConfig: (toolName: string, fieldName: string, value: ToolConfigValue) => void;
+  onResetToolConfigField: (toolName: string, fieldName: string) => void;
 }) {
   const activeMcpCount = () =>
     props.mcpInstalls.filter((install) => install.agent_enabled).length;
@@ -83,6 +111,10 @@ export function AgentToolsTab(props: {
                 group.tools.filter((tool) => props.form.tools.includes(tool)).length;
               const allChecked = () =>
                 group.tools.length > 0 && checkedCount() === group.tools.length;
+              const configurableTools = () =>
+                group.tools.filter(
+                  (tool) => props.form.tools.includes(tool) && props.toolConfigSchemas[tool],
+                );
               return (
                 <div class="agent-config-group">
                   <div class="agent-config-group-header">
@@ -119,6 +151,172 @@ export function AgentToolsTab(props: {
                       }}
                     </For>
                   </div>
+                  <Show when={configurableTools().length > 0}>
+                    <div class="agent-config-tool-settings">
+                      <For each={configurableTools()}>
+                        {(tool) => {
+                          const schema = () => props.toolConfigSchemas[tool];
+                          return (
+                            <div class="agent-config-tool-config">
+                              <div class="agent-config-tool-config-header">
+                                <div>
+                                  <div class="agent-config-tool-config-title mono">{tool}</div>
+                                  <div class="hint">Tool-specific overrides</div>
+                                </div>
+                              </div>
+                              <div class="agent-config-tool-config-grid">
+                                <For each={schema().fields}>
+                                  {(field) => {
+                                    const value = () => fieldValue(props.form, tool, field);
+                                    if (tool === "generate_image" && field.name === "provider") {
+                                      return null;
+                                    }
+                                    return (
+                                      <div class="agent-config-tool-field">
+                                        <label class="agent-config-tool-field-label" for={`${tool}-${field.name}`}>
+                                          <span>{field.label}</span>
+                                          <Show when={field.required}>
+                                            <span class="badge">Required</span>
+                                          </Show>
+                                        </label>
+                                        <Show
+                                          when={tool === "generate_image" && field.name === "model"}
+                                          fallback={
+                                        <div class="agent-config-tool-field-control">
+                                          <Show
+                                            when={field.input_type === "boolean"}
+                                            fallback={
+                                              <Show
+                                                when={field.input_type === "select"}
+                                                fallback={
+                                                  <input
+                                                    id={`${tool}-${field.name}`}
+                                                    class="input"
+                                                    type={
+                                                      field.input_type === "number"
+                                                        ? "number"
+                                                        : field.input_type === "password" || field.secret
+                                                          ? "password"
+                                                          : "text"
+                                                    }
+                                                    value={String(value() ?? "")}
+                                                    disabled={props.readOnly}
+                                                    placeholder={formatDefault(field)}
+                                                    min={field.min}
+                                                    max={field.max}
+                                                    step={field.step}
+                                                    onInput={(event) => {
+                                                      const nextValue = event.currentTarget.value;
+                                                      if (nextValue === "") {
+                                                        props.onResetToolConfigField(tool, field.name);
+                                                        return;
+                                                      }
+                                                      props.onUpdateToolConfig(tool, field.name, nextValue);
+                                                    }}
+                                                  />
+                                                }
+                                              >
+                                                <select
+                                                  id={`${tool}-${field.name}`}
+                                                  class="input"
+                                                  value={String(value() ?? "")}
+                                                  disabled={props.readOnly}
+                                                  onChange={(event) => {
+                                                    const nextValue = event.currentTarget.value;
+                                                    if (nextValue === "") {
+                                                      props.onResetToolConfigField(tool, field.name);
+                                                      return;
+                                                    }
+                                                    props.onUpdateToolConfig(tool, field.name, nextValue);
+                                                  }}
+                                                >
+                                                  <option value="">{formatDefault(field)}</option>
+                                                  <For each={field.options}>
+                                                    {(option) => <option value={option}>{option}</option>}
+                                                  </For>
+                                                </select>
+                                              </Show>
+                                            }
+                                          >
+                                            <label class="agent-config-tool-boolean">
+                                              <input
+                                                id={`${tool}-${field.name}`}
+                                                type="checkbox"
+                                                checked={Boolean(value())}
+                                                disabled={props.readOnly}
+                                                onChange={(event) =>
+                                                  props.onUpdateToolConfig(
+                                                    tool,
+                                                    field.name,
+                                                    event.currentTarget.checked,
+                                                  )
+                                                }
+                                              />
+                                              <span>Enabled</span>
+                                            </label>
+                                          </Show>
+                                          <button
+                                            class="btn btn-sm btn-ghost"
+                                            type="button"
+                                            title="Reset override"
+                                            disabled={props.readOnly || !hasOverride(props.form, tool, field.name)}
+                                            onClick={() => props.onResetToolConfigField(tool, field.name)}
+                                          >
+                                            <RotateCcw size={13} />
+                                            Reset
+                                          </button>
+                                        </div>
+                                          }
+                                        >
+                                          <div class="agent-config-tool-model-control">
+                                            <ModelPicker
+                                              catalogs={props.payload.model_catalogs}
+                                              providerNames={props.payload.provider_names}
+                                              defaultProvider={props.payload.default_provider}
+                                              defaultModel={props.payload.default_model}
+                                              provider={String(props.form.tool_configs[tool]?.provider || "")}
+                                              model={String(value() || "")}
+                                              disabled={props.readOnly}
+                                              resolveDefault
+                                              modelFilter={isImageOutputModel}
+                                              onChange={(provider, model) => {
+                                                props.onUpdateToolConfig(tool, "provider", provider);
+                                                props.onUpdateToolConfig(tool, "model", model);
+                                              }}
+                                            />
+                                            <button
+                                              class="btn btn-sm btn-ghost"
+                                              type="button"
+                                              title="Reset model override"
+                                              disabled={
+                                                props.readOnly ||
+                                                (!hasOverride(props.form, tool, "provider") &&
+                                                  !hasOverride(props.form, tool, "model"))
+                                              }
+                                              onClick={() => {
+                                                props.onResetToolConfigField(tool, "provider");
+                                                props.onResetToolConfigField(tool, "model");
+                                              }}
+                                            >
+                                              <RotateCcw size={13} />
+                                              Reset
+                                            </button>
+                                          </div>
+                                        </Show>
+                                        <Show when={field.description}>
+                                          <div class="hint">{field.description}</div>
+                                        </Show>
+                                      </div>
+                                    );
+                                  }}
+                                </For>
+                              </div>
+                            </div>
+                          );
+                        }}
+                      </For>
+                    </div>
+                  </Show>
                 </div>
               );
             }}

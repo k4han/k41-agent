@@ -26,6 +26,7 @@ class AgentConfig(BaseModel):
     provider: str
     model: str = ""
     tools: list[str] = Field(default_factory=list)
+    tool_configs: dict[str, dict[str, Any]] = Field(default_factory=dict)
     mcp_servers: Optional[list[str]] = None
     sub_agents: Optional[list[str]] = None  # None = leaf (no call_agent), list = allowed targets
     plan_approval_targets: list[str] = Field(default_factory=list)
@@ -59,6 +60,7 @@ class AgentCard(BaseModel):
     provider: str = ""
     model: str = ""
     tools: list[str] = Field(default_factory=list)
+    tool_configs: dict[str, dict[str, Any]] = Field(default_factory=dict)
     mcp_servers: Optional[list[str]] = None
     sub_agents: Optional[list[str]] = None
     plan_approval_targets: list[str] = Field(default_factory=list)
@@ -103,6 +105,10 @@ class AgentCard(BaseModel):
             provider=config.provider,
             model=config.model,
             tools=list(config.tools),
+            tool_configs={
+                name: dict(values)
+                for name, values in config.tool_configs.items()
+            },
             mcp_servers=list(config.mcp_servers) if config.mcp_servers is not None else None,
             sub_agents=list(config.sub_agents) if config.sub_agents is not None else None,
             plan_approval_targets=list(config.plan_approval_targets),
@@ -150,6 +156,10 @@ class AgentCard(BaseModel):
             provider=self.provider,
             model=self.model,
             tools=list(self.tools),
+            tool_configs={
+                name: dict(values)
+                for name, values in self.tool_configs.items()
+            },
             mcp_servers=list(self.mcp_servers) if self.mcp_servers is not None else None,
             sub_agents=list(self.sub_agents) if self.sub_agents is not None else None,
             plan_approval_targets=list(self.plan_approval_targets),

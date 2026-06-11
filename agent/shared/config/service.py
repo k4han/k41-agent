@@ -26,7 +26,15 @@ from agent.shared.infrastructure.config_file import coerce_bool
 
 logger = logging.getLogger(__name__)
 
-_SETTING_META_OPTIONAL_KEYS = ("min", "max", "step", "restart_required")
+_SETTING_META_OPTIONAL_KEYS = (
+    "min",
+    "max",
+    "step",
+    "restart_required",
+    "options",
+    "default",
+    "required",
+)
 
 
 def _build_settings_overview_entry(

@@ -6,9 +6,10 @@ Other modules should import from here, not from internal packages.
 from langchain_core.language_models import BaseChatModel
 
 from agent.modules.providers.models import ProviderModelCatalog, ResolvedChatModel
-from agent.modules.providers.provider import ProviderConfig
+from agent.modules.providers.provider import ProviderConfig, ProviderType
 from agent.modules.providers.service import ProviderService
 from agent.modules.providers.resolve_chat_model import (
+    get_default_llm_settings,
     resolve_chat_model,
     resolve_chat_model_info,
 )
@@ -117,8 +118,10 @@ from agent.modules.providers.catalog import (
 
 __all__ = [
     "ProviderService",
+    "ProviderType",
     "ResolvedChatModel",
     "get_chat_model",
+    "get_default_llm_settings",
     "get_resolved_chat_model",
     "list_provider_model_catalog",
     "list_provider_model_catalogs",

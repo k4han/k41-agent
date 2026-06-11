@@ -23,6 +23,7 @@ class ModelOption:
     source: str
     context_window: int | None = None
     input_types: tuple[str, ...] | None = None
+    output_types: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)

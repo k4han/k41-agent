@@ -19,7 +19,7 @@ import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
 import { WorkspaceExplorer } from "@/components/WorkspaceExplorer";
 import type { TodoProgress } from "@/components/ChatTodos";
-import { apiFetch, postJson, readError } from "@/lib/api";
+import { apiFetch, fetchWithCsrf, postJson, readError } from "@/lib/api";
 import {
   threadApiPath,
   toThreadTranscript,
@@ -994,7 +994,7 @@ export function ChatPage() {
       } else if (currentThreadId() && activeCheckpointId()) {
         payload.checkpoint_id = activeCheckpointId();
       }
-      const response = await fetch(API_PATHS.chatEvents, {
+      const response = await fetchWithCsrf(API_PATHS.chatEvents, {
         method: "POST",
         headers: { "content-type": "application/json" },
         credentials: "same-origin",
@@ -1094,7 +1094,7 @@ export function ChatPage() {
     const streamedRef: StreamedRef = { received: false };
 
     try {
-      const response = await fetch(API_PATHS.chatEventsReconnect, {
+      const response = await fetchWithCsrf(API_PATHS.chatEventsReconnect, {
         method: "POST",
         headers: { "content-type": "application/json" },
         credentials: "same-origin",
@@ -1320,7 +1320,7 @@ export function ChatPage() {
     const streamedRef: StreamedRef = { received: false };
 
     try {
-      const response = await fetch(API_PATHS.chatEventsEdit, {
+      const response = await fetchWithCsrf(API_PATHS.chatEventsEdit, {
         method: "POST",
         headers: { "content-type": "application/json" },
         credentials: "same-origin",

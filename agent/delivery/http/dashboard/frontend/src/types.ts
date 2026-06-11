@@ -82,6 +82,7 @@ export type ModelOption = {
   source: string;
   context_window?: number;
   input_types?: string[] | null;
+  output_types?: string[] | null;
 };
 
 export type ModelCatalog = {
@@ -101,6 +102,7 @@ export type AgentCard = {
   provider: string;
   model: string;
   tools: string[];
+  tool_configs?: Record<string, Record<string, unknown>>;
   mcp_servers?: string[];
   sub_agents: string[] | null;
   plan_approval_targets: string[];
@@ -124,6 +126,7 @@ export type AgentConfig = {
   provider: string;
   model: string;
   tools: string[];
+  tool_configs?: Record<string, Record<string, unknown>>;
   mcp_servers?: string[];
   sub_agents: string[] | null;
   plan_approval_targets: string[];
@@ -136,6 +139,25 @@ export type AgentConfig = {
 export type ToolGroup = {
   category: string;
   tools: string[];
+};
+
+export type ToolConfigField = {
+  name: string;
+  input_type: "text" | "number" | "boolean" | "password" | "select";
+  label: string;
+  description: string;
+  default: unknown;
+  required: boolean;
+  options: string[];
+  secret: boolean;
+  min?: number;
+  max?: number;
+  step?: number;
+};
+
+export type ToolConfigSchema = {
+  fields: ToolConfigField[];
+  default_config: Record<string, unknown>;
 };
 
 export type SkillInfo = {
@@ -162,6 +184,7 @@ export type AgentsPayload = {
   cards: AgentCard[];
   tools: string[];
   tool_groups?: ToolGroup[];
+  tool_config_schemas?: Record<string, ToolConfigSchema>;
   workflows: string[];
   agent_names: string[];
   provider_names: string[];
@@ -257,6 +280,9 @@ export type SettingInfo = {
   min?: number;
   max?: number;
   step?: number;
+  options?: string[];
+  default?: unknown;
+  required?: boolean;
   restart_required?: boolean;
 };
 

@@ -2,7 +2,7 @@ import { Show } from "solid-js";
 
 import type { AgentMcpInstall, AgentsPayload, PromptVariable } from "@/types";
 
-import { type AgentForm, type AgentTab } from "./agentForm";
+import { type AgentForm, type AgentTab, type ToolConfigValue } from "./agentForm";
 import { AgentGeneralTab } from "./AgentGeneralTab";
 import { AgentPromptTab } from "./AgentPromptTab";
 import { AgentToolsTab, type AgentToolGroup } from "./AgentToolsTab";
@@ -29,6 +29,8 @@ export function AgentEditTabs(props: {
   ) => void;
   onToggleToolGroup: (tools: string[], checked: boolean) => void;
   onToggleMcpInstall: (serverName: string, checked: boolean) => void;
+  onUpdateToolConfig: (toolName: string, fieldName: string, value: ToolConfigValue) => void;
+  onResetToolConfigField: (toolName: string, fieldName: string) => void;
   onInsertVariable: (name: string) => void;
 }) {
   return (
@@ -79,9 +81,13 @@ export function AgentEditTabs(props: {
               mcpUpdating={props.mcpUpdating}
               subAgentOptions={props.subAgentOptions}
               planApprovalTargetOptions={props.planApprovalTargetOptions}
+              toolConfigSchemas={props.payload.tool_config_schemas || {}}
+              payload={props.payload}
               onToggleListValue={props.onToggleListValue}
               onToggleToolGroup={props.onToggleToolGroup}
               onToggleMcpInstall={props.onToggleMcpInstall}
+              onUpdateToolConfig={props.onUpdateToolConfig}
+              onResetToolConfigField={props.onResetToolConfigField}
             />
           </Show>
           <Show when={props.activeTab === "prompt"}>

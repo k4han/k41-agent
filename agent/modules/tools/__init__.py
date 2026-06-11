@@ -13,9 +13,13 @@ from langchain_core.tools import BaseTool
 from agent.modules.tools.domain import (
     ToolCapability,
     ToolCategory,
+    ToolConfigField,
+    ToolConfigSchema,
+    ToolConfigValue,
     ToolDescriptor,
     ToolSource,
 )
+from agent.modules.tools.config import serialize_tool_config_schemas
 from agent.modules.tools.policy import ToolPolicy
 from agent.modules.tools.registry_service import (
     ensure_mcp_loaded,
@@ -159,6 +163,9 @@ async def aresolve_tools_for_agent(agent_name: str) -> list[BaseTool]:
 __all__ = [
     "ToolCapability",
     "ToolCategory",
+    "ToolConfigField",
+    "ToolConfigSchema",
+    "ToolConfigValue",
     "ToolContext",
     "ToolDescriptor",
     "ToolError",
@@ -197,4 +204,5 @@ __all__ = [
     "resolve_safe_path",
     "resolve_tools",
     "resolve_tools_for_agent",
+    "serialize_tool_config_schemas",
 ]

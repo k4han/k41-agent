@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
 from agent.shared.infrastructure.http_logging import HTTPLoggingMiddleware
-from agent.shared.infrastructure.csrf_protection import CSRFProtectionMiddleware
+from agent.shared.infrastructure.csrf_protection import CSRFProtectionMiddleware, CSRF_HEADER_NAME
 from agent.shared.infrastructure.http_errors import register_http_exception_handlers
 
 from agent.bootstrap.runtime import AppRuntime
@@ -115,6 +115,7 @@ def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["*"],
+        expose_headers=[CSRF_HEADER_NAME],
     )
 
     if bootstrap_config.enable_api:

@@ -1,5 +1,8 @@
 import type { AgentCard } from "@/types";
 
+export type ToolConfigValue = string | number | boolean | null;
+export type ToolConfigs = Record<string, Record<string, ToolConfigValue>>;
+
 export type AgentForm = {
   name: string;
   display_name: string;
@@ -8,6 +11,7 @@ export type AgentForm = {
   provider: string;
   model: string;
   tools: string[];
+  tool_configs: ToolConfigs;
   mcp_servers: string[];
   sub_agents: string[];
   plan_approval_targets: string[];
@@ -34,6 +38,7 @@ export function blankForm(workflow: string): AgentForm {
     provider: "default",
     model: "",
     tools: [],
+    tool_configs: {},
     mcp_servers: [],
     sub_agents: [],
     plan_approval_targets: [],
@@ -52,6 +57,7 @@ export function cardToForm(card: AgentCard): AgentForm {
     provider: card.provider || "default",
     model: card.model || "",
     tools: card.tools || [],
+    tool_configs: normalizeToolConfigs(card.tool_configs),
     mcp_servers: card.mcp_servers || [],
     sub_agents: card.sub_agents || [],
     plan_approval_targets: card.plan_approval_targets || [],
@@ -63,6 +69,33 @@ export function cardToForm(card: AgentCard): AgentForm {
 
 export function isFormDirty(a: AgentForm, b: AgentForm): boolean {
   return JSON.stringify(a) !== JSON.stringify(b);
+}
+
+function normalizeToolConfigs(value: unknown): ToolConfigs {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const result: ToolConfigs = {};
+  for (const [toolName, fields] of Object.entries(value)) {
+    if (!fields || typeof fields !== "object" || Array.isArray(fields)) {
+      continue;
+    }
+    result[toolName] = {};
+    for (const [fieldName, fieldValue] of Object.entries(fields)) {
+      if (
+        typeof fieldValue === "string" ||
+        typeof fieldValue === "number" ||
+        typeof fieldValue === "boolean" ||
+        fieldValue === null
+      ) {
+        result[toolName][fieldName] = fieldValue;
+      }
+    }
+    if (Object.keys(result[toolName]).length === 0) {
+      delete result[toolName];
+    }
+  }
+  return result;
 }
 
 export function defaultWorkflow(workflows: readonly string[]): string {

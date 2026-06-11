@@ -2,7 +2,7 @@ import { Star } from "lucide-solid";
 import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 
 import { classNames } from "@/lib/utils";
-import type { ModelCatalog } from "@/types";
+import type { ModelCatalog, ModelOption } from "@/types";
 
 const favoritesStorageKey = "k41.dashboard.modelFavorites";
 const keySeparator = "\u001f";
@@ -37,6 +37,7 @@ type ModelPickerProps = {
   dropdownPlacement?: "top" | "bottom";
   onChange: (provider: string, model: string) => void;
   resolveDefault?: boolean;
+  modelFilter?: (model: ModelOption, provider: string) => boolean;
 };
 
 function favoriteKey(provider: string, model: string): string {
@@ -221,12 +222,25 @@ export function ModelPicker(props: ModelPickerProps) {
         const catalog = props.catalogs.find((item) => item.provider === catalogProvider);
         const models = new Set<string>();
         if (provider !== "default") {
-          catalog?.models.forEach((model) => models.add(model.id));
-          if (catalog?.default_model) {
+          catalog?.models
+            .filter((model) => !props.modelFilter || props.modelFilter(model, catalogProvider))
+            .forEach((model) => models.add(model.id));
+          const defaultOption = catalog?.models.find((model) => model.id === catalog.default_model);
+          if (
+            catalog?.default_model &&
+            defaultOption &&
+            (!props.modelFilter || props.modelFilter(defaultOption, catalogProvider))
+          ) {
             models.add(catalog.default_model);
           }
           if (provider === selectedProvider() && selectedModel()) {
-            models.add(selectedModel());
+            const selectedOption = catalog?.models.find((model) => model.id === selectedModel());
+            if (
+              selectedOption &&
+              (!props.modelFilter || props.modelFilter(selectedOption, catalogProvider))
+            ) {
+              models.add(selectedModel());
+            }
           }
         }
         const defaultModelName = catalog?.default_model || "";

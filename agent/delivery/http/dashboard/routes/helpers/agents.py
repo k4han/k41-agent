@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from agent.delivery.http.dashboard.routes.helpers.providers import provider_model_options
 from agent.modules.agents import AgentCard, AgentConfig, get_catalog_service
-from agent.modules.tools import ToolSource, find_descriptors
+from agent.modules.tools import ToolSource, find_descriptors, serialize_tool_config_schemas
 from agent.modules.workflows import (
     REACT_AGENT_GRAPH_TYPE,
     ROUTER_GRAPH_TYPE,
@@ -25,6 +25,7 @@ _TOOL_CATEGORY_ORDER = (
     "file",
     "shell",
     "web",
+    "image",
     "schedule",
     "agent",
     "skill",
@@ -76,6 +77,7 @@ async def agent_card_options(cards: list[AgentCard] | None = None) -> dict[str, 
 
     builtin_descriptors = find_descriptors(source=ToolSource.BUILTIN)
     tool_categories = {desc.name: desc.category.value for desc in builtin_descriptors}
+    tool_config_schemas = serialize_tool_config_schemas(builtin_descriptors)
     tool_names = set(tool_categories)
     agent_names = []
     for card in cards:
@@ -107,6 +109,7 @@ async def agent_card_options(cards: list[AgentCard] | None = None) -> dict[str, 
         "cards": [serialize_agent_card(card) for card in cards],
         "tools": sorted(tool_names),
         "tool_groups": tool_groups,
+        "tool_config_schemas": tool_config_schemas,
         "workflows": workflows,
         "agent_names": sorted(agent_names),
         "mcp_server_options": mcp_servers,
@@ -146,6 +149,11 @@ def agent_config_from_body(body: "AgentCardBody") -> AgentConfig:
         provider=body.provider.strip(),
         model=body.model.strip(),
         tools=list(body.tools),
+        tool_configs={
+            name: dict(values)
+            for name, values in body.tool_configs.items()
+            if name in body.tools and isinstance(values, dict)
+        },
         mcp_servers=list(body.mcp_servers) if hasattr(body, "mcp_servers") and body.mcp_servers is not None else None,
         sub_agents=list(body.sub_agents) if body.sub_agents is not None else None,
         plan_approval_targets=list(body.plan_approval_targets),

@@ -11,6 +11,7 @@ from dataclasses import replace
 
 from langchain_core.tools import BaseTool
 
+from agent.modules.tools.config import materialize_tool
 from agent.modules.tools.domain import ToolDescriptor
 from agent.modules.tools.policy import ToolPolicy
 from agent.modules.tools.registry_service import (
@@ -68,25 +69,35 @@ class ToolResolver:
         *,
         override_tool_names: Iterable[str] | None = None,
     ) -> list[BaseTool]:
-        policy = self._load_policy_for(agent_name)
+        config = self._load_agent_config(agent_name)
+        policy = (
+            ToolPolicy.from_agent_config(config)
+            if config is not None
+            else ToolPolicy.allow_all(agent_name=agent_name or "default")
+        )
         if override_tool_names is not None:
             override_set = frozenset(override_tool_names)
             policy = replace(
                 policy,
                 allowed_tool_names=override_set if override_set else None,
             )
-        return [d.tool for d in self.resolve_for_policy(policy)]
+        agent_tool_configs = (
+            getattr(config, "tool_configs", None)
+            if config is not None
+            else None
+        )
+        return [
+            materialize_tool(d, agent_tool_configs)
+            for d in self.resolve_for_policy(policy)
+        ]
 
     @staticmethod
-    def _load_policy_for(agent_name: str) -> ToolPolicy:
+    def _load_agent_config(agent_name: str):
         # local import to avoid a circular dependency between agents and tools
         from agent.modules.agents import get_catalog_service
 
         catalog = get_catalog_service()
-        config = catalog.get_agent(agent_name) if agent_name else None
-        if config is None:
-            return ToolPolicy.allow_all(agent_name=agent_name or "default")
-        return ToolPolicy.from_agent_config(config)
+        return catalog.get_agent(agent_name) if agent_name else None
 
 
 __all__ = ["ToolResolver"]

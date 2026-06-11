@@ -10,17 +10,21 @@ from langchain_core.tools import tool
 from agent.modules.tools import (
     ToolCapability,
     ToolCategory,
+    ToolConfigField,
+    ToolConfigSchema,
     ToolDescriptor,
     ToolPolicy,
     ToolResolver,
     ToolSource,
     resolve_tools_for_agent,
 )
+from agent.modules.tools.config import ToolConfigService
 from agent.modules.tools.sources.mcp import (
     MCP_TOOL_PREFIX,
     McpToolSource,
     _extract_server_name,
 )
+from agent.shared.config.models import SettingsSource, SettingsValue
 
 
 @tool
@@ -44,6 +48,44 @@ def _builtin_descriptor(name: str, tool_obj) -> ToolDescriptor:
         category=ToolCategory.UTILITY,
         tool=tool_obj,
         capabilities=frozenset(),
+    )
+
+
+def _configurable_descriptor(name: str):
+    @tool(name)
+    def configured_tool(value: str) -> str:
+        """configured."""
+        return value
+
+    def _factory(config):
+        suffix = str(config.get("suffix") or "default")
+
+        @tool(name)
+        def materialized(value: str) -> str:
+            """materialized."""
+            return f"{value}:{suffix}"
+
+        return materialized
+
+    return ToolDescriptor(
+        id=f"builtin.utility.{name}",
+        name=name,
+        description="desc",
+        source=ToolSource.BUILTIN,
+        category=ToolCategory.UTILITY,
+        tool=configured_tool,
+        capabilities=frozenset(),
+        config_schema=ToolConfigSchema(
+            fields=(
+                ToolConfigField(
+                    name="suffix",
+                    input_type="text",
+                    label="Suffix",
+                    default="default",
+                ),
+            )
+        ),
+        factory=_factory,
     )
 
 
@@ -209,6 +251,77 @@ class TestToolResolver:
         tools = ToolResolver().resolve_for_agent("restricted")
         names = {t.name for t in tools}
         assert names == {"echo"}
+
+    def test_resolver_materializes_configurable_tool_with_agent_override(
+        self,
+        monkeypatch,
+    ) -> None:
+        fake_config = SimpleNamespace(
+            name="configured",
+            tools=["configured_tool"],
+            tool_configs={"configured_tool": {"suffix": "agent"}},
+            mcp_servers=None,
+            sub_agents=None,
+        )
+        descriptor = _configurable_descriptor("configured_tool")
+
+        class _FakeCatalog:
+            def get_agent(self, name: str):
+                if name == "configured":
+                    return fake_config
+                return None
+
+        class _FakeRegistryService:
+            def get_descriptors(self):
+                return [descriptor]
+
+        monkeypatch.setattr(
+            "agent.modules.agents.get_catalog_service",
+            lambda: _FakeCatalog(),
+        )
+        monkeypatch.setattr(
+            "agent.modules.tools.resolver.get_registry_service",
+            lambda: _FakeRegistryService(),
+        )
+
+        tools = ToolResolver().resolve_for_agent(
+            "configured",
+            override_tool_names=["configured_tool"],
+        )
+
+        assert len(tools) == 1
+        assert tools[0].invoke({"value": "x"}) == "x:agent"
+
+
+class TestToolConfigService:
+    def test_precedence_default_global_agent(self, monkeypatch) -> None:
+        descriptor = _configurable_descriptor("configured_tool")
+
+        class _FakeConfig:
+            def get_effective(self, key: str):
+                if key == "tools.configured_tool.suffix":
+                    return SettingsValue(
+                        key=key,
+                        value="global",
+                        source=SettingsSource.DATABASE,
+                    )
+                return None
+
+        monkeypatch.setattr(
+            "agent.modules.tools.config.get_config_service",
+            lambda: _FakeConfig(),
+        )
+
+        service = ToolConfigService()
+
+        assert service.resolve(descriptor)["suffix"] == "global"
+        assert (
+            service.resolve(
+                descriptor,
+                {"configured_tool": {"suffix": "agent"}},
+            )["suffix"]
+            == "agent"
+        )
 
 
 class TestMcpToolSource:

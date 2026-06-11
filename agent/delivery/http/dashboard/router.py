@@ -10,6 +10,7 @@ from agent.delivery.http.dashboard.routes import (
     channels as channels_routes,
     conversations as conversations_routes,
     dashboard as dashboard_routes,
+    generated_images as generated_images_routes,
     github as github_routes,
     mcp as mcp_routes,
     providers as providers_routes,
@@ -28,6 +29,7 @@ router = APIRouter(tags=["dashboard"], dependencies=[Depends(get_current_admin)]
 for child_router in (
     spa_routes.router,
     catalog_routes.router,
+    generated_images_routes.router,
     dashboard_routes.router,
     providers_routes.router,
     github_routes.router,

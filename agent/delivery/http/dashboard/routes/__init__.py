@@ -5,6 +5,7 @@ __all__ = [
     "channels",
     "conversations",
     "dashboard",
+    "generated_images",
     "github",
     "mcp",
     "providers",

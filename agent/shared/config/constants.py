@@ -26,6 +26,7 @@ RUNTIME_KEY_PATTERNS = [
     rf"^{re.escape(LLM_FALLBACK_PROVIDER_KEY)}$",
     rf"^{re.escape(LLM_FALLBACK_MODEL_KEY)}$",
     r"^llm\.providers\.[A-Za-z0-9_-]+\.(provider|type|api_key|base_url|default_model|models|temperature|enabled)$",
+    r"^tools\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.(transport|command|args|url|enabled)$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.env\.[A-Za-z0-9_-]+$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.headers\.[A-Za-z0-9_-]+$",
@@ -47,6 +48,7 @@ DATABASE_RUNTIME_KEY_PATTERNS = [
     rf"^{re.escape(LLM_FALLBACK_PROVIDER_KEY)}$",
     rf"^{re.escape(LLM_FALLBACK_MODEL_KEY)}$",
     r"^llm\.providers\.[A-Za-z0-9_-]+\.(provider|type|api_key|base_url|default_model|models|temperature|enabled)$",
+    r"^tools\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.(transport|command|args|url|enabled)$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.env\.[A-Za-z0-9_-]+$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.headers\.[A-Za-z0-9_-]+$",
@@ -63,6 +65,7 @@ SENSITIVE_RUNTIME_KEY_PATTERNS = [
     r"^channels\.discord\.bot_token$",
     r"^channels\.github\.(private_key|webhook_secret)$",
     r"^llm\.providers\.[A-Za-z0-9_-]+\.api_key$",
+    r"^tools\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*(api_key|token|secret|password)[A-Za-z0-9_-]*$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.env\.[A-Za-z0-9_-]+$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.headers\.[A-Za-z0-9_-]+$",
     r"^workspace\.daytona\.api_key$",
@@ -782,6 +785,53 @@ def _channel_setting_metadata(key: str) -> dict[str, Any] | None:
     }
 
 
+def _split_tool_key(key: str) -> tuple[str, str] | None:
+    prefix = "tools."
+    if not key.startswith(prefix):
+        return None
+    remainder = key[len(prefix) :]
+    if "." not in remainder:
+        return None
+    tool_name, field_name = remainder.split(".", 1)
+    if not tool_name or not field_name:
+        return None
+    return tool_name, field_name
+
+
+def _tool_setting_metadata(key: str) -> dict[str, Any] | None:
+    parsed = _split_tool_key(key)
+    if parsed is None:
+        return None
+    tool_name, field_name = parsed
+    try:
+        from agent.modules.tools import ToolSource, find_descriptors
+    except Exception:
+        return None
+
+    for descriptor in find_descriptors(source=ToolSource.BUILTIN):
+        if descriptor.name != tool_name or descriptor.config_schema is None:
+            continue
+        field = descriptor.config_schema.field_map().get(field_name)
+        if field is None:
+            return None
+        metadata: dict[str, Any] = {
+            "type": "password" if field.secret else field.input_type,
+            "description": field.description,
+            "category": "tools",
+            "label": f"{tool_name}: {field.label}",
+            "default": field.default,
+            "required": field.required,
+        }
+        if field.options:
+            metadata["options"] = list(field.options)
+        for key_name in ("min", "max", "step"):
+            value = getattr(field, key_name)
+            if value is not None:
+                metadata[key_name] = value
+        return metadata
+    return None
+
+
 # Derived ordering - must match keys in _PROVIDER_SETTING_FIELD_META
 PROVIDER_SETTING_FIELD_ORDER: list[str] = list(_PROVIDER_SETTING_FIELD_META.keys())
 
@@ -815,6 +865,9 @@ def get_setting_metadata(key: str) -> dict[str, Any]:
         provider_meta = _provider_setting_metadata(key)
         if provider_meta is not None:
             return provider_meta
+        tool_meta = _tool_setting_metadata(key)
+        if tool_meta is not None:
+            return tool_meta
         return {**_DEFAULT_META, "label": key}
     return meta
 

@@ -125,6 +125,13 @@ def serialize_agent_config(config: AgentConfig) -> str:
         "tools": list(config.tools),
         "context_trim_threshold": config.context_trim_threshold,
     }
+    tool_configs = {
+        name: dict(values)
+        for name, values in config.tool_configs.items()
+        if name in config.tools and values
+    }
+    if tool_configs:
+        data["tool_configs"] = tool_configs
     if config.mcp_servers is not None:
         data["mcp_servers"] = list(config.mcp_servers)
     if config.sub_agents is not None:
@@ -185,6 +192,14 @@ def _build_agent_config(
             f"Agent file {source_label} has invalid 'context_trim_threshold'."
         ) from exc
     tools = parse_string_or_list(data.get("tools", []))
+    raw_tool_configs = data.get("tool_configs", {})
+    tool_configs: dict[str, dict[str, object]] = {}
+    if isinstance(raw_tool_configs, dict):
+        tool_configs = {
+            str(tool_name): dict(values)
+            for tool_name, values in raw_tool_configs.items()
+            if isinstance(values, dict)
+        }
     raw_mcp = data.get("mcp_servers")
     if raw_mcp is None:
         mcp_servers = None
@@ -220,6 +235,7 @@ def _build_agent_config(
             provider=provider,
             model=model,
             tools=tools,
+            tool_configs=tool_configs,
             mcp_servers=mcp_servers,
             sub_agents=sub_agents,
             plan_approval_targets=plan_approval_targets,

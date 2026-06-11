@@ -1295,6 +1295,81 @@
   font-weight: inherit;
 }
 
+.agent-config-tool-settings {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.agent-config-tool-config {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 10px;
+}
+
+.agent-config-tool-config-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.agent-config-tool-config-title {
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.agent-config-tool-config-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.agent-config-tool-field {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.agent-config-tool-field-label {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.agent-config-tool-field-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.agent-config-tool-model-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.agent-config-tool-boolean {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg);
+  font-size: 12px;
+}
+
 .agent-config-empty {
   border: 1px dashed var(--border);
   border-radius: var(--radius);
@@ -1311,6 +1386,12 @@
 
   .agent-config-section-header {
     flex-direction: column;
+  }
+
+  .agent-config-tool-config-grid,
+  .agent-config-tool-field-control,
+  .agent-config-tool-model-control {
+    grid-template-columns: 1fr;
   }
 }
 

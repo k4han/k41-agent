@@ -30,6 +30,7 @@ class AgentCardBody(BaseModel):
     provider: str = Field(default="default", description="LLM provider name.")
     model: str = Field(default="", description="LLM model name override.")
     tools: list[str] = Field(default_factory=list, description="List of tool names available to this agent.")
+    tool_configs: dict[str, dict[str, Any]] = Field(default_factory=dict, description="Per-tool config overrides keyed by tool name.")
     mcp_servers: list[str] = Field(default_factory=list, description="List of MCP server names to use.")
     sub_agents: list[str] | None = Field(default=None, description="List of sub-agent names for delegation.")
     plan_approval_targets: list[str] = Field(default_factory=list, description="Plan step types requiring human approval.")

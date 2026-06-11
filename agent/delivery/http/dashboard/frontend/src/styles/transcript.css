@@ -106,6 +106,30 @@
   border-top: 1px solid var(--border);
 }
 
+.tool-generated-image {
+  display: block;
+  margin: 10px;
+  width: fit-content;
+  max-width: calc(100% - 20px);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.tool-generated-image img {
+  display: block;
+  width: auto;
+  max-width: min(100%, 520px);
+  max-height: 520px;
+  object-fit: contain;
+}
+
+.tool-call-body pre + .tool-generated-image,
+.tool-generated-image + pre {
+  border-top: 1px solid var(--border);
+}
+
 .plan-review {
   box-sizing: border-box;
   width: min(960px, 100%);

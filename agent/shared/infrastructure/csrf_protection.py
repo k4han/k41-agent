@@ -114,6 +114,9 @@ class CSRFProtectionMiddleware(BaseHTTPMiddleware):
                     samesite="lax",
                     secure=request.url.scheme == "https",
                 )
+            # Include CSRF token in response header so frontend can read it
+            # (cookie is httponly so JavaScript cannot read it directly)
+            response.headers[CSRF_HEADER_NAME] = csrf_token
             return response
 
         # Skip CSRF check for exempt paths

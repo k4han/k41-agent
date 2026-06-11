@@ -5,6 +5,7 @@ import { createEffect, createMemo, onCleanup, onMount, untrack } from "solid-js"
 import { render } from "solid-js/web";
 
 import { highlightCode, languageFromName } from "@/lib/codeHighlight";
+import { rewriteGeneratedImagePaths } from "@/lib/generatedImages";
 import { createDarkMode } from "@/lib/theme";
 
 marked.setOptions({
@@ -201,7 +202,7 @@ export function Markdown(props: { text: string; class?: string; deferMermaid?: b
   const dark = createDarkMode();
 
   const html = createMemo(() => {
-    const source = props.text || "";
+    const source = rewriteGeneratedImagePaths(props.text || "");
     const raw = marked.parse(source, { async: false }) as string;
     return DOMPurify.sanitize(raw, { ADD_ATTR: ["target", "rel"] });
   });

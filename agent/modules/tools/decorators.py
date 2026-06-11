@@ -17,7 +17,13 @@ from dataclasses import dataclass
 
 from langchain_core.tools import BaseTool
 
-from agent.modules.tools.domain import ToolCapability, ToolCategory
+from agent.modules.tools.domain import (
+    ToolCapability,
+    ToolCategory,
+    ToolConfigSchema,
+    ToolConfigValue,
+    ToolFactory,
+)
 
 META_ATTR = "__k41_tool_meta__"
 
@@ -31,6 +37,9 @@ class PendingToolMeta:
     tags: frozenset[str]
     explicit_id: str | None
     version: str
+    config_schema: ToolConfigSchema | None
+    default_config: dict[str, ToolConfigValue]
+    factory: ToolFactory | None
 
 
 _PENDING: list[tuple[BaseTool, PendingToolMeta]] = []
@@ -45,6 +54,9 @@ def register_tool(
     id: str | None = None,
     version: str = "1.0.0",
     apply_middleware: bool = True,
+    config_schema: ToolConfigSchema | None = None,
+    default_config: dict[str, ToolConfigValue] | None = None,
+    factory: ToolFactory | None = None,
 ) -> Callable[[BaseTool], BaseTool]:
     """Mark a ``BaseTool`` instance for built-in registration.
 
@@ -66,6 +78,9 @@ def register_tool(
             tags=frozenset(tags),
             explicit_id=id,
             version=version,
+            config_schema=config_schema,
+            default_config=dict(default_config or {}),
+            factory=factory,
         )
         setattr(tool_obj, META_ATTR, meta)
         if builtins_id(tool_obj) not in _REGISTERED_TOOL_IDS:

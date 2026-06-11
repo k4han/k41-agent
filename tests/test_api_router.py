@@ -710,6 +710,7 @@ def test_provider_models_endpoint_refreshes_and_serializes_catalog(monkeypatch):
                 "source": "live",
                 "context_window": None,
                 "input_types": None,
+                "output_types": None,
             },
             {
                 "id": "openai-config",
@@ -717,6 +718,7 @@ def test_provider_models_endpoint_refreshes_and_serializes_catalog(monkeypatch):
                 "source": "config",
                 "context_window": None,
                 "input_types": None,
+                "output_types": None,
             },
         ],
         "error": None,

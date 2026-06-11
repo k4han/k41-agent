@@ -73,6 +73,8 @@ def test_agents_page_serves_spa_and_agent_api_returns_cards(dashboard_agent_clie
     assert "tools" in data
     assert "write_todos" in data["tools"]
     assert "ask_user" in data["tools"]
+    assert "tool_config_schemas" in data
+    assert "generate_image" in data["tool_config_schemas"]
 
     index_response = client.get("/")
     assert index_response.status_code == 200
@@ -117,6 +119,35 @@ def test_agent_card_crud_endpoints(dashboard_agent_client) -> None:
     assert deleted.status_code == 200
     assert deleted.json() == {"status": "deleted", "name": "sample"}
     assert not (repo.user_dir / "sample.md").exists()
+
+
+def test_agent_card_crud_preserves_tool_configs(dashboard_agent_client) -> None:
+    client, repo = dashboard_agent_client
+    payload = _payload("image-agent")
+    payload["tools"] = ["generate_image"]
+    payload["tool_configs"] = {
+        "generate_image": {
+            "model": "gpt-image-1",
+            "size": "1024x1024",
+        },
+        "disabled_tool": {
+            "model": "ignored",
+        },
+    }
+
+    created = client.post("/agents/cards", json=payload)
+
+    assert created.status_code == 200
+    card = created.json()["card"]
+    assert card["tool_configs"] == {
+        "generate_image": {
+            "model": "gpt-image-1",
+            "size": "1024x1024",
+        }
+    }
+    assert "tool_configs:" in (repo.user_dir / "image-agent.md").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_clone_builtin_rejects_existing_user_override(dashboard_agent_client) -> None:

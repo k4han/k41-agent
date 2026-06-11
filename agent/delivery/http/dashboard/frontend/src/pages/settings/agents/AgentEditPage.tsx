@@ -16,6 +16,7 @@ import { AgentEditTabs } from "./AgentEditTabs";
 import {
   type AgentForm,
   type AgentTab,
+  type ToolConfigValue,
   blankForm,
   cardToForm,
   defaultWorkflow,
@@ -78,7 +79,12 @@ export function AgentEditPage(props: { agentName?: string }) {
       } else {
         values.delete(value);
       }
-      return { ...current, [key]: Array.from(values).sort() };
+      if (key !== "tools" || checked) {
+        return { ...current, [key]: Array.from(values).sort() };
+      }
+      const tool_configs = { ...current.tool_configs };
+      delete tool_configs[value];
+      return { ...current, [key]: Array.from(values).sort(), tool_configs };
     });
   };
 
@@ -92,7 +98,42 @@ export function AgentEditPage(props: { agentName?: string }) {
           values.delete(tool);
         }
       }
-      return { ...current, tools: Array.from(values).sort() };
+      if (checked) {
+        return { ...current, tools: Array.from(values).sort() };
+      }
+      const tool_configs = { ...current.tool_configs };
+      for (const tool of tools) {
+        delete tool_configs[tool];
+      }
+      return { ...current, tools: Array.from(values).sort(), tool_configs };
+    });
+  };
+
+  const updateToolConfig = (
+    toolName: string,
+    fieldName: string,
+    value: ToolConfigValue,
+  ) => {
+    setForm((current) => {
+      const toolConfigs = { ...current.tool_configs };
+      const fields = { ...(toolConfigs[toolName] || {}) };
+      fields[fieldName] = value;
+      toolConfigs[toolName] = fields;
+      return { ...current, tool_configs: toolConfigs };
+    });
+  };
+
+  const resetToolConfigField = (toolName: string, fieldName: string) => {
+    setForm((current) => {
+      const toolConfigs = { ...current.tool_configs };
+      const fields = { ...(toolConfigs[toolName] || {}) };
+      delete fields[fieldName];
+      if (Object.keys(fields).length > 0) {
+        toolConfigs[toolName] = fields;
+      } else {
+        delete toolConfigs[toolName];
+      }
+      return { ...current, tool_configs: toolConfigs };
     });
   };
 
@@ -217,7 +258,15 @@ export function AgentEditPage(props: { agentName?: string }) {
   };
 
   const saveAgent = async () => {
-    const current = form();
+    const currentForm = form();
+    const current: AgentForm = {
+      ...currentForm,
+      tool_configs: Object.fromEntries(
+        Object.entries(currentForm.tool_configs).filter(
+          ([toolName, fields]) => currentForm.tools.includes(toolName) && Object.keys(fields).length > 0,
+        ),
+      ),
+    };
     if (mode() === "create" && !current.name.trim()) {
       showToast("Agent name is required.", "error");
       return;
@@ -373,6 +422,8 @@ export function AgentEditPage(props: { agentName?: string }) {
         onToggleListValue={toggleListValue}
         onToggleToolGroup={toggleToolGroup}
         onToggleMcpInstall={toggleMcpInstall}
+        onUpdateToolConfig={updateToolConfig}
+        onResetToolConfigField={resetToolConfigField}
         onInsertVariable={handleInsertVariable}
       />
     );

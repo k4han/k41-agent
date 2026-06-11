@@ -258,6 +258,9 @@ def serialize_model_catalog(catalog: Any) -> dict[str, Any]:
                 "input_types": list(option.input_types)
                 if option.input_types is not None
                 else None,
+                "output_types": list(option.output_types)
+                if option.output_types is not None
+                else None,
             }
             for option in catalog.models
         ],
