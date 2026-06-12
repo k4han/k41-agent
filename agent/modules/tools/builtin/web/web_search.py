@@ -7,7 +7,7 @@ import os
 from typing import TypedDict
 
 import httpx
-from bs4 import BeautifulSoup, SoupStrainer
+from bs4 import BeautifulSoup
 from langchain_core.tools import tool
 
 from agent.modules.tools.decorators import register_tool
@@ -90,7 +90,6 @@ def _duckduckgo_search(query: str, num_results: int = 5) -> str:
         soup = BeautifulSoup(
             content.decode(response.encoding or "utf-8", errors="replace"),
             "html.parser",
-            parse_only=SoupStrainer(class_="result"),
         )
         results = []
         for element in soup.select(DDGS_RESULT_SELECTOR):
