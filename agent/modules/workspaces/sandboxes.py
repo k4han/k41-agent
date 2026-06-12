@@ -14,17 +14,14 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from agent.modules.workspaces.refs import (
-    DEFAULT_LOCAL_WORKSPACE,
-    WorkspaceRef,
-    normalize_workspace_ref,
-)
+from agent.modules.workspaces.refs import WorkspaceRef, normalize_workspace_ref
 from agent.modules.workspaces.registry import (
     DAYTONA_BACKEND,
     MODAL_BACKEND,
     call_workspace_backend_loader,
     get_workspace_backend_registry,
 )
+from agent.shared.config.constants import DEFAULT_WORKSPACE_ROOT
 from agent.modules.workspaces.repository import get_thread_workspace_repository
 from agent.modules.workspaces.service import _workspace_backend_uses_thread_loader
 
@@ -292,9 +289,14 @@ async def get_sandbox(backend: str, sandbox_id: str) -> dict[str, Any] | None:
 
 
 def _build_workspace_ref(backend: str, sandbox_id: str) -> WorkspaceRef:
+    from agent.shared.config.service import get_config_service
+
+    default_locator = str(
+        get_config_service().get_path("workspace.root", DEFAULT_WORKSPACE_ROOT)
+    )
     return normalize_workspace_ref(
         {"backend": backend, "locator": sandbox_id, "label": f"{backend}:{sandbox_id}"},
-        default_locator=DEFAULT_LOCAL_WORKSPACE,
+        default_locator=default_locator,
     )
 
 

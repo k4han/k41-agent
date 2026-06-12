@@ -167,7 +167,7 @@ GitHub App V1 dùng một app cho toàn instance, không dùng OAuth từng user
 
 App cần quyền Metadata read, Issues read/write, Contents read/write, Pull requests read/write. Bật events `issues`, `issue_comment`, `pull_request_review_comment`, `installation`, `installation_repositories`, `ping`. Endpoint nhận webhook là `/channels/github/webhook`.
 
-Repo được clone vào `~/k41-agent/github-workspaces/{owner}/{repo}`. Khi issue/comment được trigger, backend chuẩn bị branch local, chạy agent trong working directory của repo, rồi commit/push/create PR bằng installation token. Khi có `pull_request_review_comment`, backend checkout branch đang mở PR, chạy agent với ngữ cảnh review comment, rồi commit/push lại cùng PR.
+Repo được clone vào `<workspace.github.root>/{owner}/{repo}`. Khi issue/comment được trigger, backend chuẩn bị branch local, chạy agent trong working directory của repo, rồi commit/push/create PR bằng installation token. Khi có `pull_request_review_comment`, backend checkout branch đang mở PR, chạy agent với ngữ cảnh review comment, rồi commit/push lại cùng PR.
 
 #### GitHub repo trong sandbox (Daytona / Modal)
 
@@ -176,13 +176,13 @@ Dashboard Workspace selector là UI 2 cấp:
 1. **Backend**: `local` (host filesystem) | `daytona` | `modal`.
 2. **Source**: tuỳ backend — `local` có `folder`, `daytona`/`modal` có `sandbox` và `github-repo`.
 
-Khi chọn backend `daytona` hoặc `modal` + source `github-repo`, dashboard gọi `POST /dashboard-api/workspace/resolve` với `kind="github"`, `backend="daytona"|"modal"`, `repository_id=<id>`. Backend sẽ:
+Khi chọn source `github-repo`, dashboard gọi `POST /dashboard-api/workspace/resolve` với `kind="github"`, `backend="local"|"daytona"|"modal"`, `repository_id=<id>`. Backend sẽ:
 
 - Tạo (hoặc attach) sandbox tương ứng.
 - Clone repo vào trong sandbox bằng `git clone --depth 1 --branch <default_branch> --single-branch` với installation token (nếu có). Vị trí: `{sandbox_root}/{owner}/{repo}`.
 - Trả về `WorkspaceRef` với `metadata.source="github"`, `metadata.repository_full_name`, `metadata.repository_path`, và label là `owner/repo`.
 
-Local backend giữ hành vi cũ: clone về `~/k41-agent/github-workspaces/{owner}/{repo}` và resolve qua `GitHubWorkspaceManager.ensure_shared_checkout`. Tương thích ngược với payload `kind="github"` không có `backend` (vẫn trả về workspace local).
+Local backend clone repo về `<workspace.github.root>/{owner}/{repo}` và resolve qua `GitHubWorkspaceManager.ensure_shared_checkout`. Payload GitHub phải chỉ định `backend`; request thiếu backend sẽ bị từ chối.
 
 Push về GitHub vẫn do local GitHub automation (webhook handler) xử lý — sandbox chỉ dùng để chạy agent và lưu thay đổi trong phiên làm việc.
 

@@ -262,13 +262,14 @@ class WorkspaceResolveBody(BaseModel):
 def _resolve_backend(body: WorkspaceResolveBody, kind: str) -> str:
     """Return the target backend for the resolve request.
 
-    Prefers an explicit ``backend`` field on the request body, then the
-    ``workspace`` hint, then the request ``kind`` so that ``kind="github"``
-    continues to work for the local-only flow.
+    GitHub repository resolution requires an explicit backend so local and
+    sandbox flows cannot be mixed accidentally.
     """
     known_backends = set(get_workspace_backend_registry().names())
     if body.backend and body.backend.strip().lower() in known_backends:
         return body.backend.strip().lower()
+    if kind == "github":
+        raise ValueError("GitHub workspace resolution requires an explicit backend.")
     if body.workspace:
         ref = resolve_workspace_ref(body.workspace)
         if ref.backend in known_backends:

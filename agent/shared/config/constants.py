@@ -7,6 +7,8 @@ from typing import Any
 
 DISPLAY_TIMEZONE_CONFIG_KEY = "display.timezone"
 DEFAULT_DISPLAY_TIMEZONE = "UTC"
+DEFAULT_WORKSPACE_ROOT = "~/.k41-agent/workspaces"
+DEFAULT_GITHUB_WORKSPACE_ROOT = "~/.k41-agent/github-workspaces"
 BOOTSTRAP_CONFIG_KEYS = ("host", "port", "enable_web", "enable_api", "enable_dashboard")
 BOOTSTRAP_BOOLEAN_CONFIG_KEYS = ("enable_web", "enable_api", "enable_dashboard")
 
@@ -31,6 +33,7 @@ RUNTIME_KEY_PATTERNS = [
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.env\.[A-Za-z0-9_-]+$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.headers\.[A-Za-z0-9_-]+$",
     r"^workspace\.root$",
+    r"^workspace\.github\.root$",
     r"^workspace\.daytona\.(enabled|api_key|default_root|target|image|cpu|memory|disk|language|auto_stop_minutes|auto_archive_days|sweeper_interval_seconds|start_timeout_seconds|stop_timeout_seconds|sandbox_auto_stop_minutes|sandbox_auto_archive_minutes|sandbox_auto_delete_minutes|ephemeral|network_block_all|network_allow_list)$",
     r"^workspace\.modal\.(enabled|token_id|token_secret|app_name|default_root|image|sandbox_timeout_seconds|idle_timeout_seconds)$",
     rf"^{re.escape(REPOSITORY_SKILLS_DIR_KEY)}$",
@@ -52,6 +55,8 @@ DATABASE_RUNTIME_KEY_PATTERNS = [
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.(transport|command|args|url|enabled)$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.env\.[A-Za-z0-9_-]+$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.headers\.[A-Za-z0-9_-]+$",
+    r"^workspace\.root$",
+    r"^workspace\.github\.root$",
     r"^workspace\.daytona\.(enabled|api_key|default_root|target|image|cpu|memory|disk|language|auto_stop_minutes|auto_archive_days|sweeper_interval_seconds|start_timeout_seconds|stop_timeout_seconds|sandbox_auto_stop_minutes|sandbox_auto_archive_minutes|sandbox_auto_delete_minutes|ephemeral|network_block_all|network_allow_list)$",
     r"^workspace\.modal\.(enabled|token_id|token_secret|app_name|default_root|image|sandbox_timeout_seconds|idle_timeout_seconds)$",
     rf"^{re.escape(REPOSITORY_SKILLS_DIR_KEY)}$",
@@ -129,6 +134,7 @@ def _expand_runtime_keys() -> set[str]:
     keys.add(LLM_FALLBACK_MODEL_KEY)
     keys.add("database.url")
     keys.add("workspace.root")
+    keys.add("workspace.github.root")
     keys.add("workspace.daytona.enabled")
     keys.add("workspace.daytona.api_key")
     keys.add("workspace.daytona.default_root")
@@ -202,7 +208,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "channels.github.mention_triggers": "@k41-agent,/k41",
     # Security
     "persistence.allow_any_path": False,
-    "workspace.root": "~/k41-agent",
+    "workspace.root": DEFAULT_WORKSPACE_ROOT,
+    "workspace.github.root": DEFAULT_GITHUB_WORKSPACE_ROOT,
     "workspace.daytona.enabled": False,
     "workspace.daytona.api_key": "",
     "workspace.daytona.default_root": "workspace",
@@ -285,6 +292,12 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "description": "Root directory for local workspaces (supports ~)",
         "category": "general",
         "label": "Workspace Root",
+    },
+    "workspace.github.root": {
+        "type": "text",
+        "description": "Root directory for GitHub repository checkouts managed by the agent (supports ~)",
+        "category": "general",
+        "label": "GitHub Workspace Root",
     },
     "workspace.daytona.enabled": {
         "type": "boolean",
@@ -889,6 +902,8 @@ __all__ = [
     "BOOTSTRAP_CONFIG_KEYS",
     "DEFAULT_CONFIG",
     "DEFAULT_DISPLAY_TIMEZONE",
+    "DEFAULT_GITHUB_WORKSPACE_ROOT",
+    "DEFAULT_WORKSPACE_ROOT",
     "DISPLAY_TIMEZONE_CONFIG_KEY",
     "LLM_FALLBACK_MODEL_KEY",
     "LLM_FALLBACK_PROVIDER_KEY",

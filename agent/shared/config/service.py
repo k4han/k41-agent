@@ -396,6 +396,14 @@ def attach_database_config_source(database_url: str) -> None:
                 "Seeded %s runtime setting(s) from legacy YAML config.",
                 len(seeded_keys),
             )
+    migrate_legacy_workspace_roots = getattr(source, "migrate_legacy_workspace_roots", None)
+    if callable(migrate_legacy_workspace_roots):
+        migrated_keys = migrate_legacy_workspace_roots()
+        if migrated_keys:
+            logger.info(
+                "Migrated legacy workspace setting(s): %s.",
+                ", ".join(sorted(migrated_keys)),
+            )
     service.add_source(source)
     if _config_sources is not None:
         _config_sources.append(source)

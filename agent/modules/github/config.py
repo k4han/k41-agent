@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from agent.shared.config.constants import DEFAULT_GITHUB_WORKSPACE_ROOT
 from agent.shared.config import get_config_service
 from agent.shared.infrastructure.parsing import parse_string_or_list
 from agent.shared.infrastructure.validation import is_placeholder_value
@@ -11,7 +12,13 @@ from agent.shared.infrastructure.validation import is_placeholder_value
 DEFAULT_TRIGGER_LABEL = "k41-agent"
 DEFAULT_MENTION_TRIGGERS = ("@k41-agent", "/k41")
 DEFAULT_WORKSPACE_BACKEND = "local"
-GITHUB_WORKSPACE_ROOT = Path.home() / "k41-agent" / "github-workspaces"
+
+
+def get_github_workspace_root() -> Path:
+    return get_config_service().get_path(
+        "workspace.github.root",
+        DEFAULT_GITHUB_WORKSPACE_ROOT,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,7 +106,8 @@ __all__ = [
     "DEFAULT_MENTION_TRIGGERS",
     "DEFAULT_TRIGGER_LABEL",
     "DEFAULT_WORKSPACE_BACKEND",
-    "GITHUB_WORKSPACE_ROOT",
+    "DEFAULT_GITHUB_WORKSPACE_ROOT",
     "GitHubSettings",
+    "get_github_workspace_root",
     "get_github_settings",
 ]

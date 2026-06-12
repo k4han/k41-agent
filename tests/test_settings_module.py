@@ -14,6 +14,8 @@ from agent.shared.config import (
     ConfigService,
 )
 from agent.shared.config.constants import (
+    DEFAULT_GITHUB_WORKSPACE_ROOT,
+    DEFAULT_WORKSPACE_ROOT,
     get_setting_metadata,
     is_database_runtime_key,
     is_runtime_key,
@@ -360,6 +362,50 @@ class TestDatabaseConfigSource:
         assert source.get("channels.discord.bot_token") == "discord-token"
         assert source.get("host") is None
 
+    def test_migrate_legacy_workspace_roots_updates_old_defaults(self, tmp_path: Path) -> None:
+        from agent.shared.config.database_source import DatabaseConfigSource
+        from agent.shared.infrastructure.db import Base, create_tables, load_orm_models
+
+        load_orm_models()
+        db_url = f"sqlite:///{(tmp_path / 'settings.db').as_posix()}"
+        create_tables(db_url, metadata=Base.metadata)
+
+        source = DatabaseConfigSource(db_url, key_path=tmp_path / "runtime_config.key")
+        source.update_settings(
+            {
+                "workspace.root": "~/k41-agent",
+                "workspace.github.root": "~/k41-agent/github-workspaces",
+            }
+        )
+
+        migrated = source.migrate_legacy_workspace_roots()
+
+        assert migrated == {"workspace.root", "workspace.github.root"}
+        assert source.get("workspace.root") == DEFAULT_WORKSPACE_ROOT
+        assert source.get("workspace.github.root") == DEFAULT_GITHUB_WORKSPACE_ROOT
+
+    def test_migrate_legacy_workspace_roots_preserves_custom_paths(self, tmp_path: Path) -> None:
+        from agent.shared.config.database_source import DatabaseConfigSource
+        from agent.shared.infrastructure.db import Base, create_tables, load_orm_models
+
+        load_orm_models()
+        db_url = f"sqlite:///{(tmp_path / 'settings.db').as_posix()}"
+        create_tables(db_url, metadata=Base.metadata)
+
+        source = DatabaseConfigSource(db_url, key_path=tmp_path / "runtime_config.key")
+        source.update_settings(
+            {
+                "workspace.root": "~/custom-workspaces",
+                "workspace.github.root": "~/custom-github-workspaces",
+            }
+        )
+
+        migrated = source.migrate_legacy_workspace_roots()
+
+        assert migrated == set()
+        assert source.get("workspace.root") == "~/custom-workspaces"
+        assert source.get("workspace.github.root") == "~/custom-github-workspaces"
+
     def test_database_key_predicate_matches_runtime_ownership(self) -> None:
         assert is_database_runtime_key("llm.default_model")
         assert is_database_runtime_key("llm.providers.openai-main.default_model")
@@ -375,6 +421,8 @@ class TestDatabaseConfigSource:
         assert is_database_runtime_key("workspace.modal.token_id")
         assert is_database_runtime_key("workspace.modal.token_secret")
         assert is_database_runtime_key("workspace.modal.default_root")
+        assert is_database_runtime_key("workspace.root")
+        assert is_database_runtime_key("workspace.github.root")
         assert not is_database_runtime_key("database.url")
 
 
@@ -538,6 +586,7 @@ class TestRuntimeKeyMetadata:
         assert is_runtime_key("workspace.modal.token_secret")
         assert is_runtime_key("workspace.modal.default_root")
         assert is_runtime_key("workspace.root")
+        assert is_runtime_key("workspace.github.root")
         assert not is_runtime_key("llm.providers.openai-main.random_field")
 
     def test_provider_setting_metadata(self) -> None:

@@ -35,6 +35,7 @@ from agent.modules.workspaces.registry import (
     call_workspace_backend_loader,
     get_workspace_backend_registry,
 )
+from agent.shared.config.constants import DEFAULT_WORKSPACE_ROOT
 from agent.shared.integrations import IntegrationUnavailableError
 from agent.shared.infrastructure.subprocess_utils import hidden_subprocess_kwargs
 
@@ -65,7 +66,9 @@ _modal_recovery_locks: dict[str, asyncio.Lock] = {}
 
 def resolve_workspace_ref(workspace: WorkspaceRef | dict[str, Any] | str | None = None) -> WorkspaceRef:
     from agent.shared.config.service import get_config_service
-    default_locator = str(get_config_service().get_path("workspace.root", "~/k41-agent"))
+    default_locator = str(
+        get_config_service().get_path("workspace.root", DEFAULT_WORKSPACE_ROOT)
+    )
     return normalize_workspace_ref(workspace, default_locator=default_locator)
 
 
@@ -76,7 +79,9 @@ def workspace_ref_from_local_path(
     metadata: dict[str, Any] | None = None,
 ) -> WorkspaceRef:
     from agent.shared.config.service import get_config_service
-    default_locator = str(get_config_service().get_path("workspace.root", "~/k41-agent"))
+    default_locator = str(
+        get_config_service().get_path("workspace.root", DEFAULT_WORKSPACE_ROOT)
+    )
     return normalize_workspace_ref(
         {
             "backend": LOCAL_BACKEND,
@@ -764,7 +769,9 @@ class _WorkspaceBackendLifecycleManager:
 
 def resolve_workspace_root(working_dir: str | None = None) -> Path:
     from agent.shared.config.service import get_config_service
-    default_locator = str(get_config_service().get_path("workspace.root", "~/k41-agent"))
+    default_locator = str(
+        get_config_service().get_path("workspace.root", DEFAULT_WORKSPACE_ROOT)
+    )
     source = str(working_dir or "").strip() or default_locator
     return Path(source).expanduser().resolve()
 
@@ -780,7 +787,12 @@ def ensure_workspace_directory(working_dir: str | None = None) -> Path:
 
 def list_workspace_directories(path: str | None = None) -> dict[str, Any]:
     from agent.shared.config.service import get_config_service
-    workspace_root = get_config_service().get_path("workspace.root", "~/k41-agent").expanduser().resolve()
+    workspace_root = (
+        get_config_service()
+        .get_path("workspace.root", DEFAULT_WORKSPACE_ROOT)
+        .expanduser()
+        .resolve()
+    )
     
     # Ensure the configured workspace root exists
     workspace_root.mkdir(parents=True, exist_ok=True)

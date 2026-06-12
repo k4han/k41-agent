@@ -20,6 +20,7 @@ from agent.shared.infrastructure.db.engine import (
     get_database_url,
 )
 from agent.shared.infrastructure.db.session import get_async_session
+from agent.shared.config.constants import DEFAULT_WORKSPACE_ROOT
 
 
 def _trim(value: str | None, max_length: int) -> str:
@@ -67,7 +68,7 @@ class ThreadWorkspaceRepository:
         from agent.shared.config.service import get_config_service
 
         default_locator = str(
-            get_config_service().get_path("workspace.root", "~/k41-agent")
+            get_config_service().get_path("workspace.root", DEFAULT_WORKSPACE_ROOT)
         )
         workspace_ref = normalize_workspace_ref(
             workspace,

@@ -7,7 +7,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from agent.modules.github.config import GITHUB_WORKSPACE_ROOT
+from agent.modules.github.config import get_github_workspace_root
 from agent.shared.infrastructure.subprocess_utils import hidden_subprocess_kwargs
 
 BRANCH_SAFE_RE = re.compile(r"[^A-Za-z0-9._/-]+")
@@ -21,8 +21,10 @@ class PreparedWorkspace:
 
 
 class GitHubWorkspaceManager:
-    def __init__(self, root: Path = GITHUB_WORKSPACE_ROOT) -> None:
-        self.root = root.expanduser()
+    def __init__(self, root: Path | None = None) -> None:
+        self.root = (
+            root if root is not None else get_github_workspace_root()
+        ).expanduser()
 
     def repository_path(self, full_name: str) -> Path:
         owner, repo = _split_full_name(full_name)

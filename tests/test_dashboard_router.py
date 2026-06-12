@@ -578,11 +578,23 @@ def test_dashboard_workspace_resolve_uses_github_service(
 
     response = client.post(
         "/dashboard-api/workspace/resolve",
-        json={"kind": "github", "repository_id": 123},
+        json={"kind": "github", "backend": "local", "repository_id": 123},
     )
 
     assert response.status_code == 200
     assert response.json()["workspace"]["execution"]["locator"] == str(tmp_path.resolve())
+
+
+def test_dashboard_workspace_resolve_github_requires_explicit_backend() -> None:
+    client = _create_dashboard_client(ChannelManager())
+
+    response = client.post(
+        "/dashboard-api/workspace/resolve",
+        json={"kind": "github", "repository_id": 123},
+    )
+
+    assert response.status_code == 400
+    assert "requires an explicit backend" in response.json()["detail"]
 
 
 def test_dashboard_workspace_resolve_github_daytona_clones_inside_sandbox(

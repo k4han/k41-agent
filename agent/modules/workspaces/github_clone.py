@@ -18,11 +18,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from agent.modules.workspaces.refs import (
-    DEFAULT_LOCAL_WORKSPACE,
     WorkspaceRef,
     normalize_workspace_ref,
 )
 from agent.modules.workspaces.service import workspace_ref_from_local_path
+from agent.shared.config.constants import DEFAULT_WORKSPACE_ROOT
 
 if TYPE_CHECKING:
     from agent.modules.github import GitHubWorkspaceManager
@@ -117,7 +117,7 @@ async def attach_github_repository_to_local_workspace_async(
     """Clone a GitHub repository to a local path and return a local WorkspaceRef.
 
     Mirrors the historical behavior where GitHub repos were always materialized
-    under ``~/k41-agent/github-workspaces/{owner}/{repo}``.
+    under the configured GitHub workspace root.
     """
     manager = manager or _get_github_workspace_manager_cls()()
     _split_full_name(selection.full_name)
@@ -346,7 +346,12 @@ def normalize_github_workspace_ref(
     workspace back through the dashboard (for example when refreshing a
     sandbox ID).
     """
-    ref = normalize_workspace_ref(workspace, default_locator=DEFAULT_LOCAL_WORKSPACE)
+    from agent.shared.config.service import get_config_service
+
+    default_locator = str(
+        get_config_service().get_path("workspace.root", DEFAULT_WORKSPACE_ROOT)
+    )
+    ref = normalize_workspace_ref(workspace, default_locator=default_locator)
     if not is_github_workspace(workspace) and not is_github_workspace(ref):
         return ref
     if isinstance(workspace, dict):

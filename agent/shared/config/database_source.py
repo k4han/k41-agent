@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,8 @@ from sqlalchemy import create_engine, make_url, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from agent.shared.config.constants import (
+    DEFAULT_GITHUB_WORKSPACE_ROOT,
+    DEFAULT_WORKSPACE_ROOT,
     is_database_runtime_key,
     is_sensitive_runtime_key,
 )
@@ -20,6 +23,8 @@ from agent.shared.infrastructure.db.runtime_settings import RuntimeSetting
 logger = logging.getLogger(__name__)
 
 _MISSING = object()
+_LEGACY_WORKSPACE_ROOTS = ("~/k41-agent",)
+_LEGACY_GITHUB_WORKSPACE_ROOTS = ("~/k41-agent/github-workspaces",)
 
 
 def _default_key_path() -> Path:
@@ -42,6 +47,26 @@ def _load_or_create_fernet_key(path: Path) -> bytes:
     except OSError:
         logger.debug("Could not restrict permissions for runtime config key file: %s", path)
     return key
+
+
+def _normalize_path_text(value: str) -> str:
+    return os.path.normcase(os.path.normpath(str(Path(value).expanduser())))
+
+
+def _matches_legacy_path(value: Any, legacy_values: tuple[str, ...]) -> bool:
+    if not isinstance(value, str):
+        return False
+
+    candidate = value.strip().rstrip("/\\")
+    if candidate in legacy_values:
+        return True
+
+    normalized_candidate = _normalize_path_text(candidate)
+    normalized_legacy_values = {
+        _normalize_path_text(legacy_value)
+        for legacy_value in legacy_values
+    }
+    return normalized_candidate in normalized_legacy_values
 
 
 class DatabaseConfigSource:
@@ -155,6 +180,26 @@ class DatabaseConfigSource:
 
         self.update_settings(missing_updates)
         return set(missing_updates)
+
+    def migrate_legacy_workspace_roots(self) -> set[str]:
+        """Rewrite legacy default workspace roots to the current split roots."""
+        data = self._load()
+        updates: dict[str, str] = {}
+
+        if _matches_legacy_path(data.get("workspace.root"), _LEGACY_WORKSPACE_ROOTS):
+            updates["workspace.root"] = DEFAULT_WORKSPACE_ROOT
+
+        if _matches_legacy_path(
+            data.get("workspace.github.root"),
+            _LEGACY_GITHUB_WORKSPACE_ROOTS,
+        ):
+            updates["workspace.github.root"] = DEFAULT_GITHUB_WORKSPACE_ROOT
+
+        if not updates:
+            return set()
+
+        self.update_settings(updates)
+        return set(updates)
 
     def delete_setting_tree(self, key: str) -> bool:
         prefix = f"{key}."

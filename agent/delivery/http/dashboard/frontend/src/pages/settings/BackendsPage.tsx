@@ -69,6 +69,12 @@ const BACKEND_DEFS_BY_NAME: Record<string, BackendDefinition> = {
         subtitle: "Default directory used for local workspaces",
         fields: ["root"],
       },
+      {
+        id: "github",
+        title: "GitHub Workspace Root",
+        subtitle: "Repository checkouts managed by GitHub automation",
+        fields: ["github.root"],
+      },
     ],
   },
   daytona: {
@@ -250,9 +256,10 @@ export function BackendsPage() {
       return {};
     }
     const result: Record<string, SettingInfo> = {};
-    const prefix = backend === "local" ? "workspace." : `workspace.${backend}.`;
+    const localKeys = new Set(["workspace.root", "workspace.github.root"]);
+    const prefix = `workspace.${backend}.`;
     for (const [key, info] of Object.entries(payload.settings)) {
-      if (key.startsWith(prefix) || (backend === "local" && key === "workspace.root")) {
+      if (backend === "local" ? localKeys.has(key) : key.startsWith(prefix)) {
         result[key] = info;
       }
     }

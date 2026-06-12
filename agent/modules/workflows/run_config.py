@@ -3,14 +3,11 @@ from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 
-from agent.modules.workspaces import (
-    DEFAULT_LOCAL_WORKSPACE,
-    WorkspaceRef,
-    normalize_workspace_ref,
-)
+from agent.modules.workspaces import WorkspaceRef, normalize_workspace_ref
+from agent.shared.config.constants import DEFAULT_WORKSPACE_ROOT
 
 DEFAULT_CONTEXT_TRIM_THRESHOLD = 50_000
-DEFAULT_WORKING_DIR = DEFAULT_LOCAL_WORKSPACE
+DEFAULT_WORKING_DIR = DEFAULT_WORKSPACE_ROOT
 
 
 @dataclass(init=False)
@@ -39,7 +36,9 @@ class WorkflowContext:
         model: str | None = None,
     ) -> None:
         from agent.shared.config.service import get_config_service
-        default_locator = str(get_config_service().get_path("workspace.root", "~/k41-agent"))
+        default_locator = str(
+            get_config_service().get_path("workspace.root", DEFAULT_WORKSPACE_ROOT)
+        )
         self.workspace = normalize_workspace_ref(
             workspace if workspace is not None else working_dir,
             default_locator=default_locator,
@@ -127,7 +126,9 @@ def make_context(
         allowed_tool_names = get_default_tool_names()
 
     from agent.shared.config.service import get_config_service
-    default_locator = str(get_config_service().get_path("workspace.root", "~/k41-agent"))
+    default_locator = str(
+        get_config_service().get_path("workspace.root", DEFAULT_WORKSPACE_ROOT)
+    )
     resolved_workspace = normalize_workspace_ref(
         workspace if workspace is not None else working_dir,
         default_locator=default_locator,

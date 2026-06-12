@@ -206,6 +206,28 @@ def test_verify_webhook_signature_accepts_valid_signature() -> None:
     assert not verify_webhook_signature(secret=secret, body=body, signature_header="sha256=bad")
 
 
+def test_github_workspace_manager_uses_configured_github_workspace_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    configured_root = tmp_path / "github-workspaces"
+
+    class FakeConfig:
+        def get_path(self, key: str, default: str = "") -> Path:
+            assert key == "workspace.github.root"
+            assert default == "~/.k41-agent/github-workspaces"
+            return configured_root
+
+    monkeypatch.setattr(
+        "agent.modules.github.config.get_config_service",
+        lambda: FakeConfig(),
+    )
+
+    manager = GitHubWorkspaceManager()
+
+    assert manager.root == configured_root
+
+
 @pytest.mark.asyncio
 async def test_webhook_ignores_duplicate_delivery(tmp_path: Path) -> None:
     service = make_service(tmp_path, FakeStore(binding(), first_seen=False))

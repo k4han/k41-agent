@@ -25,7 +25,6 @@ from agent.modules.workspaces.constants import (
 from agent.modules.workspaces.migrations import migrate_workspace_tables
 from agent.modules.workspaces.models import ThreadWorkspace
 from agent.modules.workspaces.refs import (
-    DEFAULT_LOCAL_WORKSPACE,
     WorkspaceBackendName,
     WorkspaceBinding,
     WorkspaceExecutionRef,
@@ -105,7 +104,6 @@ from agent.modules.workspaces.github_clone import (
 __all__ = [
     "CommandResult",
     "DAYTONA_BACKEND",
-    "DEFAULT_LOCAL_WORKSPACE",
     "DaytonaWorkspaceLifecycleManager",
     "GIT_TIMEOUT_SECONDS",
     "GitHubRepositorySelection",

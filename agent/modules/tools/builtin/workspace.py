@@ -11,6 +11,7 @@ from agent.modules.workspaces import (
     get_workspace_file_io,
     normalize_workspace_ref,
 )
+from agent.shared.config.constants import DEFAULT_WORKSPACE_ROOT
 
 
 def get_workspace(runtime: ToolRuntime[Any, Any]) -> WorkspaceRef:
@@ -18,7 +19,9 @@ def get_workspace(runtime: ToolRuntime[Any, Any]) -> WorkspaceRef:
     raw_workspace = get_context_value(runtime.context, "workspace", None)
     raw_working_dir = get_context_value(runtime.context, "working_dir", None)
     from agent.shared.config.service import get_config_service
-    default_locator = str(get_config_service().get_path("workspace.root", "~/k41-agent"))
+    default_locator = str(
+        get_config_service().get_path("workspace.root", DEFAULT_WORKSPACE_ROOT)
+    )
     return normalize_workspace_ref(
         raw_workspace if raw_workspace is not None else raw_working_dir,
         default_locator=default_locator,

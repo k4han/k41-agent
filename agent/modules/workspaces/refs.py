@@ -5,7 +5,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-DEFAULT_LOCAL_WORKSPACE = str(Path.home() / "k41-agent")
+from agent.shared.config.constants import DEFAULT_WORKSPACE_ROOT
 
 
 # ``str`` (rather than ``Literal["local", "daytona", "modal"]``) so plugin
@@ -200,12 +200,12 @@ def normalize_workspace_ref(
         try:
             workspace_root = (
                 get_config_service()
-                .get_path("workspace.root", "~/k41-agent")
+                .get_path("workspace.root", DEFAULT_WORKSPACE_ROOT)
                 .expanduser()
                 .resolve()
             )
         except Exception:
-            workspace_root = Path("~/k41-agent").expanduser().resolve()
+            workspace_root = Path(DEFAULT_WORKSPACE_ROOT).expanduser().resolve()
 
         if raw_locator == "workspace":
             raw_locator = str(workspace_root)
@@ -337,7 +337,6 @@ def workspace_ref_from_columns(
 
 
 __all__ = [
-    "DEFAULT_LOCAL_WORKSPACE",
     "WorkspaceRef",
     "WorkspaceExecutionRef",
     "WorkspaceScope",

@@ -13,6 +13,7 @@ from agent.modules.workspaces import (
     normalize_workspace_ref,
     workspace_ref_from_columns,
 )
+from agent.shared.config.constants import DEFAULT_WORKSPACE_ROOT
 from agent.shared.infrastructure.db.base import utcnow
 from agent.shared.infrastructure.db.session import get_async_session
 
@@ -124,7 +125,9 @@ class BackgroundTaskRepository:
         now = utcnow()
         normalized_task_id = _trim(task_id, 64)
         from agent.shared.config.service import get_config_service
-        default_locator = str(get_config_service().get_path("workspace.root", "~/k41-agent"))
+        default_locator = str(
+            get_config_service().get_path("workspace.root", DEFAULT_WORKSPACE_ROOT)
+        )
         workspace_ref = (
             normalize_workspace_ref(
                 workspace if workspace is not None else working_dir,

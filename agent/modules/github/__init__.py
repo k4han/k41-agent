@@ -2,8 +2,8 @@ from agent.modules.github.client import GitHubAppClient
 from agent.modules.github.config import (
     DEFAULT_MENTION_TRIGGERS,
     DEFAULT_TRIGGER_LABEL,
-    GITHUB_WORKSPACE_ROOT,
     GitHubSettings,
+    get_github_workspace_root,
     get_github_settings,
 )
 from agent.modules.github.models import (
@@ -26,7 +26,6 @@ from agent.modules.github.workspace import GitHubWorkspaceManager, PreparedWorks
 __all__ = [
     "DEFAULT_MENTION_TRIGGERS",
     "DEFAULT_TRIGGER_LABEL",
-    "GITHUB_WORKSPACE_ROOT",
     "GitHubAppClient",
     "GitHubAutomationService",
     "GitHubInstallation",
@@ -37,6 +36,7 @@ __all__ = [
     "GitHubWorkspaceManager",
     "PreparedWorkspace",
     "get_github_automation_service",
+    "get_github_workspace_root",
     "get_github_repository_store",
     "get_github_settings",
     "migrate_github_tables",

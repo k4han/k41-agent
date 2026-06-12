@@ -188,6 +188,7 @@ class TestDashboardSettingsEndpoints:
         assert data["active_nav"] == "backends"
         assert data["page_title"] == "Workspace Backends"
         assert "workspace.root" in data["settings"]
+        assert "workspace.github.root" in data["settings"]
         assert "workspace.daytona.enabled" in data["settings"]
         assert "workspace.modal.enabled" in data["settings"]
         assert "workspace.modal.token_secret" in data["settings"]
@@ -524,6 +525,61 @@ class TestDashboardSettingsEndpoints:
             "value": "custom/skills",
         }
         assert db_source.get("skills.repository_dir") == "custom/skills"
+
+    def test_put_workspace_root_saves_to_runtime_database(
+        self,
+        make_dashboard_client,
+    ) -> None:
+        service, db_source = _db_config_service(
+            """
+            workspace:
+              root: "~/.k41-agent/workspaces"
+              github:
+                root: "~/.k41-agent/github-workspaces"
+            """
+        )
+        client = make_dashboard_client(service)
+
+        resp = client.put(
+            "/settings/workspace.root",
+            json={"value": "~/.k41-agent/workspaces-alt"},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "status": "success",
+            "key": "workspace.root",
+            "value": "~/.k41-agent/workspaces-alt",
+        }
+        assert db_source.get("workspace.root") == "~/.k41-agent/workspaces-alt"
+        assert service.get_str("workspace.root") == "~/.k41-agent/workspaces-alt"
+
+    def test_put_github_workspace_root_saves_to_runtime_database(
+        self,
+        make_dashboard_client,
+    ) -> None:
+        service, db_source = _db_config_service(
+            """
+            workspace:
+              github:
+                root: "~/.k41-agent/github-workspaces"
+            """
+        )
+        client = make_dashboard_client(service)
+
+        resp = client.put(
+            "/settings/workspace.github.root",
+            json={"value": "~/.k41-agent/repo-checkouts"},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "status": "success",
+            "key": "workspace.github.root",
+            "value": "~/.k41-agent/repo-checkouts",
+        }
+        assert db_source.get("workspace.github.root") == "~/.k41-agent/repo-checkouts"
+        assert service.get_str("workspace.github.root") == "~/.k41-agent/repo-checkouts"
 
     @pytest.mark.parametrize(
         "value",

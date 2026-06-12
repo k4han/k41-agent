@@ -52,8 +52,10 @@ security:
 
 # Workspace settings (optional)
 # workspace:
-#   root: "~/k41-agent"
-# Workspace backend credentials are configured in the dashboard at Settings > Backends.
+#   root: "~/.k41-agent/workspaces"
+#   github:
+#     root: "~/.k41-agent/github-workspaces"
+# Local workspace root and backend credentials are configured in the dashboard at Settings > Backends.
 
 # Dashboard display settings (e.g. IANA timezone) are runtime configuration
 # stored in the database and managed from the dashboard at Settings > General.
