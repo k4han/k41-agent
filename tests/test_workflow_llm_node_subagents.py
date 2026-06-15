@@ -21,7 +21,7 @@ def test_build_llm_system_prompt_formats_working_dir_without_extra_sections():
         system_prompt_template="Base prompt\nWorking directory: {working_dir}",
         working_dir="D:/repo",
         agent_name="default",
-        tools=[SimpleNamespace(name="read_file")],
+        tools=[],
         catalog=_FakeCatalog(),
     )
 
@@ -53,7 +53,7 @@ def test_known_prompt_placeholders_do_not_change_double_brace_variables():
         system_prompt_template="{{working_dir}}\n{working_dir}",
         working_dir="D:/repo",
         agent_name="default",
-        tools=[SimpleNamespace(name="read_file")],
+        tools=[],
         catalog=_FakeCatalog(),
         prompt_variables={},
     )

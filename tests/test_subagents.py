@@ -255,7 +255,7 @@ class TestFilesystemAgentRepository:
         assert "default" in agents
         assert "conversation-title" in agents
         assert "github-issue-fixer" in agents
-        assert agents["default"].display_name == ""
+        assert agents["default"].display_name == "kaka"
         os.rmdir(d)
 
     def test_load_nonexistent_directory(self):

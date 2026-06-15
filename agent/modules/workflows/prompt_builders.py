@@ -222,6 +222,11 @@ def build_llm_system_prompt(
             f"{system_prompt}{_build_sub_agents_prompt_section(agent_name, catalog)}"
         )
 
+    if _has_tool(tools, "skill"):
+        system_prompt = (
+            f"{system_prompt}{_build_skills_prompt_section(skills_catalog_xml)}"
+        )
+
     if _has_tool(tools, "write_todos"):
         system_prompt = f"{system_prompt}\n\n{WRITE_TODOS_PROMPT}"
 
