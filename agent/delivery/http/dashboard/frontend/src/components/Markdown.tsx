@@ -193,7 +193,12 @@ async function writeToClipboard(text: string): Promise<void> {
   }
 }
 
-export function Markdown(props: { text: string; class?: string; deferMermaid?: boolean }) {
+export function Markdown(props: {
+  text: string;
+  class?: string;
+  deferMermaid?: boolean;
+  threadId?: string | null;
+}) {
   let containerRef: HTMLDivElement | undefined;
   let disposed = false;
   let mermaidRenderTimer: number | undefined;
@@ -202,7 +207,7 @@ export function Markdown(props: { text: string; class?: string; deferMermaid?: b
   const dark = createDarkMode();
 
   const html = createMemo(() => {
-    const source = rewriteGeneratedImagePaths(props.text || "");
+    const source = rewriteGeneratedImagePaths(props.text || "", props.threadId);
     const raw = marked.parse(source, { async: false }) as string;
     return DOMPurify.sanitize(raw, { ADD_ATTR: ["target", "rel"] });
   });

@@ -61,6 +61,40 @@ ASK_USER_PROMPT = (
     "has a free-text answer field by default unless you explicitly disable it."
 )
 
+WORKSPACE_STORAGE_PROMPT = (
+    "A virtual \".k41-agent\" mount is exposed alongside the working directory so "
+    "you can persist files across calls without polluting the user's project.\n"
+    "Key facts:\n"
+    "- It is not a real folder in the working directory; it resolves to a "
+    "workspace-scoped storage area managed by the agent runtime.\n"
+    "- It is shared across all threads of the same workspace and isolated "
+    "between distinct workspaces, so data you write there is durable for as "
+    "long as the workspace is active but never leaks to other workspaces.\n"
+    "- The mount is created lazily and always exposes three sub-directories: "
+    "generated-images/, assets/, and memory/. You can read, write, edit, glob, "
+    "grep, and list them with the same filesystem tools you use for the "
+    "working directory.\n"
+    "- The generate_image tool saves its output under "
+    ".k41-agent/generated-images/ and returns that virtual path; the client UI "
+    "renders the image automatically from the returned path, so do not "
+    "re-read, re-download, or relay the file.\n"
+    "- Path traversal outside the mount (\".k41-agent/../...\") is blocked, so "
+    "every operation stays scoped to the workspace storage."
+)
+
+_WORKSPACE_STORAGE_TOOL_NAMES = frozenset(
+    {"list_dir", "read_file", "write_file", "edit_file", "glob", "grep", "generate_image"}
+)
+
+
+def _has_workspace_storage_tool(tools: Sequence[object] | None) -> bool:
+    if not tools:
+        return False
+    return any(
+        getattr(tool, "name", "") in _WORKSPACE_STORAGE_TOOL_NAMES
+        for tool in tools
+    )
+
 _PROMPT_VARIABLE_RE = re.compile(r"\{\{([A-Za-z][A-Za-z0-9_-]{0,63})\}\}")
 
 
@@ -197,8 +231,8 @@ def build_llm_system_prompt(
     if _has_tool(tools, "ask_user"):
         system_prompt = f"{system_prompt}\n\n{ASK_USER_PROMPT}"
 
-    if _has_tool(tools, "skill"):
-        system_prompt = f"{system_prompt}{_build_skills_prompt_section(skills_catalog_xml)}"
+    if _has_workspace_storage_tool(tools):
+        system_prompt = f"{system_prompt}\n\n{WORKSPACE_STORAGE_PROMPT}"
 
     return system_prompt
 
@@ -210,6 +244,7 @@ __all__ = [
     "SUB_AGENT_DISCLOSURE_PROMPT",
     "SUB_AGENT_EMPTY_PROMPT",
     "WRITE_TODOS_PROMPT",
+    "WORKSPACE_STORAGE_PROMPT",
     "build_llm_system_prompt",
     "replace_known_prompt_placeholders",
     "resolve_prompt_variables",

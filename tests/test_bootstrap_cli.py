@@ -113,13 +113,13 @@ def test_is_process_alive_uses_psutil_pid_exists(monkeypatch):
 
 
 def test_health_url_uses_loopback_for_wildcard_hosts():
-    assert cli_module._base_url("0.0.0.0", 8000) == "http://127.0.0.1:8000"
-    assert cli_module._health_url("0.0.0.0", 8000) == "http://127.0.0.1:8000/health"
-    assert cli_module._health_url("::", 8000) == "http://127.0.0.1:8000/health"
+    assert cli_module._base_url("0.0.0.0", 4141) == "http://127.0.0.1:4141"
+    assert cli_module._health_url("0.0.0.0", 4141) == "http://127.0.0.1:4141/health"
+    assert cli_module._health_url("::", 4141) == "http://127.0.0.1:4141/health"
 
 
 def test_health_url_brackets_ipv6_hosts():
-    assert cli_module._health_url("::1", 8000) == "http://[::1]:8000/health"
+    assert cli_module._health_url("::1", 4141) == "http://[::1]:4141/health"
 
 
 def test_update_command_passes_options_to_updater(monkeypatch):

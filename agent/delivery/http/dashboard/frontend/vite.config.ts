@@ -4,7 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 import solidPlugin from "vite-plugin-solid";
 
-const fastApiTarget = "http://localhost:8000";
+const fastApiTarget = "http://localhost:4141";
 
 export default defineConfig({
   base: "/dashboard-assets/",

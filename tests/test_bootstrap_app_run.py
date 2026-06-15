@@ -41,7 +41,7 @@ async def test_web_server_uses_bounded_graceful_shutdown(monkeypatch):
     monkeypatch.setattr(
         app_module,
         "settings",
-        SimpleNamespace(enable_web=True, host="127.0.0.1", port=8000),
+        SimpleNamespace(enable_web=True, host="127.0.0.1", port=4141),
     )
     monkeypatch.setattr(app_module, "app", object())
     monkeypatch.setattr(app_module.uvicorn, "Config", FakeConfig)

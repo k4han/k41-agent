@@ -525,7 +525,7 @@ export function ChatPage() {
     setWorkspace(workspaceExecution(payload.workspace) || null);
     if (!persistedStreams.has(payload.thread_id)) {
       setItems(
-        toThreadTranscript(payload.messages).map((item) => ({
+        toThreadTranscript(payload.messages, payload.thread_id).map((item) => ({
           ...item,
           id: allocItemId(),
         })),
@@ -1694,7 +1694,11 @@ export function ChatPage() {
               }
             >
               <div style={{ "max-height": "70vh", "overflow-y": "auto" }}>
-                <Markdown text={viewingMessage()?.text || ""} class="message-markdown" />
+                <Markdown
+                  text={viewingMessage()?.text || ""}
+                  class="message-markdown"
+                  threadId={currentThreadId()}
+                />
               </div>
             </Show>
             <Show when={viewingMessage()?.attachments?.length}>

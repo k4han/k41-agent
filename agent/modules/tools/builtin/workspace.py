@@ -5,9 +5,11 @@ from typing import Any
 from langgraph.prebuilt import ToolRuntime
 
 from agent.modules.tools.runtime.context import ToolContext, get_context_value
+from agent.modules.tools.runtime.thread_storage import WorkspaceStorageFileIO
 from agent.modules.workspaces import (
     WorkspaceFileIO,
     WorkspaceRef,
+    derive_workspace_scope,
     get_workspace_file_io,
     normalize_workspace_ref,
 )
@@ -31,10 +33,14 @@ def get_workspace(runtime: ToolRuntime[Any, Any]) -> WorkspaceRef:
 async def get_file_io(runtime: ToolRuntime[Any, Any]) -> WorkspaceFileIO:
     """Return the workspace file I/O capability for a tool runtime."""
     tool_context = ToolContext.from_runtime(runtime)
-    return await get_workspace_file_io(
-        get_workspace(runtime),
+    workspace = get_workspace(runtime)
+    file_io = await get_workspace_file_io(
+        workspace,
         thread_id=tool_context.thread_id,
     )
+    if tool_context.thread_id:
+        return WorkspaceStorageFileIO(file_io, derive_workspace_scope(workspace))
+    return file_io
 
 
 def get_working_dir(runtime: ToolRuntime[Any, Any]) -> str:

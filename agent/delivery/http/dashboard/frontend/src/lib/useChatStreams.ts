@@ -165,7 +165,10 @@ export function useChatStreams(params: UseChatStreamsParams) {
   ) => {
     setItems((current) => {
       if (name === GENERATE_IMAGE_TOOL_NAME) {
-        const attachment = generatedImageAttachmentFromToolResult(result);
+        const attachment = generatedImageAttachmentFromToolResult(
+          result,
+          targetThreadId || getCurrentThreadId(),
+        );
         const pendingTarget = current.find(
           (item) =>
             item.type === "message" &&

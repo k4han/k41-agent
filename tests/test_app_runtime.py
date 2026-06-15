@@ -35,7 +35,7 @@ async def wait_for_status(runtime: AppRuntime, name: str, expected: ChannelStatu
 def build_bootstrap_config() -> BootstrapConfig:
     return BootstrapConfig(
         host="0.0.0.0",
-        port=8000,
+        port=4141,
         enable_web=True,
         enable_api=True,
         enable_dashboard=True,

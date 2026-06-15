@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import base64
+import logging
 import re
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 from uuid import uuid4
 
 import httpx
-from langchain_core.tools import BaseTool, StructuredTool
+from langchain_core.tools import BaseTool, InjectedToolArg, StructuredTool
+from langgraph.prebuilt import ToolRuntime
 from openai import OpenAI
 
 from agent.modules.providers import (
@@ -26,10 +28,18 @@ from agent.modules.tools.domain import (
     ToolConfigValue,
 )
 from agent.modules.tools.result import ToolError, ToolErrorCode
+from agent.modules.tools.builtin.workspace import get_workspace
+from agent.modules.tools.runtime.context import ToolContext
+from agent.modules.tools.runtime.thread_storage import (
+    generated_images_dir_for_workspace,
+    virtual_generated_image_path,
+)
+from agent.modules.workspaces import derive_workspace_scope
 
 DEFAULT_IMAGE_MODEL = "gpt-image-1"
 DEFAULT_IMAGE_SIZE = "1024x1024"
 GENERATED_IMAGES_DIR = Path.home() / ".k41-agent" / "generated-images"
+logger = logging.getLogger(__name__)
 GENERATE_IMAGE_TOOL_DESCRIPTION = (
     "Generate an image from a text prompt and return the saved file path. "
     "After a successful result, the client UI displays the generated image "
@@ -84,14 +94,32 @@ def _safe_name(value: str) -> str:
     return cleaned.strip("-")[:48] or "image"
 
 
-def _output_path(prompt: str, content_type: str = "") -> Path:
+def _output_path(output_dir: Path, prompt: str, content_type: str = "") -> Path:
     extension = "png"
     if "jpeg" in content_type or "jpg" in content_type:
         extension = "jpg"
     elif "webp" in content_type:
         extension = "webp"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir / f"{_safe_name(prompt)}-{uuid4().hex[:8]}.{extension}"
+
+
+def _output_target(runtime: ToolRuntime[Any, Any] | None) -> tuple[Path, bool]:
+    if runtime is not None and ToolContext.from_runtime(runtime).thread_id:
+        try:
+            workspace_scope = derive_workspace_scope(get_workspace(runtime))
+        except (ValueError, TypeError, KeyError) as exc:
+            logger.debug("Failed to resolve image workspace target: %s", exc)
+        else:
+            return generated_images_dir_for_workspace(workspace_scope), True
     GENERATED_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
-    return GENERATED_IMAGES_DIR / f"{_safe_name(prompt)}-{uuid4().hex[:8]}.{extension}"
+    return GENERATED_IMAGES_DIR, False
+
+
+def _display_path(path: Path, *, thread_scoped: bool) -> str:
+    if thread_scoped:
+        return virtual_generated_image_path(path.name)
+    return str(path)
 
 
 def _resolve_provider(provider_name: str):
@@ -123,7 +151,7 @@ def _resolve_provider(provider_name: str):
     return provider
 
 
-def _write_image_from_url(url: str, prompt: str) -> Path:
+def _write_image_from_url(url: str, prompt: str, output_dir: Path) -> Path:
     try:
         with httpx.Client(timeout=httpx.Timeout(60, connect=10)) as client:
             response = client.get(url)
@@ -136,7 +164,7 @@ def _write_image_from_url(url: str, prompt: str) -> Path:
             f"Image download HTTP {exc.response.status_code}: {exc.response.reason_phrase}",
         ) from exc
 
-    path = _output_path(prompt, response.headers.get("content-type", ""))
+    path = _output_path(output_dir, prompt, response.headers.get("content-type", ""))
     path.write_bytes(response.content)
     return path
 
@@ -147,9 +175,13 @@ def _build_generate_image_tool(config: dict[str, ToolConfigValue]) -> BaseTool:
     size = str(config.get("size") or DEFAULT_IMAGE_SIZE)
     quality = str(config.get("quality") or "auto")
 
-    def _generate_image(prompt: str) -> str:
+    def _generate_image(
+        prompt: str,
+        runtime: Annotated[ToolRuntime[Any, Any], InjectedToolArg],
+    ) -> str:
         """Generate an image from a text prompt and return the saved file path."""
         provider = _resolve_provider(provider_name)
+        output_dir, thread_scoped = _output_target(runtime)
         kwargs: dict[str, Any] = {
             "model": model,
             "prompt": prompt,
@@ -174,14 +206,14 @@ def _build_generate_image_tool(config: dict[str, ToolConfigValue]) -> BaseTool:
         image = result.data[0]
         b64_json = getattr(image, "b64_json", None)
         if b64_json:
-            path = _output_path(prompt)
+            path = _output_path(output_dir, prompt)
             path.write_bytes(base64.b64decode(b64_json))
-            return f"Generated image saved to: {path}"
+            return f"Generated image saved to: {_display_path(path, thread_scoped=thread_scoped)}"
 
         url = getattr(image, "url", None)
         if url:
-            path = _write_image_from_url(url, prompt)
-            return f"Generated image saved to: {path}"
+            path = _write_image_from_url(url, prompt, output_dir)
+            return f"Generated image saved to: {_display_path(path, thread_scoped=thread_scoped)}"
 
         raise ToolError(
             ToolErrorCode.UPSTREAM,

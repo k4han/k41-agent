@@ -18,7 +18,7 @@ Trên Linux/Mac: `/home/<username>/.k41-agent/config.yaml`
 ```yaml
 # Server configuration
 host: "0.0.0.0"
-port: 8000
+port: 4141
 
 # Feature flags
 enable_web: true
@@ -90,7 +90,7 @@ config = get_config_service()
 
 # Typed getters
 host = config.get_str("host", "0.0.0.0")
-port = config.get_int("port", 8000)
+port = config.get_int("port", 4141)
 enabled = config.get_bool("enable_web", True)
 db_url = config.get_str("database.url")
 

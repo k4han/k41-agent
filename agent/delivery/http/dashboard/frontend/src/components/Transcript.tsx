@@ -307,6 +307,7 @@ export function TranscriptMessageView(props: {
   }) => void;
   onBranchSelect?: (checkpointId: string) => void;
   onMessageClick?: (payload: { text: string; role: TranscriptRole; attachments?: TranscriptAttachment[] }) => void;
+  threadId?: string | null;
 }) {
   const [editing, setEditing] = createSignal(false);
   const [draft, setDraft] = createSignal(props.text);
@@ -437,6 +438,7 @@ export function TranscriptMessageView(props: {
                     text={props.text}
                     class="message-markdown"
                     deferMermaid={props.deferMermaid}
+                    threadId={props.threadId}
                   />
                 </Show>
               }
@@ -790,10 +792,11 @@ export function ToolCallDetail(props: {
   result: unknown;
   defaultOpen?: boolean;
   itemId?: number;
+  threadId?: string | null;
 }) {
   const generatedImage = () =>
     props.name === GENERATE_IMAGE_TOOL_NAME
-      ? generatedImageFromToolResult(props.result)
+      ? generatedImageFromToolResult(props.result, props.threadId)
       : null;
 
   return (
@@ -852,6 +855,7 @@ export function TranscriptItemView(props: {
     feedback: string;
   }) => void;
   onMessageClick?: (payload: { text: string; role: TranscriptRole; attachments?: TranscriptAttachment[] }) => void;
+  threadId?: string | null;
 }) {
   if (props.item.type === "message") {
     return (
@@ -870,6 +874,7 @@ export function TranscriptItemView(props: {
       onEdit={props.onEditMessage}
       onBranchSelect={props.onBranchSelect}
       onMessageClick={props.onMessageClick}
+      threadId={props.threadId}
     />
     );
   }
@@ -900,6 +905,7 @@ export function TranscriptItemView(props: {
       args={props.item.args}
       result={props.item.result}
       itemId={props.itemId}
+      threadId={props.threadId}
     />
   );
 }

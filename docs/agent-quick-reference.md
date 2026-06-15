@@ -5,7 +5,7 @@
 ### Request với agent_name
 
 ```bash
-curl -X POST http://localhost:8000/api/chat \
+curl -X POST http://localhost:4141/api/chat \
   -H "Content-Type: application/json" \
   -d '{
     "message": "Help me research about LangGraph",
@@ -17,7 +17,7 @@ curl -X POST http://localhost:8000/api/chat \
 ### Request với workflow (legacy)
 
 ```bash
-curl -X POST http://localhost:8000/api/chat \
+curl -X POST http://localhost:4141/api/chat \
   -H "Content-Type: application/json" \
   -d '{
     "message": "Hello",

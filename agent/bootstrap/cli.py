@@ -286,7 +286,7 @@ def init() -> None:
                     "# Kai Agent Configuration\n"
                     "# Runtime provider, MCP, and channel policy settings live in the database.\n\n"
                     'host: "0.0.0.0"\n'
-                    "port: 8000\n"
+                    "port: 4141\n"
                     "enable_web: true\n"
                     "enable_api: true\n"
                     "enable_dashboard: true\n"

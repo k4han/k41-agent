@@ -18,19 +18,19 @@
 
 ### 1. Health Check
 ```bash
-curl http://localhost:8000/api/health
+curl http://localhost:4141/api/health
 # Expected: {"status": "ok", "graphs": ["react_agent", "research_chain", "router"]}
 ```
 
 ### 2. List Graphs
 ```bash
-curl http://localhost:8000/api/graphs
+curl http://localhost:4141/api/graphs
 # Expected: {"graphs": ["react_agent", "research_chain", "router"]}
 ```
 
 ### 3. Test Default Agent
 ```bash
-curl -X POST http://localhost:8000/api/chat \
+curl -X POST http://localhost:4141/api/chat \
   -H "Content-Type: application/json" \
   -d '{
     "message": "Hello, test message",
@@ -41,7 +41,7 @@ curl -X POST http://localhost:8000/api/chat \
 
 ### 4. Test Named Agent
 ```bash
-curl -X POST http://localhost:8000/api/chat \
+curl -X POST http://localhost:4141/api/chat \
   -H "Content-Type: application/json" \
   -d '{
     "message": "Research about LangGraph",
@@ -53,7 +53,7 @@ curl -X POST http://localhost:8000/api/chat \
 
 ### 5. Test Backend Agent
 ```bash
-curl -X POST http://localhost:8000/api/chat \
+curl -X POST http://localhost:4141/api/chat \
   -H "Content-Type: application/json" \
   -d '{
     "message": "Write a Python function to calculate fibonacci",
@@ -111,7 +111,7 @@ print(f"Registered graphs: {graphs}")
 ```bash
 # Send 10 concurrent requests
 for i in {1..10}; do
-  curl -X POST http://localhost:8000/api/chat \
+  curl -X POST http://localhost:4141/api/chat \
     -H "Content-Type: application/json" \
     -d "{\"message\": \"Test $i\", \"user_id\": \"user-$i\"}" &
 done
@@ -125,7 +125,7 @@ wait
 
 ### 1. Non-existent Agent
 ```bash
-curl -X POST http://localhost:8000/api/chat \
+curl -X POST http://localhost:4141/api/chat \
   -H "Content-Type: application/json" \
   -d '{
     "message": "Test",
@@ -137,7 +137,7 @@ curl -X POST http://localhost:8000/api/chat \
 
 ### 2. Empty Message
 ```bash
-curl -X POST http://localhost:8000/api/chat \
+curl -X POST http://localhost:4141/api/chat \
   -H "Content-Type: application/json" \
   -d '{
     "message": "",
@@ -149,7 +149,7 @@ curl -X POST http://localhost:8000/api/chat \
 
 ### 3. Missing Agent Name
 ```bash
-curl -X POST http://localhost:8000/api/chat \
+curl -X POST http://localhost:4141/api/chat \
   -H "Content-Type: application/json" \
   -d '{
     "message": "Test",

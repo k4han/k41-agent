@@ -57,6 +57,16 @@ from agent.modules.tools.runtime.context import (
     get_thread_id,
 )
 from agent.modules.tools.runtime.path_guard import resolve_safe_path
+from agent.modules.tools.runtime.thread_storage import (
+    generated_images_dir_for_thread,
+    generated_images_dir_for_workspace,
+    root_thread_id,
+    sanitize_thread_id,
+    sanitize_workspace_key,
+    thread_storage_root,
+    virtual_generated_image_path,
+    workspace_storage_root,
+)
 
 T = TypeVar("T")
 
@@ -208,9 +218,17 @@ __all__ = [
     "get_generated_images_dir",
     "get_runtime_context_value",
     "get_thread_id",
+    "generated_images_dir_for_thread",
+    "generated_images_dir_for_workspace",
+    "root_thread_id",
+    "sanitize_thread_id",
+    "sanitize_workspace_key",
     "get_tool_by_name",
     "resolve_safe_path",
     "resolve_tools",
     "resolve_tools_for_agent",
     "serialize_tool_config_schemas",
+    "thread_storage_root",
+    "virtual_generated_image_path",
+    "workspace_storage_root",
 ]

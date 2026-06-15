@@ -150,13 +150,16 @@ export function groupThreadsByWorkspace(threads: ThreadSummary[]): ThreadWorkspa
   return groups;
 }
 
-export function toThreadTranscript(messages: ThreadMessage[]): ThreadTranscriptItem[] {
+export function toThreadTranscript(
+  messages: ThreadMessage[],
+  threadId?: string | null,
+): ThreadTranscriptItem[] {
   const items: ThreadTranscriptItem[] = [];
 
   messages.forEach((msg, messageIndex) => {
     if (msg.role === "tool") {
       if (msg.name === GENERATE_IMAGE_TOOL_NAME) {
-        const attachment = generatedImageAttachmentFromToolResult(msg.content);
+        const attachment = generatedImageAttachmentFromToolResult(msg.content, threadId);
         if (attachment) {
           items.push({
             key: `generated-image-${messageIndex}-${msg.tool_call_id || "unknown"}`,

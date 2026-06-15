@@ -175,7 +175,7 @@ KNOWN_RUNTIME_KEYS: set[str] = _expand_runtime_keys()
 DEFAULT_CONFIG: dict[str, Any] = {
     # Server configuration
     "host": "0.0.0.0",
-    "port": 8000,
+    "port": 4141,
     "enable_web": True,
     "enable_api": True,
     "enable_dashboard": True,

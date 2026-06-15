@@ -3,7 +3,7 @@
 
 # Server configuration
 host: "0.0.0.0"
-port: 8000
+port: 4141
 
 # Feature flags
 enable_web: true
@@ -30,12 +30,12 @@ security:
   jwt_secret: ""
 
   # CORS allowed origins (list of URLs or comma-separated string)
-  # Default: ["http://localhost:8000", "http://127.0.0.1:8000"]
+  # Default: ["http://localhost:4141", "http://127.0.0.1:4141"]
   # For production, specify your actual frontend domains
   # Example: ["https://app.example.com", "https://www.example.com"]
   cors_origins:
-    - "http://localhost:8000"
-    - "http://127.0.0.1:8000"
+    - "http://localhost:4141"
+    - "http://127.0.0.1:4141"
 
   # CSRF (Cross-Site Request Forgery) protection for cookie-based authentication
   # Default: true (enabled)

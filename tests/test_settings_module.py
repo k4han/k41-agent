@@ -124,7 +124,7 @@ class TestYamlConfigSource:
         all_settings = source.get_all_settings_values()
 
         assert all_settings["host"].value == "0.0.0.0"
-        assert all_settings["port"].value == 8000
+        assert all_settings["port"].value == 4141
         assert all_settings["enable_web"].value is True
         assert all_settings["enable_api"].value is True
         assert all_settings["enable_dashboard"].value is True
@@ -142,7 +142,7 @@ class TestYamlConfigSource:
         all_settings = source.get_all_settings_values()
 
         assert all_settings["host"].value == "0.0.0.0"
-        assert all_settings["port"].value == 8000
+        assert all_settings["port"].value == 4141
         assert all_settings["security.jwt_secret"].value == "secret"
 
     def test_ensure_default_file_backfills_partial_config(self, tmp_path: Path) -> None:

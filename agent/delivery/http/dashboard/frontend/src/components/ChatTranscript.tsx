@@ -90,6 +90,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                 agents={props.agents}
                 activeAgentName={props.activeAgentName}
                 actionsDisabled={props.conversationBusy}
+                threadId={props.currentThreadId}
                 onEditMessage={props.onEditMessage}
                 onBranchSelect={props.onBranchSelect}
                 onApprovePlanReview={props.onApprovePlanReview}

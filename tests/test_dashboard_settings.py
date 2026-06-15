@@ -625,7 +625,7 @@ class TestDashboardSettingsEndpoints:
             config_path,
             """
             host: 127.0.0.1
-            port: 8000
+            port: 4141
             enable_dashboard: true
             """,
         )
