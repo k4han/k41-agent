@@ -163,3 +163,60 @@ async def test_schedule_conversation_title_generation_updates_current_title(monk
             "How do I debug this login issue?",
         ],
     }
+
+
+@pytest.mark.asyncio
+async def test_inject_agent_message_pair_calls_aupdate_state(monkeypatch):
+    import agent.modules.workflows as workflows_module
+
+    captured: dict = {}
+
+    class FakeGraph:
+        async def aupdate_state(self, config, values, *, as_node):
+            captured["config"] = config
+            captured["values"] = values
+            captured["as_node"] = as_node
+
+    monkeypatch.setattr(workflows_module, "get_workflow_graph", lambda name: FakeGraph())
+    monkeypatch.setattr(
+        workflows_module,
+        "make_run_config",
+        lambda *, thread_id: {"configurable": {"thread_id": thread_id}},
+    )
+
+    await conversation_service.inject_agent_message_pair(
+        thread_id="telegram_123_456",
+        human_content="hello",
+        ai_content="world",
+    )
+
+    assert captured["config"] == {"configurable": {"thread_id": "telegram_123_456"}}
+    assert captured["as_node"] == "llm"
+    messages = captured["values"]["messages"]
+    assert messages[0].content == "hello"
+    assert messages[1].content == "world"
+
+
+@pytest.mark.asyncio
+async def test_inject_agent_message_pair_propagates_errors(monkeypatch):
+    import agent.modules.workflows as workflows_module
+
+    class BrokenGraph:
+        async def aupdate_state(self, config, values, *, as_node):
+            raise RuntimeError("graph unavailable")
+
+    monkeypatch.setattr(
+        workflows_module, "get_workflow_graph", lambda name: BrokenGraph()
+    )
+    monkeypatch.setattr(
+        workflows_module,
+        "make_run_config",
+        lambda *, thread_id: {"thread_id": thread_id},
+    )
+
+    with pytest.raises(RuntimeError, match="graph unavailable"):
+        await conversation_service.inject_agent_message_pair(
+            thread_id="telegram_123",
+            human_content="hi",
+            ai_content="hello",
+        )

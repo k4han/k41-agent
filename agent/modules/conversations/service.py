@@ -23,6 +23,9 @@ from agent.modules.usage import (
 )
 from agent.shared.infrastructure.parsing import extract_final_text_content
 
+_INJECTION_GRAPH_NAME = "react_agent"
+_INJECTION_AS_NODE = "llm"
+
 THREAD_KIND_USER = "user"
 THREAD_KIND_SUB_AGENT = "sub_agent"
 THREAD_KIND_BACKGROUND = "background"
@@ -350,6 +353,44 @@ async def list_active_thread_ids(
     return await repo.list_active_thread_ids(thread_ids)
 
 
+async def inject_agent_message_pair(
+    *,
+    thread_id: str,
+    human_content: str,
+    ai_content: str,
+) -> None:
+    """Append a Human/AIMessage pair to ``thread_id``'s workflow checkpoint.
+
+    Used by fire-and-forget producers (background tasks, scheduled tasks) to
+    surface the request/result sent on a separate thread back into the
+    user's main conversation so they can continue chatting from context.
+
+    Does NOT upsert the conversation thread row; call sites that need the
+    thread metadata persisted must call :func:`upsert_conversation_thread`
+    themselves.
+
+    Raises whatever the underlying graph state update raises so callers can
+    decide whether to swallow (e.g. best-effort background notification) or
+    propagate (e.g. scheduler that already reported a partial failure).
+    """
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    from agent.modules.workflows import get_workflow_graph, make_run_config
+
+    config = make_run_config(thread_id=thread_id)
+    graph = get_workflow_graph(_INJECTION_GRAPH_NAME)
+    await graph.aupdate_state(
+        config,
+        {
+            "messages": [
+                HumanMessage(content=human_content),
+                AIMessage(content=ai_content),
+            ]
+        },
+        as_node=_INJECTION_AS_NODE,
+    )
+
+
 __all__ = [
     "CONVERSATION_TITLE_AGENT_NAME",
     "CONVERSATION_TITLE_MAX_CHARS",
@@ -363,6 +404,7 @@ __all__ = [
     "generate_conversation_title",
     "get_conversation_thread",
     "infer_thread_kind",
+    "inject_agent_message_pair",
     "list_active_thread_ids",
     "list_conversation_threads",
     "mark_conversation_thread_deleted",

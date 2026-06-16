@@ -11,17 +11,13 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from agent.modules.agent_runtime import SessionManager, run_agent_full
 from agent.modules.notifications import send_notification as _send_notification
-from agent.modules.workflows import get_workflow_graph, make_run_config
 from agent.shared.infrastructure.db.engine import (
     get_database_url,
     _normalize_url_to_sync,
 )
 from agent.shared.timezone import resolve_display_timezone
-from langchain_core.messages import AIMessage, HumanMessage
 
 AGENT_NAME = "scheduler-executor"
-GRAPH_NAME = "react_agent"
-NODE_NAME = "llm"
 BACKGROUND_THREAD_PREFIX = "bg"
 TASK_DESCRIPTION_MAX_LEN = 16
 SCHEDULER_SHUTDOWN_TIMEOUT = 10
@@ -53,10 +49,7 @@ async def execute_scheduled_task(platform: str, user_id: str, task: str):
             thread_id=background_thread_id,
             agent_name=AGENT_NAME,
         )
-
-        graph = get_workflow_graph(GRAPH_NAME)
-        user_config = make_run_config(thread_id=user_thread_id)
-        from agent.modules.conversations import upsert_conversation_thread
+        from agent.modules.conversations import inject_agent_message_pair, upsert_conversation_thread
 
         await upsert_conversation_thread(
             thread_id=user_thread_id,
@@ -64,10 +57,10 @@ async def execute_scheduled_task(platform: str, user_id: str, task: str):
             title=task,
         )
 
-        await graph.aupdate_state(
-            user_config,
-            {"messages": [HumanMessage(content=f"[Scheduled Task]\n{task}"), AIMessage(content=response_text)]},
-            as_node=NODE_NAME,
+        await inject_agent_message_pair(
+            thread_id=user_thread_id,
+            human_content=f"[Scheduled Task]\n{task}",
+            ai_content=response_text,
         )
 
         notification = (

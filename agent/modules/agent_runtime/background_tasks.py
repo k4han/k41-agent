@@ -26,16 +26,12 @@ from agent.modules.workspaces import (
     remember_thread_workspace_ref,
     resolve_workspace_ref,
 )
-from agent.modules.workflows import REACT_AGENT_GRAPH_TYPE
-
 logger = logging.getLogger(__name__)
 
 MAX_COMPLETED_TASKS = 100
 MAX_STORED_TEXT_LENGTH = 20_000
 TASK_EVENT_QUEUE_SIZE = 100
 BACKGROUND_THREAD_PREFIX = "task"
-_GRAPH_NAME = REACT_AGENT_GRAPH_TYPE
-_NODE_NAME = "llm"
 
 
 def _parse_timestamp(value: float | str | None) -> float:
@@ -519,8 +515,7 @@ class BackgroundTaskManager:
         on their preferred channel (Telegram, Discord, etc.).
         """
         from agent.modules.agent_runtime.session import SessionManager
-        from agent.modules.workflows import get_workflow_graph, make_run_config
-        from langchain_core.messages import AIMessage, HumanMessage
+        from agent.modules.conversations import inject_agent_message_pair
 
         channel = task.notify_channel
         user_thread_id = SessionManager.make_thread_id(
@@ -528,18 +523,10 @@ class BackgroundTaskManager:
         )
 
         try:
-            graph = get_workflow_graph(_GRAPH_NAME)
-            user_config = make_run_config(thread_id=user_thread_id)
-
-            await graph.aupdate_state(
-                user_config,
-                {
-                    "messages": [
-                        HumanMessage(content=f"[Background Task]\n{task.request}"),
-                        AIMessage(content=task.result),
-                    ]
-                },
-                as_node=_NODE_NAME,
+            await inject_agent_message_pair(
+                thread_id=user_thread_id,
+                human_content=f"[Background Task]\n{task.request}",
+                ai_content=task.result,
             )
             logger.info(
                 "Injected background task %s results into thread %s.",

@@ -138,6 +138,7 @@ def test_scheduler_job_reference_migration_skips_missing_table():
 @pytest.mark.asyncio
 async def test_execute_scheduled_task_uses_scheduled_thread_for_usage(monkeypatch):
     import agent.modules.conversations as conversations_module
+    import agent.modules.workflows as workflows_module
     from agent.modules.scheduler import service as scheduler_service
 
     captured: dict = {}
@@ -160,9 +161,9 @@ async def test_execute_scheduled_task_uses_scheduled_thread_for_usage(monkeypatc
         return True
 
     monkeypatch.setattr(scheduler_service, "run_agent_full", fake_run_agent_full)
-    monkeypatch.setattr(scheduler_service, "get_workflow_graph", lambda name: FakeGraph())
+    monkeypatch.setattr(workflows_module, "get_workflow_graph", lambda name: FakeGraph())
     monkeypatch.setattr(
-        scheduler_service,
+        workflows_module,
         "make_run_config",
         lambda *, thread_id: {"configurable": {"thread_id": thread_id}},
     )
@@ -185,4 +186,8 @@ async def test_execute_scheduled_task_uses_scheduled_thread_for_usage(monkeypatc
     assert captured["state_config"] == {
         "configurable": {"thread_id": "telegram_6197833678_6197833678"}
     }
+    assert captured["state_node"] == "llm"
+    messages = captured["state_values"]["messages"]
+    assert messages[0].content == "[Scheduled Task]\ndaily summary"
+    assert messages[1].content == "done"
     assert captured["notification"]["args"][:2] == ("telegram", "6197833678")
