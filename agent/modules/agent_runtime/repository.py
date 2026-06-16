@@ -68,6 +68,9 @@ def serialize_background_task(record: BackgroundTaskRecord) -> dict[str, Any]:
         "started_at": _timestamp_from_datetime(record.started_at),
         "completed_at": _timestamp_from_datetime(record.completed_at),
         "updated_at": record.updated_at.isoformat() if record.updated_at else None,
+        "task_timeout": record.task_timeout,
+        "max_retries": record.max_retries,
+        "retry_count": record.retry_count,
     }
 
 
@@ -121,6 +124,9 @@ class BackgroundTaskRepository:
         allowed_tool_names: list[str] | None = None,
         allowed_skill_names: list[str] | None = None,
         workspace: WorkspaceRef | dict[str, Any] | str | None = None,
+        task_timeout: float | None = None,
+        max_retries: int = 0,
+        retry_count: int = 0,
     ) -> dict[str, Any]:
         now = utcnow()
         normalized_task_id = _trim(task_id, 64)
@@ -185,6 +191,9 @@ class BackgroundTaskRepository:
             record.completed_at = _datetime_from_timestamp(completed_at)
             record.updated_at = now
             record.deleted_at = None
+            record.task_timeout = task_timeout
+            record.max_retries = max(0, max_retries)
+            record.retry_count = max(0, retry_count)
 
             await session.commit()
             await session.refresh(record)

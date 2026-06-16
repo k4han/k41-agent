@@ -141,6 +141,32 @@ class GitHubAppClient:
             json={"body": body},
         )
 
+    async def list_issue_comments(
+        self,
+        *,
+        installation_id: int,
+        full_name: str,
+        issue_number: int,
+    ) -> list[dict[str, Any]]:
+        token = await self.get_installation_token(installation_id)
+        return await self._get_all_pages(
+            f"/repos/{full_name}/issues/{issue_number}/comments",
+            token=token,
+        )
+
+    async def list_pull_requests_for_issue(
+        self,
+        *,
+        installation_id: int,
+        full_name: str,
+        issue_number: int,
+    ) -> list[dict[str, Any]]:
+        token = await self.get_installation_token(installation_id)
+        return await self._get_all_pages(
+            f"/repos/{full_name}/issues/{issue_number}/pull-requests",
+            token=token,
+        )
+
     async def _get_all_pages(
         self,
         path: str,

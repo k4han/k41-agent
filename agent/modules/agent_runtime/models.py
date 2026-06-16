@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, String, Text, UniqueConstraint
+from sqlalchemy import Column, DateTime, Float, Integer, String, Text, UniqueConstraint
 
 from agent.shared.infrastructure.db import BaseModel, utcnow
 
@@ -36,6 +36,9 @@ class BackgroundTaskRecord(BaseModel):
     completed_at = Column(DateTime(timezone=True), nullable=True)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False, index=True)
     deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    task_timeout = Column(Float, nullable=True)
+    max_retries = Column(Integer, nullable=False, default=0)
+    retry_count = Column(Integer, nullable=False, default=0)
 
     __table_args__ = (
         UniqueConstraint("task_id", name="uq_background_tasks_task_id"),

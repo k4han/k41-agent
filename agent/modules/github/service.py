@@ -42,6 +42,8 @@ SUPPORTED_WEBHOOK_EVENTS = {
 }
 COMPLETION_OPEN_PULL_REQUEST = "open_pull_request"
 COMPLETION_UPDATE_PULL_REQUEST = "update_pull_request"
+DEFAULT_TASK_TIMEOUT = 1800
+DEFAULT_MAX_RETRIES = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -283,6 +285,8 @@ class GitHubAutomationService:
             allowed_skill_names=_allowed_skills_for_binding(binding),
             provider=_provider_name(binding),
             model=_model_name(binding),
+            task_timeout=DEFAULT_TASK_TIMEOUT,
+            max_retries=DEFAULT_MAX_RETRIES,
         )
 
     async def handle_webhook(
@@ -412,6 +416,55 @@ class GitHubAutomationService:
         pull_request = payload.get("pull_request") or {}
         return bool(comment.get("body") and pull_request.get("number"))
 
+    async def _fetch_issue_context(
+        self,
+        *,
+        installation_id: int,
+        full_name: str,
+        issue_number: int,
+    ) -> dict[str, Any]:
+        context: dict[str, Any] = {
+            "comments": [],
+            "linked_pull_requests": [],
+        }
+        try:
+            comments = await self.client.list_issue_comments(
+                installation_id=installation_id,
+                full_name=full_name,
+                issue_number=issue_number,
+            )
+            context["comments"] = [
+                {
+                    "author": str(c.get("user", {}).get("login") or ""),
+                    "body": str(c.get("body") or ""),
+                    "created_at": str(c.get("created_at") or ""),
+                }
+                for c in comments[-20:]
+            ]
+        except Exception as exc:
+            logger.warning("Failed to fetch issue comments for #%s: %s", issue_number, exc)
+
+        try:
+            prs = await self.client.list_pull_requests_for_issue(
+                installation_id=installation_id,
+                full_name=full_name,
+                issue_number=issue_number,
+            )
+            context["linked_pull_requests"] = [
+                {
+                    "number": pr.get("number"),
+                    "title": str(pr.get("title") or ""),
+                    "state": str(pr.get("state") or ""),
+                    "url": str(pr.get("html_url") or ""),
+                    "head_branch": str(pr.get("head", {}).get("ref") or ""),
+                }
+                for pr in prs
+            ]
+        except Exception as exc:
+            logger.warning("Failed to fetch linked PRs for #%s: %s", issue_number, exc)
+
+        return context
+
     async def _submit_task(
         self,
         *,
@@ -445,6 +498,12 @@ class GitHubAutomationService:
             default_branch=binding.default_branch or repository.get("default_branch") or "main",
         )
 
+        issue_context = await self._fetch_issue_context(
+            installation_id=installation_id,
+            full_name=binding.full_name,
+            issue_number=issue_number,
+        )
+
         context = GitHubTaskContext(
             installation_id=installation_id,
             repository_full_name=binding.full_name,
@@ -461,6 +520,7 @@ class GitHubAutomationService:
             event=event,
             payload=payload,
             context=context,
+            issue_context=issue_context,
         )
 
         manager = get_background_task_manager()
@@ -475,6 +535,8 @@ class GitHubAutomationService:
             allowed_skill_names=_allowed_skills_for_binding(binding),
             provider=_provider_name(binding),
             model=_model_name(binding),
+            task_timeout=DEFAULT_TASK_TIMEOUT,
+            max_retries=DEFAULT_MAX_RETRIES,
         )
 
     async def _submit_review_comment_task(
@@ -549,6 +611,8 @@ class GitHubAutomationService:
             allowed_skill_names=_allowed_skills_for_binding(binding),
             provider=_provider_name(binding),
             model=_model_name(binding),
+            task_timeout=DEFAULT_TASK_TIMEOUT,
+            max_retries=DEFAULT_MAX_RETRIES,
         )
 
     def _notify_channel_for_binding(self, binding: Any) -> NotifyChannel | None:
@@ -579,68 +643,103 @@ class GitHubAutomationService:
         *,
         workspace_backend: str = "local",
     ) -> None:
-        token = await self.client.get_installation_token(context.installation_id)
-        completion_mode = getattr(context, "completion_mode", COMPLETION_OPEN_PULL_REQUEST)
+        try:
+            token = await self.client.get_installation_token(context.installation_id)
+            completion_mode = getattr(context, "completion_mode", COMPLETION_OPEN_PULL_REQUEST)
 
-        if workspace_backend == "local":
-            has_changes = await self.workspace_manager.has_changes(context.workspace_path)
-        else:
-            ref = _github_workspace_ref(context, backend=workspace_backend)
-            has_changes = await remote_has_changes(ref)
+            if workspace_backend == "local":
+                has_changes = await self.workspace_manager.has_changes(context.workspace_path)
+            else:
+                ref = _github_workspace_ref(context, backend=workspace_backend)
+                has_changes = await remote_has_changes(ref)
 
-        if not has_changes:
-            await self._post_completion_comment(
-                context,
-                body="Kai Agent finished running but did not produce any repository changes.",
+            if not has_changes:
+                await self._post_completion_comment(
+                    context,
+                    body="Kai Agent finished running but did not produce any repository changes.",
+                )
+                task.result = f"{task.result}\n\nNo repository changes were produced.".strip()
+                return
+
+            if completion_mode == COMPLETION_UPDATE_PULL_REQUEST:
+                commit_message = f"Address review feedback on PR #{context.issue_number}"
+            else:
+                commit_message = f"Kai Agent changes for issue #{context.issue_number}"
+
+            try:
+                if workspace_backend == "local":
+                    await self.workspace_manager.commit_all(
+                        path=context.workspace_path,
+                        message=commit_message,
+                    )
+                    await self.workspace_manager.push_branch(
+                        path=context.workspace_path,
+                        branch=context.branch,
+                        token=token,
+                    )
+                else:
+                    ref = _github_workspace_ref(context, backend=workspace_backend)
+                    await remote_commit_all(ref, commit_message)
+                    await remote_push_branch(ref, context.branch, token)
+            except Exception as exc:
+                error_msg = f"Failed to commit/push changes: {exc}"
+                logger.error("publish_task_result push failed for issue #%s: %s", context.issue_number, exc)
+                await self._post_completion_comment(
+                    context,
+                    body=f"Kai Agent completed but failed to push changes.\n\nError: {exc}",
+                )
+                task.result = f"{task.result}\n\n{error_msg}".strip()
+                return
+
+            if completion_mode == COMPLETION_UPDATE_PULL_REQUEST:
+                await self._post_completion_comment(
+                    context,
+                    body=_review_update_body(task.result),
+                )
+                task.result = f"{task.result}\n\nPull request updated: {context.issue_url}".strip()
+                return
+
+            try:
+                pr = await self.client.create_pull_request(
+                    installation_id=context.installation_id,
+                    full_name=context.repository_full_name,
+                    title=_pr_title(context.issue_number, context.issue_title),
+                    head=context.branch,
+                    base=context.base_branch,
+                    body=_pr_body(context, task.result),
+                )
+                pr_url = str(pr.get("html_url") or "")
+                if pr_url:
+                    await self.client.create_issue_comment(
+                        installation_id=context.installation_id,
+                        full_name=context.repository_full_name,
+                        issue_number=context.issue_number,
+                        body=f"Kai Agent opened a pull request: {pr_url}",
+                    )
+                    task.result = f"{task.result}\n\nPull request: {pr_url}".strip()
+            except Exception as exc:
+                error_msg = f"Failed to create pull request: {exc}"
+                logger.error("publish_task_result PR creation failed for issue #%s: %s", context.issue_number, exc)
+                await self._post_completion_comment(
+                    context,
+                    body=f"Kai Agent pushed changes but failed to create a pull request.\n\nError: {exc}",
+                )
+                task.result = f"{task.result}\n\n{error_msg}".strip()
+
+        except Exception as exc:
+            logger.error(
+                "publish_task_result failed unexpectedly for issue #%s: %s",
+                context.issue_number,
+                exc,
+                exc_info=True,
             )
-            task.result = f"{task.result}\n\nNo repository changes were produced.".strip()
-            return
-
-        if completion_mode == COMPLETION_UPDATE_PULL_REQUEST:
-            commit_message = f"Address review feedback on PR #{context.issue_number}"
-        else:
-            commit_message = f"Kai Agent changes for issue #{context.issue_number}"
-
-        if workspace_backend == "local":
-            await self.workspace_manager.commit_all(
-                path=context.workspace_path,
-                message=commit_message,
-            )
-            await self.workspace_manager.push_branch(
-                path=context.workspace_path,
-                branch=context.branch,
-                token=token,
-            )
-        else:
-            ref = _github_workspace_ref(context, backend=workspace_backend)
-            await remote_commit_all(ref, commit_message)
-            await remote_push_branch(ref, context.branch, token)
-
-        if completion_mode == COMPLETION_UPDATE_PULL_REQUEST:
-            await self._post_completion_comment(
-                context,
-                body=_review_update_body(task.result),
-            )
-            task.result = f"{task.result}\n\nPull request updated: {context.issue_url}".strip()
-            return
-
-        pr = await self.client.create_pull_request(
-            installation_id=context.installation_id,
-            full_name=context.repository_full_name,
-            title=_pr_title(context.issue_number, context.issue_title),
-            head=context.branch,
-            base=context.base_branch,
-            body=_pr_body(context, task.result),
-        )
-        pr_url = str(pr.get("html_url") or "")
-        if pr_url:
-            await self.client.create_issue_comment(
-                installation_id=context.installation_id,
-                full_name=context.repository_full_name,
-                issue_number=context.issue_number,
-                body=f"Kai Agent opened a pull request: {pr_url}",
-            )
-            task.result = f"{task.result}\n\nPull request: {pr_url}".strip()
+            try:
+                await self._post_completion_comment(
+                    context,
+                    body=f"Kai Agent encountered an unexpected error while publishing results.\n\nError: {exc}",
+                )
+            except Exception:
+                logger.error("Failed to post error comment for issue #%s", context.issue_number)
 
     async def _post_completion_comment(
         self,
@@ -673,6 +772,7 @@ def _build_agent_prompt(
     event: str,
     payload: dict[str, Any],
     context: GitHubTaskContext,
+    issue_context: dict[str, Any] | None = None,
 ) -> str:
     if event == "pull_request_review_comment":
         return _build_review_comment_prompt(payload=payload, context=context)
@@ -694,6 +794,35 @@ def _build_agent_prompt(
         "Issue body:",
         issue_body or "(empty)",
     ]
+
+    if issue_context:
+        linked_prs = issue_context.get("linked_pull_requests") or []
+        if linked_prs:
+            lines.extend(["", "Existing pull requests linked to this issue:"])
+            for pr in linked_prs:
+                pr_state = pr.get("state", "unknown")
+                pr_number = pr.get("number", "?")
+                pr_title = pr.get("title", "")
+                pr_url = pr.get("url", "")
+                pr_branch = pr.get("head_branch", "")
+                lines.append(
+                    f"- PR #{pr_number} [{pr_state}]: {pr_title} "
+                    f"(branch: {pr_branch}) {pr_url}"
+                )
+            lines.append(
+                "Check if any existing PR already addresses this issue before making changes."
+            )
+
+        comments = issue_context.get("comments") or []
+        if comments:
+            recent_comments = comments[-10:]
+            lines.extend(["", "Recent issue comments:"])
+            for c in recent_comments:
+                author = c.get("author", "unknown")
+                body = c.get("body", "")
+                if body:
+                    lines.append(f"- @{author}: {body[:500]}")
+
     if context.repository_instructions:
         lines.extend(
             [

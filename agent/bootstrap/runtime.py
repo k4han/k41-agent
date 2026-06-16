@@ -33,6 +33,7 @@ from agent.modules.workspaces import (
 from agent.modules.github import migrate_github_tables
 from agent.modules.mcp import migrate_mcp_tables
 from agent.modules.conversations import migrate_conversation_tables
+from agent.modules.agent_runtime import migrate_agent_runtime_tables
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,7 @@ async def initialize_persistence() -> None:
     migrate_github_tables(get_database_url())
     migrate_mcp_tables(get_database_url())
     migrate_conversation_tables(get_database_url())
+    migrate_agent_runtime_tables(get_database_url())
     await prune_usage_events()
     await initialize_checkpointer()
 

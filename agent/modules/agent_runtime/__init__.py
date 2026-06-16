@@ -21,6 +21,7 @@ from agent.modules.agent_runtime.background_tasks import (
     TaskStatus,
     get_background_task_manager,
 )
+from agent.modules.agent_runtime.migrations import migrate_agent_runtime_tables
 from agent.modules.agent_runtime.models import BackgroundTaskRecord
 from agent.modules.agent_runtime.repository import (
     BackgroundTaskRepository,
@@ -51,6 +52,7 @@ __all__ = [
     "get_active_session_registry",
     "get_background_task_manager",
     "get_background_task_repository",
+    "migrate_agent_runtime_tables",
     "run_agent",
     "run_agent_edit_stream",
     "run_agent_full",
