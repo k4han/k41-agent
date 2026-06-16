@@ -762,3 +762,23 @@
   color: var(--accent, #0066cc);
 }
 
+@media (min-width: 981px) {
+  .app-layout {
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .main {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .content {
+    flex: 1;
+    overflow-y: auto;
+  }
+}
