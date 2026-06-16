@@ -117,8 +117,8 @@ def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:
                 "/redoc",
                 "/openapi.json",
                 "/login",  # Login page needs to be accessible without CSRF token
-                "/github/webhook",  # Webhooks use signature verification instead
-                "/telegram/webhook",
+                "/channels/github/webhook",  # Webhooks use signature verification instead
+                "/channels/telegram/webhook",
             },
         )
     else:
