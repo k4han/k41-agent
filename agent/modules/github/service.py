@@ -654,9 +654,12 @@ class GitHubAutomationService:
                 has_changes = await remote_has_changes(ref)
 
             if not has_changes:
+                comment_body = "Kai Agent finished running but did not produce any repository changes."
+                if task.result.strip():
+                    comment_body += f"\n\n**Agent Summary:**\n\n{task.result.strip()}"
                 await self._post_completion_comment(
                     context,
-                    body="Kai Agent finished running but did not produce any repository changes.",
+                    body=comment_body,
                 )
                 task.result = f"{task.result}\n\nNo repository changes were produced.".strip()
                 return
@@ -788,6 +791,11 @@ def _build_agent_prompt(
         "Modify files in the current working directory to address the issue.",
         "Do not commit, push, or open the pull request yourself; the backend will do that after you finish.",
         "",
+        "CRITICAL INSTRUCTION:",
+        "Check if any existing open Pull Request or recent comments indicate that the issue has already been resolved or is being handled.",
+        "If you confirm that the issue is already addressed and no further changes are needed, DO NOT modify any files in the workspace.",
+        "Instead, immediately finish the task and write a summary explaining that the issue has already been addressed (mentioning the specific PR number or user comment).",
+        "",
         f"Issue: #{context.issue_number} {context.issue_title}",
         f"Issue URL: {context.issue_url}",
         "",
@@ -810,7 +818,9 @@ def _build_agent_prompt(
                     f"(branch: {pr_branch}) {pr_url}"
                 )
             lines.append(
-                "Check if any existing PR already addresses this issue before making changes."
+                "Check if any existing PR already addresses this issue before making changes. "
+                "If an open PR already addresses this issue and you do not need to make additional changes, "
+                "do not modify any files, and finish immediately with a summary stating that the issue is already addressed."
             )
 
         comments = issue_context.get("comments") or []
