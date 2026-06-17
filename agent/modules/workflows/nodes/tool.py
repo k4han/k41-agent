@@ -120,4 +120,4 @@ async def tool_node(
         override_tool_names=allowed_tool_names,
     )
     tools = _include_pending_control_tools(state, tools)
-    return await ToolNode(tools).ainvoke(state, config=config)
+    return await ToolNode(tools).ainvoke(state, config=config, runtime=runtime)

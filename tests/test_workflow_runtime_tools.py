@@ -283,7 +283,7 @@ async def test_tool_node_resolves_runtime_allowed_tools(monkeypatch):
         def __init__(self, tools):
             captured["tool_names"] = [tool.name for tool in tools]
 
-        async def ainvoke(self, state, *, config):
+        async def ainvoke(self, state, *, config, runtime=None):
             captured["state"] = state
             captured["config"] = config
             return {"messages": []}
@@ -322,7 +322,7 @@ async def test_tool_node_allows_pending_plan_mode_tool_after_agent_switch(monkey
         def __init__(self, tools):
             captured["tool_names"] = [tool.name for tool in tools]
 
-        async def ainvoke(self, state, *, config):
+        async def ainvoke(self, state, *, config, runtime=None):
             captured["state"] = state
             captured["config"] = config
             return {"messages": []}
@@ -376,7 +376,7 @@ async def test_tool_node_allows_pending_ask_user_tool_after_agent_switch(monkeyp
         def __init__(self, tools):
             captured["tool_names"] = [tool.name for tool in tools]
 
-        async def ainvoke(self, state, *, config):
+        async def ainvoke(self, state, *, config, runtime=None):
             captured["state"] = state
             captured["config"] = config
             return {"messages": []}

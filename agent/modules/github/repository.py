@@ -123,6 +123,19 @@ class GitHubRepositoryStore:
             result = await session.execute(stmt)
             return result.scalar_one_or_none()
 
+    async def get_binding_by_full_name(
+        self,
+        full_name: str,
+    ) -> dict[str, Any] | None:
+        session = await get_async_session()
+        async with session:
+            stmt = select(GitHubRepositoryBinding).where(
+                GitHubRepositoryBinding.full_name == full_name
+            )
+            result = await session.execute(stmt)
+            binding = result.scalar_one_or_none()
+            return _serialize_binding(binding) if binding else None
+
     async def get_serialized_binding_by_repository_id(
         self,
         repository_id: int,

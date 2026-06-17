@@ -162,10 +162,55 @@ class GitHubAppClient:
         issue_number: int,
     ) -> list[dict[str, Any]]:
         token = await self.get_installation_token(installation_id)
-        return await self._get_all_pages(
-            f"/repos/{full_name}/issues/{issue_number}/pull-requests",
+        # GitHub REST API does not have an endpoint to list PRs linked to an issue.
+        # Use the Search API to find PRs that reference this issue number.
+        query = f"repo:{full_name} type:pr {issue_number} in:title"
+        return await self._search_issues(query=query, token=token)
+
+    async def get_pull_request(
+        self,
+        *,
+        installation_id: int,
+        full_name: str,
+        pull_request_number: int,
+    ) -> dict[str, Any]:
+        token = await self.get_installation_token(installation_id)
+        return await self._get_json(
+            f"/repos/{full_name}/pulls/{pull_request_number}",
             token=token,
         )
+
+    async def get_pull_request_diff(
+        self,
+        *,
+        installation_id: int,
+        full_name: str,
+        pull_request_number: int,
+    ) -> str:
+        token = await self.get_installation_token(installation_id)
+        headers = self._headers(token)
+        headers["Accept"] = "application/vnd.github.diff"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(
+                f"{GITHUB_API_URL}/repos/{full_name}/pulls/{pull_request_number}",
+                headers=headers,
+            )
+            response.raise_for_status()
+            return response.text
+
+    async def _get_json(
+        self,
+        path: str,
+        *,
+        token: str,
+    ) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(
+                f"{GITHUB_API_URL}{path}",
+                headers=self._headers(token),
+            )
+            response.raise_for_status()
+            return response.json()
 
     async def _get_all_pages(
         self,
@@ -186,6 +231,32 @@ class GitHubAppClient:
                 response.raise_for_status()
                 data = response.json()
                 page_items = data.get(envelope_key, []) if envelope_key else data
+                if not page_items:
+                    break
+                items.extend(page_items)
+                if len(page_items) < 100:
+                    break
+                page += 1
+        return items
+
+    async def _search_issues(
+        self,
+        *,
+        query: str,
+        token: str,
+    ) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        page = 1
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            while True:
+                response = await client.get(
+                    f"{GITHUB_API_URL}/search/issues",
+                    headers=self._headers(token),
+                    params={"q": query, "per_page": 100, "page": page},
+                )
+                response.raise_for_status()
+                data = response.json()
+                page_items = data.get("items", [])
                 if not page_items:
                     break
                 items.extend(page_items)

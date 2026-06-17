@@ -103,6 +103,7 @@ async def _prepare_local_workspace(
         metadata={
             "source": "github",
             "repository_full_name": binding.full_name,
+            "installation_id": int(getattr(binding, "installation_id", 0) or 0),
             "branch": prepared.branch,
             "base_branch": prepared.base_branch,
         },
@@ -151,6 +152,9 @@ async def _prepare_remote_workspace(
         raise ValueError(f"Unsupported remote backend: {backend}")
 
     metadata = dict(ref.metadata or {})
+    metadata["source"] = "github"
+    metadata["repository_full_name"] = binding.full_name
+    metadata["installation_id"] = int(getattr(binding, "installation_id", 0) or 0)
     metadata["branch"] = branch
     metadata["base_branch"] = default_branch or binding.default_branch or "main"
     return WorkspaceRef(

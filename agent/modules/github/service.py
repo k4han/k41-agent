@@ -822,6 +822,11 @@ def _build_agent_prompt(
                 "If an open PR already addresses this issue and you do not need to make additional changes, "
                 "do not modify any files, and finish immediately with a summary stating that the issue is already addressed."
             )
+            lines.append(
+                "If you need more details about a linked PR, use the github_get_pull_request or "
+                "github_get_pull_request_diff tools; they authenticate with the GitHub App installation "
+                "token and work for private repositories."
+            )
 
         comments = issue_context.get("comments") or []
         if comments:
