@@ -25,6 +25,11 @@ from agent.modules.workspaces.constants import (
     MAX_TREE_ENTRIES,
     MAX_UNTRACKED_FILE_CHARS,
 )
+from agent.modules.workspaces.search_utils import (
+    clamp_grep_results,
+    compile_glob_pattern,
+    match_glob_path,
+)
 from agent.modules.workspaces.migrations import migrate_workspace_tables
 from agent.modules.workspaces.models import ThreadWorkspace
 from agent.modules.workspaces.refs import (
@@ -143,6 +148,9 @@ __all__ = [
     "WorkspaceUnavailableError",
     "archive_sandbox",
     "attach_github_repository_to_daytona_workspace",
+    "clamp_grep_results",
+    "compile_glob_pattern",
+    "match_glob_path",
     "attach_github_repository_to_local_workspace",
     "attach_github_repository_to_local_workspace_async",
     "attach_github_repository_to_modal_workspace",

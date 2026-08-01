@@ -57,7 +57,7 @@ def test_sandbox_glob_script_filters_inside_sandbox(tmp_path):
         pattern="**/*.py",
     )
 
-    assert result == ["pkg/inner.py"]
+    assert result == ["main.py", "pkg/inner.py"]
 
 
 def test_sandbox_glob_script_can_include_directories(tmp_path):

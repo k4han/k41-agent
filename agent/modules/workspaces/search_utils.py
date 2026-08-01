@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import glob
 import json
+import re
 import shlex
 
 from agent.modules.workspaces.constants import (
@@ -15,9 +17,10 @@ DIRECTORY_NOT_FOUND_MESSAGE = "(Directory not found)"
 NO_MATCHES_MESSAGE = "(No matches)"
 
 SANDBOX_GLOB_SCRIPT = r"""
-import fnmatch
+import glob
 import json
 import os
+import re
 import sys
 
 root, target, pattern, include_dirs_raw, limit_raw, ignored_raw = sys.argv[1:7]
@@ -29,6 +32,8 @@ if not os.path.isdir(target):
     print("(Directory not found)")
     raise SystemExit(0)
 
+pattern_regex = re.compile(glob.translate(pattern, recursive=True, include_hidden=True))
+
 count = 0
 for current_root, dirs, files in os.walk(target, followlinks=False):
     dirs[:] = sorted(name for name in dirs if name not in ignored)
@@ -39,7 +44,15 @@ for current_root, dirs, files in os.walk(target, followlinks=False):
             continue
         full_path = os.path.join(current_root, name)
         rel_path = os.path.relpath(full_path, root).replace(os.sep, "/")
-        if fnmatch.fnmatch(rel_path, pattern) or fnmatch.fnmatch(name, pattern):
+        sub_rel_path = os.path.relpath(full_path, target).replace(os.sep, "/")
+        check_rel = f"{rel_path}/" if is_dir else rel_path
+        check_sub = f"{sub_rel_path}/" if is_dir else sub_rel_path
+        if (
+            pattern_regex.match(rel_path)
+            or pattern_regex.match(check_rel)
+            or pattern_regex.match(sub_rel_path)
+            or pattern_regex.match(check_sub)
+        ):
             print(f"{rel_path}/" if is_dir else rel_path)
             count += 1
             if count >= limit:
@@ -51,6 +64,26 @@ def clamp_grep_results(max_results: int) -> int:
     if max_results <= 0:
         return MAX_GREP_RESULTS
     return min(max_results, MAX_GREP_RESULTS)
+
+
+def compile_glob_pattern(pattern: str) -> re.Pattern[str]:
+    return re.compile(glob.translate(pattern, recursive=True, include_hidden=True))
+
+
+def match_glob_path(
+    pattern_regex: re.Pattern[str],
+    rel_path: str,
+    sub_rel_path: str,
+    is_dir: bool,
+) -> bool:
+    check_rel = f"{rel_path}/" if is_dir else rel_path
+    check_sub = f"{sub_rel_path}/" if is_dir else sub_rel_path
+    return bool(
+        pattern_regex.match(rel_path)
+        or pattern_regex.match(check_rel)
+        or pattern_regex.match(sub_rel_path)
+        or pattern_regex.match(check_sub)
+    )
 
 
 def build_sandbox_glob_command(
@@ -165,6 +198,8 @@ __all__ = [
     "build_sandbox_glob_command",
     "build_sandbox_grep_command",
     "clamp_grep_results",
+    "compile_glob_pattern",
+    "match_glob_path",
     "render_sandbox_glob_output",
     "render_sandbox_grep_output",
     "rewrite_sandbox_grep_line",

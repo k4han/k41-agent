@@ -40,11 +40,57 @@ class TestGlobTool:
         (deep / "target.py").write_text("x", encoding="utf-8")
 
         result = await glob_module.glob.coroutine(
-            pattern="target.py",
+            pattern="**/target.py",
             runtime=_runtime(str(sandbox)),
         )
 
         assert "a/b/c/target.py" in result
+
+    @pytest.mark.asyncio
+    async def test_glob_double_star_multilevel(self, tmp_path):
+        sandbox = tmp_path / "sandbox"
+        sandbox.mkdir()
+        src = sandbox / "src"
+        src.mkdir()
+        (src / "root_level.py").write_text("x", encoding="utf-8")
+        level1 = src / "sub"
+        level1.mkdir()
+        (level1 / "level1.py").write_text("x", encoding="utf-8")
+        level2 = level1 / "nested"
+        level2.mkdir()
+        (level2 / "level2.py").write_text("x", encoding="utf-8")
+        other = sandbox / "other"
+        other.mkdir()
+        (other / "outside.py").write_text("x", encoding="utf-8")
+
+        result = await glob_module.glob.coroutine(
+            pattern="src/**/*.py",
+            runtime=_runtime(str(sandbox)),
+        )
+
+        assert "src/root_level.py" in result
+        assert "src/sub/level1.py" in result
+        assert "src/sub/nested/level2.py" in result
+        assert "other/outside.py" not in result
+
+    @pytest.mark.asyncio
+    async def test_glob_single_star_does_not_cross_directories(self, tmp_path):
+        sandbox = tmp_path / "sandbox"
+        sandbox.mkdir()
+        src = sandbox / "src"
+        src.mkdir()
+        (src / "top.py").write_text("x", encoding="utf-8")
+        nested = src / "nested"
+        nested.mkdir()
+        (nested / "deep.py").write_text("x", encoding="utf-8")
+
+        result = await glob_module.glob.coroutine(
+            pattern="src/*.py",
+            runtime=_runtime(str(sandbox)),
+        )
+
+        assert "src/top.py" in result
+        assert "src/nested/deep.py" not in result
 
     @pytest.mark.asyncio
     async def test_glob_skips_ignored_directories(self, tmp_path):

@@ -18,7 +18,10 @@ from agent.modules.workspaces import (
     MAX_LIST_FILES_ENTRIES,
     WorkspaceScope,
     WorkspaceFileIO,
+    compile_glob_pattern,
+    match_glob_path,
 )
+
 
 THREAD_STORAGE_MOUNT = ".k41-agent"
 THREAD_STORAGE_DIRS = ("generated-images", "assets", "memory")
@@ -296,6 +299,7 @@ class WorkspaceStorageFileIO:
         if not base.is_dir():
             return "(Directory not found)"
 
+        pattern_regex = compile_glob_pattern(pattern)
         matches: list[str] = []
         truncated = False
         for current_root, dirs, files in os.walk(base, followlinks=False):
@@ -305,9 +309,10 @@ class WorkspaceStorageFileIO:
             for name, is_dir in sorted(entries, key=lambda item: (not item[1], item[0].lower())):
                 if is_dir and not include_dirs:
                     continue
-                candidate_rel = os.path.relpath(os.path.join(current_root, name), root)
-                candidate_rel = candidate_rel.replace(os.sep, "/")
-                if fnmatch.fnmatchcase(candidate_rel, pattern) or fnmatch.fnmatchcase(name, pattern):
+                full_path = os.path.join(current_root, name)
+                candidate_rel = os.path.relpath(full_path, root).replace(os.sep, "/")
+                candidate_sub_rel = os.path.relpath(full_path, base).replace(os.sep, "/")
+                if match_glob_path(pattern_regex, candidate_rel, candidate_sub_rel, is_dir):
                     suffix = "/" if is_dir else ""
                     matches.append(f"{_virtual_path(candidate_rel)}{suffix}")
                     if len(matches) >= MAX_GLOB_RESULTS:

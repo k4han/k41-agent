@@ -15,8 +15,11 @@ from agent.modules.workspaces.constants import (
     MAX_GLOB_RESULTS,
     MAX_GREP_LINE_CHARS,
 )
-from agent.modules.workspaces.refs import WorkspaceRef
-from agent.modules.workspaces.search_utils import clamp_grep_results
+from agent.modules.workspaces.search_utils import (
+    clamp_grep_results,
+    compile_glob_pattern,
+    match_glob_path,
+)
 from agent.modules.workspaces.service import (
     delete_workspace_entry,
     get_workspace_changes,
@@ -100,6 +103,8 @@ class LocalWorkspaceBackend:
         if not os.path.isdir(base):
             return "(Directory not found)"
 
+        pattern_regex = compile_glob_pattern(pattern)
+
         matches: list[str] = []
         truncated = False
 
@@ -112,12 +117,15 @@ class LocalWorkspaceBackend:
             ):
                 if not include_dirs and is_dir:
                     continue
-                candidate_rel = os.path.relpath(
-                    os.path.join(current_root, name), str(self.root)
+                full_path = os.path.join(current_root, name)
+                candidate_rel = os.path.relpath(full_path, str(self.root)).replace(
+                    os.sep, "/"
                 )
-                candidate_rel = candidate_rel.replace(os.sep, "/")
-                if fnmatch.fnmatchcase(candidate_rel, pattern) or fnmatch.fnmatchcase(
-                    name, pattern
+                candidate_sub_rel = os.path.relpath(full_path, base).replace(
+                    os.sep, "/"
+                )
+                if match_glob_path(
+                    pattern_regex, candidate_rel, candidate_sub_rel, is_dir
                 ):
                     matches.append(f"{candidate_rel}/" if is_dir else candidate_rel)
                     if len(matches) >= MAX_GLOB_RESULTS:
