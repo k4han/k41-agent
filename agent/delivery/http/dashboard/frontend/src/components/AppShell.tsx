@@ -194,11 +194,11 @@ export function AppShell(props: {
           new CustomEvent(CUSTOM_DOM_EVENTS.THREAD_START_RUNNING, {
             detail: {
               threadId: session.thread_id,
-              title: session.current_step,
               agent_name: session.agent_name,
             },
           }),
         );
+        window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.THREADS_CHANGED));
       } catch (err) {
         console.error("Failed to parse session_started event", err);
       }
@@ -214,6 +214,7 @@ export function AppShell(props: {
             detail: { threadId: stoppedData.thread_id },
           }),
         );
+        window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.THREADS_CHANGED));
       } catch (err) {
         console.error("Failed to parse session_stopped event", err);
       }
@@ -228,7 +229,6 @@ export function AppShell(props: {
           new CustomEvent(CUSTOM_DOM_EVENTS.THREAD_START_RUNNING, {
             detail: {
               threadId: session.thread_id,
-              title: session.current_step,
               agent_name: session.agent_name,
             },
           }),
@@ -261,7 +261,6 @@ export function AppShell(props: {
 
     const exists = historyThreads().some((t) => t.thread_id === threadId);
     if (exists) {
-      const updatedAt = new Date().toISOString();
       applyHistoryState({
         threads: historyThreads().map((thread) => (
           thread.thread_id === threadId
@@ -269,7 +268,6 @@ export function AppShell(props: {
                 ...thread,
                 agent_name: agent_name || thread.agent_name,
                 workspace: workspace !== undefined ? workspaceBinding : thread.workspace,
-                updated_at: updatedAt,
               }
             : thread
         )),

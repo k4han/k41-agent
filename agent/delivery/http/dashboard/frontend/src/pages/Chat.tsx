@@ -608,7 +608,10 @@ export function ChatPage() {
     return Boolean(task && ACTIVE_TASK_STATUSES.has(task.status));
   });
   const conversationBusy = createMemo(() => (
-    streaming() || threadLoading() || backgroundTaskActive() || backgroundLive()
+    streaming() || threadLoading() || backgroundTaskActive() || backgroundLive() || Boolean(activeSession())
+  ));
+  const stopActive = createMemo(() => (
+    streaming() || backgroundTaskActive() || backgroundLive() || Boolean(activeSession())
   ));
   const workspaceLocked = createMemo(() => Boolean(currentThreadId() && workingDir().trim()));
   const workspaceReady = createMemo(() => (
@@ -1160,7 +1163,34 @@ export function ChatPage() {
     }
   };
 
-  const stopChat = () => controller()?.abort();
+  const stopChat = async () => {
+    if (streaming()) {
+      controller()?.abort();
+      return;
+    }
+    const tid = currentThreadId();
+    if (!tid) {
+      return;
+    }
+    const requests: Promise<unknown>[] = [postJson(API_PATHS.sessionsStop, { thread_id: tid })];
+    const taskId = backgroundTask()?.task_id;
+    if (taskId) {
+      requests.push(postJson(API_PATHS.taskCancel(taskId), {}));
+    }
+    const results = await Promise.allSettled(requests);
+    if (results.some((result) => result.status === "fulfilled")) {
+      showToast("Session stop requested.");
+    } else {
+      const rejected = results.find((result) => result.status === "rejected") as
+        PromiseRejectedResult | undefined;
+      showToast(
+        rejected?.reason instanceof Error
+          ? rejected.reason.message
+          : "Failed to stop session",
+        "error",
+      );
+    }
+  };
   const handleResume = () => {
     void sendMessage(true);
   };
@@ -1421,6 +1451,7 @@ export function ChatPage() {
 
   createEffect(() => {
     const threadId = currentThreadId();
+    const backgroundThread = isBackgroundThread();
     if (threadId) {
       const fetchInitialSession = async () => {
         try {
@@ -1428,7 +1459,7 @@ export function ChatPage() {
           const found = payload.sessions.find((s) => s.thread_id === threadId);
           if (threadId === currentThreadId()) {
             setActiveSession(found || null);
-            if (found && !streaming()) {
+            if (found && !streaming() && threadData() && !backgroundThread) {
               void reconnectStream(threadId);
             }
           }
@@ -1602,7 +1633,7 @@ export function ChatPage() {
                 onAddFiles={addFiles}
                 onPasteAsAttachment={handlePasteAsAttachment}
                 onRemoveAttachment={removeAttachment}
-                streaming={streaming()}
+                stopActive={stopActive()}
                 composerDisabled={composerDisabled()}
                 inputDisabled={inputDisabled()}
                 workspaceMissing={workspaceMissing()}

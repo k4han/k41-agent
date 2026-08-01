@@ -12,6 +12,7 @@ from agent.modules.agent_runtime.runner import (
     run_agent_edit_stream,
     run_agent_full,
     run_agent_stream,
+    track_active_session,
 )
 from agent.modules.agent_runtime.background_tasks import (
     BackgroundTask,
@@ -57,6 +58,7 @@ __all__ = [
     "run_agent_edit_stream",
     "run_agent_full",
     "run_agent_stream",
+    "track_active_session",
     "ChatStreamManager",
     "ChatStreamSession",
     "get_chat_stream_manager",

@@ -520,3 +520,162 @@ async def test_background_task_injects_telegram_state_without_conversation_or_wo
     messages = captured["values"]["messages"]
     assert messages[0].content == "[Background Task]\nfix issue"
     assert messages[1].content == "done"
+
+
+@pytest.mark.asyncio
+async def test_background_task_session_stays_active_through_completion_hook(
+    background_task_db,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The dashboard session must cover the whole task lifecycle.
+
+    Regression test: previously the active session was unregistered as soon as
+    the agent stream ended, so the sidebar dropped the thread while the
+    completion hook (e.g. GitHub push/PR publishing) was still running.
+    """
+    import agent.modules.agent_runtime.runner as runner_module
+    from agent.modules.agent_runtime.active_sessions import (
+        current_session_id_var,
+        get_active_session_registry,
+    )
+
+    registry = get_active_session_registry()
+    observed: dict = {}
+
+    async def fake_run_agent_stream(**kwargs):
+        observed["stream_session_id"] = current_session_id_var.get()
+        observed["stream_active"] = any(
+            session["thread_id"] == kwargs["thread_id"]
+            for session in registry.list_active()
+        )
+        yield {"type": "final", "content": "done"}
+
+    async def completion_hook(task: BackgroundTask) -> None:
+        observed["hook_session_id"] = current_session_id_var.get()
+        observed["hook_active"] = any(
+            session["thread_id"] == task.thread_id
+            for session in registry.list_active()
+        )
+
+    monkeypatch.setattr(runner_module, "run_agent_stream", fake_run_agent_stream)
+
+    manager = BackgroundTaskManager()
+    task_id = await manager.submit(
+        "do work",
+        agent_name="default",
+        completion_hook=completion_hook,
+    )
+    task = await _wait_for_task_status(manager, task_id, "completed")
+
+    assert observed["stream_active"] is True
+    assert observed["hook_active"] is True
+    assert observed["stream_session_id"] is not None
+    assert observed["stream_session_id"] == observed["hook_session_id"]
+    assert all(
+        session["thread_id"] != task["thread_id"]
+        for session in registry.list_active()
+    )
+
+
+@pytest.mark.asyncio
+async def test_background_task_retry_leaves_no_active_session(
+    background_task_db,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed attempt must not leak its session when the task retries."""
+    import agent.modules.agent_runtime.runner as runner_module
+    from agent.modules.agent_runtime.active_sessions import get_active_session_registry
+
+    registry = get_active_session_registry()
+    attempts = {"count": 0}
+
+    async def flaky_run_agent_stream(**kwargs):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise RuntimeError("boom")
+        yield {"type": "final", "content": "done"}
+
+    monkeypatch.setattr(runner_module, "run_agent_stream", flaky_run_agent_stream)
+
+    manager = BackgroundTaskManager()
+    task_id = await manager.submit("do work", agent_name="default", max_retries=1)
+    task = await _wait_for_task_status(manager, task_id, "completed")
+
+    assert task["retry_count"] == 1
+    assert attempts["count"] == 2
+
+    # The failed attempt's session reference is released from its own
+    # (still-finishing) execution context, which can lag slightly behind the
+    # retried attempt's completion. Wait for the session to be cleaned up.
+    for _ in range(100):
+        if all(
+            session["thread_id"] != task["thread_id"]
+            for session in registry.list_active()
+        ):
+            break
+        await asyncio.sleep(0.01)
+    else:
+        raise AssertionError("session leaked after retried background task")
+
+
+@pytest.mark.asyncio
+async def test_active_session_registry_reuses_session_per_thread() -> None:
+    """Nested runs on the same thread share one reference-counted session."""
+    from agent.modules.agent_runtime.active_sessions import (
+        ActiveSession,
+        ActiveSessionRegistry,
+    )
+
+    registry = ActiveSessionRegistry()
+
+    def make_session(thread_id: str) -> ActiveSession:
+        return ActiveSession(
+            thread_id=thread_id,
+            platform="task",
+            user_id="dashboard",
+            channel_id="abc",
+            agent_name="default",
+        )
+
+    events: list[str] = []
+
+    class FakeQueue:
+        def put_nowait(self, event):
+            events.append(event["type"])
+
+    async def flush_broadcasts() -> None:
+        # _broadcast schedules queue pushes via loop.call_soon_threadsafe.
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    registry._listeners.add(FakeQueue())
+
+    first = registry.acquire(make_session("thread-1"))
+    second = registry.acquire(make_session("thread-1"))
+    other = registry.acquire(make_session("thread-2"))
+    await flush_broadcasts()
+
+    assert first == second
+    assert other != first
+    assert registry.count() == 2
+    assert events == ["session_started", "session_started"]
+
+    registry.release(first)
+    await flush_broadcasts()
+    assert registry.count() == 2  # thread-1 still has one reference left
+    assert events == ["session_started", "session_started"]
+
+    registry.release(second)
+    await flush_broadcasts()
+    assert registry.count() == 1
+    assert events == ["session_started", "session_started", "session_stopped"]
+
+    registry.release(other)
+    await flush_broadcasts()
+    assert registry.count() == 0
+    assert events == [
+        "session_started",
+        "session_started",
+        "session_stopped",
+        "session_stopped",
+    ]

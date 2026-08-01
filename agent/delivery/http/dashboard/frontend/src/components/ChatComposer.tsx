@@ -32,7 +32,7 @@ export interface ChatComposerProps {
   onAddFiles: (files: FileList | null) => Promise<void>;
   onPasteAsAttachment: (text: string) => void;
   onRemoveAttachment: (id: number) => void;
-  streaming: boolean;
+  stopActive: boolean;
   composerDisabled: boolean;
   inputDisabled: boolean;
   workspaceMissing: boolean;
@@ -251,7 +251,7 @@ export function ChatComposer(props: ChatComposerProps) {
           </Show>
         </div>
         <Show
-          when={props.streaming}
+          when={props.stopActive}
           fallback={
             <button
               class="chat-composer-icon"

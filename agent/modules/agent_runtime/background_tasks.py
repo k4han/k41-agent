@@ -19,6 +19,11 @@ from enum import Enum
 from html import escape as escape_html
 from typing import Any, Awaitable, Callable
 
+from agent.modules.agent_runtime.active_sessions import (
+    SESSION_STEP_FINALIZING,
+    current_session_id_var,
+    get_active_session_registry,
+)
 from agent.modules.notifications import send_notification as _send_notification
 from agent.modules.workspaces import (
     WorkspaceRef,
@@ -391,6 +396,7 @@ class BackgroundTaskManager:
 
     async def _execute(self, task: BackgroundTask, run_fn: Any) -> None:
         """Execute the task in the background with timeout and retry support."""
+        from agent.modules.agent_runtime.runner import track_active_session
         from agent.modules.conversations import THREAD_KIND_BACKGROUND, upsert_conversation_thread
 
         task.status = TaskStatus.RUNNING
@@ -401,127 +407,137 @@ class BackgroundTaskManager:
             logger.warning("Failed to persist background task %s start: %s", task.task_id, exc)
         self._publish_task_event(task)
 
-        try:
-            if task.task_timeout and task.task_timeout > 0:
-                result = await asyncio.wait_for(
-                    self._run_streamed_task(task, run_fn),
-                    timeout=task.task_timeout,
-                )
-            else:
-                result = await self._run_streamed_task(task, run_fn)
-            task.result = _truncate_stored_text(result)
-            if task.completion_hook is not None:
-                await task.completion_hook(task)
-            task.status = TaskStatus.COMPLETED
-            logger.info("Background task %s completed successfully.", task.task_id)
-        except asyncio.TimeoutError:
-            task.retry_count += 1
-            if task.retry_count <= task.max_retries:
-                logger.warning(
-                    "Background task %s timed out (attempt %d/%d), retrying...",
-                    task.task_id,
-                    task.retry_count,
-                    task.max_retries,
-                )
-                task.status = TaskStatus.PENDING
-                task.started_at = None
-                task.error = ""
-                try:
-                    await self._persist_task(task)
-                except Exception:
-                    pass
-                async_task = asyncio.create_task(
-                    self._execute(task, run_fn),
-                    name=f"bg-task-{task.task_id}-retry-{task.retry_count}",
-                )
-                task._async_task = async_task
-                return
-
-            task.status = TaskStatus.FAILED
-            task.error = f"Task timed out after {task.task_timeout}s"
-            self._publish_agent_event(task, {"type": "error", "content": task.error})
-            logger.error(
-                "Background task %s timed out after %d retries.",
-                task.task_id,
-                task.max_retries,
-            )
-        except asyncio.CancelledError:
-            task.status = TaskStatus.CANCELLED
-            task.error = "Task was cancelled."
-            self._publish_agent_event(task, {"type": "error", "content": task.error})
-            logger.info("Background task %s was cancelled.", task.task_id)
-        except BaseException as exc:
-            from agent.shared.infrastructure.errors import classify_agent_error
-
-            agent_error = classify_agent_error(exc)
-            task.retry_count += 1
-            if task.retry_count <= task.max_retries:
-                logger.warning(
-                    "Background task %s failed (attempt %d/%d), retrying: %s",
-                    task.task_id,
-                    task.retry_count,
-                    task.max_retries,
-                    exc,
-                )
-                task.status = TaskStatus.PENDING
-                task.started_at = None
-                task.error = ""
-                try:
-                    await self._persist_task(task)
-                except Exception:
-                    pass
-                async_task = asyncio.create_task(
-                    self._execute(task, run_fn),
-                    name=f"bg-task-{task.task_id}-retry-{task.retry_count}",
-                )
-                task._async_task = async_task
-                return
-
-            task.status = TaskStatus.FAILED
-            task.error = _truncate_stored_text(agent_error.message)
-            self._publish_agent_event(
-                task,
-                {
-                    "type": "error",
-                    "code": agent_error.code,
-                    "content": agent_error.message,
-                },
-            )
-            logger.error(
-                "Background task %s failed: %s",
-                task.task_id,
-                exc,
-                exc_info=True,
-            )
-            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
-                raise
-        finally:
-            if task.status in (TaskStatus.PENDING,):
-                try:
-                    await self._persist_task(task)
-                except Exception:
-                    pass
-            else:
-                task.completed_at = time.time()
-                try:
-                    await self._persist_task(task)
-                    await upsert_conversation_thread(
-                        thread_id=task.thread_id,
-                        agent_name=task.agent_name,
-                        provider=task.provider,
-                        model=task.model,
-                        title=task.request,
-                        kind=THREAD_KIND_BACKGROUND,
+        # Track one active session for the whole task lifecycle so the
+        # dashboard running state stays stable through the agent run, the
+        # completion hook (e.g. GitHub push/PR publishing), and cleanup.
+        with track_active_session(task.thread_id, task.agent_name):
+            try:
+                if task.task_timeout and task.task_timeout > 0:
+                    result = await asyncio.wait_for(
+                        self._run_streamed_task(task, run_fn),
+                        timeout=task.task_timeout,
                     )
-                except Exception as exc:
-                    logger.warning("Failed to persist background task %s completion: %s", task.task_id, exc)
-                self._publish_done_event(task)
-                await self._notify_completion(task)
-            with self._lock:
-                self._trim_completed()
-                if task.status != TaskStatus.PENDING:
-                    task._async_task = None
-            self._publish_task_event(task)
+                else:
+                    result = await self._run_streamed_task(task, run_fn)
+                task.result = _truncate_stored_text(result)
+                if task.completion_hook is not None:
+                    session_id = current_session_id_var.get()
+                    if session_id:
+                        get_active_session_registry().update_step(
+                            session_id,
+                            SESSION_STEP_FINALIZING,
+                        )
+                    await task.completion_hook(task)
+                task.status = TaskStatus.COMPLETED
+                logger.info("Background task %s completed successfully.", task.task_id)
+            except asyncio.TimeoutError:
+                task.retry_count += 1
+                if task.retry_count <= task.max_retries:
+                    logger.warning(
+                        "Background task %s timed out (attempt %d/%d), retrying...",
+                        task.task_id,
+                        task.retry_count,
+                        task.max_retries,
+                    )
+                    task.status = TaskStatus.PENDING
+                    task.started_at = None
+                    task.error = ""
+                    try:
+                        await self._persist_task(task)
+                    except Exception:
+                        pass
+                    async_task = asyncio.create_task(
+                        self._execute(task, run_fn),
+                        name=f"bg-task-{task.task_id}-retry-{task.retry_count}",
+                    )
+                    task._async_task = async_task
+                    return
+
+                task.status = TaskStatus.FAILED
+                task.error = f"Task timed out after {task.task_timeout}s"
+                self._publish_agent_event(task, {"type": "error", "content": task.error})
+                logger.error(
+                    "Background task %s timed out after %d retries.",
+                    task.task_id,
+                    task.max_retries,
+                )
+            except asyncio.CancelledError:
+                task.status = TaskStatus.CANCELLED
+                task.error = "Task was cancelled."
+                self._publish_agent_event(task, {"type": "error", "content": task.error})
+                logger.info("Background task %s was cancelled.", task.task_id)
+            except BaseException as exc:
+                from agent.shared.infrastructure.errors import classify_agent_error
+
+                agent_error = classify_agent_error(exc)
+                task.retry_count += 1
+                if task.retry_count <= task.max_retries:
+                    logger.warning(
+                        "Background task %s failed (attempt %d/%d), retrying: %s",
+                        task.task_id,
+                        task.retry_count,
+                        task.max_retries,
+                        exc,
+                    )
+                    task.status = TaskStatus.PENDING
+                    task.started_at = None
+                    task.error = ""
+                    try:
+                        await self._persist_task(task)
+                    except Exception:
+                        pass
+                    async_task = asyncio.create_task(
+                        self._execute(task, run_fn),
+                        name=f"bg-task-{task.task_id}-retry-{task.retry_count}",
+                    )
+                    task._async_task = async_task
+                    return
+
+                task.status = TaskStatus.FAILED
+                task.error = _truncate_stored_text(agent_error.message)
+                self._publish_agent_event(
+                    task,
+                    {
+                        "type": "error",
+                        "code": agent_error.code,
+                        "content": agent_error.message,
+                    },
+                )
+                logger.error(
+                    "Background task %s failed: %s",
+                    task.task_id,
+                    exc,
+                    exc_info=True,
+                )
+                if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                    raise
+            finally:
+                if task.status in (TaskStatus.PENDING,):
+                    try:
+                        await self._persist_task(task)
+                    except Exception:
+                        pass
+                else:
+                    task.completed_at = time.time()
+                    try:
+                        await self._persist_task(task)
+                        await upsert_conversation_thread(
+                            thread_id=task.thread_id,
+                            agent_name=task.agent_name,
+                            provider=task.provider,
+                            model=task.model,
+                            title=task.request,
+                            kind=THREAD_KIND_BACKGROUND,
+                        )
+                    except Exception as exc:
+                        logger.warning("Failed to persist background task %s completion: %s", task.task_id, exc)
+                    self._publish_done_event(task)
+                    await self._notify_completion(task)
+                with self._lock:
+                    self._trim_completed()
+                    if task.status != TaskStatus.PENDING:
+                        task._async_task = None
+                self._publish_task_event(task)
 
     async def _run_streamed_task(self, task: BackgroundTask, run_fn: Any) -> str:
         message_chunks: list[str] = []

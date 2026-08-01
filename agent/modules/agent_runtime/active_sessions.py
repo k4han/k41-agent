@@ -22,6 +22,7 @@ MAX_RECORDED_TOOLS = 20
 SESSION_STEP_INITIALIZING = "initializing"
 SESSION_STEP_THINKING = "thinking"
 SESSION_STEP_RESPONDING = "responding"
+SESSION_STEP_FINALIZING = "finalizing"
 TOOL_STEP_PREFIX = "tool:"
 
 
@@ -79,6 +80,7 @@ class ActiveSessionRegistry:
     def __init__(self) -> None:
         self._sessions: dict[str, ActiveSession] = {}
         self._tasks: dict[str, Any] = {}
+        self._refcounts: dict[str, int] = {}
         self._listeners: set[Any] = set()
         self._lock = threading.Lock()
 
@@ -133,13 +135,18 @@ class ActiveSessionRegistry:
             # No running loop (e.g. outside asyncio environment)
             pass
 
+    def _register_locked(self, session: ActiveSession, task: Any | None = None) -> dict[str, Any]:
+        """Register a session. Caller must hold ``self._lock``."""
+        self._sessions[session.session_id] = session
+        self._refcounts[session.session_id] = 1
+        if task is not None:
+            self._tasks[session.session_id] = task
+        return session.to_dict()
+
     def register(self, session: ActiveSession, task: Any | None = None) -> str:
         """Register a new active session."""
         with self._lock:
-            self._sessions[session.session_id] = session
-            if task is not None:
-                self._tasks[session.session_id] = task
-            session_dict = session.to_dict()
+            session_dict = self._register_locked(session, task)
         self._broadcast("session_started", session_dict)
         return session.session_id
 
@@ -150,8 +157,37 @@ class ActiveSessionRegistry:
             thread_id = session.thread_id if session else ""
             self._sessions.pop(session_id, None)
             self._tasks.pop(session_id, None)
+            self._refcounts.pop(session_id, None)
         if thread_id:
             self._broadcast("session_stopped", {"session_id": session_id, "thread_id": thread_id})
+
+    def acquire(self, session: ActiveSession, task: Any | None = None) -> str:
+        """Acquire a tracked session for the session's thread.
+
+        Sessions are reference-counted per thread: if a session is already
+        active for the same thread, it is reused (and its reference count
+        incremented) instead of registering a duplicate. Returns the session
+        ID the caller should use.
+        """
+        with self._lock:
+            for existing_id, existing in self._sessions.items():
+                if existing.thread_id == session.thread_id:
+                    self._refcounts[existing_id] = self._refcounts.get(existing_id, 1) + 1
+                    if task is not None:
+                        self._tasks[existing_id] = task
+                    return existing_id
+            session_dict = self._register_locked(session, task)
+        self._broadcast("session_started", session_dict)
+        return session.session_id
+
+    def release(self, session_id: str) -> None:
+        """Release a session reference; unregister when the last one goes away."""
+        with self._lock:
+            refcount = self._refcounts.get(session_id, 0)
+            if refcount > 1:
+                self._refcounts[session_id] = refcount - 1
+                return
+        self.unregister(session_id)
 
     def cancel_session(self, session_id: str) -> bool:
         """Cancel the asyncio task and kill all running subprocesses associated with this session."""
@@ -252,6 +288,7 @@ def get_active_session_registry() -> ActiveSessionRegistry:
 __all__ = [
     "ActiveSession",
     "ActiveSessionRegistry",
+    "SESSION_STEP_FINALIZING",
     "SESSION_STEP_INITIALIZING",
     "SESSION_STEP_RESPONDING",
     "SESSION_STEP_THINKING",

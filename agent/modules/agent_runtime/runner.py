@@ -810,7 +810,15 @@ async def _find_message_source_state(
 
 
 @contextmanager
-def _track_active_session(thread_id: str, agent_name: str) -> Iterator[str]:
+def track_active_session(thread_id: str, agent_name: str) -> Iterator[str]:
+    """Track an active agent session for a thread.
+
+    Sessions are reference-counted per thread: nested or overlapping runs on
+    the same thread reuse the existing session, and the session is
+    unregistered only when the last reference is released. This keeps the
+    dashboard running state stable for a run's full lifecycle (including
+    background task completion hooks and retries).
+    """
     import asyncio
     registry = get_active_session_registry()
     try:
@@ -824,14 +832,14 @@ def _track_active_session(thread_id: str, agent_name: str) -> Iterator[str]:
         channel_id=channel_id,
         agent_name=agent_name,
     )
-    
+
     current_task = None
     try:
         current_task = asyncio.current_task()
     except RuntimeError:
         pass
 
-    session_id = registry.register(session, task=current_task)
+    session_id = registry.acquire(session, task=current_task)
     session_token = current_session_id_var.set(session_id)
     thread_token = current_thread_id_var.set(thread_id)
     try:
@@ -840,7 +848,7 @@ def _track_active_session(thread_id: str, agent_name: str) -> Iterator[str]:
     finally:
         current_thread_id_var.reset(thread_token)
         current_session_id_var.reset(session_token)
-        registry.unregister(session_id)
+        registry.release(session_id)
 
 
 async def run_agent(
@@ -959,7 +967,7 @@ async def run_agent(
     else:
         input_data = {"messages": [_make_user_message(user_input, attachments)]}
 
-    with _track_active_session(thread_id, agent_name) as session_id:
+    with track_active_session(thread_id, agent_name) as session_id:
         async for event in graph.astream(
             input_data,
             **stream_kwargs,
@@ -1116,7 +1124,7 @@ async def run_agent_stream(
         user_message_id = _message_id(user_message)
         current_user_seen = False
 
-    with _track_active_session(thread_id, agent_name) as session_id:
+    with track_active_session(thread_id, agent_name) as session_id:
         chunk_extractor = _StreamingChunkExtractor()
         async for event in graph.astream(
             input_data,
@@ -1318,7 +1326,7 @@ async def run_agent_edit_stream(
     user_message_id = _message_id(edited_message)
     current_user_seen = False
 
-    with _track_active_session(thread_id, agent_name) as session_id:
+    with track_active_session(thread_id, agent_name) as session_id:
         chunk_extractor = _StreamingChunkExtractor()
         async for event in graph.astream(
             {"messages": [edited_message]},
