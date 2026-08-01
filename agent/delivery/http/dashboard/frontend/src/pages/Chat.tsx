@@ -316,6 +316,7 @@ export function ChatPage() {
     updatePlanReviewResult,
     updateUserInputRequest,
     updateUserInputRequestResult,
+    flushPendingMessageChunks,
   } = streams;
 
   const attach = useChatAttachments({
@@ -536,6 +537,8 @@ export function ChatPage() {
   };
 
   const onThreadCreated = (threadId: string, streamThreadIdRef: StreamThreadIdRef) => {
+    // Apply buffered deltas before the persisted stream entry is re-keyed below.
+    flushPendingMessageChunks();
     const oldStreamTid = streamThreadIdRef.id;
     const isViewingPending = !currentThreadId() || currentThreadId() === oldStreamTid;
 
@@ -1050,6 +1053,7 @@ export function ChatPage() {
         }, "bottom", streamThreadIdRef.id);
       }
     } finally {
+      flushPendingMessageChunks();
       const finishedTid = streamThreadIdRef.id;
       markLocalStreamFinished(finishedTid);
       setStreaming(false, finishedTid);
@@ -1135,6 +1139,7 @@ export function ChatPage() {
         }, "bottom", streamThreadIdRef.id);
       }
     } finally {
+      flushPendingMessageChunks();
       const finishedTid = streamThreadIdRef.id;
       markLocalStreamFinished(finishedTid);
       setStreaming(false, finishedTid);
@@ -1400,6 +1405,7 @@ export function ChatPage() {
         }, "bottom", streamThreadIdRef.id);
       }
     } finally {
+      flushPendingMessageChunks();
       const finishedTid = streamThreadIdRef.id;
       markLocalStreamFinished(finishedTid);
       setStreaming(false, finishedTid);

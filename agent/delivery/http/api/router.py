@@ -48,6 +48,13 @@ logger = logging.getLogger(__name__)
 
 DASHBOARD_USER_ID = "dashboard"
 
+# Headers for streaming responses: disable caching and proxy buffering (e.g.
+# nginx) so chunks reach the client as soon as they are yielded.
+STREAM_RESPONSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "X-Accel-Buffering": "no",
+}
+
 
 CHAT_STREAM_THINKING_KEY = "chat.stream_thinking"
 
@@ -193,7 +200,11 @@ async def chat_stream(request: ChatRequest):
     """Stream the agent response as plain text chunks."""
     params = await prepare_run_params(request)
 
-    return StreamingResponse(_stream_agent_chunks(params), media_type="text/plain")
+    return StreamingResponse(
+        _stream_agent_chunks(params),
+        media_type="text/plain",
+        headers=STREAM_RESPONSE_HEADERS,
+    )
 
 
 @router.post("/chat/events")
@@ -216,7 +227,11 @@ async def chat_events(request: ChatRequest):
         async for event in session.subscribe():
             yield json.dumps(event, ensure_ascii=False) + "\n"
 
-    return StreamingResponse(event_generator(), media_type="application/x-ndjson")
+    return StreamingResponse(
+        event_generator(),
+        media_type="application/x-ndjson",
+        headers=STREAM_RESPONSE_HEADERS,
+    )
 
 
 @router.post("/chat/events/edit")
@@ -253,7 +268,11 @@ async def chat_events_edit(request: EditChatRequest):
         async for event in session.subscribe():
             yield json.dumps(event, ensure_ascii=False) + "\n"
 
-    return StreamingResponse(event_generator(), media_type="application/x-ndjson")
+    return StreamingResponse(
+        event_generator(),
+        media_type="application/x-ndjson",
+        headers=STREAM_RESPONSE_HEADERS,
+    )
 
 
 @router.post("/chat/events/reconnect")
@@ -269,13 +288,21 @@ async def chat_events_reconnect(request: ReconnectRequest):
         async def empty_generator():
             return
             yield  # noqa: makes this an async generator
-        return StreamingResponse(empty_generator(), media_type="application/x-ndjson")
+        return StreamingResponse(
+            empty_generator(),
+            media_type="application/x-ndjson",
+            headers=STREAM_RESPONSE_HEADERS,
+        )
 
     async def event_generator():
         async for event in session.subscribe():
             yield json.dumps(event, ensure_ascii=False) + "\n"
 
-    return StreamingResponse(event_generator(), media_type="application/x-ndjson")
+    return StreamingResponse(
+        event_generator(),
+        media_type="application/x-ndjson",
+        headers=STREAM_RESPONSE_HEADERS,
+    )
 
 
 @router.get("/graphs", response_model=GraphListResponse)

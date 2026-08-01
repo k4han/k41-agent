@@ -87,6 +87,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                 item={item}
                 itemId={item.id}
                 deferMermaid={props.streaming || props.backgroundLive}
+                deferHighlight={props.streaming || props.backgroundLive}
                 agents={props.agents}
                 activeAgentName={props.activeAgentName}
                 actionsDisabled={props.conversationBusy}

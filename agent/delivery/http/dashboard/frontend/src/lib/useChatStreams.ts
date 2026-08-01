@@ -95,6 +95,72 @@ export function useChatStreams(params: UseChatStreamsParams) {
     setLocalController(v);
   };
 
+  // Buffer for streamed message deltas. Token-level updates arrive dozens of
+  // times per second; applying each one synchronously recreates the whole
+  // message view (Solid's <For> is referentially keyed) and re-renders its
+  // Markdown every token. Deltas are accumulated here and flushed at a fixed
+  // interval so rendering stays smooth. A timer is used instead of
+  // requestAnimationFrame so background tabs still flush (throttled).
+  const STREAM_FLUSH_INTERVAL_MS = 50;
+  const pendingChunksByThread = new Map<string, Map<number, string>>();
+  let flushTimer: number | null = null;
+
+  const resolveThreadKey = (targetThreadId?: string) =>
+    targetThreadId || currentStreamThreadId() || "";
+
+  const applyItemsToThread = (
+    threadKey: string,
+    updater: (prev: ChatTranscriptItem[]) => ChatTranscriptItem[],
+  ) => {
+    if (threadKey && persistedStreams.has(threadKey)) {
+      persistedStreams.get(threadKey)!.items[1](updater as any);
+      return;
+    }
+    setLocalItems(updater as any);
+  };
+
+  const flushPendingMessageChunks = () => {
+    if (flushTimer !== null) {
+      window.clearTimeout(flushTimer);
+      flushTimer = null;
+    }
+    if (pendingChunksByThread.size === 0) {
+      return;
+    }
+    const snapshot = Array.from(pendingChunksByThread.entries());
+    pendingChunksByThread.clear();
+    const viewedThreadId = getCurrentThreadId();
+    for (const [threadKey, chunks] of snapshot) {
+      applyItemsToThread(threadKey, (current) =>
+        current.map((item) => {
+          if (item.type !== "message") {
+            return item;
+          }
+          const chunk = chunks.get(item.id);
+          return chunk ? { ...item, text: item.text + chunk } : item;
+        }),
+      );
+      if (!getIsUnmounting() && (!threadKey || threadKey === viewedThreadId)) {
+        scroll.scrollToBottom();
+      }
+    }
+  };
+
+  const scheduleFlush = () => {
+    if (flushTimer === null) {
+      flushTimer = window.setTimeout(flushPendingMessageChunks, STREAM_FLUSH_INTERVAL_MS);
+    }
+  };
+
+  const dropPendingChunksForId = (id: number) => {
+    for (const [threadKey, chunks] of pendingChunksByThread) {
+      chunks.delete(id);
+      if (chunks.size === 0) {
+        pendingChunksByThread.delete(threadKey);
+      }
+    }
+  };
+
   const appendItem = (
     item: TranscriptItem,
     scrollMode: AppendScrollMode = "bottom",
@@ -118,22 +184,22 @@ export function useChatStreams(params: UseChatStreamsParams) {
   };
 
   const updateMessage = (id: number, chunk: string, targetThreadId?: string) => {
-    setItems(
-      (current) =>
-        current.map((item) =>
-          item.id === id && item.type === "message"
-            ? { ...item, text: item.text + chunk }
-            : item,
-        ),
-      targetThreadId,
-    );
-    const isCurrent = !getIsUnmounting() && (!targetThreadId || targetThreadId === getCurrentThreadId());
-    if (isCurrent) {
-      scroll.scrollToBottom();
+    if (!chunk) {
+      return;
     }
+    const threadKey = resolveThreadKey(targetThreadId);
+    let chunks = pendingChunksByThread.get(threadKey);
+    if (!chunks) {
+      chunks = new Map();
+      pendingChunksByThread.set(threadKey, chunks);
+    }
+    chunks.set(id, (chunks.get(id) || "") + chunk);
+    scheduleFlush();
   };
 
   const replaceMessage = (id: number, text: string, targetThreadId?: string) => {
+    // Replacement text is authoritative; discard any buffered appends.
+    dropPendingChunksForId(id);
     setItems(
       (current) =>
         current.map((item) =>
@@ -150,6 +216,7 @@ export function useChatStreams(params: UseChatStreamsParams) {
   };
 
   const removeItem = (id: number, targetThreadId?: string) => {
+    dropPendingChunksForId(id);
     setItems((current) => current.filter((item) => item.id !== id), targetThreadId);
     const isCurrent = !getIsUnmounting() && (!targetThreadId || targetThreadId === getCurrentThreadId());
     if (isCurrent) {
@@ -382,5 +449,6 @@ export function useChatStreams(params: UseChatStreamsParams) {
     updatePlanReviewResult,
     updateUserInputRequest,
     updateUserInputRequestResult,
+    flushPendingMessageChunks,
   };
 }

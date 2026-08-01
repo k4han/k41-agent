@@ -197,6 +197,7 @@ export function Markdown(props: {
   text: string;
   class?: string;
   deferMermaid?: boolean;
+  deferHighlight?: boolean;
   threadId?: string | null;
 }) {
   let containerRef: HTMLDivElement | undefined;
@@ -204,6 +205,7 @@ export function Markdown(props: {
   let mermaidRenderTimer: number | undefined;
   let iconDisposers = new Set<() => void>();
   let iconDisposerByElement = new WeakMap<Element, () => void>();
+  const highlightInFlight = new WeakSet<HTMLPreElement>();
   const dark = createDarkMode();
 
   const html = createMemo(() => {
@@ -247,12 +249,16 @@ export function Markdown(props: {
   };
 
   const highlightBlock = async (pre: HTMLPreElement, language: string) => {
+    if (highlightInFlight.has(pre)) {
+      return;
+    }
     const code = pre.querySelector("code");
     const source = code?.textContent || pre.textContent || "";
     if (!source.trim()) {
       return;
     }
 
+    highlightInFlight.add(pre);
     try {
       const highlighted = await highlightCode(source, languageFromName(language), true);
       if (disposed || !pre.isConnected) {
@@ -268,7 +274,24 @@ export function Markdown(props: {
       }
     } catch {
       pre.classList.add("markdown-code-plain");
+    } finally {
+      highlightInFlight.delete(pre);
     }
+  };
+
+  // Highlight framed code blocks that were skipped while deferHighlight was on
+  // (e.g. during streaming, to avoid re-running Shiki on every batched update).
+  const highlightPendingBlocks = () => {
+    if (!containerRef) {
+      return;
+    }
+    containerRef
+      .querySelectorAll<HTMLPreElement>(
+        ".markdown-code-frame pre:not(.markdown-code-highlighted):not(.markdown-code-plain)",
+      )
+      .forEach((pre) => {
+        void highlightBlock(pre, codeBlockLanguage(pre));
+      });
   };
 
   const updateMermaidToggleButton = (button: HTMLButtonElement, view: "diagram" | "source") => {
@@ -489,7 +512,9 @@ export function Markdown(props: {
 
       pre.replaceWith(frame);
       frame.append(header, pre);
-      void highlightBlock(pre, language);
+      if (!props.deferHighlight) {
+        void highlightBlock(pre, language);
+      }
     });
   };
 
@@ -674,6 +699,23 @@ export function Markdown(props: {
       return;
     }
     scheduleMermaidRender(untrack(() => props.text || ""));
+  });
+
+  let previousDeferHighlight = Boolean(props.deferHighlight);
+  createEffect(() => {
+    const deferHighlight = Boolean(props.deferHighlight);
+    if (deferHighlight === previousDeferHighlight) {
+      return;
+    }
+    previousDeferHighlight = deferHighlight;
+    if (deferHighlight) {
+      return;
+    }
+    queueMicrotask(() => {
+      if (!disposed) {
+        highlightPendingBlocks();
+      }
+    });
   });
 
   let previousDark = dark();

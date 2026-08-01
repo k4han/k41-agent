@@ -297,6 +297,7 @@ export function TranscriptMessageView(props: {
   parentCheckpointId?: string;
   branch?: TranscriptBranch;
   deferMermaid?: boolean;
+  deferHighlight?: boolean;
   itemId?: number;
   actionsDisabled?: boolean;
   onEdit?: (payload: {
@@ -438,6 +439,7 @@ export function TranscriptMessageView(props: {
                     text={props.text}
                     class="message-markdown"
                     deferMermaid={props.deferMermaid}
+                    deferHighlight={props.deferHighlight}
                     threadId={props.threadId}
                   />
                 </Show>
@@ -831,6 +833,7 @@ export function ToolCallDetail(props: {
 export function TranscriptItemView(props: {
   item: TranscriptItem;
   deferMermaid?: boolean;
+  deferHighlight?: boolean;
   itemId?: number;
   agents?: AgentCard[];
   activeAgentName?: string;
@@ -869,6 +872,7 @@ export function TranscriptItemView(props: {
       parentCheckpointId={props.item.parentCheckpointId}
       branch={props.item.branch}
       deferMermaid={props.deferMermaid}
+      deferHighlight={props.deferHighlight}
       itemId={props.itemId}
       actionsDisabled={props.actionsDisabled}
       onEdit={props.onEditMessage}
