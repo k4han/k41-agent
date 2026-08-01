@@ -11,6 +11,7 @@ def load_orm_models() -> tuple[type[object], ...]:
     from agent.modules.conversations import ConversationThread
     from agent.modules.github import (
         GitHubInstallation,
+        GitHubIssueTaskClaim,
         GitHubRepositoryBinding,
         GitHubWebhookDelivery,
     )
@@ -34,6 +35,7 @@ def load_orm_models() -> tuple[type[object], ...]:
         BotSettings,
         UserPreferences,
         GitHubInstallation,
+        GitHubIssueTaskClaim,
         GitHubRepositoryBinding,
         GitHubWebhookDelivery,
         MCPCredential,

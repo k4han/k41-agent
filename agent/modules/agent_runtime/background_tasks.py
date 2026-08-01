@@ -91,6 +91,10 @@ class BackgroundTask:
         default=None,
         repr=False,
     )
+    cleanup_hook: Callable[["BackgroundTask"], Awaitable[None]] | None = field(
+        default=None,
+        repr=False,
+    )
     status: TaskStatus = TaskStatus.PENDING
     result: str = ""
     error: str = ""
@@ -307,6 +311,7 @@ class BackgroundTaskManager:
         working_dir: str | None = None,
         notify_channel: NotifyChannel | None = None,
         completion_hook: Callable[[BackgroundTask], Awaitable[None]] | None = None,
+        cleanup_hook: Callable[[BackgroundTask], Awaitable[None]] | None = None,
         context_trim_threshold: int | None = None,
         allowed_tool_names: list[str] | None = None,
         allowed_skill_names: list[str] | None = None,
@@ -338,6 +343,7 @@ class BackgroundTaskManager:
             model=model.strip() if model else None,
             notify_channel=notify_channel,
             completion_hook=completion_hook,
+            cleanup_hook=cleanup_hook,
             task_timeout=task_timeout,
             max_retries=max(0, max_retries),
         )
@@ -533,6 +539,15 @@ class BackgroundTaskManager:
                         logger.warning("Failed to persist background task %s completion: %s", task.task_id, exc)
                     self._publish_done_event(task)
                     await self._notify_completion(task)
+                    if task.cleanup_hook is not None:
+                        try:
+                            await task.cleanup_hook(task)
+                        except Exception as exc:
+                            logger.warning(
+                                "Cleanup hook for background task %s failed: %s",
+                                task.task_id,
+                                exc,
+                            )
                 with self._lock:
                     self._trim_completed()
                     if task.status != TaskStatus.PENDING:

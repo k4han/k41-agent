@@ -619,6 +619,106 @@ async def test_background_task_retry_leaves_no_active_session(
 
 
 @pytest.mark.asyncio
+async def test_background_task_cleanup_hook_runs_on_completion(
+    background_task_db,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agent.modules.agent_runtime.runner as runner_module
+
+    async def fake_run_agent_stream(**kwargs):
+        yield {"type": "final", "content": "done"}
+
+    monkeypatch.setattr(runner_module, "run_agent_stream", fake_run_agent_stream)
+
+    cleaned: list[str] = []
+
+    async def cleanup_hook(task: BackgroundTask) -> None:
+        cleaned.append(task.task_id)
+
+    manager = BackgroundTaskManager()
+    task_id = await manager.submit(
+        "do work",
+        agent_name="default",
+        cleanup_hook=cleanup_hook,
+    )
+    await _wait_for_task_status(manager, task_id, "completed")
+
+    assert cleaned == [task_id]
+
+
+@pytest.mark.asyncio
+async def test_background_task_cleanup_hook_runs_on_failure(
+    background_task_db,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agent.modules.agent_runtime.runner as runner_module
+
+    async def failing_run_agent_stream(**kwargs):
+        raise RuntimeError("boom")
+        yield  # pragma: no cover - keep this an async generator
+
+    monkeypatch.setattr(runner_module, "run_agent_stream", failing_run_agent_stream)
+
+    cleaned: list[str] = []
+
+    async def cleanup_hook(task: BackgroundTask) -> None:
+        cleaned.append(task.task_id)
+
+    manager = BackgroundTaskManager()
+    task_id = await manager.submit(
+        "do work",
+        agent_name="default",
+        cleanup_hook=cleanup_hook,
+    )
+    await _wait_for_task_status(manager, task_id, "failed")
+
+    assert cleaned == [task_id]
+
+
+@pytest.mark.asyncio
+async def test_background_task_cleanup_hook_waits_for_final_retry(
+    background_task_db,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The cleanup hook must not run between retry attempts."""
+    import agent.modules.agent_runtime.runner as runner_module
+
+    attempts = {"count": 0}
+
+    async def flaky_run_agent_stream(**kwargs):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise RuntimeError("boom")
+        yield {"type": "final", "content": "done"}
+
+    monkeypatch.setattr(runner_module, "run_agent_stream", flaky_run_agent_stream)
+
+    cleaned: list[str] = []
+
+    async def cleanup_hook(task: BackgroundTask) -> None:
+        cleaned.append(task.task_id)
+        assert attempts["count"] == 2
+
+    manager = BackgroundTaskManager()
+    task_id = await manager.submit(
+        "do work",
+        agent_name="default",
+        max_retries=1,
+        cleanup_hook=cleanup_hook,
+    )
+    await _wait_for_task_status(manager, task_id, "completed")
+
+    # The first attempt's execution context can flip ``_async_task`` to None
+    # slightly before the retried attempt's finally block runs the cleanup
+    # hook, so wait for the hook itself.
+    for _ in range(100):
+        if cleaned:
+            break
+        await asyncio.sleep(0.01)
+    assert cleaned == [task_id]
+
+
+@pytest.mark.asyncio
 async def test_active_session_registry_reuses_session_per_thread() -> None:
     """Nested runs on the same thread share one reference-counted session."""
     from agent.modules.agent_runtime.active_sessions import (

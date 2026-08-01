@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 
 from agent.modules.github.config import DEFAULT_MENTION_TRIGGERS, DEFAULT_TRIGGER_LABEL
 from agent.modules.github.models import (
     GitHubInstallation,
+    GitHubIssueTaskClaim,
     GitHubRepositoryBinding,
     GitHubWebhookDelivery,
 )
@@ -242,6 +244,76 @@ class GitHubRepositoryStore:
             except IntegrityError:
                 await session.rollback()
                 return False
+
+    async def try_claim_issue_task(
+        self,
+        repository_full_name: str,
+        issue_number: int,
+        *,
+        delivery_id: str,
+        action: str,
+        ttl_seconds: int,
+    ) -> bool:
+        """Claim the right to submit a task for an issue.
+
+        Returns True for the first claim (or when the previous claim is older
+        than ``ttl_seconds``), and False when a fresh claim already exists.
+        This collapses duplicate triggers such as the ``issues/opened`` +
+        ``issues/labeled`` delivery pair GitHub sends for a newly created
+        labeled issue.
+        """
+        now = utcnow()
+        cutoff = now - timedelta(seconds=max(0, int(ttl_seconds)))
+        session = await get_async_session()
+        async with session:
+            takeover = (
+                update(GitHubIssueTaskClaim)
+                .where(
+                    GitHubIssueTaskClaim.repository_full_name == repository_full_name,
+                    GitHubIssueTaskClaim.issue_number == issue_number,
+                    GitHubIssueTaskClaim.claimed_at < cutoff,
+                )
+                .values(claimed_at=now, delivery_id=delivery_id, action=action)
+            )
+            result = await session.execute(takeover)
+            if result.rowcount:
+                await session.commit()
+                return True
+
+            session.add(
+                GitHubIssueTaskClaim(
+                    repository_full_name=repository_full_name,
+                    issue_number=issue_number,
+                    delivery_id=delivery_id,
+                    action=action,
+                    claimed_at=now,
+                )
+            )
+            try:
+                await session.commit()
+                return True
+            except IntegrityError:
+                await session.rollback()
+                return False
+
+    async def release_issue_task_claim(
+        self,
+        repository_full_name: str,
+        issue_number: int,
+    ) -> None:
+        """Drop an issue-task claim so the issue can be triggered again.
+
+        Used to undo ``try_issue_task_claim`` when task submission fails,
+        keeping transient failures recoverable via a follow-up trigger.
+        """
+        session = await get_async_session()
+        async with session:
+            stmt = delete(GitHubIssueTaskClaim).where(
+                GitHubIssueTaskClaim.repository_full_name == repository_full_name,
+                GitHubIssueTaskClaim.issue_number == issue_number,
+            )
+            await session.execute(stmt)
+            await session.commit()
 
     async def upsert_installation(self, installation: dict[str, Any]) -> None:
         session = await get_async_session()

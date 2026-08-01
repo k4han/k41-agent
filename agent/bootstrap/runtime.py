@@ -30,7 +30,7 @@ from agent.modules.workspaces import (
     start_enabled_workspace_background_services,
     stop_workspace_background_services,
 )
-from agent.modules.github import migrate_github_tables
+from agent.modules.github import get_github_automation_service, migrate_github_tables
 from agent.modules.mcp import migrate_mcp_tables
 from agent.modules.conversations import migrate_conversation_tables
 from agent.modules.agent_runtime import migrate_agent_runtime_tables
@@ -124,6 +124,14 @@ class AppRuntime:
 
             logger.info("Restoring background task history...")
             await get_background_task_manager().restore_from_persistence()
+
+            logger.info("Pruning orphaned GitHub worktrees...")
+            try:
+                pruned = await get_github_automation_service().prune_orphaned_worktrees()
+                if pruned:
+                    logger.info("Pruned %d orphaned GitHub worktrees.", pruned)
+            except Exception as exc:
+                logger.warning("Failed to prune orphaned GitHub worktrees: %s", exc)
 
             logger.info("Starting workspace background services...")
             await start_enabled_workspace_background_services()

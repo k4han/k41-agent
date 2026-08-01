@@ -8,6 +8,7 @@ from agent.modules.github.config import (
 )
 from agent.modules.github.models import (
     GitHubInstallation,
+    GitHubIssueTaskClaim,
     GitHubRepositoryBinding,
     GitHubWebhookDelivery,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "GitHubAppClient",
     "GitHubAutomationService",
     "GitHubInstallation",
+    "GitHubIssueTaskClaim",
     "GitHubRepositoryBinding",
     "GitHubRepositoryStore",
     "GitHubSettings",

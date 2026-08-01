@@ -61,8 +61,27 @@ class GitHubWebhookDelivery(BaseModel):
     )
 
 
+class GitHubIssueTaskClaim(BaseModel):
+    __tablename__ = "github_issue_task_claims"
+
+    repository_full_name = Column(String(255), nullable=False)
+    issue_number = Column(Integer, nullable=False)
+    delivery_id = Column(String(255), nullable=False, default="")
+    action = Column(String(100), nullable=False, default="")
+    claimed_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "repository_full_name",
+            "issue_number",
+            name="uq_github_issue_task_claim",
+        ),
+    )
+
+
 __all__ = [
     "GitHubInstallation",
+    "GitHubIssueTaskClaim",
     "GitHubRepositoryBinding",
     "GitHubWebhookDelivery",
 ]

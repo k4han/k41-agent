@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from agent.modules.agent_runtime import BackgroundTask, NotifyChannel, get_background_task_manager
 from agent.modules.agents import resolve_catalog_agent_name
@@ -44,6 +44,12 @@ COMPLETION_OPEN_PULL_REQUEST = "open_pull_request"
 COMPLETION_UPDATE_PULL_REQUEST = "update_pull_request"
 DEFAULT_TASK_TIMEOUT = 1800
 DEFAULT_MAX_RETRIES = 2
+# Window during which only one issue-triggered task is submitted per issue.
+# Collapses the issues/opened + issues/labeled delivery pair GitHub sends
+# when an issue is created with the trigger label already attached.
+# The window must outlive the longest possible task run (timeout * attempts)
+# so a re-trigger cannot start a second agent for a still-running issue.
+ISSUE_TASK_CLAIM_TTL_SECONDS = DEFAULT_TASK_TIMEOUT * (DEFAULT_MAX_RETRIES + 1)
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +128,10 @@ class GitHubAutomationService:
     @property
     def settings(self) -> GitHubSettings:
         return get_github_settings()
+
+    async def prune_orphaned_worktrees(self) -> int:
+        """Remove leftover task worktrees from interrupted runs."""
+        return await self.workspace_manager.prune_orphaned_worktrees()
 
     async def sync_installations(self) -> dict[str, int]:
         if not self.settings.is_configured:
@@ -357,12 +367,31 @@ class GitHubAutomationService:
             ):
                 return {"status": "ignored", "reason": "comment_not_triggered"}
 
-            task_id = await self._submit_task(
-                payload=payload,
-                binding=binding,
-                event=event,
-                delivery_id=delivery_id,
-            )
+            claimed_issue = None
+            if event == "issues":
+                issue_number = int(issue["number"])
+                claimed_issue = (repository_full_name, issue_number)
+                claimed = await self.store.try_claim_issue_task(
+                    repository_full_name,
+                    issue_number,
+                    delivery_id=delivery_id,
+                    action=action,
+                    ttl_seconds=ISSUE_TASK_CLAIM_TTL_SECONDS,
+                )
+                if not claimed:
+                    return {"status": "ignored", "reason": "duplicate_issue_task"}
+
+            try:
+                task_id = await self._submit_task(
+                    payload=payload,
+                    binding=binding,
+                    event=event,
+                    delivery_id=delivery_id,
+                )
+            except Exception:
+                if claimed_issue is not None:
+                    await self.store.release_issue_task_claim(*claimed_issue)
+                raise
             return {"status": "submitted", "task_id": task_id}
 
         if not getattr(binding, "pr_review_comment_enabled", True):
@@ -524,20 +553,32 @@ class GitHubAutomationService:
         )
 
         manager = get_background_task_manager()
-        return await manager.submit(
-            request=prompt,
-            agent_name=agent_name,
-            workspace=_github_workspace_ref(context, backend=workspace_backend),
-            notify_channel=self._notify_channel_for_binding(binding),
-            completion_hook=lambda task: self.publish_task_result(task, context, workspace_backend=workspace_backend),
-            context_trim_threshold=_context_trim_threshold(binding),
-            allowed_tool_names=_allowed_tools_for_binding(binding),
-            allowed_skill_names=_allowed_skills_for_binding(binding),
-            provider=_provider_name(binding),
-            model=_model_name(binding),
-            task_timeout=DEFAULT_TASK_TIMEOUT,
-            max_retries=DEFAULT_MAX_RETRIES,
-        )
+        try:
+            return await manager.submit(
+                request=prompt,
+                agent_name=agent_name,
+                workspace=_github_workspace_ref(context, backend=workspace_backend),
+                notify_channel=self._notify_channel_for_binding(binding),
+                completion_hook=lambda task: self.publish_task_result(task, context, workspace_backend=workspace_backend),
+                cleanup_hook=self._workspace_cleanup_hook(context, workspace_backend),
+                context_trim_threshold=_context_trim_threshold(binding),
+                allowed_tool_names=_allowed_tools_for_binding(binding),
+                allowed_skill_names=_allowed_skills_for_binding(binding),
+                provider=_provider_name(binding),
+                model=_model_name(binding),
+                task_timeout=DEFAULT_TASK_TIMEOUT,
+                max_retries=DEFAULT_MAX_RETRIES,
+            )
+        except Exception:
+            # Submission failed after the workspace was prepared: discard the
+            # freshly created worktree so it is not left behind until the next
+            # startup prune.
+            if workspace_backend == "local":
+                await self._discard_local_worktree(
+                    full_name=binding.full_name,
+                    path=workspace.locator,
+                )
+            raise
 
     async def _submit_review_comment_task(
         self,
@@ -600,20 +641,62 @@ class GitHubAutomationService:
         )
 
         manager = get_background_task_manager()
-        return await manager.submit(
-            request=prompt,
-            agent_name=agent_name,
-            workspace=_github_workspace_ref(context, backend=workspace_backend),
-            notify_channel=self._notify_channel_for_binding(binding),
-            completion_hook=lambda task: self.publish_task_result(task, context, workspace_backend=workspace_backend),
-            context_trim_threshold=_context_trim_threshold(binding),
-            allowed_tool_names=_allowed_tools_for_binding(binding),
-            allowed_skill_names=_allowed_skills_for_binding(binding),
-            provider=_provider_name(binding),
-            model=_model_name(binding),
-            task_timeout=DEFAULT_TASK_TIMEOUT,
-            max_retries=DEFAULT_MAX_RETRIES,
-        )
+        try:
+            return await manager.submit(
+                request=prompt,
+                agent_name=agent_name,
+                workspace=_github_workspace_ref(context, backend=workspace_backend),
+                notify_channel=self._notify_channel_for_binding(binding),
+                completion_hook=lambda task: self.publish_task_result(task, context, workspace_backend=workspace_backend),
+                cleanup_hook=self._workspace_cleanup_hook(context, workspace_backend),
+                context_trim_threshold=_context_trim_threshold(binding),
+                allowed_tool_names=_allowed_tools_for_binding(binding),
+                allowed_skill_names=_allowed_skills_for_binding(binding),
+                provider=_provider_name(binding),
+                model=_model_name(binding),
+                task_timeout=DEFAULT_TASK_TIMEOUT,
+                max_retries=DEFAULT_MAX_RETRIES,
+            )
+        except Exception:
+            # Submission failed after the workspace was prepared: discard the
+            # freshly created worktree so it is not left behind until the next
+            # startup prune.
+            if workspace_backend == "local":
+                await self._discard_local_worktree(
+                    full_name=binding.full_name,
+                    path=workspace.locator,
+                )
+            raise
+
+    def _workspace_cleanup_hook(
+        self,
+        context: GitHubTaskContext,
+        workspace_backend: str,
+    ) -> Callable[[BackgroundTask], Awaitable[None]] | None:
+        if workspace_backend != "local":
+            return None
+
+        async def _cleanup(task: BackgroundTask) -> None:
+            await self._discard_local_worktree(
+                full_name=context.repository_full_name,
+                path=context.workspace_path,
+            )
+
+        return _cleanup
+
+    async def _discard_local_worktree(self, *, full_name: str, path: str | Path) -> None:
+        """Best-effort removal of a local task worktree."""
+        try:
+            await self.workspace_manager.discard_worktree(
+                full_name=full_name,
+                path=Path(path),
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to discard worktree %s: %s",
+                path,
+                exc,
+            )
 
     def _notify_channel_for_binding(self, binding: Any) -> NotifyChannel | None:
         return self._notify_channel(
@@ -687,6 +770,24 @@ class GitHubAutomationService:
             except Exception as exc:
                 error_msg = f"Failed to commit/push changes: {exc}"
                 logger.error("publish_task_result push failed for issue #%s: %s", context.issue_number, exc)
+                if workspace_backend == "local":
+                    backup_branch = f"backup/kai-{task.task_id}"
+                    try:
+                        await self.workspace_manager.preserve_worktree_changes(
+                            full_name=context.repository_full_name,
+                            path=context.workspace_path,
+                            backup_branch=backup_branch,
+                        )
+                        error_msg = (
+                            f"{error_msg} Local changes were preserved on "
+                            f"branch '{backup_branch}'."
+                        )
+                    except Exception as preserve_exc:
+                        logger.warning(
+                            "Failed to preserve worktree changes for issue #%s: %s",
+                            context.issue_number,
+                            preserve_exc,
+                        )
                 await self._post_completion_comment(
                     context,
                     body=f"Kai Agent completed but failed to push changes.\n\nError: {exc}",
