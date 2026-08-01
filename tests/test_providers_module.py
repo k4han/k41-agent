@@ -1342,3 +1342,239 @@ def test_get_chat_model_import() -> None:
     from agent.modules.providers import get_chat_model  # noqa: F401
 
     assert callable(get_chat_model)
+
+
+# --- extra_body config ---
+
+
+def test_provider_config_extra_body_default() -> None:
+    config = ProviderConfig(
+        name="test",
+        provider_type=ProviderType.OPENAI_COMPATIBLE,
+        base_url="https://api.test.com/v1",
+        api_key="test-key",
+        default_model="test-model",
+    )
+    assert config.extra_body is None
+
+
+def test_provider_config_with_extra_body() -> None:
+    config = ProviderConfig(
+        name="test",
+        provider_type=ProviderType.OPENAI_COMPATIBLE,
+        base_url="https://api.test.com/v1",
+        api_key="test-key",
+        default_model="test-model",
+        extra_body={"thinking": {"type": "enabled"}},
+    )
+    assert config.extra_body == {"thinking": {"type": "enabled"}}
+
+
+def test_repo_extra_body_from_json_string(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    _write_yaml(
+        config_path,
+        """
+        llm:
+            default_model: "openai-main/test-model"
+            providers:
+                openai-main:
+                    type: "openai_compatible"
+                    api_key: "test-key"
+                    default_model: "test-model"
+                    extra_body: '{"thinking": {"type": "enabled"}}'
+        """,
+    )
+    _set_config_path(monkeypatch, config_path)
+
+    repo = ConfigProviderRepository()
+    provider = repo.get_provider("openai-main")
+
+    assert provider.extra_body == {"thinking": {"type": "enabled"}}
+
+
+def test_repo_extra_body_empty_string(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    _write_yaml(
+        config_path,
+        """
+        llm:
+            default_model: "openai-main/test-model"
+            providers:
+                openai-main:
+                    type: "openai_compatible"
+                    api_key: "test-key"
+                    default_model: "test-model"
+                    extra_body: ""
+        """,
+    )
+    _set_config_path(monkeypatch, config_path)
+
+    repo = ConfigProviderRepository()
+    provider = repo.get_provider("openai-main")
+
+    assert provider.extra_body is None
+
+
+def test_repo_extra_body_invalid_json(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    _write_yaml(
+        config_path,
+        """
+        llm:
+            default_model: "openai-main/test-model"
+            providers:
+                openai-main:
+                    type: "openai_compatible"
+                    api_key: "test-key"
+                    default_model: "test-model"
+                    extra_body: "not valid json"
+        """,
+    )
+    _set_config_path(monkeypatch, config_path)
+
+    repo = ConfigProviderRepository()
+    provider = repo.get_provider("openai-main")
+
+    assert provider.extra_body is None
+
+
+def test_repo_extra_body_not_set(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    _write_config(config_path, api_key="test-key", default_model="test-model")
+    _set_config_path(monkeypatch, config_path)
+
+    repo = ConfigProviderRepository()
+    provider = repo.get_provider("openai-main")
+
+    assert provider.extra_body is None
+
+
+def test_resolve_chat_model_passes_extra_body_to_factory(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _get_cached_model.cache_clear()
+
+    config_path = tmp_path / "config.yaml"
+    _write_yaml(
+        config_path,
+        """
+        llm:
+            default_model: "openai-main/test-model"
+            providers:
+                openai-main:
+                    type: "openai_compatible"
+                    api_key: "test-key"
+                    default_model: "test-model"
+                    extra_body: '{"custom_param": true}'
+        """,
+    )
+    _set_config_path(monkeypatch, config_path)
+
+    repo = ConfigProviderRepository()
+    service = ProviderService(repository=repo)
+
+    mock_model = MagicMock()
+    mock_factory = MagicMock()
+    mock_factory.create.return_value = mock_model
+
+    service.register_factory(ProviderType.OPENAI_COMPATIBLE, mock_factory)
+
+    resolve_chat_model(service)
+
+    mock_factory.create.assert_called_once()
+    provider_config_arg = mock_factory.create.call_args.args[0]
+    assert provider_config_arg.extra_body == {"custom_param": True}
+
+    _get_cached_model.cache_clear()
+
+
+def test_factory_nvidia_minimax_auto_injects_thinking() -> None:
+    from agent.modules.providers.openai_compatible.factory import OpenAICompatibleFactory
+
+    factory = OpenAICompatibleFactory()
+    provider = ProviderConfig(
+        name="nvidia",
+        provider_type=ProviderType.OPENAI_COMPATIBLE,
+        base_url="https://integrate.api.nvidia.com/v1",
+        api_key="test",
+        default_model="minimaxai/minimax-m3",
+    )
+    model = ModelConfig(model_name="minimaxai/minimax-m3")
+    result = factory.create(provider, model, "test-key")
+
+    assert result.extra_body == {"thinking": {"type": "enabled"}}
+
+
+def test_factory_nvidia_minimax_user_override() -> None:
+    from agent.modules.providers.openai_compatible.factory import OpenAICompatibleFactory
+
+    factory = OpenAICompatibleFactory()
+    provider = ProviderConfig(
+        name="nvidia",
+        provider_type=ProviderType.OPENAI_COMPATIBLE,
+        base_url="https://integrate.api.nvidia.com/v1",
+        api_key="test",
+        default_model="minimaxai/minimax-m3",
+        extra_body={"thinking": {"type": "disabled"}},
+    )
+    model = ModelConfig(model_name="minimaxai/minimax-m3")
+    result = factory.create(provider, model, "test-key")
+
+    assert result.extra_body == {"thinking": {"type": "disabled"}}
+
+
+def test_factory_nvidia_non_minimax_no_injection() -> None:
+    from agent.modules.providers.openai_compatible.factory import OpenAICompatibleFactory
+
+    factory = OpenAICompatibleFactory()
+    provider = ProviderConfig(
+        name="nvidia",
+        provider_type=ProviderType.OPENAI_COMPATIBLE,
+        base_url="https://integrate.api.nvidia.com/v1",
+        api_key="test",
+        default_model="meta/llama-3.1-405b-instruct",
+    )
+    model = ModelConfig(model_name="meta/llama-3.1-405b-instruct")
+    result = factory.create(provider, model, "test-key")
+
+    assert result.extra_body is None
+
+
+def test_factory_non_nvidia_minimax_no_injection() -> None:
+    from agent.modules.providers.openai_compatible.factory import OpenAICompatibleFactory
+
+    factory = OpenAICompatibleFactory()
+    provider = ProviderConfig(
+        name="custom",
+        provider_type=ProviderType.OPENAI_COMPATIBLE,
+        base_url="https://api.example.com/v1",
+        api_key="test",
+        default_model="minimax-m3",
+    )
+    model = ModelConfig(model_name="minimax-m3")
+    result = factory.create(provider, model, "test-key")
+
+    assert result.extra_body is None
+
+
+def test_factory_merges_fallback_with_user_extra_body() -> None:
+    from agent.modules.providers.openai_compatible.factory import OpenAICompatibleFactory
+
+    factory = OpenAICompatibleFactory()
+    provider = ProviderConfig(
+        name="nvidia",
+        provider_type=ProviderType.OPENAI_COMPATIBLE,
+        base_url="https://integrate.api.nvidia.com/v1",
+        api_key="test",
+        default_model="minimaxai/minimax-m3",
+        extra_body={"reasoning_split": True},
+    )
+    model = ModelConfig(model_name="minimaxai/minimax-m3")
+    result = factory.create(provider, model, "test-key")
+
+    assert result.extra_body == {
+        "thinking": {"type": "enabled"},
+        "reasoning_split": True,
+    }

@@ -20,6 +20,7 @@ REPOSITORY_SKILLS_DIR_KEY = "skills.repository_dir"
 # These patterns define which keys can be updated at runtime
 RUNTIME_KEY_PATTERNS = [
     r"^(host|port|enable_web|enable_api|enable_dashboard)$",
+    r"^chat\.stream_thinking$",
     r"^channels\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$",
     r"^channels\.telegram\.(enabled|bot_token|default_agent|code_agent|research_agent|update_mode|webhook_url|webhook_secret)$",
     r"^channels\.discord\.(enabled|bot_token|default_agent|code_agent|research_agent)$",
@@ -27,7 +28,7 @@ RUNTIME_KEY_PATTERNS = [
     r"^llm\.default_model$",
     rf"^{re.escape(LLM_FALLBACK_PROVIDER_KEY)}$",
     rf"^{re.escape(LLM_FALLBACK_MODEL_KEY)}$",
-    r"^llm\.providers\.[A-Za-z0-9_-]+\.(provider|type|api_key|base_url|default_model|models|temperature|enabled)$",
+    r"^llm\.providers\.[A-Za-z0-9_-]+\.(provider|type|api_key|base_url|default_model|models|temperature|enabled|extra_body)$",
     r"^tools\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.(transport|command|args|url|enabled)$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.env\.[A-Za-z0-9_-]+$",
@@ -43,6 +44,7 @@ RUNTIME_KEY_PATTERNS = [
 ]
 
 DATABASE_RUNTIME_KEY_PATTERNS = [
+    r"^chat\.stream_thinking$",
     r"^channels\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$",
     r"^channels\.telegram\.(enabled|bot_token|default_agent|code_agent|research_agent|update_mode|webhook_url|webhook_secret)$",
     r"^channels\.discord\.(enabled|bot_token|default_agent|code_agent|research_agent)$",
@@ -50,7 +52,7 @@ DATABASE_RUNTIME_KEY_PATTERNS = [
     r"^llm\.default_model$",
     rf"^{re.escape(LLM_FALLBACK_PROVIDER_KEY)}$",
     rf"^{re.escape(LLM_FALLBACK_MODEL_KEY)}$",
-    r"^llm\.providers\.[A-Za-z0-9_-]+\.(provider|type|api_key|base_url|default_model|models|temperature|enabled)$",
+    r"^llm\.providers\.[A-Za-z0-9_-]+\.(provider|type|api_key|base_url|default_model|models|temperature|enabled|extra_body)$",
     r"^tools\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.(transport|command|args|url|enabled)$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.env\.[A-Za-z0-9_-]+$",
@@ -166,6 +168,7 @@ def _expand_runtime_keys() -> set[str]:
     keys.add(REPOSITORY_SKILLS_DIR_KEY)
     keys.add(DISPLAY_TIMEZONE_CONFIG_KEY)
     keys.add("recursion_limit")
+    keys.add("chat.stream_thinking")
     return keys
 
 
@@ -680,6 +683,18 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "max": 1000,
         "step": 1,
     },
+    # Chat UI settings
+    "chat.stream_thinking": {
+        "type": "boolean",
+        "description": (
+            "Surface model reasoning as it streams so the dashboard can "
+            "render it alongside the visible answer. Reasoning is always "
+            "stripped from the final visible text; this flag only controls "
+            "whether the intermediate deltas are forwarded."
+        ),
+        "category": "general",
+        "label": "Stream Thinking to UI",
+    },
 }
 
 
@@ -736,6 +751,11 @@ _PROVIDER_SETTING_FIELD_META: dict[str, dict[str, Any]] = {
         "type": "boolean",
         "description": "Enable or disable this provider",
         "label": "Enabled",
+    },
+    "extra_body": {
+        "type": "text",
+        "description": "Extra JSON body parameters sent with every request (e.g. {\"thinking\":{\"type\":\"enabled\"}})",
+        "label": "Extra Body (JSON)",
     },
 }
 

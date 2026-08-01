@@ -7,7 +7,17 @@ from uuid import uuid4
 
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 from langgraph.types import Command
-from agent.shared.infrastructure.parsing import extract_final_text_content
+from agent.shared.infrastructure.parsing import (
+    extract_final_text_content,
+    extract_thinking_content,
+)
+from agent.shared.infrastructure.thinking_parser import (
+    ContentWithThinking,
+    ThinkingTagStreamParser,
+    extract_thinking_from_text,
+    parse_content_for_thinking,
+    strip_thinking_tags,
+)
 
 from agent.modules.agent_runtime.active_sessions import (
     ActiveSession,
@@ -370,34 +380,125 @@ def _coerce_stream_event(event: Any) -> tuple[str, Any]:
     return "values", event
 
 
+class _StreamingChunkExtractor:
+    """Extract (visible, thinking) deltas from a stream of ``AIMessageChunk`` events.
+
+    The extractor carries enough state to handle ``<thinking>...</thinking>``
+    tags that span two adjacent chunks. Structured ``type: "thinking"`` parts
+    are routed to the thinking bucket directly while inline tags inside string
+    content are split by :class:`ThinkingTagStreamParser`. This abstraction
+    lets the runner always strip thinking from the visible stream while still
+    being able to optionally surface those deltas through a separate event
+    when the UI opts in.
+    """
+
+    def __init__(self) -> None:
+        self._tag_parser = ThinkingTagStreamParser()
+
+    def extract(self, event: Any) -> ContentWithThinking:
+        chunk = event[0] if isinstance(event, tuple) and event else event
+        if not isinstance(chunk, AIMessageChunk):
+            return ContentWithThinking(text="", thinking="")
+
+        content = getattr(chunk, "content", None)
+        parts = (
+            [_split_chunk_part(part) for part in content]
+            if isinstance(content, list)
+            else [_split_chunk_part(content)]
+        )
+
+        # Classify per-part first then route visible strings through the
+        # stateful tag parser so that ``<thinking>...</thinking>`` can be
+        # handled when the open/close tag is split across chunk boundaries.
+        visible_strings = "".join(part.text for part in parts if part.text)
+        visible_delta = self._tag_parser.feed(visible_strings)
+        thinking_delta = "".join(part.thinking for part in parts if part.thinking)
+        if thinking_delta:
+            return ContentWithThinking(
+                text=visible_delta.text,
+                thinking=visible_delta.thinking + thinking_delta,
+            )
+        return visible_delta
+
+    def flush(self) -> ContentWithThinking:
+        return self._tag_parser.flush()
+
+
+def _split_chunk_part(value: Any) -> ContentWithThinking:
+    """Classify a single chunk ``content`` part into (visible, thinking)."""
+    if value is None:
+        return ContentWithThinking(text="", thinking="")
+    if isinstance(value, str):
+        # The streaming parser handles cross-chunk tag boundaries; for a
+        # single self-contained string we classify inline tags here.
+        return ContentWithThinking(
+            text=strip_thinking_tags(value),
+            thinking=extract_thinking_from_text(value),
+        )
+    if isinstance(value, dict):
+        part_type = str(value.get("type", "") or "").strip().lower()
+        if part_type in {"thinking", "reasoning", "reasoning_content"}:
+            for key in ("thinking", "reasoning", "reasoning_content"):
+                nested = value.get(key)
+                if isinstance(nested, str) and nested:
+                    return ContentWithThinking(text="", thinking=nested)
+            nested = value.get("text") or value.get("content")
+            return ContentWithThinking(text="", thinking=_coerce_thinking_value(nested))
+        text_value = value.get("text")
+        if isinstance(text_value, str):
+            return ContentWithThinking(
+                text=strip_thinking_tags(text_value),
+                thinking=extract_thinking_from_text(text_value),
+            )
+        nested_content = value.get("content")
+        if nested_content is not None:
+            return parse_content_for_thinking(nested_content)
+        return ContentWithThinking(text="", thinking="")
+    thinking_attr = (
+        getattr(value, "thinking", None)
+        or getattr(value, "reasoning", None)
+        or getattr(value, "reasoning_content", None)
+    )
+    if isinstance(thinking_attr, str) and thinking_attr:
+        return ContentWithThinking(text="", thinking=thinking_attr)
+    text_attr = getattr(value, "text", None)
+    if isinstance(text_attr, str):
+        return ContentWithThinking(
+            text=strip_thinking_tags(text_attr),
+            thinking=extract_thinking_from_text(text_attr),
+        )
+    content_attr = getattr(value, "content", None)
+    if content_attr is not None:
+        return parse_content_for_thinking(content_attr)
+    return ContentWithThinking(text="", thinking="")
+
+
+def _coerce_thinking_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    return parse_content_for_thinking(value).thinking
+
+
 def _extract_message_chunk_content(event: Any) -> str:
+    """Extract visible text from a chunked ``AIMessageChunk`` event.
+
+    Used by call sites that need the legacy single-string representation
+    and do not care about thinking deltas. Internally still strips inline
+    ``<thinking>...</thinking>`` tags from the resulting string.
+    """
     chunk = event[0] if isinstance(event, tuple) and event else event
     if not isinstance(chunk, AIMessageChunk):
         return ""
 
-    def extract_part(value: Any) -> str:
-        if isinstance(value, str):
-            return value
-        if isinstance(value, dict):
-            part_type = str(value.get("type", "") or "").strip().lower()
-            if part_type == "thinking":
-                return ""
-            text = value.get("text")
-            if isinstance(text, str):
-                return text
-            content = value.get("content")
-            if isinstance(content, list):
-                return "".join(extract_part(part) for part in content)
-            if isinstance(content, str):
-                return content
-            return ""
-        text_attr = getattr(value, "text", None)
-        return text_attr if isinstance(text_attr, str) else ""
-
     content = getattr(chunk, "content", None)
-    if isinstance(content, list):
-        return "".join(extract_part(part) for part in content)
-    return extract_part(content)
+    parts = (
+        [_split_chunk_part(part) for part in content]
+        if isinstance(content, list)
+        else [_split_chunk_part(content)]
+    )
+    return "".join(part.text for part in parts if part.text)
 
 
 def _message_id(message: Any) -> str:
@@ -892,6 +993,7 @@ async def run_agent_stream(
     resume: bool = False,
     resume_payload: dict[str, Any] | None = None,
     checkpoint_id: str | None = None,
+    emit_thinking: bool = False,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Run a workflow graph and stream UI events (tool calls and text chunks).
 
@@ -910,6 +1012,11 @@ async def run_agent_stream(
         model: Override agent card model for this run if needed
         attachments: Optional files attached to the user message
         resume: Request to resume execution from the last checkpoint
+        emit_thinking: When ``True``, also yield ``{"type": "thinking", ...}``
+            events for reasoning deltas so the UI can render them in real
+            time. ``thinking`` is always stripped from the visible text
+            events regardless of this flag, so the default ``False`` simply
+            suppresses the extra events.
     """
     from agent.modules.agents import get_catalog_service
 
@@ -1010,18 +1117,24 @@ async def run_agent_stream(
         current_user_seen = False
 
     with _track_active_session(thread_id, agent_name) as session_id:
+        chunk_extractor = _StreamingChunkExtractor()
         async for event in graph.astream(
             input_data,
             **stream_kwargs,
         ):
             stream_mode, event_data = _coerce_stream_event(event)
             if stream_mode == "messages":
-                content = _extract_message_chunk_content(event_data)
-                if content:
+                delta = chunk_extractor.extract(event_data)
+                if delta.text:
                     registry.update_step(session_id, SESSION_STEP_RESPONDING)
                     yield {
                         "type": "message",
-                        "content": content,
+                        "content": delta.text,
+                    }
+                if emit_thinking and delta.thinking:
+                    yield {
+                        "type": "thinking",
+                        "content": delta.thinking,
                     }
                 continue
 
@@ -1071,11 +1184,21 @@ async def run_agent_stream(
                 if isinstance(message, AIMessage):
                     tool_calls = getattr(message, "tool_calls", None)
                     content = extract_final_text_content(getattr(message, "content", None))
+                    thinking = (
+                        extract_thinking_content(getattr(message, "content", None))
+                        if emit_thinking
+                        else ""
+                    )
                     if content:
                         registry.update_step(session_id, SESSION_STEP_RESPONDING)
                         yield {
                             "type": "final",
                             "content": content,
+                        }
+                    if thinking:
+                        yield {
+                            "type": "thinking",
+                            "content": thinking,
                         }
                     if tool_calls:
                         for tc in tool_calls:
@@ -1116,6 +1239,7 @@ async def run_agent_edit_stream(
     model: str | None = None,
     usage_context: dict[str, Any] | None = None,
     resume: bool = False,
+    emit_thinking: bool = False,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Fork a thread from the checkpoint before a user message and stream the result."""
     from agent.modules.agents import get_catalog_service
@@ -1195,18 +1319,24 @@ async def run_agent_edit_stream(
     current_user_seen = False
 
     with _track_active_session(thread_id, agent_name) as session_id:
+        chunk_extractor = _StreamingChunkExtractor()
         async for event in graph.astream(
             {"messages": [edited_message]},
             **stream_kwargs,
         ):
             stream_mode, event_data = _coerce_stream_event(event)
             if stream_mode == "messages":
-                content = _extract_message_chunk_content(event_data)
-                if content:
+                delta = chunk_extractor.extract(event_data)
+                if delta.text:
                     registry.update_step(session_id, SESSION_STEP_RESPONDING)
                     yield {
                         "type": "message",
-                        "content": content,
+                        "content": delta.text,
+                    }
+                if emit_thinking and delta.thinking:
+                    yield {
+                        "type": "thinking",
+                        "content": delta.thinking,
                     }
                 continue
 
@@ -1255,11 +1385,21 @@ async def run_agent_edit_stream(
                 if isinstance(message, AIMessage):
                     tool_calls = getattr(message, "tool_calls", None)
                     content = extract_final_text_content(getattr(message, "content", None))
+                    thinking = (
+                        extract_thinking_content(getattr(message, "content", None))
+                        if emit_thinking
+                        else ""
+                    )
                     if content:
                         registry.update_step(session_id, SESSION_STEP_RESPONDING)
                         yield {
                             "type": "final",
                             "content": content,
+                        }
+                    if thinking:
+                        yield {
+                            "type": "thinking",
+                            "content": thinking,
                         }
                     if tool_calls:
                         for tc in tool_calls:

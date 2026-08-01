@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from agent.shared.infrastructure.thinking_parser import (
+    extract_thinking_from_text,
+    strip_thinking_tags,
+)
+
 
 def _normalize_text(value: object) -> str:
     if value is None:
@@ -12,36 +17,51 @@ def _normalize_text(value: object) -> str:
 
 def _extract_text_from_part(part: object, *, skip_thinking: bool) -> str:
     if isinstance(part, str):
-        return _normalize_text(part)
+        return _normalize_text(strip_thinking_tags(part))
 
     if isinstance(part, dict):
         part_type = str(part.get("type", "") or "").strip().lower()
-        if skip_thinking and part_type == "thinking":
+        if skip_thinking and part_type in {"thinking", "reasoning", "reasoning_content"}:
             return ""
 
         text_value = _normalize_text(part.get("text"))
         if text_value:
-            return text_value
+            return _normalize_text(strip_thinking_tags(text_value))
 
         content_value = part.get("content")
         if isinstance(content_value, list):
             return extract_final_text_content(content_value)
         if isinstance(content_value, str):
-            return _normalize_text(content_value)
+            return _normalize_text(strip_thinking_tags(content_value))
         return ""
 
     text_attr = getattr(part, "text", None)
-    return _normalize_text(text_attr)
+    if isinstance(text_attr, str):
+        return _normalize_text(strip_thinking_tags(text_attr))
+    return ""
+
+
+def extract_thinking_content(value: object) -> str:
+    """Extract thinking content from model message content.
+
+    Supports both structured ``{"type": "thinking", ...}`` parts and inline
+    ``<thinking>...</thinking>`` tags embedded inside string parts.
+    """
+    from agent.shared.infrastructure.thinking_parser import parse_content_for_thinking
+
+    return parse_content_for_thinking(value).thinking
 
 
 def extract_final_text_content(value: object) -> str:
     """Extract the final user-visible text from model message content.
 
     Supports plain strings and structured content blocks (for example Google
-    responses that may contain `thinking` + `text` parts).
+    responses that may contain `thinking` + `text` parts). Inline
+    ``<thinking>...</thinking>`` style reasoning is stripped from the result
+    so end users never see it.
     """
     if isinstance(value, str):
-        return _normalize_text(value)
+        return _normalize_text(strip_thinking_tags(value))
 
     if isinstance(value, dict):
         return _extract_text_from_part(value, skip_thinking=False)
@@ -103,6 +123,7 @@ def safe_str_strip(value: object, default: str = "") -> str:
 
 __all__ = [
     "extract_final_text_content",
+    "extract_thinking_content",
     "parse_string_or_list",
     "safe_str_strip",
 ]

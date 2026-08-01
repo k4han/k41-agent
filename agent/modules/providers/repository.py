@@ -5,6 +5,7 @@ Reads provider configuration from the centralized config service.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from agent.modules.providers.provider import ProviderConfig, ProviderType
@@ -76,6 +77,26 @@ def _resolve_default_model(provider_values: dict[str, Any]) -> str:
 
 def _resolve_model_options(provider_values: dict[str, Any]) -> tuple[str, ...]:
     return tuple(parse_string_or_list(provider_values.get("models", [])))
+
+
+def _resolve_extra_body(provider_values: dict[str, Any]) -> dict[str, Any] | None:
+    """Parse "extra_body" from config, accepting a dict or a JSON string."""
+    raw = provider_values.get("extra_body")
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        return raw if raw else None
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return None
+        try:
+            parsed = json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            return None
+        if isinstance(parsed, dict) and parsed:
+            return parsed
+    return None
 
 
 def _provider_config_fingerprint(
@@ -168,6 +189,7 @@ def _build_provider_config(
         default_model=default_model,
         models=models,
         enabled=enabled,
+        extra_body=_resolve_extra_body(provider_values),
     )
 
 

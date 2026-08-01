@@ -1,6 +1,7 @@
 """Resolve a chat model instance from provider config + model overrides."""
 
 from functools import lru_cache
+from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 
@@ -121,6 +122,7 @@ def _resolve_chat_model_info_impl(
         api_key=resolved_api_key,
         model_name=model_config.model_name,
         temperature=model_config.temperature,
+        extra_body_json=_extra_body_to_cache_key(provider_config.extra_body),
     )
     return ResolvedChatModel(
         model=chat_model,
@@ -184,10 +186,20 @@ def _get_cached_model(
     api_key: str,
     model_name: str,
     temperature: float,
+    extra_body_json: str = "",
 ) -> BaseChatModel:
     """Cache model instances by their full config fingerprint."""
+    import json as _json
+
     from agent.modules.providers.models import ModelConfig
     from agent.modules.providers.provider import ProviderConfig, ProviderType
+
+    extra_body: dict[str, Any] | None = None
+    if extra_body_json:
+        try:
+            extra_body = _json.loads(extra_body_json)
+        except (ValueError, TypeError):
+            extra_body = None
 
     provider_config = ProviderConfig(
         name=provider_type,
@@ -196,8 +208,18 @@ def _get_cached_model(
         api_key=api_key,
         default_model=model_name,
         models=(),
+        extra_body=extra_body,
     )
     model_config = ModelConfig(model_name=model_name, temperature=temperature)
 
     # factory is a ChatModelFactory protocol
     return factory.create(provider_config, model_config, api_key)  # type: ignore[arg-type,union-attr]
+
+
+def _extra_body_to_cache_key(extra_body: dict[str, Any] | None) -> str:
+    """Serialize ``extra_body`` to a stable string for ``lru_cache`` keys."""
+    if not extra_body:
+        return ""
+    import json as _json
+
+    return _json.dumps(extra_body, sort_keys=True)

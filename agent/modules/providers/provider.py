@@ -1,7 +1,10 @@
 """Provider configuration entities."""
 
-from dataclasses import dataclass
+from __future__ import annotations
+
+from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Any
 
 
 class ProviderType(StrEnum):
@@ -24,3 +27,4 @@ class ProviderConfig:
     default_model: str
     models: tuple[str, ...] = ()
     enabled: bool = True
+    extra_body: dict[str, Any] | None = field(default=None)

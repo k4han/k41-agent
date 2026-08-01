@@ -49,6 +49,19 @@ logger = logging.getLogger(__name__)
 DASHBOARD_USER_ID = "dashboard"
 
 
+CHAT_STREAM_THINKING_KEY = "chat.stream_thinking"
+
+
+def _is_thinking_stream_enabled() -> bool:
+    """Read the runtime flag controlling whether reasoning is emitted to UI."""
+    try:
+        from agent.shared.config import get_config_service
+
+        return bool(get_config_service().get_bool(CHAT_STREAM_THINKING_KEY, False))
+    except Exception:
+        return False
+
+
 def _agent_error_event(exc: BaseException) -> dict[str, str]:
     agent_error = classify_agent_error(exc)
     return {
@@ -189,6 +202,7 @@ async def chat_events(request: ChatRequest):
     params = await prepare_run_params(request)
     created_thread = bool(request.new_thread and not request.thread_id)
     thread_id = str(params["thread_id"])
+    params["emit_thinking"] = _is_thinking_stream_enabled()
 
     manager = get_chat_stream_manager()
     session = await manager.get_or_create_session(thread_id, params, run_fn=run_agent_stream)
@@ -225,6 +239,7 @@ async def chat_events_edit(request: EditChatRequest):
 
     params["message_index"] = request.message_index
     params["source_checkpoint_id"] = request.source_checkpoint_id
+    params["emit_thinking"] = _is_thinking_stream_enabled()
     await _apply_workspace_to_run_params(request, params)
 
     manager = get_chat_stream_manager()

@@ -272,6 +272,7 @@ def test_chat_events_passes_attachments(monkeypatch):
         "provider": None,
         "model": None,
         "attachments": attachments,
+        "emit_thinking": False,
     }
 
     def fake_build_run_params(**params):
@@ -335,6 +336,7 @@ def test_chat_events_can_resume_existing_thread(monkeypatch):
         "max_context_tokens": None,
         "provider": None,
         "model": None,
+        "emit_thinking": False,
     }
 
     def fake_build_run_params(**params):
@@ -386,6 +388,7 @@ def test_chat_events_can_create_new_thread(monkeypatch, tmp_path):
         "max_context_tokens": None,
         "provider": None,
         "model": None,
+        "emit_thinking": False,
     }
 
     monkeypatch.setattr(
@@ -474,6 +477,7 @@ def test_chat_events_resolves_and_remembers_workspace(monkeypatch, tmp_path):
         "max_context_tokens": None,
         "provider": None,
         "model": None,
+        "emit_thinking": False,
     }
 
     def fake_build_run_params(**params):
@@ -544,6 +548,7 @@ def test_chat_events_ensures_stored_sandbox_workspace_before_stream(monkeypatch)
         "max_context_tokens": None,
         "provider": None,
         "model": None,
+        "emit_thinking": False,
     }
 
     def fake_build_run_params(**params):
@@ -602,6 +607,7 @@ def test_chat_events_streams_tool_calls_as_ndjson(monkeypatch):
         "max_context_tokens": None,
         "provider": None,
         "model": None,
+        "emit_thinking": False,
     }
 
     def fake_build_run_params(**params):
@@ -643,6 +649,7 @@ def test_chat_events_streams_classified_agent_errors(monkeypatch):
         "max_context_tokens": None,
         "provider": None,
         "model": None,
+        "emit_thinking": False,
     }
 
     class FakeRateLimitError(Exception):
