@@ -772,7 +772,20 @@ export function WorkspaceExplorer(props: {
         </button>
       </div>
 
-      <div class="workspace-tabs" role="tablist" aria-label="Workspace views">
+      <div
+        class="workspace-tabs"
+        role="tablist"
+        aria-label="Workspace views"
+        onWheel={(event: WheelEvent) => {
+          if (event.deltaY !== 0) {
+            event.preventDefault();
+            const container = event.currentTarget as HTMLElement;
+            if (container) {
+              container.scrollLeft += event.deltaY;
+            }
+          }
+        }}
+      >
         <button
           class={`workspace-tab ${activeTab() === "files" ? "active" : ""}`}
           type="button"
