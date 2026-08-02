@@ -473,11 +473,20 @@
     padding: 10px 12px calc(var(--safe-bottom) + 10px);
   }
 
-  /* Stack the agent-summary and model-picker columns; the 260px min column
-     otherwise blows out the viewport on phones. */
-  .chat-composer-options {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 8px;
+  /* Let the agent/model pickers shrink instead of overflowing the
+     composer toolbar on narrow screens. */
+  .chat-composer-actions {
+    gap: 6px;
+  }
+
+  .chat-agent-picker,
+  .chat-model-picker {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .chat-model-picker {
+    max-width: 36vw;
   }
 
   /* Stack chat header chips so they don't truncate awkwardly. */

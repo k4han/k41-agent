@@ -1,5 +1,4 @@
 import {
-  Bot,
   FileText,
   Image as ImageIcon,
   MoreHorizontal,
@@ -43,7 +42,6 @@ export interface ChatComposerProps {
   agentName: string;
   agents: AgentCard[];
   onAgentChange: (name: string) => void;
-  selectedCard: AgentCard | undefined;
   provider: string;
   model: string;
   onProviderModelChange: (provider: string, model: string) => void;
@@ -62,7 +60,6 @@ export interface ChatComposerProps {
 export function ChatComposer(props: ChatComposerProps) {
   let chatPromptRef: HTMLTextAreaElement | undefined;
   let fileInputRef: HTMLInputElement | undefined;
-  const [composerOptionsOpen, setComposerOptionsOpen] = createSignal(false);
   const [previewAttachment, setPreviewAttachment] = createSignal<PendingAttachment | null>(null);
 
   const resizeChatPromptInput = () => {
@@ -225,6 +222,21 @@ export function ChatComposer(props: ChatComposerProps) {
             disabled={props.composerDisabled}
             onChange={props.onAgentChange}
           />
+          <ModelPicker
+            class="chat-model-picker"
+            catalogs={props.payload.model_catalogs}
+            providerNames={props.payload.provider_names}
+            defaultProvider={props.payload.default_provider}
+            defaultModel={props.payload.default_model}
+            provider={props.provider}
+            model={props.model}
+            disabled={props.composerDisabled}
+            dropdownPlacement="top"
+            resolveDefault={true}
+            onChange={(nextProvider, nextModel) => {
+              props.onProviderModelChange(nextProvider, nextModel);
+            }}
+          />
           <button
             class="chat-composer-icon"
             type="button"
@@ -236,13 +248,10 @@ export function ChatComposer(props: ChatComposerProps) {
             <Plus size={18} />
           </button>
           <button
-            class={`chat-composer-icon ${composerOptionsOpen() ? "active" : ""}`}
+            class="chat-composer-icon"
             type="button"
-            onClick={() => setComposerOptionsOpen((current) => !current)}
-            disabled={props.workspaceMissing}
-            title="Run settings"
-            aria-label="Run settings"
-            aria-expanded={composerOptionsOpen()}
+            title="More options"
+            aria-label="More options"
           >
             <MoreHorizontal size={18} />
           </button>
@@ -276,49 +285,6 @@ export function ChatComposer(props: ChatComposerProps) {
           </button>
         </Show>
       </div>
-      <Show when={composerOptionsOpen()}>
-        <div class="chat-composer-options">
-          <div class="field">
-            <label>Provider / Model</label>
-            <ModelPicker
-              catalogs={props.payload.model_catalogs}
-              providerNames={props.payload.provider_names}
-              defaultProvider={props.payload.default_provider}
-              defaultModel={props.payload.default_model}
-              provider={props.provider}
-              model={props.model}
-              disabled={props.composerDisabled}
-              dropdownPlacement="top"
-              resolveDefault={true}
-              onChange={(nextProvider, nextModel) => {
-                props.onProviderModelChange(nextProvider, nextModel);
-              }}
-            />
-          </div>
-          <div class="chat-agent-summary">
-            <div class="row">
-              <Bot size={14} />
-              <strong>{props.selectedCard?.display_name || props.selectedCard?.name || "No agent"}</strong>
-            </div>
-            <p class="hint">{props.selectedCard?.description || "No description."}</p>
-            <div class="chips">
-              <span class="chip">{props.selectedCard?.graph_type || "default"}</span>
-              <span class="chip">
-                {(() => {
-                  const activeProvider = props.provider || props.selectedCard?.provider || "default";
-                  const activeModel = props.model || props.selectedCard?.model || "";
-                  const resolvedProv = activeProvider === "default" ? props.payload.default_provider : activeProvider;
-                  const catalog = props.payload.model_catalogs.find((c) => c.provider === resolvedProv);
-                  const resolvedMod = (activeModel === "" || activeModel === "provider default")
-                    ? (activeProvider === "default" ? props.payload.default_model : (catalog?.default_model || "default"))
-                    : activeModel;
-                  return `${resolvedProv}/${resolvedMod}`;
-                })()}
-              </span>
-            </div>
-          </div>
-        </div>
-      </Show>
       <Show when={previewAttachment()}>
         <div class="dialog-backdrop" onClick={() => setPreviewAttachment(null)}>
           <div class="dialog" onClick={(e) => e.stopPropagation()}>

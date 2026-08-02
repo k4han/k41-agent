@@ -1656,7 +1656,6 @@ export function ChatPage() {
                 agentName={agentName()}
                 agents={validCards()}
                 onAgentChange={setAgentName}
-                selectedCard={selectedCard()}
                 provider={provider()}
                 model={model()}
                 onProviderModelChange={(nextProvider, nextModel) => {

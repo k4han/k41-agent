@@ -35,6 +35,7 @@ type ModelPickerProps = {
   model: string;
   disabled?: boolean;
   dropdownPlacement?: "top" | "bottom";
+  class?: string;
   onChange: (provider: string, model: string) => void;
   resolveDefault?: boolean;
   modelFilter?: (model: ModelOption, provider: string) => boolean;
@@ -366,6 +367,7 @@ export function ModelPicker(props: ModelPickerProps) {
       class={classNames(
         "model-picker",
         props.dropdownPlacement === "top" && "model-picker-up",
+        props.class,
       )}
       ref={rootRef}
     >
