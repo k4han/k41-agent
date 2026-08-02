@@ -53,7 +53,7 @@ class WorkspaceFileIO(Protocol):
     async def read_text(self, file_path: str) -> str:
         ...
 
-    async def write_text(self, file_path: str, content: str) -> str:
+    async def write_text(self, file_path: str, content: str, *, append: bool = False) -> str:
         ...
 
     async def glob(

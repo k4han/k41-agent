@@ -624,12 +624,11 @@ class ModalWorkspaceBackend(SandboxBackendBase):
             lambda: self.fs.read_text.aio(resolve_modal_path(self.root, file_path))
         )
 
-    async def write_text(self, file_path: str, content: str) -> str:
+    async def write_text(self, file_path: str, content: str, *, append: bool = False) -> str:
         self.touch()
         self._invalidate_workspace_caches()
         remote_path = resolve_modal_path(self.root, file_path)
-        await self._run_remote_aio(lambda: self.fs.write_text.aio(content, remote_path))
-        return f"[OK] Wrote file: {remote_path}"
+        return await self._write_text_impl(remote_path, content, append=append)
 
     async def glob(
         self,

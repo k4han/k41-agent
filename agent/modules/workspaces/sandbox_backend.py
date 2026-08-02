@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 import mimetypes
 import posixpath
@@ -138,16 +139,113 @@ class SandboxBackendBase(ABC):
             return raw.decode("utf-8", errors="replace")
         return str(raw or "")
 
-    async def write_text(self, file_path: str, content: str) -> str:
+    async def write_text(self, file_path: str, content: str, *, append: bool = False) -> str:
         """Write a text file to the sandbox."""
         from agent.modules.workspaces.posix_utils import resolve_remote_path
 
         self._invalidate_workspace_caches()
         remote_path = resolve_remote_path(self.root, file_path)
+        return await self._write_text_impl(remote_path, content, append=append)
+
+    async def _write_text_impl(self, remote_path: str, content: str, *, append: bool) -> str:
+        """Write *content* to *remote_path*, creating parent dirs as needed.
+
+        ``append=False`` performs an atomic replace (upload to a temp path then
+        ``mv``); ``append=True`` appends via a shell redirect (temp file +
+        ``cat >>``).
+        """
         parent = remote_path.rsplit("/", 1)[0] or "/"
-        self._make_directory(parent)
-        self._upload_file(content.encode("utf-8"), remote_path)
+        made = self._make_directory(parent)
+        if inspect.isawaitable(made):
+            await made
+        if append:
+            await self._append_remote_text(remote_path, content)
+        else:
+            await self._atomic_write_remote(remote_path, content)
         return f"[OK] Wrote file: {remote_path}"
+
+    async def _atomic_write_remote(self, remote_path: str, content: str) -> None:
+        """Atomically replace *remote_path* with *content*.
+
+        The existing file's permission mode is preserved, and symlinks are
+        resolved so the write lands on the target instead of replacing the
+        symlink itself.
+        """
+        write_target = await self._resolve_write_target(remote_path)
+        mode = await self._remote_file_mode(write_target)
+        tmp_path = f"{write_target}.k41-{time.time_ns()}.tmp"
+        try:
+            self._upload_file(content.encode("utf-8"), tmp_path)
+            if mode:
+                chmod_result = await self._exec_cmd(
+                    f"chmod {mode} {shlex.quote(tmp_path)}", cwd="/"
+                )
+                if chmod_result.exit_code not in (0, None):
+                    logger.debug(
+                        "Failed to preserve mode %s on %s", mode, tmp_path
+                    )
+            result = await self._exec_cmd(
+                f"mv {shlex.quote(tmp_path)} {shlex.quote(write_target)}", cwd="/"
+            )
+            if result.exit_code not in (0, None):
+                raise RuntimeError(result.output.strip() or "Atomic write failed.")
+        finally:
+            try:
+                await self._exec_cmd(f"rm -f {shlex.quote(tmp_path)}", cwd="/")
+            except Exception:
+                logger.debug("Failed to remove temp file %s", tmp_path)
+
+    async def _append_remote_text(self, remote_path: str, content: str) -> None:
+        """Append *content* to *remote_path* via a temp file + shell redirect.
+
+        Unlike a read-modify-write, this keeps the cost proportional to the
+        appended content and does not race with concurrent writers.
+        """
+        tmp_path = f"{remote_path}.k41-{time.time_ns()}.tmp"
+        try:
+            self._upload_file(content.encode("utf-8"), tmp_path)
+            result = await self._exec_cmd(
+                f"cat {shlex.quote(tmp_path)} >> {shlex.quote(remote_path)}", cwd="/"
+            )
+            if result.exit_code not in (0, None):
+                raise RuntimeError(result.output.strip() or "Append failed.")
+        finally:
+            try:
+                await self._exec_cmd(f"rm -f {shlex.quote(tmp_path)}", cwd="/")
+            except Exception:
+                logger.debug("Failed to remove temp file %s", tmp_path)
+
+    async def _resolve_write_target(self, remote_path: str) -> str:
+        """Resolve symlinks so atomic replace writes through to the target."""
+        result = await self._exec_cmd(
+            f"readlink -f {shlex.quote(remote_path)}", cwd="/"
+        )
+        if result.exit_code in (0, None) and result.output.strip().startswith("/"):
+            return result.output.strip().splitlines()[-1]
+        return remote_path
+
+    async def _remote_file_mode(self, remote_path: str) -> str:
+        """Return the octal permission mode of *remote_path*, or ``""``."""
+        result = await self._exec_cmd(
+            f"stat -c %a {shlex.quote(remote_path)}", cwd="/"
+        )
+        mode = result.output.strip().splitlines()[-1] if result.output.strip() else ""
+        if result.exit_code in (0, None) and mode.isdigit() and 3 <= len(mode) <= 4:
+            return mode
+        return ""
+
+    async def _exec_cmd(
+        self,
+        command: str,
+        *,
+        cwd: str | None = None,
+        timeout: int = 30,
+    ) -> CommandResult:
+        """Execute a command, handling both sync and async ``_exec`` backends."""
+        result = self._exec(command, cwd=cwd, timeout=timeout)
+        if inspect.isawaitable(result):
+            return await result
+        return result
 
     # ------------------------------------------------------------------ #
     #  Browser / tree

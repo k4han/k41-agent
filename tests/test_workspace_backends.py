@@ -1,10 +1,11 @@
+import importlib.util
 import json
+import posixpath
 from datetime import datetime, timedelta, timezone
 from importlib.machinery import ModuleSpec
 from types import SimpleNamespace
 from typing import Any
 
-import importlib.util
 import pytest
 from sqlalchemy import create_engine, text
 
@@ -197,6 +198,30 @@ class FakeDaytonaProcess:
             source = parts[1].strip("'\"")
             destination = parts[2].strip("'\"")
             self.fs.files[destination] = self.fs.files.pop(source)
+            return SimpleNamespace(result="", exit_code=0, stderr="")
+        if command.startswith("readlink -f "):
+            target = command.split("readlink -f ", 1)[1].strip("'\"")
+            return SimpleNamespace(
+                result=posixpath.normpath(target) + "\n", exit_code=0, stderr=""
+            )
+        if command.startswith("stat -c "):
+            target = command.split()[-1].strip("'\"")
+            if target in self.fs.files or target in self.fs.dirs:
+                return SimpleNamespace(result="644\n", exit_code=0, stderr="")
+            return SimpleNamespace(result="", exit_code=1, stderr="")
+        if command.startswith("chmod "):
+            return SimpleNamespace(result="", exit_code=0, stderr="")
+        if command.startswith("rm -f "):
+            target = command.split("rm -f ", 1)[1].strip("'\"")
+            self.fs.files.pop(target, None)
+            return SimpleNamespace(result="", exit_code=0, stderr="")
+        if command.startswith("cat ") and " >> " in command:
+            source, destination = command.split(" >> ", 1)
+            source_path = source.split("cat ", 1)[1].strip("'\"")
+            destination_path = destination.strip("'\"")
+            content = self.fs.files.pop(source_path, b"")
+            existing = self.fs.files.get(destination_path, b"")
+            self.fs.files[destination_path] = existing + bytes(content)
             return SimpleNamespace(result="", exit_code=0, stderr="")
         if command.startswith("if [ -d "):
             target = command.split("if [ -d ", 1)[1].split(" ];", 1)[0].strip("'\"")
@@ -442,6 +467,30 @@ class FakeModalSandbox:
             source = parts[1].strip("'\"")
             destination = parts[2].strip("'\"")
             self.filesystem.files[destination] = self.filesystem.files.pop(source)
+            result = ""
+        elif command.startswith("readlink -f "):
+            target = command.split("readlink -f ", 1)[1].strip("'\"")
+            result = posixpath.normpath(target) + "\n"
+        elif command.startswith("stat -c "):
+            target = command.split()[-1].strip("'\"")
+            if target in self.filesystem.files or target in self.filesystem.dirs:
+                result = "644\n"
+            else:
+                result = ""
+                exit_code = 1
+        elif command.startswith("chmod "):
+            result = ""
+        elif command.startswith("rm -f "):
+            target = command.split("rm -f ", 1)[1].strip("'\"")
+            self.filesystem.files.pop(target, None)
+            result = ""
+        elif command.startswith("cat ") and " >> " in command:
+            source, destination = command.split(" >> ", 1)
+            source_path = source.split("cat ", 1)[1].strip("'\"")
+            destination_path = destination.strip("'\"")
+            content = self.filesystem.files.pop(source_path, b"")
+            existing = self.filesystem.files.get(destination_path, b"")
+            self.filesystem.files[destination_path] = existing + bytes(content)
             result = ""
         elif command.startswith("if [ -d "):
             target = command.split("if [ -d ", 1)[1].split(" ];", 1)[0].strip("'\"")

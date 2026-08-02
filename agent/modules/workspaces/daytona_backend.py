@@ -970,15 +970,11 @@ class DaytonaWorkspaceBackend(SandboxBackendBase):
             return raw
         return bytes(raw or b"").decode("utf-8", errors="replace")
 
-    async def write_text(self, file_path: str, content: str) -> str:
+    async def write_text(self, file_path: str, content: str, *, append: bool = False) -> str:
         self.ensure_active()
         self._invalidate_workspace_caches()
         remote_path = resolve_daytona_path(self.root, file_path)
-        parent = posixpath.dirname(remote_path)
-        if parent:
-            self._exec(f"mkdir -p {shlex.quote(parent)}", cwd="/")
-        self._upload_file(content.encode("utf-8"), remote_path)
-        return f"[OK] Wrote file: {remote_path}"
+        return await self._write_text_impl(remote_path, content, append=append)
 
     async def glob(
         self,

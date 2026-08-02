@@ -77,16 +77,33 @@ class LocalWorkspaceBackend:
 
     async def read_text(self, file_path: str) -> str:
         full_path = resolve_safe_path(str(self.root), file_path)
-        with open(full_path, "r", encoding="utf-8") as file_handle:
+        with open(full_path, "r", encoding="utf-8", errors="replace") as file_handle:
             return file_handle.read()
 
-    async def write_text(self, file_path: str, content: str) -> str:
+    async def write_text(self, file_path: str, content: str, *, append: bool = False) -> str:
         full_path = resolve_safe_path(str(self.root), file_path)
         parent = os.path.dirname(full_path)
         if parent:
             os.makedirs(parent, exist_ok=True)
-        with open(full_path, "w", encoding="utf-8") as file_handle:
-            file_handle.write(content)
+        if append:
+            with open(full_path, "a", encoding="utf-8") as file_handle:
+                file_handle.write(content)
+            return f"[OK] Wrote file: {full_path}"
+        write_target = os.path.realpath(full_path) if os.path.islink(full_path) else full_path
+        try:
+            mode = os.stat(write_target).st_mode & 0o7777
+        except OSError:
+            mode = None
+        tmp_path = f"{write_target}.{os.getpid()}.{time.time_ns()}.tmp"
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as file_handle:
+                file_handle.write(content)
+            if mode is not None:
+                os.chmod(tmp_path, mode)
+            os.replace(tmp_path, write_target)
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
         return f"[OK] Wrote file: {full_path}"
 
     async def glob(

@@ -19,9 +19,16 @@ async def write_file(
     file_path: str,
     content: str,
     runtime: Annotated[ToolRuntime[Any, Any], InjectedToolArg],
+    append: bool = False,
 ) -> str:
-    """Write content to file in working directory."""
+    """Write content to file in working directory.
+
+    By default the file is replaced with ``content`` (atomic write). Set
+    ``append=True`` to add ``content`` to the end of the file instead.
+    """
     try:
-        return await (await get_file_io(runtime)).write_text(file_path, content)
+        return await (await get_file_io(runtime)).write_text(
+            file_path, content, append=append
+        )
     except ValueError as exc:
         raise ToolError(ToolErrorCode.INVALID_INPUT, str(exc)) from exc

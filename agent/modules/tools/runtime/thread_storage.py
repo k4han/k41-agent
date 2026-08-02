@@ -212,15 +212,16 @@ class WorkspaceStorageFileIO:
                 return file_handle.read()
         return await self._base.read_text(file_path)
 
-    async def write_text(self, file_path: str, content: str) -> str:
+    async def write_text(self, file_path: str, content: str, *, append: bool = False) -> str:
         storage_rel = virtual_storage_relative_path(file_path)
         if storage_rel is not None:
             ensure_workspace_storage_root(self._workspace_scope)
             path = resolve_workspace_storage_path(self._workspace_scope, storage_rel)
-            with open(path, "w", encoding="utf-8") as file_handle:
+            mode = "a" if append else "w"
+            with open(path, mode, encoding="utf-8") as file_handle:
                 file_handle.write(content)
             return f"[OK] Wrote file: {_virtual_path(storage_rel)}"
-        return await self._base.write_text(file_path, content)
+        return await self._base.write_text(file_path, content, append=append)
 
     async def glob(
         self,

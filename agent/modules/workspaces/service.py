@@ -482,8 +482,8 @@ class _RecoveringModalWorkspaceBackend:
     async def read_text(self, file_path: str) -> str:
         return await self._run(lambda backend: backend.read_text(file_path))
 
-    async def write_text(self, file_path: str, content: str) -> str:
-        return await self._run(lambda backend: backend.write_text(file_path, content))
+    async def write_text(self, file_path: str, content: str, *, append: bool = False) -> str:
+        return await self._run(lambda backend: backend.write_text(file_path, content, append=append))
 
     async def execute(
         self,
