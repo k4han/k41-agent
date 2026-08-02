@@ -104,6 +104,16 @@ export function useChatScroll(
     scrollToBottom(true);
   };
 
+  // Stop following the stream and release the turn anchor so subsequent
+  // streamed chunks do not yank the view back to the anchor. Used when the
+  // user explicitly interacts with the transcript (for example expanding a
+  // tool call to read its arguments/result). Scrolling back to the bottom
+  // re-enables auto-scroll; the "scroll to bottom" button force-scrolls.
+  const pauseAutoScroll = () => {
+    clearTurnAnchor();
+    setAutoScroll(false);
+  };
+
   return {
     autoScroll,
     setAutoScroll,
@@ -116,5 +126,6 @@ export function useChatScroll(
     scrollToBottom,
     handleTranscriptScroll,
     handleScrollToBottomClick,
+    pauseAutoScroll,
   };
 }

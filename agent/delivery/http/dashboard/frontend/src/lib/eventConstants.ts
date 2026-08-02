@@ -35,6 +35,7 @@ export const CUSTOM_DOM_EVENTS = {
   THREAD_EXTERNAL_ABORT: "k41:thread-external-abort",
   THREADS_CHANGED: "k41:threads-changed",
   TASKS_CHANGED: "k41:tasks-changed",
+  TRANSCRIPT_TOOL_TOGGLE: "k41:transcript-tool-toggle",
 } as const;
 
 export function recursionLimitStorageKey(threadId: string): string {

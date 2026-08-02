@@ -1479,6 +1479,10 @@ export function ChatPage() {
     }
   });
 
+  const handleTranscriptToolToggle = () => {
+    scroll.pauseAutoScroll();
+  };
+
   const handleExternalAbort = (event: Event) => {
     const customEvent = event as CustomEvent<{ threadId: string }>;
     if (customEvent.detail.threadId === currentStreamThreadId() || customEvent.detail.threadId === currentThreadId()) {
@@ -1503,6 +1507,7 @@ export function ChatPage() {
     window.addEventListener(CUSTOM_DOM_EVENTS.SESSION_STARTED, handleSessionStartedOrUpdated);
     window.addEventListener(CUSTOM_DOM_EVENTS.SESSION_UPDATED, handleSessionStartedOrUpdated);
     window.addEventListener(CUSTOM_DOM_EVENTS.SESSION_STOPPED, handleSessionStopped);
+    window.addEventListener(CUSTOM_DOM_EVENTS.TRANSCRIPT_TOOL_TOGGLE, handleTranscriptToolToggle);
 
     void load();
     void loadDefaultWorkspace();
@@ -1518,6 +1523,7 @@ export function ChatPage() {
     window.removeEventListener(CUSTOM_DOM_EVENTS.SESSION_STARTED, handleSessionStartedOrUpdated);
     window.removeEventListener(CUSTOM_DOM_EVENTS.SESSION_UPDATED, handleSessionStartedOrUpdated);
     window.removeEventListener(CUSTOM_DOM_EVENTS.SESSION_STOPPED, handleSessionStopped);
+    window.removeEventListener(CUSTOM_DOM_EVENTS.TRANSCRIPT_TOOL_TOGGLE, handleTranscriptToolToggle);
   });
 
   let touchStartX = 0;

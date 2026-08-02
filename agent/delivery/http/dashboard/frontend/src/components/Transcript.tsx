@@ -15,6 +15,7 @@ import { Markdown } from "@/components/Markdown";
 import { StatusIndicator } from "@/components/StatusIndicator";
 import { useToast } from "@/components/Toast";
 import { isChatStatusText } from "@/lib/chatStatus";
+import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
 import {
   GENERATE_IMAGE_TOOL_NAME,
   generatedImageFromToolResult,
@@ -801,11 +802,27 @@ export function ToolCallDetail(props: {
       ? generatedImageFromToolResult(props.result, props.threadId)
       : null;
 
+  // When the user expands a tool call to inspect its details, notify the
+  // transcript scroll controller so it stops following the stream. Without
+  // this, the next streamed chunk would scroll back to the turn anchor and
+  // yank the expanded tool out of view.
+  const handleToggle = (event: Event) => {
+    const details = event.currentTarget as HTMLDetailsElement;
+    // Only react when expanding; collapsing must not interrupt following.
+    if (!details.open) {
+      return;
+    }
+    details.dispatchEvent(
+      new CustomEvent(CUSTOM_DOM_EVENTS.TRANSCRIPT_TOOL_TOGGLE, { bubbles: true }),
+    );
+  };
+
   return (
     <details
       class="tool-call"
       open={props.defaultOpen ?? false}
       data-transcript-item-id={props.itemId}
+      onToggle={handleToggle}
     >
       <summary>
         <span class="mono">{props.name || "unknown"}</span>
