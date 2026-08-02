@@ -1,4 +1,4 @@
-import { Star } from "lucide-solid";
+import { ChevronDown, Star } from "lucide-solid";
 import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 
 import { classNames } from "@/lib/utils";
@@ -39,6 +39,7 @@ type ModelPickerProps = {
   onChange: (provider: string, model: string) => void;
   resolveDefault?: boolean;
   modelFilter?: (model: ModelOption, provider: string) => boolean;
+  favoritePills?: boolean;
 };
 
 function favoriteKey(provider: string, model: string): string {
@@ -323,6 +324,41 @@ export function ModelPicker(props: ModelPickerProps) {
     return filtered;
   });
 
+  const favoriteChoices = createMemo<ModelChoice[]>(() => {
+    const favKeys = favorites();
+    if (favKeys.length === 0) {
+      return [];
+    }
+    const choicesByKey = new Map<string, ModelChoice>();
+    for (const group of baseGroups()) {
+      for (const choice of group.choices) {
+        choicesByKey.set(choice.key, choice);
+      }
+    }
+    return favKeys
+      .map((key) => {
+        const existing = choicesByKey.get(key);
+        if (existing) {
+          return existing;
+        }
+        const [provider, model] = key.split(keySeparator);
+        if (!provider || !model) {
+          return null;
+        }
+        return {
+          provider,
+          model,
+          label: selectionLabel(provider, model, props.resolveDefault, props.defaultModel),
+          description: "favorite model",
+          key,
+        } as ModelChoice;
+      })
+      .filter((item): item is ModelChoice => item !== null);
+  });
+
+  const isActiveChoice = (choice: Pick<ModelChoice, "provider" | "model">) =>
+    choice.provider === selectedProvider() && choice.model === selectedModel();
+
   const selectChoice = (choice: Pick<ModelChoice, "provider" | "model">) => {
     props.onChange(choice.provider, choice.model);
     setOpen(false);
@@ -371,7 +407,10 @@ export function ModelPicker(props: ModelPickerProps) {
       )}
       ref={rootRef}
     >
-      <div class="model-picker-control">
+      <Show
+        when={props.favoritePills}
+        fallback={
+          <div class="model-picker-control">
         <input
           class="input model-picker-input"
           ref={inputRef}
@@ -410,8 +449,64 @@ export function ModelPicker(props: ModelPickerProps) {
         </button>
       </div>
 
+        }
+      >
+        <div class="model-picker-pills">
+          <For each={favoriteChoices()}>
+            {(choice) => (
+              <button
+                class={classNames("model-picker-pill", isActiveChoice(choice) && "active")}
+                type="button"
+                disabled={props.disabled}
+                title={choice.label}
+                onClick={() => selectChoice(choice)}
+              >
+                <span class="model-picker-pill-label mono">{choice.label}</span>
+              </button>
+            )}
+          </For>
+          <button
+            class={classNames("model-picker-pill model-picker-pill-more", open() && "active")}
+            type="button"
+            disabled={props.disabled}
+            title="More models"
+            aria-expanded={open()}
+            onClick={() => {
+              setOpen((value) => !value);
+              setQuery("");
+            }}
+          >
+            <span class="model-picker-pill-label mono">{selectedLabel()}</span>
+            <ChevronDown size={13} class="model-picker-pill-chevron" />
+          </button>
+        </div>
+      </Show>
+
       <Show when={open() && !props.disabled}>
         <div class="model-picker-dropdown">
+          <Show when={props.favoritePills}>
+            <input
+              class="input model-picker-search"
+              ref={(el) => {
+                inputRef = el;
+                el.focus();
+              }}
+              value={query()}
+              placeholder="Search models"
+              autocomplete="off"
+              onInput={(event) => setQuery(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  commitQuery();
+                }
+                if (event.key === "Escape") {
+                  setOpen(false);
+                  setQuery("");
+                }
+              }}
+            />
+          </Show>
           <For each={visibleGroups()} fallback={<div class="model-picker-empty">No models found.</div>}>
             {(group) => (
               <div class="model-picker-group">

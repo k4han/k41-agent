@@ -793,6 +793,72 @@
   text-align: center;
 }
 
+/* --- Favorite model pills (quick switch row, e.g. chat composer) --- */
+
+.model-picker-pills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.model-picker-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 160px;
+  height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+  flex: 0 1 auto;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.model-picker-pill-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-picker-pill:hover:not(:disabled) {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--surface-3) 82%, var(--fg));
+}
+
+.model-picker-pill:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.model-picker-pill.active {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.model-picker-pill-more {
+  flex: 0 0 auto;
+  max-width: 220px;
+}
+
+.model-picker-pill-chevron {
+  flex: none;
+}
+
+.model-picker-search {
+  width: 100%;
+  margin: 0 0 6px;
+  border-radius: 8px;
+}
+
 .hint {
   color: var(--muted);
   font-size: 12px;

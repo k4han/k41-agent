@@ -233,6 +233,7 @@ export function ChatComposer(props: ChatComposerProps) {
             disabled={props.composerDisabled}
             dropdownPlacement="top"
             resolveDefault={true}
+            favoritePills={true}
             onChange={(nextProvider, nextModel) => {
               props.onProviderModelChange(nextProvider, nextModel);
             }}

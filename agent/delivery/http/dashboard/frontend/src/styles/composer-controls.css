@@ -128,7 +128,7 @@
 }
 
 .chat-model-picker {
-  max-width: 220px;
+  max-width: 380px;
   min-width: 0;
   flex-shrink: 0;
 }
