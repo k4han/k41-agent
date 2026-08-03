@@ -133,6 +133,20 @@ class AppRuntime:
             except Exception as exc:
                 logger.warning("Failed to prune orphaned GitHub worktrees: %s", exc)
 
+            logger.info("Cleaning up orphaned temporary workspaces...")
+            try:
+                from agent.modules.workspaces import cleanup_orphaned_temp_workspaces
+
+                cleaned = await cleanup_orphaned_temp_workspaces()
+                if cleaned.get("directories_removed") or cleaned.get("records_removed"):
+                    logger.info(
+                        "Removed %d orphaned temp workspace directories and %d records.",
+                        cleaned["directories_removed"],
+                        cleaned["records_removed"],
+                    )
+            except Exception as exc:
+                logger.warning("Failed to clean up orphaned temp workspaces: %s", exc)
+
             logger.info("Starting workspace background services...")
             await start_enabled_workspace_background_services()
 

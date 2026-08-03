@@ -69,6 +69,8 @@ from agent.modules.workspaces.sandboxes import (
 )
 from agent.modules.workspaces.service import (
     attach_workspace_backend,
+    cleanup_orphaned_temp_workspaces,
+    create_temp_workspace,
     create_workspace_backend,
     delete_thread_workspace,
     delete_workspace_entry,
@@ -87,6 +89,7 @@ from agent.modules.workspaces.service import (
     get_workspace_repository_cloner,
     get_workspace_changes,
     get_workspace_diff,
+    is_temp_workspace,
     list_workspace_directories,
     list_workspace_tree,
     remember_thread_workspace,
@@ -157,6 +160,8 @@ __all__ = [
     "attach_github_repository_to_workspace",
     "attach_workspace_backend",
     "bind_workspace_ref",
+    "cleanup_orphaned_temp_workspaces",
+    "create_temp_workspace",
     "create_workspace_backend",
     "delete_sandbox",
     "delete_thread_workspace",
@@ -181,6 +186,7 @@ __all__ = [
     "get_workspace_changes",
     "get_workspace_diff",
     "is_github_workspace",
+    "is_temp_workspace",
     "list_sandboxes",
     "list_workspace_backend_catalog",
     "list_workspace_directories",

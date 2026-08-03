@@ -63,6 +63,189 @@ IGNORED_DIR_NAMES = {
 }
 _modal_recovery_locks: dict[str, asyncio.Lock] = {}
 
+TEMP_WORKSPACE_DIRNAME = "temp-workspaces"
+
+
+def temp_workspace_root() -> Path:
+    """Return the hidden root directory that holds temporary workspaces."""
+    from agent.modules.tools import THREAD_STORAGE_BASE_DIR
+    return (THREAD_STORAGE_BASE_DIR / TEMP_WORKSPACE_DIRNAME).resolve()
+
+
+def is_temp_workspace(workspace: WorkspaceRef | dict[str, Any] | str | None) -> bool:
+    """Return ``True`` when the workspace is an ephemeral scratch workspace."""
+    ref = resolve_workspace_ref(workspace)
+    metadata = ref.metadata or {}
+    if bool(metadata.get("temp")):
+        return True
+    return str(metadata.get("source") or "").strip().lower() == "temp"
+
+
+async def create_temp_workspace(
+    thread_id: str | None,
+    *,
+    label: str | None = None,
+) -> WorkspaceRef:
+    """Create a temporary, hidden local workspace for an ad-hoc chat thread.
+
+    The directory lives under a ``workspace-storage/temp-workspaces`` folder
+    outside the configured workspace root, so it never shows up in the
+    directory browser or in conversations that run against the default
+    workspace root. Callers are responsible for remembering the returned ref
+    for ``thread_id`` so later turns reuse the same scratch directory (the
+    API router does this). Cleanup happens automatically when the thread is
+    deleted, or via :func:`cleanup_orphaned_temp_workspaces` at startup.
+    """
+    thread_key = str(thread_id or "").strip()
+    safe_key = "".join(ch for ch in thread_key if ch.isalnum() or ch in {"-", "_"})
+    if not safe_key:
+        safe_key = "untitled"
+    target = temp_workspace_root() / f"thread-{safe_key}"
+    target.mkdir(parents=True, exist_ok=True)
+
+    return resolve_workspace_ref(
+        {
+            "backend": LOCAL_BACKEND,
+            "locator": str(target),
+            "label": label or "Temp workspace",
+            "metadata": {
+                "temp": True,
+                "thread_id": thread_id or "",
+            },
+        }
+    )
+
+
+async def _delete_temp_workspace_directory(locator: str) -> bool:
+    """Remove a temporary workspace directory if it lives under the temp root.
+
+    Returns ``True`` when a directory was actually removed.
+    """
+    root = temp_workspace_root()
+    try:
+        target = Path(locator).expanduser().resolve()
+    except (OSError, RuntimeError):
+        return False
+    if target == root or not target.is_relative_to(root):
+        return False
+    if not target.exists():
+        return False
+    try:
+        await asyncio.to_thread(shutil.rmtree, target)
+    except OSError as exc:
+        logger.warning("Failed to remove temp workspace %s: %s", target, exc)
+        return False
+    return True
+
+
+async def cleanup_orphaned_temp_workspaces() -> dict[str, int]:
+    """Remove temporary workspaces whose owning thread no longer exists.
+
+    A temporary workspace is provisioned eagerly whenever a dashboard chat is
+    sent without an explicit workspace. If the first run fails before the
+    conversation thread is persisted, both the directory and its
+    ``thread_workspaces`` record would otherwise leak forever. This routine
+    drops records whose thread is no longer active and removes directories
+    under the temp root whose owning thread is also gone. It is intended to be
+    invoked once at application startup.
+    """
+    stats: dict[str, int] = {"directories_removed": 0, "records_removed": 0}
+
+    repo = get_thread_workspace_repository()
+    try:
+        records = await repo.list_by_backend(LOCAL_BACKEND)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Failed to list local workspace records for temp cleanup: %s",
+            exc,
+        )
+        records = {}
+
+    temp_records: dict[str, dict[str, Any]] = {}
+    for thread_id, record in records.items():
+        workspace = record.get("workspace")
+        if workspace and is_temp_workspace(workspace):
+            temp_records[thread_id] = record
+
+    root_ids = [str(thread_id).split(":sub:", 1)[0] for thread_id in temp_records]
+    alive_ids: set[str] = set()
+    if root_ids:
+        try:
+            from agent.modules.conversations import list_active_thread_ids
+
+            alive_ids = await list_active_thread_ids(root_ids)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Failed to resolve alive thread ids for temp cleanup: %s",
+                exc,
+            )
+            # Assume every thread is alive so we never delete a workspace that
+            # a live thread still depends on.
+            alive_ids = set(root_ids)
+
+    referenced_names: set[str] = set()
+    for thread_id, record in temp_records.items():
+        try:
+            workspace = resolve_workspace_ref(record.get("workspace"))
+        except Exception:  # noqa: BLE001
+            continue
+        locator = workspace.locator
+        root_id = str(thread_id).split(":sub:", 1)[0]
+        if root_id in alive_ids:
+            referenced_names.add(Path(locator).name)
+            continue
+        if await _delete_temp_workspace_directory(locator):
+            stats["directories_removed"] += 1
+        try:
+            await repo.delete(thread_id)
+            stats["records_removed"] += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Failed to delete temp workspace record for %s: %s",
+                thread_id,
+                exc,
+            )
+
+    root = temp_workspace_root()
+    try:
+        entries = list(root.iterdir()) if root.is_dir() else []
+    except OSError as exc:
+        logger.warning("Failed to scan temp workspace root %s: %s", root, exc)
+        entries = []
+
+    dir_names = {
+        entry.name
+        for entry in entries
+        if entry.is_dir() and entry.name.startswith("thread-")
+    }
+    orphan_names = dir_names - referenced_names
+    alive_orphan_names: set[str] = set()
+    if orphan_names:
+        candidate_roots = [name[len("thread-"):] for name in orphan_names]
+        try:
+            from agent.modules.conversations import list_active_thread_ids
+
+            alive_roots = await list_active_thread_ids(candidate_roots)
+            alive_orphan_names = {f"thread-{root_id}" for root_id in alive_roots}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Failed to resolve alive thread ids for orphaned temp dirs: %s",
+                exc,
+            )
+            # Fail closed: assume the orphaned directories belong to live
+            # threads so we never remove a live thread's scratch directory.
+            alive_orphan_names = orphan_names
+
+    for entry in entries:
+        if not entry.is_dir() or not entry.name.startswith("thread-"):
+            continue
+        if entry.name in referenced_names or entry.name in alive_orphan_names:
+            continue
+        if await _delete_temp_workspace_directory(str(entry)):
+            stats["directories_removed"] += 1
+
+    return stats
+
 
 def resolve_workspace_ref(workspace: WorkspaceRef | dict[str, Any] | str | None = None) -> WorkspaceRef:
     from agent.shared.config.service import get_config_service
@@ -927,10 +1110,44 @@ async def get_thread_workspace_dir(thread_id: str) -> str | None:
     return workspace.locator if workspace else None
 
 
+async def _temp_workspace_owner_is_gone(thread_id: str) -> bool:
+    """Return ``True`` when removing ``thread_id`` may also drop its temp directory.
+
+    A temporary workspace directory is keyed by the root conversation, and
+    sub-thread records (``<root>:sub:...``) share that same directory. Removing
+    a sub-thread must therefore only delete the directory when the root
+    conversation is itself gone; removing the root conversation removes the
+    directory outright. If the root's liveness cannot be determined the thread
+    is assumed alive so the directory is never removed underneath it.
+    """
+    normalized = str(thread_id or "")
+    root_id = normalized.split(":sub:", 1)[0]
+    if not root_id or root_id == normalized:
+        return True
+    try:
+        from agent.modules.conversations import list_active_thread_ids
+
+        return not bool(await list_active_thread_ids([root_id]))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Failed to resolve alive state for temp thread %s: %s",
+            thread_id,
+            exc,
+        )
+        return False
+
+
 async def delete_thread_workspace(thread_id: str) -> WorkspaceRef | None:
     workspace = await get_thread_workspace_ref(thread_id)
     if workspace is None:
         return None
+
+    if (
+        workspace.backend == LOCAL_BACKEND
+        and is_temp_workspace(workspace)
+        and await _temp_workspace_owner_is_gone(thread_id)
+    ):
+        await _delete_temp_workspace_directory(workspace.locator)
 
     try:
         lifecycle = await get_workspace_lifecycle_manager(

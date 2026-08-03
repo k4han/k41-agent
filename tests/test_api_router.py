@@ -444,12 +444,49 @@ def test_chat_events_can_create_new_thread(monkeypatch, tmp_path):
     assert remembered == [("api_dashboard_generated", resolved_workspace.model_dump())]
 
 
-def test_chat_events_rejects_dashboard_new_thread_without_workspace(monkeypatch):
+def test_chat_events_creates_temp_workspace_for_dashboard_new_thread_without_workspace(monkeypatch):
+    temp_workspace = router_module.resolve_workspace_ref(
+        {
+            "backend": "local",
+            "locator": "D:/workspace/.temp/thread-api_dashboard_generated",
+            "label": "Temp workspace",
+            "metadata": {"temp": True},
+        }
+    )
+    built_params = {
+        "user_input": "Start",
+        "thread_id": "api_dashboard_generated",
+        "agent_name": "default",
+        "workflow": None,
+        "workspace": temp_workspace,
+        "max_context_tokens": None,
+        "provider": None,
+        "model": None,
+        "emit_thinking": False,
+    }
+
     monkeypatch.setattr(
         router_module,
         "create_thread_id",
         lambda **kwargs: "api_dashboard_generated",
     )
+
+    async def fake_create_temp_workspace(thread_id: str | None, *, label: str | None = None):
+        assert thread_id == "api_dashboard_generated"
+        return temp_workspace
+
+    def fake_build_run_params(**params):
+        assert params["workspace"] is None
+        return {**built_params, "workspace": params["workspace"]}
+
+    async def fake_run_agent_stream(**params):
+        assert params == built_params
+        yield {"type": "final", "content": "started"}
+
+    monkeypatch.setattr(router_module, "create_temp_workspace", fake_create_temp_workspace)
+    monkeypatch.setattr(router_module, "build_run_params", fake_build_run_params)
+    monkeypatch.setattr(router_module, "run_agent_stream", fake_run_agent_stream)
+
     client = _create_client()
     response = client.post(
         "/api/chat/events",
@@ -460,8 +497,11 @@ def test_chat_events_rejects_dashboard_new_thread_without_workspace(monkeypatch)
         },
     )
 
-    assert response.status_code == 400
-    assert response.json()["detail"] == "Dashboard chats require a resolved workspace."
+    assert response.status_code == 200
+    assert response.text == (
+        '{"type": "thread_created", "thread_id": "api_dashboard_generated"}\n'
+        '{"type": "final", "content": "started"}\n'
+    )
 
 
 def test_chat_events_resolves_and_remembers_workspace(monkeypatch, tmp_path):

@@ -100,6 +100,9 @@ function workspaceSelectionReady(selection: WorkspaceSelectionDraft | null): boo
   if (!selection) {
     return false;
   }
+  if (selection.source === "temp") {
+    return true;
+  }
   if (selection.source === "path") {
     return Boolean(selection.localPath.trim());
   }
@@ -110,6 +113,9 @@ function workspaceSelectionReady(selection: WorkspaceSelectionDraft | null): boo
 }
 
 function workspaceSelectionLocator(selection: WorkspaceSelectionDraft): string {
+  if (selection.source === "temp") {
+    return "";
+  }
   if (selection.source === "path") {
     return selection.localPath.trim();
   }
@@ -178,7 +184,6 @@ export function ChatPage() {
   const [workspaceRef, setWorkspaceRef] = createSignal<WorkspaceRef | null>(null);
   const [workspaceSelection, setWorkspaceSelection] = createSignal<WorkspaceSelectionDraft | null>(null);
   const [defaultWorkingDir, setDefaultWorkingDir] = createSignal("");
-  const [defaultWorkspace, setDefaultWorkspace] = createSignal<WorkspaceRef | null>(null);
   const [prompt, setPrompt] = createSignal("");
   const [todosExpanded, setTodosExpanded] = createSignal(true);
   const [recursionLimitReached, setRecursionLimitReached] = createSignal(false);
@@ -469,13 +474,18 @@ export function ChatPage() {
     };
   };
 
-  const resolveWorkspaceForSend = async (): Promise<WorkspaceRef> => {
+  const resolveWorkspaceForSend = async (): Promise<WorkspaceRef | null> => {
     const currentWorkspace = workspaceRef();
     if (currentWorkspace) {
       return currentWorkspace;
     }
 
     const selection = workspaceSelection();
+    if (selection?.source === "temp") {
+      // Explicitly opted into a temporary workspace. The backend provisions a
+      // hidden temporary workspace for the thread automatically.
+      return null;
+    }
     let payload: WorkspaceResolveRequest | null = null;
     if (workspaceSelectionReady(selection)) {
       payload = buildWorkspaceResolvePayload(selection!);
@@ -490,7 +500,9 @@ export function ChatPage() {
       }
     }
     if (!payload) {
-      throw new Error("Select a workspace before sending.");
+      // No explicit workspace chosen. The backend provisions a hidden
+      // temporary workspace for the thread automatically.
+      return null;
     }
 
     const response = await postJson<WorkspaceResolvePayload>(
@@ -509,12 +521,9 @@ export function ChatPage() {
     try {
       const payload = await apiFetch<DefaultWorkspacePayload>("/dashboard-api/workspace/default");
       const execution = workspaceExecution(payload.workspace);
-      const fallback = execution?.locator || "";
-      setDefaultWorkingDir(fallback);
-      setDefaultWorkspace(execution);
+      setDefaultWorkingDir(execution?.locator || "");
     } catch {
       setDefaultWorkingDir("");
-      setDefaultWorkspace(null);
     }
   };
 
@@ -603,7 +612,7 @@ export function ChatPage() {
   const pageSubtitle = createMemo(() => (
     currentThreadId()
       ? "Continue this thread."
-      : "Choose a workspace, then stream an agent response with visible tool calls."
+      : "Start a conversation — a temporary workspace is created automatically when you send a message. Link a project if you want to work with real files."
   ));
   const isBackgroundThread = createMemo(() => threadData()?.kind === "background");
   const backgroundTaskActive = createMemo(() => {
@@ -617,21 +626,13 @@ export function ChatPage() {
     streaming() || backgroundTaskActive() || backgroundLive() || Boolean(activeSession())
   ));
   const workspaceLocked = createMemo(() => Boolean(currentThreadId() && workingDir().trim()));
-  const workspaceReady = createMemo(() => (
-    Boolean(workspaceRef())
-    || workspaceSelectionReady(workspaceSelection())
-    || Boolean(localWorkspaceRef(workingDir()))
-  ));
-  const workspaceMissing = createMemo(() => !workspaceReady());
   const composerDisabled = createMemo(() => (
-    conversationBusy() || workspaceMissing() || Boolean(pendingUserInputRequest())
+    conversationBusy() || Boolean(pendingUserInputRequest())
   ));
   const inputDisabled = createMemo(() => (
-    threadLoading() || workspaceMissing() || Boolean(pendingUserInputRequest())
+    threadLoading() || Boolean(pendingUserInputRequest())
   ));
-  const userInputRequestDisabled = createMemo(() => (
-    conversationBusy() || workspaceMissing()
-  ));
+  const userInputRequestDisabled = createMemo(() => conversationBusy());
 
   const loadThread = async (threadId: string, checkpointId = "") => {
     const requestId = threadLoadRequestId + 1;
@@ -778,13 +779,6 @@ export function ChatPage() {
   });
 
   createEffect(() => {
-    const defWs = defaultWorkspace();
-    if (!currentThreadId() && !workingDir().trim() && defWs) {
-      setWorkspace(defWs);
-    }
-  });
-
-  createEffect(() => {
     const threadId = routeThreadId();
     if (threadId === loadedThreadId) {
       return;
@@ -907,10 +901,6 @@ export function ChatPage() {
     const effectiveAgentName = agentNameOverride || agentName();
     if (!effectiveAgentName) {
       showToast("No valid agent is available.", "error");
-      return;
-    }
-    if (workspaceMissing()) {
-      showToast("Select a workspace before sending.", "warning");
       return;
     }
 
@@ -1264,10 +1254,6 @@ export function ChatPage() {
   const handleSubmitUserInputRequest = (payload: UserInputRequestSubmitPayload) => {
     if (conversationBusy()) {
       showToast("Wait for the current response to finish.", "warning");
-      return;
-    }
-    if (workspaceMissing()) {
-      showToast("Select a workspace before sending.", "warning");
       return;
     }
     const request = pendingUserInputRequest();
@@ -1648,7 +1634,6 @@ export function ChatPage() {
                 stopActive={stopActive()}
                 composerDisabled={composerDisabled()}
                 inputDisabled={inputDisabled()}
-                workspaceMissing={workspaceMissing()}
                 backgroundTaskActive={backgroundTaskActive()}
                 currentThreadId={currentThreadId()}
                 attachments={attachments()}

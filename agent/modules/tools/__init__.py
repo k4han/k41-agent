@@ -58,6 +58,7 @@ from agent.modules.tools.runtime.context import (
 )
 from agent.modules.tools.runtime.path_guard import resolve_safe_path
 from agent.modules.tools.runtime.thread_storage import (
+    THREAD_STORAGE_BASE_DIR,
     generated_images_dir_for_thread,
     generated_images_dir_for_workspace,
     root_thread_id,
@@ -228,6 +229,7 @@ __all__ = [
     "resolve_tools",
     "resolve_tools_for_agent",
     "serialize_tool_config_schemas",
+    "THREAD_STORAGE_BASE_DIR",
     "thread_storage_root",
     "virtual_generated_image_path",
     "workspace_storage_root",

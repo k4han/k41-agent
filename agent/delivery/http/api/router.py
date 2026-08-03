@@ -36,6 +36,7 @@ from agent.modules.providers import (
 )
 from agent.modules.users import Platform, get_pairing_service
 from agent.modules.workspaces import (
+    create_temp_workspace,
     ensure_workspace_ready,
     get_thread_workspace_ref,
     remember_thread_workspace_ref,
@@ -98,16 +99,6 @@ router.include_router(mcp_router)
 
 def _request_to_run_params(request: ChatRequest) -> dict[str, object]:
     thread_id = request.thread_id
-    if (
-        request.new_thread
-        and not thread_id
-        and request.user_id == DASHBOARD_USER_ID
-        and request.workspace is None
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="Dashboard chats require a resolved workspace.",
-        )
     if request.new_thread and not thread_id:
         thread_id = create_thread_id(
             platform=Platform.API,
@@ -163,6 +154,13 @@ async def _apply_workspace_to_run_params(
         resolved = resolve_workspace_ref(effective_workspace)
         if resolved.backend in {"daytona", "modal"}:
             resolved = await ensure_workspace_ready(resolved, thread_id=thread_id)
+        params["workspace"] = resolved
+    elif request.user_id == DASHBOARD_USER_ID and not request.thread_id:
+        # Dashboard chats may start without an explicit project. Provision a
+        # hidden temporary local workspace for the thread instead of tying the
+        # session to the default workspace root. It is remembered for the
+        # thread and removed when the thread is deleted.
+        resolved = await create_temp_workspace(thread_id)
         params["workspace"] = resolved
     else:
         resolved = resolve_workspace_ref(None)

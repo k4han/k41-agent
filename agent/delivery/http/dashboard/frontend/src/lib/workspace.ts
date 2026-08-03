@@ -131,6 +131,21 @@ export function isGitHubWorkspace(
   return typeof source === "string" && source.trim().toLowerCase() === "github";
 }
 
+export function isTempWorkspace(
+  workspace: WorkspaceBinding | WorkspaceRef | null | undefined,
+): boolean {
+  const execution = workspaceExecution(workspace);
+  if (!execution) {
+    return false;
+  }
+  const metadata = execution.metadata;
+  if (metadata?.temp === true) {
+    return true;
+  }
+  const source = metadata?.source;
+  return typeof source === "string" && source.trim().toLowerCase() === "temp";
+}
+
 export function localWorkspaceRef(locator: string): WorkspaceRef | null {
   const trimmed = locator.trim();
   if (!trimmed) {

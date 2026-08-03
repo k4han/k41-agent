@@ -34,7 +34,6 @@ export interface ChatComposerProps {
   stopActive: boolean;
   composerDisabled: boolean;
   inputDisabled: boolean;
-  workspaceMissing: boolean;
   backgroundTaskActive: boolean;
   currentThreadId: string;
   attachments: PendingAttachment[];
@@ -185,11 +184,9 @@ export function ChatComposer(props: ChatComposerProps) {
         placeholder={
           props.backgroundTaskActive
             ? "Background task is running..."
-            : props.workspaceMissing
-              ? "Select a workspace before sending..."
-              : props.currentThreadId
-                ? "Continue this thread..."
-                : "Ask Kai to build features, fix bugs, or work on your code"
+            : props.currentThreadId
+              ? "Continue this thread..."
+              : "Ask Kai to build features, fix bugs, or work on your code"
         }
         inputMode="text"
         enterkeyhint="send"
