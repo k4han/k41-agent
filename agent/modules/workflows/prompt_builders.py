@@ -163,8 +163,6 @@ def get_system_default_variables(working_dir: str = "", workspace: str = "") -> 
     import sys
     import getpass
 
-    from agent.shared.timezone import display_now
-
     os_name = sys.platform
     if os_name == "win32":
         os_name = "windows"
@@ -176,10 +174,7 @@ def get_system_default_variables(working_dir: str = "", workspace: str = "") -> 
     except Exception:
         username = "user"
 
-    current_time_str = display_now().strftime("%Y-%m-%d %H:%M:%S %Z (UTC%z)")
-
     return {
-        "current_time": current_time_str,
         "operating_system": os_name,
         "workspace": workspace or working_dir or "",
         "working_dir": working_dir or "",

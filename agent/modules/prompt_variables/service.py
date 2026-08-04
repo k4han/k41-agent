@@ -26,7 +26,6 @@ def serialize_prompt_variable(record: PromptVariable) -> dict[str, Any]:
 
 class PromptVariableService:
     SYSTEM_VARIABLE_NAMES = {
-        "current_time",
         "operating_system",
         "workspace",
         "working_dir",
@@ -67,14 +66,6 @@ class PromptVariableService:
             username = "user"
 
         system_vars = [
-            {
-                "name": "current_time",
-                "value": "(Dynamic datetime resolved at prompt evaluation)",
-                "placeholder": "{{current_time}}",
-                "is_system": True,
-                "created_at": None,
-                "updated_at": None,
-            },
             {
                 "name": "operating_system",
                 "value": os_name,
