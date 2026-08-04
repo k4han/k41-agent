@@ -13,6 +13,7 @@ from pathlib import Path, PureWindowsPath
 
 from agent.modules.skills.models import Skill, SkillSummary
 from agent.modules.skills.parser import parse_skill_md
+from agent.shared.infrastructure.revisions import SKILLS_REVISION, bump_revision
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +147,7 @@ class FilesystemSkillRepository:
     def reload(self) -> None:
         """Invalidate cache so the next access re-scans the filesystem."""
         self._cache = None
+        bump_revision(SKILLS_REVISION)
         logger.info("Skills cache invalidated — will re-scan on next access.")
 
     # --- Managed SKILL.md CRUD helpers ---

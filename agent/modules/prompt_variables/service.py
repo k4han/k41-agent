@@ -6,6 +6,10 @@ from typing import Any
 
 from agent.modules.prompt_variables.models import PromptVariable
 from agent.modules.prompt_variables.repository import PromptVariableRepository
+from agent.shared.infrastructure.revisions import (
+    PROMPT_VARIABLES_REVISION,
+    bump_revision,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +118,7 @@ class PromptVariableService:
             name=normalized_name,
             value=str(value or ""),
         )
+        bump_revision(PROMPT_VARIABLES_REVISION)
         return serialize_prompt_variable(record)
 
     async def update_variable(
@@ -134,6 +139,7 @@ class PromptVariableService:
             name=normalized_name,
             value=str(value or ""),
         )
+        bump_revision(PROMPT_VARIABLES_REVISION)
         return serialize_prompt_variable(record)
 
     async def delete_variable(self, name: str) -> None:
@@ -144,6 +150,7 @@ class PromptVariableService:
         deleted = await self._repository.delete(normalized_name)
         if not deleted:
             raise FileNotFoundError(f"Prompt variable '{normalized_name}' does not exist.")
+        bump_revision(PROMPT_VARIABLES_REVISION)
 
 
 _service: PromptVariableService | None = None

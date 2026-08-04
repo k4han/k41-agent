@@ -390,6 +390,23 @@ class TestPublicAPI:
 
         assert len(pub.list_available_skills()) == 1
 
+    def test_reload_bumps_skills_revision_exactly_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import agent.modules.skills as pub
+        from agent.shared.infrastructure.revisions import (
+            SKILLS_REVISION,
+            get_revision,
+        )
+
+        repo = FilesystemSkillRepository(skills_root=tmp_path)
+        monkeypatch.setattr(pub, "_repository", repo)
+
+        before = get_revision(SKILLS_REVISION)
+        pub.reload_skills()
+
+        assert get_revision(SKILLS_REVISION) == before + 1
+
     def test_catalog_xml_can_filter_global_skills(
         self,
         tmp_path: Path,

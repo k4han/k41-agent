@@ -3,6 +3,7 @@ from typing import Annotated, Any
 from langchain_core.tools import tool, InjectedToolArg
 from langgraph.prebuilt import ToolRuntime
 
+from agent.modules.skills import invalidate_repository_skills_for_path
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCapability, ToolCategory
 from agent.modules.tools.builtin.workspace import get_file_io
@@ -27,8 +28,11 @@ async def write_file(
     ``append=True`` to add ``content`` to the end of the file instead.
     """
     try:
-        return await (await get_file_io(runtime)).write_text(
+        result = await (await get_file_io(runtime)).write_text(
             file_path, content, append=append
         )
     except ValueError as exc:
         raise ToolError(ToolErrorCode.INVALID_INPUT, str(exc)) from exc
+
+    invalidate_repository_skills_for_path(file_path)
+    return result

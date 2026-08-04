@@ -236,10 +236,69 @@ async def _discover_repository_skills(
     return skills
 
 
-def reload_repository_skills() -> None:
-    """Invalidate the repository-local skills discovery cache."""
+def _clear_repository_discovery_cache() -> None:
     with _repository_discovery_lock:
         _repository_discovery_cache.clear()
+
+
+def reload_repository_skills() -> None:
+    """Invalidate the repository-local skills discovery cache."""
+    from agent.shared.infrastructure.revisions import SKILLS_REVISION, bump_revision
+
+    _clear_repository_discovery_cache()
+    bump_revision(SKILLS_REVISION)
+
+
+def is_repository_skill_path(
+    file_path: str,
+    *,
+    repository_dir: str | None = None,
+) -> bool:
+    """Return whether ``file_path`` points inside the repo-local skills directory.
+
+    Accepts both workspace-relative and absolute paths: the configured skill
+    directory is matched as a contiguous run of path segments anywhere in
+    ``file_path``.
+    """
+    raw = str(file_path or "").strip()
+    if not raw:
+        return False
+
+    try:
+        skill_dir = normalize_repository_skill_dir(
+            repository_dir or get_repository_skill_dir()
+        )
+    except ValueError as exc:
+        logger.debug("Invalid repository skill dir: %s", exc)
+        return False
+
+    parts = [
+        part
+        for part in raw.replace("\\", "/").split("/")
+        if part not in ("", ".")
+    ]
+    expected = skill_dir.split("/")
+    return any(
+        parts[index : index + len(expected)] == expected
+        for index in range(len(parts) - len(expected) + 1)
+    )
+
+
+def invalidate_repository_skills_for_path(
+    file_path: str,
+    *,
+    repository_dir: str | None = None,
+) -> bool:
+    """Refresh repo-local skills when a write touches the skills directory.
+
+    Lets an agent use a skill it just wrote without waiting for the discovery
+    TTL or the system prompt cache TTL to lapse. Returns whether the path was
+    relevant.
+    """
+    if not is_repository_skill_path(file_path, repository_dir=repository_dir):
+        return False
+    reload_repository_skills()
+    return True
 
 
 async def get_effective_skills_catalog_xml(
@@ -305,8 +364,10 @@ def install_skill(source: Path):
 
 def reload_skills() -> None:
     """Re-scan the filesystem for skills."""
+    # FilesystemSkillRepository.reload() already bumps SKILLS_REVISION, so the
+    # discovery cache is cleared directly to avoid a redundant second bump.
     _get_repository().reload()
-    reload_repository_skills()
+    _clear_repository_discovery_cache()
     logger.info("Skills reloaded.")
 
 
@@ -333,6 +394,8 @@ __all__ = [
     "get_skill_content_xml",
     "get_skills_catalog_xml",
     "install_skill",
+    "invalidate_repository_skills_for_path",
+    "is_repository_skill_path",
     "list_available_skills",
     "read_skill_content",
     "reload_repository_skills",

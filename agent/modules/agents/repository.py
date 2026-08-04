@@ -7,6 +7,7 @@ from pathlib import Path
 
 from agent.modules.agents.models import AgentCard, AgentConfig
 from agent.modules.agents.parser import parse_agent_file_with_error, serialize_agent_config
+from agent.shared.infrastructure.revisions import AGENTS_REVISION, bump_revision
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +176,7 @@ class FilesystemAgentRepository:
             invalid_cards,
             key=lambda card: (card.name.lower(), card.path),
         )
+        bump_revision(AGENTS_REVISION)
         count = len(agents)
         scan_dirs = ", ".join(str(p) for p in self._scan_dirs())
         if count:

@@ -50,6 +50,16 @@ security:
 # persistence:
 #   allow_any_path: false  # Set to true to allow database outside ~/.k41-agent/
 
+# System prompt cache (optional)
+# The assembled system prompt is cached per agent/workspace/toolset so repeated
+# LLM turns skip the prompt-variable query and the repo-local skills scan.
+# Edits made through the dashboard, the CLI, or the write_file/edit_file tools
+# invalidate it immediately. The TTL only bounds changes this process cannot
+# observe, chiefly writes from another worker, so keep it short.
+# Set to 0 to disable caching entirely.
+# prompt_cache:
+#   ttl_seconds: 20
+
 # Workspace settings (optional)
 # workspace:
 #   root: "~/.k41-agent/workspaces"

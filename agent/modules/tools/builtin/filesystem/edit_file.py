@@ -3,6 +3,7 @@ from typing import Annotated, Any
 from langchain_core.tools import tool, InjectedToolArg
 from langgraph.prebuilt import ToolRuntime
 
+from agent.modules.skills import invalidate_repository_skills_for_path
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCapability, ToolCategory
 from agent.modules.tools.builtin.workspace import get_file_io
@@ -65,6 +66,9 @@ async def edit_file(
         updated = content.replace(old_string, new_string, 1)
 
     try:
-        return await io.write_text(file_path, updated)
+        result = await io.write_text(file_path, updated)
     except ValueError as exc:
         raise ToolError(ToolErrorCode.INVALID_INPUT, str(exc)) from exc
+
+    invalidate_repository_skills_for_path(file_path)
+    return result

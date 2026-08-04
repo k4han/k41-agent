@@ -14,6 +14,11 @@ from agent.modules.workflows.message_history import normalize_messages_for_chat_
 from agent.modules.workflows.prompt_builders import (
     build_llm_system_prompt,
 )
+from agent.modules.workflows.system_prompt_cache import (
+    build_system_prompt_cache_key,
+    get_cached_system_prompt,
+    store_system_prompt,
+)
 from agent.modules.tools import ToolResolver, get_thread_id
 
 if TYPE_CHECKING:
@@ -54,26 +59,39 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
         override_tool_names=ctx_tool_names,
     )
 
-    prompt_variables = await get_runtime_prompt_variable_values()
-    skills_catalog_xml = None
-    if any(getattr(tool, "name", "") == "skill" for tool in tools):
-        from agent.modules.skills import get_effective_skills_catalog_xml
-
-        skills_catalog_xml = await get_effective_skills_catalog_xml(
-            allowed_names=ctx.get_allowed_skill_names(),
-            workspace=workspace,
-            thread_id=get_thread_id(config),
-        )
-    system_prompt = build_llm_system_prompt(
-        system_prompt_template=system_prompt_template,
-        working_dir=working_dir,
-        workspace=workspace.display_label(),
+    thread_id = get_thread_id(config)
+    cache_key = build_system_prompt_cache_key(
         agent_name=agent_name,
-        tools=tools,
-        catalog=catalog,
-        prompt_variables=prompt_variables,
-        skills_catalog_xml=skills_catalog_xml,
+        working_dir=working_dir,
+        workspace_label=workspace.display_label(),
+        tool_names=[getattr(tool, "name", "") for tool in tools],
+        allowed_skill_names=ctx.get_allowed_skill_names(),
+        thread_id=thread_id,
     )
+    system_prompt = get_cached_system_prompt(cache_key)
+
+    if system_prompt is None:
+        prompt_variables = await get_runtime_prompt_variable_values()
+        skills_catalog_xml = None
+        if any(getattr(tool, "name", "") == "skill" for tool in tools):
+            from agent.modules.skills import get_effective_skills_catalog_xml
+
+            skills_catalog_xml = await get_effective_skills_catalog_xml(
+                allowed_names=ctx.get_allowed_skill_names(),
+                workspace=workspace,
+                thread_id=thread_id,
+            )
+        system_prompt = build_llm_system_prompt(
+            system_prompt_template=system_prompt_template,
+            working_dir=working_dir,
+            workspace=workspace.display_label(),
+            agent_name=agent_name,
+            tools=tools,
+            catalog=catalog,
+            prompt_variables=prompt_variables,
+            skills_catalog_xml=skills_catalog_xml,
+        )
+        store_system_prompt(cache_key, system_prompt)
 
     messages: list[BaseMessage] = normalize_messages_for_chat_model(
         [
