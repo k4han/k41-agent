@@ -124,7 +124,11 @@ function sourceFromWorkspace(
 export function WorkspaceSelector(props: WorkspaceSelectorProps) {
   const { showToast } = useToast();
   const [backend, setBackend] = createSignal<WorkspaceBackendKey>("local");
-  const [source, setSource] = createSignal<WorkspaceSourceKey>("path");
+  const [source, setSource] = createSignal<WorkspaceSourceKey>(
+    props.workspace || props.selection
+      ? defaultSourceForBackend(backendFromWorkspace(props.workspace))
+      : "temp",
+  );
   const [localDraft, setLocalDraft] = createSignal(props.defaultWorkingDir);
   const [sandboxId, setSandboxId] = createSignal("");
   const [repositories, setRepositories] = createSignal<GitHubRepositoryBinding[]>([]);
@@ -505,7 +509,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
                           ? "Local path"
                           : `${getBackendDisplayName(backend())} sandbox`
                         : src === "temp"
-                          ? "Temp workspace"
+                          ? "Temporary"
                           : "GitHub repo"}
                   </span>
                 </button>
