@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 NO_WORKSPACE_KEY = "no-workspace"
 NO_WORKSPACE_LABEL = "No workspace"
+TEMP_WORKSPACE_KEY = "temp"
+TEMP_WORKSPACE_LABEL = "Temp workspace"
 
 
 async def workspace_ref_for_thread(

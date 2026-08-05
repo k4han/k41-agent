@@ -1368,6 +1368,61 @@ def test_dashboard_chat_history_uses_background_task_workspace_fallback(
     assert thread["workspace_label"] == "octo/example"
 
 
+def test_dashboard_chat_history_groups_temp_workspaces_together(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    temp_dirs = {
+        "api_dashboard_temp_1": tmp_path / ".temp" / "thread-one",
+        "api_dashboard_temp_2": tmp_path / ".temp" / "thread-two",
+    }
+    workspaces = {}
+    for thread_id, directory in temp_dirs.items():
+        workspaces[thread_id] = _dashboard_attr("resolve_workspace_ref")(
+            {
+                **_workspace_payload(directory),
+                "label": "Temp workspace",
+                "metadata": {"temp": True},
+            }
+        )
+    threads = [
+        _conversation_thread("api_dashboard_temp_1", "Temp 1"),
+        _conversation_thread("api_dashboard_temp_2", "Temp 2"),
+        _conversation_thread("api_dashboard_with", "With workspace"),
+    ]
+
+    async def fake_list_user_threads_with_stats(limit=None, offset=0):
+        return threads
+
+    async def fake_get_checkpoint_stats(thread_id: str):
+        return {"latest_checkpoint_id": f"{thread_id}-checkpoint", "checkpoint_count": 1}
+
+    async def fake_get_thread_workspace_refs(thread_ids: list[str]):
+        assert set(thread_ids) == {thread["thread_id"] for thread in threads}
+        return workspaces
+
+    _patch_dashboard_attr(monkeypatch, "list_user_threads_with_stats", fake_list_user_threads_with_stats)
+    _patch_dashboard_attr(monkeypatch, "get_checkpoint_stats", fake_get_checkpoint_stats)
+    _patch_dashboard_attr(monkeypatch, "get_thread_workspace_refs", fake_get_thread_workspace_refs)
+
+    client = _create_dashboard_client(ChannelManager())
+    response = client.get("/dashboard-api/chat-history")
+
+    assert response.status_code == 200
+    by_id = {thread["thread_id"]: thread for thread in response.json()["threads"]}
+    for thread_id, directory in temp_dirs.items():
+        thread = by_id[thread_id]
+        assert thread["workspace_key"] == "temp"
+        assert thread["workspace_label"] == "Temp workspace"
+        binding = bind_workspace_ref(workspaces[thread_id])
+        assert thread["workspace"] == binding.model_dump()
+        # Per-thread execution scope is preserved so storage stays isolated.
+        assert thread["workspace"]["scope"]["key"] == f"local:{_absolute(directory)}"
+    assert by_id["api_dashboard_with"]["workspace"] is None
+    assert by_id["api_dashboard_with"]["workspace_key"] == "no-workspace"
+    assert by_id["api_dashboard_with"]["workspace_label"] == "No workspace"
+
+
 def test_dashboard_chat_history_pagination_keeps_workspace_fields(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

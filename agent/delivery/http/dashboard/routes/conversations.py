@@ -18,6 +18,8 @@ from agent.delivery.http.dashboard.routes.helpers.sse import (
 from agent.delivery.http.dashboard.routes.helpers.workspace import (
     NO_WORKSPACE_KEY,
     NO_WORKSPACE_LABEL,
+    TEMP_WORKSPACE_KEY,
+    TEMP_WORKSPACE_LABEL,
     workspace_ref_for_thread,
 )
 from agent.modules.agent_runtime import get_background_task_manager, get_background_task_repository
@@ -40,6 +42,7 @@ from agent.modules.workspaces import (
     bind_workspace_ref,
     delete_thread_workspace,
     get_thread_workspace_refs,
+    is_temp_workspace,
     resolve_workspace_ref,
 )
 from agent.modules.workflows import delete_workflow_thread_tree
@@ -67,6 +70,16 @@ def _workspace_summary(workspace: Any | None) -> dict[str, Any]:
             "workspace_label": NO_WORKSPACE_LABEL,
         }
     binding = bind_workspace_ref(workspace)
+    if is_temp_workspace(workspace):
+        # Temporary workspaces are provisioned per thread, so each one would
+        # otherwise get its own scope. Group them under a single shared key so
+        # the UI renders one "Temp workspace" section for all of them. The
+        # underlying binding stays per-thread so storage stays isolated.
+        return {
+            "workspace": binding.model_dump(),
+            "workspace_key": TEMP_WORKSPACE_KEY,
+            "workspace_label": TEMP_WORKSPACE_LABEL,
+        }
     return {
         "workspace": binding.model_dump(),
         "workspace_key": binding.scope.key,
