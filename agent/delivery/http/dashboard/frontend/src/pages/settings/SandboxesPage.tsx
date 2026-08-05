@@ -601,7 +601,7 @@ function SandboxRowView(props: {
   const isArchived = () => props.row.status === "archived";
   const canStop = () => sandboxSupportsStop(props.row.backend) && !isTerminal() && !isStopped() && !isArchived();
   const canArchive = () => sandboxSupportsArchive(props.row.backend) && !isTerminal() && !isArchived();
-  const canDelete = () => !isTerminal() || props.row.on_cloud;
+  const canDelete = () => !isTerminal() || props.row.on_cloud || !!props.row.thread_id;
   const threadHref = () => {
     if (!props.row.thread_id || !props.row.thread_alive) {
       return null;
@@ -698,7 +698,11 @@ function SandboxRowView(props: {
             class="btn btn-sm btn-danger sandbox-action"
             type="button"
             onClick={() => props.onDelete(props.row)}
-            title="Terminate the sandbox and detach threads"
+            title={
+              props.row.on_cloud
+                ? "Terminate the sandbox and detach threads"
+                : "Delete this stale record and detach its threads"
+            }
             disabled={!canDelete()}
           >
             <Trash2 size={12} />

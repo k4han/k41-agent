@@ -146,30 +146,53 @@ def _daytona_sandboxes_from_cloud() -> list[dict[str, Any]]:
     return lister()
 
 
-async def _modal_sandboxes_from_cloud() -> list[dict[str, Any]]:
-    """List Modal sandboxes directly from the cloud provider."""
+async def _modal_sandboxes_from_cloud() -> tuple[list[dict[str, Any]], bool]:
+    """List Modal sandboxes directly from the cloud provider.
+
+    Returns ``(records, scan_ok)`` where ``scan_ok`` is ``False`` when the
+    provider could not be reached (or is disabled), so callers know an empty
+    result means "unknown" rather than "no sandboxes running".
+    """
     descriptor = get_workspace_backend_registry().require(MODAL_BACKEND)
     if not descriptor.inventory_loader:
-        return []
+        return [], True
     lister = get_workspace_backend_registry().resolve_loader(
         MODAL_BACKEND,
         descriptor.inventory_loader,
     )
     result = lister()
     if inspect.isawaitable(result):
-        return await result
-    return result
+        result = await result
+    if not isinstance(result, list):
+        return [], False
+    return result, True
 
 
 def _merge_sandbox_lists(
     thread_records: list[dict[str, Any]],
     cloud_records: list[dict[str, Any]],
+    *,
+    cloud_scanned: bool = False,
+    cloud_scan_ok: bool = True,
+    missing_from_cloud_status: str | None = None,
+    probe_confirmed_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Combine thread-attached records with cloud records.
 
     Thread records take precedence for metadata (label, repository, etc.) but
     the cloud record's ``status`` and ``on_cloud`` flag are kept because they
     reflect the live state.
+
+    When ``cloud_scanned`` and ``cloud_scan_ok`` are true and
+    ``missing_from_cloud_status`` is set, thread records absent from the cloud
+    provider (and not already confirmed via ``probe_confirmed_ids``) are marked
+    ``on_cloud=False`` with the given status. This prevents sandboxes that
+    auto-terminated on the provider (e.g. Modal idle/timeout) but whose local
+    metadata still says "running" from being shown as alive.
+
+    ``cloud_scan_ok`` guards against provider outages: when the scan itself
+    failed, absence from the (empty) result proves nothing, so records keep
+    their stored status instead of being flipped to "stopped".
     """
     by_id: dict[str, dict[str, Any]] = {}
     for record in thread_records:
@@ -192,6 +215,18 @@ def _merge_sandbox_lists(
             merged["last_stopped_at"] = cloud_record["last_stopped_at"]
         by_id[sandbox_id] = merged
 
+    if cloud_scanned and cloud_scan_ok and missing_from_cloud_status:
+        confirmed_live = probe_confirmed_ids or set()
+        cloud_ids = {record["sandbox_id"] for record in cloud_records}
+        for record in thread_records:
+            sandbox_id = record["sandbox_id"]
+            if sandbox_id in cloud_ids or sandbox_id in confirmed_live:
+                continue
+            merged = by_id[sandbox_id]
+            merged["on_cloud"] = False
+            if merged.get("status") in {"started", "starting", "unknown"}:
+                merged["status"] = missing_from_cloud_status
+
     return sorted(
         by_id.values(),
         key=lambda item: (
@@ -213,6 +248,62 @@ def parse_iso_timestamp(value: Any) -> float | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.timestamp()
+
+
+async def _probe_sandbox_statuses(
+    backend: str,
+    records: list[dict[str, Any]],
+) -> set[str]:
+    """Refresh ``status``/``on_cloud`` for cloud sandbox records via live probes.
+
+    Returns the set of sandbox ids whose status was confirmed by a probe
+    (whether running or stopped). Records that could not be probed are left
+    untouched so callers fall back to their stored status. Used for backends
+    (Modal) whose ``Sandbox.list`` never returns finished sandboxes, so the
+    only way to learn that a sandbox has auto-terminated is to attach by id
+    and poll it.
+
+    Records already in a final state (``stopped``, ``destroyed``, ``archived``,
+    ``error``) are skipped: Modal sandboxes cannot resume once finished, so
+    re-probing them only wastes RPCs.
+    """
+    if not records:
+        return set()
+    descriptor = get_workspace_backend_registry().require(backend)
+    if not descriptor.status_probe_loader:
+        return set()
+    prober = get_workspace_backend_registry().resolve_loader(
+        backend,
+        descriptor.status_probe_loader,
+    )
+    final_statuses = {"stopped", "destroyed", "archived", "error"}
+
+    async def _probe_one(record: dict[str, Any]) -> str | None:
+        sandbox_id = str(record.get("sandbox_id") or "").strip()
+        if not sandbox_id:
+            return None
+        if str(record.get("status") or "").strip().lower() in final_statuses:
+            return sandbox_id
+        try:
+            result = prober(sandbox_id)
+            if inspect.isawaitable(result):
+                result = await result
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Sandbox status probe failed for %s: %s", sandbox_id, exc)
+            return None
+        if not isinstance(result, dict):
+            return None
+        status = str(result.get("status") or "").strip()
+        if status:
+            record["status"] = _normalize_status(status)
+        if "on_cloud" in result:
+            record["on_cloud"] = bool(result["on_cloud"])
+        return sandbox_id
+
+    confirmed = await asyncio.gather(
+        *(_probe_one(record) for record in records)
+    )
+    return {sandbox_id for sandbox_id in confirmed if sandbox_id}
 
 
 async def list_sandboxes(
@@ -239,14 +330,26 @@ async def list_sandboxes(
             cloud_records = await asyncio.to_thread(_daytona_sandboxes_from_cloud)
         else:
             cloud_records = []
+        sandboxes = _merge_sandbox_lists(
+            thread_records,
+            cloud_records,
+            cloud_scanned=include_all,
+        )
     else:
         thread_records = await _modal_sandboxes_from_thread_records()
+        probe_confirmed_ids = await _probe_sandbox_statuses(normalized, thread_records)
         if include_all:
-            cloud_records = await _modal_sandboxes_from_cloud()
+            cloud_records, cloud_scan_ok = await _modal_sandboxes_from_cloud()
         else:
-            cloud_records = []
-
-    sandboxes = _merge_sandbox_lists(thread_records, cloud_records)
+            cloud_records, cloud_scan_ok = [], True
+        sandboxes = _merge_sandbox_lists(
+            thread_records,
+            cloud_records,
+            cloud_scanned=include_all,
+            cloud_scan_ok=cloud_scan_ok,
+            missing_from_cloud_status="stopped",
+            probe_confirmed_ids=probe_confirmed_ids,
+        )
     thread_ids = [
         root_id
         for root_id in (thread_root_id(entry.get("thread_id")) for entry in sandboxes)

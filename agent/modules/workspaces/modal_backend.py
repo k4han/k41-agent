@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+import inspect
 import logging
 import posixpath
 import shlex
@@ -317,6 +318,63 @@ async def get_modal_sandbox(ref: WorkspaceRef, *, client: Any | None = None):
     client = client or await get_modal_client()
     modal = get_modal_module()
     return await modal.Sandbox.from_id.aio(ref.locator, client=client)
+
+
+async def probe_modal_sandbox(
+    sandbox_id: str,
+    *,
+    client: Any | None = None,
+) -> dict[str, Any] | None:
+    """Probe the live status of a single Modal sandbox.
+
+    ``Sandbox.list`` never returns finished sandboxes (the SDK hardcodes
+    ``include_finished=False``), so the only reliable way to learn that a
+    sandbox has stopped is to attach to it by id and inspect its return code.
+
+    Returns ``{"status": ..., "on_cloud": ...}`` where status is one of
+    ``"started"``, ``"stopped"`` (finished/terminated but still referenced on
+    the server), or ``"destroyed"`` (no longer exists on the cloud provider).
+    Returns ``None`` when the status cannot be determined (e.g. transient RPC
+    failure or the Modal backend being disabled); callers should then keep
+    their last-known status and must not treat the sandbox as dead.
+    """
+    normalized_id = str(sandbox_id or "").strip()
+    if not normalized_id:
+        return None
+    try:
+        client = client or await get_modal_client()
+    except Exception as exc:
+        logger.debug("Modal client unavailable for probe %s: %s", normalized_id, exc)
+        return None
+    modal = get_modal_module()
+    try:
+        sandbox = await modal.Sandbox.from_id.aio(normalized_id, client=client)
+    except Exception as exc:
+        if _is_modal_not_found_error(exc):
+            return {"status": "destroyed", "on_cloud": False}
+        logger.debug("Modal from_id failed for %s: %s", normalized_id, exc)
+        return None
+    try:
+        returncode: Any = getattr(sandbox, "returncode", None)
+        if returncode is None:
+            poller = getattr(sandbox, "poll", None)
+            if callable(poller):
+                aio_poller = getattr(poller, "aio", None)
+                if callable(aio_poller):
+                    returncode = await aio_poller()
+                else:
+                    poll_result = poller()
+                    if inspect.isawaitable(poll_result):
+                        poll_result = await poll_result
+                    returncode = poll_result
+    except Exception as exc:
+        if _is_modal_not_found_error(exc):
+            return {"status": "destroyed", "on_cloud": False}
+        logger.debug("Modal poll failed for %s: %s", normalized_id, exc)
+        return None
+    if isinstance(returncode, int):
+        return {"status": "stopped", "on_cloud": True}
+    return {"status": "started", "on_cloud": True}
 
 
 async def create_modal_backend(
@@ -1339,5 +1397,6 @@ __all__ = [
     "get_modal_module",
     "get_modal_sandbox",
     "list_modal_cloud_sandboxes",
+    "probe_modal_sandbox",
     "resolve_modal_path",
 ]

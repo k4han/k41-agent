@@ -28,6 +28,7 @@ class WorkspaceBackendDescriptor(IntegrationDescriptor):
     stop_loader: str = ""
     archive_loader: str = ""
     inventory_loader: str = ""
+    status_probe_loader: str = ""
     sweeper_start_loader: str = ""
     sweeper_stop_loader: str = ""
     sweeper_run_loader: str = ""
@@ -119,6 +120,7 @@ BUILTIN_WORKSPACE_BACKEND_DESCRIPTORS = (
         attach_loader="agent.modules.workspaces.modal_backend:attach_modal_workspace",
         delete_loader="agent.modules.workspaces.modal_backend:delete_modal_workspace",
         inventory_loader="agent.modules.workspaces.modal_backend:list_modal_cloud_sandboxes",
+        status_probe_loader="agent.modules.workspaces.modal_backend:probe_modal_sandbox",
     ),
 )
 
