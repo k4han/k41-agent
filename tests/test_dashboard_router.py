@@ -2148,7 +2148,7 @@ async def test_dashboard_thread_messages_preserve_assistant_text_with_tool_calls
 
 
 @pytest.mark.asyncio
-async def test_dashboard_thread_messages_hide_raw_image_data(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_dashboard_thread_messages_include_image_base64_for_preview(monkeypatch: pytest.MonkeyPatch) -> None:
     from langchain_core.messages import HumanMessage
 
     class FakeCheckpointer:
@@ -2198,6 +2198,9 @@ async def test_dashboard_thread_messages_hide_raw_image_data(monkeypatch: pytest
 
     messages = await _dashboard_attr("get_thread_messages")("api_dashboard_123")
 
+    # The dashboard serializer re-hydrates the image base64 from the message
+    # content blocks so the chat UI can rebuild a data: preview URL when a
+    # thread is reloaded. Without it the attachment only shows the filename.
     assert messages == [
         {
             "id": "human-attachment",
@@ -2209,11 +2212,72 @@ async def test_dashboard_thread_messages_hide_raw_image_data(monkeypatch: pytest
                     "mime_type": "image/png",
                     "size": 14,
                     "kind": "image",
+                    "base64": "raw-image-data",
                 }
             ],
         }
     ]
-    assert "raw-image-data" not in str(messages)
+    assert "raw-image-data" in str(messages)
+
+
+def test_serialize_message_attachments_maps_image_base64_by_order() -> None:
+    from langchain_core.messages import HumanMessage
+
+    from agent.modules.conversations.history import _serialize_message_attachments
+
+    message = HumanMessage(
+        content=[
+            {"type": "text", "text": "Review these files"},
+            {"type": "text", "text": "Attached text file: notes.txt"},
+            {"type": "text", "text": "Attached image: a.png"},
+            {"type": "image", "base64": "aaa", "mime_type": "image/png"},
+            {"type": "text", "text": "Attached image: b.jpg"},
+            {"type": "image", "base64": "bbb", "mime_type": "image/jpeg"},
+        ],
+        id="user-multi",
+        additional_kwargs={
+            "attachments": [
+                {
+                    "name": "notes.txt",
+                    "mime_type": "text/plain",
+                    "size": 4,
+                    "kind": "text",
+                    "content": "hi",
+                },
+                {"name": "a.png", "mime_type": "image/png", "size": 3, "kind": "image"},
+                {"name": "b.jpg", "mime_type": "image/jpeg", "size": 3, "kind": "image"},
+            ]
+        },
+    )
+
+    attachments = _serialize_message_attachments(message)
+
+    # Image attachments pick up the base64 payload from the matching image
+    # content block (in order), while text attachments keep their text content
+    # and never receive a base64 field.
+    assert attachments == [
+        {
+            "name": "notes.txt",
+            "mime_type": "text/plain",
+            "size": 4,
+            "kind": "text",
+            "content": "hi",
+        },
+        {
+            "name": "a.png",
+            "mime_type": "image/png",
+            "size": 3,
+            "kind": "image",
+            "base64": "aaa",
+        },
+        {
+            "name": "b.jpg",
+            "mime_type": "image/jpeg",
+            "size": 3,
+            "kind": "image",
+            "base64": "bbb",
+        },
+    ]
 
 
 def test_dashboard_api_github_returns_repository_bindings(monkeypatch: pytest.MonkeyPatch) -> None:

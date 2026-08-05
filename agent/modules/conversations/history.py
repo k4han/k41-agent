@@ -222,12 +222,43 @@ async def list_background_threads_with_stats(
     return result
 
 
+def _extract_image_base64_from_content(content: Any) -> list[str]:
+    """Collect base64 payloads from image blocks embedded in message content.
+
+    ``_make_user_message`` stores each attached image as an ``image`` content
+    block alongside the attachment metadata. The metadata kept in
+    ``additional_kwargs`` intentionally omits the raw payload, so the dashboard
+    serializer re-hydrates it from the content blocks when rendering history.
+    """
+    if not isinstance(content, list):
+        return []
+    values: list[str] = []
+    for part in content:
+        if not isinstance(part, dict):
+            continue
+        if str(part.get("type") or "").strip().lower() != "image":
+            continue
+        base64_value = part.get("base64")
+        if isinstance(base64_value, str) and base64_value:
+            values.append(base64_value)
+    return values
+
+
 def _serialize_message_attachments(msg: Any) -> list[dict[str, Any]]:
     additional_kwargs = getattr(msg, "additional_kwargs", {}) or {}
     raw_attachments = additional_kwargs.get("attachments")
     if not isinstance(raw_attachments, list):
         return []
 
+    # Image attachments keep their raw payload inside the message content
+    # (as ``image`` blocks) rather than in ``additional_kwargs``. Re-hydrate
+    # the base64 data here so the dashboard can render the image preview when
+    # a thread is reloaded. Blocks and image attachments share the same
+    # ordering established by ``_make_user_message``.
+    image_base64_values = _extract_image_base64_from_content(
+        getattr(msg, "content", None)
+    )
+    image_index = 0
     attachments = []
     for attachment in raw_attachments:
         if not isinstance(attachment, dict):
@@ -240,7 +271,14 @@ def _serialize_message_attachments(msg: Any) -> list[dict[str, Any]]:
         }
         if attachment.get("content"):
             entry["content"] = str(attachment["content"])
-        if attachment.get("base64"):
+        if str(entry["kind"]).strip().lower() == "image":
+            base64_value = str(attachment.get("base64") or "")
+            if not base64_value and image_index < len(image_base64_values):
+                base64_value = image_base64_values[image_index]
+            image_index += 1
+            if base64_value:
+                entry["base64"] = base64_value
+        elif attachment.get("base64"):
             entry["base64"] = str(attachment["base64"])
         attachments.append(entry)
     return attachments
