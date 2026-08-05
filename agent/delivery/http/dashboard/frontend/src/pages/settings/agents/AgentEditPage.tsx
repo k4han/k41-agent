@@ -1,5 +1,5 @@
 import { createEffect, createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
-import { useBeforeLeave, useNavigate, useSearchParams } from "@solidjs/router";
+import { useBeforeLeave, useNavigate } from "@solidjs/router";
 import { ArrowLeft, Bot, Save } from "lucide-solid";
 
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -21,7 +21,6 @@ import {
   blankForm,
   cardToForm,
   defaultWorkflow,
-  isAgentTab,
   isFormDirty,
 } from "./agentForm";
 import { buildToolGroups } from "./AgentToolsTab";
@@ -33,7 +32,7 @@ const AGENTS_LIST_HREF = "/settings/agents";
 export function AgentEditPage(props: { agentName?: string }) {
   const isCreate = !props.agentName;
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams<{ tab?: string }>();
+  const [activeTab, setActiveTab] = createSignal<AgentTab>("general");
   const { showToast } = useToast();
 
   const [payload, setPayload] = createSignal<AgentsPayload>();
@@ -49,18 +48,6 @@ export function AgentEditPage(props: { agentName?: string }) {
   const [mcpUpdating, setMcpUpdating] = createSignal(false);
 
   let pendingRetry: (() => void) | null = null;
-
-  const activeTab = (): AgentTab => {
-    const t = searchParams.tab;
-    return isAgentTab(t) ? t : "general";
-  };
-
-  const setActiveTab = (tab: AgentTab) => {
-    if (tab === activeTab()) {
-      return;
-    }
-    setSearchParams({ tab }, { replace: true });
-  };
 
   const readOnly = () => mode() === "view";
 
@@ -274,10 +261,6 @@ export function AgentEditPage(props: { agentName?: string }) {
     }
     if (!/^[A-Za-z0-9_-]+$/.test(current.name)) {
       showToast("Agent name is invalid.", "error");
-      return;
-    }
-    if (!current.system_prompt.trim()) {
-      showToast("System prompt is required.", "error");
       return;
     }
 
