@@ -23,6 +23,15 @@ import {
   useSettingsData,
 } from "./shared";
 
+// Import new form components
+import {
+  FormField,
+  FormSelect,
+  FormButton,
+  FormCard,
+  FormActions,
+} from "@/components/forms";
+
 const DEFAULT_PROVIDER_KEY = "llm.default_provider";
 
 type ProviderFieldEntry = {
@@ -1369,20 +1378,45 @@ function FallbackModelSection(props: {
   onSave: () => void;
   onClear: () => void;
 }) {
+  const providerOptions = () => {
+    const opts = props.providerNames.map((name) => ({
+      value: name,
+      label: name,
+    }));
+    if (props.provider && !opts.some((o) => o.value === props.provider)) {
+      opts.push({ value: props.provider, label: props.provider });
+    }
+    return opts;
+  };
+
+  const currentCatalog = () => {
+    const resolvedProvider = props.provider || props.defaultProvider;
+    return props.catalogs.find((c) => c.provider === resolvedProvider);
+  };
+
+  const modelOptions = () => {
+    const catalog = currentCatalog();
+    if (!catalog) return [];
+
+    const opts = catalog.models.map((m) => ({
+      value: m.id,
+      label: (m as any).display_name || m.id,
+    }));
+
+    if (props.model && !opts.some((o) => o.value === props.model)) {
+      opts.push({ value: props.model, label: props.model });
+    }
+
+    return opts;
+  };
+
   return (
-    <section class="settings-group">
+    <FormCard
+      title="Fallback Model"
+      description="Used automatically when an agent's configured provider or model is missing or invalid. Leave empty to disable the fallback."
+      variant="default"
+    >
       <div class="settings-section-header">
-        <div>
-          <div class="settings-section-title">
-            <ShieldAlert size={15} style={{ "vertical-align": "middle", "margin-right": "6px" }} />
-            Fallback Model
-          </div>
-          <div class="hint">
-            Used automatically when an agent's configured provider or model is missing or invalid
-            (e.g. the provider was deleted or the agent card no longer references a valid model).
-            Leave empty to disable the fallback and surface the original error.
-          </div>
-        </div>
         <div class="row-wrap">
           <Show when={props.dirty}>
             <button class="btn btn-sm" type="button" onClick={props.onClear} disabled={props.saving}>
@@ -1395,23 +1429,32 @@ function FallbackModelSection(props: {
           </Show>
         </div>
       </div>
-      <div class="field" style={{ "max-width": "520px" }}>
-        <label>Provider / Model</label>
-        <ModelPicker
-          catalogs={props.catalogs}
-          providerNames={props.providerNames}
-          defaultProvider={props.defaultProvider}
-          defaultModel={props.defaultModel}
-          provider={props.provider}
-          model={props.model}
-          disabled={props.saving}
-          dropdownPlacement="bottom"
-          resolveDefault={true}
-          onChange={(nextProvider, nextModel) => {
-            props.onProviderModelChange(nextProvider, nextModel);
-          }}
+
+      <FormField
+        label="Provider"
+        helper="Select the provider to use as fallback"
+      >
+        <FormSelect
+          value={props.provider}
+          onChange={(value) => props.onProviderModelChange(value, props.model)}
+          options={providerOptions()}
+          placeholder="Select a provider"
         />
-      </div>
-    </section>
+      </FormField>
+
+      <Show when={props.provider}>
+        <FormField
+          label="Model"
+          helper="Select the model to use as fallback"
+        >
+          <FormSelect
+            value={props.model}
+            onChange={(value) => props.onProviderModelChange(props.provider, value)}
+            options={modelOptions()}
+            placeholder="Select a model"
+          />
+        </FormField>
+      </Show>
+    </FormCard>
   );
 }

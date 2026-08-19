@@ -1,19 +1,81 @@
-import { createSignal } from "solid-js";
-import { KeyRound, Save } from "lucide-solid";
+import { createSignal, Show } from "solid-js";
+import { KeyRound } from "lucide-solid";
 
 import { useToast } from "@/components/Toast";
 import { postJson } from "@/lib/api";
 
 import { SettingsLayout } from "./SettingsLayout";
 
+// Import new form components
+import {
+  FormField,
+  FormInput,
+  FormButton,
+  FormSuccess,
+  FormCard,
+  FormActions,
+  type ValidationRule,
+} from "@/components/forms";
+
 export function SecurityPage() {
   const [oldPassword, setOldPassword] = createSignal("");
   const [newPassword, setNewPassword] = createSignal("");
+  const [confirmPassword, setConfirmPassword] = createSignal("");
   const [loading, setLoading] = createSignal(false);
+  const [success, setSuccess] = createSignal(false);
+  const [errors, setErrors] = createSignal<Record<string, string>>({});
   const { showToast } = useToast();
+
+  const passwordValidation: ValidationRule = {
+    validate: (value) => {
+      if (!value) return true;
+      if (value.length < 8) {
+        return "Password must be at least 8 characters";
+      }
+      if (!/[A-Z]/.test(value)) {
+        return "Password must contain at least one uppercase letter";
+      }
+      if (!/[a-z]/.test(value)) {
+        return "Password must contain at least one lowercase letter";
+      }
+      if (!/[0-9]/.test(value)) {
+        return "Password must contain at least one number";
+      }
+      return true;
+    },
+    message: "Password does not meet requirements",
+  };
+
+  const validateForm = (): boolean => {
+    const newErrors: Record<string, string> = {};
+
+    if (!oldPassword()) {
+      newErrors.oldPassword = "Current password is required";
+    }
+
+    if (!newPassword()) {
+      newErrors.newPassword = "New password is required";
+    } else if (newPassword().length < 8) {
+      newErrors.newPassword = "Password must be at least 8 characters";
+    }
+
+    if (!confirmPassword()) {
+      newErrors.confirmPassword = "Please confirm your password";
+    } else if (confirmPassword() !== newPassword()) {
+      newErrors.confirmPassword = "Passwords do not match";
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
 
   const submit = async (event: Event) => {
     event.preventDefault();
+
+    if (!validateForm()) {
+      return;
+    }
+
     setLoading(true);
     try {
       await postJson("/change-password", {
@@ -22,7 +84,11 @@ export function SecurityPage() {
       });
       setOldPassword("");
       setNewPassword("");
-      showToast("Password changed.");
+      setConfirmPassword("");
+      setErrors({});
+      setSuccess(true);
+      showToast("Password changed successfully.");
+      setTimeout(() => setSuccess(false), 3000);
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to change password", "error");
     } finally {
@@ -30,45 +96,100 @@ export function SecurityPage() {
     }
   };
 
+  const handleReset = () => {
+    setOldPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setErrors({});
+  };
+
   return (
     <SettingsLayout
       title="Security"
       contentWidth="narrow"
     >
-      <section class="panel">
-        <div class="panel-header">
-          <div class="panel-title row">
-            <KeyRound size={14} />
-            Credentials
-          </div>
-        </div>
-        <div class="panel-body">
-          <form class="stack" onSubmit={submit}>
-            <div class="field">
-              <label>Current Password</label>
-              <input
-                class="input"
-                type="password"
-                value={oldPassword()}
-                onInput={(event) => setOldPassword(event.currentTarget.value)}
-              />
-            </div>
-            <div class="field">
-              <label>New Password</label>
-              <input
-                class="input"
-                type="password"
-                value={newPassword()}
-                onInput={(event) => setNewPassword(event.currentTarget.value)}
-              />
-            </div>
-            <button class="btn btn-primary" type="submit" disabled={loading()}>
-              <Save size={14} />
-              {loading() ? "Saving..." : "Save Password"}
-            </button>
-          </form>
-        </div>
-      </section>
+      <FormSuccess
+        show={success()}
+        message="Password changed successfully!"
+        onDismiss={() => setSuccess(false)}
+      />
+
+      <FormCard
+        title="Change Password"
+        description="Update your password to keep your account secure"
+        variant="elevated"
+      >
+        <form onSubmit={submit}>
+          <FormField
+            label="Current Password"
+            required
+            error={errors().oldPassword}
+            helper="Enter your current password for verification"
+          >
+            <FormInput
+              value={oldPassword()}
+              onChange={setOldPassword}
+              type="password"
+              placeholder="Enter current password"
+              required
+              showTogglePassword
+            />
+          </FormField>
+
+          <FormField
+            label="New Password"
+            required
+            error={errors().newPassword}
+            helper="Must be at least 8 characters with uppercase, lowercase, and numbers"
+          >
+            <FormInput
+              value={newPassword()}
+              onChange={setNewPassword}
+              type="password"
+              placeholder="Enter new password"
+              required
+              minLength={8}
+              validation={[passwordValidation]}
+              showTogglePassword
+              showValidationStatus
+            />
+          </FormField>
+
+          <FormField
+            label="Confirm New Password"
+            required
+            error={errors().confirmPassword}
+            helper="Re-enter your new password to confirm"
+          >
+            <FormInput
+              value={confirmPassword()}
+              onChange={setConfirmPassword}
+              type="password"
+              placeholder="Confirm new password"
+              required
+              showTogglePassword
+            />
+          </FormField>
+
+          <FormActions align="right">
+            <FormButton
+              variant="secondary"
+              onClick={handleReset}
+              disabled={loading()}
+            >
+              Reset
+            </FormButton>
+            <FormButton
+              variant="primary"
+              type="submit"
+              loading={loading()}
+              loadingText="Changing Password..."
+            >
+              Change Password
+            </FormButton>
+          </FormActions>
+        </form>
+      </FormCard>
     </SettingsLayout>
   );
 }

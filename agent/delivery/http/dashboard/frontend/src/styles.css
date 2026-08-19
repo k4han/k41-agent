@@ -3,6 +3,7 @@
 @import "./styles/base.css";
 @import "./styles/shell.css";
 @import "./styles/settings.css";
+@import "./styles/forms.css";
 @import "./styles/channels.css";
 @import "./styles/backends.css";
 @import "./styles/sandboxes.css";

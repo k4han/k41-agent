@@ -7,6 +7,13 @@ import { apiFetch, putJson } from "@/lib/api";
 import { formatValue, parseModelList } from "@/lib/utils";
 import type { SettingInfo, SettingsPayload } from "@/types";
 
+// Import new form components
+import {
+  FormInput,
+  FormTextarea,
+  type ValidationRule,
+} from "@/components/forms";
+
 // --- Types ---------------------------------------------------------------
 
 export type PendingChange = {
@@ -213,6 +220,22 @@ export function SettingControl(props: {
   value: unknown;
   onChange: (value: unknown) => void;
 }) {
+  const validationRules = createMemo<ValidationRule[]>(() => {
+    const rules: ValidationRule[] = [];
+
+    if (props.info.required) {
+      rules.push({
+        validate: (value) => {
+          if (props.info.input_type === "boolean") return true;
+          return value !== null && value !== undefined && String(value).trim().length > 0;
+        },
+        message: "This field is required",
+      });
+    }
+
+    return rules;
+  });
+
   return (
     <Show
       when={props.info.input_type === "boolean"}
@@ -220,23 +243,27 @@ export function SettingControl(props: {
         <Show
           when={props.info.key.endsWith(".models")}
           fallback={
-            <input
-              class="input"
-              type={controlInputType(props.info)}
+            <FormInput
+              value={displayDraft(props.value)}
+              onChange={(value) => props.onChange(value)}
+              type={controlInputType(props.info) as any}
+              placeholder="Not set"
               min={props.info.min}
               max={props.info.max}
               step={props.info.step}
-              placeholder="Not set"
-              value={displayDraft(props.value)}
-              onInput={(event) => props.onChange(event.currentTarget.value)}
+              validation={validationRules()}
+              showValidationStatus={props.info.required}
+              showTogglePassword={props.info.input_type === "password"}
             />
           }
         >
-          <textarea
-            class="textarea mono"
-            rows={4}
+          <FormTextarea
             value={displayDraft(props.value)}
-            onInput={(event) => props.onChange(event.currentTarget.value)}
+            onChange={(value) => props.onChange(value)}
+            rows={4}
+            placeholder="Not set"
+            validation={validationRules()}
+            showValidationStatus={props.info.required}
           />
         </Show>
       }
