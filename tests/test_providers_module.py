@@ -1490,6 +1490,23 @@ def test_resolve_chat_model_passes_extra_body_to_factory(
     _get_cached_model.cache_clear()
 
 
+def test_factory_enables_stream_usage_for_token_tracking() -> None:
+    from agent.modules.providers.openai_compatible.factory import OpenAICompatibleFactory
+
+    factory = OpenAICompatibleFactory()
+    provider = ProviderConfig(
+        name="cl-nvidia",
+        provider_type=ProviderType.OPENAI_COMPATIBLE,
+        base_url="https://gateway.ai.cloudflare.com/v1/account/default/custom-nvidia/v1",
+        api_key="test",
+        default_model="nvidia/nemotron-3.5-lightning-30b-a3b",
+    )
+    model = ModelConfig(model_name="nvidia/nemotron-3.5-lightning-30b-a3b")
+    result = factory.create(provider, model, "test-key")
+
+    assert result.stream_usage is True
+
+
 def test_factory_nvidia_minimax_auto_injects_thinking() -> None:
     from agent.modules.providers.openai_compatible.factory import OpenAICompatibleFactory
 

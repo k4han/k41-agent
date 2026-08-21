@@ -45,6 +45,7 @@ class OpenAICompatibleFactory:
             "model": model_config.model_name,
             "api_key": api_key,
             "temperature": model_config.temperature,
+            "stream_usage": True,
         }
         if provider_config.base_url:
             kwargs["base_url"] = provider_config.base_url
