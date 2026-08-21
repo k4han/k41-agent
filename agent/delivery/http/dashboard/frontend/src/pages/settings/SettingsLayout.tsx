@@ -5,6 +5,7 @@ import {
   BookOpen,
   Bot,
   Braces,
+  ChevronRight,
   ChevronsLeft,
   ChevronsRight,
   CloudCog,
@@ -29,21 +30,59 @@ type SettingsNavItem = {
   href: string;
   label: string;
   icon: () => JSX.Element;
+  description?: string;
+  keywords?: string;
 };
 
-const settingsNavItems: SettingsNavItem[] = [
-  { href: "/settings/config", label: "Runtime", icon: () => <Cog size={15} /> },
-  { href: "/settings/backends", label: "Backends", icon: () => <ServerCog size={15} /> },
-  { href: "/settings/sandboxes", label: "Sandboxes", icon: () => <CloudCog size={15} /> },
-  { href: "/settings/providers", label: "Providers", icon: () => <Workflow size={15} /> },
-  { href: "/settings/connections", label: "Connections", icon: () => <Link2 size={15} /> },
-  { href: "/settings/channels", label: "Channels", icon: () => <Network size={15} /> },
-  { href: "/settings/agents", label: "Agents", icon: () => <Users size={15} /> },
-  { href: "/settings/skills", label: "Skills", icon: () => <BookOpen size={15} /> },
-  { href: "/settings/prompt-variables", label: "Prompt Variables", icon: () => <Braces size={15} /> },
-  { href: "/settings/security", label: "Security", icon: () => <KeyRound size={15} /> },
-  { href: "/settings/usage", label: "Usage", icon: () => <BarChart3 size={15} /> },
-  { href: "/settings/appearance", label: "Appearance", icon: () => <Palette size={15} /> },
+type SettingsNavGroup = {
+  id: string;
+  label: string;
+  items: SettingsNavItem[];
+};
+
+const settingsNavGroups: SettingsNavGroup[] = [
+  {
+    id: "general",
+    label: "General",
+    items: [
+      { href: "/settings/config", label: "Runtime", icon: () => <Cog size={15} />, description: "Bootstrap & env", keywords: "bootstrap config env runtime" },
+      { href: "/settings/appearance", label: "Appearance", icon: () => <Palette size={15} />, description: "Theme", keywords: "theme dark light system appearance" },
+    ],
+  },
+  {
+    id: "workspace",
+    label: "Workspace",
+    items: [
+      { href: "/settings/backends", label: "Backends", icon: () => <ServerCog size={15} />, description: "Local / Daytona / Modal", keywords: "workspace backend local daytona modal" },
+      { href: "/settings/sandboxes", label: "Sandboxes", icon: () => <CloudCog size={15} />, description: "Active sandboxes", keywords: "sandbox container" },
+      { href: "/settings/connections", label: "Connections", icon: () => <Link2 size={15} />, description: "Repos & MCP", keywords: "repositories mcp connections github" },
+    ],
+  },
+  {
+    id: "intelligence",
+    label: "Intelligence",
+    items: [
+      { href: "/settings/providers", label: "Providers", icon: () => <Workflow size={15} />, description: "LLM providers & models", keywords: "llm provider model openai anthropic" },
+      { href: "/settings/agents", label: "Agents", icon: () => <Users size={15} />, description: "Agent profiles", keywords: "agent persona" },
+      { href: "/settings/skills", label: "Skills", icon: () => <BookOpen size={15} />, description: "Reusable skills", keywords: "skill repository" },
+      { href: "/settings/prompt-variables", label: "Prompt Variables", icon: () => <Braces size={15} />, description: "Template variables", keywords: "prompt variable template" },
+    ],
+  },
+  {
+    id: "integration",
+    label: "Integrations",
+    items: [
+      { href: "/settings/channels", label: "Channels", icon: () => <Network size={15} />, description: "Telegram / Discord", keywords: "channel telegram discord" },
+      { href: "/settings/security", label: "Security", icon: () => <KeyRound size={15} />, description: "Password", keywords: "security password auth" },
+    ],
+  },
+  {
+    id: "insights",
+    label: "Insights",
+    items: [
+      { href: "/settings/usage", label: "Usage", icon: () => <BarChart3 size={15} />, description: "Token & cost", keywords: "usage analytics token cost" },
+    ],
+  },
 ];
 
 type BreadcrumbSegment = {
@@ -53,6 +92,7 @@ type BreadcrumbSegment = {
 
 export function SettingsLayout(props: {
   title: string;
+  description?: string | JSX.Element;
   actions?: JSX.Element;
   breadcrumbLabel?: string;
   breadcrumbSegments?: BreadcrumbSegment[];
@@ -66,24 +106,36 @@ export function SettingsLayout(props: {
     isMobileViewport,
     mobileDrawerOpen,
     setMobileDrawerOpen,
-    closeMobileDrawer,
     handleAppLayoutClick,
     handleKeydown,
   } = useMobileDrawer({ sidebarId: "settings-layout-sidebar" });
 
-  const isActive = (href: string) => location.pathname === href;
+  let searchInputRef: HTMLInputElement | undefined;
+
+  const isActive = (href: string) => location.pathname === href || location.pathname.startsWith(href + "/");
 
   const toggleSidebar = () => {
     const next = !collapsed();
     setCollapsed(next);
-    window.localStorage.setItem(STORAGE_KEYS.SIDEBAR_COLLAPSED, next ? "collapsed" : "expanded");
+    window.localStorage.setItem(STORAGE_KEYS.SETTINGS_SIDEBAR_COLLAPSED, next ? "collapsed" : "expanded");
   };
 
   onMount(() => {
-    if (window.localStorage.getItem(STORAGE_KEYS.SIDEBAR_COLLAPSED) === "collapsed") {
+    if (window.localStorage.getItem(STORAGE_KEYS.SETTINGS_SIDEBAR_COLLAPSED) === "collapsed") {
       setCollapsed(true);
     }
     document.addEventListener("keydown", handleKeydown);
+
+    const onGlobalKey = (e: KeyboardEvent) => {
+      if ((e.key === "/" || (e.key === "k" && (e.ctrlKey || e.metaKey))) && !collapsed() && !isMobileViewport()) {
+        const target = e.target as HTMLElement;
+        if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
+        e.preventDefault();
+        searchInputRef?.focus();
+      }
+    };
+    document.addEventListener("keydown", onGlobalKey);
+    onCleanup(() => document.removeEventListener("keydown", onGlobalKey));
   });
 
   onCleanup(() => {
@@ -93,13 +145,23 @@ export function SettingsLayout(props: {
   const settingsHomeHref = "/settings/config";
   const homeHref = "/";
 
-  const filteredNavItems = createMemo<SettingsNavItem[]>(() => {
+  const filteredGroups = createMemo<SettingsNavGroup[]>(() => {
     const query = navQuery().trim().toLowerCase();
-    if (!query) {
-      return settingsNavItems;
-    }
-    return settingsNavItems.filter((item) => item.label.toLowerCase().includes(query));
+    if (!query) return settingsNavGroups;
+    return settingsNavGroups
+      .map((group) => ({
+        ...group,
+        items: group.items.filter((item) =>
+          [item.label, item.description, item.keywords, item.href]
+            .join(" ")
+            .toLowerCase()
+            .includes(query),
+        ),
+      }))
+      .filter((group) => group.items.length > 0);
   });
+
+  const totalFilteredCount = createMemo(() => filteredGroups().reduce((acc, g) => acc + g.items.length, 0));
 
   const segments = createMemo<BreadcrumbSegment[]>(() => {
     if (props.breadcrumbSegments && props.breadcrumbSegments.length > 0) {
@@ -116,7 +178,7 @@ export function SettingsLayout(props: {
       class={`app-layout ${collapsed() ? "sidebar-collapsed" : ""} ${isMobileViewport() && mobileDrawerOpen() ? "app-layout--drawer-open" : ""}`}
       onClick={handleAppLayoutClick}
     >
-      <aside id="settings-layout-sidebar" class="sidebar">
+      <aside id="settings-layout-sidebar" class="sidebar settings-sidebar">
         <div class="brand">
           <Show
             when={!collapsed()}
@@ -137,18 +199,20 @@ export function SettingsLayout(props: {
             </div>
             <div class="brand-text">
               <div class="brand-title">Kai Console</div>
+              <div class="brand-subtitle">Settings</div>
             </div>
             <button
               class="brand-collapse-btn"
               type="button"
               onClick={toggleSidebar}
               title="Collapse sidebar"
+              aria-label="Collapse sidebar"
             >
               <ChevronsLeft size={14} />
             </button>
           </Show>
         </div>
-        <nav class="nav">
+        <nav class="nav settings-nav">
           <A
             href={homeHref}
             class="nav-link settings-back-home"
@@ -158,14 +222,15 @@ export function SettingsLayout(props: {
             <ArrowLeft size={15} />
             <span class="nav-label">Back to home</span>
           </A>
-          <div class="nav-section-title">Settings</div>
+
           <Show when={!collapsed()}>
             <div class="settings-nav-search">
               <Search size={13} class="settings-nav-search-icon" />
               <input
+                ref={searchInputRef}
                 type="text"
                 class="settings-nav-search-input"
-                placeholder="Search settings..."
+                placeholder="Search settings… ( / )"
                 value={navQuery()}
                 aria-label="Search settings"
                 onInput={(event) => setNavQuery(event.currentTarget.value)}
@@ -182,23 +247,58 @@ export function SettingsLayout(props: {
                 </button>
               </Show>
             </div>
+            <Show when={navQuery().trim().length > 0}>
+              <div class="settings-nav-search-meta">
+                <span class="settings-nav-search-count">{totalFilteredCount()} results</span>
+                <Show when={totalFilteredCount() === 0}>
+                  <span class="settings-nav-search-hint">Try “provider” or “workspace”</span>
+                </Show>
+              </div>
+            </Show>
           </Show>
-          <For each={filteredNavItems()}>
-            {(item) => (
-              <A
-                href={item.href}
-                class={`nav-link ${isActive(item.href) ? "active" : ""}`}
-                title={item.label}
-              >
-                {item.icon()}
-                <span class="nav-label">{item.label}</span>
-              </A>
-            )}
-          </For>
-          <Show when={filteredNavItems().length === 0}>
-            <div class="settings-nav-empty">No matches</div>
+
+          <div class="settings-nav-groups">
+            <For each={filteredGroups()}>
+              {(group) => (
+                <div class="settings-nav-group">
+                  <Show when={!collapsed()}>
+                    <div class="settings-nav-group-title">{group.label}</div>
+                  </Show>
+                  <For each={group.items}>
+                    {(item) => (
+                      <A
+                        href={item.href}
+                        class={`nav-link ${isActive(item.href) ? "active" : ""}`}
+                        title={item.description ? `${item.label} — ${item.description}` : item.label}
+                      >
+                        {item.icon()}
+                        <span class="nav-label">
+                          <span class="settings-nav-label-text">{item.label}</span>
+                          <Show when={!collapsed() && item.description}>
+                            <span class="settings-nav-label-desc">{item.description}</span>
+                          </Show>
+                        </span>
+                      </A>
+                    )}
+                  </For>
+                </div>
+              )}
+            </For>
+          </div>
+
+          <Show when={filteredGroups().length === 0}>
+            <div class="settings-nav-empty">
+              <Search size={16} />
+              <div>No matches for “{navQuery()}”</div>
+              <div class="settings-nav-empty-hint">Try a different keyword</div>
+            </div>
           </Show>
         </nav>
+        <Show when={!collapsed()}>
+          <div class="settings-sidebar-footer-hint">
+            <span class="hint">Press <span class="kbd">/</span> to search</span>
+          </div>
+        </Show>
       </aside>
       <main class="main">
         <header class="topbar settings-topbar">
@@ -218,15 +318,18 @@ export function SettingsLayout(props: {
             </button>
           </Show>
           <nav class="settings-breadcrumb" aria-label="Breadcrumb">
-            {segments().map((segment, index) => {
-              const isLast = index === segments().length - 1;
-              return (
+            <For each={segments()}>
+              {(segment, index) => (
                 <>
-                  {index > 0 && <span class="settings-breadcrumb-separator">/</span>}
+                  <Show when={index() > 0}>
+                    <span class="settings-breadcrumb-separator" aria-hidden="true">
+                      <ChevronRight size={12} />
+                    </span>
+                  </Show>
                   <Show
-                    when={!isLast && segment.href}
+                    when={index() !== segments().length - 1 && segment.href}
                     fallback={
-                      <span class="settings-breadcrumb-current">{segment.label}</span>
+                      <span class="settings-breadcrumb-current" aria-current="page">{segment.label}</span>
                     }
                   >
                     <A href={segment.href!} class="settings-breadcrumb-link">
@@ -234,14 +337,19 @@ export function SettingsLayout(props: {
                     </A>
                   </Show>
                 </>
-              );
-            })}
+              )}
+            </For>
           </nav>
-          <div class="row-wrap">{props.actions}</div>
+          <div class="row-wrap settings-topbar-actions">{props.actions}</div>
         </header>
         <div class={`content settings-content settings-content-${props.contentWidth || "medium"}`}>
           <div class="settings-page-heading">
-            <h1 class="page-title">{props.title}</h1>
+            <div class="settings-page-heading-text">
+              <h1 class="page-title">{props.title}</h1>
+              <Show when={props.description}>
+                <p class="page-subtitle settings-page-description">{props.description}</p>
+              </Show>
+            </div>
           </div>
           <div class="settings-page-body">{props.children}</div>
         </div>

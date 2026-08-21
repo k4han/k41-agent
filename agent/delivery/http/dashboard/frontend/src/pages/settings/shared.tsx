@@ -1,6 +1,7 @@
 import { createMemo, createSignal, For, JSX, Show } from "solid-js";
-import { RotateCcw, TriangleAlert } from "lucide-solid";
+import { ArrowRight, Check, RotateCcw, TriangleAlert, ChevronDown } from "lucide-solid";
 
+import { CopyButton } from "@/components/CopyButton";
 import { Dialog } from "@/components/Dialog";
 import { useToast } from "@/components/Toast";
 import { apiFetch, putJson } from "@/lib/api";
@@ -83,7 +84,7 @@ export function settingLabel(
 
 export function formatSettingValue(info: SettingInfo | undefined, value: unknown): string {
   if (info?.input_type === "password" && value) {
-    return "********";
+    return "••••••••";
   }
   return formatValue(value);
 }
@@ -173,6 +174,14 @@ export function useSettingsData(endpoint: string) {
     showToast("Change reverted.", "warning");
   };
 
+  const discardAll = () => {
+    const payload = data();
+    if (!payload) return;
+    const settings = settingsFromPayload(payload);
+    setDrafts(Object.fromEntries(Object.entries(settings).map(([k, v]) => [k, v.value])));
+    showToast("All changes discarded.", "warning");
+  };
+
   const saveChanges = async (onSuccess?: () => void) => {
     const changes = pendingChanges();
     const payload = data();
@@ -209,6 +218,7 @@ export function useSettingsData(endpoint: string) {
     pendingChanges,
     setDraft,
     restoreDraft,
+    discardAll,
     saveChanges,
   };
 }
@@ -247,7 +257,7 @@ export function SettingControl(props: {
               value={displayDraft(props.value)}
               onChange={(value) => props.onChange(value)}
               type={controlInputType(props.info) as any}
-              placeholder="Not set"
+              placeholder={props.info.required ? "Required" : "Not set"}
               min={props.info.min}
               max={props.info.max}
               step={props.info.step}
@@ -261,7 +271,7 @@ export function SettingControl(props: {
             value={displayDraft(props.value)}
             onChange={(value) => props.onChange(value)}
             rows={4}
-            placeholder="Not set"
+            placeholder={props.info.required ? "Required — one per line" : "Not set — one per line"}
             validation={validationRules()}
             showValidationStatus={props.info.required}
           />
@@ -280,6 +290,9 @@ export function SettingControl(props: {
           <span class="toggle-thumb" />
         </span>
         <span class="toggle-label">{Boolean(props.value) ? "Enabled" : "Disabled"}</span>
+        <span class="toggle-text" aria-hidden="true">
+          {Boolean(props.value) ? "Enabled" : "Disabled"}
+        </span>
       </button>
     </Show>
   );
@@ -287,25 +300,63 @@ export function SettingControl(props: {
 
 export function SettingsSection(props: {
   title: string;
+  count?: number;
   description?: JSX.Element;
   actions?: JSX.Element;
   class?: string;
+  collapsible?: boolean;
+  defaultOpen?: boolean;
   children: JSX.Element;
 }) {
+  const [open, setOpen] = createSignal(props.defaultOpen ?? true);
+  const isCollapsible = () => props.collapsible === true;
+
   return (
-    <section class={`settings-group ${props.class || ""}`}>
+    <section class={`settings-group ${props.class || ""} ${isCollapsible() && !open() ? "settings-group--collapsed" : ""}`}>
       <div class="settings-section-header">
-        <div>
-          <div class="settings-section-title">{props.title}</div>
-          <Show when={props.description}>
-            <div class="hint">{props.description}</div>
-          </Show>
-        </div>
+        <Show
+          when={isCollapsible()}
+          fallback={
+            <div class="settings-section-header-text">
+              <div class="settings-section-title">
+                {props.title}
+                <Show when={props.count !== undefined}>
+                  <span class="settings-section-count">{props.count}</span>
+                </Show>
+              </div>
+              <Show when={props.description}>
+                <div class="hint settings-section-desc">{props.description}</div>
+              </Show>
+            </div>
+          }
+        >
+          <button
+            type="button"
+            class="settings-section-header-btn"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open()}
+          >
+            <span class="settings-section-header-text">
+              <span class="settings-section-title">
+                <ChevronDown size={14} class={`settings-section-chevron ${open() ? "open" : ""}`} />
+                {props.title}
+                <Show when={props.count !== undefined}>
+                  <span class="settings-section-count">{props.count}</span>
+                </Show>
+              </span>
+              <Show when={props.description}>
+                <span class="hint settings-section-desc">{props.description}</span>
+              </Show>
+            </span>
+          </button>
+        </Show>
         <Show when={props.actions}>
-          <div class="row-wrap">{props.actions}</div>
+          <div class="row-wrap settings-section-actions">{props.actions}</div>
         </Show>
       </div>
-      {props.children}
+      <Show when={!isCollapsible() || open()}>
+        <div class="settings-section-body">{props.children}</div>
+      </Show>
     </section>
   );
 }
@@ -324,6 +375,7 @@ export function SettingRow(props: {
 }) {
   return (
     <div class={`setting-card ${props.dirty ? "setting-dirty" : ""}`}>
+      <div class="setting-card-accent" aria-hidden="true" />
       <div class="setting-card-main">
         <div class="setting-copy">
           <div class="setting-title-row">
@@ -331,15 +383,31 @@ export function SettingRow(props: {
               {settingLabel(props.settingKey, props.info, {
                 trimProviderPrefix: props.trimProviderPrefix,
               })}
+              <Show when={props.info.required}>
+                <span class="setting-required" title="Required">*</span>
+              </Show>
             </div>
+            <Show when={props.info.restart_required}>
+              <span class="badge badge-warning setting-restart-badge" title={RESTART_REQUIRED_NOTICE}>Restart</span>
+            </Show>
             <Show when={props.dirty}>
+              <span class="setting-dirty-dot" title="Unsaved changes" />
               <span class="badge badge-warning">Unsaved</span>
             </Show>
             <Show when={props.actions}>
               <div class="setting-inline-actions">{props.actions}</div>
             </Show>
+            <CopyButton
+              value={props.settingKey}
+              class="btn btn-sm setting-copy-key"
+              title="Copy setting key"
+              ariaLabel="Copy setting key"
+              successMessage="Key copied"
+              iconSize={11}
+            />
           </div>
-          <Show when={props.showDescription === true && props.info.description}>
+          <div class="setting-key mono">{props.settingKey}</div>
+          <Show when={props.showDescription !== false && props.info.description}>
             <div class="setting-description">{props.info.description}</div>
           </Show>
         </div>
@@ -370,20 +438,29 @@ export function ChangesPreview(props: {
       <For each={props.changes}>
         {(change) => {
           const info = () => props.settings[change.key];
+          const isRestart = () => info()?.restart_required === true;
           return (
-            <div class="change-card">
-              <div>
-                <div class="setting-title">{settingLabel(change.key, info())}</div>
-                <div class="mono hint">{change.key}</div>
+            <div class={`change-card ${isRestart() ? "change-card--restart" : ""}`}>
+              <div class="change-card-head">
+                <div class="change-card-title">
+                  <span class="setting-title">{settingLabel(change.key, info())}</span>
+                  <Show when={isRestart()}>
+                    <span class="badge badge-warning">Restart</span>
+                  </Show>
+                </div>
+                <div class="mono hint change-card-key">{change.key}</div>
               </div>
               <div class="change-values">
-                <div>
-                  <span class="setting-detail-label">Current</span>
-                  <span>{formatSettingValue(info(), change.oldValue)}</span>
+                <div class="change-value change-value--old">
+                  <span class="change-value-label">Current</span>
+                  <span class="change-value-text">{formatSettingValue(info(), change.oldValue) || "—"}</span>
                 </div>
-                <div>
-                  <span class="setting-detail-label">New</span>
-                  <span>{formatSettingValue(info(), change.newValue)}</span>
+                <div class="change-value-arrow" aria-hidden="true">
+                  <ArrowRight size={14} />
+                </div>
+                <div class="change-value change-value--new">
+                  <span class="change-value-label">New</span>
+                  <span class="change-value-text">{formatSettingValue(info(), change.newValue) || "—"}</span>
                 </div>
               </div>
             </div>
@@ -424,22 +501,59 @@ export function SettingsConfirmDialog(props: {
             disabled={props.saving}
             onClick={props.onConfirm}
           >
-            {props.saving ? "Saving..." : "Confirm Save"}
+            {props.saving ? "Saving…" : `Confirm Save (${props.changes.length})`}
           </button>
         </>
       }
     >
       <div class="stack">
-        <p>You are about to update {props.changes.length} setting{props.changes.length === 1 ? "" : "s"}.</p>
+        <p class="hint" style={{ "font-size": "13px" }}>
+          You are about to update <strong>{props.changes.length} setting{props.changes.length === 1 ? "" : "s"}</strong>.
+        </p>
         <Show when={props.restartRequired}>
           <div class="settings-restart-notice" role="status">
             <TriangleAlert size={14} />
-            <span>{RESTART_REQUIRED_NOTICE}</span>
+            <span>{RESTART_REQUIRED_NOTICE} Some changes need a restart to take effect.</span>
           </div>
         </Show>
-        <ChangesPreview changes={props.changes} settings={props.settings} />
+        <div class="change-list-scroll">
+          <ChangesPreview changes={props.changes} settings={props.settings} />
+        </div>
       </div>
     </Dialog>
+  );
+}
+
+export function SettingsPendingBar(props: {
+  count: number;
+  saving?: boolean;
+  restartRequired?: boolean;
+  onDiscard: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <Show when={props.count > 0}>
+      <div class="settings-pending-bar" role="status" aria-live="polite">
+        <div class="settings-pending-bar-left">
+          <span class="settings-pending-badge">{props.count}</span>
+          <span class="settings-pending-text">
+            {props.count} unsaved change{props.count === 1 ? "" : "s"}
+          </span>
+          <Show when={props.restartRequired}>
+            <span class="badge badge-warning">Restart required</span>
+          </Show>
+        </div>
+        <div class="settings-pending-actions">
+          <button class="btn btn-sm" type="button" disabled={props.saving} onClick={props.onDiscard}>
+            Discard
+          </button>
+          <button class="btn btn-primary btn-sm" type="button" disabled={props.saving} onClick={props.onSave}>
+            <Check size={14} />
+            {props.saving ? "Saving…" : "Save Changes"}
+          </button>
+        </div>
+      </div>
+    </Show>
   );
 }
 

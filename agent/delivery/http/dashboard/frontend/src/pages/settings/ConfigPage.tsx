@@ -1,5 +1,5 @@
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
-import { Save, TriangleAlert } from "lucide-solid";
+import { Save, TriangleAlert, SearchX, RotateCcw } from "lucide-solid";
 
 import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { DataGate } from "@/components/State";
@@ -11,15 +11,17 @@ import {
   SettingRow,
   SettingsSection,
   SettingsConfirmDialog,
+  SettingsPendingBar,
   useSettingsData,
 } from "./shared";
 
 export function ConfigPage() {
-  const { data, error, drafts, load, pendingChanges, setDraft, restoreDraft, saveChanges } =
+  const { data, error, drafts, load, pendingChanges, setDraft, restoreDraft, discardAll, saveChanges } =
     useSettingsData("/dashboard-api/config");
 
   const [search, setSearch] = createSignal("");
   const [confirmOpen, setConfirmOpen] = createSignal(false);
+  const [saving, setSaving] = createSignal(false);
 
   const filteredCategories = createMemo(() => {
     const payload = data();
@@ -40,6 +42,8 @@ export function ConfigPage() {
       .filter((group) => group.settings.length > 0);
   });
 
+  const totalVisible = createMemo(() => filteredCategories().reduce((acc, g) => acc + g.settings.length, 0));
+
   const pendingRestartChanges = createMemo(() => {
     const payload = data();
     if (!payload) {
@@ -50,11 +54,21 @@ export function ConfigPage() {
     );
   });
 
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await saveChanges(() => setConfirmOpen(false));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   onMount(load);
 
   return (
     <SettingsLayout
       title="Runtime Configuration"
+      description="Environment and bootstrap settings. Restart-required changes are marked and need a server restart."
       breadcrumbLabel="Runtime"
       actions={
         <button
@@ -64,7 +78,7 @@ export function ConfigPage() {
           onClick={() => setConfirmOpen(true)}
         >
           <Save size={14} />
-          Save Changes {pendingChanges().length ? `(${pendingChanges().length})` : ""}
+          Save {pendingChanges().length ? `(${pendingChanges().length})` : ""}
         </button>
       }
     >
@@ -74,50 +88,81 @@ export function ConfigPage() {
             <div class="stack">
               <SettingsResourceToolbar
                 searchValue={search()}
-                searchPlaceholder="Search settings..."
+                searchPlaceholder="Search by key, label or description…"
                 onSearchInput={setSearch}
               />
+              <Show when={search().trim()}>
+                <div class="hint" style={{ "font-size": "12px" }}>
+                  Found <strong>{totalVisible()}</strong> setting{totalVisible() === 1 ? "" : "s"} in {filteredCategories().length} categor{filteredCategories().length === 1 ? "y" : "ies"}
+                  <Show when={search().trim()}> for “{search().trim()}”</Show>
+                </div>
+              </Show>
               <Show when={pendingRestartChanges().length > 0}>
                 <div class="settings-restart-notice" role="status">
                   <TriangleAlert size={14} />
-                  <span>{RESTART_REQUIRED_NOTICE}</span>
+                  <span>{RESTART_REQUIRED_NOTICE} — {pendingRestartChanges().length} change{pendingRestartChanges().length === 1 ? "" : "s"} need restart.</span>
                 </div>
               </Show>
-              <For each={filteredCategories()}>
-                {(group) => (
-                  <SettingsSection
-                    title={categoryLabel(group.category)}
-                    description={`${group.settings.length} setting${group.settings.length === 1 ? "" : "s"}`}
-                  >
-                    <div class="settings-list">
-                      <For each={group.settings}>
-                        {([key, info]) => (
-                          <SettingRow
-                            settingKey={key}
-                            info={info}
-                            draft={drafts()[key]}
-                            dirty={pendingChanges().some((change) => change.key === key)}
-                            onChange={(value) => setDraft(key, value)}
-                            onRestore={() => restoreDraft(key)}
-                          />
-                        )}
-                      </For>
+              <Show
+                when={filteredCategories().length > 0}
+                fallback={
+                  <div class="panel" style={{ padding: "32px 20px", "text-align": "center" }}>
+                    <div style={{ display: "grid", "place-items": "center", gap: "8px", color: "var(--muted)" }}>
+                      <SearchX size={28} />
+                      <div style={{ "font-weight": "650", color: "var(--fg)" }}>No settings match your search</div>
+                      <div class="hint">Try a different term or clear the search.</div>
+                      <button class="btn btn-sm" type="button" onClick={() => setSearch("")}>
+                        <RotateCcw size={13} /> Clear search
+                      </button>
                     </div>
-                  </SettingsSection>
-                )}
-              </For>
-              <Show when={filteredCategories().length === 0}>
-                <div class="empty">No settings found.</div>
+                  </div>
+                }
+              >
+                <For each={filteredCategories()}>
+                  {(group) => (
+                    <SettingsSection
+                      title={categoryLabel(group.category)}
+                      count={group.settings.length}
+                      description={`${group.settings.length} setting${group.settings.length === 1 ? "" : "s"} in this group`}
+                      collapsible
+                      defaultOpen={filteredCategories().length <= 3 || Boolean(search().trim())}
+                    >
+                      <div class="settings-list">
+                        <For each={group.settings}>
+                          {([key, info]) => (
+                            <SettingRow
+                              settingKey={key}
+                              info={info}
+                              draft={drafts()[key]}
+                              dirty={pendingChanges().some((change) => change.key === key)}
+                              onChange={(value) => setDraft(key, value)}
+                              onRestore={() => restoreDraft(key)}
+                            />
+                          )}
+                        </For>
+                      </div>
+                    </SettingsSection>
+                  )}
+                </For>
               </Show>
             </div>
 
+            <SettingsPendingBar
+              count={pendingChanges().length}
+              saving={saving()}
+              restartRequired={pendingRestartChanges().length > 0}
+              onDiscard={discardAll}
+              onSave={() => setConfirmOpen(true)}
+            />
+
             <SettingsConfirmDialog
               open={confirmOpen()}
+              saving={saving()}
               changes={pendingChanges()}
               settings={payload.settings}
               restartRequired={pendingRestartChanges().length > 0}
               onClose={() => setConfirmOpen(false)}
-              onConfirm={() => saveChanges(() => setConfirmOpen(false))}
+              onConfirm={handleSave}
             />
           </div>
         )}

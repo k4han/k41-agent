@@ -262,6 +262,26 @@
   white-space: nowrap;
 }
 
+.toggle-control {
+  grid-template-columns: auto auto;
+  gap: 8px;
+}
+
+.toggle-text {
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--muted);
+  transition: color 120ms ease;
+}
+
+.toggle-control.active .toggle-text {
+  color: var(--info);
+}
+
+.toggle-control:focus-visible .toggle-track {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--info) 16%, transparent);
+}
+
 .provider-config-group {
   display: grid;
   gap: 10px;
@@ -1538,5 +1558,49 @@
   height: 100% !important;
   flex: 1 1 auto;
   resize: none;
+}
+
+/* ── Settings polish overrides ── */
+
+.panel {
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+}
+
+.panel-header {
+  background: color-mix(in srgb, var(--surface-2) 45%, var(--surface));
+}
+
+.btn:focus-visible,
+.input:focus-visible,
+.textarea:focus-visible,
+.select-control-trigger:focus-visible {
+  outline: none;
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fg) 7%, transparent);
+}
+
+.btn-primary:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.badge {
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.settings-resource-toolbar {
+  align-items: center;
+}
+
+.settings-resource-toolbar .settings-resource-search input {
+  height: 36px;
+  font-size: 13px;
+  border-radius: 8px;
+}
+
+.settings-tabs {
+  margin-bottom: 18px;
 }
 

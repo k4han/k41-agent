@@ -1,5 +1,6 @@
 export const STORAGE_KEYS = {
   SIDEBAR_COLLAPSED: "k41-dashboard-sidebar",
+  SETTINGS_SIDEBAR_COLLAPSED: "k41-dashboard-settings-sidebar",
   HISTORY_PANEL: "k41-dashboard-history",
   WORKSPACE_FILTER: "k41-dashboard-workspace-filter",
   THEME: "k41-dashboard-theme",

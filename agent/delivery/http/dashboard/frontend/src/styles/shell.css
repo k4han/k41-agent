@@ -677,30 +677,212 @@
 }
 
 .theme-option {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   border: 2px solid var(--border);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--surface);
   color: var(--muted);
   cursor: pointer;
-  padding: 16px 12px;
+  padding: 16px 12px 14px;
   transition:
-    border-color 120ms ease,
-    color 120ms ease,
-    background-color 120ms ease;
+    border-color 150ms ease,
+    color 150ms ease,
+    background-color 150ms ease,
+    transform 150ms ease,
+    box-shadow 150ms ease;
+  text-align: center;
 }
 
 .theme-option:hover {
   background: var(--surface-2);
   color: var(--fg);
+  transform: translateY(-1px);
 }
 
 .theme-option.active {
   border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 4%, var(--surface));
   color: var(--fg);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+}
+
+.theme-option-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--muted);
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+.theme-option.active .theme-option-icon {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.theme-option-label {
+  font-size: 13px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+}
+
+.theme-option-desc {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted-2);
+  line-height: 1.2;
+}
+
+.theme-option-check {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+/* Appearance preview */
+
+.appearance-panel .panel-body {
+  padding: 18px;
+}
+
+.appearance-preview {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+
+.appearance-preview-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.appearance-preview-body {
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.appearance-preview-mock {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+
+.appearance-mock-topbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-2) 60%, var(--surface));
+}
+
+.appearance-mock-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border);
+}
+
+.appearance-mock-dot:nth-child(1) { background: #ff5f57; opacity: 0.9; }
+.appearance-mock-dot:nth-child(2) { background: #ffbd2e; opacity: 0.9; }
+.appearance-mock-dot:nth-child(3) { background: #28ca42; opacity: 0.9; }
+
+.appearance-mock-title {
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--fg);
+  letter-spacing: -0.01em;
+}
+
+.appearance-mock-content {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.appearance-mock-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  padding: 10px 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.appearance-mock-card.muted {
+  opacity: 0.85;
+}
+
+.appearance-mock-line {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--surface-3);
+}
+
+.appearance-mock-line.short {
+  width: 68%;
+  height: 7px;
+  background: color-mix(in srgb, var(--border) 80%, transparent);
+}
+
+.appearance-mock-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.appearance-mock-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.appearance-mock-btn.primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+
+.appearance-preview-caption {
+  font-size: 11px;
+  color: var(--muted-2);
+  text-align: center;
 }
 
 .main {
