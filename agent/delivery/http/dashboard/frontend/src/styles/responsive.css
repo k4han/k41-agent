@@ -94,6 +94,21 @@
     display: none;
   }
 
+  .nav-link {
+    position: relative;
+  }
+
+  .nav-badge {
+    position: absolute;
+    top: -2px;
+    right: -4px;
+    min-width: 14px;
+    height: 14px;
+    margin-left: 0;
+    padding: 0 3px;
+    font-size: 9px;
+  }
+
   .grid-sidebar,
   .chat-shell,
   .grid-2,

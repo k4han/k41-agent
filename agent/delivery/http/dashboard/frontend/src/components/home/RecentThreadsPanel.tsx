@@ -1,7 +1,8 @@
 import { For, Show } from "solid-js";
 import { A } from "@solidjs/router";
-import { MessageSquare } from "lucide-solid";
+import { MessageSquare, MessageSquarePlus } from "lucide-solid";
 
+import { EmptyState } from "@/components/EmptyState";
 import type { ThreadSummary } from "@/lib/chatThreads";
 import { chatThreadHref } from "@/lib/chatThreads";
 import { truncateText } from "@/lib/utils";
@@ -21,7 +22,15 @@ export function RecentThreadsPanel(props: { threads: ThreadSummary[] }) {
       <div class="panel-body">
         <Show
           when={props.threads.length > 0}
-          fallback={<div class="empty">No chat threads yet.</div>}
+          fallback={
+            <EmptyState
+              icon={<MessageSquarePlus size={20} />}
+              message="No chat threads yet."
+              hint="Start your first conversation with an agent."
+              href="/chat"
+              action="New chat"
+            />
+          }
         >
           <ul class="compact-list">
             <For each={props.threads}>

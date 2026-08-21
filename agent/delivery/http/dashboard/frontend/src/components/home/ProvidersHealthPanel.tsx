@@ -1,6 +1,8 @@
 import { For, Show } from "solid-js";
 import { A } from "@solidjs/router";
+import { Cpu } from "lucide-solid";
 
+import { EmptyState } from "@/components/EmptyState";
 import { truncateText } from "@/lib/utils";
 import type { ProviderHealth } from "@/types";
 
@@ -21,7 +23,15 @@ export function ProvidersHealthPanel(props: { providers: ProviderHealth[] }) {
       <div class="panel-body">
         <Show
           when={props.providers.length > 0}
-          fallback={<div class="empty">No LLM providers configured.</div>}
+          fallback={
+            <EmptyState
+              icon={<Cpu size={20} />}
+              message="No LLM providers configured."
+              hint="Add a provider with an API key to start using agents."
+              href="/settings/providers"
+              action="Add provider"
+            />
+          }
         >
           <ul class="provider-list">
             <For each={props.providers}>

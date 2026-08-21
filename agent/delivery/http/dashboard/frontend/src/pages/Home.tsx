@@ -1,6 +1,6 @@
 import { A } from "@solidjs/router";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import { MessageSquarePlus, Play, Square } from "lucide-solid";
+import { MessageSquarePlus } from "lucide-solid";
 
 import { AppShell } from "@/components/AppShell";
 import { useToast } from "@/components/Toast";
@@ -16,12 +16,46 @@ import {
 } from "@/components/home";
 import { apiFetch, postJson } from "@/lib/api";
 import { API_PATHS } from "@/lib/endpoints";
+import { HOME_CACHE_MAX_AGE_MS, STORAGE_KEYS } from "@/lib/uiConstants";
 import type { HomePayload } from "@/types";
 
 const HOME_POLL_INTERVAL_MS = 10000;
 
+type HomeCacheEntry = {
+  saved_at: number;
+  payload: HomePayload;
+};
+
+function readHomeCache(): HomePayload | undefined {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEYS.HOME_CACHE);
+    if (!raw) {
+      return undefined;
+    }
+    const entry = JSON.parse(raw) as HomeCacheEntry;
+    if (!entry || typeof entry.saved_at !== "number" || !entry.payload) {
+      return undefined;
+    }
+    if (Date.now() - entry.saved_at > HOME_CACHE_MAX_AGE_MS) {
+      return undefined;
+    }
+    return entry.payload;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeHomeCache(payload: HomePayload) {
+  try {
+    const entry: HomeCacheEntry = { saved_at: Date.now(), payload };
+    window.localStorage.setItem(STORAGE_KEYS.HOME_CACHE, JSON.stringify(entry));
+  } catch {
+    // Ignore storage failures (quota, privacy mode).
+  }
+}
+
 export function HomePage() {
-  const [data, setData] = createSignal<HomePayload>();
+  const [data, setData] = createSignal<HomePayload | undefined>(readHomeCache());
   const [error, setError] = createSignal("");
   const { showToast } = useToast();
   let timer: number | undefined;
@@ -62,6 +96,7 @@ export function HomePage() {
       }
 
       setData(payload);
+      writeHomeCache(payload);
     } catch (err) {
       if (!disposed) {
         setError(err instanceof Error ? err.message : "Failed to load home");
@@ -120,31 +155,15 @@ export function HomePage() {
       title="Home"
       subtitle="Command center for the Kai Agent runtime."
       actions={
-        <>
-          <A class="btn" href="/chat">
-            <MessageSquarePlus size={14} />
-            New chat
-          </A>
-          <button class="btn" type="button" onClick={() => allAction("start-all")}>
-            <Play size={14} />
-            Start all
-          </button>
-          <button
-            class="btn btn-warning"
-            type="button"
-            onClick={() => allAction("stop-all")}
-          >
-            <Square size={14} />
-            Stop all
-          </button>
-        </>
+        <A class="btn btn-primary" href="/chat">
+          <MessageSquarePlus size={14} />
+          New chat
+        </A>
       }
     >
       <Show
         when={data()}
-        fallback={
-          <HomeSkeleton />
-        }
+        fallback={<HomeSkeleton />}
       >
         {(payload) => (
           <div class="stack home-stack">
@@ -162,6 +181,7 @@ export function HomePage() {
                 <ServicesPanel
                   services={payload().services}
                   onAction={serviceAction}
+                  onAllAction={allAction}
                 />
                 <UpcomingJobsPanel
                   jobs={payload().recent.upcoming_jobs}
@@ -185,7 +205,7 @@ function HomeSkeleton() {
   return (
     <div class="stack home-stack" aria-busy="true" aria-label="Loading dashboard">
       <div class="grid-metrics">
-        <For each={Array.from({ length: 6 })}>
+        <For each={Array.from({ length: 4 })}>
           {() => (
             <div class="panel metric metric-card home-skeleton-metric">
               <span class="skeleton-line home-skeleton-value" />

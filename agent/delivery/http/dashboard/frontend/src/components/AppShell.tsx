@@ -6,7 +6,10 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  Folder,
+  Folders,
   FolderOpen,
+  GitBranch,
   GitPullRequest,
   History,
   Home,
@@ -537,15 +540,18 @@ export function AppShell(props: {
   });
 
   const historyWorkspaceFilterOptions = createMemo(() => [
-    { value: ALL_WORKSPACES_KEY, label: "🗂 All Workspaces" },
+    {
+      value: ALL_WORKSPACES_KEY,
+      label: "All Workspaces",
+      icon: <Folders size={13} />,
+    },
     ...availableWorkspaces().map((ws) => {
       const runningCount = workspaceRunningCounts().get(ws.key) || 0;
-      const icon = ws.isRepo ? "⎇" : "🗀";
-      const prefix = runningCount > 0 ? "↻ " : "";
       const suffix = runningCount > 0 ? ` (${runningCount} running)` : "";
       return {
         value: ws.key,
-        label: `${prefix}${icon} ${ws.label}${suffix}`,
+        label: `${ws.label}${suffix}`,
+        icon: ws.isRepo ? <GitBranch size={13} /> : <Folder size={13} />,
       };
     }),
   ]);
@@ -896,6 +902,11 @@ export function AppShell(props: {
               >
                 {item.icon()}
                 <span class="nav-label">{item.label}</span>
+                <Show when={item.href === "/chat" && runningThreadIds().size > 0}>
+                  <span class="nav-badge" title={`${runningThreadIds().size} running`}>
+                    {runningThreadIds().size}
+                  </span>
+                </Show>
               </A>
             )}
           </For>

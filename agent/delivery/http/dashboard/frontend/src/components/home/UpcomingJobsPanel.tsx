@@ -2,6 +2,7 @@ import { For, Show } from "solid-js";
 import { A } from "@solidjs/router";
 import { CalendarClock } from "lucide-solid";
 
+import { EmptyState } from "@/components/EmptyState";
 import { truncateText } from "@/lib/utils";
 import type { UpcomingJob } from "@/types";
 
@@ -22,7 +23,15 @@ export function UpcomingJobsPanel(props: { jobs: UpcomingJob[]; timezone: string
       <div class="panel-body">
         <Show
           when={props.jobs.length > 0}
-          fallback={<div class="empty">No jobs scheduled.</div>}
+          fallback={
+            <EmptyState
+              icon={<CalendarClock size={20} />}
+              message="No jobs scheduled."
+              hint="Schedule recurring tasks to automate your workflow."
+              href="/scheduler"
+              action="Open scheduler"
+            />
+          }
         >
           <ul class="compact-list">
             <For each={props.jobs}>

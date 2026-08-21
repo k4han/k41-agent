@@ -3,7 +3,11 @@ export const STORAGE_KEYS = {
   HISTORY_PANEL: "k41-dashboard-history",
   WORKSPACE_FILTER: "k41-dashboard-workspace-filter",
   THEME: "k41-dashboard-theme",
+  HOME_CACHE: "k41-dashboard-home-cache",
+  ONBOARDING_COLLAPSED: "k41-dashboard-onboarding-collapsed",
 } as const;
+
+export const HOME_CACHE_MAX_AGE_MS = 10 * 60_000;
 
 export const HISTORY_PAGE_SIZE = 20;
 export const HISTORY_MENU_MIN_SPACE_PX = 78;

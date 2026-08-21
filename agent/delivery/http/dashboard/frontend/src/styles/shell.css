@@ -148,6 +148,24 @@
   text-overflow: ellipsis;
 }
 
+.nav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 17px;
+  height: 17px;
+  margin-left: auto;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--info) 16%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--info) 35%, transparent);
+  color: var(--info);
+  padding: 0 5px;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
 .nav-history-toggle {
   width: 100%;
 }

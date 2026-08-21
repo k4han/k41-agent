@@ -591,6 +591,17 @@
   right: 10px;
 }
 
+.select-control-option .select-control-option-icon {
+  position: static;
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-right: 7px;
+}
+
+.spin-icon {
+  animation: spin 1.2s linear infinite;
+}
+
 .select-control:has(.select-control-trigger:disabled) {
   opacity: 0.55;
 }

@@ -6,6 +6,7 @@ export type SelectControlOption = {
   label: string;
   disabled?: boolean;
   title?: string;
+  icon?: JSX.Element;
 };
 
 export function SelectControl(props: {
@@ -77,7 +78,7 @@ export function SelectControl(props: {
       style={props.style}
     >
       <button
-        class={`select-control-trigger ${props.icon ? "select-control-with-icon" : ""}`}
+        class={`select-control-trigger ${props.icon || selectedOption()?.icon ? "select-control-with-icon" : ""}`}
         type="button"
         disabled={props.disabled}
         aria-label={props.ariaLabel}
@@ -88,6 +89,11 @@ export function SelectControl(props: {
       >
         <Show when={props.icon}>
           <span class="select-control-icon">{props.icon}</span>
+        </Show>
+        <Show when={selectedOption()?.icon && !props.icon}>
+          <span class="select-control-icon select-control-option-icon">
+            {selectedOption()?.icon}
+          </span>
         </Show>
         <span class="select-control-value">{selectedLabel()}</span>
         <ChevronDown class="select-control-caret" size={14} />
@@ -105,6 +111,11 @@ export function SelectControl(props: {
                 title={option.title || option.label}
                 onClick={() => selectOption(option)}
               >
+                <Show when={option.icon}>
+                  <span class="select-control-icon select-control-option-icon" aria-hidden="true">
+                    {option.icon}
+                  </span>
+                </Show>
                 {option.label}
               </button>
             )}

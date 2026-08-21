@@ -1,7 +1,8 @@
 import { For, Show } from "solid-js";
 import { A } from "@solidjs/router";
-import { ExternalLink } from "lucide-solid";
+import { ExternalLink, PlaySquare } from "lucide-solid";
 
+import { EmptyState } from "@/components/EmptyState";
 import { StatusBadge } from "@/components/StatusBadge";
 import { truncateText } from "@/lib/utils";
 import type { BackgroundTask } from "@/types";
@@ -21,7 +22,15 @@ export function RecentTasksPanel(props: { tasks: BackgroundTask[] }) {
       <div class="panel-body">
         <Show
           when={props.tasks.length > 0}
-          fallback={<div class="empty">No background tasks yet.</div>}
+          fallback={
+            <EmptyState
+              icon={<PlaySquare size={20} />}
+              message="No background tasks yet."
+              hint="Submit a long-running job and track it here."
+              href="/tasks"
+              action="Create a task"
+            />
+          }
         >
           <ul class="compact-list">
             <For each={props.tasks}>

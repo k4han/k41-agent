@@ -4,7 +4,7 @@
 
 .grid-metrics {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -20,8 +20,18 @@
   transform: translateY(-1px);
 }
 
+.metric-link:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--info) 55%, transparent);
+  outline-offset: 2px;
+}
+
 .metric-card {
   margin: 0;
+}
+
+.metric-card.metric-info {
+  border-color: color-mix(in srgb, var(--info) 30%, var(--border));
+  background: color-mix(in srgb, var(--info) 5%, var(--surface));
 }
 
 .metric-card.metric-warning {
@@ -32,6 +42,10 @@
 .metric-card.metric-danger {
   border-color: color-mix(in srgb, var(--danger) 30%, var(--border));
   background: color-mix(in srgb, var(--danger) 5%, var(--surface));
+}
+
+.metric-card.metric-info .metric-value {
+  color: var(--info);
 }
 
 .metric-card.metric-warning .metric-value {
@@ -377,12 +391,6 @@
   margin-top: 2px;
 }
 
-@media (max-width: 1180px) {
-  .grid-metrics {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
 @media (max-width: 980px) {
   .home-grid {
     grid-template-columns: 1fr;
@@ -396,4 +404,108 @@
   .grid-metrics {
     grid-template-columns: 1fr;
   }
+}
+
+/* --- Empty states ------------------------------------------------------ */
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 26px 16px;
+  text-align: center;
+}
+
+.empty-state-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  margin-bottom: 2px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.empty-state-message {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 550;
+}
+
+.empty-state-hint {
+  max-width: 320px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.empty-state-action {
+  margin-top: 8px;
+}
+
+/* --- Onboarding checklist ---------------------------------------------- */
+
+.onboarding-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px 4px;
+}
+
+.onboarding-progress-track {
+  flex: 1;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-3);
+}
+
+.onboarding-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--success);
+  transition: width 240ms ease;
+}
+
+.onboarding-progress-count {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.onboarding-collapse-caret {
+  transition: transform 140ms ease;
+}
+
+.onboarding-collapse-caret.collapsed {
+  transform: rotate(-90deg);
+}
+
+/* --- Home panel rows ---------------------------------------------------- */
+
+.panel-header-actions {
+  justify-content: flex-end;
+}
+
+.service-error-text {
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-item-link {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  color: inherit;
+}
+
+.session-item-link:focus-visible,
+.compact-list-link:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--info) 55%, transparent);
+  outline-offset: -2px;
+  border-radius: 6px;
 }
