@@ -543,28 +543,29 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "label": "Telegram Bot Token",
     },
     "channels.telegram.default_agent": {
-        "type": "text",
+        "type": "select",
         "description": "Default agent for Telegram DM",
         "category": "channels",
         "label": "Telegram Default Agent",
     },
     "channels.telegram.code_agent": {
-        "type": "text",
+        "type": "select",
         "description": "Agent triggered by /code command",
         "category": "channels",
         "label": "Telegram Code Agent",
     },
     "channels.telegram.research_agent": {
-        "type": "text",
+        "type": "select",
         "description": "Agent triggered by /research command",
         "category": "channels",
         "label": "Telegram Research Agent",
     },
     "channels.telegram.update_mode": {
-        "type": "text",
+        "type": "select",
         "description": "Telegram update mode: polling or webhook",
         "category": "channels",
         "label": "Telegram Update Mode",
+        "options": ["polling", "webhook"],
     },
     "channels.telegram.webhook_url": {
         "type": "url",
@@ -591,19 +592,19 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "label": "Discord Bot Token",
     },
     "channels.discord.default_agent": {
-        "type": "text",
+        "type": "select",
         "description": "Default agent for Discord DM",
         "category": "channels",
         "label": "Discord Default Agent",
     },
     "channels.discord.code_agent": {
-        "type": "text",
+        "type": "select",
         "description": "Agent triggered by /code command",
         "category": "channels",
         "label": "Discord Code Agent",
     },
     "channels.discord.research_agent": {
-        "type": "text",
+        "type": "select",
         "description": "Agent triggered by /research command",
         "category": "channels",
         "label": "Discord Research Agent",
@@ -621,28 +622,29 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "label": "Zalo Bot Token",
     },
     "channels.zalo.default_agent": {
-        "type": "text",
+        "type": "select",
         "description": "Default agent for Zalo DM",
         "category": "channels",
         "label": "Zalo Default Agent",
     },
     "channels.zalo.code_agent": {
-        "type": "text",
+        "type": "select",
         "description": "Agent triggered by /code command",
         "category": "channels",
         "label": "Zalo Code Agent",
     },
     "channels.zalo.research_agent": {
-        "type": "text",
+        "type": "select",
         "description": "Agent triggered by /research command",
         "category": "channels",
         "label": "Zalo Research Agent",
     },
     "channels.zalo.update_mode": {
-        "type": "text",
+        "type": "select",
         "description": "Zalo update mode: polling or webhook",
         "category": "channels",
         "label": "Zalo Update Mode",
+        "options": ["polling", "webhook"],
     },
     "channels.zalo.webhook_url": {
         "type": "url",
@@ -693,7 +695,7 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "label": "GitHub Webhook Secret",
     },
     "channels.github.default_agent": {
-        "type": "text",
+        "type": "select",
         "description": "Default agent for GitHub repository automation",
         "category": "channels",
         "label": "GitHub Default Agent",
@@ -880,12 +882,19 @@ def _channel_setting_metadata(key: str) -> dict[str, Any] | None:
     field = get_channel_setting_field(key)
     if field is None:
         return None
-    return {
+    meta: dict[str, Any] = {
         "type": field.input_type,
         "description": field.description,
         "category": "channels",
         "label": field.label,
     }
+    if field.options:
+        meta["options"] = list(field.options)
+    if field.required:
+        meta["required"] = field.required
+    if field.default not in ("", None):
+        meta["default"] = field.default
+    return meta
 
 
 def _split_tool_key(key: str) -> tuple[str, str] | None:

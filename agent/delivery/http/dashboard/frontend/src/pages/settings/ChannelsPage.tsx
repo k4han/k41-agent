@@ -8,6 +8,7 @@ import {
 } from "solid-js";
 import { useSearchParams } from "@solidjs/router";
 import {
+  Bot,
   CheckCircle2,
   ChevronDown,
   Copy,
@@ -29,6 +30,7 @@ import {
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DashboardTable } from "@/components/DashboardTable";
 import { Dialog } from "@/components/Dialog";
+import { SelectControl, type SelectControlOption } from "@/components/SelectControl";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
@@ -86,6 +88,14 @@ const TAB_ITEMS: ReadonlyArray<SettingsTabItem<TabKey>> = [
   { value: "channels", label: "Channels", icon: () => <Network size={13} /> },
   { value: "pairing", label: "Pairing", icon: () => <Fingerprint size={13} /> },
 ];
+
+const AGENT_FIELD_NAMES = new Set(["default_agent", "code_agent", "research_agent"]);
+const isAgentField = (name: string) => AGENT_FIELD_NAMES.has(name) || name.endsWith("_agent");
+
+type AgentCardsPayload = {
+  agent_names: string[];
+  cards: Array<{ name: string; display_name?: string }>;
+};
 
 type DrawerSection = {
   id: string;
@@ -294,6 +304,7 @@ export function ChannelsPage() {
   const [pairing, setPairing] = createSignal<PairingResponse | null>(null);
   const [creatingPairingCode, setCreatingPairingCode] = createSignal(false);
   const [unpairTarget, setUnpairTarget] = createSignal<Identity | null>(null);
+  const [agentNames, setAgentNames] = createSignal<string[]>([]);
   const { showToast } = useToast();
 
   const channelDefs = createMemo<ChannelDefinition[]>(() => {
@@ -315,15 +326,17 @@ export function ChannelsPage() {
   const load = async () => {
     setError("");
     try {
-      const payload = await apiFetch<ChannelsPayload>(
-        "/dashboard-api/channels",
-      );
+      const [payload, agentsPayload] = await Promise.all([
+        apiFetch<ChannelsPayload>("/dashboard-api/channels"),
+        apiFetch<AgentCardsPayload>("/dashboard-api/agents/cards").catch(() => ({ agent_names: [], cards: [] as any[] })),
+      ]);
       setData(payload);
       setDrafts(
         Object.fromEntries(
           Object.entries(payload.settings).map(([key, info]) => [key, info.value]),
         ),
       );
+      setAgentNames(agentsPayload.agent_names || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load channels");
     }
@@ -730,6 +743,7 @@ export function ChannelsPage() {
                           section={section}
                           drafts={drafts()}
                           pending={pending()}
+                          agentNames={agentNames()}
                           collapsed={Boolean(collapsed()[id])}
                           onToggle={() => toggleSection(name(), section.id)}
                           onChange={setDraft}
@@ -1072,6 +1086,7 @@ function DrawerSection(props: {
   section: DrawerSection;
   drafts: Record<string, unknown>;
   pending: PendingChange[];
+  agentNames: string[];
   collapsed: boolean;
   helper: JSX.Element | null;
   onToggle: () => void;
@@ -1083,9 +1098,9 @@ function DrawerSection(props: {
       .map((suffix) => {
         const key = `channels.${props.channel}.${suffix}`;
         const info = props.settings[key];
-        return info ? { key, info } : null;
+        return info ? { key, info, suffix } : null;
       })
-      .filter((entry): entry is { key: string; info: SettingInfo } => entry !== null);
+      .filter((entry): entry is { key: string; info: SettingInfo; suffix: string } => entry !== null);
   });
 
   const dirtyCount = createMemo(() => {
@@ -1130,6 +1145,7 @@ function DrawerSection(props: {
           {(entry) => {
             const dirty = () =>
               props.pending.some((change) => change.key === entry.key);
+            const isAgent = isAgentField(entry.suffix);
             return (
               <SettingRow
                 settingKey={entry.key}
@@ -1137,6 +1153,26 @@ function DrawerSection(props: {
                 draft={props.drafts[entry.key]}
                 dirty={dirty()}
                 showDescription
+                control={
+                  isAgent ? (
+                    <AgentNameSelect
+                      value={String(props.drafts[entry.key] ?? "")}
+                      agentNames={props.agentNames}
+                      onChange={(value) => props.onChange(entry.key, value)}
+                      ariaLabel={entry.info.label}
+                    />
+                  ) : entry.suffix === "update_mode" ? (
+                    <SelectControl
+                      value={String(props.drafts[entry.key] ?? "polling")}
+                      options={[
+                        { value: "polling", label: "polling" },
+                        { value: "webhook", label: "webhook" },
+                      ]}
+                      onChange={(value) => props.onChange(entry.key, value)}
+                      ariaLabel={entry.info.label}
+                    />
+                  ) : undefined
+                }
                 onChange={(value) => props.onChange(entry.key, value)}
                 onRestore={() => props.onRestore(entry.key)}
               />
@@ -1148,6 +1184,36 @@ function DrawerSection(props: {
         </Show>
       </div>
     </section>
+  );
+}
+
+function AgentNameSelect(props: {
+  value: string;
+  agentNames: string[];
+  onChange: (value: string) => void;
+  ariaLabel?: string;
+}) {
+  const options = createMemo<SelectControlOption[]>(() => {
+    const names = new Set(props.agentNames);
+    if (props.value) {
+      names.add(props.value);
+    }
+    const sorted = [...names].sort((a, b) => a.localeCompare(b));
+    const withEmpty: SelectControlOption[] = [
+      { value: "", label: "— Use default —" },
+      ...sorted.map((name) => ({ value: name, label: name })),
+    ];
+    return withEmpty;
+  });
+
+  return (
+    <SelectControl
+      value={props.value}
+      options={options()}
+      onChange={props.onChange}
+      ariaLabel={props.ariaLabel || "Agent"}
+      icon={<Bot size={14} />}
+    />
   );
 }
 

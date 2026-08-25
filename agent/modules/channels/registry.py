@@ -183,6 +183,7 @@ def _serialize_settings_schema(channel_name: str, fields: tuple[Any, ...]) -> li
                 "secret": field.secret,
                 "section": field.section,
                 "default": field.default,
+                "options": list(field.options) if field.options else [],
             }
         )
     return serialized

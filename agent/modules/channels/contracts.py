@@ -28,6 +28,7 @@ class ChannelSettingField:
     secret: bool = False
     section: str = "general"
     default: Any = ""
+    options: tuple[str, ...] = ()
 
     def config_key(self, channel_name: str) -> str:
         return f"channels.{channel_name}.{self.name}"

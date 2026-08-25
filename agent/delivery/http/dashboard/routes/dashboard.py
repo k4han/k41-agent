@@ -397,6 +397,29 @@ async def get_dashboard_channels(request: Request) -> dict[str, Any]:
         if item.get("name")
     }
     channel_names = sorted(set(by_channel) | set(runtime_map) | catalog_names)
+    # Enrich agent picker fields with dropdown options from the agent catalog so
+    # the frontend can render them as <select> controls even without a custom
+    # override. This keeps the API self-describing and supports generic
+    # SettingControl rendering for update_mode and agent fields.
+    try:
+        from agent.modules.agents import get_catalog_service
+
+        agent_names = sorted(
+            card.name for card in get_catalog_service().list_agent_cards() if card.valid
+        )
+        for key, info in list(settings.items()):
+            suffix = key.rsplit(".", 1)[-1] if "." in key else ""
+            if suffix in ("default_agent", "code_agent", "research_agent"):
+                # Provide sorted agent names plus an empty choice for "use default"
+                info["options"] = ["", *agent_names]
+                info["input_type"] = "select"
+            elif suffix == "update_mode":
+                info["options"] = ["polling", "webhook"]
+                info["input_type"] = "select"
+        # Re-group after enrichment so by_channel reflects injected options/input_type
+        by_channel = _group_channel_settings(settings)
+    except Exception:
+        pass
     runtimes = {
         name: {
             "name": name,

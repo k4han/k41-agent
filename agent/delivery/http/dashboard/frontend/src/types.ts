@@ -365,6 +365,7 @@ export type ChannelCatalogSetting = {
   secret: boolean;
   section: string;
   default: unknown;
+  options?: string[];
 };
 
 export type ChannelCatalogItem = {

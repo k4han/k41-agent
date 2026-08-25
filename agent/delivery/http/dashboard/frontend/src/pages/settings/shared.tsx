@@ -11,6 +11,7 @@ import type { SettingInfo, SettingsPayload } from "@/types";
 // Import new form components
 import {
   FormInput,
+  FormSelect,
   FormTextarea,
   type ValidationRule,
 } from "@/components/forms";
@@ -246,34 +247,60 @@ export function SettingControl(props: {
     return rules;
   });
 
+  const selectOptions = createMemo(() => {
+    const opts = props.info.options;
+    if (!Array.isArray(opts) || opts.length === 0) {
+      return null;
+    }
+    return opts.map((opt) => ({
+      value: String(opt),
+      label: String(opt),
+    }));
+  });
+
   return (
     <Show
       when={props.info.input_type === "boolean"}
       fallback={
         <Show
-          when={props.info.key.endsWith(".models")}
+          when={props.info.input_type === "select" && Boolean(selectOptions())}
           fallback={
-            <FormInput
-              value={displayDraft(props.value)}
-              onChange={(value) => props.onChange(value)}
-              type={controlInputType(props.info) as any}
-              placeholder={props.info.required ? "Required" : "Not set"}
-              min={props.info.min}
-              max={props.info.max}
-              step={props.info.step}
-              validation={validationRules()}
-              showValidationStatus={props.info.required}
-              showTogglePassword={props.info.input_type === "password"}
-            />
+            <Show
+              when={props.info.key.endsWith(".models")}
+              fallback={
+                <FormInput
+                  value={displayDraft(props.value)}
+                  onChange={(value) => props.onChange(value)}
+                  type={controlInputType(props.info) as any}
+                  placeholder={props.info.required ? "Required" : "Not set"}
+                  min={props.info.min}
+                  max={props.info.max}
+                  step={props.info.step}
+                  validation={validationRules()}
+                  showValidationStatus={props.info.required}
+                  showTogglePassword={props.info.input_type === "password"}
+                />
+              }
+            >
+              <FormTextarea
+                value={displayDraft(props.value)}
+                onChange={(value) => props.onChange(value)}
+                rows={4}
+                placeholder={props.info.required ? "Required — one per line" : "Not set — one per line"}
+                validation={validationRules()}
+                showValidationStatus={props.info.required}
+              />
+            </Show>
           }
         >
-          <FormTextarea
+          <FormSelect
             value={displayDraft(props.value)}
+            options={selectOptions()!}
             onChange={(value) => props.onChange(value)}
-            rows={4}
-            placeholder={props.info.required ? "Required — one per line" : "Not set — one per line"}
-            validation={validationRules()}
+            placeholder={props.info.required ? "Required" : "Not set"}
+            required={props.info.required}
             showValidationStatus={props.info.required}
+            ariaLabel={props.info.label || props.info.key}
           />
         </Show>
       }

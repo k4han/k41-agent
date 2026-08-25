@@ -57,18 +57,21 @@ class DiscordChannelAdapter:
             name="default_agent",
             label="Discord Default Agent",
             description="Default agent for Discord messages",
+            input_type="select",
             section="agents",
         ),
         ChannelSettingField(
             name="code_agent",
             label="Discord Code Agent",
             description="Agent triggered by /code command",
+            input_type="select",
             section="agents",
         ),
         ChannelSettingField(
             name="research_agent",
             label="Discord Research Agent",
             description="Agent triggered by /research command",
+            input_type="select",
             section="agents",
         ),
     )
