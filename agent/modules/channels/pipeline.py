@@ -16,7 +16,7 @@ async def process_inbound_message(
     adapter: ChatChannelAdapter | None = None,
     commands: CommandRegistry | None = None,
 ) -> None:
-    if not message.text:
+    if not message.text and not message.attachments:
         return
 
     if adapter is not None and "private_only" in adapter.capabilities and not message.is_private:

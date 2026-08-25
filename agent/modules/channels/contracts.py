@@ -42,6 +42,7 @@ class InboundMessage:
     is_private: bool
     raw: Any = None
     reply: ChannelReply | None = None
+    attachments: list[dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True, slots=True)

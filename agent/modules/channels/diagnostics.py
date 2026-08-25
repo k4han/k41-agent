@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_API_URL = "https://api.telegram.org"
 DISCORD_API_URL = "https://discord.com/api/v10"
+ZALO_API_URL = "https://bot-api.zaloplatforms.com"
 GITHUB_API_URL = "https://api.github.com"
 TEST_TIMEOUT_SECONDS = 8.0
 
@@ -46,6 +47,8 @@ async def test_channel_connection(name: str) -> TestResult:
         return await test_telegram_connection()
     if normalized == "discord":
         return await test_discord_connection()
+    if normalized == "zalo":
+        return await test_zalo_connection()
     if normalized == "github":
         return await test_github_connection()
     try:
@@ -224,6 +227,70 @@ async def test_discord_connection() -> TestResult:
     )
 
 
+async def test_zalo_connection() -> TestResult:
+    config = get_config_service()
+    token = config.get_str("channels.zalo.bot_token", "")
+    if is_placeholder_value(token):
+        return TestResult(
+            ok=False,
+            message="Zalo bot token is not configured.",
+        )
+    missing_dependency = _ensure_channel_dependency("zalo")
+    if missing_dependency is not None:
+        return missing_dependency
+
+    url = f"{ZALO_API_URL}/bot{token}/getMe"
+    started = time.perf_counter()
+    try:
+        async with httpx.AsyncClient(timeout=TEST_TIMEOUT_SECONDS) as client:
+            response = await client.post(url, json={})
+    except httpx.TimeoutException:
+        return TestResult(ok=False, message="Timed out contacting Zalo API.")
+    except httpx.HTTPError as exc:
+        return TestResult(ok=False, message=f"Zalo request failed: {exc}")
+
+    latency_ms = int((time.perf_counter() - started) * 1000)
+
+    if response.status_code == 401:
+        return TestResult(
+            ok=False,
+            message="Zalo rejected the bot token (401 Unauthorized).",
+            latency_ms=latency_ms,
+        )
+
+    try:
+        payload = response.json()
+    except ValueError:
+        return TestResult(
+            ok=False,
+            message=f"Zalo returned non-JSON response (HTTP {response.status_code}).",
+            latency_ms=latency_ms,
+        )
+
+    if not response.is_success or not payload.get("ok"):
+        description = str(payload.get("description") or payload.get("error") or "Unknown Zalo error")
+        return TestResult(
+            ok=False,
+            message=f"Zalo error: {description}",
+            latency_ms=latency_ms,
+        )
+
+    result = payload.get("result") or {}
+    details = {
+        "bot_id": result.get("id"),
+        "account_name": result.get("account_name"),
+        "account_type": result.get("account_type"),
+        "can_join_groups": result.get("can_join_groups"),
+    }
+    display = result.get("account_name") or result.get("id") or "unknown"
+    return TestResult(
+        ok=True,
+        message=f"Connected as {display}.",
+        latency_ms=latency_ms,
+        details=details,
+    )
+
+
 async def test_github_connection() -> TestResult:
     config = get_config_service()
     app_id = config.get_str("channels.github.app_id", "")
@@ -342,4 +409,5 @@ __all__ = [
     "test_discord_connection",
     "test_github_connection",
     "test_telegram_connection",
+    "test_zalo_connection",
 ]

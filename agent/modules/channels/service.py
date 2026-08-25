@@ -172,4 +172,8 @@ def get_channel_webhook_runtime(name: str) -> object | None:
         from agent.modules.channels.telegram.bot import get_telegram_webhook_runtime
 
         return get_telegram_webhook_runtime()
+    if normalized == "zalo":
+        from agent.modules.channels.zalo.bot import get_zalo_webhook_runtime
+
+        return get_zalo_webhook_runtime()
     return None

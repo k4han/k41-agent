@@ -145,6 +145,87 @@ DISCORD_SETTINGS_SCHEMA = (
 )
 
 
+ZALO_SETTINGS_SECTIONS = (
+    ChannelSettingSection(
+        id="authentication",
+        title="Authentication",
+        subtitle="Bot token from Zalo Bot Platform",
+    ),
+    ChannelSettingSection(
+        id="agents",
+        title="Agents",
+        subtitle="Default agent and command routing",
+        default_collapsed=True,
+    ),
+    ChannelSettingSection(
+        id="webhook",
+        title="Update Mode",
+        subtitle="Polling or webhook delivery",
+        default_collapsed=True,
+    ),
+)
+
+ZALO_SETTINGS_SCHEMA = (
+    ChannelSettingField(
+        name="enabled",
+        label="Zalo Enabled",
+        description="Enable Zalo channel integration",
+        input_type="boolean",
+        section="authentication",
+        default=True,
+    ),
+    ChannelSettingField(
+        name="bot_token",
+        label="Zalo Bot Token",
+        description="Zalo bot token from Bot Platform",
+        input_type="password",
+        required=True,
+        secret=True,
+        section="authentication",
+    ),
+    ChannelSettingField(
+        name="default_agent",
+        label="Zalo Default Agent",
+        description="Default agent for Zalo messages",
+        section="agents",
+    ),
+    ChannelSettingField(
+        name="code_agent",
+        label="Zalo Code Agent",
+        description="Agent triggered by /code command",
+        section="agents",
+    ),
+    ChannelSettingField(
+        name="research_agent",
+        label="Zalo Research Agent",
+        description="Agent triggered by /research command",
+        section="agents",
+    ),
+    ChannelSettingField(
+        name="update_mode",
+        label="Zalo Update Mode",
+        description="Zalo update mode: polling or webhook",
+        section="webhook",
+        default="polling",
+    ),
+    ChannelSettingField(
+        name="webhook_url",
+        label="Zalo Webhook URL",
+        description="Public HTTPS endpoint for Zalo webhook mode",
+        input_type="url",
+        section="webhook",
+    ),
+    ChannelSettingField(
+        name="webhook_secret",
+        label="Zalo Webhook Secret",
+        description="Secret token checked against Zalo webhook requests (X-Bot-Api-Secret-Token)",
+        input_type="password",
+        secret=True,
+        section="webhook",
+    ),
+)
+
+
 BUILTIN_CHANNEL_DESCRIPTORS = (
     ChannelDescriptor(
         kind="channel",
@@ -176,6 +257,22 @@ BUILTIN_CHANNEL_DESCRIPTORS = (
         install_extra="channel-discord",
         settings_schema=DISCORD_SETTINGS_SCHEMA,
         settings_sections=DISCORD_SETTINGS_SECTIONS,
+        has_runner=True,
+    ),
+    ChannelDescriptor(
+        kind="channel",
+        name="zalo",
+        title="Zalo",
+        summary="Chat with your agents from Zalo.",
+        tagline="Bot platform",
+        config_prefix="channels.zalo",
+        loader="agent.modules.channels.zalo.adapter:get_zalo_adapter",
+        adapter_loader="agent.modules.channels.zalo.adapter:get_zalo_adapter",
+        capabilities=frozenset({"chat", "outbound", "streaming"}),
+        dependency_imports=(),
+        install_extra="channel-zalo",
+        settings_schema=ZALO_SETTINGS_SCHEMA,
+        settings_sections=ZALO_SETTINGS_SECTIONS,
         has_runner=True,
     ),
 )

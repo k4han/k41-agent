@@ -23,6 +23,7 @@ from agent.delivery.http import (
     dashboard_router,
     github_webhook_router,
     telegram_webhook_router,
+    zalo_webhook_router,
 )
 from agent.delivery.http.common import redirect_legacy_api
 from agent.delivery.http.dashboard.auth_router import router as auth_router
@@ -90,6 +91,7 @@ def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:
             {"name": "mcp", "description": "MCP server marketplace: search, install, and manage servers."},
             {"name": "github", "description": "GitHub webhook receiver."},
             {"name": "telegram", "description": "Telegram webhook receiver."},
+            {"name": "zalo", "description": "Zalo webhook receiver."},
             {"name": "auth", "description": "Admin login, logout, and password management."},
             {"name": "dashboard", "description": "Dashboard overview, sessions, and channel management."},
         ],
@@ -119,6 +121,7 @@ def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:
                 "/login",  # Login page needs to be accessible without CSRF token
                 "/channels/github/webhook",  # Webhooks use signature verification instead
                 "/channels/telegram/webhook",
+                "/channels/zalo/webhook",
             },
         )
     else:
@@ -144,6 +147,7 @@ def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:
         fastapi_app.middleware("http")(redirect_legacy_api)
 
     fastapi_app.include_router(telegram_webhook_router)
+    fastapi_app.include_router(zalo_webhook_router)
     fastapi_app.include_router(github_webhook_router)
 
     if bootstrap_config.enable_dashboard:

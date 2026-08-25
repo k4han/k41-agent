@@ -58,6 +58,9 @@ def build_channel_run_params(
     working_dir: str | None = None,
     **overrides: Any,
 ) -> dict[str, Any]:
+    # Forward attachments from InboundMessage if caller did not explicitly pass them.
+    if "attachments" not in overrides and message.attachments:
+        overrides["attachments"] = message.attachments
     return build_run_params(
         platform=message.platform,
         user_id=message.user_id,

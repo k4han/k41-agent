@@ -50,6 +50,7 @@ channel-telegram = [
 channel-discord = [
     "discord.py>=2.4.0",
 ]
+channel-zalo = []
 sandbox-daytona = [
     "daytona==0.183.0",
 ]
