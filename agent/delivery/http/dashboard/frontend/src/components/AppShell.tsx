@@ -305,6 +305,25 @@ export function AppShell(props: {
     setActiveSessions((prev) => [...prev]);
   };
 
+  const handleThreadTitleUpdated = (event: Event) => {
+    const customEvent = event as CustomEvent<{ threadId: string; title: string }>;
+    const { threadId, title } = customEvent.detail;
+    if (!threadId || !title) {
+      return;
+    }
+
+    const threads = historyThreads();
+    if (!threads.some((item) => item.thread_id === threadId)) {
+      return;
+    }
+
+    applyHistoryState({
+      threads: threads.map((item) =>
+        item.thread_id === threadId ? { ...item, title } : item,
+      ),
+    });
+  };
+
   const applyHistoryState = (next: Partial<HistoryCache>) => {
     if (next.threads !== undefined) {
       historyCache.threads = next.threads;
@@ -834,6 +853,7 @@ export function AppShell(props: {
     window.addEventListener(CUSTOM_DOM_EVENTS.THREADS_CHANGED, handleThreadsChanged);
     window.addEventListener(CUSTOM_DOM_EVENTS.THREAD_START_RUNNING, handleThreadStartRunning);
     window.addEventListener(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, handleThreadStopRunning);
+    window.addEventListener(CUSTOM_DOM_EVENTS.THREAD_TITLE_UPDATED, handleThreadTitleUpdated);
 
     connectSessionEvents();
   });
@@ -850,6 +870,7 @@ export function AppShell(props: {
     window.removeEventListener(CUSTOM_DOM_EVENTS.THREADS_CHANGED, handleThreadsChanged);
     window.removeEventListener(CUSTOM_DOM_EVENTS.THREAD_START_RUNNING, handleThreadStartRunning);
     window.removeEventListener(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, handleThreadStopRunning);
+    window.removeEventListener(CUSTOM_DOM_EVENTS.THREAD_TITLE_UPDATED, handleThreadTitleUpdated);
   });
 
   return (
@@ -956,30 +977,45 @@ export function AppShell(props: {
                       {(thread) => (
                         <div class="nav-history-item-wrapper">
                           <div
-                            class={`nav-history-item ${isThreadActive(thread.thread_id) ? "active" : ""} running`}
+                            class={`nav-history-item ${isThreadActive(thread.thread_id) ? "active" : ""} running ${editingHistoryThreadId() === thread.thread_id ? "editing" : ""}`}
                           >
-                            <A
-                              href={chatThreadHref(thread.thread_id)}
-                              activeClass=""
-                              inactiveClass=""
-                              class="nav-history-link"
-                              title={`${thread.thread_id} - ${threadMeta(thread)}`}
+                            <Show
+                              when={editingHistoryThreadId() === thread.thread_id}
+                              fallback={
+                                <A
+                                  href={chatThreadHref(thread.thread_id)}
+                                  activeClass=""
+                                  inactiveClass=""
+                                  class="nav-history-link"
+                                  title={`${thread.thread_id} - ${threadMeta(thread)}`}
+                                >
+                                  <RefreshCw size={12} class="nav-history-kind-icon spinner-animate" />
+                                  <span class="nav-history-title">
+                                    {threadTitle(thread)}
+                                  </span>
+                                </A>
+                              }
                             >
-                              <RefreshCw size={12} class="nav-history-kind-icon spinner-animate" />
-                              <span class="nav-history-title">
-                                {threadTitle(thread)}
-                              </span>
-                            </A>
-                            <button
-                              class={`nav-history-action ${historyMenuThreadId() === thread.thread_id ? "active" : ""}`}
-                              type="button"
-                              title="Thread actions"
-                              aria-label="Thread actions"
-                              aria-expanded={historyMenuThreadId() === thread.thread_id}
-                              onClick={(event) => toggleHistoryMenu(thread.thread_id, event)}
-                            >
-                              <MoreHorizontal size={14} />
-                            </button>
+                              <InlineRenameInput
+                                class="nav-history-rename-input"
+                                value={editingHistoryTitle()}
+                                onInput={setEditingHistoryTitle}
+                                onBlur={() => void finishRenameHistoryThread(thread)}
+                                onCancel={cancelRenameHistoryThread}
+                              />
+                            </Show>
+                            <Show when={editingHistoryThreadId() !== thread.thread_id}>
+                              <button
+                                class={`nav-history-action ${historyMenuThreadId() === thread.thread_id ? "active" : ""}`}
+                                type="button"
+                                title="Thread actions"
+                                aria-label="Thread actions"
+                                aria-expanded={historyMenuThreadId() === thread.thread_id}
+                                onClick={(event) => toggleHistoryMenu(thread.thread_id, event)}
+                              >
+                                <MoreHorizontal size={14} />
+                              </button>
+                            </Show>
                           </div>
                           <Show when={historyMenuThreadId() === thread.thread_id}>
                             <div class={`nav-history-menu ${historyMenuOpensUp() ? "open-up" : ""}`}>

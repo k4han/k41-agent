@@ -596,6 +596,13 @@ export function ChatPage() {
     onError: (message) => showToast(message, "error"),
     setRecursionLimitReached: (v) => setRecursionLimitReached(v),
     onThreadCreated,
+    onThreadTitle: (threadId, title) => {
+      window.dispatchEvent(
+        new CustomEvent(CUSTOM_DOM_EVENTS.THREAD_TITLE_UPDATED, {
+          detail: { threadId, title },
+        }),
+      );
+    },
   };
 
   const background = useBackgroundStream({ applyThreadPayload, streamCallbacks });

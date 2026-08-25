@@ -26,6 +26,7 @@ export interface StreamCallbacks {
   onError?: (message: string, code?: string) => void;
   setRecursionLimitReached: (value: boolean) => void;
   onThreadCreated: (threadId: string, streamThreadIdRef: StreamThreadIdRef) => void;
+  onThreadTitle?: (threadId: string, title: string) => void;
 }
 
 // ── Mutable refs shared across event handling ──
@@ -49,6 +50,16 @@ export function handleStreamEvent(
       return;
     }
     callbacks.onThreadCreated(threadId, streamThreadIdRef);
+    return;
+  }
+
+  if (event.type === STREAM_EVENTS.THREAD_TITLE) {
+    const threadId = String(event.thread_id || "");
+    const title = String(event.title || "").trim();
+    if (!threadId || !title) {
+      return;
+    }
+    callbacks.onThreadTitle?.(threadId, title);
     return;
   }
 

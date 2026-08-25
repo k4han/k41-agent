@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import importlib
 from types import SimpleNamespace
@@ -1457,7 +1458,151 @@ async def test_run_agent_edit_stream_forks_from_parent_and_preserves_attachments
     assert captured["kwargs"]["config"]["configurable"]["checkpoint_id"] == "parent-1"
     edited_message = captured["payload"]["messages"][0]
     assert edited_message.id == "user-1"
-    assert edited_message.content[0]["text"] == "Updated request"
-    assert edited_message.content[1]["text"] == "Attached text file: notes.txt\n\nold"
+    assert edited_message.content[0]["text"] == "Attached text file: notes.txt\n\nold"
+    assert edited_message.content[1]["text"] == "Updated request"
     assert edited_message.additional_kwargs == original_message.additional_kwargs
+
+
+def _title_stream_mocks(monkeypatch) -> None:
+    class _FakeCatalog:
+        def get_agent(self, name: str):
+            return SimpleNamespace(
+                graph_type="react_agent",
+                max_context_tokens=1234,
+                tools=["list_dir"],
+            )
+
+    monkeypatch.setattr(
+        "agent.modules.agents.get_catalog_service",
+        lambda: _FakeCatalog(),
+    )
+    monkeypatch.setattr(runner_module, "make_run_context", lambda **kwargs: kwargs)
+    monkeypatch.setattr(
+        runner_module,
+        "make_run_config",
+        lambda **kwargs: {"configurable": {"thread_id": kwargs["thread_id"]}},
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_emits_thread_title_while_generating(monkeypatch):
+    _title_stream_mocks(monkeypatch)
+
+    async def fake_record_conversation_thread(**kwargs):
+        async def _generate_title():
+            await asyncio.sleep(0)
+            return {
+                "thread_id": kwargs["thread_id"],
+                "title": "Login Bug Fix",
+            }
+
+        return asyncio.create_task(_generate_title())
+
+    monkeypatch.setattr(
+        runner_module,
+        "_record_conversation_thread",
+        fake_record_conversation_thread,
+    )
+
+    class _FakeGraph:
+        async def astream(self, payload, **kwargs):
+            yield ("messages", (AIMessageChunk(content="working"), {"langgraph_node": "llm"}))
+            # Give the title task a few loop ticks to land mid-stream.
+            for _ in range(5):
+                await asyncio.sleep(0)
+            yield ("values", {"messages": [AIMessage(content="done", id="ai-1")]})
+
+    monkeypatch.setattr(runner_module, "get_workflow_graph", lambda name: _FakeGraph())
+
+    events = [
+        event
+        async for event in runner_module.run_agent_stream(
+            user_input="fix the login bug",
+            thread_id="api:dashboard:t1",
+            agent_name="default",
+        )
+    ]
+
+    assert {"type": "thread_title", "thread_id": "api:dashboard:t1", "title": "Login Bug Fix"} in events
+    title_index = events.index(
+        {"type": "thread_title", "thread_id": "api:dashboard:t1", "title": "Login Bug Fix"}
+    )
+    final_index = events.index({"type": "final", "content": "done"})
+    assert title_index < final_index
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_delivers_late_thread_title_before_close(monkeypatch):
+    _title_stream_mocks(monkeypatch)
+
+    async def fake_record_conversation_thread(**kwargs):
+        async def _generate_title():
+            await asyncio.sleep(0.05)
+            return {
+                "thread_id": kwargs["thread_id"],
+                "title": "Slow Generated Title",
+            }
+
+        return asyncio.create_task(_generate_title())
+
+    monkeypatch.setattr(
+        runner_module,
+        "_record_conversation_thread",
+        fake_record_conversation_thread,
+    )
+
+    class _FakeGraph:
+        async def astream(self, payload, **kwargs):
+            yield ("values", {"messages": [AIMessage(content="quick answer", id="ai-1")]})
+
+    monkeypatch.setattr(runner_module, "get_workflow_graph", lambda name: _FakeGraph())
+
+    events = [
+        event
+        async for event in runner_module.run_agent_stream(
+            user_input="quick question",
+            thread_id="api:dashboard:t2",
+            agent_name="default",
+        )
+    ]
+
+    assert events == [
+        {"type": "final", "content": "quick answer"},
+        {
+            "type": "thread_title",
+            "thread_id": "api:dashboard:t2",
+            "title": "Slow Generated Title",
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_without_title_task_has_no_title_events(monkeypatch):
+    _title_stream_mocks(monkeypatch)
+
+    async def fake_record_conversation_thread(**kwargs):
+        return None
+
+    monkeypatch.setattr(
+        runner_module,
+        "_record_conversation_thread",
+        fake_record_conversation_thread,
+    )
+
+    class _FakeGraph:
+        async def astream(self, payload, **kwargs):
+            yield ("values", {"messages": [AIMessage(content="hello", id="ai-1")]})
+
+    monkeypatch.setattr(runner_module, "get_workflow_graph", lambda name: _FakeGraph())
+
+    events = [
+        event
+        async for event in runner_module.run_agent_stream(
+            user_input="hi again",
+            thread_id="api:dashboard:t3",
+            agent_name="default",
+        )
+    ]
+
+    assert events == [{"type": "final", "content": "hello"}]
 

@@ -1,6 +1,6 @@
 import { A } from "@solidjs/router";
 import { FolderOpen, MessageSquare, Pencil, PlaySquare, Trash2 } from "lucide-solid";
-import { createMemo, createSignal, For, onMount, Show } from "solid-js";
+import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 
 import { AppShell } from "@/components/AppShell";
 import { DashboardTable } from "@/components/DashboardTable";
@@ -234,7 +234,33 @@ export function ChatHistoryListPage() {
     }
   };
 
-  onMount(load);
+  const handleThreadTitleUpdated = (event: Event) => {
+    const customEvent = event as CustomEvent<{ threadId: string; title: string }>;
+    const { threadId, title } = customEvent.detail;
+    if (!threadId || !title) {
+      return;
+    }
+    setData((current) => {
+      if (!current || !current.threads.some((item) => item.thread_id === threadId)) {
+        return current;
+      }
+      return {
+        ...current,
+        threads: current.threads.map((item) =>
+          item.thread_id === threadId ? { ...item, title } : item,
+        ),
+      };
+    });
+  };
+
+  onMount(() => {
+    void load();
+    window.addEventListener(CUSTOM_DOM_EVENTS.THREAD_TITLE_UPDATED, handleThreadTitleUpdated);
+  });
+
+  onCleanup(() => {
+    window.removeEventListener(CUSTOM_DOM_EVENTS.THREAD_TITLE_UPDATED, handleThreadTitleUpdated);
+  });
 
   return (
     <AppShell

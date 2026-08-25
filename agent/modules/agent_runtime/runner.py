@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import binascii
 from contextlib import contextmanager
@@ -328,7 +329,13 @@ async def _record_conversation_thread(
     model: str | None = None,
     title: str = "",
     attachments: list[Any] | None = None,
-) -> None:
+) -> asyncio.Task[dict[str, Any] | None] | None:
+    """Persist thread metadata and schedule title generation.
+
+    Returns the scheduled title-generation task (resolving to the updated
+    thread metadata, or ``None``) so stream runners can surface the rename
+    in real time while the model is still generating its response.
+    """
     try:
         from agent.modules.conversations import (
             THREAD_KIND_USER,
@@ -358,7 +365,7 @@ async def _record_conversation_thread(
             kind=kind,
         )
         if should_generate_title:
-            schedule_conversation_title_generation(
+            return schedule_conversation_title_generation(
                 thread_id=thread_id,
                 title=title,
                 attachments=attachments,
@@ -369,6 +376,7 @@ async def _record_conversation_thread(
             thread_id,
             exc,
         )
+    return None
 
 
 def _coerce_stream_event(event: Any) -> tuple[str, Any]:
@@ -1078,10 +1086,11 @@ async def run_agent_stream(
         provider=provider,
         model=model,
     )
+    conversation_title_task: asyncio.Task[dict[str, Any] | None] | None = None
     if normalized_resume_payload is not None and normalized_resume_payload.action == "approve":
         await _update_thread_agent(thread_id, agent_name)
     elif not resume and not checkpoint_id:
-        await _record_conversation_thread(
+        conversation_title_task = await _record_conversation_thread(
             thread_id=thread_id,
             agent_name=agent_name,
             provider=provider,
@@ -1124,109 +1133,160 @@ async def run_agent_stream(
         user_message_id = _message_id(user_message)
         current_user_seen = False
 
-    with track_active_session(thread_id, agent_name) as session_id:
-        chunk_extractor = _StreamingChunkExtractor()
-        async for event in graph.astream(
-            input_data,
-            **stream_kwargs,
-        ):
-            stream_mode, event_data = _coerce_stream_event(event)
-            if stream_mode == "messages":
-                delta = chunk_extractor.extract(event_data)
-                if delta.text:
-                    registry.update_step(session_id, SESSION_STEP_RESPONDING)
-                    yield {
-                        "type": "message",
-                        "content": delta.text,
-                    }
-                if emit_thinking and delta.thinking:
-                    yield {
-                        "type": "thinking",
-                        "content": delta.thinking,
-                    }
-                continue
+    title_event_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
-            if stream_mode != "values":
-                continue
+    async def _publish_generated_title() -> None:
+        if conversation_title_task is None:
+            return
+        try:
+            updated_metadata = await conversation_title_task
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.debug(
+                "Conversation title generation failed for '%s': %s",
+                thread_id,
+                exc,
+            )
+            return
+        generated_title = str((updated_metadata or {}).get("title") or "").strip()
+        if generated_title:
+            title_event_queue.put_nowait(
+                {
+                    "type": "thread_title",
+                    "thread_id": thread_id,
+                    "title": generated_title,
+                }
+            )
 
-            event = event_data
-            for plan_review_event in _plan_review_events_from_value_event(event):
-                yield plan_review_event
-            for user_input_event in _user_input_request_events_from_value_event(event):
-                yield user_input_event
-
-            messages = event.get("messages", [])
-            if not messages:
-                continue
-
-            if user_message_id:
-                current_user_index = next(
-                    (
-                        index
-                        for index, message in enumerate(messages)
-                        if _message_id(message) == user_message_id
-                    ),
-                    None,
-                )
-                if current_user_index is not None:
-                    current_user_seen = True
-                    for message in messages[: current_user_index + 1]:
-                        message_id = _message_id(message)
-                        if message_id:
-                            seen_ids.add(message_id)
-                    messages = messages[current_user_index + 1 :]
-                elif not current_user_seen and len(messages) > 1:
-                    for message in messages:
-                        message_id = _message_id(message)
-                        if message_id:
-                            seen_ids.add(message_id)
-                    continue
-
-            for message in messages:
-                message_id = _message_id(message)
-                if message_id:
-                    if message_id in seen_ids:
-                        continue
-                    seen_ids.add(message_id)
-
-                if isinstance(message, AIMessage):
-                    tool_calls = getattr(message, "tool_calls", None)
-                    content = extract_final_text_content(getattr(message, "content", None))
-                    thinking = (
-                        extract_thinking_content(getattr(message, "content", None))
-                        if emit_thinking
-                        else ""
-                    )
-                    if content:
+    title_watcher = asyncio.create_task(_publish_generated_title())
+    try:
+        with track_active_session(thread_id, agent_name) as session_id:
+            chunk_extractor = _StreamingChunkExtractor()
+            async for event in graph.astream(
+                input_data,
+                **stream_kwargs,
+            ):
+                stream_mode, event_data = _coerce_stream_event(event)
+                while not title_event_queue.empty():
+                    yield title_event_queue.get_nowait()
+                if stream_mode == "messages":
+                    delta = chunk_extractor.extract(event_data)
+                    if delta.text:
                         registry.update_step(session_id, SESSION_STEP_RESPONDING)
                         yield {
-                            "type": "final",
-                            "content": content,
+                            "type": "message",
+                            "content": delta.text,
                         }
-                    if thinking:
+                    if emit_thinking and delta.thinking:
                         yield {
                             "type": "thinking",
-                            "content": thinking,
+                            "content": delta.thinking,
                         }
-                    if tool_calls:
-                        for tc in tool_calls:
-                            tool_name = tc.get("name") or "unknown"
-                            if tool_name in {PLAN_MODE_TOOL_NAME, ASK_USER_TOOL_NAME}:
-                                continue
-                            registry.add_tool_call(session_id, tool_name)
+                    continue
+
+                if stream_mode != "values":
+                    continue
+
+                event = event_data
+                for plan_review_event in _plan_review_events_from_value_event(event):
+                    yield plan_review_event
+                for user_input_event in _user_input_request_events_from_value_event(event):
+                    yield user_input_event
+
+                messages = event.get("messages", [])
+                if not messages:
+                    continue
+
+                if user_message_id:
+                    current_user_index = next(
+                        (
+                            index
+                            for index, message in enumerate(messages)
+                            if _message_id(message) == user_message_id
+                        ),
+                        None,
+                    )
+                    if current_user_index is not None:
+                        current_user_seen = True
+                        for message in messages[: current_user_index + 1]:
+                            message_id = _message_id(message)
+                            if message_id:
+                                seen_ids.add(message_id)
+                        messages = messages[current_user_index + 1 :]
+                    elif not current_user_seen and len(messages) > 1:
+                        for message in messages:
+                            message_id = _message_id(message)
+                            if message_id:
+                                seen_ids.add(message_id)
+                        continue
+
+                for message in messages:
+                    message_id = _message_id(message)
+                    if message_id:
+                        if message_id in seen_ids:
+                            continue
+                        seen_ids.add(message_id)
+
+                    if isinstance(message, AIMessage):
+                        tool_calls = getattr(message, "tool_calls", None)
+                        content = extract_final_text_content(getattr(message, "content", None))
+                        thinking = (
+                            extract_thinking_content(getattr(message, "content", None))
+                            if emit_thinking
+                            else ""
+                        )
+                        if content:
+                            registry.update_step(session_id, SESSION_STEP_RESPONDING)
                             yield {
-                                "type": "tool_call",
-                                "id": tc.get("id"),
-                                "name": tool_name,
-                                "args": tc.get("args"),
+                                "type": "final",
+                                "content": content,
                             }
-                elif isinstance(message, ToolMessage):
-                    yield {
-                        "type": "tool_result",
-                        "tool_call_id": getattr(message, "tool_call_id", None),
-                        "name": getattr(message, "name", None),
-                        "content": extract_final_text_content(getattr(message, "content", None)),
-                    }
+                        if thinking:
+                            yield {
+                                "type": "thinking",
+                                "content": thinking,
+                            }
+                        if tool_calls:
+                            for tc in tool_calls:
+                                tool_name = tc.get("name") or "unknown"
+                                if tool_name in {PLAN_MODE_TOOL_NAME, ASK_USER_TOOL_NAME}:
+                                    continue
+                                registry.add_tool_call(session_id, tool_name)
+                                yield {
+                                    "type": "tool_call",
+                                    "id": tc.get("id"),
+                                    "name": tool_name,
+                                    "args": tc.get("args"),
+                                }
+                    elif isinstance(message, ToolMessage):
+                        yield {
+                            "type": "tool_result",
+                            "tool_call_id": getattr(message, "tool_call_id", None),
+                            "name": getattr(message, "name", None),
+                            "content": extract_final_text_content(getattr(message, "content", None)),
+                        }
+
+            # The graph finished but the generated title may still be in
+            # flight; give it a bounded window so a late rename still
+            # reaches the client before the stream closes.
+            if not title_watcher.done():
+                try:
+                    from agent.modules.conversations.service import (
+                        CONVERSATION_TITLE_TIMEOUT_SECONDS,
+                    )
+
+                    await asyncio.wait_for(
+                        asyncio.shield(title_watcher),
+                        timeout=CONVERSATION_TITLE_TIMEOUT_SECONDS + 2.0,
+                    )
+                except TimeoutError:
+                    pass
+            while not title_event_queue.empty():
+                yield title_event_queue.get_nowait()
+    finally:
+        if not title_watcher.done():
+            title_watcher.cancel()
 
 
 async def run_agent_edit_stream(

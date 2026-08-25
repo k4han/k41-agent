@@ -165,7 +165,13 @@ async def _generate_and_update_conversation_title(
     thread_id: str,
     title: str,
     attachments: list[Any] | None = None,
-) -> None:
+) -> dict[str, Any] | None:
+    """Generate a title and persist it when the thread still shows the fallback.
+
+    Returns the updated thread metadata when the title actually changed so
+    callers (e.g. stream runners) can surface the rename in real time, or
+    ``None`` when generation failed or the thread was renamed manually.
+    """
     try:
         generated_title = await generate_conversation_title(
             first_user_message=title,
@@ -176,7 +182,7 @@ async def _generate_and_update_conversation_title(
         current_titles = [thread_id]
         if fallback_title:
             current_titles.append(fallback_title)
-        await update_conversation_thread_title_if_current(
+        return await update_conversation_thread_title_if_current(
             thread_id=thread_id,
             title=generated_title,
             current_titles=current_titles,
@@ -187,6 +193,7 @@ async def _generate_and_update_conversation_title(
             thread_id,
             exc,
         )
+        return None
 
 
 def schedule_conversation_title_generation(
@@ -194,7 +201,7 @@ def schedule_conversation_title_generation(
     thread_id: str,
     title: str,
     attachments: list[Any] | None = None,
-) -> asyncio.Task[None]:
+) -> asyncio.Task[dict[str, Any] | None]:
     return asyncio.create_task(
         _generate_and_update_conversation_title(
             thread_id=thread_id,

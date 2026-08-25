@@ -128,6 +128,7 @@ async def test_schedule_conversation_title_generation_updates_current_title(monk
 
     async def fake_update_conversation_thread_title_if_current(**kwargs):
         calls["update_title"] = kwargs
+        return {"thread_id": kwargs["thread_id"], "title": kwargs["title"]}
 
     monkeypatch.setattr(
         conversation_service,
@@ -162,6 +163,10 @@ async def test_schedule_conversation_title_generation_updates_current_title(monk
             "task_dashboard_123",
             "How do I debug this login issue?",
         ],
+    }
+    assert task.result() == {
+        "thread_id": "task_dashboard_123",
+        "title": "Debug login issue",
     }
 
 

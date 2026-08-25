@@ -1,5 +1,6 @@
 export const STREAM_EVENTS = {
   THREAD_CREATED: "thread_created",
+  THREAD_TITLE: "thread_title",
   MESSAGE: "message",
   FINAL: "final",
   TOOL_CALL: "tool_call",
@@ -32,6 +33,7 @@ export const CUSTOM_DOM_EVENTS = {
   SESSION_UPDATED: "k41:session-updated",
   THREAD_START_RUNNING: "k41:thread-start-running",
   THREAD_STOP_RUNNING: "k41:thread-stop-running",
+  THREAD_TITLE_UPDATED: "k41:thread-title-updated",
   THREAD_EXTERNAL_ABORT: "k41:thread-external-abort",
   THREADS_CHANGED: "k41:threads-changed",
   TASKS_CHANGED: "k41:tasks-changed",
