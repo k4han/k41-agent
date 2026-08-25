@@ -775,20 +775,26 @@ def _run_config_from_checkpoint(
 def _replace_human_message_text(message: HumanMessage, text: str) -> HumanMessage:
     content = message.content
     if isinstance(content, list):
-        next_content: list[Any] = []
-        replaced = False
+        attachment_parts: list[Any] = []
         for part in content:
-            if (
-                not replaced
-                and isinstance(part, dict)
-                and str(part.get("type") or "").strip().lower() == "text"
-            ):
-                next_content.append({**part, "text": text})
-                replaced = True
-                continue
-            next_content.append(part)
-        if not replaced:
-            next_content.insert(0, {"type": "text", "text": text})
+            if isinstance(part, dict):
+                part_type = str(part.get("type") or "").strip().lower()
+                if part_type == "image_url":
+                    attachment_parts.append(part)
+                    continue
+                if part_type == "text":
+                    text_value = part.get("text")
+                    if isinstance(text_value, str) and text_value.startswith("Attached "):
+                        attachment_parts.append(part)
+                        continue
+                    # Skip original user text blocks; they will be replaced.
+                    continue
+                attachment_parts.append(part)
+            else:
+                attachment_parts.append(part)
+        next_content: list[Any] = []
+        next_content.extend(attachment_parts)
+        next_content.append({"type": "text", "text": text})
         return message.model_copy(update={"content": next_content})
     return message.model_copy(update={"content": text})
 
@@ -1272,7 +1278,7 @@ async def run_agent_stream(
             # reaches the client before the stream closes.
             if not title_watcher.done():
                 try:
-                    from agent.modules.conversations.service import (
+                    from agent.modules.conversations import (
                         CONVERSATION_TITLE_TIMEOUT_SECONDS,
                     )
 

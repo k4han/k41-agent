@@ -65,7 +65,7 @@ async def zalo_webhook(
         raise HTTPException(status_code=400, detail="Invalid Zalo update payload.")
 
     try:
-        from agent.modules.channels.zalo.adapter import handle_zalo_update
+        from agent.modules.channels import handle_zalo_update
 
         await handle_zalo_update(inner)
     except HTTPException:

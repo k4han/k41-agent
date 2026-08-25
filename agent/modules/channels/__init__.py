@@ -48,6 +48,7 @@ from agent.modules.channels.service_specs import (
     ChannelDescriptor,
 )
 from agent.modules.channels.models import BotSettings
+from agent.modules.channels.zalo import handle_zalo_update
 
 __all__ = [
     "BUILTIN_CHANNEL_DESCRIPTORS",
@@ -87,4 +88,5 @@ __all__ = [
     "stop_all_channels",
     "stop_channel",
     "test_channel_connection",
+    "handle_zalo_update",
 ]

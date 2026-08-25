@@ -492,6 +492,7 @@ class TestConfigService:
                 "telegram": True,
                 "discord": False,
                 "github": False,
+                "zalo": True,
             }
         )
 
@@ -667,6 +668,7 @@ class TestPublicAPI:
                 "telegram": True,
                 "discord": True,
                 "github": False,
+                "zalo": True,
             }
         )
 
