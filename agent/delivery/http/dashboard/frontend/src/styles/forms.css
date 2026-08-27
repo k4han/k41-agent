@@ -417,6 +417,54 @@
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
+.form-select-menu--portal {
+  position: fixed;
+  left: auto;
+  right: auto;
+  z-index: 999;
+  /* top/left/width/max-height set inline via JS */
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.form-select-search {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.form-select-search-icon {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
+.form-select-search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12px;
+  outline: none;
+}
+
+.form-select-search-input::placeholder {
+  color: var(--muted-2);
+}
+
+.form-select-empty {
+  padding: 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .form-select-option {
   display: flex;
   align-items: center;

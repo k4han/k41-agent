@@ -260,6 +260,21 @@ def normalize_setting_value(key: str, value: Any | None) -> Any | None:
             return _normalize_bootstrap_port(value)
         if key in BOOTSTRAP_BOOLEAN_CONFIG_KEYS:
             return coerce_bool(value)
+    if key == "display.timezone":
+        if value is None:
+            return None
+        tz_name = str(value).strip()
+        if not tz_name:
+            raise HTTPException(status_code=400, detail="Display timezone cannot be empty.")
+        try:
+            from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+            ZoneInfo(tz_name)
+        except ZoneInfoNotFoundError:
+            raise HTTPException(status_code=400, detail=f"Invalid timezone '{tz_name}'.")
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid timezone '{tz_name}': {exc}") from exc
+        return tz_name
     if value is None or not key.endswith(".models"):
         return value
     if isinstance(value, str):

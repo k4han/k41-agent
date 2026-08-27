@@ -7,6 +7,84 @@ from typing import Any
 
 DISPLAY_TIMEZONE_CONFIG_KEY = "display.timezone"
 DEFAULT_DISPLAY_TIMEZONE = "UTC"
+
+
+def _build_display_timezone_options() -> list[str]:
+    """Build sorted IANA timezone options for the display.timezone dropdown.
+
+    Uses zoneinfo.available_timezones when available and falls back to a
+    curated list of common zones. Filters to canonical continent-based zones
+    plus UTC for a cleaner dropdown.
+    """
+    try:
+        from zoneinfo import available_timezones
+
+        zones = sorted(available_timezones())
+        continents = {
+            "Africa",
+            "America",
+            "Antarctica",
+            "Arctic",
+            "Asia",
+            "Atlantic",
+            "Australia",
+            "Europe",
+            "Indian",
+            "Pacific",
+        }
+        cleaned = [z for z in zones if z == "UTC" or z.split("/")[0] in continents]
+        if not cleaned:
+            return ["UTC", *sorted(z for z in zones if "/" in z)]
+        # Put UTC first, rest sorted
+        rest = sorted(z for z in cleaned if z != "UTC")
+        return ["UTC", *rest]
+    except Exception:
+        return [
+            "UTC",
+            "Africa/Cairo",
+            "Africa/Johannesburg",
+            "Africa/Lagos",
+            "America/Anchorage",
+            "America/Bogota",
+            "America/Chicago",
+            "America/Denver",
+            "America/Halifax",
+            "America/Los_Angeles",
+            "America/Mexico_City",
+            "America/New_York",
+            "America/Phoenix",
+            "America/Sao_Paulo",
+            "America/Toronto",
+            "America/Vancouver",
+            "Asia/Bangkok",
+            "Asia/Colombo",
+            "Asia/Dhaka",
+            "Asia/Dubai",
+            "Asia/Ho_Chi_Minh",
+            "Asia/Hong_Kong",
+            "Asia/Jakarta",
+            "Asia/Karachi",
+            "Asia/Kolkata",
+            "Asia/Kuala_Lumpur",
+            "Asia/Manila",
+            "Asia/Seoul",
+            "Asia/Shanghai",
+            "Asia/Singapore",
+            "Asia/Tokyo",
+            "Australia/Melbourne",
+            "Australia/Sydney",
+            "Europe/Berlin",
+            "Europe/Istanbul",
+            "Europe/London",
+            "Europe/Moscow",
+            "Europe/Paris",
+            "Europe/Rome",
+            "Pacific/Auckland",
+            "Pacific/Honolulu",
+        ]
+
+
+DISPLAY_TIMEZONE_OPTIONS: list[str] = _build_display_timezone_options()
 DEFAULT_WORKSPACE_ROOT = "~/.k41-agent/workspaces"
 DEFAULT_GITHUB_WORKSPACE_ROOT = "~/.k41-agent/github-workspaces"
 BOOTSTRAP_CONFIG_KEYS = ("host", "port", "enable_web", "enable_api", "enable_dashboard")
@@ -740,10 +818,11 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
     },
     # Display settings
     DISPLAY_TIMEZONE_CONFIG_KEY: {
-        "type": "text",
+        "type": "select",
         "description": "IANA timezone used to display dashboard timestamps (e.g. Asia/Bangkok)",
         "category": "general",
         "label": "Display Timezone",
+        "options": DISPLAY_TIMEZONE_OPTIONS,
     },
     # General / Workflows settings
     "recursion_limit": {
@@ -1001,6 +1080,7 @@ __all__ = [
     "BOOTSTRAP_CONFIG_KEYS",
     "DEFAULT_CONFIG",
     "DEFAULT_DISPLAY_TIMEZONE",
+    "DISPLAY_TIMEZONE_OPTIONS",
     "DEFAULT_GITHUB_WORKSPACE_ROOT",
     "DEFAULT_WORKSPACE_ROOT",
     "DISPLAY_TIMEZONE_CONFIG_KEY",

@@ -452,6 +452,8 @@
   border-radius: 10px;
   background: var(--surface);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  /* portal dropdown escapes this container, but keep visible when needed for non-portal fallback */
+  isolation: isolate;
 }
 
 .setting-card {
@@ -464,6 +466,20 @@
     border-color 150ms ease,
     background-color 150ms ease,
     box-shadow 150ms ease;
+}
+
+/* Redesign: when dropdown is open, allow it to overflow card/list boundaries.
+   Portal-based dropdown already escapes overflow, this is fallback for any
+   remaining absolute menus and ensures correct stacking. */
+.settings-list:has(.form-select--open) {
+  overflow: visible;
+  z-index: 10;
+  position: relative;
+}
+
+.setting-card:has(.form-select--open) {
+  overflow: visible;
+  z-index: 20;
 }
 
 .setting-card + .setting-card {
