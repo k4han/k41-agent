@@ -287,6 +287,7 @@ def create_daytona_workspace(*, label: str | None = None) -> WorkspaceRef:
     )
     backend = DaytonaWorkspaceBackend(ref, sandbox=sandbox)
     backend.ensure_root()
+    backend.ensure_storage()
     ref.metadata.update(
         daytona_lifecycle_metadata(
             root=backend.root,
@@ -317,6 +318,7 @@ def attach_daytona_workspace(
     )
     backend = DaytonaWorkspaceBackend(ref)
     backend.ensure_root()
+    backend.ensure_storage()
     ref.metadata.update(
         daytona_lifecycle_metadata(
             root=backend.root,
@@ -910,6 +912,19 @@ class DaytonaWorkspaceBackend(SandboxBackendBase):
     def ensure_root(self) -> None:
         self.ensure_active()
         self._exec(f"mkdir -p {shlex.quote(self.root)}", cwd="/")
+
+    def ensure_storage(self) -> None:
+        """Ensure ``.k41-agent`` storage directories exist inside the sandbox."""
+        for dirname in (".k41-agent/generated-images", ".k41-agent/assets", ".k41-agent/memory", ".k41-agent/uploads", ".k41-agent/scratchpad"):
+            target = resolve_daytona_path(self.root, dirname)
+            try:
+                self._make_directory(target)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Failed to ensure daytona storage dir %s: %s", target, exc)
+        try:
+            self._exec("mkdir -p .git/info && grep -qF '.k41-agent/' .git/info/exclude 2>/dev/null || echo '.k41-agent/' >> .git/info/exclude", cwd=self.root, timeout=10)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Failed to ensure daytona git exclude: %s", exc)
 
     def clone_repository(
         self,

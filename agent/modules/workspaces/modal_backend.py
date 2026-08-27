@@ -193,6 +193,7 @@ async def create_modal_workspace(*, label: str | None = None) -> WorkspaceRef:
     backend = ModalWorkspaceBackend(ref, sandbox=sandbox, fs=fs, client=client)
     await backend.ensure_git()
     await backend.ensure_root()
+    await backend.ensure_storage()
     return ref
 
 
@@ -218,6 +219,7 @@ async def attach_modal_workspace(
     backend = await ModalWorkspaceBackend.create(ref)
     await backend.ensure_git()
     await backend.ensure_root()
+    await backend.ensure_storage()
     return ref
 
 
@@ -591,6 +593,19 @@ class ModalWorkspaceBackend(SandboxBackendBase):
 
     async def ensure_root(self) -> None:
         await self._make_directory(self.root)
+
+    async def ensure_storage(self) -> None:
+        """Ensure ``.k41-agent`` storage directories exist inside the sandbox."""
+        for dirname in (".k41-agent/generated-images", ".k41-agent/assets", ".k41-agent/memory", ".k41-agent/uploads", ".k41-agent/scratchpad"):
+            target = resolve_modal_path(self.root, dirname)
+            try:
+                await self._make_directory(target)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Failed to ensure modal storage dir %s: %s", target, exc)
+        try:
+            await self._exec("mkdir -p .git/info && grep -qF '.k41-agent/' .git/info/exclude 2>/dev/null || echo '.k41-agent/' >> .git/info/exclude", cwd=self.root, timeout=10)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Failed to ensure modal git exclude: %s", exc)
 
     def ensure_active(self) -> None:
         """Ensure the sandbox is active (Modal uses touch for lifecycle)."""

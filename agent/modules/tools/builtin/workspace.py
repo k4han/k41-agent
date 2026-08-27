@@ -44,6 +44,17 @@ async def get_file_io(runtime: ToolRuntime[Any, Any]) -> WorkspaceFileIO:
     if tool_context.thread_id:
         if workspace.backend == "local":
             ensure_physical_workspace_storage(workspace.locator)
+        elif workspace.backend in {"daytona", "modal"}:
+            try:
+                from agent.modules.tools.runtime.thread_storage import (
+                    ensure_sandbox_workspace_storage,
+                )
+
+                await ensure_sandbox_workspace_storage(
+                    workspace, thread_id=tool_context.thread_id
+                )
+            except Exception:
+                pass
         return WorkspaceStorageFileIO(file_io, derive_workspace_scope(workspace))
     return file_io
 

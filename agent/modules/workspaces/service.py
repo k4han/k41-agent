@@ -793,6 +793,12 @@ async def _provision_modal_replacement(ref: WorkspaceRef) -> WorkspaceRef:
     backend = await _create_workspace_runtime_backend(replacement)
     await backend.ensure_git()
     await backend.ensure_root()
+    # Ensure .k41-agent mount exists on the fresh sandbox.
+    ensure_storage = getattr(backend, "ensure_storage", None)
+    if callable(ensure_storage):
+        res = ensure_storage()
+        if inspect.isawaitable(res):
+            await res
     replacement = backend.ref
 
     repository_id = _github_repository_id(ref)

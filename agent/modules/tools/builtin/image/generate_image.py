@@ -32,7 +32,9 @@ from agent.modules.tools.builtin.workspace import get_workspace
 from agent.modules.tools.runtime.context import ToolContext
 from agent.modules.tools.runtime.thread_storage import (
     ensure_physical_workspace_storage,
+    ensure_sandbox_workspace_storage,
     generated_images_dir_for_workspace,
+    ingest_attachment_file_to_sandbox,
     virtual_generated_image_path,
 )
 from agent.modules.workspaces import derive_workspace_scope
@@ -176,7 +178,70 @@ def _build_generate_image_tool(config: dict[str, ToolConfigValue]) -> BaseTool:
     size = str(config.get("size") or DEFAULT_IMAGE_SIZE)
     quality = str(config.get("quality") or "auto")
 
-    def _generate_image(
+    def _generate_image_sync(
+        prompt: str,
+        runtime: Annotated[ToolRuntime[Any, Any], InjectedToolArg],
+    ) -> str:
+        """Sync wrapper for local workspaces (used by legacy tests)."""
+        provider = _resolve_provider(provider_name)
+        output_dir, thread_scoped = _output_target(runtime)
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "prompt": prompt,
+            "size": size,
+        }
+        if quality:
+            kwargs["quality"] = quality
+
+        client_kwargs = {"api_key": provider.api_key}
+        if provider.base_url:
+            client_kwargs["base_url"] = provider.base_url
+        client = OpenAI(**client_kwargs)
+
+        try:
+            result = client.images.generate(**kwargs)
+        except Exception as exc:
+            raise ToolError(ToolErrorCode.UPSTREAM, f"Image generation failed: {exc}") from exc
+
+        if not result.data:
+            raise ToolError(ToolErrorCode.UPSTREAM, "Image generation returned no data.")
+
+        def _sync_to_workspace_sync(filename: str, content: bytes) -> None:
+            if runtime is None:
+                return
+            try:
+                workspace = get_workspace(runtime)
+                if workspace.backend == "local" and workspace.locator:
+                    ws_dir = ensure_physical_workspace_storage(workspace.locator) / "generated-images"
+                    ws_dir.mkdir(parents=True, exist_ok=True)
+                    (ws_dir / filename).write_bytes(content)
+            except Exception as sync_exc:
+                logger.debug("Failed to sync generated image to local workspace: %s", sync_exc)
+
+        image = result.data[0]
+        b64_json = getattr(image, "b64_json", None)
+        if b64_json:
+            path = _output_path(output_dir, prompt)
+            raw_bytes = base64.b64decode(b64_json)
+            path.write_bytes(raw_bytes)
+            _sync_to_workspace_sync(path.name, raw_bytes)
+            return f"Generated image saved to: {_display_path(path, thread_scoped=thread_scoped)}"
+
+        url = getattr(image, "url", None)
+        if url:
+            path = _write_image_from_url(url, prompt, output_dir)
+            try:
+                _sync_to_workspace_sync(path.name, path.read_bytes())
+            except Exception:
+                pass
+            return f"Generated image saved to: {_display_path(path, thread_scoped=thread_scoped)}"
+
+        raise ToolError(
+            ToolErrorCode.UPSTREAM,
+            "Image generation response did not include image data or URL.",
+        )
+
+    async def _generate_image(
         prompt: str,
         runtime: Annotated[ToolRuntime[Any, Any], InjectedToolArg],
     ) -> str:
@@ -204,7 +269,7 @@ def _build_generate_image_tool(config: dict[str, ToolConfigValue]) -> BaseTool:
         if not result.data:
             raise ToolError(ToolErrorCode.UPSTREAM, "Image generation returned no data.")
 
-        def _sync_to_workspace(filename: str, content: bytes) -> None:
+        async def _sync_to_workspace(filename: str, content: bytes) -> None:
             if runtime is None:
                 return
             try:
@@ -213,8 +278,22 @@ def _build_generate_image_tool(config: dict[str, ToolConfigValue]) -> BaseTool:
                     ws_dir = ensure_physical_workspace_storage(workspace.locator) / "generated-images"
                     ws_dir.mkdir(parents=True, exist_ok=True)
                     (ws_dir / filename).write_bytes(content)
+                elif workspace.backend in {"daytona", "modal"}:
+                    try:
+                        from agent.modules.tools.runtime.context import ToolContext
+
+                        thread_id = ToolContext.from_runtime(runtime).thread_id
+                    except Exception:
+                        thread_id = None
+                    try:
+                        await ensure_sandbox_workspace_storage(workspace, thread_id=thread_id)
+                        await ingest_attachment_file_to_sandbox(
+                            f"generated-images/{filename}", content, workspace, thread_id=thread_id
+                        )
+                    except Exception as exc:
+                        logger.debug("Failed to sync generated image to sandbox workspace: %s", exc)
             except Exception as sync_exc:
-                logger.debug("Failed to sync generated image to local workspace: %s", sync_exc)
+                logger.debug("Failed to sync generated image to workspace: %s", sync_exc)
 
         image = result.data[0]
         b64_json = getattr(image, "b64_json", None)
@@ -222,14 +301,14 @@ def _build_generate_image_tool(config: dict[str, ToolConfigValue]) -> BaseTool:
             path = _output_path(output_dir, prompt)
             raw_bytes = base64.b64decode(b64_json)
             path.write_bytes(raw_bytes)
-            _sync_to_workspace(path.name, raw_bytes)
+            await _sync_to_workspace(path.name, raw_bytes)
             return f"Generated image saved to: {_display_path(path, thread_scoped=thread_scoped)}"
 
         url = getattr(image, "url", None)
         if url:
             path = _write_image_from_url(url, prompt, output_dir)
             try:
-                _sync_to_workspace(path.name, path.read_bytes())
+                await _sync_to_workspace(path.name, path.read_bytes())
             except Exception:
                 pass
             return f"Generated image saved to: {_display_path(path, thread_scoped=thread_scoped)}"
@@ -240,7 +319,8 @@ def _build_generate_image_tool(config: dict[str, ToolConfigValue]) -> BaseTool:
         )
 
     return StructuredTool.from_function(
-        func=_generate_image,
+        func=_generate_image_sync,
+        coroutine=_generate_image,
         name="generate_image",
         description=GENERATE_IMAGE_TOOL_DESCRIPTION,
     )

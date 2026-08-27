@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
+import inspect
+import logging
 import os
 import re
 import shutil
@@ -14,11 +17,14 @@ from agent.modules.workspaces import (
     WorkspaceFileIO,
 )
 
+logger = logging.getLogger(__name__)
+
 
 THREAD_STORAGE_MOUNT = ".k41-agent"
 THREAD_STORAGE_DIRS = ("generated-images", "assets", "memory", "uploads", "scratchpad")
 THREAD_STORAGE_BASE_DIR = Path.home() / ".k41-agent" / "workspace-storage"
 GENERATED_IMAGES_DIR = Path.home() / ".k41-agent" / "generated-images"
+_SANDBOX_BACKENDS = frozenset({"daytona", "modal"})
 
 # Module-level caches avoid repeated SHA256/regex work and redundant mkdir
 # syscalls on every storage I/O call. The keys are the sanitized storage
@@ -296,6 +302,203 @@ def ingest_attachment_file(
     return storage_path
 
 
+async def ensure_sandbox_workspace_storage(
+    workspace: object | None,
+    *,
+    thread_id: str | None = None,
+) -> None:
+    """Ensure ``.k41-agent`` directories exist inside a sandbox workspace.
+
+    For ``daytona``/``modal`` backends the physical directory lives inside the
+    remote sandbox and must be created via the workspace file I/O backend. This
+    is a no-op for local workspaces where :func:`ensure_physical_workspace_storage`
+    already handles the local filesystem.
+    """
+    if workspace is None:
+        return
+    try:
+        from agent.modules.workspaces import get_workspace_file_io, resolve_workspace_ref
+
+        ref = resolve_workspace_ref(workspace)
+        if ref.backend not in _SANDBOX_BACKENDS:
+            return
+        file_io = await get_workspace_file_io(ref, thread_id=thread_id)
+        for dirname in THREAD_STORAGE_DIRS:
+            rel = f"{THREAD_STORAGE_MOUNT}/{dirname}"
+            try:
+                # ``execute("mkdir -p ...")`` works for both modal and daytona
+                # backends and creates the directory inside the sandbox root.
+                executor = getattr(file_io, "execute", None)
+                if callable(executor):
+                    await executor(f"mkdir -p {rel}", timeout=10)
+                else:
+                    await file_io.write_text(f"{rel}/.keep", "", append=False)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Failed to ensure sandbox storage dir %s: %s", rel, exc)
+        # Ensure git exclude for the mount if the sandbox is a git repo.
+        try:
+            executor = getattr(file_io, "execute", None)
+            if callable(executor):
+                await executor(
+                    "mkdir -p .git/info && grep -qF '.k41-agent/' .git/info/exclude 2>/dev/null || echo '.k41-agent/' >> .git/info/exclude",
+                    timeout=10,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Failed to ensure sandbox git exclude: %s", exc)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("ensure_sandbox_workspace_storage failed: %s", exc)
+
+
+async def ingest_attachment_file_to_sandbox(
+    filename: str,
+    content_bytes: bytes,
+    workspace: object | None,
+    *,
+    thread_id: str | None = None,
+) -> bool:
+    """Write an attachment file into a sandbox's ``.k41-agent/uploads``.
+
+    Returns ``True`` when the file was successfully written to the remote
+    sandbox, ``False`` otherwise. The caller is still responsible for writing
+    to the persistent host storage via :func:`ingest_attachment_file`.
+    """
+    if workspace is None or not content_bytes:
+        return False
+    try:
+        from agent.modules.workspaces import get_workspace_file_io, resolve_workspace_ref
+        from agent.modules.workspaces.posix_utils import resolve_remote_path
+
+        ref = resolve_workspace_ref(workspace)
+        if ref.backend not in _SANDBOX_BACKENDS:
+            return False
+        file_io = await get_workspace_file_io(ref, thread_id=thread_id)
+        raw_name = str(filename).replace("\\", "/").lstrip("/")
+        if "/" in raw_name:
+            # Preserve sub-directory (e.g. generated-images/foo.png)
+            rel = f"{THREAD_STORAGE_MOUNT}/{raw_name}"
+            safe_name = Path(raw_name).name
+            parent_rel = f"{THREAD_STORAGE_MOUNT}/{Path(raw_name).parent.as_posix()}"
+        else:
+            safe_name = Path(raw_name).name
+            rel = f"{THREAD_STORAGE_MOUNT}/uploads/{safe_name}"
+            parent_rel = f"{THREAD_STORAGE_MOUNT}/uploads"
+        # Ensure parent exists.
+        try:
+            executor = getattr(file_io, "execute", None)
+            if callable(executor):
+                await executor(f"mkdir -p {parent_rel}", timeout=10)
+        except Exception:
+            pass
+
+        root = getattr(file_io, "root", None) or str(ref.metadata.get("root") or "")
+        if not root:
+            root = "/workspace" if ref.backend == "modal" else "workspace"
+        try:
+            abs_path = resolve_remote_path(str(root), rel)
+        except Exception:
+            abs_path = f"{str(root).rstrip('/')}/{rel}"
+
+        uploader = getattr(file_io, "_upload_file", None)
+        if callable(uploader):
+            try:
+                result = uploader(content_bytes, abs_path)
+                if inspect.isawaitable(result):
+                    await result
+                return True
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Sandbox _upload_file failed for %s: %s", rel, exc)
+
+        # Fallback: text write for utf-8 content.
+        if b"\x00" not in content_bytes:
+            try:
+                text = content_bytes.decode("utf-8")
+                await file_io.write_text(rel, text, append=False)
+                return True
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Sandbox write_text fallback failed for %s: %s", rel, exc)
+
+        # Final fallback: base64 via shell (handles binary). Write via a temp
+        # file then decode to avoid shell quoting limits for large payloads.
+        try:
+            b64 = base64.b64encode(content_bytes).decode("ascii")
+            tmp_rel = f"{parent_rel}/.tmp_{safe_name}.b64"
+            # Write base64 chunks via the file API then decode inside sandbox.
+            await file_io.write_text(tmp_rel, b64, append=False)
+            executor = getattr(file_io, "execute", None)
+            if callable(executor):
+                await executor(
+                    f"base64 -d {tmp_rel} > {rel} && rm -f {tmp_rel}",
+                    timeout=30,
+                )
+            else:
+                # If no execute, try raw upload of decoded bytes via python.
+                await file_io.write_text(rel, b64, append=False)
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Sandbox base64 fallback failed for %s: %s", rel, exc)
+            return False
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("ingest_attachment_file_to_sandbox failed for %s: %s", filename, exc)
+        return False
+
+
+async def hydrate_workspace_storage_to_sandbox(
+    workspace: object | None,
+    workspace_scope: WorkspaceScope | str | None,
+    *,
+    thread_id: str | None = None,
+) -> None:
+    """Hydrate persistent host storage into a sandbox's physical ``.k41-agent``.
+
+    Mirrors :func:`hydrate_workspace_storage` but uses the sandbox file I/O
+    backend instead of local ``shutil`` copies.
+    """
+    if workspace is None or workspace_scope is None:
+        return
+    try:
+        from agent.modules.workspaces import get_workspace_file_io, resolve_workspace_ref
+
+        ref = resolve_workspace_ref(workspace)
+        if ref.backend not in _SANDBOX_BACKENDS:
+            return
+        source_root = ensure_workspace_storage_root(workspace_scope)
+        if not source_root.is_dir():
+            return
+        file_io = await get_workspace_file_io(ref, thread_id=thread_id)
+        for current_root, _dirs, files in os.walk(source_root):
+            rel_dir = os.path.relpath(current_root, source_root)
+            for filename in files:
+                src_file = Path(current_root) / filename
+                rel_path = filename if rel_dir == "." else f"{rel_dir}/{filename}"
+                target_rel = f"{THREAD_STORAGE_MOUNT}/{rel_path}"
+                try:
+                    content = src_file.read_bytes()
+                    # Reuse the same upload logic as ingest.
+                    await ingest_attachment_file_to_sandbox(
+                        target_rel, content, workspace, thread_id=thread_id
+                    )
+                    # Direct upload for generic paths: try _upload_file.
+                    if "/" in rel_path:
+                        from agent.modules.workspaces.posix_utils import resolve_remote_path
+
+                        root = getattr(file_io, "root", None) or str(ref.metadata.get("root") or "/workspace")
+                        try:
+                            abs_path = resolve_remote_path(str(root), target_rel)
+                            uploader = getattr(file_io, "_upload_file", None)
+                            if callable(uploader):
+                                res = uploader(content, abs_path)
+                                if inspect.isawaitable(res):
+                                    await res
+                        except Exception:
+                            pass
+                except OSError:
+                    continue
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("Hydrate to sandbox failed for %s: %s", target_rel, exc)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("hydrate_workspace_storage_to_sandbox failed: %s", exc)
+
+
 class WorkspaceStorageFileIO:
     """Workspace file I/O wrapper ensuring physical workspace storage."""
 
@@ -353,12 +556,15 @@ __all__ = [
     "WorkspaceStorageFileIO",
     "ensure_git_exclude",
     "ensure_physical_workspace_storage",
+    "ensure_sandbox_workspace_storage",
     "ensure_thread_storage_root",
     "ensure_workspace_storage_root",
     "generated_images_dir_for_thread",
     "generated_images_dir_for_workspace",
     "hydrate_workspace_storage",
+    "hydrate_workspace_storage_to_sandbox",
     "ingest_attachment_file",
+    "ingest_attachment_file_to_sandbox",
     "resolve_thread_storage_path",
     "resolve_workspace_storage_path",
     "root_thread_id",

@@ -337,6 +337,57 @@ def _ingest_attachments_to_workspace(
         logger.debug("Failed to ingest attachments into workspace: %s", exc)
 
 
+async def _ingest_attachments_to_sandbox(
+    attachments: list[Any] | None,
+    workspace: Any,
+    *,
+    thread_id: str | None = None,
+) -> None:
+    """Persist attachments into a sandbox's ``.k41-agent`` mount.
+
+    For ``modal``/``daytona`` backends the physical workspace lives inside the
+    remote sandbox and cannot be populated by the synchronous host-only
+    :func:`_ingest_attachments_to_workspace`. This helper ensures the remote
+    ``.k41-agent`` directory exists and copies each attachment file into
+    ``.k41-agent/uploads`` via the workspace backend.
+    """
+    if not attachments or workspace is None:
+        return
+    try:
+        from agent.modules.workspaces import resolve_workspace_ref
+
+        ref = resolve_workspace_ref(workspace)
+        if ref.backend not in {"daytona", "modal"}:
+            return
+        from agent.modules.tools.runtime.thread_storage import (
+            ensure_sandbox_workspace_storage,
+            ingest_attachment_file_to_sandbox,
+        )
+
+        normalized = _normalize_chat_attachments(attachments)
+        if not normalized:
+            return
+        await ensure_sandbox_workspace_storage(ref, thread_id=thread_id)
+        for attachment in normalized:
+            name = str(attachment.get("name") or "").strip()
+            if not name:
+                continue
+            content_bytes: bytes | None = None
+            if attachment.get("base64"):
+                try:
+                    content_bytes = base64.b64decode(attachment["base64"])
+                except Exception:
+                    continue
+            elif attachment.get("content"):
+                content_bytes = str(attachment["content"]).encode("utf-8")
+            if content_bytes is not None:
+                await ingest_attachment_file_to_sandbox(
+                    name, content_bytes, ref, thread_id=thread_id
+                )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Failed to ingest sandbox attachments: %s", exc)
+
+
 def _make_user_message(
     user_input: str,
     attachments: list[Any] | None = None,
@@ -1056,6 +1107,9 @@ async def run_agent(
         stream_kwargs["context"] = context
 
     registry = get_active_session_registry()
+    # Ensure sandbox ``.k41-agent`` is populated before the graph sees the message.
+    if not resume and normalized_resume_payload is None and attachments and workspace is not None:
+        await _ingest_attachments_to_sandbox(attachments, workspace, thread_id=thread_id)
     if normalized_resume_payload is not None:
         input_data = Command(resume=normalized_resume_payload.model_dump(exclude_none=True))
     elif resume:
@@ -1207,6 +1261,8 @@ async def run_agent_stream(
         stream_kwargs["context"] = context
 
     registry = get_active_session_registry()
+    if not resume and normalized_resume_payload is None and attachments and workspace is not None:
+        await _ingest_attachments_to_sandbox(attachments, workspace, thread_id=thread_id)
     if resume:
         input_data = None
         user_message_id = None
