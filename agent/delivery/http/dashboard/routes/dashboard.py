@@ -30,6 +30,7 @@ from agent.delivery.http.dashboard.routes.helpers.sse import (
 from agent.modules.agent_runtime import (
     get_active_session_registry,
     get_background_task_manager,
+    get_chat_stream_manager,
 )
 from agent.modules.agents import get_catalog_service
 from agent.modules.conversations import get_conversation_thread_repository
@@ -494,10 +495,32 @@ async def stop_dashboard_session(payload: dict[str, Any]) -> dict[str, Any]:
     registry = get_active_session_registry()
 
     success = False
+    # Resolve thread_id for chat stream cancellation when only session_id is provided.
+    resolved_thread_id: str | None = None
     if session_id:
+        info = registry.get(session_id)
+        if info and isinstance(info.get("thread_id"), str):
+            resolved_thread_id = str(info["thread_id"])
         success = registry.cancel_session(session_id)
     elif thread_id:
         success = registry.cancel_by_thread(thread_id)
+        resolved_thread_id = str(thread_id)
+
+    # Also cancel any active chat stream session for the same thread.
+    # ChatStreamManager tasks survive client disconnects (F5) and share the
+    # same underlying asyncio task as ActiveSessionRegistry, but there is a
+    # race window where the active session is not yet registered. Cancelling
+    # the chat stream session directly guarantees the LLM stream actually stops.
+    target_thread_id = resolved_thread_id or (str(thread_id) if thread_id else None)
+    if target_thread_id:
+        try:
+            manager = get_chat_stream_manager()
+            session = await manager.get_session(target_thread_id)
+            if session is not None:
+                session.cancel()
+                success = True
+        except Exception:
+            logger.debug("Failed to cancel chat stream session for thread %s", target_thread_id, exc_info=True)
 
     if not success:
         raise HTTPException(status_code=400, detail="No active session found to cancel.")

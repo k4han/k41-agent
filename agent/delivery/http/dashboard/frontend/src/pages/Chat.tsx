@@ -1167,7 +1167,25 @@ export function ChatPage() {
 
   const stopChat = async () => {
     if (streaming()) {
+      const tid = currentStreamThreadId() || currentThreadId();
+      // Abort the local fetch first so UI stops rendering immediately.
       controller()?.abort();
+      // Also request server-side cancellation so the LLM stream actually stops.
+      // Abort alone only disconnects the client; the background ChatStreamSession
+      // survives client disconnects (for F5 reconnection) and must be cancelled
+      // explicitly via the sessions/stop endpoint.
+      if (tid && !tid.startsWith("__pending__")) {
+        const requests: Promise<unknown>[] = [postJson(API_PATHS.sessionsStop, { thread_id: tid })];
+        const taskId = backgroundTask()?.task_id;
+        if (taskId) {
+          requests.push(postJson(API_PATHS.taskCancel(taskId), {}));
+        }
+        // Fire-and-forget is not enough for reliable UX; await so server confirms,
+        // but swallow errors because the local AbortError toast already informs the user.
+        try {
+          await Promise.allSettled(requests);
+        } catch {}
+      }
       return;
     }
     const tid = currentThreadId();

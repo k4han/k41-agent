@@ -98,7 +98,7 @@ class ChatStreamSession:
                     break
 
             manager = get_chat_stream_manager()
-            await manager.remove_session(self.thread_id)
+            await manager.remove_session(self.thread_id, self)
 
     async def push_event(self, event: dict[str, Any]) -> None:
         """Push a generated stream event to the buffer and all subscribed queues."""
@@ -172,9 +172,19 @@ class ChatStreamManager:
         async with self._lock:
             return self._sessions.get(thread_id)
 
-    async def remove_session(self, thread_id: str) -> None:
-        """Remove a session from the manager (thread-safe)."""
+    async def remove_session(self, thread_id: str, session: ChatStreamSession | None = None) -> None:
+        """Remove a session from the manager (thread-safe).
+
+        When ``session`` is provided, only remove the entry if it is still the
+        same object. This prevents a just-cancelled session's grace-period
+        cleanup from deleting a newly created session for the same thread
+        (e.g. user cancelled then immediately sent a new message).
+        """
         async with self._lock:
+            if session is not None:
+                existing = self._sessions.get(thread_id)
+                if existing is not session:
+                    return
             self._sessions.pop(thread_id, None)
 
 
