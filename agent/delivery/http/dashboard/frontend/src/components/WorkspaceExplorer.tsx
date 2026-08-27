@@ -19,6 +19,7 @@ import { useToast } from "@/components/Toast";
 import { apiFetch, postJson } from "@/lib/api";
 import { highlightCode, languageFromPath } from "@/lib/codeHighlight";
 import { renderUnifiedDiffHtml } from "@/lib/diffView";
+import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
 import { getBackendIcon } from "@/lib/iconRegistry";
 import { createDarkMode } from "@/lib/theme";
 import { formatWorkspaceRoot, localWorkspaceRef, workspaceDisplayLabel } from "@/lib/workspace";
@@ -382,7 +383,7 @@ export function WorkspaceExplorer(props: {
     }
   };
 
-  const refresh = () => {
+  const hardRefresh = () => {
     generation += 1;
     const targetGeneration = generation;
     const savedExpanded = { ...untrack(expandedByPath) };
@@ -414,6 +415,43 @@ export function WorkspaceExplorer(props: {
     };
     void reloadWithExpansion();
     void loadChanges(targetGeneration);
+  };
+
+  const softRefresh = () => {
+    if (!canQuery()) {
+      return;
+    }
+    generation += 1;
+    const targetGeneration = generation;
+    const savedExpanded = { ...untrack(expandedByPath) };
+    // Keep existing tree entries visible to avoid flicker; only mark root as loading.
+    setTreeLoadingByPath((current) => ({ ...current, [""]: true }));
+    setTreeError("");
+    setChangesLoading(true);
+    const reloadWithExpansion = async () => {
+      await loadTree("", targetGeneration);
+      if (targetGeneration !== generation) return;
+      const paths = Object.keys(savedExpanded).filter((p) => p !== "" && savedExpanded[p]);
+      for (const path of paths) {
+        if (targetGeneration !== generation) return;
+        // Skip missing expanded paths (deleted/renamed) silently.
+        if (entriesByPath()[path] === undefined && path !== "") {
+          // Still attempt to load; tree will stay empty if path gone.
+        }
+        await loadTree(path, targetGeneration);
+      }
+      if (targetGeneration === generation) {
+        setExpandedByPath(savedExpanded);
+      }
+    };
+    void reloadWithExpansion();
+    void loadChanges(targetGeneration);
+  };
+
+  const refresh = () => {
+    // Keep for external callers (manual refresh button). Use soft refresh to
+    // avoid flashing when the workspace hasn't actually changed.
+    softRefresh();
   };
 
   const applyWorkingDir = () => {
@@ -625,16 +663,57 @@ export function WorkspaceExplorer(props: {
     onCleanup(() => document.removeEventListener("click", handleDocumentClick));
   }
 
+  // Auto-refresh workspace when the agent finishes a turn (files may have
+  // changed). Use soft refresh so expanded folders and open file tabs are
+  // preserved and the tree doesn't flash to "No files".
+  if (typeof window !== "undefined") {
+    const handleWorkspaceRefreshEvent = (event: Event) => {
+      const custom = event as CustomEvent<{ threadId?: string }>;
+      const tid = custom.detail?.threadId;
+      // Only refresh the explorer that belongs to the affected thread (or
+      // the global explorer when no thread filter is present).
+      if (tid && tid !== props.threadId) {
+        return;
+      }
+      // Defer to next microtask so ChatPage's refreshThread has already
+      // updated threadData/workspaceRef if it will.
+      queueMicrotask(() => {
+        if (!canQuery()) {
+          return;
+        }
+        softRefresh();
+      });
+    };
+    window.addEventListener(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, handleWorkspaceRefreshEvent);
+    window.addEventListener(CUSTOM_DOM_EVENTS.THREADS_CHANGED, handleWorkspaceRefreshEvent);
+    onCleanup(() => {
+      window.removeEventListener(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, handleWorkspaceRefreshEvent);
+      window.removeEventListener(CUSTOM_DOM_EVENTS.THREADS_CHANGED, handleWorkspaceRefreshEvent);
+    });
+  }
+
   createEffect(() => {
     setDraftWorkingDir(props.workingDir || "");
   });
 
+  let lastWorkspaceRefreshKey = "";
   createEffect(() => {
-    props.threadId;
-    props.workingDir;
-    props.workspace?.backend;
-    props.workspace?.locator;
-    refresh();
+    const ws = props.workspace;
+    const root = typeof ws?.metadata?.root === "string" ? ws.metadata.root.trim() : "";
+    const key = `${props.threadId}|${props.workingDir}|${ws?.backend || ""}|${ws?.locator || ""}|${root}`;
+    if (key === lastWorkspaceRefreshKey) {
+      return;
+    }
+    lastWorkspaceRefreshKey = key;
+    // Workspace identity changed (new thread, switched project) — hard reset
+    // so stale entries from the previous workspace don't linger.
+    if (!key || key.startsWith("|")) {
+      // Initial mount or empty workspace: keep hard reset to clear stale state
+      // but allow the first load to happen. Use hard path for correctness.
+      hardRefresh();
+      return;
+    }
+    hardRefresh();
   });
 
   const TreeEntry = (entryProps: { entry: WorkspaceTreeEntry; depth: number }) => {
@@ -937,19 +1016,40 @@ export function WorkspaceExplorer(props: {
           <section class="workspace-section workspace-tree-section workspace-tab-panel" role="tabpanel">
             <Show when={!treeError()} fallback={<div class="empty compact">{treeError()}</div>}>
               <Show
-                when={rootEntries().length > 0}
-                fallback={<div class="empty compact">No files.</div>}
-              >
-                <div class="workspace-tree">
-                  <For each={rootEntries()}>
-                    {(entry) => <TreeEntry entry={entry} depth={0} />}
-                  </For>
-                  <Show when={rootTreeTruncated()}>
-                    <div class="workspace-tree-status" style="--depth: 0;">
-                      Tree truncated
+                when={treeLoadingByPath()[rootPath()] || treeLoadingByPath()[""]}
+                fallback={
+                  <Show
+                    when={rootEntries().length > 0}
+                    fallback={<div class="empty compact">No files.</div>}
+                  >
+                    <div class="workspace-tree">
+                      <For each={rootEntries()}>
+                        {(entry) => <TreeEntry entry={entry} depth={0} />}
+                      </For>
+                      <Show when={rootTreeTruncated()}>
+                        <div class="workspace-tree-status" style="--depth: 0;">
+                          Tree truncated
+                        </div>
+                      </Show>
                     </div>
                   </Show>
-                </div>
+                }
+              >
+                <Show
+                  when={rootEntries().length > 0}
+                  fallback={<div class="empty compact">Loading files...</div>}
+                >
+                  <div class="workspace-tree">
+                    <For each={rootEntries()}>
+                      {(entry) => <TreeEntry entry={entry} depth={0} />}
+                    </For>
+                    <Show when={rootTreeTruncated()}>
+                      <div class="workspace-tree-status" style="--depth: 0;">
+                        Tree truncated
+                      </div>
+                    </Show>
+                  </div>
+                </Show>
               </Show>
             </Show>
           </section>
