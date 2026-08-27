@@ -18,6 +18,7 @@ from queue import Empty, Queue
 from typing import Any, Dict, List, Optional
 
 from agent.modules.tools.runtime.sandbox import build_safe_env
+from agent.modules.tools.runtime.shell_guard import assert_command_allowed
 from agent.shared.infrastructure.subprocess_utils import hidden_subprocess_kwargs
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,27 @@ logger = logging.getLogger(__name__)
 # Limits
 MAX_OUTPUT_CHARS = 100_000  # ~100KB max output per command
 MAX_HISTORY_LINES = 500  # Keep last 500 lines of drained output
+HARD_MAX_TIMEOUT = 300.0
+HARD_MIN_TIMEOUT = 1.0
+HARD_MAX_OUTPUT_CHARS = 200_000
+
+
+def _clamp_timeout(value: float) -> float:
+    try:
+        v = float(value)
+    except Exception:
+        return 30.0
+    return max(HARD_MIN_TIMEOUT, min(v, HARD_MAX_TIMEOUT))
+
+
+def _clamp_max_output(value: int | None) -> int | None:
+    if value is None:
+        return MAX_OUTPUT_CHARS
+    try:
+        v = int(value)
+    except Exception:
+        return MAX_OUTPUT_CHARS
+    return max(1024, min(v, HARD_MAX_OUTPUT_CHARS))
 
 # ANSI escape code pattern (colors, cursor movement, etc.)
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
@@ -53,6 +75,7 @@ class TerminalSessionManager:
 
     def __init__(self) -> None:
         self.sessions: Dict[str, TerminalSession] = {}
+        self._lock = threading.Lock()
 
     @staticmethod
     def _normalize_scope_id(scope_id: str | None) -> str | None:
@@ -156,7 +179,8 @@ class TerminalSessionManager:
             error_queue=error_queue,
         )
 
-        self.sessions[session_key] = session
+        with self._lock:
+            self.sessions[session_key] = session
 
         # Wait a bit for terminal to initialize
         time.sleep(0.2)
@@ -215,15 +239,25 @@ class TerminalSessionManager:
         scope_id: str | None = None,
     ) -> Dict[str, Any]:
         """Execute a command in a session, auto-creating the session if it doesn't exist."""
+        timeout = _clamp_timeout(timeout)
+        # Block dangerous commands early (local execution only — remote backends are isolated)
+        try:
+            assert_command_allowed(command)
+        except ValueError as exc:
+            return {"error": str(exc)}
+
         session_key = self._session_key(session_id, scope_id)
-        if session_key not in self.sessions:
+        with self._lock:
+            needs_create = session_key not in self.sessions
+        if needs_create:
             if working_dir is None:
                 return {"error": f"Session {session_id} does not exist and no working_dir provided"}
             self.create_session(working_dir, session_id, scope_id=scope_id)
 
-        session = self.sessions[session_key]
+        with self._lock:
+            session = self.sessions.get(session_key)
 
-        if not session.is_running or session.process.poll() is not None:
+        if session is None or not session.is_running or session.process.poll() is not None:
             return {"error": f"Session {session_id} is no longer active"}
 
         # Drain stale outputs to history before executing a new command
@@ -252,8 +286,8 @@ class TerminalSessionManager:
         elif not has_active_children:
             session.has_background_process = False
 
-        # Generate a unique sentinel token for synchronous execution
-        sentinel_id = uuid.uuid4().hex[:8]
+        # Generate a unique sentinel token for synchronous execution (16 hex reduces collision)
+        sentinel_id = uuid.uuid4().hex[:16]
         sentinel_token = f"____CMD_DONE_{sentinel_id}____"
 
         try:
@@ -271,12 +305,13 @@ class TerminalSessionManager:
                     }
                 else:
                     # For synchronous commands, send the command followed by the sentinel echo
+                    # Use quoted token to avoid shell expansion edge cases
                     full_command = f"{command}\necho {sentinel_token}\n"
                     session.process.stdin.write(full_command)
                     session.process.stdin.flush()
 
-            output_lines = []
-            error_lines = []
+            output_lines: list[str] = []
+            error_lines: list[str] = []
             total_output_chars = 0
 
             start_time = time.time()
@@ -295,17 +330,18 @@ class TerminalSessionManager:
                     line = session.output_queue.get(timeout=0.05)
                     if sentinel_token in line:
                         break  # Sentinel token found, execution is complete
-                    
+
                     # Filter out Windows code page switch messages
                     if "Active code page:" in line:
                         continue
-                    
-                    # Track total output size for truncation
-                    total_output_chars += len(line)
-                    if total_output_chars <= MAX_OUTPUT_CHARS:
-                        output_lines.append(line)
-                    elif not output_lines or output_lines[-1] != "[...output truncated...]":
-                        output_lines.append("[...output truncated...]")
+
+                    # Keep tail when exceeding MAX_OUTPUT_CHARS: drop oldest lines
+                    line_len = len(line) + 1  # +1 for newline
+                    output_lines.append(line)
+                    total_output_chars += line_len
+                    while total_output_chars > MAX_OUTPUT_CHARS and len(output_lines) > 1:
+                        removed = output_lines.pop(0)
+                        total_output_chars -= len(removed) + 1
 
                     last_output_time = time.time()
                     got_output = True
@@ -316,7 +352,15 @@ class TerminalSessionManager:
                     err = session.error_queue.get_nowait()
                     # Filter out unnecessary PSReadline messages
                     if "PSReadline" not in err:
+                        # Apply same tail truncation to stderr
                         error_lines.append(err)
+                        # Keep stderr also bounded (simple tail)
+                        err_text = "\n".join(error_lines)
+                        if len(err_text) > MAX_OUTPUT_CHARS:
+                            # Keep last lines that fit
+                            truncated = err_text[-MAX_OUTPUT_CHARS:]
+                            # Rebuild lines from truncated text
+                            error_lines = truncated.splitlines()
                     last_output_time = time.time()
                     got_output = True
                 except Empty:
@@ -327,12 +371,13 @@ class TerminalSessionManager:
                     break
 
             output_text = self._truncate_output("\n".join(output_lines))
+            stderr_text = self._truncate_output("\n".join(error_lines)) if error_lines else ""
 
             return {
                 "session_id": session_id,
                 "command": command,
                 "output": output_text,
-                "stderr": "\n".join(error_lines),
+                "stderr": stderr_text,
                 "status": "completed",
             }
 
@@ -346,24 +391,30 @@ class TerminalSessionManager:
         scope_id: str | None = None,
     ) -> Dict[str, Any]:
         """Get output from background process running in a session."""
+        try:
+            timeout = max(0.1, min(float(timeout), 60.0))
+        except Exception:
+            timeout = 1.0
         session_key = self._session_key(session_id, scope_id)
-        if session_key not in self.sessions:
+        with self._lock:
+            session = self.sessions.get(session_key)
+        if session is None:
             return {"error": f"Session {session_id} does not exist"}
 
-        session = self.sessions[session_key]
-        output_lines = []
-        error_lines = []
+        output_lines: list[str] = []
+        error_lines: list[str] = []
         total_chars = 0
 
         start_time = time.time()
         while time.time() - start_time < timeout:
             try:
                 line = session.output_queue.get(timeout=0.1)
-                total_chars += len(line)
-                if total_chars <= MAX_OUTPUT_CHARS:
-                    output_lines.append(line)
-                elif not output_lines or output_lines[-1] != "[...output truncated...]":
-                    output_lines.append("[...output truncated...]")
+                line_len = len(line) + 1
+                output_lines.append(line)
+                total_chars += line_len
+                while total_chars > MAX_OUTPUT_CHARS and len(output_lines) > 1:
+                    removed = output_lines.pop(0)
+                    total_chars -= len(removed) + 1
             except Empty:
                 pass
 
@@ -382,11 +433,12 @@ class TerminalSessionManager:
                 break
 
         output_text = self._truncate_output("\n".join(output_lines))
+        stderr_text = self._truncate_output("\n".join(error_lines)) if error_lines else ""
 
         return {
             "session_id": session_id,
             "output": output_text,
-            "stderr": "\n".join(error_lines),
+            "stderr": stderr_text,
             "is_running": session.process.poll() is None,
         }
 
@@ -406,10 +458,10 @@ class TerminalSessionManager:
             Dict with confirmation or error.
         """
         session_key = self._session_key(session_id, scope_id)
-        if session_key not in self.sessions:
+        with self._lock:
+            session = self.sessions.get(session_key)
+        if session is None:
             return {"error": f"Session '{session_id}' does not exist"}
-
-        session = self.sessions[session_key]
 
         if session.process.poll() is not None:
             return {"error": f"Session '{session_id}' process has terminated"}
@@ -440,10 +492,10 @@ class TerminalSessionManager:
             Dict with confirmation or error.
         """
         session_key = self._session_key(session_id, scope_id)
-        if session_key not in self.sessions:
+        with self._lock:
+            session = self.sessions.get(session_key)
+        if session is None:
             return {"error": f"Session '{session_id}' does not exist"}
-
-        session = self.sessions[session_key]
 
         if session.process.poll() is not None:
             return {"error": f"Session '{session_id}' process has already terminated"}
@@ -493,6 +545,8 @@ class TerminalSessionManager:
     def list_sessions(self, scope_id: str | None = None) -> List[Dict[str, Any]]:
         """List all active sessions."""
         normalized_scope_id = self._normalize_scope_id(scope_id)
+        with self._lock:
+            sessions_copy = list(self.sessions.values())
         return [
             {
                 "session_id": s.session_id,
@@ -500,7 +554,7 @@ class TerminalSessionManager:
                 "working_dir": s.working_dir,
                 "is_running": s.process.poll() is None,
             }
-            for s in self.sessions.values()
+            for s in sessions_copy
             if normalized_scope_id is None or s.scope_id == normalized_scope_id
         ]
 
@@ -511,10 +565,10 @@ class TerminalSessionManager:
 
     def _close_session_by_key(self, session_key: str) -> bool:
         """Close terminal session by internal key and kill all child processes."""
-        if session_key not in self.sessions:
-            return False
-
-        session = self.sessions[session_key]
+        with self._lock:
+            if session_key not in self.sessions:
+                return False
+            session = self.sessions[session_key]
         session.is_running = False
 
         # Unregister the PID
@@ -591,18 +645,20 @@ class TerminalSessionManager:
             except Exception:
                 pass
 
-        if session_key in self.sessions:
-            del self.sessions[session_key]
+        with self._lock:
+            if session_key in self.sessions:
+                del self.sessions[session_key]
         return True
 
     def close_all_sessions(self, scope_id: str | None = None) -> int:
         """Close all sessions, optionally limited to one thread scope."""
         normalized_scope_id = self._normalize_scope_id(scope_id)
-        session_keys = [
-            key
-            for key, session in self.sessions.items()
-            if normalized_scope_id is None or session.scope_id == normalized_scope_id
-        ]
+        with self._lock:
+            session_keys = [
+                key
+                for key, session in self.sessions.items()
+                if normalized_scope_id is None or session.scope_id == normalized_scope_id
+            ]
         for session_key in session_keys:
             self._close_session_by_key(session_key)
         return len(session_keys)
@@ -612,11 +668,12 @@ class TerminalSessionManager:
         normalized_thread_id = str(thread_id or "").strip()
         if not normalized_thread_id:
             return 0
-        session_keys = [
-            key
-            for key, session in self.sessions.items()
-            if self._is_thread_tree_scope(session.scope_id, normalized_thread_id)
-        ]
+        with self._lock:
+            session_keys = [
+                key
+                for key, session in self.sessions.items()
+                if self._is_thread_tree_scope(session.scope_id, normalized_thread_id)
+            ]
         for session_key in session_keys:
             self._close_session_by_key(session_key)
         return len(session_keys)

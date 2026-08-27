@@ -5,12 +5,24 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import threading
 import time
 import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from queue import Empty, Queue
 from typing import Any, Dict, List
+
+HARD_MAX_TIMEOUT = 300.0
+HARD_MIN_TIMEOUT = 1.0
+
+
+def _clamp_timeout(value: float) -> float:
+    try:
+        v = float(value)
+    except Exception:
+        return 30.0
+    return max(HARD_MIN_TIMEOUT, min(v, HARD_MAX_TIMEOUT))
 
 from agent.modules.tools.builtin.shell.session_manager import (
     MAX_HISTORY_LINES,
@@ -54,6 +66,7 @@ class DaytonaTerminalSessionManager:
 
     def __init__(self) -> None:
         self.sessions: Dict[str, DaytonaTerminalSession] = {}
+        self._lock = threading.Lock()
 
     @staticmethod
     def _normalize_scope_id(scope_id: str | None) -> str | None:
@@ -86,7 +99,8 @@ class DaytonaTerminalSessionManager:
         return f"k41-{digest}"
 
     def has_session(self, session_id: str, scope_id: str | None = None) -> bool:
-        return self._session_key(session_id, scope_id) in self.sessions
+        with self._lock:
+            return self._session_key(session_id, scope_id) in self.sessions
 
     def create_session(
         self,
@@ -119,7 +133,8 @@ class DaytonaTerminalSessionManager:
             output_queue=output_queue,
             error_queue=error_queue,
         )
-        self.sessions[session_key] = session
+        with self._lock:
+            self.sessions[session_key] = session
         self._start_reader(session)
         time.sleep(0.2)
         self._drain_queues_to_history(session)
@@ -195,8 +210,11 @@ class DaytonaTerminalSessionManager:
         force: bool = False,
         scope_id: str | None = None,
     ) -> Dict[str, Any]:
+        timeout = _clamp_timeout(timeout)
         session_key = self._session_key(session_id, scope_id)
-        if session_key not in self.sessions:
+        with self._lock:
+            has_session = session_key in self.sessions
+        if not has_session:
             try:
                 self.create_session(
                     workspace=workspace,
@@ -229,8 +247,9 @@ class DaytonaTerminalSessionManager:
                 fallback["fallback"] = "non_pty"
                 return fallback
 
-        session = self.sessions[session_key]
-        if not session.is_running:
+        with self._lock:
+            session = self.sessions.get(session_key)
+        if session is None or not session.is_running:
             return {"error": f"Session {session_id} is no longer active"}
 
         session.backend.ensure_active()
@@ -255,7 +274,7 @@ class DaytonaTerminalSessionManager:
                     "status": "running_background",
                 }
 
-            sentinel_id = uuid.uuid4().hex[:8]
+            sentinel_id = uuid.uuid4().hex[:16]
             sentinel_token = f"____CMD_DONE_{sentinel_id}____"
             self._send_input(session.pty_handle, f"{command}\necho {sentinel_token}\n")
 
@@ -268,28 +287,33 @@ class DaytonaTerminalSessionManager:
                     line = session.output_queue.get(timeout=0.05)
                     if sentinel_token in line:
                         break
-                    total_output_chars += len(line)
-                    if total_output_chars <= MAX_OUTPUT_CHARS:
-                        output_lines.append(line)
-                    elif (
-                        not output_lines
-                        or output_lines[-1] != "[...output truncated...]"
-                    ):
-                        output_lines.append("[...output truncated...]")
+                    line_len = len(line) + 1
+                    output_lines.append(line)
+                    total_output_chars += line_len
+                    while total_output_chars > MAX_OUTPUT_CHARS and len(output_lines) > 1:
+                        removed = output_lines.pop(0)
+                        total_output_chars -= len(removed) + 1
                 except Empty:
                     pass
 
                 try:
-                    error_lines.append(session.error_queue.get_nowait())
+                    err = session.error_queue.get_nowait()
+                    error_lines.append(err)
+                    # keep stderr bounded tail-style
+                    err_text = "\n".join(error_lines)
+                    if len(err_text) > MAX_OUTPUT_CHARS:
+                        truncated = err_text[-MAX_OUTPUT_CHARS:]
+                        error_lines = truncated.splitlines()
                 except Empty:
                     pass
 
             output_text = self._truncate_output("\n".join(output_lines))
+            stderr_text = self._truncate_output("\n".join(error_lines)) if error_lines else ""
             return {
                 "session_id": session_id,
                 "command": command,
                 "output": output_text,
-                "stderr": "\n".join(error_lines),
+                "stderr": stderr_text,
                 "status": "completed",
             }
         except Exception as exc:
@@ -351,11 +375,16 @@ class DaytonaTerminalSessionManager:
         timeout: float = 1.0,
         scope_id: str | None = None,
     ) -> Dict[str, Any]:
+        try:
+            timeout = max(0.1, min(float(timeout), 60.0))
+        except Exception:
+            timeout = 1.0
         session_key = self._session_key(session_id, scope_id)
-        if session_key not in self.sessions:
+        with self._lock:
+            session = self.sessions.get(session_key)
+        if session is None:
             return {"error": f"Session {session_id} does not exist"}
 
-        session = self.sessions[session_key]
         session.backend.touch()
         output_lines: list[str] = []
         error_lines: list[str] = []
@@ -364,11 +393,12 @@ class DaytonaTerminalSessionManager:
         while time.time() - start_time < timeout:
             try:
                 line = session.output_queue.get(timeout=0.1)
-                total_chars += len(line)
-                if total_chars <= MAX_OUTPUT_CHARS:
-                    output_lines.append(line)
-                elif not output_lines or output_lines[-1] != "[...output truncated...]":
-                    output_lines.append("[...output truncated...]")
+                line_len = len(line) + 1
+                output_lines.append(line)
+                total_chars += line_len
+                while total_chars > MAX_OUTPUT_CHARS and len(output_lines) > 1:
+                    removed = output_lines.pop(0)
+                    total_chars -= len(removed) + 1
             except Empty:
                 pass
 
@@ -377,10 +407,11 @@ class DaytonaTerminalSessionManager:
             except Empty:
                 pass
 
+        stderr_text = self._truncate_output("\n".join(error_lines)) if error_lines else ""
         return {
             "session_id": session_id,
             "output": self._truncate_output("\n".join(output_lines)),
-            "stderr": "\n".join(error_lines),
+            "stderr": stderr_text,
             "is_running": self._session_is_running(session),
         }
 
@@ -391,9 +422,10 @@ class DaytonaTerminalSessionManager:
         scope_id: str | None = None,
     ) -> Dict[str, Any]:
         session_key = self._session_key(session_id, scope_id)
-        if session_key not in self.sessions:
+        with self._lock:
+            session = self.sessions.get(session_key)
+        if session is None:
             return {"error": f"Session '{session_id}' does not exist"}
-        session = self.sessions[session_key]
         try:
             session.backend.ensure_active()
             self._send_input(session.pty_handle, text + "\n")
@@ -408,9 +440,10 @@ class DaytonaTerminalSessionManager:
         scope_id: str | None = None,
     ) -> Dict[str, Any]:
         session_key = self._session_key(session_id, scope_id)
-        if session_key not in self.sessions:
+        with self._lock:
+            session = self.sessions.get(session_key)
+        if session is None:
             return {"error": f"Session '{session_id}' does not exist"}
-        session = self.sessions[session_key]
         try:
             session.backend.ensure_active()
             if signal_type == "interrupt":
@@ -437,6 +470,8 @@ class DaytonaTerminalSessionManager:
 
     def list_sessions(self, scope_id: str | None = None) -> List[Dict[str, Any]]:
         normalized_scope_id = self._normalize_scope_id(scope_id)
+        with self._lock:
+            sessions_copy = list(self.sessions.values())
         return [
             {
                 "session_id": session.session_id,
@@ -445,7 +480,7 @@ class DaytonaTerminalSessionManager:
                 "is_running": self._session_is_running(session),
                 "backend": "daytona",
             }
-            for session in self.sessions.values()
+            for session in sessions_copy
             if normalized_scope_id is None or session.scope_id == normalized_scope_id
         ]
 
@@ -454,9 +489,10 @@ class DaytonaTerminalSessionManager:
         return self._close_session_by_key(session_key)
 
     def _close_session_by_key(self, session_key: str) -> bool:
-        if session_key not in self.sessions:
-            return False
-        session = self.sessions[session_key]
+        with self._lock:
+            if session_key not in self.sessions:
+                return False
+            session = self.sessions[session_key]
         session.is_running = False
         try:
             self._send_input(session.pty_handle, "exit\n")
@@ -468,16 +504,18 @@ class DaytonaTerminalSessionManager:
             logger.debug(
                 "Failed to kill Daytona PTY session %s: %s", session.pty_id, exc
             )
-        self.sessions.pop(session_key, None)
+        with self._lock:
+            self.sessions.pop(session_key, None)
         return True
 
     def close_all_sessions(self, scope_id: str | None = None) -> int:
         normalized_scope_id = self._normalize_scope_id(scope_id)
-        session_keys = [
-            key
-            for key, session in self.sessions.items()
-            if normalized_scope_id is None or session.scope_id == normalized_scope_id
-        ]
+        with self._lock:
+            session_keys = [
+                key
+                for key, session in self.sessions.items()
+                if normalized_scope_id is None or session.scope_id == normalized_scope_id
+            ]
         for session_key in session_keys:
             self._close_session_by_key(session_key)
         return len(session_keys)
@@ -486,11 +524,12 @@ class DaytonaTerminalSessionManager:
         normalized_thread_id = str(thread_id or "").strip()
         if not normalized_thread_id:
             return 0
-        session_keys = [
-            key
-            for key, session in self.sessions.items()
-            if self._is_thread_tree_scope(session.scope_id, normalized_thread_id)
-        ]
+        with self._lock:
+            session_keys = [
+                key
+                for key, session in self.sessions.items()
+                if self._is_thread_tree_scope(session.scope_id, normalized_thread_id)
+            ]
         for session_key in session_keys:
             self._close_session_by_key(session_key)
         return len(session_keys)

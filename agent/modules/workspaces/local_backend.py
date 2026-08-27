@@ -8,6 +8,7 @@ import time
 from typing import Any
 
 from agent.modules.tools import resolve_safe_path
+from agent.modules.tools.runtime.sandbox import build_safe_env
 from agent.modules.workspaces.backends import CommandResult
 from agent.modules.workspaces.constants import (
     IGNORED_DIR_NAMES,
@@ -33,6 +34,34 @@ from agent.shared.infrastructure.subprocess_utils import hidden_subprocess_kwarg
 
 MAX_LIST_FILES_ENTRIES = 5000
 GIT_STATUS_CACHE_TTL = 2.0
+HARD_MAX_TIMEOUT = 300
+HARD_MAX_OUTPUT_CHARS = 200_000
+HARD_MIN_OUTPUT_CHARS = 1024
+
+
+def _clamp_timeout(value: int | float) -> int:
+    try:
+        v = int(float(value))
+    except Exception:
+        return 30
+    return max(1, min(v, HARD_MAX_TIMEOUT))
+
+
+def _clamp_max_output(value: int | None) -> int | None:
+    if value is None:
+        return None
+    try:
+        v = int(value)
+    except Exception:
+        return None
+    return max(HARD_MIN_OUTPUT_CHARS, min(v, HARD_MAX_OUTPUT_CHARS))
+
+
+def _truncate_tail(text: str, max_chars: int) -> tuple[str, bool]:
+    if len(text) <= max_chars:
+        return text, False
+    truncated = len(text) - max_chars
+    return f"[...truncated {truncated} characters...]\n{text[-max_chars:]}", True
 
 
 def create_local_backend(ref: WorkspaceRef, *, thread_id: str | None = None) -> "LocalWorkspaceBackend":
@@ -246,6 +275,18 @@ class LocalWorkspaceBackend:
             current_session_id_var,
             get_active_session_registry,
         )
+        from agent.modules.tools.runtime.shell_guard import check_command_blocked
+
+        blocked, reason = check_command_blocked(command)
+        if blocked:
+            return CommandResult(
+                output=f"[error] Blocked dangerous command ({reason}): command rejected for local execution",
+                exit_code=1,
+                truncated=False,
+            )
+
+        timeout = _clamp_timeout(timeout)
+        max_output_chars = _clamp_max_output(max_output_chars)
         session_id = current_session_id_var.get()
         registry = get_active_session_registry()
 
@@ -258,6 +299,7 @@ class LocalWorkspaceBackend:
             text=True,
             encoding="utf-8",
             errors="replace",
+            env=build_safe_env(),
             **hidden_subprocess_kwargs(),
         )
 
@@ -286,8 +328,7 @@ class LocalWorkspaceBackend:
         combined = output_str + (f"\n[stderr]: {error_str}" if error_str else "")
         truncated = False
         if max_output_chars is not None and len(combined) > max_output_chars:
-            combined = combined[:max_output_chars] + "\n...[truncated]"
-            truncated = True
+            combined, truncated = _truncate_tail(combined, max_output_chars)
         return CommandResult(
             output=combined,
             exit_code=exit_code,

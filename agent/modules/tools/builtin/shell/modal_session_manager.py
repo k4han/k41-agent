@@ -56,6 +56,11 @@ class ModalCommandSessionManager:
                     "Modal shell execution does not support background sessions yet."
                 ),
             }
+        # Clamp timeout to 1-300
+        try:
+            timeout_clamped = max(1, min(int(float(timeout)), 300))
+        except Exception:
+            timeout_clamped = 30
         try:
             executor = await get_workspace_command_executor(
                 workspace,
@@ -63,7 +68,7 @@ class ModalCommandSessionManager:
             )
             result = await executor.execute(
                 command,
-                timeout=max(1, int(timeout)),
+                timeout=timeout_clamped,
                 max_output_chars=MAX_OUTPUT_CHARS,
             )
         except Exception as exc:

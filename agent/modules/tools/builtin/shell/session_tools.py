@@ -15,6 +15,7 @@ from agent.modules.tools.builtin.shell.daytona_session_manager import daytona_se
 from agent.modules.tools.builtin.shell.modal_session_manager import modal_session_manager
 from agent.modules.tools.builtin.shell.session_manager import session_manager
 from agent.modules.agent_runtime import current_thread_id_var
+from agent.modules.tools.runtime.shell_guard import check_command_blocked
 
 
 def _scope_id_from_runtime(runtime: ToolRuntime[Any, Any]) -> str | None:
@@ -24,6 +25,20 @@ def _scope_id_from_runtime(runtime: ToolRuntime[Any, Any]) -> str | None:
 
 def _current_scope_id() -> str | None:
     return current_thread_id_var.get()
+
+
+HARD_MAX_TIMEOUT = 300.0
+MIN_TIMEOUT = 1.0
+DEFAULT_TIMEOUT = 30.0
+
+
+def _clamp_timeout(value: float) -> float:
+    """Clamp timeout to hard limits to prevent DoS via huge timeout."""
+    try:
+        v = float(value)
+    except Exception:
+        return DEFAULT_TIMEOUT
+    return max(MIN_TIMEOUT, min(v, HARD_MAX_TIMEOUT))
 
 
 class BashInput(BaseModel):
@@ -49,7 +64,9 @@ class BashInput(BaseModel):
     )
     timeout: float = Field(
         default=30.0,
-        description="Maximum wait time in seconds for command output.",
+        ge=MIN_TIMEOUT,
+        le=HARD_MAX_TIMEOUT,
+        description="Maximum wait time in seconds for command output. Clamped to 1-300s.",
     )
     run_in_background: bool = Field(
         default=False,
@@ -77,7 +94,9 @@ class BashReadOutputInput(BaseModel):
     )
     timeout: float = Field(
         default=1.0,
-        description="Time in seconds to wait for new output from the session.",
+        ge=0.1,
+        le=60.0,
+        description="Time in seconds to wait for new output from the session. Clamped to 0.1-60s.",
     )
 
 
@@ -154,7 +173,16 @@ async def bash(
         force: Set to True to force execution even when a background process is running in the session.
     """
     try:
+        # Hard-clamp timeout even if caller bypasses Pydantic validation
+        timeout = _clamp_timeout(timeout)
+        # Early block for local backend dangerous commands (fast fail before routing)
+        # Remote backends (daytona/modal) are container-isolated, so we only strictly
+        # enforce on local; but we still check and will be caught in manager as well.
         workspace = get_workspace(runtime)
+        if workspace.backend == "local":
+            blocked, reason = check_command_blocked(command)
+            if blocked:
+                raise ValueError(f"Blocked dangerous command ({reason}): command rejected for local execution")
         scope_id = _scope_id_from_runtime(runtime)
         if workspace.backend == "daytona":
             res = daytona_session_manager.execute_command(
@@ -226,6 +254,11 @@ def bash_read_output(
         session_id: ID of the active terminal session.
         timeout: Time in seconds to wait for new output.
     """
+    # Clamp to 0.1-60s
+    try:
+        timeout = max(0.1, min(float(timeout), 60.0))
+    except Exception:
+        timeout = 1.0
     scope_id = _current_scope_id()
     if daytona_session_manager.has_session(session_id, scope_id=scope_id):
         res = daytona_session_manager.get_session_output(
@@ -394,12 +427,30 @@ def bash_close(
     else:
         ids = session_ids or []
     scope_id = _current_scope_id()
+
+    def _safe_count(manager) -> int:
+        # Prefer direct dict length for test mocks; use lock if available
+        try:
+            sessions = getattr(manager, "sessions", None)
+            if isinstance(sessions, dict):
+                lock = getattr(manager, "_lock", None)
+                if lock is not None:
+                    with lock:
+                        return len(sessions)
+                return len(sessions)
+        except Exception:
+            pass
+        try:
+            return len(manager.list_sessions(scope_id=scope_id))
+        except Exception:
+            return 0
+
     if not ids:
         if scope_id is None:
             count = (
-                len(session_manager.sessions)
-                + len(daytona_session_manager.sessions)
-                + len(modal_session_manager.sessions)
+                _safe_count(session_manager)
+                + _safe_count(daytona_session_manager)
+                + _safe_count(modal_session_manager)
             )
         else:
             count = len(session_manager.list_sessions(scope_id=scope_id))

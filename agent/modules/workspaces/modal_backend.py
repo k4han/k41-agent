@@ -49,8 +49,36 @@ DEFAULT_MODAL_ROOT = "/workspace"
 DEFAULT_MODAL_IMAGE = "python:3.13-slim"
 DEFAULT_MODAL_SANDBOX_TIMEOUT_SECONDS = 3600
 DEFAULT_MODAL_IDLE_TIMEOUT_SECONDS = 900
+HARD_MAX_TIMEOUT = 300
+HARD_MIN_TIMEOUT = 1
+HARD_MAX_OUTPUT_CHARS = 200_000
 GIT_TIMEOUT_SECONDS = 10
 T = TypeVar("T")
+
+
+def _clamp_timeout(value: int | float) -> int:
+    try:
+        v = int(float(value))
+    except Exception:
+        return 30
+    return max(HARD_MIN_TIMEOUT, min(v, HARD_MAX_TIMEOUT))
+
+
+def _clamp_max_output(value: int | None) -> int | None:
+    if value is None:
+        return None
+    try:
+        v = int(value)
+    except Exception:
+        return None
+    return max(1024, min(v, HARD_MAX_OUTPUT_CHARS))
+
+
+def _truncate_tail(text: str, max_chars: int) -> tuple[str, bool]:
+    if len(text) <= max_chars:
+        return text, False
+    truncated = len(text) - max_chars
+    return f"[...truncated {truncated} characters...]\n{text[-max_chars:]}", True
 
 
 def _config() -> tuple[bool, str, str, str, str, str, int, int]:
@@ -749,8 +777,8 @@ class ModalWorkspaceBackend(SandboxBackendBase):
         return await self._exec(
             command,
             cwd=self.root,
-            timeout=timeout,
-            max_output_chars=max_output_chars,
+            timeout=_clamp_timeout(timeout),
+            max_output_chars=_clamp_max_output(max_output_chars),
         )
 
     async def tree(self, path: str | None = None) -> dict[str, Any]:
@@ -995,6 +1023,8 @@ class ModalWorkspaceBackend(SandboxBackendBase):
         timeout: int = 30,
         max_output_chars: int | None = None,
     ) -> CommandResult:
+        timeout = _clamp_timeout(timeout)
+        max_output_chars = _clamp_max_output(max_output_chars)
         try:
             try:
                 process = await self.sandbox.exec.aio(
@@ -1021,8 +1051,7 @@ class ModalWorkspaceBackend(SandboxBackendBase):
             combined = output + (f"\n[stderr]: {stderr}" if stderr else "")
             truncated = False
             if max_output_chars is not None and len(combined) > max_output_chars:
-                combined = combined[:max_output_chars] + "\n...[truncated]"
-                truncated = True
+                combined, truncated = _truncate_tail(combined, max_output_chars)
             return CommandResult(
                 output=combined,
                 exit_code=int(exit_code) if exit_code is not None else None,
