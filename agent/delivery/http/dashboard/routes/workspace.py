@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import mimetypes
+from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from agent.modules.workspaces import WorkspaceBinding, WorkspaceRef
@@ -206,6 +209,57 @@ async def get_dashboard_workspace_file(
             get_workspace_browser,
             _op,
         )
+    except Exception as exc:
+        raise workspace_http_error(exc) from exc
+
+
+@router.get("/dashboard-api/workspace/download")
+async def download_dashboard_workspace_file(
+    thread_id: str | None = Query(default=None, description="Thread ID to resolve workspace from."),
+    backend: str | None = Query(default="local", description="Workspace backend type."),
+    locator: str | None = Query(default=None, description="Backend-specific locator."),
+    root: str | None = Query(default=None, description="Root directory override."),
+    path: str = Query(..., min_length=1, description="File path to download."),
+) -> Response:
+    """Download a file (binary or text) from the workspace."""
+    try:
+        workspace = await workspace_ref_from_request(
+            thread_id=thread_id,
+            backend=backend,
+            locator=locator,
+            root=root,
+        )
+        if workspace.backend == "local":
+            from agent.modules.tools import resolve_safe_path
+            from agent.modules.workspaces import resolve_workspace_root
+            workspace_root = resolve_workspace_root(workspace.locator)
+            full_path = Path(resolve_safe_path(str(workspace_root), path))
+            if not full_path.is_file():
+                raise HTTPException(status_code=404, detail=f"File not found: {path}")
+            media_type = mimetypes.guess_type(full_path.name)[0] or "application/octet-stream"
+            return FileResponse(full_path, media_type=media_type, filename=full_path.name)
+        else:
+            from agent.modules.workspaces import get_workspace_file_io, resolve_remote_path
+            file_io = await get_workspace_file_io(workspace, thread_id=thread_id)
+            if hasattr(file_io, "_download_file"):
+                remote_path = resolve_remote_path(getattr(file_io, "root", ""), path)
+                raw_bytes = file_io._download_file(remote_path)
+                if isinstance(raw_bytes, str):
+                    raw_bytes = raw_bytes.encode("utf-8")
+                media_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
+                safe_name = Path(path).name
+                return Response(
+                    content=raw_bytes,
+                    media_type=media_type,
+                    headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+                )
+            else:
+                content = await file_io.read_text(path)
+                return Response(
+                    content=content.encode("utf-8"),
+                    media_type="text/plain",
+                    headers={"Content-Disposition": f'attachment; filename="{Path(path).name}"'},
+                )
     except Exception as exc:
         raise workspace_http_error(exc) from exc
 

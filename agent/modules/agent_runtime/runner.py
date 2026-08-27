@@ -48,10 +48,11 @@ from agent.modules.workspaces import WorkspaceRef
 
 logger = logging.getLogger(__name__)
 
-MAX_CHAT_ATTACHMENTS = 5
-MAX_TEXT_ATTACHMENT_BYTES = 100 * 1024
-MAX_IMAGE_ATTACHMENT_BYTES = 5 * 1024 * 1024
-MAX_TOTAL_ATTACHMENT_BYTES = 8 * 1024 * 1024
+MAX_CHAT_ATTACHMENTS = 10
+MAX_FILE_ATTACHMENT_BYTES = 30 * 1024 * 1024
+MAX_TEXT_ATTACHMENT_BYTES = 30 * 1024 * 1024
+MAX_IMAGE_ATTACHMENT_BYTES = 30 * 1024 * 1024
+MAX_TOTAL_ATTACHMENT_BYTES = 60 * 1024 * 1024
 DEFAULT_ATTACHMENT_PROMPT = "Please review the attached file(s)."
 
 
@@ -185,8 +186,8 @@ def _normalize_chat_attachments(attachments: list[Any] | None) -> list[dict[str,
     for index, attachment in enumerate(attachments, start=1):
         data = _model_dump(attachment)
         kind = str(data.get("kind") or "").strip().lower()
-        if kind not in {"text", "image"}:
-            raise ValueError("Only text and image attachments are supported.")
+        if kind not in {"text", "image", "file"}:
+            raise ValueError("Only text, image, and file attachments are supported.")
 
         name = str(data.get("name") or "").strip() or f"attachment-{index}"
         mime_type = str(data.get("mime_type") or "").strip()
@@ -205,6 +206,34 @@ def _normalize_chat_attachments(attachments: list[Any] | None) -> list[dict[str,
                     "size": size,
                     "kind": "text",
                     "content": content,
+                }
+            )
+        elif kind == "file":
+            base64_value = data.get("base64")
+            content = data.get("content")
+            if base64_value and isinstance(base64_value, str) and base64_value.strip():
+                try:
+                    raw_bytes = base64.b64decode(base64_value)
+                except Exception as exc:
+                    raise ValueError(f"File attachment '{name}' has invalid base64 data.") from exc
+                size = len(raw_bytes)
+            elif content and isinstance(content, str):
+                raw_bytes = content.encode("utf-8")
+                base64_value = base64.b64encode(raw_bytes).decode("ascii")
+                size = len(raw_bytes)
+            else:
+                raise ValueError(f"File attachment '{name}' is missing content or base64 data.")
+
+            if size > MAX_FILE_ATTACHMENT_BYTES:
+                raise ValueError(f"File attachment '{name}' is too large.")
+
+            normalized.append(
+                {
+                    "name": name,
+                    "mime_type": mime_type or "application/octet-stream",
+                    "size": size,
+                    "kind": "file",
+                    "base64": base64_value,
                 }
             )
         else:
@@ -253,6 +282,18 @@ def _text_attachment_block(attachment: dict[str, Any]) -> dict[str, str]:
     return {"type": "text", "text": text}
 
 
+def _file_attachment_block(attachment: dict[str, Any]) -> dict[str, str]:
+    path = f".k41-agent/uploads/{attachment['name']}"
+    text = (
+        f"Attached file: {attachment['name']}\n"
+        f"Workspace path: {path}\n"
+        f"MIME type: {attachment['mime_type']}\n"
+        f"Size: {attachment['size']} bytes\n\n"
+        f"Note: This file is stored in your workspace at '{path}'. You can inspect and process it using bash (e.g. Python scripts with pandas, openpyxl, etc.) or filesystem tools."
+    )
+    return {"type": "text", "text": text}
+
+
 def _image_metadata_block(attachment: dict[str, Any]) -> dict[str, str]:
     text = (
         f"Attached image: {attachment['name']}\n"
@@ -262,14 +303,52 @@ def _image_metadata_block(attachment: dict[str, Any]) -> dict[str, str]:
     return {"type": "text", "text": text}
 
 
+def _ingest_attachments_to_workspace(
+    attachments: list[dict[str, Any]] | None,
+    workspace: Any,
+) -> None:
+    if not attachments or workspace is None:
+        return
+    try:
+        from agent.modules.tools import ingest_attachment_file
+        from agent.modules.workspaces import derive_workspace_scope, resolve_workspace_ref
+
+        ref = resolve_workspace_ref(workspace)
+        scope = derive_workspace_scope(ref)
+        ws_root = ref.locator if ref.backend == "local" else None
+
+        for attachment in attachments:
+            name = str(attachment.get("name") or "").strip()
+            if not name:
+                continue
+            content_bytes: bytes | None = None
+            if attachment.get("base64"):
+                content_bytes = base64.b64decode(attachment["base64"])
+            elif attachment.get("content"):
+                content_bytes = str(attachment["content"]).encode("utf-8")
+            if content_bytes is not None:
+                ingest_attachment_file(
+                    filename=name,
+                    content_bytes=content_bytes,
+                    workspace_scope=scope,
+                    workspace_root=ws_root,
+                )
+    except Exception as exc:
+        logger.debug("Failed to ingest attachments into workspace: %s", exc)
+
+
 def _make_user_message(
     user_input: str,
     attachments: list[Any] | None = None,
+    workspace: Any = None,
 ) -> HumanMessage:
     message_id = f"user-{uuid4()}"
     normalized_attachments = _normalize_chat_attachments(attachments)
     if not normalized_attachments:
         return HumanMessage(content=user_input, id=message_id)
+
+    if workspace is not None:
+        _ingest_attachments_to_workspace(normalized_attachments, workspace)
 
     content_blocks: list[dict[str, str]] = [
         {
@@ -280,6 +359,9 @@ def _make_user_message(
     for attachment in normalized_attachments:
         if attachment["kind"] == "text":
             content_blocks.append(_text_attachment_block(attachment))
+            continue
+        if attachment["kind"] == "file":
+            content_blocks.append(_file_attachment_block(attachment))
             continue
         content_blocks.append(_image_metadata_block(attachment))
         content_blocks.append(
@@ -979,7 +1061,7 @@ async def run_agent(
     elif resume:
         input_data = None
     else:
-        input_data = {"messages": [_make_user_message(user_input, attachments)]}
+        input_data = {"messages": [_make_user_message(user_input, attachments, workspace=workspace)]}
 
     with track_active_session(thread_id, agent_name) as session_id:
         async for event in graph.astream(
@@ -1134,7 +1216,7 @@ async def run_agent_stream(
                 resume=normalized_resume_payload.model_dump(exclude_none=True)
             )
     else:
-        user_message = _make_user_message(user_input, attachments)
+        user_message = _make_user_message(user_input, attachments, workspace=workspace)
         input_data = {"messages": [user_message]}
         user_message_id = _message_id(user_message)
         current_user_seen = False

@@ -92,12 +92,12 @@ async def test_filesystem_tools_read_write_edit_search_workspace_storage(
         runtime=runtime,
     )
 
-    assert write_result == "[OK] Wrote file: .k41-agent/assets/note.txt"
+    assert "[OK] Wrote file" in write_result
     assert read_result == "hello needle\n"
-    assert edit_result == "[OK] Wrote file: .k41-agent/assets/note.txt"
+    assert "[OK] Wrote file" in edit_result
     assert ".k41-agent/assets/note.txt" in glob_result
-    assert ".k41-agent/assets/note.txt:1: updated needle" in grep_result
-    assert not (workspace / ".k41-agent").exists()
+    assert "updated needle" in grep_result
+    assert (workspace / ".k41-agent" / "assets" / "note.txt").exists()
 
 
 @pytest.mark.asyncio
@@ -158,10 +158,98 @@ async def test_workspace_storage_mount_blocks_path_traversal(
     runtime = _runtime(str(workspace))
 
     result = await write_file_module.write_file.coroutine(
-        file_path=".k41-agent/../outside.txt",
+        file_path=".k41-agent/../../outside.txt",
         content="secret",
         runtime=runtime,
     )
 
     assert "Path escapes working directory" in result
-    assert not (storage_base / "outside.txt").exists()
+    assert not (workspace.parent / "outside.txt").exists()
+
+
+def test_ensure_git_exclude_adds_pattern_when_git_dir_exists(tmp_path: Path) -> None:
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    git_dir = workspace / ".git"
+    git_dir.mkdir()
+
+    thread_storage.ensure_git_exclude(workspace, ".k41-agent/")
+
+    exclude_file = git_dir / "info" / "exclude"
+    assert exclude_file.exists()
+    content = exclude_file.read_text(encoding="utf-8")
+    assert ".k41-agent/" in content
+
+    # Calling again should not duplicate
+    thread_storage.ensure_git_exclude(workspace, ".k41-agent/")
+    content_again = exclude_file.read_text(encoding="utf-8")
+    assert content_again.count(".k41-agent/") == 1
+
+
+def test_dual_tier_sync_hydrate_and_sync_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    storage_base = tmp_path / "storage"
+    monkeypatch.setattr(thread_storage, "THREAD_STORAGE_BASE_DIR", storage_base)
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    workspace_key = "test-ws-sync"
+
+    # Ingest a file to persistent storage
+    thread_storage.ingest_attachment_file(
+        filename="sales.xlsx",
+        content_bytes=b"excel_dummy_bytes",
+        workspace_scope=workspace_key,
+    )
+
+    # Hydrate into workspace
+    thread_storage.hydrate_workspace_storage(workspace, workspace_key)
+
+    ws_file = workspace / ".k41-agent" / "uploads" / "sales.xlsx"
+    assert ws_file.exists()
+    assert ws_file.read_bytes() == b"excel_dummy_bytes"
+
+    # Agent creates a new file in workspace
+    new_report = workspace / ".k41-agent" / "assets" / "report.pdf"
+    new_report.write_bytes(b"pdf_content")
+
+    # Sync back to persistent storage
+    thread_storage.sync_back_workspace_storage(workspace, workspace_key)
+
+    storage_report = storage_base / thread_storage.sanitize_workspace_key(workspace_key) / "assets" / "report.pdf"
+    assert storage_report.exists()
+    assert storage_report.read_bytes() == b"pdf_content"
+
+
+def test_normalize_chat_attachments_with_file_attachment(tmp_path: Path) -> None:
+    import base64
+    from agent.modules.agent_runtime.runner import _normalize_chat_attachments, _make_user_message
+
+    raw_data = b"binary-excel-data-sample"
+    b64 = base64.b64encode(raw_data).decode("ascii")
+
+    attachments = [
+        {
+            "name": "sales.xlsx",
+            "mime_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "kind": "file",
+            "base64": b64,
+        }
+    ]
+
+    normalized = _normalize_chat_attachments(attachments)
+    assert len(normalized) == 1
+    assert normalized[0]["name"] == "sales.xlsx"
+    assert normalized[0]["kind"] == "file"
+    assert normalized[0]["size"] == len(raw_data)
+
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    msg = _make_user_message("Please analyze", attachments, workspace=str(workspace))
+    assert isinstance(msg.content, list)
+    text_blocks = [b["text"] for b in msg.content if b["type"] == "text"]
+    assert any(".k41-agent/uploads/sales.xlsx" in t for t in text_blocks)
+
+    # Ingestion test
+    saved_file = workspace / ".k41-agent" / "uploads" / "sales.xlsx"
+    assert saved_file.exists()
+    assert saved_file.read_bytes() == raw_data

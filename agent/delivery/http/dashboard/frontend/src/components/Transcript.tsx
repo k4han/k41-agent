@@ -41,7 +41,7 @@ export type TranscriptAttachment = {
   name: string;
   mime_type: string;
   size: number;
-  kind: "text" | "image";
+  kind: "text" | "image" | "file";
   content?: string;
   base64?: string;
   preview_url?: string;

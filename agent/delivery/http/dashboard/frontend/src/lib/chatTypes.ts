@@ -10,7 +10,7 @@ import type { UserAnswerResumePayload } from "@/lib/userInputRequest";
 
 // ── Attachment types ──
 
-export type ChatAttachmentKind = "text" | "image";
+export type ChatAttachmentKind = "text" | "image" | "file";
 
 export type ChatAttachmentPayload = {
   name: string;
@@ -87,11 +87,12 @@ export type WorkspaceBrowsePayload = {
 
 // ── Constants ──
 
-export const MAX_ATTACHMENTS = 5;
+export const MAX_ATTACHMENTS = 10;
 export const PASTE_AS_ATTACHMENT_THRESHOLD = 200;
-export const MAX_TEXT_ATTACHMENT_BYTES = 100 * 1024;
-export const MAX_IMAGE_ATTACHMENT_BYTES = 5 * 1024 * 1024;
-export const MAX_TOTAL_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+export const MAX_TEXT_ATTACHMENT_BYTES = 30 * 1024 * 1024;
+export const MAX_IMAGE_ATTACHMENT_BYTES = 30 * 1024 * 1024;
+export const MAX_FILE_ATTACHMENT_BYTES = 30 * 1024 * 1024;
+export const MAX_TOTAL_ATTACHMENT_BYTES = 60 * 1024 * 1024;
 export const DEFAULT_ATTACHMENT_MESSAGE = "Please review the attached file(s).";
 
 export const WORKSPACE_EXPLORER_OPEN_KEY = "k41-dashboard-workspace-explorer-open";
@@ -102,6 +103,20 @@ export const WORKSPACE_EXPLORER_MAX_WIDTH = 920;
 
 export const ATTACHMENT_ACCEPT = [
   "image/*",
+  // Documents & Spreadsheets
+  ".xlsx",
+  ".xls",
+  ".csv",
+  ".tsv",
+  ".parquet",
+  ".pdf",
+  ".docx",
+  ".doc",
+  ".pptx",
+  ".ppt",
+  ".odt",
+  ".ods",
+  // Text & Data
   ".txt",
   ".md",
   ".markdown",
@@ -110,7 +125,26 @@ export const ATTACHMENT_ACCEPT = [
   ".yml",
   ".toml",
   ".xml",
-  ".csv",
+  ".log",
+  ".sql",
+  ".sqlite",
+  ".db",
+  // Archives
+  ".zip",
+  ".tar",
+  ".gz",
+  ".tgz",
+  ".7z",
+  ".rar",
+  // Media
+  ".mp3",
+  ".wav",
+  ".ogg",
+  ".m4a",
+  ".mp4",
+  ".webm",
+  ".mov",
+  // Code & Config
   ".html",
   ".css",
   ".js",
@@ -132,7 +166,6 @@ export const ATTACHMENT_ACCEPT = [
   ".kt",
   ".kts",
   ".dart",
-  ".sql",
   ".sh",
   ".ps1",
   ".bat",

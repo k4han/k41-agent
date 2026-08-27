@@ -30,6 +30,7 @@ from agent.modules.workspaces.search_utils import (
     compile_glob_pattern,
     match_glob_path,
 )
+from agent.modules.workspaces.posix_utils import resolve_remote_path
 from agent.modules.workspaces.migrations import migrate_workspace_tables
 from agent.modules.workspaces.models import ThreadWorkspace
 from agent.modules.workspaces.refs import (
@@ -197,6 +198,7 @@ __all__ = [
     "remember_thread_workspace",
     "remember_thread_workspace_ref",
     "rename_workspace_entry",
+    "resolve_remote_path",
     "resolve_workspace_ref",
     "resolve_workspace_root",
     "serialize_thread_workspace",

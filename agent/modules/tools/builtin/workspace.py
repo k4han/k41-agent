@@ -5,7 +5,10 @@ from typing import Any
 from langgraph.prebuilt import ToolRuntime
 
 from agent.modules.tools.runtime.context import ToolContext, get_context_value
-from agent.modules.tools.runtime.thread_storage import WorkspaceStorageFileIO
+from agent.modules.tools.runtime.thread_storage import (
+    WorkspaceStorageFileIO,
+    ensure_physical_workspace_storage,
+)
 from agent.modules.workspaces import (
     WorkspaceFileIO,
     WorkspaceRef,
@@ -39,6 +42,8 @@ async def get_file_io(runtime: ToolRuntime[Any, Any]) -> WorkspaceFileIO:
         thread_id=tool_context.thread_id,
     )
     if tool_context.thread_id:
+        if workspace.backend == "local":
+            ensure_physical_workspace_storage(workspace.locator)
         return WorkspaceStorageFileIO(file_io, derive_workspace_scope(workspace))
     return file_io
 

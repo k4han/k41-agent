@@ -12,14 +12,14 @@ export function fileExtension(fileName: string): string {
   return dotIndex >= 0 ? lowerName.slice(dotIndex) : lowerName;
 }
 
-export function attachmentKind(file: File): ChatAttachmentKind | null {
+export function attachmentKind(file: File): ChatAttachmentKind {
   if (file.type.startsWith("image/")) {
     return "image";
   }
   if (file.type.startsWith("text/") || TEXT_MIME_TYPES.has(file.type)) {
     return "text";
   }
-  return TEXT_EXTENSIONS.has(fileExtension(file.name)) ? "text" : null;
+  return TEXT_EXTENSIONS.has(fileExtension(file.name)) ? "text" : "file";
 }
 
 export function formatBytes(size: number): string {

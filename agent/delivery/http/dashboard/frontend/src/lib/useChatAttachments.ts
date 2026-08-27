@@ -7,6 +7,7 @@ import {
 } from "@/lib/chatAttachments";
 import {
   MAX_ATTACHMENTS,
+  MAX_FILE_ATTACHMENT_BYTES,
   MAX_IMAGE_ATTACHMENT_BYTES,
   MAX_TEXT_ATTACHMENT_BYTES,
   MAX_TOTAL_ATTACHMENT_BYTES,
@@ -78,11 +79,16 @@ export function useChatAttachments(params: UseChatAttachmentsParams) {
         continue;
       }
       if (kind === "image" && !getModelSupportsImage()) {
-        showToast("This model does not support images. Only text files can be attached.", "warning");
+        showToast("This model does not support images. Only text and data files can be attached.", "warning");
         continue;
       }
 
-      const maxSize = kind === "image" ? MAX_IMAGE_ATTACHMENT_BYTES : MAX_TEXT_ATTACHMENT_BYTES;
+      const maxSize =
+        kind === "image"
+          ? MAX_IMAGE_ATTACHMENT_BYTES
+          : kind === "file"
+          ? MAX_FILE_ATTACHMENT_BYTES
+          : MAX_TEXT_ATTACHMENT_BYTES;
       if (file.size > maxSize) {
         showToast(`${file.name} exceeds ${formatBytes(maxSize)}.`, "warning");
         continue;
@@ -104,6 +110,18 @@ export function useChatAttachments(params: UseChatAttachmentsParams) {
               kind,
               base64: await readFileAsBase64(file),
               preview_url: URL.createObjectURL(file),
+            },
+          ];
+        } else if (kind === "file") {
+          nextAttachments = [
+            ...nextAttachments,
+            {
+              id: nextAttachmentId++,
+              name: file.name,
+              mime_type: file.type || "application/octet-stream",
+              size: file.size,
+              kind,
+              base64: await readFileAsBase64(file),
             },
           ];
         } else {

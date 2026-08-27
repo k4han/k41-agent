@@ -7,14 +7,14 @@ from agent.modules.workspaces import WorkspaceBinding, WorkspaceRef
 
 
 class ChatAttachment(BaseModel):
-    """An attachment included with a chat message (text or image)."""
+    """An attachment included with a chat message (text, image, or file)."""
 
     name: str = Field(..., description="Filename or label for the attachment.")
-    mime_type: str = Field(default="", description="MIME type of the attachment (e.g. 'text/plain', 'image/png').")
+    mime_type: str = Field(default="", description="MIME type of the attachment (e.g. 'text/plain', 'image/png', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').")
     size: int = Field(default=0, description="Size of the attachment in bytes.")
-    kind: Literal["text", "image"] = Field(..., description="Type of attachment content.")
+    kind: Literal["text", "image", "file"] = Field(..., description="Type of attachment content.")
     content: Optional[str] = Field(default=None, description="Text content when kind is 'text'.")
-    base64: Optional[str] = Field(default=None, description="Base64-encoded content when kind is 'image'.")
+    base64: Optional[str] = Field(default=None, description="Base64-encoded content when kind is 'image' or 'file'.")
 
 
 class ChatRequest(BaseModel):

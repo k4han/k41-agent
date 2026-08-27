@@ -31,6 +31,7 @@ from agent.modules.tools.result import ToolError, ToolErrorCode
 from agent.modules.tools.builtin.workspace import get_workspace
 from agent.modules.tools.runtime.context import ToolContext
 from agent.modules.tools.runtime.thread_storage import (
+    ensure_physical_workspace_storage,
     generated_images_dir_for_workspace,
     virtual_generated_image_path,
 )
@@ -203,16 +204,34 @@ def _build_generate_image_tool(config: dict[str, ToolConfigValue]) -> BaseTool:
         if not result.data:
             raise ToolError(ToolErrorCode.UPSTREAM, "Image generation returned no data.")
 
+        def _sync_to_workspace(filename: str, content: bytes) -> None:
+            if runtime is None:
+                return
+            try:
+                workspace = get_workspace(runtime)
+                if workspace.backend == "local" and workspace.locator:
+                    ws_dir = ensure_physical_workspace_storage(workspace.locator) / "generated-images"
+                    ws_dir.mkdir(parents=True, exist_ok=True)
+                    (ws_dir / filename).write_bytes(content)
+            except Exception as sync_exc:
+                logger.debug("Failed to sync generated image to local workspace: %s", sync_exc)
+
         image = result.data[0]
         b64_json = getattr(image, "b64_json", None)
         if b64_json:
             path = _output_path(output_dir, prompt)
-            path.write_bytes(base64.b64decode(b64_json))
+            raw_bytes = base64.b64decode(b64_json)
+            path.write_bytes(raw_bytes)
+            _sync_to_workspace(path.name, raw_bytes)
             return f"Generated image saved to: {_display_path(path, thread_scoped=thread_scoped)}"
 
         url = getattr(image, "url", None)
         if url:
             path = _write_image_from_url(url, prompt, output_dir)
+            try:
+                _sync_to_workspace(path.name, path.read_bytes())
+            except Exception:
+                pass
             return f"Generated image saved to: {_display_path(path, thread_scoped=thread_scoped)}"
 
         raise ToolError(
