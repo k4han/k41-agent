@@ -7,8 +7,7 @@ import subprocess
 import time
 from typing import Any
 
-from agent.modules.tools import resolve_safe_path
-from agent.modules.tools.runtime.sandbox import build_safe_env
+from agent.modules.tools import build_safe_env, resolve_safe_path
 from agent.modules.workspaces.backends import CommandResult
 from agent.modules.workspaces.constants import (
     IGNORED_DIR_NAMES,
@@ -275,7 +274,7 @@ class LocalWorkspaceBackend:
             current_session_id_var,
             get_active_session_registry,
         )
-        from agent.modules.tools.runtime.shell_guard import check_command_blocked
+        from agent.modules.tools import check_command_blocked
 
         blocked, reason = check_command_blocked(command)
         if blocked:

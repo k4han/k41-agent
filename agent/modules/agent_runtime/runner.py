@@ -359,7 +359,7 @@ async def _ingest_attachments_to_sandbox(
         ref = resolve_workspace_ref(workspace)
         if ref.backend not in {"daytona", "modal"}:
             return
-        from agent.modules.tools.runtime.thread_storage import (
+        from agent.modules.tools import (
             ensure_sandbox_workspace_storage,
             ingest_attachment_file_to_sandbox,
         )

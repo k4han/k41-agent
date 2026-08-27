@@ -365,8 +365,11 @@ async def ingest_attachment_file_to_sandbox(
     if workspace is None or not content_bytes:
         return False
     try:
-        from agent.modules.workspaces import get_workspace_file_io, resolve_workspace_ref
-        from agent.modules.workspaces.posix_utils import resolve_remote_path
+        from agent.modules.workspaces import (
+            get_workspace_file_io,
+            resolve_remote_path,
+            resolve_workspace_ref,
+        )
 
         ref = resolve_workspace_ref(workspace)
         if ref.backend not in _SANDBOX_BACKENDS:
@@ -479,7 +482,7 @@ async def hydrate_workspace_storage_to_sandbox(
                     )
                     # Direct upload for generic paths: try _upload_file.
                     if "/" in rel_path:
-                        from agent.modules.workspaces.posix_utils import resolve_remote_path
+                        from agent.modules.workspaces import resolve_remote_path
 
                         root = getattr(file_io, "root", None) or str(ref.metadata.get("root") or "/workspace")
                         try:

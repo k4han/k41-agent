@@ -57,6 +57,8 @@ from agent.modules.tools.runtime.context import (
     get_thread_id,
 )
 from agent.modules.tools.runtime.path_guard import resolve_safe_path
+from agent.modules.tools.runtime.sandbox import build_safe_env
+from agent.modules.tools.runtime.shell_guard import check_command_blocked
 from agent.modules.tools.runtime.thread_storage import (
     THREAD_STORAGE_BASE_DIR,
     THREAD_STORAGE_DIRS,
@@ -236,6 +238,8 @@ __all__ = [
     "root_thread_id",
     "sanitize_thread_id",
     "sanitize_workspace_key",
+    "build_safe_env",
+    "check_command_blocked",
     "get_tool_by_name",
     "resolve_safe_path",
     "resolve_tools",
