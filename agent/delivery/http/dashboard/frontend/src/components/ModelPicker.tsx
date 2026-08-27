@@ -1,4 +1,4 @@
-import { ChevronDown, Star } from "lucide-solid";
+import { Star } from "lucide-solid";
 import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 
 import { classNames } from "@/lib/utils";
@@ -39,6 +39,7 @@ type ModelPickerProps = {
   onChange: (provider: string, model: string) => void;
   resolveDefault?: boolean;
   modelFilter?: (model: ModelOption, provider: string) => boolean;
+  /** @deprecated pill UI removed; favorites are now pinned at top inside dropdown regardless of this flag */
   favoritePills?: boolean;
 };
 
@@ -356,8 +357,37 @@ export function ModelPicker(props: ModelPickerProps) {
       .filter((item): item is ModelChoice => item !== null);
   });
 
-  const isActiveChoice = (choice: Pick<ModelChoice, "provider" | "model">) =>
-    choice.provider === selectedProvider() && choice.model === selectedModel();
+  const dropdownFavoriteChoices = createMemo<ModelChoice[]>(() => {
+    const all = favoriteChoices();
+    if (all.length === 0) {
+      return [];
+    }
+    const needle = query().trim().toLowerCase();
+    if (!needle) {
+      return all;
+    }
+    return all.filter((choice) =>
+      [choice.label, choice.provider, choice.model, choice.description].join(" ").toLowerCase().includes(needle),
+    );
+  });
+
+  const dropdownVisibleGroups = createMemo<ModelGroup[]>(() => {
+    const groups = visibleGroups();
+    const favKeys = new Set(favoriteChoices().map((item) => item.key));
+    if (favKeys.size === 0) {
+      return groups;
+    }
+    return groups
+      .map((group) => ({
+        provider: group.provider,
+        choices: group.choices.filter((choice) => !favKeys.has(choice.key)),
+      }))
+      .filter((group) => group.choices.length > 0);
+  });
+
+  const renderGroups = createMemo<ModelGroup[]>(() => dropdownVisibleGroups());
+
+  const hasDropdownContent = createMemo(() => dropdownFavoriteChoices().length > 0 || renderGroups().length > 0);
 
   const selectChoice = (choice: Pick<ModelChoice, "provider" | "model">) => {
     props.onChange(choice.provider, choice.model);
@@ -407,10 +437,7 @@ export function ModelPicker(props: ModelPickerProps) {
       )}
       ref={rootRef}
     >
-      <Show
-        when={props.favoritePills}
-        fallback={
-          <div class="model-picker-control">
+      <div class="model-picker-control">
         <input
           class="input model-picker-input"
           ref={inputRef}
@@ -449,69 +476,16 @@ export function ModelPicker(props: ModelPickerProps) {
         </button>
       </div>
 
-        }
-      >
-        <div class="model-picker-pills">
-          <For each={favoriteChoices()}>
-            {(choice) => (
-              <button
-                class={classNames("model-picker-pill", isActiveChoice(choice) && "active")}
-                type="button"
-                disabled={props.disabled}
-                title={choice.label}
-                onClick={() => selectChoice(choice)}
-              >
-                <span class="model-picker-pill-label mono">{choice.label}</span>
-              </button>
-            )}
-          </For>
-          <button
-            class={classNames("model-picker-pill model-picker-pill-more", open() && "active")}
-            type="button"
-            disabled={props.disabled}
-            title="More models"
-            aria-expanded={open()}
-            onClick={() => {
-              setOpen((value) => !value);
-              setQuery("");
-            }}
-          >
-            <span class="model-picker-pill-label mono">{selectedLabel()}</span>
-            <ChevronDown size={13} class="model-picker-pill-chevron" />
-          </button>
-        </div>
-      </Show>
-
       <Show when={open() && !props.disabled}>
         <div class="model-picker-dropdown">
-          <Show when={props.favoritePills}>
-            <input
-              class="input model-picker-search"
-              ref={(el) => {
-                inputRef = el;
-                el.focus();
-              }}
-              value={query()}
-              placeholder="Search models"
-              autocomplete="off"
-              onInput={(event) => setQuery(event.currentTarget.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  commitQuery();
-                }
-                if (event.key === "Escape") {
-                  setOpen(false);
-                  setQuery("");
-                }
-              }}
-            />
-          </Show>
-          <For each={visibleGroups()} fallback={<div class="model-picker-empty">No models found.</div>}>
-            {(group) => (
-              <div class="model-picker-group">
-                <div class="model-picker-group-title">{group.provider}</div>
-                <For each={group.choices}>
+          <Show
+            when={hasDropdownContent()}
+            fallback={<div class="model-picker-empty">No models found.</div>}
+          >
+            <Show when={dropdownFavoriteChoices().length > 0}>
+              <div class="model-picker-group model-picker-group-favorites">
+                <div class="model-picker-group-title">Favorites</div>
+                <For each={dropdownFavoriteChoices()}>
                   {(choice) => (
                     <div
                       class={classNames(
@@ -545,8 +519,48 @@ export function ModelPicker(props: ModelPickerProps) {
                   )}
                 </For>
               </div>
-            )}
-          </For>
+            </Show>
+            <For each={renderGroups()}>
+              {(group) => (
+                <div class="model-picker-group">
+                  <div class="model-picker-group-title">{group.provider}</div>
+                  <For each={group.choices}>
+                    {(choice) => (
+                      <div
+                        class={classNames(
+                          "model-picker-option",
+                          choice.provider === selectedProvider() && choice.model === selectedModel() && "active",
+                        )}
+                      >
+                        <button
+                          class="model-picker-option-main"
+                          type="button"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => selectChoice(choice)}
+                        >
+                          <span class="mono">{choice.label}</span>
+                        </button>
+                        <button
+                          class={classNames("model-picker-option-star", isFavorite(choice) && "active")}
+                          type="button"
+                          disabled={!choice.model}
+                          title={isFavorite(choice) ? "Remove favorite model" : "Add favorite model"}
+                          aria-pressed={isFavorite(choice)}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            toggleFavorite(choice);
+                          }}
+                        >
+                          <Star size={14} fill={isFavorite(choice) ? "currentColor" : "none"} />
+                        </button>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              )}
+            </For>
+          </Show>
         </div>
       </Show>
     </div>
