@@ -1053,6 +1053,11 @@ async def run_agent(
     )
     if normalized_resume_payload is not None:
         resume = True
+        # When resuming an interrupt (plan review / ask_user), ignore any
+        # stale checkpoint_id from the client. LangGraph tracks the pending
+        # interrupt on the latest checkpoint, so a stale id would resume from
+        # the wrong state and appear as "stopped" after approval.
+        checkpoint_id = None
     agent_config = catalog.get_agent(agent_name)
     if agent_config is None:
         raise ValueError(f"Agent '{agent_name}' not found in catalog")
@@ -1194,6 +1199,11 @@ async def run_agent_stream(
     )
     if normalized_resume_payload is not None:
         resume = True
+        # When resuming an interrupt (plan review / ask_user), ignore any
+        # stale checkpoint_id from the client. LangGraph tracks the pending
+        # interrupt on the latest checkpoint, so a stale id would resume from
+        # the wrong state and appear as "stopped" after approval.
+        checkpoint_id = None
     agent_config = catalog.get_agent(agent_name)
     if agent_config is None:
         raise ValueError(f"Agent '{agent_name}' not found in catalog")

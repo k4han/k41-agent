@@ -1000,9 +1000,11 @@ export function ChatPage() {
         if (resumePayload) {
           payload.resume_payload = resumePayload;
         }
-        if (activeCheckpointId()) {
-          payload.checkpoint_id = activeCheckpointId();
-        }
+        // Do not send checkpoint_id when resuming an interrupt; let the
+        // backend resume from the latest checkpoint that holds the pending
+        // interrupt. A stale checkpoint_id would cause the plan approval
+        // to resume from the wrong state and appear as stopped after
+        // switching to the target agent.
       } else if (currentThreadId() && activeCheckpointId()) {
         payload.checkpoint_id = activeCheckpointId();
       }
@@ -1239,6 +1241,21 @@ export function ChatPage() {
     });
     updateCurrentThreadAgent(targetAgent);
     setAgentName(targetAgent);
+    // Sync provider/model to the target agent's defaults before resuming.
+    // Otherwise the stale planner provider/model would override the target
+    // and the resume could use the wrong model, appearing as stopped.
+    const targetCard = validCards().find((card) => card.name === targetAgent);
+    if (targetCard) {
+      const selection = fallbackModelSelection(targetCard);
+      // Only update if the current selection is not already the target's
+      // fallback; this avoids clobbering an explicit user choice when the
+      // provider/model are already compatible, but ensures a stale planner
+      // selection does not poison the act agent's run.
+      if (selection.provider !== provider() || selection.model !== model()) {
+        setProvider(selection.provider);
+        setModel(selection.model);
+      }
+    }
     void sendMessage(
       true,
       {
