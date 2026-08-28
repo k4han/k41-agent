@@ -203,6 +203,109 @@
   object-fit: contain;
 }
 
+.tool-html-preview {
+  box-sizing: border-box;
+  width: min(960px, 100%);
+  max-width: 100%;
+  min-width: 0;
+  margin: 0 auto 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.tool-html-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.tool-html-preview-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.tool-html-preview-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.tool-html-preview-frame {
+  display: block;
+  width: 100%;
+  height: 420px;
+  border: 0;
+  background: #ffffff;
+}
+
+.tool-html-preview-source {
+  max-height: 420px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px;
+  border: 0;
+  background: transparent;
+  white-space: pre-wrap;
+  font-size: 12px;
+}
+
+.tool-html-preview-error {
+  margin: 0;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  color: var(--danger);
+  white-space: pre-wrap;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.tool-html-preview-dialog {
+  width: min(1400px, 96vw);
+  height: 92vh;
+  max-height: 92vh;
+}
+
+.tool-html-preview-dialog-header {
+  padding: 10px 14px;
+}
+
+.tool-html-preview-dialog-header .tool-html-preview-title {
+  font-size: 13px;
+  color: var(--fg);
+}
+
+.tool-html-preview-dialog-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.tool-html-preview-dialog-body .tool-html-preview-frame {
+  flex: 1 1 auto;
+  height: auto;
+}
+
+.tool-html-preview-dialog-body .tool-html-preview-source {
+  flex: 1 1 auto;
+  max-height: none;
+}
+
 .tool-call-body pre + .tool-generated-image,
 .tool-generated-image + pre {
   border-top: 1px solid var(--border);

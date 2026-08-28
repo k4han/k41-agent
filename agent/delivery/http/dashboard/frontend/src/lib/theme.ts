@@ -23,3 +23,23 @@ export function createDarkMode(): () => boolean {
 
   return dark;
 }
+
+let sharedDark: (() => boolean) | null = null;
+
+export function getSharedDarkMode(): () => boolean {
+  if (sharedDark) {
+    return sharedDark;
+  }
+  const [dark, setDark] = createSignal(readDarkMode());
+  sharedDark = dark;
+  if (typeof MutationObserver !== "undefined" && typeof document !== "undefined") {
+    const observer = new MutationObserver(() => {
+      setDark(readDarkMode());
+    });
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+  }
+  return dark;
+}

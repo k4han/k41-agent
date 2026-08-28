@@ -2,12 +2,25 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  Code,
   Download,
+  Eye,
   FileText,
   Image as ImageIcon,
+  Maximize2,
   Pencil,
+  X,
 } from "lucide-solid";
-import { createEffect, createSignal, For, Show } from "solid-js";
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  onCleanup,
+  Show,
+  type Accessor,
+} from "solid-js";
+import { Portal } from "solid-js/web";
 
 import { AgentPicker } from "@/components/AgentPicker";
 import { CopyButton } from "@/components/CopyButton";
@@ -15,7 +28,15 @@ import { Markdown } from "@/components/Markdown";
 import { StatusIndicator } from "@/components/StatusIndicator";
 import { useToast } from "@/components/Toast";
 import { isChatStatusText } from "@/lib/chatStatus";
+import { getSharedDarkMode } from "@/lib/theme";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
+import {
+  HTML_PREVIEW_TOOL_NAME,
+  buildPreviewChromeStyle,
+  htmlPreviewFromArgs,
+  injectPreviewChrome,
+  type HtmlPreviewContent,
+} from "@/lib/htmlPreview";
 import {
   GENERATE_IMAGE_TOOL_NAME,
   generatedImageFromToolResult,
@@ -802,6 +823,13 @@ export function ToolCallDetail(props: {
       ? generatedImageFromToolResult(props.result, props.threadId)
       : null;
 
+  // HTML previews replace the raw args/result view entirely: the agent
+  // already sent the document, so showing it rendered is more useful than
+  // JSON noise. The fallback keeps normal tool call rendering when the args
+  // do not contain a usable HTML payload.
+  const htmlPreview = () =>
+    props.name === HTML_PREVIEW_TOOL_NAME ? htmlPreviewFromArgs(props.args) : null;
+
   // When the user expands a tool call to inspect its details, notify the
   // transcript scroll controller so it stops following the stream. Without
   // this, the next streamed chunk would scroll back to the turn anchor and
@@ -818,32 +846,205 @@ export function ToolCallDetail(props: {
   };
 
   return (
-    <details
-      class="tool-call"
-      open={props.defaultOpen ?? false}
-      data-transcript-item-id={props.itemId}
-      onToggle={handleToggle}
+    <Show
+      when={htmlPreview()}
+      fallback={
+        <details
+          class="tool-call"
+          open={props.defaultOpen ?? false}
+          data-transcript-item-id={props.itemId}
+          onToggle={handleToggle}
+        >
+          <summary>
+            <span class="mono">{props.name || "unknown"}</span>
+          </summary>
+          <div class="tool-call-body">
+            <pre>{formatValue(props.args)}</pre>
+            <Show when={generatedImage()}>
+              {(image) => (
+                <a
+                  class="tool-generated-image"
+                  href={image().url}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <img src={image().url} alt={image().filename} />
+                </a>
+              )}
+            </Show>
+            <pre>{props.result === null ? "Waiting for tool result..." : formatValue(props.result)}</pre>
+          </div>
+        </details>
+      }
     >
-      <summary>
-        <span class="mono">{props.name || "unknown"}</span>
-      </summary>
-      <div class="tool-call-body">
-        <pre>{formatValue(props.args)}</pre>
-        <Show when={generatedImage()}>
-          {(image) => (
-            <a
-              class="tool-generated-image"
-              href={image().url}
-              target="_blank"
-              rel="noreferrer"
+      {(preview) => <HtmlPreviewBlock preview={preview()} itemId={props.itemId} result={props.result} />}
+    </Show>
+  );
+}
+
+function HtmlPreviewBlock(props: {
+  preview: HtmlPreviewContent;
+  itemId?: number;
+  result?: unknown;
+}) {
+  const [mode, setMode] = createSignal<"preview" | "source">("preview");
+  const [expanded, setExpanded] = createSignal(false);
+  const title = () => props.preview.title || "HTML Preview";
+
+  // Use shared dark mode signal to avoid creating a MutationObserver per preview.
+  const darkMode = getSharedDarkMode();
+  const previewSrc = createMemo(() => {
+    darkMode();
+    return injectPreviewChrome(props.preview.html, buildPreviewChromeStyle());
+  });
+
+  const isSuccessResult = () =>
+    typeof props.result === "string" && props.result.startsWith("HTML preview ready");
+  const hasErrorResult = () =>
+    props.result !== null && props.result !== undefined && !isSuccessResult();
+
+  const handleEscKeyDown = (event: KeyboardEvent) => {
+    if (event.key === "Escape") {
+      setExpanded(false);
+    }
+  };
+  createEffect(() => {
+    if (expanded()) {
+      window.addEventListener("keydown", handleEscKeyDown);
+    } else {
+      window.removeEventListener("keydown", handleEscKeyDown);
+    }
+  });
+  onCleanup(() => window.removeEventListener("keydown", handleEscKeyDown));
+
+  return (
+    <>
+      <section class="tool-html-preview" data-transcript-item-id={props.itemId}>
+        <div class="tool-html-preview-header">
+          <span class="mono tool-html-preview-title">{title()}</span>
+          <div class="tool-html-preview-actions">
+            <HtmlPreviewToolbar
+              mode={mode}
+              onToggle={() => setMode(mode() === "preview" ? "source" : "preview")}
+              html={props.preview.html}
+            />
+            <button
+              class="message-action-btn"
+              type="button"
+              onClick={() => setExpanded(true)}
+              title="Open in large popup"
+              aria-label="Open preview in large popup"
             >
-              <img src={image().url} alt={image().filename} />
-            </a>
-          )}
+              <Maximize2 size={14} />
+            </button>
+          </div>
+        </div>
+        <Show
+          when={mode() === "preview"}
+          fallback={<pre class="tool-html-preview-source">{props.preview.html}</pre>}
+        >
+          <iframe
+            class="tool-html-preview-frame"
+            // Sandbox without `allow-same-origin`: preview scripts run in an
+            // opaque origin and cannot touch dashboard DOM, storage or cookies.
+            sandbox="allow-scripts allow-forms"
+            srcdoc={previewSrc()}
+            title={title()}
+          />
         </Show>
-        <pre>{props.result === null ? "Waiting for tool result..." : formatValue(props.result)}</pre>
-      </div>
-    </details>
+        <Show when={hasErrorResult()}>
+          <pre class="tool-html-preview-error">{formatValue(props.result)}</pre>
+        </Show>
+      </section>
+      <Show when={expanded()}>
+        <Portal>
+          <div
+            class="dialog-backdrop"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) {
+                setExpanded(false);
+              }
+            }}
+          >
+            <section
+              class="dialog tool-html-preview-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-label={title()}
+            >
+              <header class="dialog-header tool-html-preview-dialog-header">
+                <span class="mono tool-html-preview-title">{title()}</span>
+                <div class="tool-html-preview-actions">
+                  <HtmlPreviewToolbar
+                    mode={mode}
+                    onToggle={() => setMode(mode() === "preview" ? "source" : "preview")}
+                    html={props.preview.html}
+                  />
+                  <button
+                    class="btn btn-icon btn-sm"
+                    type="button"
+                    onClick={() => setExpanded(false)}
+                    title="Close"
+                    aria-label="Close preview popup"
+                  >
+                    <X size={15} />
+                  </button>
+                </div>
+              </header>
+              <div class="tool-html-preview-dialog-body">
+                <Show
+                  when={mode() === "preview"}
+                  fallback={<pre class="tool-html-preview-source">{props.preview.html}</pre>}
+                >
+                  <iframe
+                    class="tool-html-preview-frame"
+                    sandbox="allow-scripts allow-forms"
+                    srcdoc={previewSrc()}
+                    title={title()}
+                  />
+                </Show>
+                <Show when={hasErrorResult()}>
+                  <pre class="tool-html-preview-error">{formatValue(props.result)}</pre>
+                </Show>
+              </div>
+            </section>
+          </div>
+        </Portal>
+      </Show>
+    </>
+  );
+}
+
+function HtmlPreviewToolbar(props: {
+  mode: Accessor<"preview" | "source">;
+  onToggle: () => void;
+  html: string;
+}) {
+  const isPreview = () => props.mode() === "preview";
+  return (
+    <>
+      <button
+        class="message-action-btn"
+        type="button"
+        onClick={props.onToggle}
+        title={isPreview() ? "Show HTML source" : "Show rendered preview"}
+        aria-label={isPreview() ? "Show HTML source" : "Show rendered preview"}
+      >
+        <Show when={isPreview()} fallback={<Eye size={14} />}>
+          <Code size={14} />
+        </Show>
+      </button>
+      <CopyButton
+        value={props.html}
+        class="message-action-btn"
+        title="Copy HTML"
+        ariaLabel="Copy HTML"
+        copiedTitle="Copied"
+        successMessage="HTML copied."
+        failureMessage="Copy failed"
+        iconSize={14}
+      />
+    </>
   );
 }
 
