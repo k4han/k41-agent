@@ -162,7 +162,11 @@ class SandboxBackendBase(ABC):
             await self._append_remote_text(remote_path, content)
         else:
             await self._atomic_write_remote(remote_path, content)
-        return f"[OK] Wrote file: {remote_path}"
+        from agent.modules.workspaces.posix_utils import relative_remote_path
+
+        relative = relative_remote_path(self.root, remote_path)
+        display_path = relative if relative else remote_path.lstrip("/")
+        return f"[OK] Wrote file: {display_path}"
 
     async def _atomic_write_remote(self, remote_path: str, content: str) -> None:
         """Atomically replace *remote_path* with *content*.

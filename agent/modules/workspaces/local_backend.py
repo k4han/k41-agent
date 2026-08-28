@@ -116,7 +116,7 @@ class LocalWorkspaceBackend:
         if append:
             with open(full_path, "a", encoding="utf-8") as file_handle:
                 file_handle.write(content)
-            return f"[OK] Wrote file: {full_path}"
+            return f"[OK] Wrote file: {file_path}"
         write_target = os.path.realpath(full_path) if os.path.islink(full_path) else full_path
         try:
             mode = os.stat(write_target).st_mode & 0o7777
@@ -132,7 +132,7 @@ class LocalWorkspaceBackend:
         finally:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
-        return f"[OK] Wrote file: {full_path}"
+        return f"[OK] Wrote file: {file_path}"
 
     async def glob(
         self,
