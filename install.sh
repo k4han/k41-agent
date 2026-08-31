@@ -520,8 +520,12 @@ remove_profile_block() {
 
 stage "Stop app"
 if [[ -x "\$PythonExe" ]]; then
-  "\$PythonExe" -m agent.bootstrap.cli stop || true
-  echo "Existing app stop command completed."
+  "\$PythonExe" -m agent.bootstrap.cli stop --with-tray 2>/dev/null || true
+  echo "Existing app stop command completed (including tray)."
+  "\$PythonExe" -c "from agent.bootstrap.tray import disable_autostart; disable_autostart()" 2>/dev/null || true
+  # Also remove autostart files directly
+  rm -f "\$HOME/.config/autostart/k41-agent-tray.desktop" 2>/dev/null || true
+  rm -f "\$HOME/Library/LaunchAgents/com.k41.agent.tray.plist" 2>/dev/null || true
 else
   echo "No existing virtual environment found."
 fi
@@ -565,11 +569,13 @@ stop_existing_app() {
     return
   fi
 
-  if "$PythonExe" -m agent.bootstrap.cli stop; then
-    echo "Existing app stop command completed."
+  if "$PythonExe" -m agent.bootstrap.cli stop --with-tray 2>/dev/null; then
+    echo "Existing app stop command completed (including tray)."
   else
     echo "Existing app stop command was skipped."
   fi
+
+  "$PythonExe" -c "from agent.bootstrap.tray import disable_autostart; disable_autostart()" 2>/dev/null || true
 }
 
 select_profile_file() {

@@ -26,6 +26,7 @@ DOWNLOAD_TIMEOUT_SECONDS = 60.0
 SERVER_STOP_TIMEOUT_SECONDS = 15.0
 SERVER_LOG_FILE = Path.home() / ".k41-agent" / "server.log"
 PID_FILE = Path.home() / ".k41-agent" / "server.pid"
+TRAY_PID_FILE = Path.home() / ".k41-agent" / "tray.pid"
 SHUTDOWN_SIGNAL = Path.home() / ".k41-agent" / "shutdown.signal"
 
 
@@ -135,7 +136,28 @@ def run_update(
     source_root = extract_release_artifact(artifact_path, extract_dir)
 
     running_pid = get_running_server_pid()
+    running_tray_pid = get_running_tray_pid()
     should_restart = running_pid is not None
+    should_restart_tray = running_tray_pid is not None
+    if running_tray_pid is not None:
+        echo(f"Stopping running tray (PID {running_tray_pid})")
+        tray_stopped = False
+        try:
+            tray_stopped = stop_running_tray(running_tray_pid)
+        except Exception as exc:
+            echo(f"Warning: Could not stop tray: {exc}")
+        if not tray_stopped and is_process_alive(running_tray_pid):
+            echo(
+                "Warning: Tray process still alive after stop attempt; "
+                "keeping pid file to avoid duplicate spawn. "
+                "On Windows, file handles may prevent source replacement."
+            )
+        else:
+            # Give OS a moment to release file handles before replacing source
+            for _ in range(5):
+                if not is_process_alive(running_tray_pid):
+                    break
+                time.sleep(0.2)
     if running_pid is not None:
         echo(f"Stopping running server (PID {running_pid})")
         stop_running_server(running_pid)
@@ -162,6 +184,12 @@ def run_update(
                 ) from exc
         if should_restart:
             start_server(install)
+        if should_restart_tray:
+            if get_running_tray_pid() is None:
+                try:
+                    start_tray(install)
+                except Exception as exc:
+                    echo(f"Warning: Could not restart tray: {exc}")
         if isinstance(exc, UpdateError):
             raise
         raise UpdateError(f"Update failed: {exc}") from exc
@@ -169,6 +197,27 @@ def run_update(
     if should_restart:
         echo("Restarting server")
         start_server(install)
+        # Brief pause to let server write PID file before checking tray
+        time.sleep(0.5)
+    if should_restart_tray:
+        # Avoid spawning tray twice: server is started with --no-tray so it
+        # will not auto-spawn tray; still check pid before explicit start.
+        # Poll briefly to handle race where old tray pid file lingers.
+        tray_running_now = get_running_tray_pid()
+        if tray_running_now is not None:
+            echo("Tray already running after server restart, skipping explicit tray start.")
+        else:
+            # Ensure any stale pid file from previous tray is cleaned
+            # before spawning - wait a moment for OS to release handle
+            time.sleep(0.3)
+            if get_running_tray_pid() is not None:
+                echo("Tray already running after server restart, skipping explicit tray start.")
+            else:
+                echo("Restarting tray")
+                try:
+                    start_tray(install)
+                except Exception as exc:
+                    echo(f"Warning: Could not restart tray: {exc}")
 
     cleanup_downloads(install)
     echo(f"Updated K41 Agent to {release.version}.")
@@ -504,15 +553,80 @@ def run_command(command: list[str], *, cwd: Path, env: dict[str, str]) -> None:
 
 
 def get_running_server_pid() -> int | None:
-    if not PID_FILE.exists():
-        return None
+    from agent.bootstrap.process_utils import get_running_server_pid as _shared_get_server_pid
+
+    return _shared_get_server_pid(PID_FILE)
+
+
+def _get_process_cmdline(pid: int) -> str:
+    from agent.bootstrap.process_utils import get_process_cmdline as _shared_get_cmd
+
+    return _shared_get_cmd(pid)
+
+
+def get_running_tray_pid() -> int | None:
+    from agent.bootstrap.process_utils import get_running_tray_pid as _shared_get_tray_pid
+
+    return _shared_get_tray_pid(TRAY_PID_FILE)
+
+
+def stop_running_tray(pid: int) -> bool:
+    """Stop tray pid if verified. Returns True if stopped/cleaned, False otherwise."""
+    cmd = _get_process_cmdline(pid)
+    if not cmd:
+        # Unverifiable cmdline -> refuse to terminate to avoid killing unrelated process
+        return False
+    if "tray" not in cmd and "agent.bootstrap.tray" not in cmd:
+        # Verified non-tray -> stale pid file
+        TRAY_PID_FILE.unlink(missing_ok=True)
+        return False
     try:
-        pid = int(PID_FILE.read_text(encoding="utf-8").strip())
-    except (OSError, ValueError):
-        return None
-    if not is_process_alive(pid) or not is_k41_process(pid):
-        return None
-    return pid
+        import psutil
+
+        try:
+            proc = psutil.Process(pid)
+            proc.terminate()
+            deadline = time.time() + SERVER_STOP_TIMEOUT_SECONDS
+            while time.time() < deadline:
+                if not is_process_alive(pid):
+                    TRAY_PID_FILE.unlink(missing_ok=True)
+                    return True
+                time.sleep(0.5)
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        except psutil.NoSuchProcess:
+            TRAY_PID_FILE.unlink(missing_ok=True)
+            return True
+    except ImportError:
+        try:
+            if os.name == "nt":
+                from agent.shared.infrastructure.subprocess_utils import hidden_subprocess_kwargs
+
+                subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/F"],
+                    capture_output=True,
+                    **hidden_subprocess_kwargs(),
+                )
+            else:
+                os.kill(pid, 15)
+                time.sleep(1)
+                if is_process_alive(pid):
+                    os.kill(pid, 9)
+        except Exception:
+            pass
+    deadline = time.time() + SERVER_STOP_TIMEOUT_SECONDS
+    while time.time() < deadline:
+        if not is_process_alive(pid):
+            TRAY_PID_FILE.unlink(missing_ok=True)
+            return True
+        time.sleep(0.5)
+    # Keep pid file if process still alive to avoid duplicate spawn.
+    if not is_process_alive(pid):
+        TRAY_PID_FILE.unlink(missing_ok=True)
+        return True
+    return False
 
 
 def stop_running_server(pid: int) -> None:
@@ -528,74 +642,49 @@ def stop_running_server(pid: int) -> None:
     raise UpdateError(f"Server process {pid} did not stop within timeout.")
 
 
+def start_tray(install: ManagedInstall) -> None:
+    from agent.bootstrap.process_utils import spawn_detached_process
+
+    env = os.environ.copy()
+    env["K41_TRAY_DAEMONIZED"] = "1"
+    tray_log = Path.home() / ".k41-agent" / "tray.log"
+    # Prefer pythonw for tray on Windows to avoid console window
+    tray_exe = install.python_exe
+    if os.name == "nt":
+        pythonw = Path(str(tray_exe)).with_name("pythonw.exe")
+        if pythonw.exists():
+            tray_exe = pythonw
+    spawn_detached_process(
+        [str(tray_exe), "-m", "agent.bootstrap.tray"],
+        tray_log,
+        env=env,
+        cwd=install.app_dir,
+    )
+
+
 def start_server(install: ManagedInstall) -> None:
+    from agent.bootstrap.process_utils import spawn_detached_process
+
     env = os.environ.copy()
     env["K41_DAEMONIZED"] = "1"
-    SERVER_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with SERVER_LOG_FILE.open("ab") as log_file:
-        if os.name == "nt":
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = subprocess.SW_HIDE
-            subprocess.Popen(
-                [str(install.python_exe), "-m", "agent.bootstrap.cli"],
-                cwd=install.app_dir,
-                env=env,
-                stdin=subprocess.DEVNULL,
-                stdout=log_file,
-                stderr=subprocess.STDOUT,
-                creationflags=(
-                    subprocess.CREATE_NO_WINDOW
-                    | subprocess.DETACHED_PROCESS
-                    | subprocess.CREATE_NEW_PROCESS_GROUP
-                ),
-                startupinfo=startupinfo,
-                close_fds=True,
-            )
-            return
-        subprocess.Popen(
-            [str(install.python_exe), "-m", "agent.bootstrap.cli"],
-            cwd=install.app_dir,
-            env=env,
-            stdin=subprocess.DEVNULL,
-            stdout=log_file,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-            close_fds=True,
-        )
+    spawn_detached_process(
+        [str(install.python_exe), "-m", "agent.bootstrap.cli", "--no-tray"],
+        SERVER_LOG_FILE,
+        env=env,
+        cwd=install.app_dir,
+    )
 
 
 def is_process_alive(pid: int) -> bool:
-    try:
-        import psutil
+    from agent.bootstrap.process_utils import is_process_alive as _shared_alive
 
-        return psutil.pid_exists(pid)
-    except Exception:
-        try:
-            os.kill(pid, 0)
-            return True
-        except OSError:
-            return False
+    return _shared_alive(pid)
 
 
 def is_k41_process(pid: int) -> bool:
-    try:
-        if os.name == "nt":
-            result = subprocess.run(
-                ["wmic", "process", "where", f"ProcessId={pid}", "get", "CommandLine", "/value"],
-                capture_output=True,
-                text=True,
-            )
-        else:
-            result = subprocess.run(
-                ["ps", "-p", str(pid), "-o", "args="],
-                capture_output=True,
-                text=True,
-            )
-        output = result.stdout.lower()
-        return "k41" in output or "agent.bootstrap.cli" in output
-    except Exception:
-        return False
+    from agent.bootstrap.process_utils import is_k41_process as _shared_k41
+
+    return _shared_k41(pid)
 
 
 def cleanup_downloads(install: ManagedInstall) -> None:

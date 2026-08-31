@@ -789,7 +789,7 @@ def test_local_workspace_backend_file_operations_and_path_guard(tmp_path):
 
         result = await backend.write_text("src/app.py", "print('hello')\n")
 
-        assert result == f"[OK] Wrote file: {file_path.resolve()}"
+        assert result == "[OK] Wrote file: src/app.py"
         assert await backend.read_text("src/app.py") == "print('hello')\n"
         assert await backend.read_text(str(file_path)) == "print('hello')\n"
         assert await backend.list_dir("src") == "app.py"
@@ -814,7 +814,7 @@ def test_daytona_workspace_backend_file_operations_and_path_guard():
 
         result = await backend.write_text("src/app.py", "print('hello')\n")
 
-        assert result == "[OK] Wrote file: /workspace/src/app.py"
+        assert result == "[OK] Wrote file: src/app.py"
         assert await backend.read_text("src/app.py") == "print('hello')\n"
         assert await backend.list_dir("src") == "app.py"
         tree = await backend.tree()
@@ -847,7 +847,7 @@ def test_modal_workspace_backend_file_operations_and_path_guard():
 
         result = await backend.write_text("src/app.py", "print('hello')\n")
 
-        assert result == "[OK] Wrote file: /workspace/src/app.py"
+        assert result == "[OK] Wrote file: src/app.py"
         assert await backend.read_text("src/app.py") == "print('hello')\n"
         assert await backend.list_dir("src") == "app.py"
         tree = await backend.tree()

@@ -10,6 +10,8 @@ CONFIG_KEY_ENABLE_API = "enable_api"
 CONFIG_KEY_ENABLE_DASHBOARD = "enable_dashboard"
 CONFIG_KEY_CORS_ORIGINS = "security.cors_origins"
 CONFIG_KEY_CSRF_PROTECTION_ENABLED = "security.csrf_protection_enabled"
+CONFIG_KEY_TRAY_ENABLED = "tray.enabled"
+CONFIG_KEY_TRAY_AUTOSTART = "tray.autostart"
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +25,8 @@ class BootstrapConfig:
         default_factory=lambda: ["http://localhost:4141", "http://127.0.0.1:4141"]
     )
     csrf_protection_enabled: bool = True
+    tray_enabled: bool = True
+    tray_autostart: bool = False
 
 
 def load_bootstrap_config() -> BootstrapConfig:
@@ -47,6 +51,8 @@ def load_bootstrap_config() -> BootstrapConfig:
         enable_dashboard=config.get_bool(CONFIG_KEY_ENABLE_DASHBOARD, True),
         cors_origins=cors_origins,
         csrf_protection_enabled=config.get_bool(CONFIG_KEY_CSRF_PROTECTION_ENABLED, True),
+        tray_enabled=config.get_bool(CONFIG_KEY_TRAY_ENABLED, True),
+        tray_autostart=config.get_bool(CONFIG_KEY_TRAY_AUTOSTART, False),
     )
 
 

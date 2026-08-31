@@ -412,13 +412,9 @@ exit /b 2
 echo.
 echo ==> Stop app
 if not exist "%PYTHON_EXE%" goto no_python
-"%PYTHON_EXE%" -m agent.bootstrap.cli stop
-if errorlevel 1 goto stop_skipped
-echo Existing app stop command completed.
-goto after_stop
-
-:stop_skipped
-echo Existing app stop command was skipped.
+"%PYTHON_EXE%" -m agent.bootstrap.cli stop --with-tray 2>nul
+echo Existing app stop command completed (including tray).
+"%PYTHON_EXE%" -c "from agent.bootstrap.tray import disable_autostart; disable_autostart()" 2>nul
 goto after_stop
 
 :no_python
@@ -485,13 +481,19 @@ function Stop-ExistingApp {
         return
     }
 
-    & $PythonExe -m agent.bootstrap.cli stop
+    & $PythonExe -m agent.bootstrap.cli stop --with-tray
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "Existing app stop command completed."
+        Write-Host "Existing app stop command completed (including tray)."
     } else {
         Write-Host "Existing app stop command was skipped with exit code $LASTEXITCODE."
     }
     $global:LASTEXITCODE = 0
+
+    # Remove tray autostart to avoid orphaned entry on reinstall
+    try {
+        & $PythonExe -c "from agent.bootstrap.tray import disable_autostart; disable_autostart()" 2>$null
+    } catch {
+    }
 }
 
 function Clear-DownloadDirectory {

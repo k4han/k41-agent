@@ -83,6 +83,33 @@ def test_daemon_command_uses_module_entrypoint(monkeypatch):
         "-m",
         "agent.bootstrap.cli",
         "--verbose",
+        "--no-tray",
+    ]
+
+    # Already has --no-tray -> not duplicated
+    monkeypatch.setattr(
+        cli_module.sys,
+        "argv",
+        [r"C:\venv\Scripts\k41.exe", "--no-tray"],
+    )
+    assert cli_module._daemon_command() == [
+        "python.exe",
+        "-m",
+        "agent.bootstrap.cli",
+        "--no-tray",
+    ]
+
+    # Explicit --tray should be preserved without injecting --no-tray
+    monkeypatch.setattr(
+        cli_module.sys,
+        "argv",
+        [r"C:\venv\Scripts\k41.exe", "--tray"],
+    )
+    assert cli_module._daemon_command() == [
+        "python.exe",
+        "-m",
+        "agent.bootstrap.cli",
+        "--tray",
     ]
 
 

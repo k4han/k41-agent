@@ -64,13 +64,35 @@ function Stop-ExistingApp {
         return
     }
 
-    & $PythonExe -m agent.bootstrap.cli stop
+    & $PythonExe -m agent.bootstrap.cli stop --with-tray 2>$null
     if ($LASTEXITCODE -eq 0) {
         Write-Host "Existing app stop command completed."
     } else {
         Write-Host "Existing app stop command was skipped with exit code $LASTEXITCODE."
     }
     $global:LASTEXITCODE = 0
+
+    & $PythonExe -m agent.bootstrap.cli tray --stop 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "Tray stop command completed."
+    } else {
+        Write-Host "Tray stop skipped."
+    }
+    $global:LASTEXITCODE = 0
+
+    try {
+        & $PythonExe -c "from agent.bootstrap.tray import disable_autostart; disable_autostart()" 2>$null
+        Write-Host "Autostart disabled."
+    } catch {
+    }
+    $global:LASTEXITCODE = 0
+
+    # Also remove autostart registry entry directly in case Python is broken
+    try {
+        Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "k41-agent-tray" -ErrorAction SilentlyContinue
+        Write-Host "Removed tray autostart registry entry."
+    } catch {
+    }
 }
 
 Stage "1. Stop app"

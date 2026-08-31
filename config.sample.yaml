@@ -10,6 +10,11 @@ enable_web: true
 enable_api: true
 enable_dashboard: true
 
+# System tray (optional) — integrated with `k41` by default
+# tray:
+#   enabled: true      # Show system tray icon when `k41` starts (default true)
+#   autostart: false   # Auto-launch tray on system login (default false)
+
 # Database configuration (optional)
 # By default, SQLite is used at ~/.k41-agent/data/agent_state.db
 # Only configure this if you want to use PostgreSQL

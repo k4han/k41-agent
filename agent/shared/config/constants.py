@@ -87,8 +87,8 @@ def _build_display_timezone_options() -> list[str]:
 DISPLAY_TIMEZONE_OPTIONS: list[str] = _build_display_timezone_options()
 DEFAULT_WORKSPACE_ROOT = "~/.k41-agent/workspaces"
 DEFAULT_GITHUB_WORKSPACE_ROOT = "~/.k41-agent/github-workspaces"
-BOOTSTRAP_CONFIG_KEYS = ("host", "port", "enable_web", "enable_api", "enable_dashboard")
-BOOTSTRAP_BOOLEAN_CONFIG_KEYS = ("enable_web", "enable_api", "enable_dashboard")
+BOOTSTRAP_CONFIG_KEYS = ("host", "port", "enable_web", "enable_api", "enable_dashboard", "tray.enabled", "tray.autostart")
+BOOTSTRAP_BOOLEAN_CONFIG_KEYS = ("enable_web", "enable_api", "enable_dashboard", "tray.enabled", "tray.autostart")
 
 LLM_FALLBACK_PROVIDER_KEY = "llm.fallback.provider"
 LLM_FALLBACK_MODEL_KEY = "llm.fallback.model"
@@ -97,7 +97,7 @@ REPOSITORY_SKILLS_DIR_KEY = "skills.repository_dir"
 # Runtime configuration key patterns
 # These patterns define which keys can be updated at runtime
 RUNTIME_KEY_PATTERNS = [
-    r"^(host|port|enable_web|enable_api|enable_dashboard)$",
+    r"^(host|port|enable_web|enable_api|enable_dashboard|tray\.enabled|tray\.autostart)$",
     r"^chat\.stream_thinking$",
     r"^channels\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$",
     r"^channels\.telegram\.(enabled|bot_token|default_agent|code_agent|research_agent|update_mode|webhook_url|webhook_secret)$",
@@ -345,6 +345,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     DISPLAY_TIMEZONE_CONFIG_KEY: DEFAULT_DISPLAY_TIMEZONE,
     "security.jwt_secret": "",
     "recursion_limit": 100,
+    "tray.enabled": True,
+    "tray.autostart": False,
 }
 
 
@@ -387,6 +389,20 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "description": "Enable the dashboard UI. Restart required to apply changes.",
         "category": "bootstrap",
         "label": "Enable Dashboard",
+        "restart_required": True,
+    },
+    "tray.enabled": {
+        "type": "boolean",
+        "description": "Enable system tray icon. Restart required to apply changes.",
+        "category": "bootstrap",
+        "label": "System Tray Enabled",
+        "restart_required": True,
+    },
+    "tray.autostart": {
+        "type": "boolean",
+        "description": "Automatically start tray on system login. Restart required to apply changes.",
+        "category": "bootstrap",
+        "label": "Autostart on Login",
         "restart_required": True,
     },
     # Workspace settings

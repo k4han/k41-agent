@@ -15,6 +15,7 @@ from agent.modules.workspaces.constants import (
     MAX_GLOB_RESULTS,
     MAX_GREP_LINE_CHARS,
 )
+from agent.modules.workspaces.refs import WorkspaceRef
 from agent.modules.workspaces.search_utils import (
     clamp_grep_results,
     compile_glob_pattern,
@@ -376,3 +377,4 @@ class LocalWorkspaceBackend:
 
 
 __all__ = ["LocalWorkspaceBackend"]
+__all__ = ["LocalWorkspaceBackend", "create_local_backend"]

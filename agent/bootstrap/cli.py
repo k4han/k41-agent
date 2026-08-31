@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from functools import wraps
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,8 @@ app = typer.Typer(
 PID_FILE = Path.home() / ".k41-agent" / "server.pid"
 SHUTDOWN_SIGNAL = Path.home() / ".k41-agent" / "shutdown.signal"
 SERVER_LOG_FILE = Path.home() / ".k41-agent" / "server.log"
+TRAY_PID_FILE = Path.home() / ".k41-agent" / "tray.pid"
+TRAY_LOG_FILE = Path.home() / ".k41-agent" / "tray.log"
 
 
 def _echo_info(message: str) -> None:
@@ -95,48 +98,25 @@ def _print_common_commands() -> None:
 
 def _daemonize() -> None:
     """Detach process and run in background."""
+    from agent.bootstrap.process_utils import spawn_detached_process
+
     env = os.environ.copy()
     env["K41_DAEMONIZED"] = "1"
     cmd = _daemon_command()
-    SERVER_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with SERVER_LOG_FILE.open("ab") as log_file:
-        if os.name == "nt":
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = subprocess.SW_HIDE
-            subprocess.Popen(
-                cmd,
-                env=env,
-                stdin=subprocess.DEVNULL,
-                stdout=log_file,
-                stderr=subprocess.STDOUT,
-                creationflags=(
-                    subprocess.CREATE_NO_WINDOW
-                    | subprocess.DETACHED_PROCESS
-                    | subprocess.CREATE_NEW_PROCESS_GROUP
-                ),
-                startupinfo=startupinfo,
-                close_fds=True,
-            )
-        else:
-            subprocess.Popen(
-                cmd,
-                env=env,
-                stdin=subprocess.DEVNULL,
-                stdout=log_file,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-                close_fds=True,
-            )
+    spawn_detached_process(cmd, SERVER_LOG_FILE, env=env)
     sys.exit(0)
 
 
 def _daemon_command() -> list[str]:
+    args = list(sys.argv[1:])
+    # Prevent double tray spawn: daemon child should not re-spawn tray.
+    if "--no-tray" not in args and "--tray" not in args:
+        args.append("--no-tray")
     return [
         _background_python_executable(sys.executable),
         "-m",
         "agent.bootstrap.cli",
-        *sys.argv[1:],
+        *args,
     ]
 
 
@@ -156,39 +136,134 @@ def _background_python_executable(
 
 
 def _is_process_alive(pid: int) -> bool:
-    try:
-        import psutil
+    from agent.bootstrap.process_utils import is_process_alive as _shared_alive
 
-        return psutil.pid_exists(pid)
-    except Exception:
-        try:
-            os.kill(pid, 0)
-            return True
-        except OSError:
-            return False
+    return _shared_alive(pid)
+
+
+def _get_process_cmdline(pid: int) -> str:
+    from agent.bootstrap.process_utils import get_process_cmdline as _shared_cmd
+
+    return _shared_cmd(pid)
 
 
 def _is_k41_process(pid: int) -> bool:
     """Check if PID belongs to a k41 server process."""
-    try:
-        if os.name == "nt":
-            result = subprocess.run(
-                ["wmic", "process", "where", f"ProcessId={pid}", "get", "CommandLine", "/value"],
-                capture_output=True,
-                text=True,
-            )
-            output = result.stdout.lower()
-        else:
-            result = subprocess.run(
-                ["ps", "-p", str(pid), "-o", "args="],
-                capture_output=True,
-                text=True,
-            )
-            output = result.stdout.lower()
+    from agent.bootstrap.process_utils import is_k41_process as _shared_k41
 
-        return "k41" in output or "agent.bootstrap.cli" in output
-    except Exception:
+    return _shared_k41(pid)
+
+
+def _is_tray_process(pid: int, *, strict: bool = False) -> bool:
+    """Check if PID belongs to a k41 tray process."""
+    from agent.bootstrap.process_utils import is_tray_process as _shared_tray
+
+    return _shared_tray(pid, strict=strict)
+
+
+def _is_tray_running() -> bool:
+    from agent.bootstrap.process_utils import is_tray_running as _shared_is_tray_running
+
+    return _shared_is_tray_running(TRAY_PID_FILE, lenient_on_unverifiable=True)
+
+
+def _tray_command() -> list[str]:
+    return [
+        _background_python_executable(sys.executable),
+        "-m",
+        "agent.bootstrap.tray",
+    ]
+
+
+def _spawn_tray_process() -> None:
+    from agent.bootstrap.process_utils import spawn_detached_process
+
+    env = os.environ.copy()
+    env["K41_TRAY_DAEMONIZED"] = "1"
+    cmd = _tray_command()
+    spawn_detached_process(cmd, TRAY_LOG_FILE, env=env)
+
+
+def _maybe_stop_tray(with_tray: bool) -> bool:
+    """Helper to stop tray when requested. Returns True if tray was stopped."""
+    if not with_tray or not _is_tray_running():
         return False
+    _echo_info("Stopping tray as requested...")
+    stopped = _stop_tray_process()
+    if stopped:
+        _echo_success("Tray stopped.")
+        return True
+    _echo_warning("Could not stop tray (unverifiable or termination failed).")
+    return False
+
+
+def _stop_tray_process() -> bool:
+    if not TRAY_PID_FILE.exists():
+        return False
+    try:
+        pid_text = TRAY_PID_FILE.read_text(encoding="utf-8").strip()
+        pid = int(pid_text)
+    except (OSError, ValueError):
+        TRAY_PID_FILE.unlink(missing_ok=True)
+        return False
+    if not _is_process_alive(pid):
+        TRAY_PID_FILE.unlink(missing_ok=True)
+        return False
+    cmd = _get_process_cmdline(pid)
+    if not cmd:
+        # Cannot verify cmdline (AccessDenied / psutil missing) -> refuse to
+        # terminate to avoid killing an unrelated process that reused the PID.
+        return False
+    if not _is_tray_process(pid, strict=True):
+        # Verified non-tray process (including k41 server pid leaked into tray.pid) -> stale
+        TRAY_PID_FILE.unlink(missing_ok=True)
+        return False
+    # Try graceful termination
+    try:
+        import psutil
+
+        try:
+            proc = psutil.Process(pid)
+            proc.terminate()
+            for _ in range(10):
+                time.sleep(0.5)
+                if not _is_process_alive(pid):
+                    break
+            else:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+        except psutil.NoSuchProcess:
+            pass
+    except ImportError:
+        try:
+            if os.name == "nt":
+                from agent.shared.infrastructure.subprocess_utils import hidden_subprocess_kwargs
+
+                subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/F"],
+                    capture_output=True,
+                    **hidden_subprocess_kwargs(),
+                )
+            else:
+                os.kill(pid, 15)
+                time.sleep(1)
+                if _is_process_alive(pid):
+                    os.kill(pid, 9)
+        except Exception:
+            pass
+    for _ in range(6):
+        time.sleep(0.5)
+        if not _is_process_alive(pid):
+            TRAY_PID_FILE.unlink(missing_ok=True)
+            return True
+    # Termination failed - keep pid file to avoid duplicate spawn.
+    # Lenient is_tray_running will still block a second instance.
+    if not _is_process_alive(pid):
+        TRAY_PID_FILE.unlink(missing_ok=True)
+        return True
+    return False
 
 
 def _setup_database() -> None:
@@ -233,14 +308,23 @@ def main(
     foreground: bool = typer.Option(
         False, "--foreground", "-f", help="Run in foreground (don't daemonize)."
     ),
+    tray: bool = typer.Option(
+        False, "--tray", help="Force enable system tray (overrides config)."
+    ),
+    no_tray: bool = typer.Option(
+        False, "--no-tray", help="Disable system tray for this run."
+    ),
 ) -> None:
     """Kai Agent CLI."""
+    if tray and no_tray:
+        _echo_error("Cannot use --tray and --no-tray together.")
+        raise typer.Exit(1)
     if version:
         typer.echo(f"k41-agent {APP_VERSION}")
         raise typer.Exit()
     _set_log_level(verbose, quiet)
     if ctx.invoked_subcommand is None:
-        serve(foreground=foreground)
+        serve(foreground=foreground, tray=tray, no_tray=no_tray)
 
 
 @app.command()
@@ -310,22 +394,115 @@ def init() -> None:
     _print_key_value("Start", "k41")
 
 
-def serve(foreground: bool = False) -> None:
+def _should_auto_start_tray(
+    config: Any,
+    tray: bool,
+    no_tray: bool,
+) -> bool:
+    if no_tray:
+        return False
+    if tray:
+        return True
+    # Default: follow config
+    return bool(getattr(config, "tray_enabled", True))
+
+
+def _sync_autostart_from_config(config: Any) -> None:
+    try:
+        from agent.bootstrap.tray import sync_autostart_from_config
+
+        tray_enabled = bool(getattr(config, "tray_enabled", True))
+        tray_autostart = bool(getattr(config, "tray_autostart", False))
+        message = sync_autostart_from_config(tray_enabled, tray_autostart)
+        if message:
+            _echo_info(message)
+    except Exception as exc:
+        _echo_warning(f"Could not sync autostart: {exc}")
+
+
+def serve(foreground: bool = False, tray: bool = False, no_tray: bool = False) -> None:
     """Start the k41-agent server.
 
     Args:
         foreground: If True, run in foreground. If False, daemonize.
+        tray: If True, force enable system tray.
+        no_tray: If True, disable system tray for this run.
     """
     PID_FILE.parent.mkdir(parents=True, exist_ok=True)
     from agent.bootstrap.settings import load_bootstrap_config
 
     config = load_bootstrap_config()
 
+    # Decide tray usage: explicit flags override config
+    use_tray = _should_auto_start_tray(config, tray, no_tray)
+    tray_reason = "forced via --tray" if tray else ("disabled via --no-tray" if no_tray else f"config tray.enabled={config.tray_enabled}")
+
+    # Sync autostart state with config regardless of whether tray is starting now
+    # (so config change takes effect on next `k41` restart)
+    _sync_autostart_from_config(config)
+
+    # Handle tray early so `k41` (auto) or `k41 --tray` can start tray even if server already running.
+    # Skip in daemon child - _daemon_command injects --no-tray and tray was already spawned by parent.
+    is_daemon_child = os.environ.get("K41_DAEMONIZED") == "1"
+    if not is_daemon_child:
+        if use_tray:
+            try:
+                from agent.bootstrap.tray import check_tray_available
+
+                available, reason = check_tray_available()
+                if not available:
+                    _echo_warning(f"System tray not available: {reason} ({tray_reason})")
+                elif _is_tray_running():
+                    _echo_warning("Tray is already running.")
+                else:
+                    _echo_info(f"Starting system tray ({tray_reason})...")
+                    _spawn_tray_process()
+                    tray_started = False
+                    for _ in range(10):
+                        time.sleep(0.2)
+                        if _is_tray_running():
+                            tray_started = True
+                            break
+                    if tray_started:
+                        _echo_success("System tray started.")
+                    else:
+                        _echo_warning("Tray may have failed to start. Check logs at:")
+                        _print_key_value("Log", TRAY_LOG_FILE)
+                    _print_section("Tray")
+                    _print_key_value("PID file", TRAY_PID_FILE)
+                    _print_key_value("Log", TRAY_LOG_FILE)
+            except ImportError as exc:
+                _echo_warning(f"Tray dependencies missing: {exc}. Run: uv sync")
+            except Exception as exc:
+                _echo_warning(f"Could not start tray: {exc}")
+        else:
+            _echo_info(f"System tray disabled ({tray_reason}).")
+            # If tray should not run but is still running, stop it.
+            # This covers both config tray.enabled=false and explicit --no-tray.
+            if _is_tray_running():
+                _echo_info("Stopping running tray because tray is disabled for this run...")
+                if _stop_tray_process():
+                    _echo_success("Tray stopped.")
+                else:
+                    _echo_warning("Could not stop tray (unverifiable or termination failed).")
+
     if PID_FILE.exists():
         try:
             old_pid = int(PID_FILE.read_text().strip())
             if _is_process_alive(old_pid) and _is_k41_process(old_pid):
-                _echo_error(f"Server is already running (PID {old_pid}).")
+                # Server already running - tray request already handled above.
+                if tray and _is_tray_running():
+                    # Explicit --tray request satisfied (tray running) even though
+                    # server was already running; return success so scripts/CI
+                    # can detect tray started correctly.
+                    _echo_success(f"Server already running (PID {old_pid}), tray is running.")
+                    _print_server_endpoints(config)
+                    _print_common_commands()
+                    raise typer.Exit(0)
+                if use_tray:
+                    _echo_warning(f"Server is already running (PID {old_pid}).")
+                else:
+                    _echo_error(f"Server is already running (PID {old_pid}).")
                 _print_server_endpoints(config)
                 _print_common_commands()
                 raise typer.Exit(1)
@@ -415,6 +592,37 @@ def status() -> None:
 
     logging.getLogger("httpx").setLevel(logging.WARNING)
     typer.echo("Kai Agent Status")
+
+    # Show tray status first (non-fatal)
+    _print_section("System Tray")
+    try:
+        from agent.bootstrap.settings import load_bootstrap_config
+
+        tray_cfg = load_bootstrap_config()
+        _print_key_value("Config tray.enabled", tray_cfg.tray_enabled)
+        _print_key_value("Config tray.autostart", tray_cfg.tray_autostart)
+        try:
+            from agent.bootstrap.tray import is_autostart_enabled
+
+            _print_key_value("OS autostart", is_autostart_enabled())
+        except Exception:
+            pass
+    except Exception:
+        pass
+    if _is_tray_running():
+        try:
+            tray_pid = int(TRAY_PID_FILE.read_text(encoding="utf-8").strip())
+            _echo_success(f"Tray is running (PID {tray_pid}).")
+            _print_key_value("Tray PID file", TRAY_PID_FILE)
+            _print_key_value("Tray log", TRAY_LOG_FILE)
+        except Exception:
+            _echo_success("Tray is running.")
+    else:
+        _echo_info("Tray is not running.")
+        _print_key_value("Tray PID file", TRAY_PID_FILE)
+        _print_key_value("Start tray", "k41 tray")
+        _print_key_value("Enable", "k41 tray --enable-tray")
+
     if not PID_FILE.exists():
         _echo_warning("Server is not running.")
         _print_section("Next steps")
@@ -475,12 +683,19 @@ def status() -> None:
 
 
 @app.command()
-def stop() -> None:
+def stop(
+    with_tray: bool = typer.Option(
+        False,
+        "--with-tray",
+        help="Also stop system tray if running.",
+    ),
+) -> None:
     """Stop the running k41-agent server."""
     typer.echo("Kai Agent Stop")
     if not PID_FILE.exists():
         _echo_warning("Server is not running.")
         _print_key_value("PID file", PID_FILE)
+        _maybe_stop_tray(with_tray)
         raise typer.Exit(1)
 
     pid_text = PID_FILE.read_text().strip()
@@ -489,16 +704,19 @@ def stop() -> None:
     except ValueError:
         _echo_error("Invalid PID file content.")
         PID_FILE.unlink(missing_ok=True)
+        _maybe_stop_tray(with_tray)
         raise typer.Exit(1)
 
     if not _is_process_alive(pid):
         _echo_warning(f"Process {pid} was not found. Cleaning up PID file.")
         PID_FILE.unlink(missing_ok=True)
+        _maybe_stop_tray(with_tray)
         raise typer.Exit(1)
 
     if not _is_k41_process(pid):
         _echo_warning(f"Process {pid} is not a Kai Agent server. Cleaning up PID file.")
         PID_FILE.unlink(missing_ok=True)
+        _maybe_stop_tray(with_tray)
         raise typer.Exit(1)
 
     SHUTDOWN_SIGNAL.write_text(str(pid))
@@ -512,12 +730,309 @@ def stop() -> None:
             PID_FILE.unlink(missing_ok=True)
             SHUTDOWN_SIGNAL.unlink(missing_ok=True)
             _echo_success(f"Server stopped (PID {pid}).")
+            _maybe_stop_tray(with_tray)
             return
 
     _echo_warning(f"Process {pid} is still alive after 5s.")
     _echo_info("It may take a moment to shut down.")
     PID_FILE.unlink(missing_ok=True)
     SHUTDOWN_SIGNAL.unlink(missing_ok=True)
+
+    _maybe_stop_tray(with_tray)
+
+
+def _tray_handle_enabled_toggle(
+    enable_tray: bool,
+    disable_tray: bool,
+    stop: bool,
+    status: bool,
+    foreground: bool,
+    enable_autostart: bool,
+    disable_autostart: bool,
+) -> bool:
+    """Handle --enable-tray / --disable-tray. Return True if caller should return early."""
+    if not (enable_tray or disable_tray):
+        return False
+    try:
+        from agent.shared.config import get_config_service
+
+        svc = get_config_service()
+        if enable_tray:
+            svc.update_setting("tray.enabled", True)
+            _echo_success("System tray enabled (tray.enabled=true). Restart `k41` to apply.")
+        if disable_tray:
+            svc.update_setting("tray.enabled", False)
+            _echo_success("System tray disabled (tray.enabled=false). Stopping tray if running...")
+            if _is_tray_running():
+                _stop_tray_process()
+                _echo_success("Tray stopped.")
+        svc2 = get_config_service()
+        _print_section("Tray Config")
+        _print_key_value("tray.enabled", svc2.get_bool("tray.enabled", True))
+        _print_key_value("tray.autostart", svc2.get_bool("tray.autostart", False))
+        if not (stop or status or foreground or enable_autostart or disable_autostart):
+            return True
+    except Exception as exc:
+        _echo_error(f"Tray config update failed: {exc}")
+        raise typer.Exit(1)
+    return False
+
+
+def _tray_handle_autostart_toggle(
+    enable_autostart: bool,
+    disable_autostart: bool,
+    stop: bool,
+    status: bool,
+    foreground: bool,
+) -> bool:
+    """Handle --enable-autostart / --disable-autostart. Return True if caller should return."""
+    if not (enable_autostart or disable_autostart):
+        return False
+    try:
+        from agent.bootstrap.tray import disable_autostart as tray_disable
+        from agent.bootstrap.tray import enable_autostart as tray_enable
+        from agent.bootstrap.tray import is_autostart_enabled
+        from agent.shared.config import get_config_service
+
+        svc = get_config_service()
+        if enable_autostart:
+            # Update DB first for atomicity; rollback OS change if DB fails,
+            # and rollback DB if OS fails.
+            svc.update_setting("tray.autostart", True)
+            try:
+                tray_enable()
+            except Exception as os_exc:
+                try:
+                    svc.update_setting("tray.autostart", False)
+                except Exception:
+                    pass
+                raise RuntimeError(f"OS autostart enable failed: {os_exc}") from os_exc
+            _echo_success("Autostart enabled (tray.autostart=true).")
+        if disable_autostart:
+            svc.update_setting("tray.autostart", False)
+            try:
+                tray_disable()
+            except Exception as os_exc:
+                try:
+                    svc.update_setting("tray.autostart", True)
+                except Exception:
+                    pass
+                raise RuntimeError(f"OS autostart disable failed: {os_exc}") from os_exc
+            _echo_success("Autostart disabled (tray.autostart=false).")
+        _print_section("Autostart")
+        _print_key_value("OS autostart", is_autostart_enabled())
+        _print_key_value("Config tray.autostart", svc.get_bool("tray.autostart", False))
+        if not (stop or status or foreground):
+            return True
+    except Exception as exc:
+        _echo_error(f"Autostart operation failed: {exc}")
+        raise typer.Exit(1)
+    return False
+
+
+def _tray_show_status() -> None:
+    _print_section("System Tray")
+    try:
+        from agent.bootstrap.settings import load_bootstrap_config
+
+        cfg = load_bootstrap_config()
+        _print_key_value("Config tray.enabled", cfg.tray_enabled)
+        _print_key_value("Config tray.autostart", cfg.tray_autostart)
+        try:
+            from agent.bootstrap.tray import is_autostart_enabled
+
+            _print_key_value("OS autostart", is_autostart_enabled())
+        except Exception:
+            pass
+    except Exception:
+        pass
+    if _is_tray_running():
+        try:
+            tray_pid = int(TRAY_PID_FILE.read_text(encoding="utf-8").strip())
+            _echo_success(f"Tray is running (PID {tray_pid}).")
+        except Exception:
+            _echo_success("Tray is running.")
+        _print_key_value("PID file", TRAY_PID_FILE)
+        _print_key_value("Log", TRAY_LOG_FILE)
+    else:
+        _echo_warning("Tray is not running.")
+        _print_key_value("PID file", TRAY_PID_FILE)
+        _print_key_value("Start", "k41 tray")
+
+
+def _tray_stop() -> None:
+    typer.echo("Kai Agent Tray Stop")
+    if not TRAY_PID_FILE.exists():
+        _echo_warning("Tray is not running.")
+        _print_key_value("PID file", TRAY_PID_FILE)
+        raise typer.Exit(1)
+    try:
+        tray_pid_text = TRAY_PID_FILE.read_text(encoding="utf-8").strip()
+        tray_pid = int(tray_pid_text)
+    except ValueError:
+        _echo_error("Invalid tray PID file content.")
+        TRAY_PID_FILE.unlink(missing_ok=True)
+        raise typer.Exit(1)
+    if not _is_process_alive(tray_pid):
+        _echo_warning(f"Tray process {tray_pid} not found. Cleaning up PID file.")
+        TRAY_PID_FILE.unlink(missing_ok=True)
+        raise typer.Exit(1)
+    _cmd = _get_process_cmdline(tray_pid)
+    if not _cmd:
+        _echo_warning(
+            f"Cannot verify tray process {tray_pid} (unverifiable cmdline). "
+            "Refusing to stop to avoid killing unrelated process. "
+            "Remove tray.pid manually if stale."
+        )
+        raise typer.Exit(1)
+    if not _is_tray_process(tray_pid, strict=True):
+        _echo_warning(f"Process {tray_pid} is not a tray process. Cleaning up PID file.")
+        TRAY_PID_FILE.unlink(missing_ok=True)
+        raise typer.Exit(1)
+    _echo_info(f"Stopping tray (PID {tray_pid})...")
+    if _stop_tray_process():
+        _echo_success(f"Tray stopped (PID {tray_pid}).")
+    else:
+        _echo_warning("Could not stop tray cleanly. PID file kept to avoid duplicate spawn.")
+
+
+def _tray_clean_stale_pid_file() -> None:
+    if not TRAY_PID_FILE.exists():
+        return
+    try:
+        stale_pid = int(TRAY_PID_FILE.read_text(encoding="utf-8").strip())
+        if not _is_process_alive(stale_pid):
+            TRAY_PID_FILE.unlink(missing_ok=True)
+        else:
+            _cmd = _get_process_cmdline(stale_pid)
+            if not _cmd:
+                # Unverifiable cmdline -> keep file to avoid duplicate spawn
+                # and to avoid deleting a valid tray pid when AccessDenied.
+                return
+            if not _is_tray_process(stale_pid, strict=True):
+                TRAY_PID_FILE.unlink(missing_ok=True)
+    except (ValueError, OSError):
+        TRAY_PID_FILE.unlink(missing_ok=True)
+
+
+def _tray_wait_for_start(timeout_seconds: float = 2.0) -> bool:
+    interval = 0.2
+    steps = int(timeout_seconds / interval)
+    for _ in range(steps):
+        time.sleep(interval)
+        if _is_tray_running():
+            return True
+    return False
+
+
+def _tray_start(foreground: bool) -> None:
+    if _is_tray_running():
+        try:
+            old_pid = int(TRAY_PID_FILE.read_text(encoding="utf-8").strip())
+            _echo_error(f"Tray is already running (PID {old_pid}).")
+        except Exception:
+            _echo_error("Tray is already running.")
+        raise typer.Exit(1)
+    _tray_clean_stale_pid_file()
+
+    try:
+        from agent.bootstrap.tray import check_tray_available
+
+        available, reason = check_tray_available()
+        if not available:
+            _echo_error(f"System tray not available: {reason}")
+            if "Missing tray dependencies" in reason:
+                _echo_info("Install tray dependencies with: uv sync")
+            raise typer.Exit(1)
+    except ImportError as exc:
+        _echo_error(f"Tray dependencies missing: {exc}")
+        _echo_info("Install with: uv sync")
+        raise typer.Exit(1)
+
+    if not foreground and os.environ.get("K41_TRAY_DAEMONIZED") != "1":
+        _echo_info("Starting system tray in background...")
+        _print_key_value("PID file", TRAY_PID_FILE)
+        _print_key_value("Log", TRAY_LOG_FILE)
+        _print_key_value("Stop", "k41 tray --stop")
+        _spawn_tray_process()
+        if _tray_wait_for_start():
+            _echo_success("System tray started.")
+        else:
+            _echo_warning("Tray may have failed to start. Check logs at:")
+            _print_key_value("Log", TRAY_LOG_FILE)
+        return
+
+    _echo_info("Starting system tray in foreground. Close the tray icon to exit.")
+    TRAY_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+    TRAY_PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
+    try:
+        from agent.bootstrap.tray import run_tray_blocking
+
+        run_tray_blocking()
+    except RuntimeError as exc:
+        _echo_error(str(exc))
+        raise typer.Exit(1) from exc
+    except KeyboardInterrupt:
+        _echo_info("Tray stopped by user.")
+    finally:
+        if TRAY_PID_FILE.exists():
+            try:
+                file_pid = int(TRAY_PID_FILE.read_text(encoding="utf-8").strip())
+                if file_pid == os.getpid():
+                    TRAY_PID_FILE.unlink(missing_ok=True)
+            except Exception:
+                TRAY_PID_FILE.unlink(missing_ok=True)
+
+
+@app.command("tray")
+def tray(
+    foreground: bool = typer.Option(
+        False, "--foreground", "-f", help="Run tray in foreground."
+    ),
+    stop: bool = typer.Option(
+        False, "--stop", help="Stop running tray."
+    ),
+    status: bool = typer.Option(
+        False, "--status", help="Show tray status."
+    ),
+    enable_autostart: bool = typer.Option(
+        False, "--enable-autostart", help="Enable autostart on login."
+    ),
+    disable_autostart: bool = typer.Option(
+        False, "--disable-autostart", help="Disable autostart on login."
+    ),
+    enable_tray: bool = typer.Option(
+        False, "--enable-tray", help="Enable system tray (config tray.enabled=true)."
+    ),
+    disable_tray: bool = typer.Option(
+        False, "--disable-tray", help="Disable system tray (config tray.enabled=false)."
+    ),
+) -> None:
+    """Manage system tray."""
+    if enable_tray and disable_tray:
+        _echo_error("Cannot use --enable-tray and --disable-tray together.")
+        raise typer.Exit(1)
+    if enable_autostart and disable_autostart:
+        _echo_error("Cannot use --enable-autostart and --disable-autostart together.")
+        raise typer.Exit(1)
+
+    if _tray_handle_enabled_toggle(
+        enable_tray, disable_tray, stop, status, foreground, enable_autostart, disable_autostart
+    ):
+        return
+
+    if _tray_handle_autostart_toggle(enable_autostart, disable_autostart, stop, status, foreground):
+        return
+
+    if status:
+        _tray_show_status()
+        return
+
+    if stop:
+        _tray_stop()
+        return
+
+    _tray_start(foreground)
 
 
 @app.command("update")
