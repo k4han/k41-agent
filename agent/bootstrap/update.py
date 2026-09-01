@@ -1,22 +1,21 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import os
-from pathlib import Path
 import re
 import shutil
 import subprocess
 import sys
 import time
-import zipfile
 import tomllib
+import zipfile
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Callable
 
 import httpx
 
 from agent.bootstrap.version import APP_VERSION, PACKAGE_NAME
-
 
 DEFAULT_OWNER = "k4han"
 DEFAULT_REPO = "k41-agent"
@@ -553,7 +552,9 @@ def run_command(command: list[str], *, cwd: Path, env: dict[str, str]) -> None:
 
 
 def get_running_server_pid() -> int | None:
-    from agent.bootstrap.process_utils import get_running_server_pid as _shared_get_server_pid
+    from agent.bootstrap.process_utils import (
+        get_running_server_pid as _shared_get_server_pid,
+    )
 
     return _shared_get_server_pid(PID_FILE)
 
@@ -565,7 +566,9 @@ def _get_process_cmdline(pid: int) -> str:
 
 
 def get_running_tray_pid() -> int | None:
-    from agent.bootstrap.process_utils import get_running_tray_pid as _shared_get_tray_pid
+    from agent.bootstrap.process_utils import (
+        get_running_tray_pid as _shared_get_tray_pid,
+    )
 
     return _shared_get_tray_pid(TRAY_PID_FILE)
 
@@ -602,7 +605,9 @@ def stop_running_tray(pid: int) -> bool:
     except ImportError:
         try:
             if os.name == "nt":
-                from agent.shared.infrastructure.subprocess_utils import hidden_subprocess_kwargs
+                from agent.shared.infrastructure.subprocess_utils import (
+                    hidden_subprocess_kwargs,
+                )
 
                 subprocess.run(
                     ["taskkill", "/PID", str(pid), "/F"],
@@ -643,19 +648,30 @@ def stop_running_server(pid: int) -> None:
 
 
 def start_tray(install: ManagedInstall) -> None:
-    from agent.bootstrap.process_utils import spawn_detached_process
+    from agent.bootstrap.process_utils import (
+        get_dedicated_tray_executable,
+        spawn_detached_process,
+    )
 
     env = os.environ.copy()
     env["K41_TRAY_DAEMONIZED"] = "1"
     tray_log = Path.home() / ".k41-agent" / "tray.log"
-    # Prefer pythonw for tray on Windows to avoid console window
     tray_exe = install.python_exe
+    tray_argv_tail = ["-m", "agent.bootstrap.tray"]
     if os.name == "nt":
-        pythonw = Path(str(tray_exe)).with_name("pythonw.exe")
-        if pythonw.exists():
-            tray_exe = pythonw
+        # Prefer the dedicated, friendly-named tray GUI executable so Windows
+        # shows "k41-agent-tray.exe" instead of "pythonw.exe" in Startup apps.
+        dedicated = get_dedicated_tray_executable(str(tray_exe))
+        if dedicated is not None:
+            tray_exe = dedicated
+            tray_argv_tail = []
+        else:
+            # Prefer pythonw for tray on Windows to avoid console window
+            pythonw = Path(str(tray_exe)).with_name("pythonw.exe")
+            if pythonw.exists():
+                tray_exe = pythonw
     spawn_detached_process(
-        [str(tray_exe), "-m", "agent.bootstrap.tray"],
+        [str(tray_exe), *tray_argv_tail],
         tray_log,
         env=env,
         cwd=install.app_dir,

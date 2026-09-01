@@ -22,11 +22,24 @@ APP_NAME = "k41-agent"
 
 # Re-export shared process helpers for backward compatibility
 from agent.bootstrap.process_utils import (  # noqa: E402
+    get_dedicated_tray_executable as _get_dedicated_tray_executable,
+)
+from agent.bootstrap.process_utils import (
     get_process_cmdline as _get_process_cmdline,
+)
+from agent.bootstrap.process_utils import (
     get_running_server_pid as _get_running_server_pid,
+)
+from agent.bootstrap.process_utils import (
     get_running_tray_pid as _get_running_tray_pid,
+)
+from agent.bootstrap.process_utils import (
     is_k41_process as _is_k41_process,
+)
+from agent.bootstrap.process_utils import (
     is_process_alive as _is_process_alive,
+)
+from agent.bootstrap.process_utils import (
     is_tray_process as _is_tray_process,
 )
 
@@ -76,19 +89,25 @@ def is_tray_running() -> bool:
 
 
 def get_tray_pid() -> int | None:
-    from agent.bootstrap.process_utils import get_running_tray_pid as _shared_get_tray_pid
+    from agent.bootstrap.process_utils import (
+        get_running_tray_pid as _shared_get_tray_pid,
+    )
 
     return _shared_get_tray_pid(TRAY_PID_FILE)
 
 
 def is_server_running() -> bool:
-    from agent.bootstrap.process_utils import is_server_running as _shared_is_server_running
+    from agent.bootstrap.process_utils import (
+        is_server_running as _shared_is_server_running,
+    )
 
     return _shared_is_server_running(SERVER_PID_FILE)
 
 
 def get_server_pid() -> int | None:
-    from agent.bootstrap.process_utils import get_running_server_pid as _shared_get_server_pid
+    from agent.bootstrap.process_utils import (
+        get_running_server_pid as _shared_get_server_pid,
+    )
 
     return _shared_get_server_pid(SERVER_PID_FILE)
 
@@ -223,6 +242,11 @@ def is_autostart_enabled() -> bool:
 
 
 def _get_autostart_executable() -> str:
+    # Prefer the dedicated, friendly-named tray GUI executable so Windows
+    # shows "k41-agent-tray.exe" instead of "pythonw.exe" in Startup apps.
+    dedicated = _get_dedicated_tray_executable()
+    if dedicated is not None:
+        return dedicated
     # Use python executable that runs current env
     exe = sys.executable
     # On Windows, prefer pythonw.exe
@@ -235,12 +259,23 @@ def _get_autostart_executable() -> str:
     return exe
 
 
+def _is_dedicated_tray_executable(exe: str) -> bool:
+    return Path(exe).name.lower() == "k41-agent-tray.exe"
+
+
 def _get_autostart_argv() -> list[str]:
-    return [_get_autostart_executable(), "-m", "agent.bootstrap.tray"]
+    exe = _get_autostart_executable()
+    # The dedicated GUI executable already targets the tray module.
+    if _is_dedicated_tray_executable(exe):
+        return [exe]
+    return [exe, "-m", "agent.bootstrap.tray"]
 
 
 def _get_autostart_command() -> str:
-    return f'"{_get_autostart_executable()}" -m agent.bootstrap.tray'
+    exe = _get_autostart_executable()
+    if _is_dedicated_tray_executable(exe):
+        return f'"{exe}"'
+    return f'"{exe}" -m agent.bootstrap.tray'
 
 
 def _escape_desktop_arg(arg: str) -> str:
@@ -380,15 +415,14 @@ def sync_autostart_from_config(tray_enabled: bool, tray_autostart: bool) -> str 
 
 # --- Server control helpers ---
 
+# Notification policy: tray notifications are reserved for errors and
+# important state changes the user cannot otherwise see. Obvious successes
+# (e.g. dashboard opened, server starting) do not notify.
+
 def _open_dashboard(icon=None, item=None) -> None:
     url = _get_dashboard_url()
     try:
         webbrowser.open(url)
-        if icon is not None:
-            try:
-                icon.notify(f"Opened {url}", "K41 Agent")
-            except Exception:
-                pass
     except Exception as exc:
         logger.exception("Failed to open dashboard: %s", exc)
         if icon is not None:
@@ -461,11 +495,7 @@ def _start_server(icon=None, item=None) -> None:
             SERVER_LOG_FILE,
             env=env,
         )
-        if icon is not None:
-            try:
-                icon.notify("Starting server...", "K41 Agent")
-            except Exception:
-                pass
+        # The status poller updates the icon when the server is up; no notify.
     except Exception as exc:
         logger.exception("Failed to start server: %s", exc)
         if icon is not None:
@@ -487,12 +517,7 @@ def _stop_server(icon=None, item=None) -> None:
     try:
         SHUTDOWN_SIGNAL.parent.mkdir(parents=True, exist_ok=True)
         SHUTDOWN_SIGNAL.write_text(str(pid), encoding="utf-8")
-        if icon is not None:
-            try:
-                icon.notify(f"Stopping server (PID {pid})...", "K41 Agent")
-            except Exception:
-                pass
-        # Poll briefly to give feedback, but don't block too long in tray thread
+
         def _wait_and_notify():
             for _ in range(10):
                 time.sleep(0.5)
@@ -503,11 +528,6 @@ def _stop_server(icon=None, item=None) -> None:
                         except Exception:
                             pass
                     return
-            if icon is not None:
-                try:
-                    icon.notify("Server is stopping...", "K41 Agent")
-                except Exception:
-                    pass
 
         threading.Thread(target=_wait_and_notify, daemon=True).start()
     except Exception as exc:
@@ -549,10 +569,6 @@ def _enable_autostart_action(icon=None, item=None) -> None:
         _sync_config_autostart(True)
         if icon is not None:
             try:
-                icon.notify("Autostart enabled", "K41 Agent")
-            except Exception:
-                pass
-            try:
                 icon.update_menu()
             except Exception:
                 pass
@@ -569,10 +585,6 @@ def _disable_autostart_action(icon=None, item=None) -> None:
         disable_autostart()
         _sync_config_autostart(False)
         if icon is not None:
-            try:
-                icon.notify("Autostart disabled", "K41 Agent")
-            except Exception:
-                pass
             try:
                 icon.update_menu()
             except Exception:
@@ -726,9 +738,28 @@ def run_tray_blocking() -> None:
     app.run()
 
 
+def _set_windows_app_user_model_id() -> None:
+    """Identify the tray process with a dedicated AppUserModelID.
+
+    Without this, Windows shows "pythonw.exe" as the app name in toast
+    notifications and taskbar grouping.
+    """
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "k41.agent.tray"
+        )
+    except Exception:
+        logger.debug("Failed to set AppUserModelID", exc_info=True)
+
+
 def main() -> None:
-    # Entry point for `python -m agent.bootstrap.tray`
+    # Entry point for `python -m agent.bootstrap.tray` and k41-agent-tray.exe
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
+    _set_windows_app_user_model_id()
     TRAY_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
     # Single instance check - lenient on unverifiable cmdline to avoid duplicates
     if is_tray_running():

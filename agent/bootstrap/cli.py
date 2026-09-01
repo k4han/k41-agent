@@ -13,6 +13,7 @@ import typer
 
 from agent.bootstrap.version import APP_VERSION
 from agent.modules.admin_auth import get_admin_auth_service
+from agent.modules.users import get_pairing_service
 from agent.shared.infrastructure.db import (
     Base,
     create_tables,
@@ -20,7 +21,6 @@ from agent.shared.infrastructure.db import (
     initialize_async_engine,
     load_orm_models,
 )
-from agent.modules.users import get_pairing_service
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +168,12 @@ def _is_tray_running() -> bool:
 
 
 def _tray_command() -> list[str]:
+    from agent.bootstrap.process_utils import get_dedicated_tray_executable
+
+    # Prefer the dedicated, friendly-named tray GUI executable (Windows).
+    dedicated = get_dedicated_tray_executable()
+    if dedicated is not None:
+        return [dedicated]
     return [
         _background_python_executable(sys.executable),
         "-m",
@@ -239,7 +245,9 @@ def _stop_tray_process() -> bool:
     except ImportError:
         try:
             if os.name == "nt":
-                from agent.shared.infrastructure.subprocess_utils import hidden_subprocess_kwargs
+                from agent.shared.infrastructure.subprocess_utils import (
+                    hidden_subprocess_kwargs,
+                )
 
                 subprocess.run(
                     ["taskkill", "/PID", str(pid), "/F"],
@@ -573,9 +581,10 @@ async def reset_password() -> None:
 @with_async_db
 async def reset_quota() -> None:
     """Reset all recorded LLM usage/token logs."""
-    from agent.shared.infrastructure.db.session import get_async_session
-    from agent.modules.usage import LLMUsageEvent
     from sqlalchemy import delete
+
+    from agent.modules.usage import LLMUsageEvent
+    from agent.shared.infrastructure.db.session import get_async_session
 
     session = await get_async_session()
     async with session:

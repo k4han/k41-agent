@@ -17,7 +17,38 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
+
+TRAY_EXECUTABLE_NAME = "k41-agent-tray.exe"
+
+# Markers that uniquely identify a tray process cmdline. Deliberately NOT the
+# bare word "tray": server cmdlines contain "--no-tray" and would otherwise
+# false-positive when a dead tray's PID gets reused by a server process.
+TRAY_CMDLINE_MARKERS = ("agent.bootstrap.tray", TRAY_EXECUTABLE_NAME)
+
+
+def _is_tray_cmdline(cmd: str) -> bool:
+    """Return True if a (lowercased) cmdline belongs to the tray process."""
+    return any(marker in cmd for marker in TRAY_CMDLINE_MARKERS)
+
+
+def get_dedicated_tray_executable(
+    python_executable: str | None = None,
+) -> str | None:
+    """Return the dedicated tray GUI executable if available (Windows only).
+
+    The executable is generated from [project.gui-scripts] in pyproject.toml
+    (k41-agent-tray.exe). Preferring it over pythonw.exe makes Windows show
+    "k41-agent-tray.exe" instead of "pythonw.exe" under Settings > Apps >
+    Startup. Returns None when unavailable; callers must fall back to
+    "pythonw.exe -m agent.bootstrap.tray".
+    """
+    if os.name != "nt":
+        return None
+    base = Path(python_executable) if python_executable else Path(sys.executable)
+    candidate = base.with_name(TRAY_EXECUTABLE_NAME)
+    return str(candidate) if candidate.exists() else None
 
 
 def is_process_alive(pid: int) -> bool:
@@ -48,7 +79,9 @@ def get_process_cmdline(pid: int) -> str:
     except ImportError:
         pass
     try:
-        from agent.shared.infrastructure.subprocess_utils import hidden_subprocess_kwargs
+        from agent.shared.infrastructure.subprocess_utils import (
+            hidden_subprocess_kwargs,
+        )
 
         if os.name == "nt":
             result = subprocess.run(
@@ -77,7 +110,10 @@ def is_k41_process(pid: int, *, strict: bool = False) -> bool:
                 return False
             # Lenient: be lenient if pid is alive to avoid duplicate spawn.
             return is_process_alive(pid)
-        return "k41" in cmd or "agent.bootstrap.cli" in cmd
+        # Exclude tray cmdlines: "k41" also appears in "k41-agent-tray.exe"
+        # and in the install path, so a reused tray PID would otherwise be
+        # mistaken for a server process.
+        return ("k41" in cmd or "agent.bootstrap.cli" in cmd) and not _is_tray_cmdline(cmd)
     except Exception:
         return False
 
@@ -94,7 +130,7 @@ def is_tray_process(pid: int, *, strict: bool = False) -> bool:
             # Lenient mode for spawn-guard: treat alive pid as valid tray
             # when we cannot verify to avoid duplicate instances.
             return is_process_alive(pid)
-        return "tray" in cmd or "agent.bootstrap.tray" in cmd
+        return _is_tray_cmdline(cmd)
     except Exception:
         return False
 
@@ -233,7 +269,7 @@ def get_running_tray_pid(pid_file: Path) -> int | None:
     if not cmd:
         # Lenient: treat unverifiable but alive pid as running tray
         return pid
-    if "tray" in cmd or "agent.bootstrap.tray" in cmd:
+    if _is_tray_cmdline(cmd):
         return pid
     return None
 
@@ -249,6 +285,8 @@ def get_running_server_pid(pid_file: Path) -> int | None:
     cmd = get_process_cmdline(pid)
     if not cmd:
         return pid
-    if "k41" in cmd or "agent.bootstrap.cli" in cmd:
+    # Exclude tray cmdlines so a server PID reused by the tray is not
+    # reported as a running server.
+    if ("k41" in cmd or "agent.bootstrap.cli" in cmd) and not _is_tray_cmdline(cmd):
         return pid
     return None
