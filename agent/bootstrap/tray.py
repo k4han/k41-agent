@@ -668,6 +668,23 @@ class TrayApp:
         windows_cls = _get_windows_tray_icon_class(pystray)
         return windows_cls("k41-agent", image, title, menu=menu)
 
+    def _auto_start_server(self) -> None:
+        """Start the server automatically when the tray starts.
+
+        This makes tray autostart behave as expected: enabling autostart at
+        login brings up the bot, not just the tray icon.
+        """
+        # Give the tray a moment to initialize before spawning the server.
+        self._stop_event.wait(1.0)
+        if self._stop_event.is_set():
+            return
+        try:
+            if not is_server_running():
+                logger.info("Server is not running; auto-starting it from tray.")
+                _start_server()
+        except Exception:
+            logger.exception("Failed to auto-start server from tray")
+
     def _status_poller(self) -> None:
         while not self._stop_event.is_set():
             try:
@@ -714,6 +731,12 @@ class TrayApp:
         # Start poller thread
         poller = threading.Thread(target=self._status_poller, daemon=True)
         poller.start()
+
+        # Auto-start the server if it is not running (e.g. when the tray is
+        # launched at system login via autostart). Runs in a background thread
+        # so the tray icon appears immediately without waiting for the spawn.
+        auto_start = threading.Thread(target=self._auto_start_server, daemon=True)
+        auto_start.start()
 
         try:
             self.icon.run()
