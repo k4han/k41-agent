@@ -24,19 +24,26 @@ from agent.delivery.cli.session import CLISession
 from agent.modules.agent_runtime import run_agent_stream
 
 logger = logging.getLogger(__name__)
+
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+if hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 console = Console()
 
 _HISTORY_FILE = os.path.join(os.path.expanduser("~"), ".k41-agent", ".cli_history")
 
 _PROMPT_STYLE = Style.from_dict({
     "prompt": "bold cyan",
-    "agent": "bold green",
+    "agent": "dim cyan",
 })
-
-_BANNER = (
-    "[bold cyan]Kai Agent CLI[/bold cyan] — interactive chat\n"
-    "Type your message, or [bold]/help[/bold] to list commands. Use [bold]/quit[/bold] to exit.\n"
-)
 
 
 class SlashCommandCompleter(Completer):
@@ -56,8 +63,26 @@ class SlashCommandCompleter(Completer):
                 )
 
 
-def _get_prompt(session: CLISession) -> str:
-    return f"[{session.agent_name}]> "
+def _get_prompt(session: CLISession) -> list[tuple[str, str]]:
+    if session.agent_name and session.agent_name != "default":
+        return [
+            ("class:agent", f"{session.agent_name} "),
+            ("class:prompt", "❯ "),
+        ]
+    return [("class:prompt", "❯ ")]
+
+
+def _print_welcome_banner(session: CLISession) -> None:
+    short_thread = session.thread_id
+    if "_" in short_thread:
+        parts = short_thread.split("_")
+        short_thread = parts[-1]
+    console.print(
+        f"\n[bold]kai[/bold] [dim]› session {short_thread} · agent:[/dim] [green]{session.agent_name}[/green]"
+    )
+    console.print(
+        "[dim]Type a message to chat, /help for commands, /quit to exit.[/dim]\n"
+    )
 
 
 async def _stream_agent_response(session: CLISession, user_input: str) -> None:
@@ -73,27 +98,30 @@ async def _stream_agent_response(session: CLISession, user_input: str) -> None:
                 name = event.get("name", "?")
                 args = event.get("args")
                 if args:
-                    console.print(f"  [dim][tool][/dim] [yellow]{name}[/yellow]({args})")
+                    console.print(f"  [dim]·[/dim] [cyan]tool[/cyan] [dim]{name}({args})[/dim]")
                 else:
-                    console.print(f"  [dim][tool][/dim] [yellow]{name}[/yellow]")
+                    console.print(f"  [dim]·[/dim] [cyan]tool[/cyan] [dim]{name}[/dim]")
             elif event_type == "final":
                 content = event.get("content", "")
                 if content:
                     last_text = content
     except Exception as exc:
         logger.exception("Agent run failed")
-        console.print(f"  [red][error][/red] {exc}")
+        console.print(f"  [bold red]✖[/bold red] [red]{exc}[/red]\n")
         return
 
     if last_text:
-        console.print(last_text)
+        from rich.markdown import Markdown
+
+        console.print()
+        console.print(Markdown(last_text))
+        console.print()
     else:
-        console.print("[dim](no response)[/dim]")
+        console.print("[dim](no response)[/dim]\n")
 
 
 async def _chat_loop(session: CLISession) -> None:
-    console.print(_BANNER)
-    console.print(f"Thread: [dim]{session.thread_id}[/dim]\n")
+    _print_welcome_banner(session)
 
     history = FileHistory(_HISTORY_FILE)
     completer = SlashCommandCompleter()
@@ -149,11 +177,10 @@ def run_repl() -> None:
                     selectors.SelectSelector()
                 ),
             )
-            return
-        asyncio.run(_run_repl_async())
+        else:
+            asyncio.run(_run_repl_async())
     except KeyboardInterrupt:
-        console.print()
-        logger.info("CLI interrupted by user.")
+        pass
 
 
 __all__ = ["run_repl"]

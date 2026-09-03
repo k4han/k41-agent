@@ -30,8 +30,12 @@ def test_init_registers_orm_models_before_creating_tables(
             captured["tables"] = sorted(metadata.tables.keys())
 
         monkeypatch.setattr(cli_module.Path, "home", lambda: home_dir)
-        monkeypatch.setattr(cli_module, "get_database_url", lambda: database_url)
-        monkeypatch.setattr(cli_module, "create_tables", fake_create_tables)
+        monkeypatch.setattr(
+            "agent.shared.infrastructure.db.get_database_url", lambda: database_url
+        )
+        monkeypatch.setattr(
+            "agent.shared.infrastructure.db.create_tables", fake_create_tables
+        )
 
         result = runner.invoke(cli_module.app, ["init"])
 

@@ -11,24 +11,31 @@ from typing import Any
 
 import typer
 
+from agent.bootstrap import ui
 from agent.bootstrap.version import APP_VERSION
-from agent.modules.admin_auth import get_admin_auth_service
-from agent.modules.users import get_pairing_service
-from agent.shared.infrastructure.db import (
-    Base,
-    create_tables,
-    get_database_url,
-    initialize_async_engine,
-    load_orm_models,
-)
 
 logger = logging.getLogger(__name__)
 
+# Heavy imports (db/sqlalchemy, admin auth, users) are deferred: they are
+# resolved lazily via module __getattr__ / inside the commands that need
+# them, so that `k41 --help` and every command start instantly.
+
 app = typer.Typer(
     name="k41",
-    help="Kai Agent CLI — manage and interact with your AI agent.",
+    help="Kai Agent CLI - manage and interact with your AI agent.",
+    epilog=(
+        "Examples:\n\n"
+        "    k41                    Start the server in the background\n\n"
+        "    k41 status             Check server and tray status\n\n"
+        "    k41 stop               Stop the running server\n\n"
+        "    k41 cli                Start an interactive chat session\n\n"
+        "    k41 tray --status      Show system tray status\n\n"
+        "    k41 update             Update from the latest GitHub release"
+    ),
     no_args_is_help=False,
     add_completion=False,
+    rich_markup_mode="rich",
+    pretty_exceptions_show_locals=False,
 )
 
 PID_FILE = Path.home() / ".k41-agent" / "server.pid"
@@ -39,27 +46,27 @@ TRAY_LOG_FILE = Path.home() / ".k41-agent" / "tray.log"
 
 
 def _echo_info(message: str) -> None:
-    typer.secho(f"[INFO] {message}", fg=typer.colors.BLUE)
+    ui.info(message)
 
 
 def _echo_success(message: str) -> None:
-    typer.secho(f"[OK] {message}", fg=typer.colors.GREEN)
+    ui.success(message)
 
 
 def _echo_warning(message: str) -> None:
-    typer.secho(f"[WARNING] {message}", fg=typer.colors.YELLOW)
+    ui.warning(message)
 
 
 def _echo_error(message: str) -> None:
-    typer.secho(f"[ERROR] {message}", fg=typer.colors.RED)
+    ui.error(message)
 
 
 def _print_section(title: str) -> None:
-    typer.echo(f"\n{title}")
+    ui.section(title)
 
 
 def _print_key_value(label: str, value: Any) -> None:
-    typer.echo(f"  {label}: {value}")
+    ui.kv(label, value)
 
 
 def _base_url(host: str, port: int) -> str:
@@ -73,27 +80,33 @@ def _health_url(host: str, port: int) -> str:
     return f"{_base_url(host, port)}/health"
 
 
+def _health_url_from_base(base_url: str) -> str:
+    return f"{base_url}/health"
+
+
 def _print_server_endpoints(config: Any) -> None:
     base_url = _base_url(config.host, config.port)
-    _print_section("Server")
-    _print_key_value("URL", base_url)
-    if config.enable_dashboard:
-        _print_key_value("Dashboard", base_url)
-    if config.enable_api:
-        _print_key_value("API", f"{base_url}/api")
-    _print_key_value("Health", _health_url(config.host, config.port))
+    rows: list[tuple[bool | None, str, str, str]] = [
+        (True, "Server", "ready", base_url),
+    ]
+    if getattr(config, "enable_dashboard", False):
+        rows.append((True, "Dashboard", "ready", f"{base_url}/dashboard"))
+    if getattr(config, "enable_api", False):
+        rows.append((True, "API", "active", f"{base_url}/api"))
+    ui.services_table(rows)
 
 
-def _print_runtime_files() -> None:
-    _print_section("Runtime files")
-    _print_key_value("PID", PID_FILE)
-    _print_key_value("Logs", SERVER_LOG_FILE)
 
 
 def _print_common_commands() -> None:
-    _print_section("Commands")
-    _print_key_value("Check", "k41 status")
-    _print_key_value("Stop", "k41 stop")
+    ui.next_steps(
+        [
+            ("chat", "k41 cli"),
+            ("status", "k41 status"),
+            ("stop", "k41 stop"),
+        ]
+    )
+
 
 
 def _daemonize() -> None:
@@ -275,6 +288,8 @@ def _stop_tray_process() -> bool:
 
 
 def _setup_database() -> None:
+    from agent.shared.infrastructure.db import load_orm_models
+
     load_orm_models()
 
 
@@ -282,6 +297,11 @@ def with_async_db(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
         async def _run():
+            from agent.shared.infrastructure.db import (
+                Base,
+                initialize_async_engine,
+            )
+
             _setup_database()
             await initialize_async_engine(metadata=Base.metadata)
             return await func(*args, **kwargs)
@@ -354,6 +374,13 @@ def init() -> None:
         _echo_success(f"Created {directory}")
 
     try:
+        from agent.shared.infrastructure.db import (
+            Base,
+            create_tables,
+            get_database_url,
+            load_orm_models,
+        )
+
         load_orm_models()
         database_url = get_database_url()
         _echo_success(f"Database URL: {database_url}")
@@ -397,9 +424,12 @@ def init() -> None:
         _echo_success(f"Config already exists at {config_file}")
 
     _echo_success("Initialization complete.")
-    _print_section("Next steps")
-    _print_key_value("Home", k41_dir)
-    _print_key_value("Start", "k41")
+    ui.next_steps(
+        [
+            ("home", str(k41_dir)),
+            ("start", "k41"),
+        ]
+    )
 
 
 def _should_auto_start_tray(
@@ -421,9 +451,7 @@ def _sync_autostart_from_config(config: Any) -> None:
 
         tray_enabled = bool(getattr(config, "tray_enabled", True))
         tray_autostart = bool(getattr(config, "tray_autostart", False))
-        message = sync_autostart_from_config(tray_enabled, tray_autostart)
-        if message:
-            _echo_info(message)
+        sync_autostart_from_config(tray_enabled, tray_autostart)
     except Exception as exc:
         _echo_warning(f"Could not sync autostart: {exc}")
 
@@ -443,7 +471,6 @@ def serve(foreground: bool = False, tray: bool = False, no_tray: bool = False) -
 
     # Decide tray usage: explicit flags override config
     use_tray = _should_auto_start_tray(config, tray, no_tray)
-    tray_reason = "forced via --tray" if tray else ("disabled via --no-tray" if no_tray else f"config tray.enabled={config.tray_enabled}")
 
     # Sync autostart state with config regardless of whether tray is starting now
     # (so config change takes effect on next `k41` restart)
@@ -453,17 +480,15 @@ def serve(foreground: bool = False, tray: bool = False, no_tray: bool = False) -
     # Skip in daemon child - _daemon_command injects --no-tray and tray was already spawned by parent.
     is_daemon_child = os.environ.get("K41_DAEMONIZED") == "1"
     if not is_daemon_child:
+        ui.banner("Kai Agent", f"v{APP_VERSION}")
         if use_tray:
             try:
                 from agent.bootstrap.tray import check_tray_available
 
                 available, reason = check_tray_available()
                 if not available:
-                    _echo_warning(f"System tray not available: {reason} ({tray_reason})")
-                elif _is_tray_running():
-                    _echo_warning("Tray is already running.")
-                else:
-                    _echo_info(f"Starting system tray ({tray_reason})...")
+                    _echo_warning(f"System tray not available: {reason}")
+                elif not _is_tray_running():
                     _spawn_tray_process()
                     tray_started = False
                     for _ in range(10):
@@ -476,15 +501,11 @@ def serve(foreground: bool = False, tray: bool = False, no_tray: bool = False) -
                     else:
                         _echo_warning("Tray may have failed to start. Check logs at:")
                         _print_key_value("Log", TRAY_LOG_FILE)
-                    _print_section("Tray")
-                    _print_key_value("PID file", TRAY_PID_FILE)
-                    _print_key_value("Log", TRAY_LOG_FILE)
             except ImportError as exc:
                 _echo_warning(f"Tray dependencies missing: {exc}. Run: uv sync")
             except Exception as exc:
                 _echo_warning(f"Could not start tray: {exc}")
         else:
-            _echo_info(f"System tray disabled ({tray_reason}).")
             # If tray should not run but is still running, stop it.
             # This covers both config tray.enabled=false and explicit --no-tray.
             if _is_tray_running():
@@ -520,7 +541,6 @@ def serve(foreground: bool = False, tray: bool = False, no_tray: bool = False) -
     if not foreground and os.environ.get("K41_DAEMONIZED") != "1":
         _echo_info("Starting Kai Agent in background...")
         _print_server_endpoints(config)
-        _print_runtime_files()
         _print_common_commands()
         _daemonize()
         return
@@ -551,10 +571,16 @@ def chat_cli() -> None:
 @with_async_db
 async def pair_code() -> None:
     """Generate a new pairing code for a root user."""
+    from agent.modules.users import get_pairing_service
+    from rich.markup import escape
+
     pairing_service = get_pairing_service()
     code, user_id = await pairing_service.create_pairing_root_user_and_code()
-    typer.echo(f"[OK] Root user ready (ID: {user_id})")
-    typer.echo(f"[OK] Pairing code: {code} (expires in 24 hours)")
+    _echo_success(f"Root user ready (ID: {user_id})")
+    ui.console.print(
+        f"\n  pairing code: [bold cyan]{escape(code)}[/bold cyan]"
+        f" [dim](expires in 24h)[/dim]\n",
+    )
 
 
 @app.command("reset-password")
@@ -563,18 +589,20 @@ async def reset_password() -> None:
     """Reset the admin user password (reads from stdin for security)."""
     import getpass
 
+    from agent.modules.admin_auth import get_admin_auth_service
+
     new_pass = getpass.getpass("New admin password: ")
     if not new_pass:
-        typer.echo("[ERROR] Password cannot be empty.")
+        _echo_error("Password cannot be empty.")
         raise typer.Exit(1)
     confirm = getpass.getpass("Confirm password: ")
     if new_pass != confirm:
-        typer.echo("[ERROR] Passwords do not match.")
+        _echo_error("Passwords do not match.")
         raise typer.Exit(1)
 
     auth_service = get_admin_auth_service()
     await auth_service.set_admin_password(new_pass)
-    typer.echo("[OK] Admin password has been reset.")
+    _echo_success("Admin password has been reset.")
 
 
 @app.command("reset-quota")
@@ -591,104 +619,123 @@ async def reset_quota() -> None:
         result = await session.execute(delete(LLMUsageEvent))
         await session.commit()
         row_count = int(result.rowcount or 0)
-    typer.echo(f"[OK] Successfully reset usage logs. Deleted {row_count} record(s).")
+    _echo_success(f"Successfully reset usage logs. Deleted {row_count} record(s).")
 
 
 @app.command()
 def status() -> None:
     """Show the status of the k41-agent server."""
     import httpx
+    from rich.markup import escape
 
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    typer.echo("Kai Agent Status")
 
-    # Show tray status first (non-fatal)
-    _print_section("System Tray")
-    try:
-        from agent.bootstrap.settings import load_bootstrap_config
+    ui.banner("Kai Agent", f"v{APP_VERSION}")
+    ui.console.print()
 
-        tray_cfg = load_bootstrap_config()
-        _print_key_value("Config tray.enabled", tray_cfg.tray_enabled)
-        _print_key_value("Config tray.autostart", tray_cfg.tray_autostart)
+    # --- Server process state ---
+    server_ok = False
+    pid_text = ""
+    if PID_FILE.exists():
+        pid_text = PID_FILE.read_text().strip()
         try:
-            from agent.bootstrap.tray import is_autostart_enabled
+            pid = int(pid_text)
+        except ValueError:
+            _echo_error("Invalid PID file content.")
+        else:
+            if not _is_process_alive(pid):
+                _echo_warning("Server process is not running. PID file may be stale.")
+            elif not _is_k41_process(pid):
+                _echo_warning("Process is not a Kai Agent server. PID file may be stale.")
+            else:
+                server_ok = True
+    # Server state will be displayed in the services_table below
 
-            _print_key_value("OS autostart", is_autostart_enabled())
+
+    base_url: str | None = None
+    config: Any = None
+    if server_ok:
+        try:
+            from agent.bootstrap.settings import load_bootstrap_config
+
+            config = load_bootstrap_config()
+            base_url = _base_url(config.host, config.port)
+        except Exception:
+            base_url = None
+
+    rows: list[tuple[bool | None, str, str, str]] = []
+    if server_ok:
+        rows.append((True, "Server", f"running (pid {pid_text})", base_url or ""))
+        if config and getattr(config, "enable_dashboard", False) and base_url:
+            rows.append((True, "Dashboard", "ready", f"{base_url}/dashboard"))
+        if config and getattr(config, "enable_api", False) and base_url:
+            rows.append((True, "API", "active", f"{base_url}/api"))
+    else:
+        rows.append((False, "Server", "stopped", ""))
+
+    # --- System tray ---
+    tray_running = _is_tray_running()
+    if tray_running:
+        try:
+            from agent.bootstrap.settings import load_bootstrap_config
+
+            tray_cfg = load_bootstrap_config()
+            autostart = "on" if tray_cfg.tray_autostart else "off"
+        except Exception:
+            autostart = "unknown"
+        tray_pid = ""
+        try:
+            tray_pid = TRAY_PID_FILE.read_text(encoding="utf-8").strip()
         except Exception:
             pass
-    except Exception:
-        pass
-    if _is_tray_running():
-        try:
-            tray_pid = int(TRAY_PID_FILE.read_text(encoding="utf-8").strip())
-            _echo_success(f"Tray is running (PID {tray_pid}).")
-            _print_key_value("Tray PID file", TRAY_PID_FILE)
-            _print_key_value("Tray log", TRAY_LOG_FILE)
-        except Exception:
-            _echo_success("Tray is running.")
+        tray_detail = f"active (autostart {autostart})"
+        if tray_pid:
+            tray_detail = f"running (pid {tray_pid}, autostart {autostart})"
+        rows.append((True, "System Tray", tray_detail, ""))
     else:
-        _echo_info("Tray is not running.")
-        _print_key_value("Tray PID file", TRAY_PID_FILE)
-        _print_key_value("Start tray", "k41 tray")
-        _print_key_value("Enable", "k41 tray --enable-tray")
+        rows.append((False, "System Tray", "stopped", ""))
 
-    if not PID_FILE.exists():
-        _echo_warning("Server is not running.")
-        _print_section("Next steps")
-        _print_key_value("Start", "k41")
-        _print_key_value("PID file", PID_FILE)
-        raise typer.Exit(1)
-
-    pid_text = PID_FILE.read_text().strip()
-    _print_section("Process")
-    _print_key_value("PID", pid_text)
-
-    try:
-        pid = int(pid_text)
-    except ValueError:
-        _echo_error("Invalid PID file content.")
-        _print_key_value("PID file", PID_FILE)
-        raise typer.Exit(1)
-
-    if not _is_process_alive(pid):
-        _echo_error("Server process is not running. PID file may be stale.")
-        _print_key_value("PID file", PID_FILE)
-        raise typer.Exit(1)
-
-    if not _is_k41_process(pid):
-        _echo_error("Process is not a Kai Agent server. PID file may be stale.")
-        _print_key_value("PID file", PID_FILE)
-        raise typer.Exit(1)
-
-    _echo_success("Server process is running.")
-
-    try:
-        from agent.bootstrap.settings import load_bootstrap_config
-
-        config = load_bootstrap_config()
-        _print_server_endpoints(config)
-        _print_runtime_files()
-        url = _health_url(config.host, config.port)
-        resp = httpx.get(url, timeout=3.0)
-        if resp.status_code == 200:
-            data = resp.json()
-            _print_section("Health")
-            _echo_success("Health endpoint returned OK.")
-            channels = data.get("services", [])
-            if channels:
-                _print_section("Channels")
-                for ch in channels:
-                    name = ch.get("name", "?")
-                    ch_status = ch.get("status", "?")
-                    _print_key_value(name, ch_status)
+    # --- Health & channels ---
+    if server_ok and base_url:
+        try:
+            url = _health_url_from_base(base_url)
+            resp = httpx.get(url, timeout=3.0)
+            if resp.status_code == 200:
+                data = resp.json()
+                channels = data.get("services", [])
+                if channels:
+                    healthy = {"running", "ok", "connected", "active", "started"}
+                    for ch in channels:
+                        name = str(ch.get("name", "?"))
+                        state = str(ch.get("status", "?"))
+                        is_ok = state.lower() in healthy
+                        rows.append((is_ok, f"Channel {name}", state, ""))
+                else:
+                    rows.append((None, "Channels", "0 active", ""))
             else:
-                _echo_info("No managed channels active.")
-        else:
-            _echo_warning(f"Health endpoint returned HTTP {resp.status_code}.")
-    except httpx.ConnectError:
-        _echo_warning("Could not connect to the health endpoint yet.")
-    except Exception as e:
-        _echo_warning(f"Could not query health: {e}")
+                _echo_warning(f"Health endpoint returned HTTP {resp.status_code}.")
+        except httpx.ConnectError:
+            _echo_warning("Could not connect to the health endpoint yet.")
+        except Exception as e:
+            _echo_warning(f"Could not query health: {e}")
+
+    ui.services_table(rows)
+
+    if not server_ok:
+        ui.next_steps(
+            [
+                ("start", "k41"),
+                ("status", "k41 status"),
+            ]
+        )
+        raise typer.Exit(1)
+
+    ui.next_steps(
+        [
+            ("chat", "k41 cli"),
+            ("stop", "k41 stop"),
+        ]
+    )
 
 
 @app.command()
@@ -700,7 +747,7 @@ def stop(
     ),
 ) -> None:
     """Stop the running k41-agent server."""
-    typer.echo("Kai Agent Stop")
+    _echo_info("Stopping Kai Agent server...")
     if not PID_FILE.exists():
         _echo_warning("Server is not running.")
         _print_key_value("PID file", PID_FILE)
@@ -840,21 +887,6 @@ def _tray_handle_autostart_toggle(
 
 
 def _tray_show_status() -> None:
-    _print_section("System Tray")
-    try:
-        from agent.bootstrap.settings import load_bootstrap_config
-
-        cfg = load_bootstrap_config()
-        _print_key_value("Config tray.enabled", cfg.tray_enabled)
-        _print_key_value("Config tray.autostart", cfg.tray_autostart)
-        try:
-            from agent.bootstrap.tray import is_autostart_enabled
-
-            _print_key_value("OS autostart", is_autostart_enabled())
-        except Exception:
-            pass
-    except Exception:
-        pass
     if _is_tray_running():
         try:
             tray_pid = int(TRAY_PID_FILE.read_text(encoding="utf-8").strip())
@@ -865,12 +897,26 @@ def _tray_show_status() -> None:
         _print_key_value("Log", TRAY_LOG_FILE)
     else:
         _echo_warning("Tray is not running.")
-        _print_key_value("PID file", TRAY_PID_FILE)
-        _print_key_value("Start", "k41 tray")
+        _print_key_value("start", "k41 tray")
+    _print_section("Config")
+    try:
+        from agent.bootstrap.settings import load_bootstrap_config
+
+        cfg = load_bootstrap_config()
+        _print_key_value("tray.enabled", cfg.tray_enabled)
+        _print_key_value("tray.autostart", cfg.tray_autostart)
+        try:
+            from agent.bootstrap.tray import is_autostart_enabled
+
+            _print_key_value("OS autostart", is_autostart_enabled())
+        except Exception:
+            pass
+    except Exception:
+        pass
 
 
 def _tray_stop() -> None:
-    typer.echo("Kai Agent Tray Stop")
+    _echo_info("Stopping system tray...")
     if not TRAY_PID_FILE.exists():
         _echo_warning("Tray is not running.")
         _print_key_value("PID file", TRAY_PID_FILE)
