@@ -9,6 +9,30 @@ const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 let csrfToken: string | null = null;
 let csrfTokenRequest: Promise<void> | null = null;
 
+function errorMessage(value: unknown): string | null {
+  if (typeof value === "string") {
+    return value.trim() || null;
+  }
+
+  if (Array.isArray(value)) {
+    const messages = value
+      .map((item) => errorMessage(item))
+      .filter((message): message is string => Boolean(message));
+    return messages.length ? messages.join("; ") : null;
+  }
+
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const payload = value as Record<string, unknown>;
+  return errorMessage(payload.message)
+    || errorMessage(payload.detail)
+    || errorMessage(payload.error)
+    || errorMessage(payload.msg)
+    || null;
+}
+
 function updateCsrfToken(response: Response): void {
   const serverCsrfToken = response.headers.get(CSRF_HEADER_NAME);
   if (serverCsrfToken) {
@@ -51,8 +75,8 @@ export async function readError(response: Response): Promise<string> {
   }
 
   try {
-    const data = JSON.parse(text) as { detail?: string; message?: string };
-    return data.detail || data.message || text;
+    const message = errorMessage(JSON.parse(text));
+    return message || text;
   } catch {
     return text;
   }

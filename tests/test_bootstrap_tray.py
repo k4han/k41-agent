@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+
 from agent.bootstrap import tray
 
 
@@ -187,4 +189,46 @@ def test_check_tray_available_headless(monkeypatch) -> None:
     avail, reason = tray.check_tray_available()
     assert avail is False
     assert "headless" in reason.lower()
+
+
+def test_auto_start_server_starts_server_when_not_running(monkeypatch) -> None:
+    calls = {"start": 0}
+
+    monkeypatch.setattr(tray, "is_server_running", lambda: False)
+    monkeypatch.setattr(tray, "_start_server", lambda: calls.__setitem__("start", calls["start"] + 1))
+
+    app = tray.TrayApp()
+    app._stop_event = threading.Event()
+
+    app._auto_start_server()
+
+    assert calls["start"] == 1
+
+
+def test_auto_start_server_skips_when_already_running(monkeypatch) -> None:
+    calls = {"start": 0}
+
+    monkeypatch.setattr(tray, "is_server_running", lambda: True)
+    monkeypatch.setattr(tray, "_start_server", lambda: calls.__setitem__("start", calls["start"] + 1))
+
+    app = tray.TrayApp()
+    app._stop_event = threading.Event()
+
+    app._auto_start_server()
+
+    assert calls["start"] == 0
+
+
+def test_auto_start_server_skips_when_tray_stopped(monkeypatch) -> None:
+    calls = {"start": 0}
+
+    monkeypatch.setattr(tray, "_start_server", lambda: calls.__setitem__("start", calls["start"] + 1))
+
+    app = tray.TrayApp()
+    app._stop_event = threading.Event()
+    app._stop_event.set()
+
+    app._auto_start_server()
+
+    assert calls["start"] == 0
 

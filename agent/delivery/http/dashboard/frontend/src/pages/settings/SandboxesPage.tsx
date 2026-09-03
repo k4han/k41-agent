@@ -363,6 +363,9 @@ export function SandboxesPage() {
   const counts = createMemo(() => countByBackend(rows()));
 
   const hasSandboxes = createMemo(() => rows().length > 0);
+  const hasEnabledSandboxBackend = createMemo(() =>
+    getEnabledBackends().some((backend) => backend.name !== "local"),
+  );
 
   return (
     <SettingsLayout
@@ -484,23 +487,36 @@ export function SandboxesPage() {
                             <div class="sandboxes-empty-icon" aria-hidden="true">
                               <CloudCog size={20} />
                             </div>
-                            <div class="sandboxes-empty-title">No sandboxes found</div>
-                            <div class="sandboxes-empty-hint">
-                              <Show
-                                when={includeAll()}
-                                fallback={
-                                  <>
-                                    Attach a Daytona or Modal sandbox to a chat
-                                    thread, or toggle <strong>Show all on cloud</strong>
-                                    {" "}to scan the cloud provider.
-                                  </>
-                                }
-                              >
-                                No sandboxes are visible on the selected
-                                provider. Create one from the chat composer to
-                                see it here.
-                              </Show>
-                            </div>
+                            <Show
+                              when={hasEnabledSandboxBackend()}
+                              fallback={
+                                <>
+                                  <div class="sandboxes-empty-title">No cloud sandbox backend is enabled</div>
+                                  <div class="sandboxes-empty-hint">
+                                    Enable Daytona or Modal in <A href="/settings/backends">Backend settings</A>
+                                    {" "}to create and manage sandboxes.
+                                  </div>
+                                </>
+                              }
+                            >
+                              <div class="sandboxes-empty-title">No sandboxes found</div>
+                              <div class="sandboxes-empty-hint">
+                                <Show
+                                  when={includeAll()}
+                                  fallback={
+                                    <>
+                                      Attach a Daytona or Modal sandbox to a chat
+                                      thread, or toggle <strong>Show all on cloud</strong>
+                                      {" "}to scan the cloud provider.
+                                    </>
+                                  }
+                                >
+                                  No sandboxes are visible on the selected
+                                  provider. Create one from the chat composer to
+                                  see it here.
+                                </Show>
+                              </div>
+                            </Show>
                           </div>
                         }
                       >
