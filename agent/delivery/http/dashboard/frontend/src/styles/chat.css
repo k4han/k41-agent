@@ -108,13 +108,13 @@
 .chat-shell-resizable.workspace-open .transcript > .message,
 .chat-shell-resizable.workspace-open .transcript > .tool-call,
 .chat-shell-resizable.workspace-open .transcript > .plan-review,
-.chat-shell-resizable.workspace-open .transcript > .tool-html-preview,
+.chat-shell-resizable.workspace-open .transcript > .tool-html-preview:not(.is-fullwidth),
 .chat-shell-resizable.workspace-open .transcript > .empty,
 .chat-shell-resizable.workspace-open .transcript > .chat-workspace-empty,
 .chat-shell-resizable.workspace-closed .transcript > .message,
 .chat-shell-resizable.workspace-closed .transcript > .tool-call,
 .chat-shell-resizable.workspace-closed .transcript > .plan-review,
-.chat-shell-resizable.workspace-closed .transcript > .tool-html-preview,
+.chat-shell-resizable.workspace-closed .transcript > .tool-html-preview:not(.is-fullwidth),
 .chat-shell-resizable.workspace-closed .transcript > .empty,
 .chat-shell-resizable.workspace-closed .transcript > .chat-workspace-empty {
   width: min(960px, 100%);

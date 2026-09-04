@@ -4,12 +4,22 @@ import {
   ChevronRight,
   Code,
   Download,
+  Expand,
+  ExternalLink,
   Eye,
   FileText,
+  GripHorizontal,
   Image as ImageIcon,
   Maximize2,
+  Monitor,
   Pencil,
+  RotateCcw,
+  Shrink,
+  Smartphone,
+  Tablet,
   X,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-solid";
 import {
   createEffect,
@@ -17,6 +27,7 @@ import {
   createSignal,
   For,
   onCleanup,
+  onMount,
   Show,
   type Accessor,
 } from "solid-js";
@@ -35,7 +46,10 @@ import {
   buildPreviewChromeStyle,
   htmlPreviewFromArgs,
   injectPreviewChrome,
+  isFullPageHtml,
+  PREVIEW_VIEWPORT_WIDTHS,
   type HtmlPreviewContent,
+  type PreviewViewport,
 } from "@/lib/htmlPreview";
 import {
   GENERATE_IMAGE_TOOL_NAME,
@@ -889,6 +903,7 @@ function HtmlPreviewBlock(props: {
 }) {
   const [mode, setMode] = createSignal<"preview" | "source">("preview");
   const [expanded, setExpanded] = createSignal(false);
+  const [isFullWidth, setIsFullWidth] = createSignal(false);
   const title = () => props.preview.title || "HTML Preview";
 
   // Use shared dark mode signal to avoid creating a MutationObserver per preview.
@@ -896,6 +911,136 @@ function HtmlPreviewBlock(props: {
   const previewSrc = createMemo(() => {
     darkMode();
     return injectPreviewChrome(props.preview.html, buildPreviewChromeStyle());
+  });
+
+  const isPage = createMemo(() => isFullPageHtml(props.preview.html, props.preview.mode));
+
+  const defaultViewportFor = (page: boolean): PreviewViewport =>
+    page ? "desktop" : "responsive";
+  const defaultHeightFor = (page: boolean): number => (page ? 520 : 360);
+
+  const [viewport, setViewport] = createSignal<PreviewViewport>(
+    defaultViewportFor(isPage()),
+  );
+  const [scaleToFit, setScaleToFit] = createSignal(true);
+  const [zoom, setZoom] = createSignal(1.0);
+
+  const [height, setHeight] = createSignal(defaultHeightFor(isPage()));
+  const [autoHeight, setAutoHeight] = createSignal(!isPage());
+  const [contentHeight, setContentHeight] = createSignal<number | null>(null);
+  const { showToast } = useToast();
+
+  // Reset per-preview state when Solid reuses this component instance for a
+  // different tool call (new html/mode). Without this a card rendered after
+  // a full page would keep the desktop viewport and tall frame.
+  const [previewKey, setPreviewKey] = createSignal(
+    `${props.preview.html.length}:${props.preview.mode ?? "auto"}`,
+  );
+  createEffect(() => {
+    const key = `${props.preview.html.length}:${props.preview.mode ?? "auto"}:${props.preview.html.slice(0, 128)}`;
+    if (key !== previewKey()) {
+      setPreviewKey(key);
+      const page = isFullPageHtml(props.preview.html, props.preview.mode);
+      setViewport(defaultViewportFor(page));
+      setHeight(defaultHeightFor(page));
+      setAutoHeight(!page);
+      setContentHeight(null);
+      setZoom(1.0);
+      setScaleToFit(true);
+    }
+  });
+
+  let inlineStageRef: HTMLDivElement | undefined;
+  let inlineFrameRef: HTMLIFrameElement | undefined;
+  let dialogStageRef: HTMLDivElement | undefined;
+  let dialogFrameRef: HTMLIFrameElement | undefined;
+
+  const [inlineStageWidth, setInlineStageWidth] = createSignal(960);
+  const [dialogStageWidth, setDialogStageWidth] = createSignal(1200);
+  const [dialogStageHeight, setDialogStageHeight] = createSignal(750);
+
+  let inlineStageObserver: ResizeObserver | undefined;
+  let dialogStageObserver: ResizeObserver | undefined;
+
+  const attachInlineStage = (el: HTMLDivElement | undefined) => {
+    inlineStageRef = el;
+    inlineStageObserver?.disconnect();
+    inlineStageObserver = undefined;
+    if (el) {
+      inlineStageObserver = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          if (entry.contentRect.width > 0) {
+            setInlineStageWidth(entry.contentRect.width);
+          }
+        }
+      });
+      inlineStageObserver.observe(el);
+    }
+  };
+
+  const attachDialogStage = (el: HTMLDivElement | undefined) => {
+    dialogStageRef = el;
+    dialogStageObserver?.disconnect();
+    dialogStageObserver = undefined;
+    if (el) {
+      const update = (rect: DOMRectReadOnly) => {
+        if (rect.width > 0) {
+          setDialogStageWidth(rect.width);
+        }
+        if (rect.height > 0) {
+          setDialogStageHeight(rect.height);
+        }
+      };
+      dialogStageObserver = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          update(entry.contentRect);
+        }
+      });
+      dialogStageObserver.observe(el);
+      update(el.getBoundingClientRect());
+    }
+  };
+
+  onCleanup(() => {
+    inlineStageObserver?.disconnect();
+    dialogStageObserver?.disconnect();
+  });
+
+  const clampFrameHeight = (value: number): number =>
+    Math.max(180, Math.min(850, Math.ceil(value) + 16));
+
+  const handleWindowMessage = (event: MessageEvent) => {
+    if (
+      event.data &&
+      typeof event.data === "object" &&
+      event.data.type === "k41-preview-height" &&
+      Number.isFinite(event.data.height)
+    ) {
+      const measured = event.data.height as number;
+      if (measured <= 0 || measured > 10000) {
+        return;
+      }
+      const isFromInline = inlineFrameRef && event.source === inlineFrameRef.contentWindow;
+      const isFromDialog = dialogFrameRef && event.source === dialogFrameRef.contentWindow;
+      if (isFromInline || isFromDialog) {
+        const prev = contentHeight();
+        if (prev !== null && Math.abs(measured - prev) <= 1) {
+          return;
+        }
+        setContentHeight(measured);
+        if (autoHeight() && isFromInline) {
+          const clamped = clampFrameHeight(measured);
+          if (Math.abs(clamped - height()) > 1) {
+            setHeight(clamped);
+          }
+        }
+      }
+    }
+  };
+
+  onMount(() => {
+    window.addEventListener("message", handleWindowMessage);
+    onCleanup(() => window.removeEventListener("message", handleWindowMessage));
   });
 
   const isSuccessResult = () =>
@@ -917,40 +1062,227 @@ function HtmlPreviewBlock(props: {
   });
   onCleanup(() => window.removeEventListener("keydown", handleEscKeyDown));
 
+  // NOTE: the inline iframe is sandboxed (no allow-same-origin), but the
+  // new-tab blob URL runs with full blob-origin privileges (scripts, fetch,
+  // storage). This is intentional for faithful full-page viewing, but the
+  // HTML may come from untrusted agent output, so treat the new tab as
+  // untrusted web content.
+  const handleOpenNewTab = () => {
+    try {
+      const blob = new Blob([previewSrc()], { type: "text/html;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const opened = window.open(url, "_blank", "noopener,noreferrer");
+      if (!opened) {
+        URL.revokeObjectURL(url);
+        showToast("Popup blocked. Allow popups to open the preview.", "error");
+        return;
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch {
+      showToast("Could not open preview in new tab", "error");
+    }
+  };
+
+  const handleResizeStart = (event: PointerEvent) => {
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = height();
+    const cleanup = () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+    };
+    const onPointerMove = (e: PointerEvent) => {
+      const deltaY = e.clientY - startY;
+      const nextHeight = Math.max(180, Math.min(1600, startHeight + deltaY));
+      setHeight(nextHeight);
+      setAutoHeight(false);
+    };
+    const onPointerUp = () => {
+      cleanup();
+    };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
+  };
+
+  const handleResetHeight = () => {
+    setAutoHeight(true);
+    const ch = contentHeight();
+    if (Number.isFinite(ch) && (ch as number) > 0) {
+      setHeight(clampFrameHeight(ch as number));
+    } else {
+      setHeight(defaultHeightFor(isPage()));
+    }
+  };
+
+  const handleZoomIn = () => {
+    setZoom((z) => +(Math.min(2.5, z + 0.15)).toFixed(2));
+  };
+
+  const handleZoomOut = () => {
+    setZoom((z) => +(Math.max(0.3, z - 0.15)).toFixed(2));
+  };
+
+  const handleZoomReset = () => {
+    setZoom(1.0);
+    setScaleToFit(true);
+  };
+
+  const targetWidth = createMemo(() => PREVIEW_VIEWPORT_WIDTHS[viewport()]);
+
+  const effectiveScale = (availableWidth: number) => {
+    const tw = targetWidth();
+    const z = zoom();
+    if (tw === null) {
+      return z;
+    }
+    const cw = availableWidth > 0 ? availableWidth : 960;
+    if (scaleToFit()) {
+      const fit = cw < tw ? cw / tw : 1;
+      return +(fit * z).toFixed(3);
+    }
+    return z;
+  };
+
+  const renderStage = (isDialog: boolean) => {
+    const availableWidth = isDialog ? dialogStageWidth() : inlineStageWidth();
+    const tw = targetWidth();
+    const s = effectiveScale(availableWidth);
+    const frameHeight = isDialog ? dialogStageHeight() : height();
+    const safeScale = Number.isFinite(s) && s > 0 ? s : 1;
+
+    return (
+      <div
+        ref={(el) => {
+          if (isDialog) {
+            attachDialogStage(el);
+          } else {
+            attachInlineStage(el);
+          }
+        }}
+        class="tool-html-preview-stage"
+        style={{
+          height: isDialog ? "100%" : `${height()}px`,
+        }}
+      >
+        <Show
+          when={tw !== null}
+          fallback={
+            <iframe
+              ref={(el) => (isDialog ? (dialogFrameRef = el) : (inlineFrameRef = el))}
+              class="tool-html-preview-frame"
+              style={{
+                width: "100%",
+                height: "100%",
+                border: "0",
+                zoom: `${zoom()}`,
+              }}
+              sandbox="allow-scripts allow-forms"
+              srcdoc={previewSrc()}
+              title={title()}
+            />
+          }
+        >
+          <div
+            class="tool-html-preview-viewport-wrapper"
+            style={{
+              width: scaleToFit()
+                ? `${Math.round(tw! * safeScale)}px`
+                : `${tw!}px`,
+              height: isDialog ? "100%" : `${height()}px`,
+              position: "relative",
+              overflow: scaleToFit() ? "hidden" : "auto",
+              "flex-shrink": "0",
+              margin: "0 auto",
+              "max-width": "100%",
+            }}
+          >
+            <iframe
+              ref={(el) => (isDialog ? (dialogFrameRef = el) : (inlineFrameRef = el))}
+              class="tool-html-preview-frame"
+              style={{
+                position: scaleToFit() ? "absolute" : "static",
+                top: "0",
+                left: "0",
+                width: `${tw!}px`,
+                height: scaleToFit()
+                  ? `${Math.round(frameHeight / safeScale)}px`
+                  : `${Math.round(frameHeight)}px`,
+                transform: scaleToFit() ? `scale(${safeScale})` : undefined,
+                "transform-origin": "top left",
+                border: "0",
+              }}
+              sandbox="allow-scripts allow-forms"
+              srcdoc={previewSrc()}
+              title={title()}
+            />
+          </div>
+        </Show>
+      </div>
+    );
+  };
+
   return (
     <>
-      <section class="tool-html-preview" data-transcript-item-id={props.itemId}>
+      <section
+        class="tool-html-preview"
+        classList={{
+          "is-page": isPage(),
+          "is-fullwidth": isFullWidth(),
+        }}
+        data-transcript-item-id={props.itemId}
+      >
         <div class="tool-html-preview-header">
-          <span class="mono tool-html-preview-title">{title()}</span>
+          <div class="tool-html-preview-title-wrap">
+            <span class="mono tool-html-preview-title">{title()}</span>
+            <Show when={isPage()}>
+              <span class="tool-html-preview-tag" title="Full web page layout detected">
+                Full Page
+              </span>
+            </Show>
+          </div>
           <div class="tool-html-preview-actions">
             <HtmlPreviewToolbar
               mode={mode}
-              onToggle={() => setMode(mode() === "preview" ? "source" : "preview")}
+              onToggleMode={() => setMode(mode() === "preview" ? "source" : "preview")}
               html={props.preview.html}
+              viewport={viewport}
+              onSelectViewport={setViewport}
+              zoom={zoom}
+              onZoomIn={handleZoomIn}
+              onZoomOut={handleZoomOut}
+              onZoomReset={handleZoomReset}
+              scaleToFit={scaleToFit}
+              onToggleScaleToFit={() => setScaleToFit(!scaleToFit())}
+              onOpenNewTab={handleOpenNewTab}
+              isFullWidth={isFullWidth}
+              onToggleFullWidth={() => setIsFullWidth(!isFullWidth())}
+              onExpandDialog={() => setExpanded(true)}
+              autoHeight={autoHeight}
+              onResetHeight={handleResetHeight}
             />
-            <button
-              class="message-action-btn"
-              type="button"
-              onClick={() => setExpanded(true)}
-              title="Open in large popup"
-              aria-label="Open preview in large popup"
-            >
-              <Maximize2 size={14} />
-            </button>
           </div>
         </div>
+        <Show when={isPage() && mode() === "preview"}>
+          <div class="tool-html-preview-hint">
+            <span>Full-page content scaled for desktop preview. Switch device, zoom, or open in new tab.</span>
+          </div>
+        </Show>
         <Show
           when={mode() === "preview"}
           fallback={<pre class="tool-html-preview-source">{props.preview.html}</pre>}
         >
-          <iframe
-            class="tool-html-preview-frame"
-            // Sandbox without `allow-same-origin`: preview scripts run in an
-            // opaque origin and cannot touch dashboard DOM, storage or cookies.
-            sandbox="allow-scripts allow-forms"
-            srcdoc={previewSrc()}
-            title={title()}
-          />
+          {renderStage(false)}
+          <div
+            class="tool-html-preview-resizer"
+            onPointerDown={handleResizeStart}
+            onDblClick={handleResetHeight}
+            title="Drag to resize height (Double-click to auto-fit)"
+            aria-label="Resize preview height"
+          >
+            <GripHorizontal size={14} />
+          </div>
         </Show>
         <Show when={hasErrorResult()}>
           <pre class="tool-html-preview-error">{formatValue(props.result)}</pre>
@@ -973,12 +1305,27 @@ function HtmlPreviewBlock(props: {
               aria-label={title()}
             >
               <header class="dialog-header tool-html-preview-dialog-header">
-                <span class="mono tool-html-preview-title">{title()}</span>
+                <div class="tool-html-preview-title-wrap">
+                  <span class="mono tool-html-preview-title">{title()}</span>
+                  <Show when={isPage()}>
+                    <span class="tool-html-preview-tag">Full Page</span>
+                  </Show>
+                </div>
                 <div class="tool-html-preview-actions">
                   <HtmlPreviewToolbar
                     mode={mode}
-                    onToggle={() => setMode(mode() === "preview" ? "source" : "preview")}
+                    onToggleMode={() => setMode(mode() === "preview" ? "source" : "preview")}
                     html={props.preview.html}
+                    viewport={viewport}
+                    onSelectViewport={setViewport}
+                    zoom={zoom}
+                    onZoomIn={handleZoomIn}
+                    onZoomOut={handleZoomOut}
+                    onZoomReset={handleZoomReset}
+                    scaleToFit={scaleToFit}
+                    onToggleScaleToFit={() => setScaleToFit(!scaleToFit())}
+                    onOpenNewTab={handleOpenNewTab}
+                    isDialog={true}
                   />
                   <button
                     class="btn btn-icon btn-sm"
@@ -996,12 +1343,7 @@ function HtmlPreviewBlock(props: {
                   when={mode() === "preview"}
                   fallback={<pre class="tool-html-preview-source">{props.preview.html}</pre>}
                 >
-                  <iframe
-                    class="tool-html-preview-frame"
-                    sandbox="allow-scripts allow-forms"
-                    srcdoc={previewSrc()}
-                    title={title()}
-                  />
+                  {renderStage(true)}
                 </Show>
                 <Show when={hasErrorResult()}>
                   <pre class="tool-html-preview-error">{formatValue(props.result)}</pre>
@@ -1017,23 +1359,187 @@ function HtmlPreviewBlock(props: {
 
 function HtmlPreviewToolbar(props: {
   mode: Accessor<"preview" | "source">;
-  onToggle: () => void;
+  onToggleMode: () => void;
   html: string;
+  viewport: Accessor<PreviewViewport>;
+  onSelectViewport: (vp: PreviewViewport) => void;
+  zoom: Accessor<number>;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onZoomReset: () => void;
+  scaleToFit?: Accessor<boolean>;
+  onToggleScaleToFit?: () => void;
+  onOpenNewTab: () => void;
+  isDialog?: boolean;
+  isFullWidth?: Accessor<boolean>;
+  onToggleFullWidth?: () => void;
+  onExpandDialog?: () => void;
+  autoHeight?: Accessor<boolean>;
+  onResetHeight?: () => void;
 }) {
   const isPreview = () => props.mode() === "preview";
+
   return (
     <>
+      <Show when={isPreview()}>
+        <div class="tool-html-preview-btn-group" title="Preview Viewport Mode">
+          <button
+            class="message-action-btn"
+            classList={{ "is-active": props.viewport() === "responsive" }}
+            type="button"
+            onClick={() => props.onSelectViewport("responsive")}
+            title="Responsive (Fluid 100%)"
+            aria-label="Responsive viewport"
+          >
+            Auto
+          </button>
+          <button
+            class="message-action-btn"
+            classList={{ "is-active": props.viewport() === "desktop" }}
+            type="button"
+            onClick={() => props.onSelectViewport("desktop")}
+            title="Desktop (1280px, scale-to-fit)"
+            aria-label="Desktop viewport"
+          >
+            <Monitor size={13} />
+          </button>
+          <button
+            class="message-action-btn"
+            classList={{ "is-active": props.viewport() === "tablet" }}
+            type="button"
+            onClick={() => props.onSelectViewport("tablet")}
+            title="Tablet (768px)"
+            aria-label="Tablet viewport"
+          >
+            <Tablet size={13} />
+          </button>
+          <button
+            class="message-action-btn"
+            classList={{ "is-active": props.viewport() === "mobile" }}
+            type="button"
+            onClick={() => props.onSelectViewport("mobile")}
+            title="Mobile (375px)"
+            aria-label="Mobile viewport"
+          >
+            <Smartphone size={13} />
+          </button>
+        </div>
+
+        <div class="tool-html-preview-btn-group" title="Zoom Controls">
+          <button
+            class="message-action-btn"
+            type="button"
+            onClick={props.onZoomOut}
+            title="Zoom out (-15%)"
+            aria-label="Zoom out"
+          >
+            <ZoomOut size={13} />
+          </button>
+          <button
+            class="tool-html-preview-zoom-btn"
+            type="button"
+            onClick={props.onZoomReset}
+            title="Click to reset zoom (100%)"
+            aria-label="Reset zoom"
+          >
+            {Math.round(props.zoom() * 100)}%
+          </button>
+          <button
+            class="message-action-btn"
+            type="button"
+            onClick={props.onZoomIn}
+            title="Zoom in (+15%)"
+            aria-label="Zoom in"
+          >
+            <ZoomIn size={13} />
+          </button>
+        </div>
+
+        <Show when={props.onToggleScaleToFit && props.viewport() !== "responsive"}>
+          <button
+            class="message-action-btn"
+            classList={{ "is-active": props.scaleToFit?.() }}
+            type="button"
+            onClick={props.onToggleScaleToFit}
+            title={
+              props.scaleToFit?.()
+                ? "Scale to fit enabled (click for 1:1 with scroll)"
+                : "Scale to fit disabled (click to fit width)"
+            }
+            aria-label="Toggle scale to fit"
+            aria-pressed={props.scaleToFit?.()}
+          >
+            <Shrink size={13} />
+          </button>
+        </Show>
+
+        <Show when={!props.isDialog && props.onResetHeight}>
+          <button
+            class="message-action-btn"
+            classList={{ "is-active": props.autoHeight?.() }}
+            type="button"
+            onClick={props.onResetHeight}
+            title={
+              props.autoHeight?.()
+                ? "Auto-height enabled (click to re-fit)"
+                : "Fit content height"
+            }
+            aria-label="Fit content height"
+          >
+            <RotateCcw size={13} />
+          </button>
+        </Show>
+
+        <Show when={!props.isDialog && props.onToggleFullWidth}>
+          <button
+            class="message-action-btn"
+            classList={{ "is-active": props.isFullWidth?.() }}
+            type="button"
+            onClick={props.onToggleFullWidth}
+            title={props.isFullWidth?.() ? "Reset chat width" : "Expand to full width"}
+            aria-label="Toggle full width preview"
+          >
+            <Show when={props.isFullWidth?.()} fallback={<Expand size={13} />}>
+              <Shrink size={13} />
+            </Show>
+          </button>
+        </Show>
+      </Show>
+
       <button
         class="message-action-btn"
         type="button"
-        onClick={props.onToggle}
+        onClick={props.onOpenNewTab}
+        title="Open in new browser tab"
+        aria-label="Open in new browser tab"
+      >
+        <ExternalLink size={13} />
+      </button>
+
+      <Show when={!props.isDialog && props.onExpandDialog}>
+        <button
+          class="message-action-btn"
+          type="button"
+          onClick={props.onExpandDialog}
+          title="Open in popup dialog"
+          aria-label="Open preview in large popup"
+        >
+          <Maximize2 size={13} />
+        </button>
+      </Show>
+
+      <button
+        class="message-action-btn"
+        type="button"
+        onClick={props.onToggleMode}
         title={isPreview() ? "Show HTML source" : "Show rendered preview"}
         aria-label={isPreview() ? "Show HTML source" : "Show rendered preview"}
       >
-        <Show when={isPreview()} fallback={<Eye size={14} />}>
-          <Code size={14} />
+        <Show when={isPreview()} fallback={<Eye size={13} />}>
+          <Code size={13} />
         </Show>
       </button>
+
       <CopyButton
         value={props.html}
         class="message-action-btn"
@@ -1042,7 +1548,7 @@ function HtmlPreviewToolbar(props: {
         copiedTitle="Copied"
         successMessage="HTML copied."
         failureMessage="Copy failed"
-        iconSize={14}
+        iconSize={13}
       />
     </>
   );

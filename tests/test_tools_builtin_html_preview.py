@@ -21,3 +21,15 @@ def test_html_preview_registration_metadata() -> None:
 
 def test_html_preview_name() -> None:
     assert html_preview.name == "html_preview"
+
+
+def test_html_preview_with_mode() -> None:
+    result = html_preview.invoke(
+        {"html": "<div>card</div>", "title": "Card Demo", "mode": "card"}
+    )
+    assert result == f"HTML preview ready ({len('<div>card</div>')} chars): Card Demo"
+
+    result_page = html_preview.invoke(
+        {"html": "<html>...</html>", "title": "Page Demo", "mode": "full_page"}
+    )
+    assert result_page == f"HTML preview ready ({len('<html>...</html>')} chars): Page Demo"

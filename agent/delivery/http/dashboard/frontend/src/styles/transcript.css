@@ -213,17 +213,32 @@
   border-radius: 8px;
   background: var(--surface);
   overflow: hidden;
+  transition: width 0.15s ease;
+}
+
+.tool-html-preview.is-fullwidth {
+  width: 100% !important;
+  max-width: 100% !important;
 }
 
 .tool-html-preview-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
   padding: 6px 10px;
   border-bottom: 1px solid var(--border);
   background: var(--surface-2);
+  flex-wrap: wrap;
+}
+
+.tool-html-preview-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .tool-html-preview-title {
@@ -232,26 +247,137 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
+  font-weight: 500;
   color: var(--muted);
+}
+
+.tool-html-preview-tag {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  color: var(--primary);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
 }
 
 .tool-html-preview-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.tool-html-preview-btn-group {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  overflow: hidden;
+  height: 24px;
+}
+
+.tool-html-preview-btn-group .message-action-btn {
+  border: 0;
+  border-radius: 0;
+  height: 100%;
+  padding: 0 6px;
+  font-size: 11px;
+}
+
+.tool-html-preview-btn-group .message-action-btn + .message-action-btn,
+.tool-html-preview-btn-group .message-action-btn + .tool-html-preview-zoom-btn,
+.tool-html-preview-btn-group .tool-html-preview-zoom-btn + .message-action-btn {
+  border-left: 1px solid var(--border);
+}
+
+.tool-html-preview-btn-group .message-action-btn.is-active {
+  background: color-mix(in srgb, var(--primary) 16%, transparent);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.tool-html-preview-zoom-btn {
+  border: 0;
+  background: transparent;
+  padding: 0 5px;
+  font-size: 10px;
+  font-family: var(--font-mono, monospace);
+  color: var(--muted);
+  cursor: pointer;
+  height: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.tool-html-preview-zoom-btn:hover {
+  color: var(--fg);
+  background: var(--surface-2);
+}
+
+.tool-html-preview-stage {
+  position: relative;
+  width: 100%;
+  background: color-mix(in srgb, var(--surface-2) 65%, var(--border));
+  overflow: auto;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+.tool-html-preview-viewport-wrapper {
+  position: relative;
+  background: #ffffff;
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.08);
 }
 
 .tool-html-preview-frame {
   display: block;
   width: 100%;
-  height: 420px;
+  height: 100%;
   border: 0;
   background: #ffffff;
 }
 
+.tool-html-preview-resizer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 12px;
+  width: 100%;
+  cursor: row-resize;
+  background: var(--surface-2);
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  user-select: none;
+  touch-action: none;
+  transition: background 0.15s ease;
+}
+
+.tool-html-preview-resizer:hover,
+.tool-html-preview-resizer:active {
+  background: color-mix(in srgb, var(--primary) 15%, var(--surface-2));
+  color: var(--primary);
+}
+
+.tool-html-preview-hint {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+  color: var(--muted);
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .tool-html-preview-source {
-  max-height: 420px;
+  width: 100%;
+  max-height: 520px;
   overflow: auto;
   margin: 0;
   padding: 10px;
@@ -259,6 +385,7 @@
   background: transparent;
   white-space: pre-wrap;
   font-size: 12px;
+  box-sizing: border-box;
 }
 
 .tool-html-preview-error {
@@ -279,7 +406,7 @@
 }
 
 .tool-html-preview-dialog-header {
-  padding: 10px 14px;
+  padding: 8px 12px;
 }
 
 .tool-html-preview-dialog-header .tool-html-preview-title {
@@ -296,9 +423,9 @@
   padding: 0;
 }
 
-.tool-html-preview-dialog-body .tool-html-preview-frame {
+.tool-html-preview-dialog-body .tool-html-preview-stage {
   flex: 1 1 auto;
-  height: auto;
+  height: 100% !important;
 }
 
 .tool-html-preview-dialog-body .tool-html-preview-source {
