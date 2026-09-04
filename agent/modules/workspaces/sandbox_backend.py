@@ -139,6 +139,16 @@ class SandboxBackendBase(ABC):
             return raw.decode("utf-8", errors="replace")
         return str(raw or "")
 
+    async def read_bytes(self, file_path: str) -> bytes:
+        """Read a file from the sandbox as raw bytes."""
+        from agent.modules.workspaces.posix_utils import resolve_remote_path
+
+        remote_path = resolve_remote_path(self.root, file_path)
+        raw = self._download_file(remote_path)
+        if isinstance(raw, str):
+            return raw.encode("utf-8")
+        return bytes(raw or b"")
+
     async def write_text(self, file_path: str, content: str, *, append: bool = False) -> str:
         """Write a text file to the sandbox."""
         from agent.modules.workspaces.posix_utils import resolve_remote_path

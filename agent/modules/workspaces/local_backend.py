@@ -109,6 +109,11 @@ class LocalWorkspaceBackend:
         with open(full_path, "r", encoding="utf-8", errors="replace") as file_handle:
             return file_handle.read()
 
+    async def read_bytes(self, file_path: str) -> bytes:
+        full_path = resolve_safe_path(str(self.root), file_path)
+        with open(full_path, "rb") as file_handle:
+            return file_handle.read()
+
     async def write_text(self, file_path: str, content: str, *, append: bool = False) -> str:
         full_path = resolve_safe_path(str(self.root), file_path)
         parent = os.path.dirname(full_path)

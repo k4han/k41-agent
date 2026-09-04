@@ -1013,6 +1013,14 @@ class DaytonaWorkspaceBackend(SandboxBackendBase):
             return raw
         return bytes(raw or b"").decode("utf-8", errors="replace")
 
+    async def read_bytes(self, file_path: str) -> bytes:
+        self.ensure_active()
+        remote_path = resolve_daytona_path(self.root, file_path)
+        raw = self._download_file(remote_path)
+        if isinstance(raw, str):
+            return raw.encode("utf-8")
+        return bytes(raw or b"")
+
     async def write_text(self, file_path: str, content: str, *, append: bool = False) -> str:
         self.ensure_active()
         self._invalidate_workspace_caches()

@@ -20,6 +20,22 @@ MAX_UNTRACKED_FILE_CHARS = 120_000
 # Cloud metadata cache
 METADATA_CACHE_TTL_SECONDS = 1.0
 
+# Image reading limits for multimodal tools (e.g. read_file auto-detect)
+MAX_IMAGE_READ_BYTES = 5 * 1024 * 1024
+SUPPORTED_IMAGE_EXTENSIONS: frozenset[str] = frozenset({
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".gif",
+})
+SUPPORTED_IMAGE_MIME_TYPES: frozenset[str] = frozenset({
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "image/gif",
+})
+
 # Directories to ignore when listing files
 IGNORED_DIR_NAMES: frozenset[str] = frozenset({
     ".cache",
@@ -42,8 +58,11 @@ __all__ = [
     "MAX_GLOB_RESULTS",
     "MAX_GREP_LINE_CHARS",
     "MAX_GREP_RESULTS",
+    "MAX_IMAGE_READ_BYTES",
     "MAX_LIST_FILES_ENTRIES",
     "MAX_TREE_ENTRIES",
     "MAX_UNTRACKED_FILE_CHARS",
     "METADATA_CACHE_TTL_SECONDS",
+    "SUPPORTED_IMAGE_EXTENSIONS",
+    "SUPPORTED_IMAGE_MIME_TYPES",
 ]

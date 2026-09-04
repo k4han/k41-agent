@@ -53,6 +53,12 @@ class WorkspaceFileIO(Protocol):
     async def read_text(self, file_path: str) -> str:
         ...
 
+    async def read_bytes(self, file_path: str) -> bytes:
+        raise UnsupportedWorkspaceCapabilityError(
+            backend=getattr(getattr(self, "ref", None), "backend", "unknown"),
+            capability="read_bytes",
+        )
+
     async def write_text(self, file_path: str, content: str, *, append: bool = False) -> str:
         ...
 

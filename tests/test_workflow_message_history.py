@@ -51,18 +51,19 @@ def test_normalize_tool_text_blocks_to_string_preserves_tool_metadata():
     assert normalized[0].status == "success"
 
 
-def test_normalize_tool_image_blocks_to_string_omits_binary_payload():
+def test_normalize_tool_image_blocks_preserves_multimodal_payload():
     artifact = {"raw": "kept outside model payload"}
+    content = [
+        {"type": "text", "text": "Screenshot 'wiki_mat_troi' taken at 0x0"},
+        {
+            "type": "image",
+            "base64": "raw-image-data",
+            "mime_type": "image/png",
+            "id": "lc_123",
+        },
+    ]
     message = ToolMessage(
-        content=[
-            {"type": "text", "text": "Screenshot 'wiki_mat_troi' taken at 0x0"},
-            {
-                "type": "image",
-                "base64": "raw-image-data",
-                "mime_type": "image/png",
-                "id": "lc_123",
-            },
-        ],
+        content=content,
         tool_call_id="call-1",
         name="mcp__sanbox__browser_screenshot",
         artifact=artifact,
@@ -70,11 +71,7 @@ def test_normalize_tool_image_blocks_to_string_omits_binary_payload():
 
     normalized = normalize_messages_for_chat_model([message])
 
-    assert normalized[0].content == (
-        "Screenshot 'wiki_mat_troi' taken at 0x0\n\n"
-        "[image content omitted: mime_type=image/png, source=base64, id=lc_123]"
-    )
-    assert "raw-image-data" not in normalized[0].content
+    assert normalized[0].content == content
     assert normalized[0].tool_call_id == "call-1"
     assert normalized[0].name == "mcp__sanbox__browser_screenshot"
     assert normalized[0].artifact == artifact
@@ -111,3 +108,39 @@ def test_normalize_assistant_blocks_still_strips_non_text_blocks():
     normalized = normalize_messages_for_chat_model([message])
 
     assert normalized[0].content == "Visible answer"
+
+
+def test_normalize_tool_mixed_image_and_file_omits_non_text():
+    message = ToolMessage(
+        content=[
+            {"type": "text", "text": "See screenshot"},
+            {"type": "image", "base64": "YWJjZA==", "mime_type": "image/png"},
+            {
+                "type": "file",
+                "url": "https://example.test/report.pdf",
+                "mimeType": "application/pdf",
+            },
+        ],
+        tool_call_id="call-1",
+    )
+
+    normalized = normalize_messages_for_chat_model([message])
+
+    content = normalized[0].content
+    assert isinstance(content, list)
+    assert content[0] == {"type": "text", "text": "See screenshot"}
+    assert content[1]["type"] == "image"
+    assert content[2]["type"] == "text"
+    assert "file content omitted" in content[2]["text"]
+
+
+def test_normalize_tool_image_url_blocks_preserved():
+    content = [
+        {"type": "text", "text": "Look"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}},
+    ]
+    message = ToolMessage(content=content, tool_call_id="call-1")
+
+    normalized = normalize_messages_for_chat_model([message])
+
+    assert normalized[0].content == content

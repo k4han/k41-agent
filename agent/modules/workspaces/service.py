@@ -665,6 +665,18 @@ class _RecoveringModalWorkspaceBackend:
     async def read_text(self, file_path: str) -> str:
         return await self._run(lambda backend: backend.read_text(file_path))
 
+    async def read_bytes(self, file_path: str) -> bytes:
+        def _read(backend: Any) -> Awaitable[bytes]:
+            reader = getattr(backend, "read_bytes", None)
+            if not callable(reader):
+                raise UnsupportedWorkspaceCapabilityError(
+                    backend=getattr(getattr(backend, "ref", None), "backend", "modal"),
+                    capability="read_bytes",
+                )
+            return reader(file_path)
+
+        return await self._run(_read)
+
     async def write_text(self, file_path: str, content: str, *, append: bool = False) -> str:
         return await self._run(lambda backend: backend.write_text(file_path, content, append=append))
 

@@ -13,6 +13,7 @@ from pathlib import Path
 
 from agent.modules.tools.runtime.path_guard import resolve_safe_path
 from agent.modules.workspaces import (
+    UnsupportedWorkspaceCapabilityError,
     WorkspaceScope,
     WorkspaceFileIO,
 )
@@ -517,6 +518,18 @@ class WorkspaceStorageFileIO:
 
     async def read_text(self, file_path: str) -> str:
         return await self._base.read_text(file_path)
+
+    async def read_bytes(self, file_path: str) -> bytes:
+        reader = getattr(self._base, "read_bytes", None)
+        if callable(reader):
+            result = reader(file_path)
+            if inspect.isawaitable(result):
+                return await result
+            return result
+        raise UnsupportedWorkspaceCapabilityError(
+            backend=getattr(getattr(self._base, "ref", None), "backend", "unknown"),
+            capability="read_bytes",
+        )
 
     async def write_text(self, file_path: str, content: str, *, append: bool = False) -> str:
         return await self._base.write_text(file_path, content, append=append)

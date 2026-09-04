@@ -89,6 +89,58 @@ def _human_text_from_content_list(content: list[Any]) -> tuple[str, bool]:
     return "\n\n".join(text_parts).strip(), True
 
 
+def _is_image_part(part: Any) -> bool:
+    if not isinstance(part, dict):
+        return False
+    part_type = str(part.get("type") or "").strip().lower()
+    if part_type in ("image", "image_url"):
+        return True
+    image_url = part.get("image_url")
+    if isinstance(image_url, (str, dict)):
+        return True
+    return False
+
+
+def _tool_content_has_image(content: list[Any]) -> bool:
+    for part in content:
+        if isinstance(part, dict):
+            if _is_image_part(part):
+                return True
+            nested = part.get("content")
+            if isinstance(nested, list) and _tool_content_has_image(nested):
+                return True
+    return False
+
+
+def _normalize_tool_content_for_model(content: list[Any]) -> list[Any]:
+    """Keep text and image blocks, replace other non-text blocks with placeholders."""
+    normalized: list[Any] = []
+    for part in content:
+        if isinstance(part, dict):
+            if _is_image_part(part):
+                normalized.append(part)
+                continue
+            text, handled = _human_text_from_part(part)
+            if handled:
+                normalized.append(part)
+                continue
+            content_value = part.get("content")
+            if isinstance(content_value, str):
+                normalized.append(part)
+                continue
+            if isinstance(content_value, list):
+                normalized.append(
+                    {**part, "content": _normalize_tool_content_for_model(content_value)}
+                )
+                continue
+            normalized.append(
+                {"type": "text", "text": _tool_omitted_content_text(part)}
+            )
+            continue
+        normalized.append(part)
+    return normalized
+
+
 def _tool_metadata_value(part: dict[str, Any], *keys: str) -> str:
     for key in keys:
         value = part.get(key)
@@ -160,6 +212,15 @@ def normalize_messages_for_chat_model(messages: list[BaseMessage]) -> list[BaseM
                 continue
 
         if isinstance(message, ToolMessage) and isinstance(content, list):
+            if _tool_content_has_image(content):
+                normalized_messages.append(
+                    message.model_copy(
+                        update={
+                            "content": _normalize_tool_content_for_model(content)
+                        }
+                    )
+                )
+                continue
             normalized_messages.append(
                 message.model_copy(
                     update={"content": _tool_text_from_content_list(content)}
