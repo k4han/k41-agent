@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import fnmatch
 import os
 import re
 import subprocess
@@ -20,6 +19,7 @@ from agent.modules.workspaces.search_utils import (
     clamp_grep_results,
     compile_glob_pattern,
     match_glob_path,
+    match_include_pattern,
 )
 from agent.modules.workspaces.service import (
     delete_workspace_entry,
@@ -221,7 +221,7 @@ class LocalWorkspaceBackend:
         for current_root, dirs, files in os.walk(base, followlinks=False):
             dirs[:] = sorted(d for d in dirs if d not in IGNORED_DIR_NAMES)
             for filename in sorted(files):
-                if include and not fnmatch.fnmatchcase(filename, include):
+                if not match_include_pattern(filename, include):
                     continue
                 full_path = os.path.join(current_root, filename)
                 rel_path = os.path.relpath(full_path, str(self.root)).replace(

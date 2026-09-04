@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fnmatch
 import glob
 import json
 import re
@@ -32,7 +33,59 @@ if not os.path.isdir(target):
     print("(Directory not found)")
     raise SystemExit(0)
 
-pattern_regex = re.compile(glob.translate(pattern, recursive=True, include_hidden=True))
+def _split_brace_inner(inner):
+    parts, depth, current = [], 0, ""
+    for ch in inner:
+        if ch == "," and depth == 0:
+            parts.append(current)
+            current = ""
+        else:
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth = max(0, depth - 1)
+            current += ch
+    parts.append(current)
+    return parts
+
+def _expand_braces(pattern):
+    start = pattern.find("{")
+    if start == -1:
+        return [pattern]
+    depth = 0
+    end = -1
+    for idx in range(start, len(pattern)):
+        if pattern[idx] == "{":
+            depth += 1
+        elif pattern[idx] == "}":
+            depth -= 1
+            if depth == 0:
+                end = idx
+                break
+    if end == -1:
+        return [pattern]
+    prefix, inner, suffix = pattern[:start], pattern[start + 1:end], pattern[end + 1:]
+    parts = _split_brace_inner(inner)
+    if len(parts) <= 1:
+        return [prefix + "{" + inner + "}" + rest for rest in _expand_braces(suffix)]
+    expanded = []
+    for part in parts:
+        for rest in _expand_braces(prefix + part + suffix):
+            expanded.append(rest)
+    return expanded
+
+def _compile_glob(pattern):
+    # NOTE: keep in sync with compile_glob_pattern below. This copy runs
+    # inside the sandbox script and cannot import this module.
+    # Each glob.translate result is already a full-match regex, so combine
+    # them with alternation instead of stripping internal wrappers.
+    translated = [
+        glob.translate(item, recursive=True, include_hidden=True)
+        for item in _expand_braces(pattern)
+    ]
+    return re.compile("(?:%s)" % "|".join(translated))
+
+pattern_regex = _compile_glob(pattern)
 
 count = 0
 for current_root, dirs, files in os.walk(target, followlinks=False):
@@ -66,8 +119,60 @@ def clamp_grep_results(max_results: int) -> int:
     return min(max_results, MAX_GREP_RESULTS)
 
 
+def _split_brace_inner(inner: str) -> list[str]:
+    parts: list[str] = []
+    depth = 0
+    current: list[str] = []
+    for ch in inner:
+        if ch == "," and depth == 0:
+            parts.append("".join(current))
+            current = []
+        else:
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth = max(0, depth - 1)
+            current.append(ch)
+    parts.append("".join(current))
+    return parts
+
+
+def expand_brace_patterns(pattern: str) -> list[str]:
+    start = pattern.find("{")
+    if start == -1:
+        return [pattern]
+    depth = 0
+    end = -1
+    for idx in range(start, len(pattern)):
+        if pattern[idx] == "{":
+            depth += 1
+        elif pattern[idx] == "}":
+            depth -= 1
+            if depth == 0:
+                end = idx
+                break
+    if end == -1:
+        return [pattern]
+    prefix, inner, suffix = pattern[:start], pattern[start + 1 : end], pattern[end + 1 :]
+    parts = _split_brace_inner(inner)
+    if len(parts) <= 1:
+        return [prefix + "{" + inner + "}" + rest for rest in expand_brace_patterns(suffix)]
+    expanded: list[str] = []
+    for part in parts:
+        expanded.extend(expand_brace_patterns(prefix + part + suffix))
+    return expanded
+
+
 def compile_glob_pattern(pattern: str) -> re.Pattern[str]:
-    return re.compile(glob.translate(pattern, recursive=True, include_hidden=True))
+    # NOTE: keep in sync with _compile_glob in SANDBOX_GLOB_SCRIPT above.
+    # Each glob.translate result is already a full-match regex, so combine
+    # them with alternation instead of stripping internal wrappers. This
+    # avoids depending on the exact wrapper format of glob.translate.
+    translated = [
+        glob.translate(item, recursive=True, include_hidden=True)
+        for item in expand_brace_patterns(pattern)
+    ]
+    return re.compile("(?:%s)" % "|".join(translated))
 
 
 def match_glob_path(
@@ -83,6 +188,15 @@ def match_glob_path(
         or pattern_regex.match(check_rel)
         or pattern_regex.match(sub_rel_path)
         or pattern_regex.match(check_sub)
+    )
+
+
+def match_include_pattern(filename: str, include: str | None) -> bool:
+    if not include:
+        return True
+    return any(
+        fnmatch.fnmatchcase(filename, expanded)
+        for expanded in expand_brace_patterns(include)
     )
 
 
@@ -121,7 +235,13 @@ def build_sandbox_grep_command(
 ) -> str:
     effective_max = clamp_grep_results(max_results)
     flags = "-ErnI" + ("i" if case_insensitive else "")
-    include_clause = f" --include={shlex.quote(include)}" if include else ""
+    if include:
+        include_clause = "".join(
+            f" --include={shlex.quote(expanded)}"
+            for expanded in expand_brace_patterns(include)
+        )
+    else:
+        include_clause = ""
     excluded = " ".join(
         f"--exclude-dir={shlex.quote(name)}" for name in sorted(IGNORED_DIR_NAMES)
     )
@@ -199,6 +319,8 @@ __all__ = [
     "build_sandbox_grep_command",
     "clamp_grep_results",
     "compile_glob_pattern",
+    "expand_brace_patterns",
+    "match_include_pattern",
     "match_glob_path",
     "render_sandbox_glob_output",
     "render_sandbox_grep_output",

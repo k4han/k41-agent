@@ -31,7 +31,9 @@ from agent.modules.workspaces.constants import (
 from agent.modules.workspaces.search_utils import (
     clamp_grep_results,
     compile_glob_pattern,
+    expand_brace_patterns,
     match_glob_path,
+    match_include_pattern,
 )
 from agent.modules.workspaces.posix_utils import resolve_remote_path
 from agent.modules.workspaces.migrations import migrate_workspace_tables
@@ -160,7 +162,9 @@ __all__ = [
     "attach_github_repository_to_daytona_workspace",
     "clamp_grep_results",
     "compile_glob_pattern",
+    "expand_brace_patterns",
     "match_glob_path",
+    "match_include_pattern",
     "attach_github_repository_to_local_workspace",
     "attach_github_repository_to_local_workspace_async",
     "attach_github_repository_to_modal_workspace",

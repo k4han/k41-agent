@@ -23,10 +23,11 @@ async def glob(
 ) -> str:
     """Find files in the workspace by glob pattern.
 
-    Patterns follow standard glob syntax (``*``, ``?``, ``**``). Results are
-    returned as relative paths, one per line. Ignored directories such as
-    ``.git`` and ``node_modules`` are excluded. Set ``include_dirs=True`` to
-    also match directories.
+    Patterns follow standard glob syntax (``*``, ``?``, ``**``) plus
+    ``{a,b}`` brace expansion (e.g. ``**/*.{png,jpg,jpeg,webp,gif}``).
+    Results are returned as relative paths, one per line. Ignored
+    directories such as ``.git``, ``.venv`` and ``node_modules`` are
+    excluded. Set ``include_dirs=True`` to also match directories.
     """
     if not pattern or not pattern.strip():
         raise ToolError(

@@ -27,7 +27,8 @@ async def grep(
 
     ``pattern`` is treated as a regular expression (matching is unanchored
     and case-sensitive by default). Use ``include`` to restrict the search
-    to files whose name matches a glob (e.g. ``*.py``). Results are
+    to files whose name matches a glob (e.g. ``*.py``). ``include`` also
+    supports ``{a,b}`` brace expansion (e.g. ``*.{py,md}``). Results are
     formatted as ``path:line: matched text`` and are truncated to
     ``max_results`` entries (capped at 100).
     """
