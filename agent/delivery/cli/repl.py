@@ -107,7 +107,17 @@ async def _stream_agent_response(session: CLISession, user_input: str) -> None:
                     last_text = content
     except Exception as exc:
         logger.exception("Agent run failed")
-        console.print(f"  [bold red]✖[/bold red] [red]{exc}[/red]\n")
+        message = str(exc)
+        if "No providers configured" in message or "No enabled providers" in message:
+            console.print(f"  [bold red]✖[/bold red] [red]{exc}[/red]\n")
+            console.print(
+                "  [yellow]Chưa cấu hình LLM provider.[/yellow]\n"
+                "  Hãy mở Dashboard [cyan]/dashboard -> Settings -> Providers[/cyan] để thêm provider,\n"
+                "  hoặc cấu hình [cyan]llm.providers.<name>.api_key[/cyan] và [cyan]llm.default_model[/cyan] trong runtime settings.\n"
+                "  Sau đó chạy lại [cyan]k41 cli[/cyan].\n"
+            )
+        else:
+            console.print(f"  [bold red]✖[/bold red] [red]{exc}[/red]\n")
         return
 
     if last_text:

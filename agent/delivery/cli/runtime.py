@@ -16,9 +16,11 @@ from agent.modules.workflows import (
     initialize_checkpointer,
     register_builtin_workflows,
 )
+from agent.shared.config import attach_database_config_source, detach_database_config_source
 from agent.shared.infrastructure.db import Base, load_orm_models
 from agent.shared.infrastructure.db.engine import (
     close_async_engine,
+    get_database_url,
     initialize_async_engine,
 )
 
@@ -38,6 +40,7 @@ class CLIRuntime:
         logger.info("Initializing CLI runtime...")
         load_orm_models()
         await initialize_async_engine(metadata=Base.metadata)
+        attach_database_config_source(get_database_url())
         await initialize_checkpointer()
         register_builtin_workflows()
         reload_skills()
@@ -52,6 +55,7 @@ class CLIRuntime:
         logger.info("Stopping CLI runtime...")
         await stop_scheduler()
         await close_checkpointer()
+        detach_database_config_source()
         await close_async_engine()
         self._started = False
         logger.info("CLI runtime stopped.")
