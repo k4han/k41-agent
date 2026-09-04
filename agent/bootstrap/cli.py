@@ -592,6 +592,26 @@ def serve(foreground: bool = False, tray: bool = False, no_tray: bool = False) -
         except (ValueError, OSError):
             pass
 
+    # Health fallback: PID file stale/missing but server is still serving.
+    # Prevent duplicate spawn and give accurate "already running" message.
+    try:
+        import httpx
+
+        health_url = _health_url(config.host, config.port)
+        resp = httpx.get(health_url, timeout=2.0)
+        if resp.status_code == 200:
+            _echo_warning(
+                "Server health endpoint is reachable but PID check failed - server is actually running (stale PID file)."
+            )
+            _echo_warning("If you want to restart, run `k41 stop` (may need --with-tray) then `k41`.")
+            _print_server_endpoints(config)
+            _print_common_commands()
+            raise typer.Exit(1)
+    except typer.Exit:
+        raise
+    except Exception:
+        pass
+
     if not foreground and os.environ.get("K41_DAEMONIZED") != "1":
         _echo_info("Starting Kai Agent in background...")
         from agent.bootstrap.process_utils import spawn_detached_process
@@ -702,38 +722,74 @@ def status() -> None:
     ui.console.print()
 
     # --- Server process state ---
+    # Load config early so health fallback can run even when PID is stale/missing
+    base_url: str | None = None
+    config: Any = None
+    try:
+        from agent.bootstrap.settings import load_bootstrap_config
+
+        config = load_bootstrap_config()
+        base_url = _base_url(config.host, config.port)
+    except Exception:
+        base_url = None
+        config = None
+
     server_ok = False
     pid_text = ""
+    pid_stale_reason = ""
     if PID_FILE.exists():
         pid_text = PID_FILE.read_text().strip()
         try:
             pid = int(pid_text)
         except ValueError:
             _echo_error("Invalid PID file content.")
+            pid_stale_reason = "invalid pid file"
         else:
             if not _is_process_alive(pid):
                 _echo_warning("Server process is not running. PID file may be stale.")
+                pid_stale_reason = "process not alive"
             elif not _is_k41_process(pid):
                 _echo_warning("Process is not a Kai Agent server. PID file may be stale.")
+                pid_stale_reason = "not a k41 process"
             else:
                 server_ok = True
-    # Server state will be displayed in the services_table below
+    else:
+        pid_stale_reason = "pid file missing"
 
-
-    base_url: str | None = None
-    config: Any = None
-    if server_ok:
+    # Health fallback: if PID check says stopped but health endpoint is reachable,
+    # the server is actually running (pid file stale/deleted, pid reused, etc.).
+    health_data: Any = None
+    health_fetch_error: str | None = None
+    health_status_code: int | None = None
+    if base_url is not None:
         try:
-            from agent.bootstrap.settings import load_bootstrap_config
-
-            config = load_bootstrap_config()
-            base_url = _base_url(config.host, config.port)
-        except Exception:
-            base_url = None
+            url = _health_url_from_base(base_url)
+            resp = httpx.get(url, timeout=3.0)
+            health_status_code = resp.status_code
+            if resp.status_code == 200:
+                health_data = resp.json()
+                if not server_ok:
+                    _echo_warning(
+                        f"Server PID check failed ({pid_stale_reason}) but health endpoint is reachable - server is actually running."
+                    )
+                    server_ok = True
+                    if pid_text:
+                        pid_text = f"{pid_text} (stale, health ok)"
+                    else:
+                        pid_text = "unknown (health check)"
+            elif server_ok:
+                health_fetch_error = f"Health endpoint returned HTTP {resp.status_code}."
+        except httpx.ConnectError:
+            if server_ok:
+                health_fetch_error = "Could not connect to the health endpoint yet."
+        except Exception as e:
+            if server_ok:
+                health_fetch_error = f"Could not query health: {e}"
 
     rows: list[tuple[bool | None, str, str, str]] = []
     if server_ok:
-        rows.append((True, "Server", f"running (pid {pid_text})", base_url or ""))
+        label = f"running (pid {pid_text})" if pid_text else "running (health check)"
+        rows.append((True, "Server", label, base_url or ""))
         if config and getattr(config, "enable_dashboard", False) and base_url:
             rows.append((True, "Dashboard", "ready", f"{base_url}/dashboard"))
         if config and getattr(config, "enable_api", False) and base_url:
@@ -765,27 +821,49 @@ def status() -> None:
 
     # --- Health & channels ---
     if server_ok and base_url:
-        try:
-            url = _health_url_from_base(base_url)
-            resp = httpx.get(url, timeout=3.0)
-            if resp.status_code == 200:
-                data = resp.json()
-                channels = data.get("services", [])
-                if channels:
-                    healthy = {"running", "ok", "connected", "active", "started"}
-                    for ch in channels:
-                        name = str(ch.get("name", "?"))
-                        state = str(ch.get("status", "?"))
-                        is_ok = state.lower() in healthy
-                        rows.append((is_ok, f"Channel {name}", state, ""))
-                else:
-                    rows.append((None, "Channels", "0 active", ""))
+        # Reuse health_data fetched for fallback to avoid extra request and to
+        # keep the fallback's error handling consistent.
+        if health_fetch_error:
+            _echo_warning(health_fetch_error)
+        if health_data is not None:
+            data = health_data
+            channels = data.get("services", [])
+            if channels:
+                healthy = {"running", "ok", "connected", "active", "started"}
+                for ch in channels:
+                    name = str(ch.get("name", "?"))
+                    state = str(ch.get("status", "?"))
+                    is_ok = state.lower() in healthy
+                    rows.append((is_ok, f"Channel {name}", state, ""))
             else:
-                _echo_warning(f"Health endpoint returned HTTP {resp.status_code}.")
-        except httpx.ConnectError:
-            _echo_warning("Could not connect to the health endpoint yet.")
-        except Exception as e:
-            _echo_warning(f"Could not query health: {e}")
+                rows.append((None, "Channels", "0 active", ""))
+        elif health_status_code is None and health_fetch_error is None:
+            # No health attempt yet (e.g. base_url was None at first fetch but now set)
+            # or fallback fetch was skipped due to missing base_url - retry once.
+            try:
+                url = _health_url_from_base(base_url)
+                resp = httpx.get(url, timeout=3.0)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    channels = data.get("services", [])
+                    if channels:
+                        healthy = {"running", "ok", "connected", "active", "started"}
+                        for ch in channels:
+                            name = str(ch.get("name", "?"))
+                            state = str(ch.get("status", "?"))
+                            is_ok = state.lower() in healthy
+                            rows.append((is_ok, f"Channel {name}", state, ""))
+                    else:
+                        rows.append((None, "Channels", "0 active", ""))
+                else:
+                    _echo_warning(f"Health endpoint returned HTTP {resp.status_code}.")
+            except httpx.ConnectError:
+                _echo_warning("Could not connect to the health endpoint yet.")
+            except Exception as e:
+                _echo_warning(f"Could not query health: {e}")
+        elif health_data is None and health_fetch_error is None and health_status_code is not None:
+            # Health returned non-200 and no explicit error was stored for non-server_ok case
+            _echo_warning(f"Health endpoint returned HTTP {health_status_code}.")
 
     ui.services_table(rows)
 

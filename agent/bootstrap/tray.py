@@ -104,6 +104,38 @@ def is_server_running() -> bool:
     return _shared_is_server_running(SERVER_PID_FILE)
 
 
+def _is_server_reachable_via_health(timeout: float = 2.0) -> bool:
+    """Check if server health endpoint is reachable.
+
+    Used as fallback when PID file is stale/missing but server is still
+    serving traffic (e.g. PID file deleted, PID reused). Keeps tray from
+    spawning a duplicate server and from showing a stale 'Stopped' icon.
+    """
+    try:
+        import httpx
+
+        from agent.bootstrap.settings import load_bootstrap_config
+
+        cfg = load_bootstrap_config()
+        host = cfg.host
+        port = cfg.port
+        connect_host = "127.0.0.1" if host in {"0.0.0.0", "::", ""} else host
+        if ":" in connect_host and not connect_host.startswith("["):
+            connect_host = f"[{connect_host}]"
+        url = f"http://{connect_host}:{port}/health"
+        resp = httpx.get(url, timeout=timeout)
+        return resp.status_code == 200
+    except Exception:
+        return False
+
+
+def is_server_running_or_reachable() -> bool:
+    """PID check plus health fallback."""
+    if is_server_running():
+        return True
+    return _is_server_reachable_via_health()
+
+
 def get_server_pid() -> int | None:
     from agent.bootstrap.process_utils import (
         get_running_server_pid as _shared_get_server_pid,
@@ -471,7 +503,7 @@ def _open_config_folder(icon=None, item=None) -> None:
 
 
 def _start_server(icon=None, item=None) -> None:
-    if is_server_running():
+    if is_server_running_or_reachable():
         if icon is not None:
             try:
                 icon.notify("Server is already running", "K41 Agent")
@@ -644,11 +676,11 @@ class TrayApp:
 
         return pystray.Menu(
             Item(f"K41 Agent v{APP_VERSION}", None, enabled=False),
-            Item(lambda item: f"Status: {'\u25cf Running' if is_server_running() else '\u25cb Stopped'}", None, enabled=False),
+            Item(lambda item: f"Status: {'\u25cf Running' if is_server_running_or_reachable() else '\u25cb Stopped'}", None, enabled=False),
             pystray.Menu.SEPARATOR,
             Item("Open Dashboard", _open_dashboard),
-            Item("Start Server", _start_server, enabled=lambda item: not is_server_running()),
-            Item("Stop Server", _stop_server, enabled=lambda item: is_server_running()),
+            Item("Start Server", _start_server, enabled=lambda item: not is_server_running_or_reachable()),
+            Item("Stop Server", _stop_server, enabled=lambda item: is_server_running_or_reachable()),
             Item("Restart Server", _restart_server),
             pystray.Menu.SEPARATOR,
             Item("View Logs", _view_logs),
@@ -679,7 +711,7 @@ class TrayApp:
         if self._stop_event.is_set():
             return
         try:
-            if not is_server_running():
+            if not is_server_running_or_reachable():
                 logger.info("Server is not running; auto-starting it from tray.")
                 _start_server()
         except Exception:
@@ -688,7 +720,7 @@ class TrayApp:
     def _status_poller(self) -> None:
         while not self._stop_event.is_set():
             try:
-                running = is_server_running()
+                running = is_server_running_or_reachable()
                 if self._running_cache is None:
                     self._running_cache = running
                 if running != self._running_cache:
@@ -722,7 +754,7 @@ class TrayApp:
         except ImportError as exc:
             raise RuntimeError(f"pystray not installed: {exc}") from exc
 
-        running = is_server_running()
+        running = is_server_running_or_reachable()
         self._running_cache = running
         icon_image = load_tray_icon(running)
         title = f"K41 Agent - {'Running' if running else 'Stopped'}"

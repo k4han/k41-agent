@@ -33,7 +33,7 @@ def test_status_poller_does_not_update_menu_from_worker_thread(monkeypatch) -> N
     app._running_cache = False
     app._stop_event = _StopAfterOnePoll()
 
-    monkeypatch.setattr(tray, "is_server_running", lambda: True)
+    monkeypatch.setattr(tray, "is_server_running_or_reachable", lambda: True)
     monkeypatch.setattr(tray, "load_tray_icon", lambda running: "running-icon")
 
     app._status_poller()
@@ -194,7 +194,7 @@ def test_check_tray_available_headless(monkeypatch) -> None:
 def test_auto_start_server_starts_server_when_not_running(monkeypatch) -> None:
     calls = {"start": 0}
 
-    monkeypatch.setattr(tray, "is_server_running", lambda: False)
+    monkeypatch.setattr(tray, "is_server_running_or_reachable", lambda: False)
     monkeypatch.setattr(tray, "_start_server", lambda: calls.__setitem__("start", calls["start"] + 1))
 
     app = tray.TrayApp()
@@ -208,7 +208,7 @@ def test_auto_start_server_starts_server_when_not_running(monkeypatch) -> None:
 def test_auto_start_server_skips_when_already_running(monkeypatch) -> None:
     calls = {"start": 0}
 
-    monkeypatch.setattr(tray, "is_server_running", lambda: True)
+    monkeypatch.setattr(tray, "is_server_running_or_reachable", lambda: True)
     monkeypatch.setattr(tray, "_start_server", lambda: calls.__setitem__("start", calls["start"] + 1))
 
     app = tray.TrayApp()
