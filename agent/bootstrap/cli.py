@@ -96,6 +96,60 @@ def _print_server_endpoints(config: Any) -> None:
     ui.services_table(rows)
 
 
+def _print_server_endpoints_pending(config: Any) -> None:
+    base_url = _base_url(config.host, config.port)
+    rows: list[tuple[bool | None, str, str, str]] = [
+        (None, "Server", "starting", base_url),
+    ]
+    if getattr(config, "enable_dashboard", False):
+        rows.append((None, "Dashboard", "pending", f"{base_url}/dashboard"))
+    if getattr(config, "enable_api", False):
+        rows.append((None, "API", "pending", f"{base_url}/api"))
+    ui.services_table(rows)
+
+
+def _wait_for_server_startup(config: Any, timeout_seconds: float = 10.0) -> bool:
+    """Poll until server PID is alive and health endpoint responds.
+
+    Returns True if server is confirmed running, False otherwise.
+    """
+    health_url: str | None = None
+    if getattr(config, "enable_web", True):
+        try:
+            health_url = _health_url(config.host, config.port)
+        except Exception:
+            health_url = None
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        if PID_FILE.exists():
+            try:
+                pid = int(PID_FILE.read_text().strip())
+            except (ValueError, OSError):
+                time.sleep(0.3)
+                continue
+            if _is_process_alive(pid) and _is_k41_process(pid):
+                if health_url is None:
+                    return True
+                try:
+                    import httpx
+
+                    resp = httpx.get(health_url, timeout=1.0)
+                    if resp.status_code == 200:
+                        return True
+                except Exception:
+                    pass
+        time.sleep(0.3)
+    # Final fallback: PID alive is considered started even if health not yet ready
+    if PID_FILE.exists():
+        try:
+            pid = int(PID_FILE.read_text().strip())
+            if _is_process_alive(pid) and _is_k41_process(pid):
+                return True
+        except (ValueError, OSError):
+            pass
+    return False
+
+
 
 
 def _print_common_commands() -> None:
@@ -540,10 +594,24 @@ def serve(foreground: bool = False, tray: bool = False, no_tray: bool = False) -
 
     if not foreground and os.environ.get("K41_DAEMONIZED") != "1":
         _echo_info("Starting Kai Agent in background...")
-        _print_server_endpoints(config)
+        from agent.bootstrap.process_utils import spawn_detached_process
+
+        env = os.environ.copy()
+        env["K41_DAEMONIZED"] = "1"
+        cmd = _daemon_command()
+        spawn_detached_process(cmd, SERVER_LOG_FILE, env=env)
+
+        started = _wait_for_server_startup(config, timeout_seconds=10.0)
+        if started:
+            _echo_success("Server started.")
+            _print_server_endpoints(config)
+        else:
+            _echo_warning("Server is starting in background. It may take a moment to become ready.")
+            _echo_warning("If it does not start, check logs at:")
+            _print_key_value("Log", SERVER_LOG_FILE)
+            _print_server_endpoints_pending(config)
         _print_common_commands()
-        _daemonize()
-        return
+        sys.exit(0)
 
     if foreground:
         _echo_info("Starting Kai Agent in foreground. Press Ctrl+C to stop.")
