@@ -315,10 +315,7 @@ export function SettingControl(props: {
         <span class="toggle-track">
           <span class="toggle-thumb" />
         </span>
-        <span class="toggle-label">{Boolean(props.value) ? "Enabled" : "Disabled"}</span>
-        <span class="toggle-text" aria-hidden="true">
-          {Boolean(props.value) ? "Enabled" : "Disabled"}
-        </span>
+        <span class="toggle-text">{Boolean(props.value) ? "Enabled" : "Disabled"}</span>
       </button>
     </Show>
   );
@@ -332,10 +329,21 @@ export function SettingsSection(props: {
   class?: string;
   collapsible?: boolean;
   defaultOpen?: boolean;
+  isOpen?: boolean;
+  onToggle?: () => void;
   children: JSX.Element;
 }) {
-  const [open, setOpen] = createSignal(props.defaultOpen ?? true);
+  const [internalOpen, setInternalOpen] = createSignal(props.defaultOpen ?? true);
   const isCollapsible = () => props.collapsible === true;
+  const open = () => (props.isOpen !== undefined ? props.isOpen : internalOpen());
+
+  const handleToggle = () => {
+    if (props.onToggle) {
+      props.onToggle();
+    } else {
+      setInternalOpen((v) => !v);
+    }
+  };
 
   return (
     <section class={`settings-group ${props.class || ""} ${isCollapsible() && !open() ? "settings-group--collapsed" : ""}`}>
@@ -359,7 +367,7 @@ export function SettingsSection(props: {
           <button
             type="button"
             class="settings-section-header-btn"
-            onClick={() => setOpen((v) => !v)}
+            onClick={handleToggle}
             aria-expanded={open()}
           >
             <span class="settings-section-header-text">
@@ -396,6 +404,7 @@ export function SettingRow(props: {
   trimProviderPrefix?: boolean;
   actions?: JSX.Element;
   control?: JSX.Element;
+  density?: "compact" | "detailed";
   onChange: (value: unknown) => void;
   onRestore: () => void;
 }) {
@@ -412,20 +421,33 @@ export function SettingRow(props: {
     return props.settingKey;
   });
 
+  const shouldShowDescription = createMemo(() => {
+    if (props.showDescription === false) return false;
+    if (props.density === "detailed") return Boolean(props.info.description);
+    return false;
+  });
+
   return (
-    <div class={`setting-card ${props.dirty ? "setting-dirty" : ""}`}>
+    <div
+      class={`setting-card setting-row ${props.dirty ? "setting-dirty" : ""} ${props.density === "detailed" ? "setting-row--detailed" : "setting-row--compact"}`}
+    >
       <div class="setting-card-accent" aria-hidden="true" />
-      <div class="setting-card-main">
-        <div class="setting-copy">
+      <div class="setting-card-main setting-row-main">
+        <div class="setting-copy setting-row-copy">
           <div class="setting-title-row">
-            <div class="setting-title" title={tooltip()}>
+            <span class="setting-title" title={tooltip()}>
               {label()}
-              <Show when={props.info.required}>
-                <span class="setting-required" title="Required">*</span>
-              </Show>
-            </div>
+            </span>
+            <Show when={props.info.required}>
+              <span class="setting-required" title="Required">*</span>
+            </Show>
+            <span class="setting-key-tag mono" title={props.settingKey}>
+              {props.settingKey}
+            </span>
             <Show when={props.info.restart_required}>
-              <span class="badge badge-warning setting-restart-badge" title={RESTART_REQUIRED_NOTICE}>Restart</span>
+              <span class="badge badge-warning setting-restart-badge" title={RESTART_REQUIRED_NOTICE}>
+                Restart
+              </span>
             </Show>
             <Show when={props.dirty}>
               <span class="setting-dirty-dot" title="Unsaved changes" />
@@ -435,18 +457,30 @@ export function SettingRow(props: {
               <div class="setting-inline-actions">{props.actions}</div>
             </Show>
           </div>
+          <Show when={shouldShowDescription() && props.info.description}>
+            <div class="setting-description">{props.info.description}</div>
+          </Show>
         </div>
-        <div class="setting-control-panel">
-          {props.control || (
-            <SettingControl info={{ ...props.info, key: props.settingKey }} value={props.draft} onChange={props.onChange} />
-          )}
+        <div class="setting-control-panel setting-row-controls">
+          <div class="setting-control-wrapper">
+            {props.control || (
+              <SettingControl
+                info={{ ...props.info, key: props.settingKey }}
+                value={props.draft}
+                onChange={props.onChange}
+              />
+            )}
+          </div>
           <Show when={props.dirty}>
-            <div class="setting-actions">
-              <button class="btn btn-sm" type="button" onClick={props.onRestore}>
-                <RotateCcw size={13} />
-                Undo
-              </button>
-            </div>
+            <button
+              class="btn btn-ghost btn-sm setting-undo-btn"
+              type="button"
+              title="Undo change"
+              aria-label="Undo change"
+              onClick={props.onRestore}
+            >
+              <RotateCcw size={13} />
+            </button>
           </Show>
         </div>
       </div>

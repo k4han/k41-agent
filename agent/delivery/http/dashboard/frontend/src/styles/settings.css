@@ -427,77 +427,249 @@
   flex-shrink: 0;
 }
 
+.settings-config-header {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 2px;
+}
+
+.settings-toolbar-container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-toolbar-search-wrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-toolbar-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.settings-toolbar-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.settings-category-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 2px 0 6px;
+  scrollbar-width: thin;
+}
+
+.settings-category-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 11px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 120ms ease;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.settings-category-pill:hover {
+  background: var(--surface-3);
+  color: var(--fg);
+  border-color: var(--border-strong);
+}
+
+.settings-category-pill.active {
+  background: var(--primary, #6366f1);
+  border-color: var(--primary, #6366f1);
+  color: #fff;
+}
+
+.settings-category-pill-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+  color: inherit;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.settings-category-pill.active .settings-category-pill-badge {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
+.settings-search-meta {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 0 2px;
+}
+
+.settings-sections-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
 .settings-section-body {
   display: grid;
   gap: 0;
 }
 
-/* Cards */
-.settings-list {
+/* ── Settings groups, table & rows ── */
+
+.settings-group {
+  display: grid;
+  gap: 6px;
+}
+
+.settings-group--collapsed .settings-section-body {
+  display: none;
+}
+
+.settings-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 2px 4px;
+}
+
+.settings-section-header-text {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settings-section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 750;
+  color: var(--fg);
+  letter-spacing: -0.01em;
+}
+
+.settings-section-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.settings-section-desc {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--muted-2);
+}
+
+.settings-section-header-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+}
+
+.settings-section-chevron {
+  color: var(--muted-2);
+  transition: transform 160ms ease;
+  flex-shrink: 0;
+}
+
+.settings-section-chevron.open {
+  transform: rotate(0deg);
+}
+
+.settings-section-chevron:not(.open) {
+  transform: rotate(-90deg);
+}
+
+.settings-section-actions {
+  flex-shrink: 0;
+}
+
+/* Compact Table & Rows */
+.settings-list,
+.settings-table {
   display: grid;
   gap: 0;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--surface);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-  /* portal dropdown escapes this container, but keep visible when needed for non-portal fallback */
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
   isolation: isolate;
 }
 
-.setting-card {
-  position: relative;
-  overflow: hidden;
-  border: 1px solid transparent;
-  border-radius: 0;
-  background: var(--surface);
-  transition:
-    border-color 150ms ease,
-    background-color 150ms ease,
-    box-shadow 150ms ease;
-}
-
-/* Redesign: when dropdown is open, allow it to overflow card/list boundaries.
-   Portal-based dropdown already escapes overflow, this is fallback for any
-   remaining absolute menus and ensures correct stacking. */
-.settings-list:has(.form-select--open) {
+.settings-list:has(.form-select--open),
+.settings-table:has(.form-select--open) {
   overflow: visible;
   z-index: 10;
   position: relative;
 }
 
-.setting-card:has(.form-select--open) {
+.setting-card,
+.setting-row {
+  position: relative;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: var(--surface);
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.setting-card:has(.form-select--open),
+.setting-row:has(.form-select--open) {
   overflow: visible;
   z-index: 20;
 }
 
-.setting-card + .setting-card {
+.setting-card + .setting-card,
+.setting-row + .setting-row {
   border-top: 1px solid var(--border);
-}
-
-.setting-card:first-child {
-  border-top-left-radius: 10px;
-  border-top-right-radius: 10px;
-}
-
-.setting-card:last-child {
-  border-bottom-left-radius: 10px;
-  border-bottom-right-radius: 10px;
-}
-
-.settings-list .setting-card {
-  border-left: 0;
-  border-right: 0;
-  border-bottom: 0;
-  border-radius: 0;
-}
-
-.settings-list .setting-card:first-child {
-  border-radius: 10px 10px 0 0;
-}
-
-.settings-list .setting-card:last-child {
-  border-radius: 0 0 10px 10px;
 }
 
 .setting-card-accent {
@@ -507,38 +679,49 @@
   left: 0;
   width: 3px;
   background: transparent;
-  transition: background-color 150ms ease;
+  transition: background-color 120ms ease;
 }
 
-.setting-card.setting-dirty .setting-card-accent {
+.setting-card.setting-dirty .setting-card-accent,
+.setting-row.setting-dirty .setting-card-accent {
   background: var(--warning);
 }
 
-.setting-card.setting-dirty {
+.setting-card.setting-dirty,
+.setting-row.setting-dirty {
   background: color-mix(in srgb, var(--warning) 4%, var(--surface));
 }
 
-.setting-card:hover {
+.setting-card:hover,
+.setting-row:hover {
   background: var(--surface-2);
 }
 
-.setting-card.setting-dirty:hover {
+.setting-card.setting-dirty:hover,
+.setting-row.setting-dirty:hover {
   background: color-mix(in srgb, var(--warning) 6%, var(--surface));
 }
 
-.setting-card-main {
+.setting-card-main,
+.setting-row-main {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(240px, 340px);
-  gap: 18px;
+  grid-template-columns: minmax(0, 1.2fr) minmax(200px, 320px);
+  gap: 14px;
   align-items: center;
-  min-height: 56px;
-  padding: 13px 18px 13px 20px;
+  min-height: 40px;
+  padding: 7px 14px 7px 16px;
 }
 
-.setting-copy {
+.setting-row--detailed .setting-row-main {
+  min-height: 48px;
+  padding: 8px 14px 9px 16px;
+}
+
+.setting-copy,
+.setting-row-copy {
   min-width: 0;
   display: grid;
-  gap: 4px;
+  gap: 2px;
 }
 
 .setting-title-row {
@@ -546,13 +729,30 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+  min-width: 0;
 }
 
 .setting-title {
-  overflow-wrap: anywhere;
-  font-weight: 700;
-  font-size: 13.5px;
+  font-weight: 650;
+  font-size: 13px;
   letter-spacing: -0.01em;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+.setting-key-tag {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 10.5px;
+  color: var(--muted-2);
+  background: color-mix(in srgb, var(--surface-3) 50%, var(--surface));
+  border: 1px solid var(--border);
+  padding: 0.5px 5px;
+  border-radius: 4px;
+  letter-spacing: -0.02em;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .setting-required {
@@ -562,9 +762,10 @@
 }
 
 .setting-restart-badge {
-  font-size: 10px;
-  min-height: 18px;
-  padding: 0 6px;
+  font-size: 9.5px;
+  min-height: 16px;
+  padding: 0 5px;
+  font-weight: 700;
 }
 
 .setting-dirty-dot {
@@ -572,41 +773,94 @@
   height: 6px;
   border-radius: 50%;
   background: var(--warning);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 18%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--warning) 25%, transparent);
   flex-shrink: 0;
 }
 
 .setting-inline-actions {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .setting-description {
-  max-width: 760px;
+  max-width: 720px;
   color: var(--muted);
-  font-size: 12.5px;
-  line-height: 1.5;
+  font-size: 11.5px;
+  line-height: 1.4;
+  margin-top: 1px;
 }
 
-.setting-control-panel {
-  display: grid;
-  min-width: 0;
+.setting-control-panel,
+.setting-row-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
   gap: 8px;
-  justify-items: end;
-  align-content: center;
+  min-width: 0;
+}
+
+.setting-control-wrapper {
+  flex: 1;
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.setting-control-wrapper > * {
+  width: 100%;
+  max-width: 280px;
 }
 
 .setting-control-panel .input,
-.setting-control-panel .textarea,
 .setting-control-panel .select,
-.setting-control-panel .select-control {
-  min-height: 34px;
-  font-size: 13px;
+.setting-control-panel .select-control,
+.setting-row-controls .input,
+.setting-row-controls .select,
+.setting-row-controls .select-control {
+  min-height: 30px;
+  height: 30px;
+  font-size: 12.5px;
+  padding: 3px 9px;
+  border-radius: 6px;
 }
 
-.setting-control-panel .form-input-wrapper .input {
-  min-height: 34px;
+.setting-control-panel .form-input-wrapper .input,
+.setting-row-controls .form-input-wrapper .input {
+  min-height: 30px;
+  height: 30px;
+}
+
+.setting-control-panel .textarea,
+.setting-row-controls .textarea {
+  min-height: 52px;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  padding: 6px 8px;
+  border-radius: 6px;
+  line-height: 1.35;
+}
+
+.setting-undo-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--warning) 40%, var(--border));
+  background: color-mix(in srgb, var(--warning) 10%, var(--surface));
+  color: var(--warning);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 120ms ease;
+}
+
+.setting-undo-btn:hover {
+  background: color-mix(in srgb, var(--warning) 22%, var(--surface));
+  border-color: var(--warning);
+  color: var(--warning);
 }
 
 .setting-actions {
@@ -781,21 +1035,50 @@
 
 /* Responsive */
 @media (max-width: 900px) {
-  .setting-card-main {
+  .setting-card-main,
+  .setting-row-main {
     grid-template-columns: 1fr;
-    gap: 12px;
+    gap: 8px;
     align-items: stretch;
+    padding: 10px 14px;
   }
 
-  .setting-control-panel {
-    justify-items: stretch;
+  .setting-control-panel,
+  .setting-row-controls {
+    flex-direction: row;
+    justify-content: stretch;
+  }
+
+  .setting-control-wrapper {
+    flex: 1;
+  }
+
+  .setting-control-wrapper > * {
+    max-width: 100%;
   }
 
   .setting-control-panel .input,
   .setting-control-panel .textarea,
   .setting-control-panel .form-input-wrapper,
-  .setting-control-panel .form-textarea-wrapper {
+  .setting-control-panel .form-textarea-wrapper,
+  .setting-row-controls .input,
+  .setting-row-controls .form-input-wrapper,
+  .setting-row-controls .form-textarea-wrapper {
     width: 100%;
+  }
+
+  .settings-toolbar-container {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .settings-toolbar-controls {
+    justify-content: flex-end;
+  }
+
+  .setting-key-tag {
+    display: none;
   }
 
   .change-values {
@@ -838,10 +1121,21 @@
   .settings-nav-groups {
     gap: 10px;
   }
+
+  .settings-category-nav {
+    gap: 4px;
+    padding: 2px 0 4px;
+  }
+
+  .settings-category-pill {
+    padding: 3px 8px;
+    font-size: 11px;
+  }
 }
 
 /* Dark mode tweaks for cards */
-.dark .setting-card.setting-dirty {
+.dark .setting-card.setting-dirty,
+.dark .setting-row.setting-dirty {
   background: color-mix(in srgb, var(--warning) 7%, var(--surface));
 }
 
