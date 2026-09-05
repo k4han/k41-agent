@@ -22,6 +22,8 @@ from agent.modules.workspaces.search_utils import (
     match_include_pattern,
 )
 from agent.modules.workspaces.service import (
+    create_workspace_directory,
+    create_workspace_file,
     delete_workspace_entry,
     get_workspace_changes,
     get_workspace_diff,
@@ -380,6 +382,15 @@ class LocalWorkspaceBackend:
     async def delete(self, *, path: str) -> dict[str, Any]:
         return delete_workspace_entry(working_dir=str(self.root), path=path)
 
+    async def create_file(self, *, path: str, content: str = "") -> dict[str, Any]:
+        return create_workspace_file(
+            working_dir=str(self.root),
+            path=path,
+            content=content,
+        )
 
-__all__ = ["LocalWorkspaceBackend"]
+    async def create_directory(self, *, path: str) -> dict[str, Any]:
+        return create_workspace_directory(working_dir=str(self.root), path=path)
+
+
 __all__ = ["LocalWorkspaceBackend", "create_local_backend"]

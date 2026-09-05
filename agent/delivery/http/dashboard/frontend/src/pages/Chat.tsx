@@ -1,6 +1,5 @@
 import { useNavigate, useParams, useSearchParams } from "@solidjs/router";
 import {
-  GripVertical,
   Menu,
   PanelRightClose,
   PanelRightOpen,
@@ -1595,19 +1594,27 @@ export function ChatPage() {
   let touchStartY = 0;
 
   const handleShellClick = (event: MouseEvent) => {
-    if (explorer.open() && event.target === chatShellRef) {
+    // Backdrop click to dismiss drawer is only for mobile viewport (<= 980px),
+    // never close on desktop or while/immediately after dragging resize handle.
+    if (
+      isMobileViewport()
+      && explorer.open()
+      && !explorer.resizing()
+      && !explorer.justResized()
+      && event.target === chatShellRef
+    ) {
       explorer.toggle();
     }
   };
 
   const handleTouchStart = (event: TouchEvent) => {
-    if (!explorer.open()) return;
+    if (!isMobileViewport() || !explorer.open() || explorer.resizing() || explorer.justResized()) return;
     touchStartX = event.touches[0].clientX;
     touchStartY = event.touches[0].clientY;
   };
 
   const handleTouchEnd = (event: TouchEvent) => {
-    if (!explorer.open()) return;
+    if (!isMobileViewport() || !explorer.open() || explorer.resizing() || explorer.justResized()) return;
     const touchEndX = event.changedTouches[0].clientX;
     const touchEndY = event.changedTouches[0].clientY;
     const deltaX = touchEndX - touchStartX;
@@ -1757,11 +1764,13 @@ export function ChatPage() {
                 class="workspace-resize-handle"
                 type="button"
                 onPointerDown={explorer.startResize}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
                 title="Resize workspace explorer"
                 aria-label="Resize workspace explorer"
-              >
-                <GripVertical size={15} />
-              </button>
+              />
               <WorkspaceExplorer
                 threadId={currentThreadId()}
                 workingDir={workingDir()}

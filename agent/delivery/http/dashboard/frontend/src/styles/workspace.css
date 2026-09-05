@@ -45,52 +45,35 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  left: -10px;
+  left: -4px;
   z-index: 6;
-  display: grid;
-  width: 14px;
-  place-items: center;
+  width: 8px;
   border: 0;
   background: transparent;
-  color: var(--muted-2);
   cursor: col-resize;
   padding: 0;
-  transition: color 150ms ease;
+  margin: 0;
+  touch-action: none;
 }
 
 .workspace-resize-handle::before {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 6px;
-  width: 1px;
-  background: var(--border);
+  left: 3px;
+  width: 2px;
+  background: transparent;
   content: "";
   transition: background-color 150ms ease;
 }
 
-.workspace-resize-handle svg {
-  position: relative;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--surface);
-  padding: 1px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-  transition:
-    border-color 150ms ease,
-    color 150ms ease,
-    background-color 150ms ease;
+.workspace-resize-handle:hover::before,
+.workspace-resizing .workspace-resize-handle::before {
+  background: var(--primary, var(--border-strong));
 }
 
-.workspace-resize-handle:hover svg,
-.workspace-resize-handle:focus-visible svg {
-  border-color: var(--border-strong);
-  color: var(--fg);
-  background: var(--surface-2);
-}
-
-.workspace-resize-handle:hover::before {
-  background: var(--border-strong);
+.workspace-resize-handle:focus:not(:focus-visible) {
+  outline: none;
 }
 
 body.workspace-resizing {
@@ -117,8 +100,8 @@ body.workspace-resizing * {
   grid-template-columns: auto minmax(0, 1fr) auto auto;
   gap: 6px;
   align-items: center;
-  height: 38px;
-  min-height: 38px;
+  height: 42px;
+  min-height: 42px;
   border-bottom: 1px solid var(--border);
   padding: 0 10px;
   background: var(--surface);
@@ -129,8 +112,8 @@ body.workspace-resizing * {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   padding: 0;
   border: none;
   background: transparent;
@@ -157,15 +140,15 @@ body.workspace-resizing * {
 .workspace-backend-pill {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  height: 25px;
+  gap: 5px;
+  height: 28px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: 6px;
   background: var(--surface-2);
   color: var(--muted);
-  padding: 0 7px;
+  padding: 0 8px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10.5px;
+  font-size: 11.5px;
   font-weight: 600;
   letter-spacing: 0.02em;
   white-space: nowrap;
@@ -175,6 +158,8 @@ body.workspace-resizing * {
 
 .workspace-backend-pill > svg {
   flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
 }
 
 .workspace-backend-pill.backend-local {
@@ -197,14 +182,14 @@ body.workspace-resizing * {
 
 .workspace-dir-input {
   min-width: 0;
-  height: 25px;
+  height: 28px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: 6px;
   background: var(--surface);
   color: var(--fg);
-  padding: 0 7px;
+  padding: 0 8px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11.5px;
+  font-size: 12.5px;
   transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease;
 }
 
@@ -292,19 +277,19 @@ body.workspace-resizing * {
 .workspace-tab {
   position: relative;
   display: inline-flex;
-  min-height: 29px;
-  height: 29px;
+  min-height: 32px;
+  height: 32px;
   flex: 0 0 auto;
   align-items: center;
   gap: 0;
   margin-bottom: -1px;
   border: 1px solid transparent;
   border-bottom: none;
-  border-radius: 5px 5px 0 0;
+  border-radius: 6px 6px 0 0;
   background: transparent;
   color: var(--muted);
-  padding: 0 10px 0 6px;
-  font-size: 11.5px;
+  padding: 0 10px 0 8px;
+  font-size: 12.5px;
   font-weight: 500;
   cursor: pointer;
   user-select: none;
@@ -355,10 +340,10 @@ body.workspace-resizing * {
   position: relative;
   display: grid;
   place-items: center;
-  width: 18px;
-  height: 18px;
-  flex: 0 0 18px;
-  margin-right: 5px;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  margin-right: 6px;
 }
 
 .workspace-tab-icon {
@@ -415,7 +400,7 @@ body.workspace-resizing * {
 }
 
 .workspace-tab-label {
-  max-width: 140px;
+  max-width: 150px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -424,17 +409,17 @@ body.workspace-resizing * {
 
 .workspace-tab-count {
   display: grid;
-  min-width: 16px;
-  height: 16px;
+  min-width: 18px;
+  height: 18px;
   place-items: center;
   border-radius: 999px;
   background: var(--surface-3);
   color: var(--muted);
-  padding: 0 4px;
-  font-size: 10px;
+  padding: 0 5px;
+  font-size: 11px;
   font-weight: 600;
   line-height: 1;
-  margin-left: 5px;
+  margin-left: 6px;
 }
 
 .workspace-tab.active .workspace-tab-count {
@@ -455,10 +440,10 @@ body.workspace-resizing * {
 .workspace-tab-plus {
   display: grid;
   place-items: center;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: 5px;
   background: transparent;
   color: var(--muted-2);
   cursor: pointer;
@@ -477,13 +462,13 @@ body.workspace-resizing * {
   position: fixed;
   z-index: 1000;
   display: flex;
-  width: 185px;
+  width: 195px;
   flex-direction: column;
   gap: 1px;
   margin: 0;
-  padding: 4px;
+  padding: 5px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--surface);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14), 0 2px 6px rgba(0, 0, 0, 0.05);
   animation: workspace-menu-in 120ms cubic-bezier(0.16, 1, 0.3, 1);
@@ -507,17 +492,17 @@ body.workspace-resizing * {
 .workspace-plus-menu-item {
   display: flex;
   align-items: center;
-  gap: 7px;
-  min-height: 28px;
+  gap: 8px;
+  min-height: 32px;
   width: 100%;
   border: 0;
-  border-radius: 4px;
+  border-radius: 5px;
   background: transparent;
   color: var(--fg);
-  padding: 0 8px;
+  padding: 0 9px;
   text-align: left;
   cursor: pointer;
-  font-size: 11.5px;
+  font-size: 12.5px;
   transition: background-color 100ms ease;
 }
 
@@ -537,9 +522,9 @@ body.workspace-resizing * {
 
 .workspace-menu-pill {
   margin-left: auto;
-  font-size: 9.5px;
+  font-size: 10.5px;
   font-weight: 600;
-  padding: 1px 5px;
+  padding: 1px 6px;
   border-radius: 4px;
   background: var(--surface-3);
   color: var(--muted);
@@ -581,15 +566,15 @@ body.workspace-resizing * {
 }
 
 .workspace-empty-title {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--fg);
 }
 
 .workspace-empty-desc {
-  font-size: 11.5px;
+  font-size: 12.5px;
   color: var(--muted);
-  max-width: 240px;
+  max-width: 260px;
   line-height: 1.45;
   margin-bottom: 8px;
 }
@@ -619,6 +604,52 @@ body.workspace-resizing * {
 
 .workspace-tab-panel {
   flex: 1 1 auto;
+}
+
+/* Tree Toolbar */
+.workspace-tree-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 8px 0 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  user-select: none;
+}
+
+.workspace-tree-toolbar-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.workspace-tree-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.workspace-tree-toolbar-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  color: var(--muted);
+}
+
+.workspace-tree-toolbar-btn:hover:not(:disabled) {
+  color: var(--fg);
+  background: var(--surface-2);
+}
+
+.workspace-empty-tree-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+  justify-content: center;
 }
 
 /* Scrollbars */
@@ -670,19 +701,19 @@ body.workspace-resizing * {
 
 .workspace-tree-row {
   display: grid;
-  grid-template-columns: 14px 16px minmax(0, 1fr) auto;
+  grid-template-columns: 16px 18px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   width: 100%;
   min-width: 0;
-  min-height: 25px;
+  min-height: 28px;
   border: 0;
-  border-radius: 4px;
+  border-radius: 5px;
   background: transparent;
   color: var(--fg);
-  padding: 2px 5px;
-  padding-left: calc(4px + (var(--depth) * 14px));
-  font-size: 11.5px;
+  padding: 3px 6px;
+  padding-left: calc(6px + (var(--depth) * 16px));
+  font-size: 13px;
   text-align: left;
   cursor: pointer;
   transition: background-color 100ms ease, color 100ms ease;
@@ -702,16 +733,16 @@ body.workspace-resizing * {
   display: grid;
   place-items: center;
   color: var(--muted-2);
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
 }
 
 .workspace-tree-icon {
   display: grid;
   place-items: center;
   color: var(--muted);
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
 }
 
 .workspace-tree-row.active .workspace-tree-icon {
@@ -730,9 +761,9 @@ body.workspace-resizing * {
 .workspace-tree-meta {
   color: var(--muted-2);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10px;
+  font-size: 11px;
   white-space: nowrap;
-  padding-left: 4px;
+  padding-left: 5px;
 }
 
 /* Tree Row Actions & Dropdown */
@@ -758,8 +789,8 @@ body.workspace-resizing * {
 .workspace-tree-action {
   display: grid;
   place-items: center;
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   border: 0;
   border-radius: 4px;
   background: transparent;
@@ -780,13 +811,13 @@ body.workspace-resizing * {
   right: 0;
   z-index: 30;
   display: flex;
-  width: 160px;
+  width: 175px;
   flex-direction: column;
   gap: 1px;
   margin: 0;
-  padding: 3px;
+  padding: 4px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--surface);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.04);
 }
@@ -798,17 +829,17 @@ body.workspace-resizing * {
 .workspace-tree-menu-item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  min-height: 26px;
+  gap: 8px;
+  min-height: 28px;
   width: 100%;
   border: 0;
-  border-radius: 4px;
+  border-radius: 5px;
   background: transparent;
   color: var(--muted);
-  padding: 0 7px;
+  padding: 0 8px;
   text-align: left;
   cursor: pointer;
-  font-size: 11.5px;
+  font-size: 12.5px;
   transition: background-color 100ms ease, color 100ms ease;
 }
 
@@ -823,9 +854,9 @@ body.workspace-resizing * {
 }
 
 .workspace-tree-status {
-  padding: 4px 8px 4px calc(22px + (var(--depth) * 14px));
+  padding: 4px 8px 4px calc(24px + (var(--depth) * 16px));
   color: var(--muted-2);
-  font-size: 11px;
+  font-size: 12px;
   font-style: italic;
 }
 
@@ -855,10 +886,10 @@ body.workspace-resizing * {
 
 .workspace-change-row {
   display: grid;
-  grid-template-columns: 14px minmax(0, 1fr) auto auto;
+  grid-template-columns: 16px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 6px;
-  min-height: 30px;
+  min-height: 32px;
   width: 100%;
   min-width: 0;
   border: 0;
@@ -888,7 +919,7 @@ body.workspace-resizing * {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11.5px;
+  font-size: 12.5px;
 }
 
 .workspace-change-stats {
@@ -896,7 +927,7 @@ body.workspace-resizing * {
   align-items: center;
   gap: 5px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10.5px;
+  font-size: 11.5px;
   font-weight: 600;
   white-space: nowrap;
 }
@@ -914,8 +945,8 @@ body.workspace-resizing * {
   border-radius: 4px;
   background: color-mix(in srgb, var(--muted) 10%, transparent);
   color: var(--muted);
-  padding: 1px 5px;
-  font-size: 9.5px;
+  padding: 2px 6px;
+  font-size: 10.5px;
   font-weight: 600;
   text-overflow: ellipsis;
   text-transform: uppercase;
@@ -951,7 +982,7 @@ body.workspace-resizing * {
   margin: 0 10px 6px;
   color: var(--muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 /* Diff and File Viewers */
@@ -965,7 +996,7 @@ body.workspace-resizing * {
   background: var(--surface);
   border-radius: 6px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11.5px;
+  font-size: 12.5px;
   line-height: 1.55;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
@@ -1072,13 +1103,13 @@ body.workspace-resizing * {
 
 .workspace-hint {
   padding: 4px 10px 6px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted-2);
 }
 
 .empty.compact {
   padding: 16px 12px;
-  font-size: 11.5px;
+  font-size: 12.5px;
   color: var(--muted);
   text-align: center;
 }

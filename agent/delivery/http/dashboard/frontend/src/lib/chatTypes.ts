@@ -99,7 +99,10 @@ export const WORKSPACE_EXPLORER_OPEN_KEY = "k41-dashboard-workspace-explorer-ope
 export const WORKSPACE_EXPLORER_WIDTH_KEY = "k41-dashboard-workspace-explorer-width";
 export const WORKSPACE_EXPLORER_DEFAULT_WIDTH = 560;
 export const WORKSPACE_EXPLORER_MIN_WIDTH = 340;
-export const WORKSPACE_EXPLORER_MAX_WIDTH = 920;
+export const WORKSPACE_EXPLORER_MAX_WIDTH = 1200;
+export const CHAT_COMPOSER_MAX_WIDTH = 960;
+export const CHAT_COMPOSER_SIDE_GAP = 16;
+export const CHAT_PANEL_MIN_WIDTH = 380;
 
 export const ATTACHMENT_ACCEPT = [
   "image/*",

@@ -3,7 +3,9 @@ import {
   ChevronRight,
   Clipboard,
   File,
+  FilePlus,
   Folder,
+  FolderPlus,
   GitCompare,
   MoreHorizontal,
   PanelRightClose,
@@ -236,6 +238,12 @@ export function WorkspaceExplorer(props: {
   const [renaming, setRenaming] = createSignal(false);
   const [deleteTarget, setDeleteTarget] = createSignal<WorkspaceTreeEntry | null>(null);
   const [deleting, setDeleting] = createSignal(false);
+  const [createTarget, setCreateTarget] = createSignal<{
+    kind: "file" | "directory";
+    parentPath: string;
+  } | null>(null);
+  const [createName, setCreateName] = createSignal("");
+  const [creating, setCreating] = createSignal(false);
   const [workspaceRoot, setWorkspaceRoot] = createSignal("");
   const [reconnectingModal, setReconnectingModal] = createSignal(false);
   let generation = 0;
@@ -665,6 +673,61 @@ export function WorkspaceExplorer(props: {
     }
   };
 
+  const requestCreate = (
+    kind: "file" | "directory",
+    parentPath: string = "",
+    event?: MouseEvent,
+  ) => {
+    event?.stopPropagation();
+    closeActionMenu();
+    setCreateTarget({ kind, parentPath });
+    setCreateName("");
+  };
+
+  const cancelCreate = () => {
+    setCreateTarget(null);
+    setCreateName("");
+  };
+
+  const confirmCreate = async () => {
+    const target = createTarget();
+    if (!target) {
+      return;
+    }
+    const cleanName = createName().trim();
+    if (!cleanName) {
+      cancelCreate();
+      return;
+    }
+    setCreating(true);
+    try {
+      const parent = target.parentPath.replace(/\\/g, "/").replace(/\/+$/, "");
+      const fullPath = parent ? `${parent}/${cleanName}` : cleanName;
+      await postJson("/dashboard-api/workspace/create-entry", {
+        thread_id: props.threadId || null,
+        workspace: queryWorkspace(),
+        path: fullPath,
+        kind: target.kind,
+      });
+      showToast(
+        `Created ${target.kind === "directory" ? "folder" : "file"} ${cleanName}`,
+        "success",
+      );
+      cancelCreate();
+      if (target.parentPath) {
+        setExpandedByPath((current) => ({ ...current, [target.parentPath]: true }));
+      }
+      await reloadPath(target.parentPath);
+      if (target.kind === "file") {
+        openFile(fullPath);
+      }
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Creation failed", "error");
+    } finally {
+      setCreating(false);
+    }
+  };
+
   const copyPath = async (entry: WorkspaceTreeEntry, event: MouseEvent) => {
     event.stopPropagation();
     closeActionMenu();
@@ -803,14 +866,14 @@ export function WorkspaceExplorer(props: {
           >
             <span class="workspace-tree-caret">
               <Show when={isDirectory()}>
-                <Show when={isOpen()} fallback={<ChevronRight size={12} />}>
-                  <ChevronDown size={12} />
+                <Show when={isOpen()} fallback={<ChevronRight size={14} />}>
+                  <ChevronDown size={14} />
                 </Show>
               </Show>
             </span>
             <span class="workspace-tree-icon">
-              <Show when={isDirectory()} fallback={<File size={13} />}>
-                <Folder size={13} />
+              <Show when={isDirectory()} fallback={<File size={15} />}>
+                <Folder size={15} />
               </Show>
             </span>
             <span class="workspace-tree-name">{entry().name}</span>
@@ -826,17 +889,38 @@ export function WorkspaceExplorer(props: {
               aria-expanded={isMenuOpen()}
               onClick={(event) => toggleActionMenu(entry().path, event)}
             >
-              <MoreHorizontal size={12} />
+              <MoreHorizontal size={14} />
             </button>
             <Show when={isMenuOpen()}>
               <div class="workspace-tree-menu" role="menu">
+                <Show when={isDirectory()}>
+                  <button
+                    class="workspace-tree-menu-item"
+                    type="button"
+                    role="menuitem"
+                    onClick={(event) => requestCreate("file", entry().path, event)}
+                  >
+                    <FilePlus size={14} />
+                    <span>New file</span>
+                  </button>
+                  <button
+                    class="workspace-tree-menu-item"
+                    type="button"
+                    role="menuitem"
+                    onClick={(event) => requestCreate("directory", entry().path, event)}
+                  >
+                    <FolderPlus size={14} />
+                    <span>New folder</span>
+                  </button>
+                  <div class="workspace-menu-divider" />
+                </Show>
                 <button
                   class="workspace-tree-menu-item"
                   type="button"
                   role="menuitem"
                   onClick={(event) => requestRename(entry(), event)}
                 >
-                  <Pencil size={12} />
+                  <Pencil size={14} />
                   <span>Rename</span>
                 </button>
                 <button
@@ -845,7 +929,7 @@ export function WorkspaceExplorer(props: {
                   role="menuitem"
                   onClick={(event) => void copyPath(entry(), event)}
                 >
-                  <Clipboard size={12} />
+                  <Clipboard size={14} />
                   <span>Copy path</span>
                 </button>
                 <button
@@ -854,7 +938,7 @@ export function WorkspaceExplorer(props: {
                   role="menuitem"
                   onClick={(event) => requestDelete(entry(), event)}
                 >
-                  <Trash2 size={12} />
+                  <Trash2 size={14} />
                   <span>Delete</span>
                 </button>
               </div>
@@ -913,7 +997,7 @@ export function WorkspaceExplorer(props: {
           title={isRefreshing() ? "Refreshing workspace..." : "Refresh workspace"}
           aria-label="Refresh workspace"
         >
-          <RefreshCw size={17} />
+          <RefreshCw size={18} />
         </button>
         <Show when={props.onCollapse}>
           <button
@@ -923,7 +1007,7 @@ export function WorkspaceExplorer(props: {
             title="Collapse workspace"
             aria-label="Collapse workspace"
           >
-            <PanelRightClose size={19} />
+            <PanelRightClose size={20} />
           </button>
         </Show>
       </div>
@@ -967,13 +1051,13 @@ export function WorkspaceExplorer(props: {
                   <div class="workspace-tab-icon-slot">
                     <span class="workspace-tab-icon" aria-hidden="true">
                       <Show when={isFiles}>
-                        <Folder size={12} />
+                        <Folder size={14} />
                       </Show>
                       <Show when={isChanges}>
-                        <GitCompare size={12} />
+                        <GitCompare size={14} />
                       </Show>
                       <Show when={isFile}>
-                        <File size={12} />
+                        <File size={14} />
                       </Show>
                     </span>
                     <button
@@ -983,7 +1067,7 @@ export function WorkspaceExplorer(props: {
                       aria-label={`Close ${isFiles ? "Files" : isChanges ? "Changes" : fileName(filePath)}`}
                       onClick={(event) => closeTab(tab, event)}
                     >
-                      <X size={11} />
+                      <X size={13} />
                     </button>
                   </div>
 
@@ -1018,7 +1102,7 @@ export function WorkspaceExplorer(props: {
                 }
               }}
             >
-              <Plus size={13} />
+              <Plus size={15} />
             </button>
 
             <Show when={plusMenuOpen()}>
@@ -1043,7 +1127,7 @@ export function WorkspaceExplorer(props: {
                       setPlusMenuOpen(false);
                     }}
                   >
-                    <Folder size={13} />
+                    <Folder size={15} />
                     <span>Files Explorer</span>
                     <Show when={openTabs().includes("files")}>
                       <span class="workspace-menu-pill">Open</span>
@@ -1058,7 +1142,7 @@ export function WorkspaceExplorer(props: {
                       setPlusMenuOpen(false);
                     }}
                   >
-                    <GitCompare size={13} />
+                    <GitCompare size={15} />
                     <span>Git Changes</span>
                     <Show when={changes().length > 0}>
                       <span class="workspace-tab-count">{changes().length}</span>
@@ -1074,7 +1158,7 @@ export function WorkspaceExplorer(props: {
                     role="menuitem"
                     aria-disabled="true"
                   >
-                    <Terminal size={13} />
+                    <Terminal size={15} />
                     <span>Terminal</span>
                     <span class="workspace-menu-pill badge-soon">Soon</span>
                   </div>
@@ -1089,7 +1173,7 @@ export function WorkspaceExplorer(props: {
         <Show when={openTabs().length === 0}>
           <div class="workspace-empty-view">
             <div class="workspace-empty-icon">
-              <Folder size={28} />
+              <Folder size={32} />
             </div>
             <div class="workspace-empty-title">No open tabs</div>
             <div class="workspace-empty-desc">
@@ -1101,7 +1185,7 @@ export function WorkspaceExplorer(props: {
                 type="button"
                 onClick={() => openTab("files")}
               >
-                <Folder size={12} />
+                <Folder size={14} />
                 <span>Files Explorer</span>
               </button>
               <button
@@ -1109,7 +1193,7 @@ export function WorkspaceExplorer(props: {
                 type="button"
                 onClick={() => openTab("changes")}
               >
-                <GitCompare size={12} />
+                <GitCompare size={14} />
                 <span>Git Changes</span>
                 <Show when={changes().length > 0}>
                   <span class="workspace-tab-count">{changes().length}</span>
@@ -1148,9 +1232,9 @@ export function WorkspaceExplorer(props: {
                             <span class="workspace-change-caret">
                               <Show
                                 when={expandedChangePath() === change.path}
-                                fallback={<ChevronRight size={12} />}
+                                fallback={<ChevronRight size={14} />}
                               >
-                                <ChevronDown size={12} />
+                                <ChevronDown size={14} />
                               </Show>
                             </span>
                             <span class="workspace-change-path">{change.path}</span>
@@ -1215,13 +1299,58 @@ export function WorkspaceExplorer(props: {
 
         <Show when={activeTab() === "files"}>
           <section class="workspace-section workspace-tree-section workspace-tab-panel" role="tabpanel">
+            <div class="workspace-tree-toolbar">
+              <span class="workspace-tree-toolbar-title">Files</span>
+              <div class="workspace-tree-toolbar-actions">
+                <button
+                  class="workspace-icon-btn workspace-tree-toolbar-btn"
+                  type="button"
+                  title="New file in workspace root"
+                  aria-label="New file"
+                  onClick={(event) => requestCreate("file", "", event)}
+                >
+                  <FilePlus size={15} />
+                </button>
+                <button
+                  class="workspace-icon-btn workspace-tree-toolbar-btn"
+                  type="button"
+                  title="New folder in workspace root"
+                  aria-label="New folder"
+                  onClick={(event) => requestCreate("directory", "", event)}
+                >
+                  <FolderPlus size={15} />
+                </button>
+              </div>
+            </div>
             <Show when={!treeError()} fallback={<div class="empty compact">{treeError()}</div>}>
               <Show
                 when={treeLoadingByPath()[rootPath()] || treeLoadingByPath()[""]}
                 fallback={
                   <Show
                     when={rootEntries().length > 0}
-                    fallback={<div class="empty compact">No files.</div>}
+                    fallback={
+                      <div class="empty compact">
+                        <span>No files in workspace.</span>
+                        <div class="workspace-empty-tree-actions">
+                          <button
+                            class="btn btn-sm btn-primary"
+                            type="button"
+                            onClick={(event) => requestCreate("file", "", event)}
+                          >
+                            <FilePlus size={14} />
+                            <span>New file</span>
+                          </button>
+                          <button
+                            class="btn btn-sm"
+                            type="button"
+                            onClick={(event) => requestCreate("directory", "", event)}
+                          >
+                            <FolderPlus size={14} />
+                            <span>New folder</span>
+                          </button>
+                        </div>
+                      </div>
+                    }
                   >
                     <div class="workspace-tree">
                       <For each={rootEntries()}>
@@ -1364,7 +1493,7 @@ export function WorkspaceExplorer(props: {
               onClick={() => void confirmDelete()}
               disabled={deleting()}
             >
-              <Trash2 size={14} />
+              <Trash2 size={15} />
               {deleting() ? "Deleting..." : "Delete"}
             </button>
           </div>
@@ -1380,6 +1509,66 @@ export function WorkspaceExplorer(props: {
           </p>
         </Show>
         <p class="muted" style="margin-top: 8px;">This action cannot be undone.</p>
+      </Dialog>
+
+      <Dialog
+        open={createTarget() !== null}
+        title={createTarget()?.kind === "directory" ? "New folder" : "New file"}
+        onClose={() => {
+          if (!creating()) {
+            cancelCreate();
+          }
+        }}
+        footer={
+          <div class="row-wrap">
+            <button
+              class="btn"
+              type="button"
+              onClick={cancelCreate}
+              disabled={creating()}
+            >
+              Cancel
+            </button>
+            <button
+              class="btn btn-primary"
+              type="button"
+              onClick={() => void confirmCreate()}
+              disabled={creating() || !createName().trim()}
+            >
+              {creating()
+                ? "Creating..."
+                : createTarget()?.kind === "directory"
+                ? "Create folder"
+                : "Create file"}
+            </button>
+          </div>
+        }
+      >
+        <p class="muted" style="margin-bottom: 8px;">
+          Location: <span class="mono">/{createTarget()?.parentPath ? `${createTarget()?.parentPath}/` : ""}</span>
+        </p>
+        <input
+          class="input"
+          value={createName()}
+          placeholder={
+            createTarget()?.kind === "directory"
+              ? "Folder name"
+              : "File name (e.g. main.py, index.ts)"
+          }
+          disabled={creating()}
+          autofocus
+          onInput={(event) => setCreateName(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              void confirmCreate();
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              cancelCreate();
+            }
+          }}
+        />
       </Dialog>
     </aside>
   );

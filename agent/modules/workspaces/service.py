@@ -1438,6 +1438,52 @@ def delete_workspace_entry(
     }
 
 
+def create_workspace_file(
+    *,
+    working_dir: str | None,
+    path: str,
+    content: str = "",
+) -> dict[str, Any]:
+    root = ensure_workspace_directory(working_dir)
+    target = resolve_workspace_child(root, path)
+    relative_path = workspace_relative_path(root, target)
+    if not relative_path:
+        raise ValueError("Cannot create file at workspace root.")
+    if target.exists():
+        raise FileExistsError(f"Path already exists: {relative_path}")
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+    return {
+        "root": str(root),
+        "path": workspace_absolute_path(target),
+        "relative_path": relative_path,
+        "kind": "file",
+    }
+
+
+def create_workspace_directory(
+    *,
+    working_dir: str | None,
+    path: str,
+) -> dict[str, Any]:
+    root = ensure_workspace_directory(working_dir)
+    target = resolve_workspace_child(root, path)
+    relative_path = workspace_relative_path(root, target)
+    if not relative_path:
+        raise ValueError("Cannot create workspace root.")
+    if target.exists():
+        raise FileExistsError(f"Path already exists: {relative_path}")
+
+    target.mkdir(parents=True, exist_ok=False)
+    return {
+        "root": str(root),
+        "path": workspace_absolute_path(target),
+        "relative_path": relative_path,
+        "kind": "directory",
+    }
+
+
 def _run_git(args: list[str], *, cwd: Path) -> str:
     result = subprocess.run(
         ["git", *args],

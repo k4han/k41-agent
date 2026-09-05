@@ -302,6 +302,16 @@ class WorkspaceDeleteBody(BaseModel):
     path: str = Field(..., min_length=1, description="Path of the file or directory to delete.")
 
 
+class WorkspaceCreateEntryBody(BaseModel):
+    """Request body for creating a file or directory in the workspace."""
+
+    thread_id: str | None = Field(default=None, description="Thread ID to resolve workspace from.")
+    workspace: WorkspaceRef | WorkspaceBinding | None = Field(default=None, description="Workspace reference.")
+    path: str = Field(..., min_length=1, description="Path of the file or directory to create.")
+    kind: str = Field(default="file", description="Kind of entry: 'file' or 'directory'.")
+    content: str = Field(default="", description="Initial content for the file (if kind is 'file').")
+
+
 class WorkspaceResolveBody(BaseModel):
     """Request body for resolving a workspace from various inputs (local, GitHub, sandbox)."""
 
@@ -572,6 +582,34 @@ async def delete_dashboard_workspace_entry(
             workspace=body.workspace,
         )
         async def _op(b): return await b.delete(path=body.path)
+        return await _run_workspace_capability_operation(
+            workspace,
+            body.thread_id,
+            get_workspace_entry_mutator,
+            _op,
+        )
+    except Exception as exc:
+        raise workspace_http_error(exc) from exc
+
+
+@router.post("/dashboard-api/workspace/create-entry")
+async def create_dashboard_workspace_entry(
+    body: WorkspaceCreateEntryBody,
+) -> dict[str, Any]:
+    """Create a new file or directory in the workspace."""
+    try:
+        workspace = await workspace_ref_from_request(
+            thread_id=body.thread_id,
+            workspace=body.workspace,
+        )
+        clean_kind = body.kind.strip().lower()
+        if clean_kind in ("dir", "directory", "folder"):
+            async def _op(b): return await b.create_directory(path=body.path)
+        elif clean_kind == "file":
+            async def _op(b): return await b.create_file(path=body.path, content=body.content)
+        else:
+            raise ValueError(f"Unsupported entry kind: '{body.kind}'. Expected 'file' or 'directory'.")
+
         return await _run_workspace_capability_operation(
             workspace,
             body.thread_id,

@@ -228,7 +228,7 @@
 .chat-shell-resizable.workspace-closed .transcript > .tool-html-preview:not(.is-fullwidth),
 .chat-shell-resizable.workspace-closed .transcript > .empty,
 .chat-shell-resizable.workspace-closed .transcript > .chat-workspace-empty {
-  width: min(960px, 100%);
+  width: min(960px, calc(100% - 32px));
   margin-inline: auto;
 }
 
@@ -237,7 +237,7 @@
 .chat-shell-resizable.workspace-closed .thread-banner,
 .chat-shell-resizable.workspace-closed .chat-composer {
   align-self: center;
-  width: min(960px, 100%);
+  width: min(960px, calc(100% - 32px));
 }
 
 .chat-workspace-empty {

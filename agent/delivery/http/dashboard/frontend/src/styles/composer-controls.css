@@ -114,9 +114,11 @@
 
 .chat-agent-picker {
   max-width: 240px;
+  min-width: 0;
   min-height: 30px;
   border-radius: 999px;
   font-weight: 650;
+  flex: 0 1 auto;
 }
 
 .chat-agent-picker .select-control-trigger {
@@ -130,7 +132,7 @@
 .chat-model-picker {
   max-width: 380px;
   min-width: 0;
-  flex-shrink: 0;
+  flex: 0 1 auto;
 }
 
 .chat-model-picker .model-picker-control {

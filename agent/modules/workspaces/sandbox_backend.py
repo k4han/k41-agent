@@ -511,6 +511,57 @@ class SandboxBackendBase(ABC):
             raise RuntimeError(result.output.strip() or "Delete failed.")
         return {"root": self.root, "path": target, "kind": kind}
 
+    async def create_file(self, *, path: str, content: str = "") -> dict[str, Any]:
+        """Create a new file in the sandbox workspace."""
+        import base64
+        from agent.modules.workspaces.posix_utils import (
+            relative_remote_path,
+            resolve_remote_path,
+        )
+
+        self._invalidate_workspace_caches()
+        self.ensure_active()
+        target = resolve_remote_path(self.root, path)
+        relative = relative_remote_path(self.root, target)
+        if not relative:
+            raise ValueError("Cannot create file at workspace root.")
+        check = self._exec_sync(f"test -e {shlex.quote(target)}", cwd="/")
+        if check.exit_code == 0:
+            raise FileExistsError(f"Path already exists: {relative}")
+        parent = posixpath.dirname(target)
+        mkdir_res = self._exec_sync(f"mkdir -p {shlex.quote(parent)}", cwd="/")
+        if mkdir_res.exit_code not in (0, None):
+            raise RuntimeError(mkdir_res.output.strip() or "Failed to create directory.")
+        encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
+        res = self._exec_sync(
+            f"printf '%s' {shlex.quote(encoded)} | base64 -d > {shlex.quote(target)}",
+            cwd="/",
+        )
+        if res.exit_code not in (0, None):
+            raise RuntimeError(res.output.strip() or "Failed to create file.")
+        return {"root": self.root, "path": target, "relative_path": relative, "kind": "file"}
+
+    async def create_directory(self, *, path: str) -> dict[str, Any]:
+        """Create a new directory in the sandbox workspace."""
+        from agent.modules.workspaces.posix_utils import (
+            relative_remote_path,
+            resolve_remote_path,
+        )
+
+        self._invalidate_workspace_caches()
+        self.ensure_active()
+        target = resolve_remote_path(self.root, path)
+        relative = relative_remote_path(self.root, target)
+        if not relative:
+            raise ValueError("Cannot create workspace root.")
+        check = self._exec_sync(f"test -e {shlex.quote(target)}", cwd="/")
+        if check.exit_code == 0:
+            raise FileExistsError(f"Path already exists: {relative}")
+        res = self._exec_sync(f"mkdir -p {shlex.quote(target)}", cwd="/")
+        if res.exit_code not in (0, None):
+            raise RuntimeError(res.output.strip() or "Failed to create directory.")
+        return {"root": self.root, "path": target, "relative_path": relative, "kind": "directory"}
+
     # ------------------------------------------------------------------ #
     #  Private helpers
     # ------------------------------------------------------------------ #

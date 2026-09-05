@@ -125,6 +125,12 @@ class WorkspaceEntryMutator(Protocol):
     async def delete(self, *, path: str) -> dict[str, Any]:
         ...
 
+    async def create_file(self, *, path: str, content: str = "") -> dict[str, Any]:
+        ...
+
+    async def create_directory(self, *, path: str) -> dict[str, Any]:
+        ...
+
 
 class WorkspaceRepositoryCloner(Protocol):
     ref: WorkspaceRef
