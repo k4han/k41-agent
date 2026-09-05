@@ -274,9 +274,6 @@ export function SettingsLayout(props: {
                         {item.icon()}
                         <span class="nav-label">
                           <span class="settings-nav-label-text">{item.label}</span>
-                          <Show when={!collapsed() && item.description}>
-                            <span class="settings-nav-label-desc">{item.description}</span>
-                          </Show>
                         </span>
                       </A>
                     )}
@@ -346,9 +343,6 @@ export function SettingsLayout(props: {
           <div class="settings-page-heading">
             <div class="settings-page-heading-text">
               <h1 class="page-title">{props.title}</h1>
-              <Show when={props.description}>
-                <p class="page-subtitle settings-page-description">{props.description}</p>
-              </Show>
             </div>
           </div>
           <div class="settings-page-body">{props.children}</div>

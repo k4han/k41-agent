@@ -548,7 +548,6 @@ function BackendCard(props: {
         </div>
         <div class="backend-card-title">
           <div class="backend-card-name">{props.backend.title}</div>
-          <div class="backend-card-subtitle">{props.backend.tagline}</div>
         </div>
         <span
           class="backend-status-pill"
@@ -561,8 +560,6 @@ function BackendCard(props: {
       </header>
 
       <div class="backend-card-body">
-        <div class="hint">{props.backend.summary}</div>
-
         <Show
           when={
             !props.configured &&
@@ -675,11 +672,6 @@ function DrawerSection(props: {
               <span class="badge badge-warning">{dirtyCount()}</span>
             </Show>
           </div>
-          <Show when={props.section.subtitle}>
-            <div class="backend-drawer-section-subtitle">
-              {props.section.subtitle}
-            </div>
-          </Show>
         </div>
         <span class="backend-drawer-section-caret" aria-hidden="true">
           <ChevronDown size={16} />
@@ -703,7 +695,6 @@ function DrawerSection(props: {
                 info={entry.info}
                 draft={props.drafts[entry.key]}
                 dirty={dirty()}
-                showDescription
                 onChange={(value) => props.onChange(entry.key, value)}
                 onRestore={() => props.onRestore(entry.key)}
               />

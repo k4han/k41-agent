@@ -116,7 +116,6 @@ export function SecurityPage() {
 
       <FormCard
         title="Change Password"
-        description="Update your password to keep your account secure"
         variant="elevated"
       >
         <form onSubmit={submit}>
@@ -124,7 +123,6 @@ export function SecurityPage() {
             label="Current Password"
             required
             error={errors().oldPassword}
-            helper="Enter your current password for verification"
           >
             <FormInput
               value={oldPassword()}
@@ -140,13 +138,12 @@ export function SecurityPage() {
             label="New Password"
             required
             error={errors().newPassword}
-            helper="Must be at least 8 characters with uppercase, lowercase, and numbers"
           >
             <FormInput
               value={newPassword()}
               onChange={setNewPassword}
               type="password"
-              placeholder="Enter new password"
+              placeholder="Enter new password (min. 8 chars)"
               required
               minLength={8}
               validation={[passwordValidation]}
@@ -159,7 +156,6 @@ export function SecurityPage() {
             label="Confirm New Password"
             required
             error={errors().confirmPassword}
-            helper="Re-enter your new password to confirm"
           >
             <FormInput
               value={confirmPassword()}

@@ -286,7 +286,6 @@ function GitHubConnectionCard() {
           </div>
           <div class="channel-card-title">
             <div class="channel-card-name">GitHub</div>
-            <div class="channel-card-subtitle">Repository hosting</div>
           </div>
           <div class="row-wrap">
             <span
@@ -315,10 +314,6 @@ function GitHubConnectionCard() {
         </header>
 
         <div class="channel-card-body">
-          <div class="hint">
-            Trigger agents from issues, pull requests, and discussions.
-          </div>
-
           <Show when={!isConfigured() && (channelsData() || github())}>
             <div class="channel-card-empty-hint">
               <TriangleAlert size={14} />
@@ -558,16 +553,9 @@ function DrawerSection(props: {
         class="channel-drawer-section-header"
         onClick={props.onToggle}
       >
-        <div>
-          <div class="channel-drawer-section-title">
-            <Show when={props.section.icon}>{props.section.icon!()}</Show>
-            {props.section.title}
-          </div>
-          <Show when={props.section.subtitle}>
-            <div class="channel-drawer-section-subtitle">
-              {props.section.subtitle}
-            </div>
-          </Show>
+        <div class="channel-drawer-section-title">
+          <Show when={props.section.icon}>{props.section.icon!()}</Show>
+          {props.section.title}
         </div>
       </button>
       <div class="channel-drawer-section-body">
@@ -590,7 +578,6 @@ function DrawerSection(props: {
                 info={entry.info}
                 draft={props.drafts[entry.key]}
                 dirty={dirty()}
-                showDescription
                 actions={
                   isPrivateKey ? (
                     <PrivateKeyUpload

@@ -1413,7 +1413,6 @@ function FallbackModelSection(props: {
   return (
     <FormCard
       title="Fallback Model"
-      description="Used automatically when an agent's configured provider or model is missing or invalid. Leave empty to disable the fallback."
       variant="default"
     >
       <div class="settings-section-header">
@@ -1432,7 +1431,6 @@ function FallbackModelSection(props: {
 
       <FormField
         label="Provider"
-        helper="Select the provider to use as fallback"
       >
         <FormSelect
           value={props.provider}
@@ -1445,7 +1443,6 @@ function FallbackModelSection(props: {
       <Show when={props.provider}>
         <FormField
           label="Model"
-          helper="Select the model to use as fallback"
         >
           <FormSelect
             value={props.model}

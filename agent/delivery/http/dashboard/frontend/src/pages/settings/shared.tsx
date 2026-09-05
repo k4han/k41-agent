@@ -399,16 +399,27 @@ export function SettingRow(props: {
   onChange: (value: unknown) => void;
   onRestore: () => void;
 }) {
+  const label = createMemo(() =>
+    settingLabel(props.settingKey, props.info, {
+      trimProviderPrefix: props.trimProviderPrefix,
+    }),
+  );
+
+  const tooltip = createMemo(() => {
+    if (props.info.description) {
+      return `${label()}: ${props.info.description} (${props.settingKey})`;
+    }
+    return props.settingKey;
+  });
+
   return (
     <div class={`setting-card ${props.dirty ? "setting-dirty" : ""}`}>
       <div class="setting-card-accent" aria-hidden="true" />
       <div class="setting-card-main">
         <div class="setting-copy">
           <div class="setting-title-row">
-            <div class="setting-title">
-              {settingLabel(props.settingKey, props.info, {
-                trimProviderPrefix: props.trimProviderPrefix,
-              })}
+            <div class="setting-title" title={tooltip()}>
+              {label()}
               <Show when={props.info.required}>
                 <span class="setting-required" title="Required">*</span>
               </Show>
@@ -424,10 +435,6 @@ export function SettingRow(props: {
               <div class="setting-inline-actions">{props.actions}</div>
             </Show>
           </div>
-          <div class="setting-key mono">{props.settingKey}</div>
-          <Show when={props.showDescription !== false && props.info.description}>
-            <div class="setting-description">{props.info.description}</div>
-          </Show>
         </div>
         <div class="setting-control-panel">
           {props.control || (

@@ -68,7 +68,6 @@ export function ConfigPage() {
   return (
     <SettingsLayout
       title="Runtime Configuration"
-      description="Environment and bootstrap settings. Restart-required changes are marked and need a server restart."
       breadcrumbLabel="Runtime"
       actions={
         <button
@@ -123,7 +122,6 @@ export function ConfigPage() {
                     <SettingsSection
                       title={categoryLabel(group.category)}
                       count={group.settings.length}
-                      description={`${group.settings.length} setting${group.settings.length === 1 ? "" : "s"} in this group`}
                       collapsible
                       defaultOpen={filteredCategories().length <= 3 || Boolean(search().trim())}
                     >

@@ -815,10 +815,7 @@ function PairingPanel(props: {
   return (
     <section class="panel">
       <div class="panel-header pairing-panel-header">
-        <div>
-          <div class="panel-title">Pairing</div>
-          <div class="hint">Create a one-time code to link Telegram or Discord identities.</div>
-        </div>
+        <div class="panel-title">Pairing</div>
         <button
           class="btn btn-primary"
           type="button"
@@ -943,7 +940,6 @@ function ChannelCard(props: {
         </div>
         <div class="channel-card-title">
           <div class="channel-card-name">{props.channel.title}</div>
-          <div class="channel-card-subtitle">{props.channel.tagline}</div>
         </div>
         <span
           class="channel-status-pill"
@@ -956,8 +952,6 @@ function ChannelCard(props: {
       </header>
 
       <div class="channel-card-body">
-        <div class="hint">{props.channel.summary}</div>
-
         <Show when={props.runtime.error}>
           <div class="channel-card-error">
             <TriangleAlert size={14} />
@@ -1123,11 +1117,6 @@ function DrawerSection(props: {
               <span class="badge badge-warning">{dirtyCount()}</span>
             </Show>
           </div>
-          <Show when={props.section.subtitle}>
-            <div class="channel-drawer-section-subtitle">
-              {props.section.subtitle}
-            </div>
-          </Show>
         </div>
         <span class="channel-drawer-section-caret" aria-hidden="true">
           <ChevronDown size={16} />
@@ -1152,7 +1141,6 @@ function DrawerSection(props: {
                 info={entry.info}
                 draft={props.drafts[entry.key]}
                 dirty={dirty()}
-                showDescription
                 control={
                   isAgent ? (
                     <AgentNameSelect

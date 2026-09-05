@@ -188,12 +188,7 @@ export function McpTab() {
           <>
             <section class="panel">
               <div class="panel-header">
-                <div>
-                  <div class="panel-title">Your MCP servers</div>
-                  <div class="hint">
-                    Installed servers are enabled per agent from the agent tools page.
-                  </div>
-                </div>
+                <div class="panel-title">Your MCP servers</div>
               </div>
               <DashboardTable
                 columns={[
@@ -284,10 +279,7 @@ export function McpTab() {
 
             <section class="panel">
               <div class="panel-header">
-                <div>
-                  <div class="panel-title">MCP Marketplace</div>
-                  <div class="hint">Search the official MCP registry and install servers per agent.</div>
-                </div>
+                <div class="panel-title">MCP Marketplace</div>
               </div>
               <div class="panel-body stack">
                 <div class="row-wrap">

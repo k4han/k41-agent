@@ -69,7 +69,6 @@ export function AppearancePage() {
   return (
     <SettingsLayout
       title="Appearance"
-      description="Choose how Kai Console looks on this device. System follows your OS preference."
       contentWidth="narrow"
     >
       <section class="panel appearance-panel">
@@ -94,7 +93,6 @@ export function AppearancePage() {
                   <Sun size={20} />
                 </span>
                 <span class="theme-option-label">Light</span>
-                <span class="theme-option-desc">Bright and clean</span>
                 <Show when={mode() === "light"}>
                   <span class="theme-option-check"><Check size={12} /></span>
                 </Show>
@@ -109,7 +107,6 @@ export function AppearancePage() {
                   <Moon size={20} />
                 </span>
                 <span class="theme-option-label">Dark</span>
-                <span class="theme-option-desc">Easy on the eyes</span>
                 <Show when={mode() === "dark"}>
                   <span class="theme-option-check"><Check size={12} /></span>
                 </Show>
@@ -124,7 +121,6 @@ export function AppearancePage() {
                   <Monitor size={20} />
                 </span>
                 <span class="theme-option-label">System</span>
-                <span class="theme-option-desc">{systemDark() ? "Dark" : "Light"} now</span>
                 <Show when={mode() === "system"}>
                   <span class="theme-option-check"><Check size={12} /></span>
                 </Show>

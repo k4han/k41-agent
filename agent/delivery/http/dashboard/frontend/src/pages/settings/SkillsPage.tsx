@@ -312,10 +312,7 @@ export function SkillsPage() {
           <div class="stack">
             <section class="panel">
               <div class="panel-header">
-                <div>
-                  <div class="panel-title">Repository-local skills</div>
-                  <div class="hint">Global skills live in <span class="mono">{payload.skills_root}</span>.</div>
-                </div>
+                <div class="panel-title">Repository-local skills</div>
               </div>
               <div class="panel-body">
                 <div class="field">
