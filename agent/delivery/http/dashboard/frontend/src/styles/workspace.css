@@ -2,11 +2,13 @@
   position: relative;
   min-width: 0;
   min-height: 0;
+  height: 100%;
+  max-height: 100%;
   opacity: 0;
   overflow: hidden;
   pointer-events: none;
   background: var(--surface);
-  border-left: 1px solid var(--border);
+  border-left: 0;
   transition:
     opacity 180ms ease,
     visibility 180ms ease;
@@ -18,6 +20,21 @@
   overflow: visible;
   pointer-events: auto;
   visibility: visible;
+  border-left: 1px solid var(--border);
+}
+
+.workspace-closed .workspace-drawer {
+  border-left: 0 !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  max-width: 0 !important;
+  overflow: hidden !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+.workspace-closed .workspace-resize-handle {
+  display: none !important;
 }
 
 .workspace-resizing .workspace-drawer {
@@ -97,12 +114,44 @@ body.workspace-resizing * {
 /* Header & Directory Control */
 .workspace-dir-control {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   gap: 6px;
   align-items: center;
+  height: 38px;
+  min-height: 38px;
   border-bottom: 1px solid var(--border);
-  padding: 7px 10px;
+  padding: 0 10px;
   background: var(--surface);
+  box-sizing: border-box;
+}
+
+.workspace-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 6px;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+
+.workspace-icon-btn:hover:not(:disabled) {
+  color: var(--fg);
+  background: var(--surface-2);
+}
+
+.workspace-icon-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.workspace-icon-btn.is-refreshing svg {
+  animation: workspace-spin 750ms linear infinite;
 }
 
 .workspace-backend-pill {

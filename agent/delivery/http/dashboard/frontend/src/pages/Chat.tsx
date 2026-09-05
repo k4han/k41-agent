@@ -1,6 +1,7 @@
 import { useNavigate, useParams, useSearchParams } from "@solidjs/router";
 import {
   GripVertical,
+  Menu,
   PanelRightClose,
   PanelRightOpen,
   X,
@@ -72,7 +73,8 @@ import {
   ATTACHMENT_ACCEPT,
   DEFAULT_ATTACHMENT_MESSAGE,
 } from "@/lib/chatTypes";
-import { ACTIVE_TASK_STATUSES } from "@/lib/uiConstants";
+import { ACTIVE_TASK_STATUSES, MOBILE_MEDIA_QUERY } from "@/lib/uiConstants";
+import { createMediaQuery } from "@/lib/useMediaQuery";
 import { useChatScroll } from "@/lib/useChatScroll";
 import { useChatStreams } from "@/lib/useChatStreams";
 import { useWorkspaceExplorer } from "@/lib/useWorkspaceExplorer";
@@ -176,6 +178,8 @@ export function ChatPage() {
   const [threadLoading, setThreadLoading] = createSignal(false);
   const [currentThreadId, setCurrentThreadId] = createSignal("");
   const [activeCheckpointId, setActiveCheckpointId] = createSignal("");
+  const [threadTitleOverride, setThreadTitleOverride] = createSignal("");
+  const isMobileViewport = createMediaQuery(MOBILE_MEDIA_QUERY);
 
   const [agentName, setAgentName] = createSignal("");
   const [provider, setProvider] = createSignal("default");
@@ -530,6 +534,7 @@ export function ChatPage() {
   const applyThreadPayload = (payload: ThreadMessagesPayload) => {
     scroll.clearTurnAnchor();
     setThreadData(payload);
+    setThreadTitleOverride(payload.title || "");
     setCurrentThreadId(payload.thread_id);
     setActiveCheckpointId(payload.active_checkpoint_id || "");
     setWorkspace(workspaceExecution(payload.workspace) || null);
@@ -597,6 +602,9 @@ export function ChatPage() {
     setRecursionLimitReached: (v) => setRecursionLimitReached(v),
     onThreadCreated,
     onThreadTitle: (threadId, title) => {
+      if (threadId === currentThreadId()) {
+        setThreadTitleOverride(title);
+      }
       window.dispatchEvent(
         new CustomEvent(CUSTOM_DOM_EVENTS.THREAD_TITLE_UPDATED, {
           detail: { threadId, title },
@@ -615,6 +623,25 @@ export function ChatPage() {
     openBackgroundStream,
     closeBackgroundStream,
   } = background;
+
+  const displayThreadTitle = createMemo(() => {
+    const title = threadTitleOverride() || threadData()?.title;
+    if (title && title.trim()) {
+      return title.trim();
+    }
+    if (currentThreadId()) {
+      return currentThreadId();
+    }
+    return "New Chat";
+  });
+
+  const fullThreadTitle = createMemo(() => {
+    const title = threadTitleOverride() || threadData()?.title;
+    if (title && title.trim()) {
+      return currentThreadId() ? `${title.trim()} (${currentThreadId()})` : title.trim();
+    }
+    return currentThreadId() || "New Chat";
+  });
 
   const pageSubtitle = createMemo(() => (
     currentThreadId()
@@ -798,6 +825,7 @@ export function ChatPage() {
 
     if (!threadId) {
       setCurrentThreadId("");
+      setThreadTitleOverride("");
       setCurrentStreamThreadId(null);
       setActiveCheckpointId("");
       setThreadData(undefined);
@@ -1526,10 +1554,18 @@ export function ChatPage() {
     }
   };
 
+  const handleThreadTitleUpdated = (event: Event) => {
+    const customEvent = event as CustomEvent<{ threadId: string; title: string }>;
+    if (customEvent.detail?.threadId === currentThreadId()) {
+      setThreadTitleOverride(customEvent.detail.title || "");
+    }
+  };
+
   onMount(() => {
     isUnmounting = false;
     cleanupStaleStreams();
 
+    window.addEventListener(CUSTOM_DOM_EVENTS.THREAD_TITLE_UPDATED, handleThreadTitleUpdated);
     window.addEventListener(CUSTOM_DOM_EVENTS.THREAD_EXTERNAL_ABORT, handleExternalAbort);
     window.addEventListener(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, handleThreadStopRunningExternal);
     window.addEventListener(CUSTOM_DOM_EVENTS.SESSION_STARTED, handleSessionStartedOrUpdated);
@@ -1546,6 +1582,7 @@ export function ChatPage() {
     if (!activeTid || !persistedStreams.has(activeTid)) {
       controller()?.abort();
     }
+    window.removeEventListener(CUSTOM_DOM_EVENTS.THREAD_TITLE_UPDATED, handleThreadTitleUpdated);
     window.removeEventListener(CUSTOM_DOM_EVENTS.THREAD_EXTERNAL_ABORT, handleExternalAbort);
     window.removeEventListener(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, handleThreadStopRunningExternal);
     window.removeEventListener(CUSTOM_DOM_EVENTS.SESSION_STARTED, handleSessionStartedOrUpdated);
@@ -1586,36 +1623,7 @@ export function ChatPage() {
     <>
     <AppShell
       title={currentThreadId() ? "Thread Chat" : "Agent Chat"}
-      subtitle={
-        <span class="row-wrap" style="gap: 8px; align-items: center; flex-wrap: wrap; display: inline-flex;">
-          <span>{pageSubtitle()}</span>
-          <ChatThreadBadges
-            isBackgroundThread={isBackgroundThread()}
-            backgroundTask={backgroundTask()}
-            backgroundLive={backgroundLive()}
-            backgroundSession={backgroundSession()}
-            activeSession={activeSession()}
-          />
-        </span>
-      }
-      actions={
-        <>
-          <button
-            class={`btn btn-icon ${explorer.open() ? "active" : ""}`}
-            type="button"
-            onClick={explorer.toggle}
-            title={explorer.open() ? "Hide workspace explorer" : "Show workspace explorer"}
-            aria-label={
-              explorer.open() ? "Hide workspace explorer" : "Show workspace explorer"
-            }
-            aria-pressed={explorer.open()}
-          >
-            <Show when={explorer.open()} fallback={<PanelRightOpen size={15} />}>
-              <PanelRightClose size={15} />
-            </Show>
-          </button>
-        </>
-      }
+      noHeader={true}
     >
       <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => (
@@ -1628,6 +1636,49 @@ export function ChatPage() {
             onTouchEnd={handleTouchEnd}
           >
             <section class="panel chat-panel">
+              <div class="chat-header">
+                <div class="chat-header-left">
+                  <Show when={isMobileViewport()}>
+                    <button
+                      class="chat-header-menu-toggle"
+                      type="button"
+                      onClick={() => {
+                        window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.OPEN_MOBILE_NAV));
+                      }}
+                      aria-label="Open navigation"
+                    >
+                      <Menu size={16} />
+                    </button>
+                  </Show>
+                  <div class="chat-header-title-wrap">
+                    <span class="chat-header-title" title={fullThreadTitle()}>
+                      {displayThreadTitle()}
+                    </span>
+                    <Show when={isBackgroundThread() || activeSession()}>
+                      <ChatThreadBadges
+                        isBackgroundThread={isBackgroundThread()}
+                        backgroundTask={backgroundTask()}
+                        backgroundLive={backgroundLive()}
+                        backgroundSession={backgroundSession()}
+                        activeSession={activeSession()}
+                      />
+                    </Show>
+                  </div>
+                </div>
+                <div class="chat-header-right">
+                  <Show when={!explorer.open()}>
+                    <button
+                      class="chat-header-workspace-btn"
+                      type="button"
+                      onClick={explorer.toggle}
+                      title="Open workspace"
+                      aria-label="Open workspace"
+                    >
+                      <PanelRightOpen size={19} />
+                    </button>
+                  </Show>
+                </div>
+              </div>
               <Show when={threadError() || backgroundStreamError()}>
                 <div class="thread-banner thread-banner-error">
                   <Show when={threadError()}>
@@ -1723,6 +1774,7 @@ export function ChatPage() {
                   || (workspaceLocked() && workspaceRef()?.backend !== "modal")
                 }
                 onWorkingDirChange={setWorkspace}
+                onCollapse={explorer.toggle}
               />
             </div>
           </div>

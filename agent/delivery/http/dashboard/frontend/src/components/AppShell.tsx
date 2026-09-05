@@ -108,6 +108,7 @@ export function AppShell(props: {
   subtitle?: JSX.Element;
   actions?: JSX.Element;
   children: JSX.Element;
+  noHeader?: boolean;
 }) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -831,10 +832,19 @@ export function AppShell(props: {
       });
       cancelRenameHistoryThread();
       showToast("Thread renamed.", "success");
+      window.dispatchEvent(
+        new CustomEvent(CUSTOM_DOM_EVENTS.THREAD_TITLE_UPDATED, {
+          detail: { threadId: updated.thread_id, title: updated.title || trimmedTitle },
+        }),
+      );
       window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.THREADS_CHANGED));
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Rename failed", "error");
     }
+  };
+
+  const handleOpenMobileNav = () => {
+    setMobileDrawerOpen(true);
   };
 
   onMount(() => {
@@ -850,6 +860,7 @@ export function AppShell(props: {
     }
     document.addEventListener("click", handleClickOutside);
     document.addEventListener("keydown", handleKeydown);
+    window.addEventListener(CUSTOM_DOM_EVENTS.OPEN_MOBILE_NAV, handleOpenMobileNav);
     window.addEventListener(CUSTOM_DOM_EVENTS.THREADS_CHANGED, handleThreadsChanged);
     window.addEventListener(CUSTOM_DOM_EVENTS.THREAD_START_RUNNING, handleThreadStartRunning);
     window.addEventListener(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, handleThreadStopRunning);
@@ -867,6 +878,7 @@ export function AppShell(props: {
     }
     document.removeEventListener("click", handleClickOutside);
     document.removeEventListener("keydown", handleKeydown);
+    window.removeEventListener(CUSTOM_DOM_EVENTS.OPEN_MOBILE_NAV, handleOpenMobileNav);
     window.removeEventListener(CUSTOM_DOM_EVENTS.THREADS_CHANGED, handleThreadsChanged);
     window.removeEventListener(CUSTOM_DOM_EVENTS.THREAD_START_RUNNING, handleThreadStartRunning);
     window.removeEventListener(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, handleThreadStopRunning);
@@ -875,7 +887,7 @@ export function AppShell(props: {
 
   return (
     <div
-      class={`app-layout ${collapsed() ? "sidebar-collapsed" : ""} ${isMobileViewport() && mobileDrawerOpen() ? "app-layout--drawer-open" : ""}`}
+      class={`app-layout ${collapsed() ? "sidebar-collapsed" : ""} ${isMobileViewport() && mobileDrawerOpen() ? "app-layout--drawer-open" : ""} ${props.noHeader ? "app-layout-no-header" : ""}`}
       onClick={handleAppLayoutClick}
     >
       <aside id="app-shell-sidebar" class="sidebar">
@@ -1122,33 +1134,35 @@ export function AppShell(props: {
           </div>
         </div>
       </aside>
-      <main class="main">
-        <header class="topbar">
-          <Show when={isMobileViewport()}>
-            <button
-              class="topbar-menu-toggle"
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                setMobileDrawerOpen(true);
-              }}
-              aria-label="Open navigation"
-              aria-expanded={mobileDrawerOpen()}
-              aria-controls="app-shell-sidebar"
-            >
-              <Menu size={18} />
-            </button>
+      <main class={`main ${props.noHeader ? "main-no-header" : ""}`}>
+        <Show when={!props.noHeader}>
+          <header class="topbar">
+            <Show when={isMobileViewport()}>
+              <button
+                class="topbar-menu-toggle"
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setMobileDrawerOpen(true);
+                }}
+                aria-label="Open navigation"
+                aria-expanded={mobileDrawerOpen()}
+                aria-controls="app-shell-sidebar"
+              >
+                <Menu size={18} />
+              </button>
+            </Show>
+            <div>
+              <h1 class="page-title">{props.title}</h1>
+              {props.subtitle ? <p class="page-subtitle">{props.subtitle}</p> : null}
+            </div>
+            <div class="row-wrap">{props.actions}</div>
+          </header>
+          <Show when={isMobileViewport() && props.subtitle}>
+            <div class="topbar-meta">{props.subtitle}</div>
           </Show>
-          <div>
-            <h1 class="page-title">{props.title}</h1>
-            {props.subtitle ? <p class="page-subtitle">{props.subtitle}</p> : null}
-          </div>
-          <div class="row-wrap">{props.actions}</div>
-        </header>
-        <Show when={isMobileViewport() && props.subtitle}>
-          <div class="topbar-meta">{props.subtitle}</div>
         </Show>
-        <div class="content">{props.children}</div>
+        <div class={`content ${props.noHeader ? "content-no-header" : ""}`}>{props.children}</div>
       </main>
 
       <DeleteThreadDialog

@@ -6,6 +6,7 @@ import {
   Folder,
   GitCompare,
   MoreHorizontal,
+  PanelRightClose,
   Pencil,
   Plus,
   RefreshCw,
@@ -200,6 +201,7 @@ export function WorkspaceExplorer(props: {
   workspace?: WorkspaceRef | null;
   disabled?: boolean;
   onWorkingDirChange: (value: WorkspaceRef | string | null) => void;
+  onCollapse?: () => void;
 }) {
   const dark = createDarkMode();
   const { showToast } = useToast();
@@ -904,15 +906,26 @@ export function WorkspaceExplorer(props: {
           }}
         />
         <button
-          class={`btn btn-sm ${isRefreshing() ? "is-refreshing" : ""}`}
+          class={`workspace-icon-btn ${isRefreshing() ? "is-refreshing" : ""}`}
           type="button"
           onClick={refresh}
           disabled={!canQuery() || isRefreshing()}
           title={isRefreshing() ? "Refreshing workspace..." : "Refresh workspace"}
           aria-label="Refresh workspace"
         >
-          <RefreshCw size={12} />
+          <RefreshCw size={17} />
         </button>
+        <Show when={props.onCollapse}>
+          <button
+            class="workspace-icon-btn workspace-collapse-btn"
+            type="button"
+            onClick={props.onCollapse}
+            title="Collapse workspace"
+            aria-label="Collapse workspace"
+          >
+            <PanelRightClose size={19} />
+          </button>
+        </Show>
       </div>
 
       <div class="workspace-tabs-bar">

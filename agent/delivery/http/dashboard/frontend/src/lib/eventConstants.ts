@@ -38,6 +38,7 @@ export const CUSTOM_DOM_EVENTS = {
   THREADS_CHANGED: "k41:threads-changed",
   TASKS_CHANGED: "k41:tasks-changed",
   TRANSCRIPT_TOOL_TOGGLE: "k41:transcript-tool-toggle",
+  OPEN_MOBILE_NAV: "k41:open-mobile-nav",
 } as const;
 
 export function recursionLimitStorageKey(threadId: string): string {
