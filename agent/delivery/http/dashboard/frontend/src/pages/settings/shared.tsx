@@ -1,7 +1,6 @@
 import { createMemo, createSignal, For, JSX, Show } from "solid-js";
 import { ArrowRight, Check, RotateCcw, TriangleAlert, ChevronDown } from "lucide-solid";
 
-import { CopyButton } from "@/components/CopyButton";
 import { Dialog } from "@/components/Dialog";
 import { useToast } from "@/components/Toast";
 import { apiFetch, putJson } from "@/lib/api";
@@ -424,14 +423,6 @@ export function SettingRow(props: {
             <Show when={props.actions}>
               <div class="setting-inline-actions">{props.actions}</div>
             </Show>
-            <CopyButton
-              value={props.settingKey}
-              class="btn btn-sm setting-copy-key"
-              title="Copy setting key"
-              ariaLabel="Copy setting key"
-              successMessage="Key copied"
-              iconSize={11}
-            />
           </div>
           <div class="setting-key mono">{props.settingKey}</div>
           <Show when={props.showDescription !== false && props.info.description}>

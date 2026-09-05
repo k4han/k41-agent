@@ -601,34 +601,6 @@
   gap: 8px;
 }
 
-.setting-copy-key {
-  width: 22px;
-  min-height: 22px;
-  height: 22px;
-  padding: 0;
-  border-radius: 6px;
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--muted-2);
-  opacity: 0;
-  transition:
-    opacity 120ms ease,
-    background-color 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease;
-}
-
-.setting-card:hover .setting-copy-key,
-.setting-copy-key:focus-visible {
-  opacity: 1;
-}
-
-.setting-copy-key:hover {
-  background: var(--surface-3);
-  border-color: var(--border);
-  color: var(--fg);
-}
-
 .setting-description {
   max-width: 760px;
   color: var(--muted);
