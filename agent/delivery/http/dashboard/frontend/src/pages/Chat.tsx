@@ -9,6 +9,7 @@ import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show }
 
 import { AppShell } from "@/components/AppShell";
 import { ChatComposer } from "@/components/ChatComposer";
+import { Dialog } from "@/components/Dialog";
 import { Markdown } from "@/components/Markdown";
 import { ChatThreadBadges } from "@/components/ChatThreadBadges";
 import { ChatTranscript } from "@/components/ChatTranscript";
@@ -1790,97 +1791,84 @@ export function ChatPage() {
         )}
       </DataGate>
     </AppShell>
-    <Show when={viewingMessage()}>
-      <div class="dialog-backdrop" onClick={() => setViewingMessage(null)}>
-        <div class="dialog dialog-wide" onClick={(e) => e.stopPropagation()}>
-          <div class="dialog-header">
-            <span style={{ "font-weight": 600, "font-size": "13px", "text-transform": "capitalize" }}>
-              {viewingMessage()?.role}
-            </span>
-            <button
-              class="btn btn-icon"
-              type="button"
-              onClick={() => setViewingMessage(null)}
-              aria-label="Close"
-            >
-              <X size={15} />
-            </button>
+    <Dialog
+      open={viewingMessage() !== null}
+      title={`${viewingMessage()?.role || "Message"} Message`}
+      subtitle={`Raw inspect view for ${viewingMessage()?.role || "message"}`}
+      size="xl"
+      onClose={() => setViewingMessage(null)}
+    >
+      <Show
+        when={viewingMessage()?.role === "assistant"}
+        fallback={
+          <div style={{ "max-height": "70vh", "overflow-y": "auto" }}>
+            <pre style={{
+              "white-space": "pre-wrap",
+              "word-break": "break-all",
+              "font-size": "13px",
+              "line-height": "1.6",
+              "margin": 0,
+            }}>
+              {viewingMessage()?.text}
+            </pre>
           </div>
-          <div class="dialog-body">
-            <Show
-              when={viewingMessage()?.role === "assistant"}
-              fallback={
-                <div style={{ "max-height": "70vh", "overflow-y": "auto" }}>
-                  <pre style={{
-                    "white-space": "pre-wrap",
-                    "word-break": "break-all",
-                    "font-size": "13px",
-                    "line-height": "1.6",
-                    "margin": 0,
-                  }}>
-                    {viewingMessage()?.text}
-                  </pre>
-                </div>
-              }
-            >
-              <div style={{ "max-height": "70vh", "overflow-y": "auto" }}>
-                <Markdown
-                  text={viewingMessage()?.text || ""}
-                  class="message-markdown"
-                  threadId={currentThreadId()}
-                />
-              </div>
-            </Show>
-            <Show when={viewingMessage()?.attachments?.length}>
-              <div style={{ "margin-top": "12px", "border-top": "1px solid var(--border)", "padding-top": "12px" }}>
-                <For each={viewingMessage()?.attachments || []}>
-                  {(attachment) => (
-                    <div style={{ "margin-bottom": "8px" }}>
-                      <div style={{
-                        "font-size": "12px",
-                        "font-weight": 600,
-                        "color": "var(--muted)",
-                        "margin-bottom": "4px",
-                      }}>
-                        {attachment.name}
-                      </div>
-                      <Show
-                        when={attachment.kind === "image" && attachment.preview_url}
-                        fallback={
-                          <Show when={attachment.content}>
-                            <pre style={{
-                              "white-space": "pre-wrap",
-                              "word-break": "break-all",
-                              "font-size": "12px",
-                              "line-height": "1.5",
-                              "margin": 0,
-                              "background": "var(--surface-2)",
-                              "border": "1px solid var(--border)",
-                              "border-radius": "6px",
-                              "padding": "8px",
-                              "max-height": "300px",
-                              "overflow-y": "auto",
-                            }}>
-                              {attachment.content}
-                            </pre>
-                          </Show>
-                        }
-                      >
-                        <img
-                          src={attachment.preview_url}
-                          alt={attachment.name}
-                          style={{ "max-width": "100%", "border-radius": "6px" }}
-                        />
-                      </Show>
-                    </div>
-                  )}
-                </For>
-              </div>
-            </Show>
-          </div>
+        }
+      >
+        <div style={{ "max-height": "70vh", "overflow-y": "auto" }}>
+          <Markdown
+            text={viewingMessage()?.text || ""}
+            class="message-markdown"
+            threadId={currentThreadId()}
+          />
         </div>
-      </div>
-    </Show>
+      </Show>
+      <Show when={viewingMessage()?.attachments?.length}>
+        <div style={{ "margin-top": "12px", "border-top": "1px solid var(--border)", "padding-top": "12px" }}>
+          <For each={viewingMessage()?.attachments || []}>
+            {(attachment) => (
+              <div style={{ "margin-bottom": "8px" }}>
+                <div style={{
+                  "font-size": "12px",
+                  "font-weight": 600,
+                  "color": "var(--muted)",
+                  "margin-bottom": "4px",
+                }}>
+                  {attachment.name}
+                </div>
+                <Show
+                  when={attachment.kind === "image" && attachment.preview_url}
+                  fallback={
+                    <Show when={attachment.content}>
+                      <pre style={{
+                        "white-space": "pre-wrap",
+                        "word-break": "break-all",
+                        "font-size": "12px",
+                        "line-height": "1.5",
+                        "margin": 0,
+                        "background": "var(--surface-2)",
+                        "border": "1px solid var(--border)",
+                        "border-radius": "6px",
+                        "padding": "8px",
+                        "max-height": "300px",
+                        "overflow-y": "auto",
+                      }}>
+                        {attachment.content}
+                      </pre>
+                    </Show>
+                  }
+                >
+                  <img
+                    src={attachment.preview_url}
+                    alt={attachment.name}
+                    style={{ "max-width": "100%", "border-radius": "6px" }}
+                  />
+                </Show>
+              </div>
+            )}
+          </For>
+        </div>
+      </Show>
+    </Dialog>
     </>
   );
 }

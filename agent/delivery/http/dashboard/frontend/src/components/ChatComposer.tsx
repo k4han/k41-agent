@@ -12,6 +12,7 @@ import { createEffect, createSignal, For, Show, type JSX } from "solid-js";
 import { AgentPicker } from "@/components/AgentPicker";
 import { ChatTodos, type TodoProgress } from "@/components/ChatTodos";
 import { ContextWindowIndicator, type ContextWindowData } from "@/components/ContextWindowIndicator";
+import { Dialog } from "@/components/Dialog";
 import { ModelPicker } from "@/components/ModelPicker";
 import {
   UserInputRequestCard,
@@ -282,49 +283,36 @@ export function ChatComposer(props: ChatComposerProps) {
           </button>
         </Show>
       </div>
-      <Show when={previewAttachment()}>
-        <div class="dialog-backdrop" onClick={() => setPreviewAttachment(null)}>
-          <div class="dialog" onClick={(e) => e.stopPropagation()}>
-            <div class="dialog-header">
-              <span style={{ "font-weight": 600, "font-size": "13px" }}>
-                {previewAttachment()?.name}
-              </span>
-              <button
-                class="btn btn-icon"
-                type="button"
-                onClick={() => setPreviewAttachment(null)}
-                aria-label="Close"
-              >
-                <X size={15} />
-              </button>
-            </div>
-            <div class="dialog-body">
-              <Show
-                when={previewAttachment()?.kind === "image"}
-                fallback={
-                  <pre style={{
-                    "white-space": "pre-wrap",
-                    "word-break": "break-all",
-                    "font-size": "12px",
-                    "line-height": "1.5",
-                    "margin": 0,
-                    "max-height": "60vh",
-                    "overflow-y": "auto",
-                  }}>
-                    {previewAttachment()?.content || "(empty)"}
-                  </pre>
-                }
-              >
-                <img
-                  src={previewAttachment()?.preview_url}
-                  alt={previewAttachment()?.name}
-                  style={{ "max-width": "100%", "max-height": "60vh", "border-radius": "6px" }}
-                />
-              </Show>
-            </div>
-          </div>
-        </div>
-      </Show>
+      <Dialog
+        open={previewAttachment() !== null}
+        title={previewAttachment()?.name || "Preview"}
+        subtitle={previewAttachment()?.kind === "image" ? "Image attachment preview" : "Text file preview"}
+        size="lg"
+        onClose={() => setPreviewAttachment(null)}
+      >
+        <Show
+          when={previewAttachment()?.kind === "image"}
+          fallback={
+            <pre style={{
+              "white-space": "pre-wrap",
+              "word-break": "break-all",
+              "font-size": "12px",
+              "line-height": "1.5",
+              "margin": 0,
+              "max-height": "60vh",
+              "overflow-y": "auto",
+            }}>
+              {previewAttachment()?.content || "(empty)"}
+            </pre>
+          }
+        >
+          <img
+            src={previewAttachment()?.preview_url}
+            alt={previewAttachment()?.name}
+            style={{ "max-width": "100%", "max-height": "60vh", "border-radius": "6px", display: "block", margin: "0 auto" }}
+          />
+        </Show>
+      </Dialog>
     </div>
   );
 }

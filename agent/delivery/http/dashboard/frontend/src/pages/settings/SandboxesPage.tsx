@@ -567,6 +567,9 @@ export function SandboxesPage() {
 
       <Dialog
         open={deleteTarget() !== null}
+        size="sm"
+        icon={<Trash2 size={17} />}
+        iconVariant="danger"
         title="Delete sandbox"
         onClose={cancelDelete}
         footer={

@@ -511,6 +511,10 @@ export function SettingsConfirmDialog(props: {
     <Dialog
       open={props.open}
       title="Confirm Changes"
+      subtitle={`Review and apply ${props.changes.length} pending change${props.changes.length === 1 ? "" : "s"}`}
+      icon={<Check size={17} />}
+      iconVariant="primary"
+      size="md"
       onClose={props.onClose}
       footer={
         <>

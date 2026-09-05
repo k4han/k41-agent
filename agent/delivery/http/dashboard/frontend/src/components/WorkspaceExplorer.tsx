@@ -1420,6 +1420,7 @@ export function WorkspaceExplorer(props: {
 
       <Dialog
         open={renameTarget() !== null}
+        size="sm"
         title="Rename"
         onClose={() => {
           if (!renaming()) {
@@ -1471,6 +1472,9 @@ export function WorkspaceExplorer(props: {
 
       <Dialog
         open={deleteTarget() !== null}
+        size="sm"
+        icon={<Trash2 size={17} />}
+        iconVariant="danger"
         title={deleteTarget()?.kind === "directory" ? "Delete folder" : "Delete file"}
         onClose={() => {
           if (!deleting()) {
@@ -1513,6 +1517,7 @@ export function WorkspaceExplorer(props: {
 
       <Dialog
         open={createTarget() !== null}
+        size="sm"
         title={createTarget()?.kind === "directory" ? "New folder" : "New file"}
         onClose={() => {
           if (!creating()) {

@@ -446,18 +446,31 @@
 
   .dialog-backdrop {
     padding: 0;
+    align-items: flex-end;
   }
 
   .dialog {
     width: 100%;
-    max-height: 100vh;
-    max-height: 100dvh;
-    height: 100%;
-    border-radius: 0;
-    padding-top: var(--safe-top);
-    padding-bottom: var(--safe-bottom);
-    padding-left: var(--safe-left);
-    padding-right: var(--safe-right);
+    max-width: 100%;
+    max-height: calc(100vh - 24px);
+    max-height: calc(100dvh - 24px);
+    border-radius: 16px 16px 0 0;
+    border-bottom: none;
+    border-left: none;
+    border-right: none;
+    margin-bottom: 0;
+  }
+
+  .dialog-header {
+    padding: 16px 18px;
+  }
+
+  .dialog-body {
+    padding: 16px 18px;
+  }
+
+  .dialog-footer {
+    padding: 12px 18px max(14px, calc(10px + var(--safe-bottom)));
   }
 
   .settings-resource-toolbar {

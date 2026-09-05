@@ -1020,6 +1020,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
       {/* 3. FOLDER BROWSER DIALOG */}
       <Dialog
         open={browserOpen()}
+        size="lg"
         title="Choose Local Folder"
         onClose={closeBrowser}
         footer={
