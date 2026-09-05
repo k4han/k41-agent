@@ -7,12 +7,15 @@ import {
   GitCompare,
   MoreHorizontal,
   Pencil,
+  Plus,
   RefreshCw,
+  Terminal,
   Trash2,
   X,
   Zap,
 } from "lucide-solid";
 import { createEffect, createMemo, createResource, createSignal, For, onCleanup, Show, untrack } from "solid-js";
+import { Portal } from "solid-js/web";
 
 import { Dialog } from "@/components/Dialog";
 import { useToast } from "@/components/Toast";
@@ -215,7 +218,12 @@ export function WorkspaceExplorer(props: {
   const [diffPayload, setDiffPayload] = createSignal<WorkspaceDiffPayload | null>(null);
   const [diffLoading, setDiffLoading] = createSignal(false);
   const [diffError, setDiffError] = createSignal("");
+  const [openTabs, setOpenTabs] = createSignal<WorkspaceTab[]>(["files"]);
   const [activeTab, setActiveTab] = createSignal<WorkspaceTab>("files");
+  const [plusMenuOpen, setPlusMenuOpen] = createSignal(false);
+  let plusBtnRef: HTMLButtonElement | undefined;
+  let plusMenuRef: HTMLDivElement | undefined;
+  const [plusMenuPos, setPlusMenuPos] = createSignal({ top: 0, left: 0 });
   const [fileTabs, setFileTabs] = createSignal<string[]>([]);
   const [filePayloads, setFilePayloads] = createSignal<Record<string, WorkspaceFilePayload>>({});
   const [fileLoadingByPath, setFileLoadingByPath] = createSignal<Record<string, boolean>>({});
@@ -400,13 +408,12 @@ export function WorkspaceExplorer(props: {
     setExpandedChangePath("");
     setDiffPayload(null);
     setDiffError("");
+    setOpenTabs(["files"]);
+    setActiveTab("files");
     setFileTabs([]);
     setFilePayloads({});
     setFileLoadingByPath({});
     setFileErrorByPath({});
-    if (untrack(activeTab).startsWith("file:")) {
-      setActiveTab("files");
-    }
     const reloadWithExpansion = async () => {
       await loadTree("", targetGeneration);
       if (targetGeneration !== generation) return;
@@ -527,19 +534,39 @@ export function WorkspaceExplorer(props: {
     void loadDiff(path);
   };
 
-   const openFile = (path: string) => {
-    setFileTabs((current) => current.includes(path) ? current : [...current, path]);
-    setActiveTab(fileTabId(path));
-    if (!filePayloads()[path] && !fileLoadingByPath()[path]) {
-      void loadFile(path);
+  const openTab = (tab: WorkspaceTab) => {
+    setOpenTabs((current) => (current.includes(tab) ? current : [...current, tab]));
+    setActiveTab(tab);
+  };
+
+  const closeTab = (tab: WorkspaceTab, event?: MouseEvent) => {
+    event?.stopPropagation();
+    const current = openTabs();
+    const nextTabs = current.filter((t) => t !== tab);
+    setOpenTabs(nextTabs);
+
+    if (activeTab() === tab) {
+      if (nextTabs.length > 0) {
+        const closedIdx = current.indexOf(tab);
+        const nextIdx = Math.max(0, closedIdx - 1);
+        setActiveTab(nextTabs[nextIdx] || nextTabs[0]);
+      } else {
+        setActiveTab("" as WorkspaceTab);
+      }
+    }
+
+    if (tab.startsWith("file:")) {
+      const path = fileTabPath(tab);
+      setFileTabs((curr) => curr.filter((item) => item !== path));
     }
   };
 
-  const closeFileTab = (path: string, event: MouseEvent) => {
-    event.stopPropagation();
-    setFileTabs((current) => current.filter((item) => item !== path));
-    if (activeTab() === fileTabId(path)) {
-      setActiveTab("files");
+  const openFile = (path: string) => {
+    const tab = fileTabId(path);
+    setFileTabs((current) => (current.includes(path) ? current : [...current, path]));
+    openTab(tab);
+    if (!filePayloads()[path] && !fileLoadingByPath()[path]) {
+      void loadFile(path);
     }
   };
 
@@ -582,15 +609,12 @@ export function WorkspaceExplorer(props: {
       });
       showToast(`Renamed to ${nextName}`, "success");
       const openedPath = entry.path;
-      setFileTabs((current) => current.filter((item) => item !== openedPath));
+      closeTab(fileTabId(openedPath));
       setFilePayloads((current) => {
         const copy = { ...current };
         delete copy[openedPath];
         return copy;
       });
-      if (activeTab() === fileTabId(openedPath)) {
-        setActiveTab("files");
-      }
       cancelRename();
       const parentPath = entry.path.split("/").slice(0, -1).join("/") || "";
       await reloadPath(parentPath);
@@ -623,15 +647,12 @@ export function WorkspaceExplorer(props: {
       });
       showToast(`Deleted ${entry.name}`, "success");
       const removedPath = entry.path;
-      setFileTabs((current) => current.filter((item) => item !== removedPath));
+      closeTab(fileTabId(removedPath));
       setFilePayloads((current) => {
         const copy = { ...current };
         delete copy[removedPath];
         return copy;
       });
-      if (activeTab() === fileTabId(removedPath)) {
-        setActiveTab("files");
-      }
       setDeleteTarget(null);
       const parentPath = entry.path.split("/").slice(0, -1).join("/") || "";
       await reloadPath(parentPath);
@@ -653,15 +674,45 @@ export function WorkspaceExplorer(props: {
     }
   };
 
+  const updatePlusMenuPosition = () => {
+    if (!plusBtnRef) return;
+    const rect = plusBtnRef.getBoundingClientRect();
+    const menuWidth = 185;
+    let left = rect.left;
+    if (left + menuWidth > window.innerWidth - 8) {
+      left = Math.max(8, window.innerWidth - menuWidth - 8);
+    }
+    const spaceBelow = window.innerHeight - rect.bottom;
+    let top = rect.bottom + 4;
+    if (spaceBelow < 150 && rect.top > spaceBelow) {
+      top = Math.max(8, rect.top - 140);
+    }
+    setPlusMenuPos({ top, left });
+  };
+
+  createEffect(() => {
+    if (!plusMenuOpen()) return;
+    updatePlusMenuPosition();
+    const handler = () => updatePlusMenuPosition();
+    window.addEventListener("scroll", handler, true);
+    window.addEventListener("resize", handler);
+    onCleanup(() => {
+      window.removeEventListener("scroll", handler, true);
+      window.removeEventListener("resize", handler);
+    });
+  });
+
   const handleDocumentClick = (event: MouseEvent) => {
-    if (!actionMenuPath()) {
-      return;
-    }
     const target = event.target as HTMLElement | null;
-    if (target && target.closest(".workspace-tree-actions")) {
-      return;
+    if (actionMenuPath() && !target?.closest(".workspace-tree-actions")) {
+      closeActionMenu();
     }
-    closeActionMenu();
+    if (plusMenuOpen()) {
+      if (plusBtnRef?.contains(target as Node) || plusMenuRef?.contains(target as Node)) {
+        return;
+      }
+      setPlusMenuOpen(false);
+    }
   };
 
   if (typeof document !== "undefined") {
@@ -864,72 +915,196 @@ export function WorkspaceExplorer(props: {
         </button>
       </div>
 
-      <div
-        class="workspace-tabs"
-        role="tablist"
-        aria-label="Workspace views"
-        onWheel={(event: WheelEvent) => {
-          if (event.deltaY !== 0) {
-            event.preventDefault();
-            const container = event.currentTarget as HTMLElement;
-            if (container) {
-              container.scrollLeft += event.deltaY;
+      <div class="workspace-tabs-bar">
+        <div
+          class="workspace-tabs"
+          role="tablist"
+          aria-label="Workspace views"
+          onWheel={(event: WheelEvent) => {
+            if (event.deltaY !== 0) {
+              event.preventDefault();
+              const container = event.currentTarget as HTMLElement;
+              if (container) {
+                container.scrollLeft += event.deltaY;
+              }
             }
-          }
-        }}
-      >
-        <button
-          class={`workspace-tab ${activeTab() === "files" ? "active" : ""}`}
-          type="button"
-          role="tab"
-          aria-selected={activeTab() === "files"}
-          onClick={() => setActiveTab("files")}
+          }}
         >
-          <Folder size={12} />
-          <span>Files</span>
-        </button>
-        <button
-          class={`workspace-tab ${activeTab() === "changes" ? "active" : ""}`}
-          type="button"
-          role="tab"
-          aria-selected={activeTab() === "changes"}
-          onClick={() => setActiveTab("changes")}
-        >
-          <GitCompare size={12} />
-          <span>Changes</span>
-          <Show when={changes().length > 0}>
-            <span class="workspace-tab-count">{changes().length}</span>
-          </Show>
-        </button>
-        <For each={fileTabs()}>
-          {(path) => (
-            <div class={`workspace-tab workspace-file-tab ${activeTab() === fileTabId(path) ? "active" : ""}`}>
-              <button
-                class="workspace-tab-main"
-                type="button"
-                role="tab"
-                aria-selected={activeTab() === fileTabId(path)}
-                title={path}
-                onClick={() => setActiveTab(fileTabId(path))}
-              >
-                <File size={12} />
-                <span>{fileName(path)}</span>
-              </button>
-              <button
-                class="workspace-tab-close"
-                type="button"
-                title="Close file tab"
-                aria-label={`Close ${path}`}
-                onClick={(event) => closeFileTab(path, event)}
-              >
-                <X size={11} />
-              </button>
-            </div>
-          )}
-        </For>
+          <For each={openTabs()}>
+            {(tab) => {
+              const isFiles = tab === "files";
+              const isChanges = tab === "changes";
+              const isFile = tab.startsWith("file:");
+              const filePath = isFile ? fileTabPath(tab) : "";
+
+              return (
+                <div
+                  class={`workspace-tab ${activeTab() === tab ? "active" : ""}`}
+                  role="tab"
+                  aria-selected={activeTab() === tab}
+                  onClick={() => setActiveTab(tab)}
+                  onAuxClick={(event) => {
+                    if (event.button === 1) {
+                      event.preventDefault();
+                      closeTab(tab, event);
+                    }
+                  }}
+                  title={isFile ? filePath : isFiles ? "Files Explorer" : "Git Changes"}
+                >
+                  <div class="workspace-tab-icon-slot">
+                    <span class="workspace-tab-icon" aria-hidden="true">
+                      <Show when={isFiles}>
+                        <Folder size={12} />
+                      </Show>
+                      <Show when={isChanges}>
+                        <GitCompare size={12} />
+                      </Show>
+                      <Show when={isFile}>
+                        <File size={12} />
+                      </Show>
+                    </span>
+                    <button
+                      class="workspace-tab-close"
+                      type="button"
+                      title={`Close ${isFiles ? "Files" : isChanges ? "Changes" : fileName(filePath)}`}
+                      aria-label={`Close ${isFiles ? "Files" : isChanges ? "Changes" : fileName(filePath)}`}
+                      onClick={(event) => closeTab(tab, event)}
+                    >
+                      <X size={11} />
+                    </button>
+                  </div>
+
+                  <span class="workspace-tab-label">
+                    {isFiles ? "Files" : isChanges ? "Changes" : fileName(filePath)}
+                  </span>
+
+                  <Show when={isChanges && changes().length > 0}>
+                    <span class="workspace-tab-count">{changes().length}</span>
+                  </Show>
+                </div>
+              );
+            }}
+          </For>
+
+          <div class="workspace-plus-control">
+            <button
+              ref={plusBtnRef}
+              class={`workspace-tab-plus ${plusMenuOpen() ? "active" : ""}`}
+              type="button"
+              title="New tab / Add tool"
+              aria-label="New tab"
+              aria-haspopup="menu"
+              aria-expanded={plusMenuOpen()}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (!plusMenuOpen()) {
+                  updatePlusMenuPosition();
+                  setPlusMenuOpen(true);
+                } else {
+                  setPlusMenuOpen(false);
+                }
+              }}
+            >
+              <Plus size={13} />
+            </button>
+
+            <Show when={plusMenuOpen()}>
+              <Portal>
+                <div
+                  ref={plusMenuRef}
+                  class="workspace-plus-menu"
+                  style={{
+                    position: "fixed",
+                    top: `${plusMenuPos().top}px`,
+                    left: `${plusMenuPos().left}px`,
+                  }}
+                  role="menu"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    class={`workspace-plus-menu-item ${openTabs().includes("files") ? "is-open" : ""}`}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      openTab("files");
+                      setPlusMenuOpen(false);
+                    }}
+                  >
+                    <Folder size={13} />
+                    <span>Files Explorer</span>
+                    <Show when={openTabs().includes("files")}>
+                      <span class="workspace-menu-pill">Open</span>
+                    </Show>
+                  </button>
+                  <button
+                    class={`workspace-plus-menu-item ${openTabs().includes("changes") ? "is-open" : ""}`}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      openTab("changes");
+                      setPlusMenuOpen(false);
+                    }}
+                  >
+                    <GitCompare size={13} />
+                    <span>Git Changes</span>
+                    <Show when={changes().length > 0}>
+                      <span class="workspace-tab-count">{changes().length}</span>
+                    </Show>
+                    <Show when={openTabs().includes("changes")}>
+                      <span class="workspace-menu-pill">Open</span>
+                    </Show>
+                  </button>
+                  <div class="workspace-menu-divider" />
+                  <div
+                    class="workspace-plus-menu-item is-disabled"
+                    title="Terminal support coming soon"
+                    role="menuitem"
+                    aria-disabled="true"
+                  >
+                    <Terminal size={13} />
+                    <span>Terminal</span>
+                    <span class="workspace-menu-pill badge-soon">Soon</span>
+                  </div>
+                </div>
+              </Portal>
+            </Show>
+          </div>
+        </div>
       </div>
 
       <div class="workspace-explorer-body">
+        <Show when={openTabs().length === 0}>
+          <div class="workspace-empty-view">
+            <div class="workspace-empty-icon">
+              <Folder size={28} />
+            </div>
+            <div class="workspace-empty-title">No open tabs</div>
+            <div class="workspace-empty-desc">
+              Open the file explorer or view git changes to get started.
+            </div>
+            <div class="workspace-empty-actions">
+              <button
+                class="btn btn-sm btn-primary"
+                type="button"
+                onClick={() => openTab("files")}
+              >
+                <Folder size={12} />
+                <span>Files Explorer</span>
+              </button>
+              <button
+                class="btn btn-sm"
+                type="button"
+                onClick={() => openTab("changes")}
+              >
+                <GitCompare size={12} />
+                <span>Git Changes</span>
+                <Show when={changes().length > 0}>
+                  <span class="workspace-tab-count">{changes().length}</span>
+                </Show>
+              </button>
+            </div>
+          </div>
+        </Show>
         <Show when={activeTab() === "changes"}>
           <section class="workspace-section workspace-tab-panel" role="tabpanel">
             <Show
