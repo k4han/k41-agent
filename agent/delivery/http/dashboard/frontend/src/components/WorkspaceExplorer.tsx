@@ -252,6 +252,12 @@ export function WorkspaceExplorer(props: {
   const rootTreeTruncated = () =>
     treeTruncatedByPath()[rootPath()] || treeTruncatedByPath()[""] || false;
   const canQuery = () => Boolean(queryWorkspace()?.locator.trim() || props.threadId);
+  const isRefreshing = () =>
+    Boolean(
+      treeLoadingByPath()[rootPath()]
+      || treeLoadingByPath()[""]
+      || changesLoading(),
+    );
   const activeFilePath = () => fileTabPath(activeTab());
   const activeFilePayload = () => filePayloads()[activeFilePath()];
   const workingDirDisplayValue = () =>
@@ -744,14 +750,14 @@ export function WorkspaceExplorer(props: {
           >
             <span class="workspace-tree-caret">
               <Show when={isDirectory()}>
-                <Show when={isOpen()} fallback={<ChevronRight size={13} />}>
-                  <ChevronDown size={13} />
+                <Show when={isOpen()} fallback={<ChevronRight size={12} />}>
+                  <ChevronDown size={12} />
                 </Show>
               </Show>
             </span>
             <span class="workspace-tree-icon">
-              <Show when={isDirectory()} fallback={<File size={14} />}>
-                <Folder size={14} />
+              <Show when={isDirectory()} fallback={<File size={13} />}>
+                <Folder size={13} />
               </Show>
             </span>
             <span class="workspace-tree-name">{entry().name}</span>
@@ -767,7 +773,7 @@ export function WorkspaceExplorer(props: {
               aria-expanded={isMenuOpen()}
               onClick={(event) => toggleActionMenu(entry().path, event)}
             >
-              <MoreHorizontal size={13} />
+              <MoreHorizontal size={12} />
             </button>
             <Show when={isMenuOpen()}>
               <div class="workspace-tree-menu" role="menu">
@@ -777,7 +783,7 @@ export function WorkspaceExplorer(props: {
                   role="menuitem"
                   onClick={(event) => requestRename(entry(), event)}
                 >
-                  <Pencil size={13} />
+                  <Pencil size={12} />
                   <span>Rename</span>
                 </button>
                 <button
@@ -786,7 +792,7 @@ export function WorkspaceExplorer(props: {
                   role="menuitem"
                   onClick={(event) => void copyPath(entry(), event)}
                 >
-                  <Clipboard size={13} />
+                  <Clipboard size={12} />
                   <span>Copy path</span>
                 </button>
                 <button
@@ -795,7 +801,7 @@ export function WorkspaceExplorer(props: {
                   role="menuitem"
                   onClick={(event) => requestDelete(entry(), event)}
                 >
-                  <Trash2 size={13} />
+                  <Trash2 size={12} />
                   <span>Delete</span>
                 </button>
               </div>
@@ -846,8 +852,15 @@ export function WorkspaceExplorer(props: {
             }
           }}
         />
-        <button class="btn btn-sm" type="button" onClick={refresh} disabled={!canQuery()}>
-          <RefreshCw size={13} />
+        <button
+          class={`btn btn-sm ${isRefreshing() ? "is-refreshing" : ""}`}
+          type="button"
+          onClick={refresh}
+          disabled={!canQuery() || isRefreshing()}
+          title={isRefreshing() ? "Refreshing workspace..." : "Refresh workspace"}
+          aria-label="Refresh workspace"
+        >
+          <RefreshCw size={12} />
         </button>
       </div>
 
@@ -872,7 +885,7 @@ export function WorkspaceExplorer(props: {
           aria-selected={activeTab() === "files"}
           onClick={() => setActiveTab("files")}
         >
-          <Folder size={13} />
+          <Folder size={12} />
           <span>Files</span>
         </button>
         <button
@@ -882,7 +895,7 @@ export function WorkspaceExplorer(props: {
           aria-selected={activeTab() === "changes"}
           onClick={() => setActiveTab("changes")}
         >
-          <GitCompare size={13} />
+          <GitCompare size={12} />
           <span>Changes</span>
           <Show when={changes().length > 0}>
             <span class="workspace-tab-count">{changes().length}</span>
@@ -899,7 +912,7 @@ export function WorkspaceExplorer(props: {
                 title={path}
                 onClick={() => setActiveTab(fileTabId(path))}
               >
-                <File size={13} />
+                <File size={12} />
                 <span>{fileName(path)}</span>
               </button>
               <button
@@ -909,7 +922,7 @@ export function WorkspaceExplorer(props: {
                 aria-label={`Close ${path}`}
                 onClick={(event) => closeFileTab(path, event)}
               >
-                <X size={12} />
+                <X size={11} />
               </button>
             </div>
           )}
@@ -947,9 +960,9 @@ export function WorkspaceExplorer(props: {
                             <span class="workspace-change-caret">
                               <Show
                                 when={expandedChangePath() === change.path}
-                                fallback={<ChevronRight size={13} />}
+                                fallback={<ChevronRight size={12} />}
                               >
-                                <ChevronDown size={13} />
+                                <ChevronDown size={12} />
                               </Show>
                             </span>
                             <span class="workspace-change-path">{change.path}</span>
