@@ -32,3 +32,5 @@ agent/delivery/http/dashboard/static/
 agent/modules/providers/api.json
 
 .vscode
+
+.agent/

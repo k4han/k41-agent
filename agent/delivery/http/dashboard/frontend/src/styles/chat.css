@@ -140,20 +140,7 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  width: min(680px, 100%);
-}
-
-.chat-workspace-empty-title {
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.chat-workspace-empty-hint {
-  font-size: 12px;
-  color: var(--muted);
-  text-align: center;
-  margin-bottom: 8px;
+  width: min(580px, 100%);
 }
 
 .chat-workspace-empty .workspace-selector {

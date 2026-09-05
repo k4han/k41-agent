@@ -1,8 +1,10 @@
 import { createEffect, createMemo, createSignal, For, Match, Show, Switch } from "solid-js";
 import {
   FolderOpen,
+  Folder,
   GitBranch,
   CheckCircle2,
+  Check,
   ArrowUp,
   HardDrive,
   Plus,
@@ -10,6 +12,10 @@ import {
   RefreshCw,
   Cloud,
   Sparkles,
+  Search,
+  Copy,
+  X,
+  Lock,
 } from "lucide-solid";
 
 import { Dialog } from "@/components/Dialog";
@@ -116,13 +122,13 @@ function sourceFromWorkspace(
 function sourceIcon(source: WorkspaceSourceKey) {
   switch (source) {
     case "github":
-      return <GitBranch size={13} />;
+      return <GitBranch size={14} />;
     case "sandbox":
-      return <Cloud size={13} />;
+      return <Cloud size={14} />;
     case "temp":
-      return <Sparkles size={13} />;
+      return <Sparkles size={14} />;
     default:
-      return <FolderOpen size={13} />;
+      return <FolderOpen size={14} />;
   }
 }
 
@@ -131,12 +137,31 @@ function sourceTitle(source: WorkspaceSourceKey): string {
     case "github":
       return "GitHub";
     case "sandbox":
-      return "Sandbox";
+      return "Cloud Sandbox";
     case "temp":
-      return "Temp";
+      return "Temporary";
     default:
-      return "Path";
+      return "Local Folder";
   }
+}
+
+function sourceBadgeLabel(source: WorkspaceSourceKey): string {
+  switch (source) {
+    case "github":
+      return "GitHub Repository";
+    case "sandbox":
+      return "Cloud Sandbox";
+    case "temp":
+      return "Temporary Scratchpad";
+    default:
+      return "Local Directory";
+  }
+}
+
+function getTailPath(fullPath: string): string {
+  if (!fullPath) return "";
+  const parts = fullPath.replace(/\\/g, "/").split("/").filter(Boolean);
+  return parts.length > 0 ? parts[parts.length - 1] : fullPath;
 }
 
 export function WorkspaceSelector(props: WorkspaceSelectorProps) {
@@ -147,23 +172,27 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
       ? defaultSourceForBackend(backendFromWorkspace(props.workspace))
       : "temp",
   );
-  const [localDraft, setLocalDraft] = createSignal(props.defaultWorkingDir);
+  const [localDraft, setLocalDraft] = createSignal(props.defaultWorkingDir || props.workingDir || "");
   const [sandboxId, setSandboxId] = createSignal("");
   const [repositories, setRepositories] = createSignal<GitHubRepositoryBinding[]>([]);
   const [repositoryId, setRepositoryId] = createSignal("");
   const [repositoriesLoading, setRepositoriesLoading] = createSignal(false);
   const [repositoriesError, setRepositoriesError] = createSignal("");
+  const [repoSearch, setRepoSearch] = createSignal("");
   const [sandboxes, setSandboxes] = createSignal<SandboxListPayload["sandboxes"]>([]);
   const [sandboxesLoading, setSandboxesLoading] = createSignal(false);
   const [sandboxesError, setSandboxesError] = createSignal("");
+  const [sandboxSearch, setSandboxSearch] = createSignal("");
   const [resolvedLabel, setResolvedLabel] = createSignal("");
   const [browserOpen, setBrowserOpen] = createSignal(false);
   const [browsePayload, setBrowsePayload] = createSignal<WorkspaceBrowsePayload | null>(null);
   const [browseLoading, setBrowseLoading] = createSignal(false);
   const [browseError, setBrowseError] = createSignal("");
+  const [folderFilter, setFolderFilter] = createSignal("");
   const [createFolderOpen, setCreateFolderOpen] = createSignal(false);
   const [newFolderName, setNewFolderName] = createSignal("");
   const [createFolderResolving, setCreateFolderResolving] = createSignal(false);
+  const [copiedPath, setCopiedPath] = createSignal(false);
 
   const pathSegments = createMemo(() => {
     const currentPath = browsePayload()?.path || localDraft() || "";
@@ -222,7 +251,32 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
         !entry.name.startsWith(".") &&
         entry.name !== "__pycache__" &&
         entry.name !== "node_modules" &&
-        entry.name !== "venv"
+        entry.name !== "venv",
+    );
+  });
+
+  const displayedFolderEntries = createMemo(() => {
+    const query = folderFilter().trim().toLowerCase();
+    const entries = filteredEntries();
+    if (!query) return entries;
+    return entries.filter((e) => e.name.toLowerCase().includes(query));
+  });
+
+  const filteredRepositories = createMemo(() => {
+    const query = repoSearch().trim().toLowerCase();
+    const list = repositories();
+    if (!query) return list;
+    return list.filter((r) => r.full_name.toLowerCase().includes(query));
+  });
+
+  const filteredSandboxes = createMemo(() => {
+    const query = sandboxSearch().trim().toLowerCase();
+    const list = sandboxes();
+    if (!query) return list;
+    return list.filter(
+      (s) =>
+        s.sandbox_id.toLowerCase().includes(query) ||
+        (s.label && s.label.toLowerCase().includes(query)),
     );
   });
 
@@ -241,29 +295,51 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
   const selectedRepository = createMemo(() =>
     repositories().find((repository) => String(repository.repository_id) === repositoryId()),
   );
-  const workspaceStatusLabel = createMemo(() =>
-    workspaceDisplayLabel(props.workspace)
-    || props.selection?.label
-    || workspaceDisplayLabelFromValues(resolvedLabel(), props.workingDir || resolvedLabel()),
-  );
+
+  const activeSource = createMemo<WorkspaceSourceKey>(() => {
+    if (props.workspace) {
+      return sourceFromWorkspace(backendFromWorkspace(props.workspace), props.workspace);
+    }
+    if (props.selection) {
+      return props.selection.source;
+    }
+    return source();
+  });
+
+  const workspaceStatusLabel = createMemo(() => {
+    if (props.workspace) {
+      return workspaceDisplayLabel(props.workspace);
+    }
+    if (props.selection?.label) {
+      return props.selection.label;
+    }
+    if (resolvedLabel()) {
+      return resolvedLabel();
+    }
+    if (source() === "temp") {
+      return "Temporary workspace (auto-provisions on first message)";
+    }
+    if (props.workingDir) {
+      return workspaceDisplayLabelFromValues("", props.workingDir);
+    }
+    return "Temporary workspace (default)";
+  });
+
   const workspaceStatusTitle = createMemo(() =>
     props.workingDir || props.selection?.label || resolvedLabel() || workspaceStatusLabel(),
   );
 
-  const subNote = createMemo(() => {
-    const src = source();
-    if (src === "path") {
-      return "The agent reads and writes files directly in this folder.";
-    }
-    if (src === "temp") {
-      return "Isolated scratch space. Session files are removed when the thread is deleted.";
-    }
-    if (src === "github") {
-      return isSandboxBackend(backend())
-        ? `Repository will be cloned inside the ${getBackendDisplayName(backend())} sandbox.`
-        : "Repository will be cloned to a local cache folder.";
-    }
-    return "";
+  const isCurrentPathActive = createMemo(() => {
+    if (source() !== "path") return false;
+    const draft = localDraft().trim();
+    if (!draft) return false;
+    if (props.workspace?.backend === "local" && props.workspace?.locator === draft) return true;
+    if (props.selection?.source === "path" && props.selection?.localPath === draft) return true;
+    return false;
+  });
+
+  const isTempActive = createMemo(() => {
+    return props.selection?.source === "temp" || (!props.selection && !props.workspace);
   });
 
   const resolveDisabled = createMemo(() => {
@@ -302,8 +378,6 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
     }
   };
 
-  // Monotonic id guarding against stale sandbox-list responses: only the
-  // latest request is allowed to write state.
   let sandboxesRequestId = 0;
 
   const loadSandboxes = async (backendName: string) => {
@@ -350,6 +424,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
   const openBrowser = () => {
     setCreateFolderOpen(false);
     setNewFolderName("");
+    setFolderFilter("");
     setBrowserOpen(true);
     void loadBrowsePath(localDraft().trim() || props.defaultWorkingDir);
   };
@@ -359,6 +434,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
     setBrowseError("");
     setCreateFolderOpen(false);
     setNewFolderName("");
+    setFolderFilter("");
   };
 
   const chooseCurrentBrowsePath = () => {
@@ -367,6 +443,18 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
       setLocalDraft(payload.path);
       closeBrowser();
       commitSelection(payload.path);
+    }
+  };
+
+  const copyPathToClipboard = async () => {
+    const target = browsePayload()?.path || localDraft();
+    if (!target) return;
+    try {
+      await navigator.clipboard.writeText(target);
+      setCopiedPath(true);
+      setTimeout(() => setCopiedPath(false), 1500);
+    } catch {
+      // ignore
     }
   };
 
@@ -397,8 +485,6 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
     const src = source();
     const back = backend();
     const repository = selectedRepository();
-    // GitHub clones into a sandbox backend may target an existing sandbox,
-    // so the sandbox locator is preserved for both "sandbox" and "github".
     const sid = (src === "sandbox" || src === "github") && isSandboxBackend(back)
       ? sandboxId().trim()
       : "";
@@ -440,14 +526,12 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
     const selection = buildSelection(targetPath);
     setResolvedLabel(selection.label);
     props.onSelectionChange(selection);
-    showToast("Workspace selected.", "success");
+    showToast(`Workspace set to ${selection.label}.`, "success");
   };
 
   createEffect(() => {
     const workspace = props.workspace;
     if (workspace && workspace.backend !== "local") {
-      // Sandbox roots (e.g. /workspace/repo) are not valid local paths and
-      // must not leak into the path-source draft.
       return;
     }
     if (props.workingDir) {
@@ -512,7 +596,6 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
     if (source() === "sandbox" && isSandboxBackend(back) && isBackendEnabled(back)) {
       void loadSandboxes(back);
     } else {
-      // Invalidate any in-flight sandbox request before resetting state.
       sandboxesRequestId += 1;
       setSandboxes([]);
       setSandboxesError("");
@@ -526,38 +609,33 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
 
   return (
     <div class={`workspace-selector ${props.locked ? "locked" : ""}`}>
-      <div class="workspace-selector-status">
-        <Show when={workspaceStatusLabel()} fallback={<FolderOpen size={14} />}>
-          <CheckCircle2 size={14} />
-        </Show>
-        <span title={workspaceStatusTitle()}>
-          {workspaceStatusLabel() || "Select a workspace to start"}
-        </span>
-      </div>
+      <Show when={props.locked}>
+        <div class="workspace-selector-locked-status">
+          <Lock size={13} />
+          <span title={workspaceStatusTitle()}>
+            {workspaceStatusLabel()}
+          </span>
+        </div>
+      </Show>
 
+      {/* CONFIGURATION CONTROLS */}
       <Show when={!props.locked}>
-        <div class="workspace-selector-controls">
-          <div class="workspace-selector-toolbar">
-            <div class="workspace-selector-backends">
-              <SelectControl
-                value={backend()}
-                options={backendOptions()}
-                disabled={props.disabled}
-                onChange={(value) => setBackend(value as WorkspaceBackendKey)}
-                ariaLabel="Workspace backend"
-                title={backendOptions().find((b) => b.value === backend())?.label || backend()}
-                icon={selectedBackendIcon()}
-              />
-            </div>
-
-            <div class="workspace-selector-sources" role="tablist" aria-label="Workspace source">
+        <div class="workspace-selector-body">
+          {/* TAB SELECTION & BACKEND ROW */}
+          <div class="workspace-nav-bar">
+            <div class="workspace-tabs-list" role="tablist" aria-label="Workspace source">
               <For each={sourceForBackend(backend())}>
                 {(src) => (
                   <button
-                    class={`workspace-selector-source ${source() === src ? "active" : ""}`}
+                    class={`workspace-tab-btn ${source() === src ? "active" : ""}`}
                     type="button"
                     disabled={props.disabled}
-                    onClick={() => setSource(src)}
+                    onClick={() => {
+                      setSource(src);
+                      if (src === "temp") {
+                        commitSelection();
+                      }
+                    }}
                     aria-selected={source() === src}
                     role="tab"
                   >
@@ -567,238 +645,388 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
                 )}
               </For>
             </div>
+
+            <Show when={backendOptions().length > 1}>
+              <div class="workspace-backend-control">
+                <span class="workspace-backend-label">Backend:</span>
+                <SelectControl
+                  value={backend()}
+                  options={backendOptions()}
+                  disabled={props.disabled}
+                  onChange={(value) => setBackend(value as WorkspaceBackendKey)}
+                  ariaLabel="Workspace backend"
+                  title={backendOptions().find((b) => b.value === backend())?.label || backend()}
+                  icon={selectedBackendIcon()}
+                />
+              </div>
+            </Show>
           </div>
 
-          <Switch>
-            <Match when={source() === "path"}>
-              <div class="workspace-selector-row-enhanced">
-                <div class="workspace-input-group">
-                  <input
-                    class="input workspace-selector-input has-browse"
-                    value={localDraft()}
-                    disabled={props.disabled}
-                    placeholder="Working directory"
-                    spellcheck={false}
-                    onInput={(event) => setLocalDraft(event.currentTarget.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        commitSelection();
-                      }
-                    }}
-                  />
-                  <button
-                    class="workspace-input-btn-browse"
-                    type="button"
-                    title="Browse folder"
-                    disabled={props.disabled}
-                    onClick={openBrowser}
-                  >
-                    <FolderOpen size={14} />
-                  </button>
-                </div>
-                <button
-                  class="btn btn-sm btn-primary workspace-use-btn"
-                  type="button"
-                  disabled={resolveDisabled()}
-                  onClick={() => commitSelection()}
-                >
-                  <CheckCircle2 size={13} />
-                  Use
-                </button>
-              </div>
-            </Match>
+          {/* TAB PANELS */}
+          <div class="workspace-tab-content">
+            <Switch>
+              {/* LOCAL FOLDER */}
+              <Match when={source() === "path"}>
+                <div class="workspace-panel-path">
+                  <div class="workspace-input-row">
+                    <div class="workspace-path-input-container">
+                      <FolderOpen class="workspace-input-leading-icon" size={15} />
+                      <input
+                        class="input workspace-path-input"
+                        value={localDraft()}
+                        disabled={props.disabled}
+                        placeholder="Path to project directory..."
+                        spellcheck={false}
+                        onInput={(event) => setLocalDraft(event.currentTarget.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            commitSelection();
+                          }
+                        }}
+                      />
+                      <Show when={localDraft().trim()}>
+                        <button
+                          class="workspace-input-clear-btn"
+                          type="button"
+                          title="Clear input"
+                          disabled={props.disabled}
+                          onClick={() => setLocalDraft("")}
+                        >
+                          <X size={13} />
+                        </button>
+                      </Show>
+                    </div>
 
-            <Match when={source() === "temp"}>
-              <div class="workspace-selector-row-enhanced">
-                <button
-                  class="btn btn-sm btn-primary workspace-use-btn"
-                  type="button"
-                  disabled={resolveDisabled()}
-                  onClick={() => commitSelection()}
-                  title="Use temporary workspace"
-                >
-                  <Sparkles size={13} />
-                  Use temporary workspace
-                </button>
-              </div>
-            </Match>
-
-            <Match when={source() === "github"}>
-              <Show when={isSandboxBackend(backend())}>
-                <div class="workspace-selector-row-enhanced">
-                  <div class="workspace-input-group">
-                    <input
-                      class="input workspace-selector-input"
-                      value={sandboxId()}
+                    <button
+                      class="btn workspace-browse-btn"
+                      type="button"
                       disabled={props.disabled}
-                      placeholder="sandbox ID (leave empty to create new)"
-                      spellcheck={false}
-                      onInput={(event) => setSandboxId(event.currentTarget.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          commitSelection();
-                        }
-                      }}
-                    />
-                  </div>
-                </div>
-              </Show>
-              <div class="workspace-selector-row-enhanced workspace-selector-row-top">
-                <div class="workspace-option-list">
-                  <Show
-                    when={!repositoriesLoading()}
-                    fallback={<div class="workspace-option-state">Loading repositories...</div>}
-                  >
-                    <Show
-                      when={!repositoriesError()}
-                      fallback={<div class="workspace-option-state error">{repositoriesError()}</div>}
+                      onClick={openBrowser}
+                      title="Browse directory"
                     >
-                      <For
-                        each={repositories()}
-                        fallback={<div class="workspace-option-state">No synced GitHub repositories.</div>}
+                      <FolderOpen size={14} />
+                      <span>Browse</span>
+                    </button>
+
+                    <button
+                      class="btn btn-primary workspace-apply-btn"
+                      type="button"
+                      disabled={resolveDisabled() || isCurrentPathActive()}
+                      onClick={() => commitSelection()}
+                    >
+                      <Check size={14} />
+                      <span>{isCurrentPathActive() ? "Current" : "Use Folder"}</span>
+                    </button>
+                  </div>
+
+                  {/* QUICK JUMP CHIP */}
+                  <Show when={props.defaultWorkingDir && props.defaultWorkingDir !== localDraft()}>
+                    <div class="workspace-quick-chip-row">
+                      <span class="workspace-quick-chip-label">Default:</span>
+                      <button
+                        class="workspace-quick-chip"
+                        type="button"
+                        disabled={props.disabled}
+                        onClick={() => {
+                          setLocalDraft(props.defaultWorkingDir);
+                          commitSelection(props.defaultWorkingDir);
+                        }}
+                        title={props.defaultWorkingDir}
                       >
-                        {(repository) => (
+                        <HardDrive size={12} />
+                        <span>{getTailPath(props.defaultWorkingDir) || props.defaultWorkingDir}</span>
+                      </button>
+                    </div>
+                  </Show>
+
+                  <p class="workspace-panel-hint">
+                    The agent reads and modifies code files directly inside this folder.
+                  </p>
+                </div>
+              </Match>
+
+              {/* TEMPORARY */}
+              <Match when={source() === "temp"}>
+                <div class="workspace-panel-temp">
+                  <div class="workspace-temp-card">
+                    <div class="workspace-temp-icon-container">
+                      <Sparkles size={20} />
+                    </div>
+                    <div class="workspace-temp-info">
+                      <div class="workspace-temp-title">Isolated Scratchpad</div>
+                      <p class="workspace-temp-text">
+                        Start coding immediately. The agent creates files in an ephemeral session folder.
+                        No local files will be modified. All session data is discarded when the thread is deleted.
+                      </p>
+                    </div>
+                    <div class="workspace-temp-action">
+                      <Show
+                        when={isTempActive()}
+                        fallback={
                           <button
-                            class={`workspace-option-row ${
-                              repositoryId() === String(repository.repository_id) ? "active" : ""
-                            }`}
+                            class="btn btn-primary workspace-temp-btn"
                             type="button"
                             disabled={props.disabled}
-                            onClick={() => setRepositoryId(String(repository.repository_id))}
+                            onClick={() => commitSelection()}
                           >
-                            <GitBranch size={13} />
-                            <span class="grow">{repository.full_name}</span>
-                            <span class="sub">{repository.default_branch || "main"}</span>
+                            <Sparkles size={14} />
+                            <span>Activate</span>
                           </button>
-                        )}
-                      </For>
-                    </Show>
-                  </Show>
+                        }
+                      >
+                        <span class="workspace-active-tag">
+                          <CheckCircle2 size={13} />
+                          <span>Active</span>
+                        </span>
+                      </Show>
+                    </div>
+                  </div>
                 </div>
-                <button
-                  class="btn btn-sm btn-primary workspace-use-btn"
-                  type="button"
-                  disabled={resolveDisabled()}
-                  onClick={() => commitSelection()}
-                >
-                  <CheckCircle2 size={13} />
-                  {isSandboxBackend(backend())
-                    ? sandboxId().trim()
-                      ? "Attach & clone"
-                      : "Clone"
-                    : "Use"}
-                </button>
-              </div>
-            </Match>
+              </Match>
 
-            <Match when={source() === "sandbox"}>
-              <div class="workspace-selector-row-enhanced">
-                <div class="workspace-input-group">
-                  <input
-                    class="input workspace-selector-input"
-                    value={sandboxId()}
-                    disabled={props.disabled}
-                    placeholder="sandbox ID (leave empty to create new)"
-                    spellcheck={false}
-                    onInput={(event) => setSandboxId(event.currentTarget.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        commitSelection();
-                      }
-                    }}
-                  />
-                </div>
-                <button
-                  class="btn btn-sm btn-primary workspace-use-btn"
-                  type="button"
-                  disabled={resolveDisabled()}
-                  onClick={() => commitSelection()}
-                  title={sandboxId().trim() ? "Attach sandbox" : "Create sandbox"}
-                >
-                  <Cloud size={13} />
-                  {sandboxId().trim() ? "Attach" : "Create"}
-                </button>
-              </div>
-              <div class="workspace-option-list">
-                <Show
-                  when={!sandboxesLoading()}
-                  fallback={<div class="workspace-option-state">Loading sandboxes...</div>}
-                >
-                  <Show
-                    when={!sandboxesError()}
-                    fallback={<div class="workspace-option-state error">{sandboxesError()}</div>}
-                  >
-                    <For
-                      each={sandboxes()}
-                      fallback={
-                        <div class="workspace-option-state">
-                          No existing sandboxes. Leave the ID empty to create a new one.
-                        </div>
-                      }
-                    >
-                      {(sandbox) => (
+              {/* GITHUB */}
+              <Match when={source() === "github"}>
+                <div class="workspace-panel-github">
+                  <Show when={isSandboxBackend(backend())}>
+                    <div class="workspace-sandbox-sub-row">
+                      <label class="workspace-field-label">Target Sandbox ID (optional):</label>
+                      <input
+                        class="input workspace-sandbox-input"
+                        value={sandboxId()}
+                        disabled={props.disabled}
+                        placeholder="Leave empty to create a new sandbox automatically"
+                        spellcheck={false}
+                        onInput={(event) => setSandboxId(event.currentTarget.value)}
+                      />
+                    </div>
+                  </Show>
+
+                  <div class="workspace-search-bar">
+                    <div class="workspace-search-input-wrap">
+                      <Search size={14} class="workspace-search-icon" />
+                      <input
+                        class="input workspace-search-field"
+                        value={repoSearch()}
+                        disabled={props.disabled || repositoriesLoading()}
+                        placeholder="Filter synced repositories..."
+                        spellcheck={false}
+                        onInput={(event) => setRepoSearch(event.currentTarget.value)}
+                      />
+                      <Show when={repoSearch()}>
                         <button
-                          class={`workspace-option-row ${sandboxId() === sandbox.sandbox_id ? "active" : ""}`}
+                          class="workspace-input-clear-btn"
                           type="button"
-                          disabled={props.disabled}
-                          onClick={() => setSandboxId(sandbox.sandbox_id)}
-                          title={sandbox.sandbox_id}
+                          onClick={() => setRepoSearch("")}
                         >
-                          <Cloud size={13} />
-                          <span class="grow">{sandbox.sandbox_id}</span>
-                          <span class="sub">
-                            {[sandbox.label, sandbox.root].filter((part) => part && part.trim()).join(" · ")}
-                          </span>
+                          <X size={13} />
                         </button>
-                      )}
-                    </For>
-                  </Show>
-                </Show>
-              </div>
-            </Match>
-          </Switch>
+                      </Show>
+                    </div>
+                    <button
+                      class="btn btn-icon workspace-refresh-icon-btn"
+                      type="button"
+                      disabled={repositoriesLoading()}
+                      title="Reload repositories"
+                      onClick={() => void loadRepositories()}
+                    >
+                      <RefreshCw size={13} class={repositoriesLoading() ? "workspace-spinning" : ""} />
+                    </button>
+                  </div>
 
-          <Show when={subNote()}>
-            <p class="workspace-sub-note">{subNote()}</p>
-          </Show>
+                  <div class="workspace-options-scroll">
+                    <Show
+                      when={!repositoriesLoading()}
+                      fallback={<div class="workspace-status-message">Loading synced repositories...</div>}
+                    >
+                      <Show
+                        when={!repositoriesError()}
+                        fallback={<div class="workspace-status-message error">{repositoriesError()}</div>}
+                      >
+                        <For
+                          each={filteredRepositories()}
+                          fallback={
+                            <div class="workspace-status-message">
+                              {repoSearch()
+                                ? "No repositories match your filter."
+                                : "No synced GitHub repositories. Connect in Settings > Channels."}
+                            </div>
+                          }
+                        >
+                          {(repository) => (
+                            <button
+                              class={`workspace-item-card ${
+                                repositoryId() === String(repository.repository_id) ? "selected" : ""
+                              }`}
+                              type="button"
+                              disabled={props.disabled}
+                              onClick={() => {
+                                setRepositoryId(String(repository.repository_id));
+                                commitSelection();
+                              }}
+                            >
+                              <div class="workspace-item-card-left">
+                                <GitBranch size={15} class="workspace-item-icon" />
+                                <div class="workspace-item-card-text">
+                                  <span class="workspace-item-name">{repository.full_name}</span>
+                                  <span class="workspace-item-meta">{repository.default_branch || "main"}</span>
+                                </div>
+                              </div>
+                              <Show when={repositoryId() === String(repository.repository_id)}>
+                                <span class="workspace-item-check">
+                                  <Check size={13} />
+                                </span>
+                              </Show>
+                            </button>
+                          )}
+                        </For>
+                      </Show>
+                    </Show>
+                  </div>
+
+                  <p class="workspace-panel-hint">
+                    {isSandboxBackend(backend())
+                      ? `Repository will be cloned inside the ${getBackendDisplayName(backend())} sandbox.`
+                      : "Repository will be cloned to the local caching directory."}
+                  </p>
+                </div>
+              </Match>
+
+              {/* SANDBOX */}
+              <Match when={source() === "sandbox"}>
+                <div class="workspace-panel-sandbox">
+                  <div class="workspace-input-row">
+                    <div class="workspace-path-input-container">
+                      <Cloud class="workspace-input-leading-icon" size={15} />
+                      <input
+                        class="input workspace-path-input"
+                        value={sandboxId()}
+                        disabled={props.disabled}
+                        placeholder="Existing sandbox ID (or leave blank to create new)..."
+                        spellcheck={false}
+                        onInput={(event) => setSandboxId(event.currentTarget.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            commitSelection();
+                          }
+                        }}
+                      />
+                      <Show when={sandboxId().trim()}>
+                        <button
+                          class="workspace-input-clear-btn"
+                          type="button"
+                          onClick={() => setSandboxId("")}
+                        >
+                          <X size={13} />
+                        </button>
+                      </Show>
+                    </div>
+
+                    <button
+                      class="btn btn-primary workspace-apply-btn"
+                      type="button"
+                      disabled={resolveDisabled()}
+                      onClick={() => commitSelection()}
+                    >
+                      <Cloud size={14} />
+                      <span>{sandboxId().trim() ? "Attach" : "Create New"}</span>
+                    </button>
+                  </div>
+
+                  {/* SANDBOX SEARCH */}
+                  <div class="workspace-search-bar">
+                    <div class="workspace-search-input-wrap">
+                      <Search size={14} class="workspace-search-icon" />
+                      <input
+                        class="input workspace-search-field"
+                        value={sandboxSearch()}
+                        disabled={props.disabled || sandboxesLoading()}
+                        placeholder="Filter active sandboxes..."
+                        spellcheck={false}
+                        onInput={(event) => setSandboxSearch(event.currentTarget.value)}
+                      />
+                      <Show when={sandboxSearch()}>
+                        <button
+                          class="workspace-input-clear-btn"
+                          type="button"
+                          onClick={() => setSandboxSearch("")}
+                        >
+                          <X size={13} />
+                        </button>
+                      </Show>
+                    </div>
+                  </div>
+
+                  <div class="workspace-options-scroll">
+                    <Show
+                      when={!sandboxesLoading()}
+                      fallback={<div class="workspace-status-message">Loading sandboxes...</div>}
+                    >
+                      <Show
+                        when={!sandboxesError()}
+                        fallback={<div class="workspace-status-message error">{sandboxesError()}</div>}
+                      >
+                        <For
+                          each={filteredSandboxes()}
+                          fallback={
+                            <div class="workspace-status-message">
+                              {sandboxSearch()
+                                ? "No sandboxes match your filter."
+                                : "No active sandboxes. Leave the ID blank to create one."}
+                            </div>
+                          }
+                        >
+                          {(sandbox) => (
+                            <button
+                              class={`workspace-item-card ${
+                                sandboxId() === sandbox.sandbox_id ? "selected" : ""
+                              }`}
+                              type="button"
+                              disabled={props.disabled}
+                              onClick={() => {
+                                setSandboxId(sandbox.sandbox_id);
+                                commitSelection();
+                              }}
+                              title={sandbox.sandbox_id}
+                            >
+                              <div class="workspace-item-card-left">
+                                <Cloud size={15} class="workspace-item-icon" />
+                                <div class="workspace-item-card-text">
+                                  <span class="workspace-item-name">{sandbox.sandbox_id}</span>
+                                  <span class="workspace-item-meta">
+                                    {[sandbox.label, sandbox.root].filter((part) => part && part.trim()).join(" · ")}
+                                  </span>
+                                </div>
+                              </div>
+                              <Show when={sandboxId() === sandbox.sandbox_id}>
+                                <span class="workspace-item-check">
+                                  <Check size={13} />
+                                </span>
+                              </Show>
+                            </button>
+                          )}
+                        </For>
+                      </Show>
+                    </Show>
+                  </div>
+                </div>
+              </Match>
+            </Switch>
+          </div>
         </div>
       </Show>
 
+      {/* 3. FOLDER BROWSER DIALOG */}
       <Dialog
         open={browserOpen()}
-        title="Choose folder"
+        title="Choose Local Folder"
         onClose={closeBrowser}
         footer={
-          <>
-            <div class="workspace-new-folder">
-              <Show when={createFolderOpen()}>
-                <input
-                  class="input"
-                  value={newFolderName()}
-                  disabled={createFolderResolving()}
-                  placeholder="New folder name"
-                  spellcheck={false}
-                  onInput={(event) => setNewFolderName(event.currentTarget.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" && newFolderName().trim() && !createFolderResolving()) {
-                      event.preventDefault();
-                      void handleCreateFolderSubmit();
-                    }
-                  }}
-                  ref={(el) => setTimeout(() => el?.focus(), 50)}
-                />
-                <button
-                  class="btn btn-sm"
-                  type="button"
-                  disabled={createFolderResolving() || !newFolderName().trim()}
-                  onClick={() => void handleCreateFolderSubmit()}
-                >
-                  {createFolderResolving() ? "Creating..." : "Create"}
-                </button>
-              </Show>
+          <div class="workspace-browser-footer">
+            <div class="workspace-browser-current-path" title={browsePayload()?.path || ""}>
+              <span class="workspace-browser-path-label">Selected:</span>
+              <span class="workspace-browser-path-val">{browsePayload()?.path || "(none)"}</span>
             </div>
             <div class="workspace-browser-actions">
               <button class="btn btn-sm" type="button" onClick={closeBrowser}>
@@ -810,17 +1038,18 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
                 disabled={!browsePayload()?.path}
                 onClick={chooseCurrentBrowsePath}
               >
-                <CheckCircle2 size={13} />
-                Choose this folder
+                <Check size={13} />
+                <span>Choose This Folder</span>
               </button>
             </div>
-          </>
+          </div>
         }
       >
         <div class="workspace-browser">
+          {/* HEADER NAVIGATION */}
           <div class="workspace-browser-header">
             <button
-              class="btn btn-icon"
+              class="btn btn-icon workspace-browser-nav-btn"
               type="button"
               disabled={
                 browseLoading() ||
@@ -837,12 +1066,13 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
                   return normalize(current) === normalize(props.defaultWorkingDir);
                 })()
               }
-              title="Parent directory"
+              title="Parent directory (Up)"
               aria-label="Parent directory"
               onClick={() => void loadBrowsePath(browsePayload()?.parent)}
             >
               <ArrowUp size={14} />
             </button>
+
             <div class="workspace-browser-breadcrumbs">
               <For each={pathSegments()}>
                 {(segment, index) => (
@@ -863,57 +1093,150 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
                 )}
               </For>
             </div>
-            <button
-              class="btn btn-icon"
-              type="button"
-              disabled={browseLoading()}
-              title="Refresh directories"
-              aria-label="Refresh directories"
-              onClick={() => void loadBrowsePath(browsePayload()?.path || localDraft())}
-            >
-              <RefreshCw size={14} />
-            </button>
-          </div>
-          <div class="workspace-browser-roots">
-            <div class="workspace-browser-roots-scroll">
-              <For each={browsePayload()?.roots || []}>
-                {(root) => (
-                  <button
-                    class="workspace-browser-root"
-                    type="button"
-                    disabled={browseLoading()}
-                    onClick={() => void loadBrowsePath(root.path)}
-                    title={root.path}
-                  >
-                    <HardDrive size={13} />
-                    <span>{root.name}</span>
-                  </button>
-                )}
-              </For>
+
+            <div class="workspace-browser-header-tools">
+              <button
+                class="btn btn-icon workspace-browser-nav-btn"
+                type="button"
+                title={copiedPath() ? "Copied!" : "Copy current path"}
+                aria-label="Copy current path"
+                onClick={() => void copyPathToClipboard()}
+              >
+                <Show when={copiedPath()} fallback={<Copy size={13} />}>
+                  <Check size={13} />
+                </Show>
+              </button>
+              <button
+                class="btn btn-icon workspace-browser-nav-btn"
+                type="button"
+                disabled={browseLoading()}
+                title="Refresh folder listing"
+                aria-label="Refresh folder listing"
+                onClick={() => void loadBrowsePath(browsePayload()?.path || localDraft())}
+              >
+                <RefreshCw size={13} class={browseLoading() ? "workspace-spinning" : ""} />
+              </button>
             </div>
+          </div>
+
+          {/* DRIVE ROOTS & FILTER BAR */}
+          <div class="workspace-browser-subbar">
+            <Show when={(browsePayload()?.roots || []).length > 0}>
+              <div class="workspace-browser-roots-scroll">
+                <For each={browsePayload()?.roots || []}>
+                  {(root) => (
+                    <button
+                      class={`workspace-browser-root ${
+                        browsePayload()?.path?.toLowerCase().startsWith(root.path.toLowerCase()) ? "active" : ""
+                      }`}
+                      type="button"
+                      disabled={browseLoading()}
+                      onClick={() => void loadBrowsePath(root.path)}
+                      title={root.path}
+                    >
+                      <HardDrive size={12} />
+                      <span>{root.name}</span>
+                    </button>
+                  )}
+                </For>
+              </div>
+            </Show>
+
+            <div class="workspace-browser-filter-wrap">
+              <Search size={13} class="workspace-browser-filter-icon" />
+              <input
+                class="input workspace-browser-filter-input"
+                value={folderFilter()}
+                placeholder="Filter subfolders..."
+                spellcheck={false}
+                onInput={(event) => setFolderFilter(event.currentTarget.value)}
+              />
+              <Show when={folderFilter()}>
+                <button
+                  class="workspace-input-clear-btn"
+                  type="button"
+                  onClick={() => setFolderFilter("")}
+                >
+                  <X size={12} />
+                </button>
+              </Show>
+            </div>
+
             <button
-              class="btn btn-icon btn-sm"
+              class={`btn btn-sm workspace-browser-new-folder-toggle ${createFolderOpen() ? "btn-primary" : ""}`}
               type="button"
               disabled={browseLoading() || !(browsePayload()?.path || localDraft())}
               title="Create new folder"
-              aria-label="Create new folder"
               onClick={() => setCreateFolderOpen((open) => !open)}
             >
-              <Plus size={14} />
+              <Plus size={13} />
+              <span>New Folder</span>
             </button>
           </div>
+
+          {/* INLINE NEW FOLDER CREATOR */}
+          <Show when={createFolderOpen()}>
+            <div class="workspace-browser-new-folder-form">
+              <Folder size={14} class="workspace-new-folder-icon" />
+              <input
+                class="input workspace-new-folder-input"
+                value={newFolderName()}
+                disabled={createFolderResolving()}
+                placeholder="New folder name..."
+                spellcheck={false}
+                onInput={(event) => setNewFolderName(event.currentTarget.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && newFolderName().trim() && !createFolderResolving()) {
+                    event.preventDefault();
+                    void handleCreateFolderSubmit();
+                  }
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    setCreateFolderOpen(false);
+                    setNewFolderName("");
+                  }
+                }}
+                ref={(el) => setTimeout(() => el?.focus(), 50)}
+              />
+              <button
+                class="btn btn-sm btn-primary"
+                type="button"
+                disabled={createFolderResolving() || !newFolderName().trim()}
+                onClick={() => void handleCreateFolderSubmit()}
+              >
+                {createFolderResolving() ? "Creating..." : "Create"}
+              </button>
+              <button
+                class="btn btn-sm"
+                type="button"
+                disabled={createFolderResolving()}
+                onClick={() => {
+                  setCreateFolderOpen(false);
+                  setNewFolderName("");
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </Show>
+
+          {/* DIRECTORIES LIST */}
           <div class="workspace-browser-list">
             <Show
               when={!browseLoading()}
-              fallback={<div class="workspace-browser-state">Loading directories...</div>}
+              fallback={<div class="workspace-browser-state">Loading subdirectories...</div>}
             >
               <Show
                 when={!browseError()}
                 fallback={<div class="workspace-browser-state error">{browseError()}</div>}
               >
                 <For
-                  each={filteredEntries()}
-                  fallback={<div class="workspace-browser-state">No child directories.</div>}
+                  each={displayedFolderEntries()}
+                  fallback={
+                    <div class="workspace-browser-state">
+                      {folderFilter() ? "No subfolders match your search." : "No child directories found."}
+                    </div>
+                  }
                 >
                   {(entry) => (
                     <button
@@ -922,14 +1245,14 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
                       onClick={() => void loadBrowsePath(entry.path)}
                       title={entry.path}
                     >
-                      <FolderOpen size={14} />
-                      <span>{entry.name}</span>
-                      <ChevronRight size={13} />
+                      <Folder size={15} class="workspace-browser-item-icon" />
+                      <span class="workspace-browser-item-name">{entry.name}</span>
+                      <ChevronRight size={13} class="workspace-browser-item-arrow" />
                     </button>
                   )}
                 </For>
                 <Show when={browsePayload()?.truncated}>
-                  <div class="workspace-browser-state">Directory list truncated.</div>
+                  <div class="workspace-browser-state">Directory listing truncated.</div>
                 </Show>
               </Show>
             </Show>

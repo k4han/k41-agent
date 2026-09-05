@@ -65,13 +65,6 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                 >
                   <div class="chat-workspace-empty">
                     <div class="chat-workspace-empty-inner">
-                      <div class="chat-workspace-empty-title">
-                        Start a conversation. No project required.
-                      </div>
-                      <div class="chat-workspace-empty-hint">
-                        A temporary workspace is created automatically when you send a message.
-                        Link a project below if you want to work with real files.
-                      </div>
                       <WorkspaceSelector
                         workingDir={props.workingDir}
                         defaultWorkingDir={props.defaultWorkingDir}
