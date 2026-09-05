@@ -6,11 +6,11 @@ import {
   JSX,
   Show,
 } from "solid-js";
-import { useSearchParams } from "@solidjs/router";
+import { useNavigate, useParams, useSearchParams } from "@solidjs/router";
 import {
+  ArrowLeft,
   Bot,
   CheckCircle2,
-  ChevronDown,
   Copy,
   Fingerprint,
   Link2,
@@ -29,7 +29,6 @@ import {
 
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DashboardTable } from "@/components/DashboardTable";
-import { Dialog } from "@/components/Dialog";
 import { SelectControl, type SelectControlOption } from "@/components/SelectControl";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
@@ -296,8 +295,7 @@ export function ChannelsPage() {
   const [data, setData] = createSignal<ChannelsPayload>();
   const [error, setError] = createSignal("");
   const [drafts, setDrafts] = createSignal<Record<string, unknown>>({});
-  const [drawerChannel, setDrawerChannel] = createSignal<string | null>(null);
-  const [collapsed, setCollapsed] = createSignal<Record<string, boolean>>({});
+  const [selectedChannel, setSelectedChannel] = createSignal<string>("telegram");
   const [busy, setBusy] = createSignal<Record<string, string>>({});
   const [testResults, setTestResults] = createSignal<Record<string, TestOutcome>>({});
   const [stopTarget, setStopTarget] = createSignal<string | null>(null);
@@ -343,31 +341,6 @@ export function ChannelsPage() {
   };
 
   useCatalogAndLoad(load);
-
-  createEffect(() => {
-    const payload = data();
-    if (!payload) {
-      return;
-    }
-    setCollapsed((current) => {
-      const next = { ...current };
-      for (const channel of channelDefs()) {
-        const channelSettings = payload.by_channel[channel.name] || {};
-        for (const section of channel.sections) {
-          const id = `${channel.name}:${section.id}`;
-          if (id in next) {
-            continue;
-          }
-          const hasValue = section.fields.some((field) => {
-            const info = channelSettings[settingKey(channel.name, field)];
-            return info?.value && String(info.value).length > 0;
-          });
-          next[id] = section.defaultCollapsed ?? (!hasValue && section.id !== "authentication");
-        }
-      }
-      return next;
-    });
-  });
 
   const settingKey = (channel: string, suffix: string) =>
     `channels.${channel}.${suffix}`;
@@ -562,11 +535,6 @@ export function ChannelsPage() {
     }
   };
 
-  const toggleSection = (channel: string, sectionId: string) => {
-    const id = `${channel}:${sectionId}`;
-    setCollapsed((current) => ({ ...current, [id]: !current[id] }));
-  };
-
   const createPairingCode = async () => {
     setCreatingPairingCode(true);
     try {
@@ -622,145 +590,258 @@ export function ChannelsPage() {
     }
   };
 
+  const params = useParams<{ channelName?: string }>();
+  const navigate = useNavigate();
+
   return (
-    <SettingsLayout
-      title="Channels"
-      breadcrumbLabel="Channels"
-      contentWidth="wide"
-    >
-      <SettingsTabBar
-        items={TAB_ITEMS}
-        value={tab()}
-        ariaLabel="Channel section"
-        onChange={(value) => setSearchParams({ tab: value })}
-      />
+    <>
+      <Show
+      when={params.channelName}
+      fallback={
+        <SettingsLayout
+          title="Channels"
+          breadcrumbLabel="Channels"
+          contentWidth="wide"
+        >
+          <SettingsTabBar
+            items={TAB_ITEMS}
+            value={tab()}
+            ariaLabel="Channel section"
+            onChange={(value) => setSearchParams({ tab: value })}
+          />
 
-      <DataGate data={data()} error={error()} onRetry={load}>
-        {(payload) => (
-          <div class="stack">
-            <Show when={tab() === "channels"}>
-              <div class="channels-grid">
-                <For each={channelDefs()}>
-                  {(channel) => (
-                    <ChannelCard
-                      channel={channel}
-                      runtime={runtimeFor(channel.name)}
-                      enabled={Boolean(draftValueFor(channel.name, ENABLED_FIELD))}
-                      configured={isChannelConfigured(channel.name)}
-                      pendingCount={(pendingByChannel()[channel.name] || []).length}
-                      busy={busy()[channel.name] || null}
-                      testResult={testResults()[channel.name] || null}
-                      paired={countPairedFor(payload, channel.name)}
-                      onToggle={(value) => void toggleEnabled(channel.name, value)}
-                      onStart={() => void startChannel(channel.name)}
-                      onStopRequest={() => setStopTarget(channel.name)}
-                      onTest={() => void testChannel(channel.name)}
-                      onConfigure={() => setDrawerChannel(channel.name)}
-                    />
-                  )}
-                </For>
+          <DataGate data={data()} error={error()} onRetry={load}>
+            {(payload) => (
+              <div class="stack">
+                <Show when={tab() === "channels"}>
+                  <div class="stack" style={{ gap: "24px" }}>
+                    <div>
+                      <div class="settings-section-title" style={{ "margin-bottom": "12px" }}>
+                        Select Channel
+                      </div>
+                      <div class="channels-grid">
+                        <For each={channelDefs()}>
+                          {(channel) => (
+                            <ChannelCard
+                              channel={channel}
+                              runtime={runtimeFor(channel.name)}
+                              enabled={Boolean(draftValueFor(channel.name, ENABLED_FIELD))}
+                              configured={isChannelConfigured(channel.name)}
+                              pendingCount={(pendingByChannel()[channel.name] || []).length}
+                              busy={busy()[channel.name] || null}
+                              testResult={testResults()[channel.name] || null}
+                              paired={countPairedFor(payload, channel.name)}
+                              onToggle={(value) => void toggleEnabled(channel.name, value)}
+                              onStart={() => void startChannel(channel.name)}
+                              onStopRequest={() => setStopTarget(channel.name)}
+                              onTest={() => void testChannel(channel.name)}
+                              onConfigure={() => navigate(`/settings/channels/${channel.name}`)}
+                            />
+                          )}
+                        </For>
+                      </div>
+                    </div>
+                  </div>
+                </Show>
+
+                <Show when={tab() === "pairing"}>
+                  <PairingPanel
+                    pairing={pairing()}
+                    creating={creatingPairingCode()}
+                    onCreate={() => void createPairingCode()}
+                    onCopy={() => void copyPairingCode()}
+                  />
+
+                  <PairedIdentitiesTable
+                    identities={payload.identities}
+                    onUnpair={requestUnpair}
+                  />
+                </Show>
               </div>
-            </Show>
+            )}
+          </DataGate>
+        </SettingsLayout>
+      }
+    >
+      {(channelName) => {
+        const def = () => channelDefs().find((c) => c.name === channelName()) ?? null;
+        const name = () => channelName();
+        const channelPayload = () => data()?.by_channel[name()] || {};
+        const pending = () => pendingByChannel()[name()] || [];
+        const runtime = () => runtimeFor(name());
+        const isRunning = () => runtime().status === "running";
 
-            <Show when={tab() === "pairing"}>
-              <PairingPanel
-                pairing={pairing()}
-                creating={creatingPairingCode()}
-                onCreate={() => void createPairingCode()}
-                onCopy={() => void copyPairingCode()}
-              />
+        return (
+          <SettingsLayout
+            title={def() ? `${def()!.title} Settings` : "Channel Settings"}
+            description={def()?.summary}
+            breadcrumbSegments={[
+              { label: "Channels", href: "/settings/channels" },
+              { label: def()?.title || name() },
+            ]}
+            contentWidth="wide"
+            actions={
+              <div class="row-wrap" style={{ gap: "8px" }}>
+                <button
+                  class="btn btn-sm"
+                  type="button"
+                  onClick={() => navigate("/settings/channels")}
+                >
+                  <ArrowLeft size={14} />
+                  Back to Channels
+                </button>
+                <button
+                  class="btn btn-sm"
+                  type="button"
+                  disabled={busy()[name()] === "test"}
+                  onClick={() => void testChannel(name())}
+                >
+                  <PlugZap size={14} />
+                  {busy()[name()] === "test" ? "Testing..." : "Test connection"}
+                </button>
+                <button
+                  class="btn btn-sm btn-primary"
+                  type="button"
+                  disabled={pending().length === 0 || busy()[name()] === "save"}
+                  onClick={() => void saveChannel(name())}
+                >
+                  <Save size={14} />
+                  {busy()[name()] === "save"
+                    ? "Saving..."
+                    : `Save changes ${pending().length ? `(${pending().length})` : ""}`}
+                </button>
+              </div>
+            }
+          >
+            <DataGate data={data()} error={error()} onRetry={load}>
+              {() => (
+                <Show
+                  when={def()}
+                  fallback={
+                    <div class="panel empty" style={{ padding: "32px", "text-align": "center" }}>
+                      <h3>Channel not found</h3>
+                      <button
+                        class="btn"
+                        style={{ "margin-top": "12px" }}
+                        type="button"
+                        onClick={() => navigate("/settings/channels")}
+                      >
+                        <ArrowLeft size={14} />
+                        Back to Channels
+                      </button>
+                    </div>
+                  }
+                >
+                  <div class="stack" style={{ gap: "20px" }}>
+                    {/* Overview Card */}
+                    <div class="channel-config-card">
+                      <div class="channel-config-header" style={{ "border-bottom": "none", padding: "0" }}>
+                        <div class="channel-config-header-left">
+                          <div class="channel-brand-icon" data-channel={name()} aria-hidden="true">
+                            {getChannelIcon(name())()}
+                          </div>
+                          <div>
+                            <h2 class="channel-config-title">{def()!.title}</h2>
+                            <p class="hint channel-config-subtitle">{def()!.tagline} &mdash; {def()!.summary}</p>
+                          </div>
+                        </div>
+                        <div class="row-wrap channel-config-header-actions">
+                          <label class="channel-toggle-cell">
+                            <button
+                              class={`toggle-control ${Boolean(draftValueFor(name(), ENABLED_FIELD)) ? "active" : ""}`}
+                              type="button"
+                              role="switch"
+                              aria-checked={Boolean(draftValueFor(name(), ENABLED_FIELD))}
+                              disabled={busy()[name()] === "toggle"}
+                              onClick={() => void toggleEnabled(name(), !draftValueFor(name(), ENABLED_FIELD))}
+                            >
+                              <span class="toggle-track">
+                                <span class="toggle-thumb" />
+                              </span>
+                              <span class="toggle-label">
+                                {draftValueFor(name(), ENABLED_FIELD) ? "Enabled" : "Disabled"}
+                              </span>
+                            </button>
+                          </label>
+                          <span
+                            class="channel-status-pill"
+                            data-state={runtime().status}
+                            title={runtime().error || runtime().status}
+                          >
+                            <span class="channel-status-dot" />
+                            {runtime().status}
+                          </span>
+                          <Show
+                            when={isRunning()}
+                            fallback={
+                              <button
+                                class="btn btn-sm"
+                                type="button"
+                                disabled={busy()[name()] === "start" || !isChannelConfigured(name())}
+                                onClick={() => void startChannel(name())}
+                              >
+                                <Play size={13} />
+                                {busy()[name()] === "start" ? "Starting..." : "Start"}
+                              </button>
+                            }
+                          >
+                            <button
+                              class="btn btn-sm btn-warning"
+                              type="button"
+                              disabled={busy()[name()] === "stop"}
+                              onClick={() => setStopTarget(name())}
+                            >
+                              <StopCircle size={13} />
+                              {busy()[name()] === "stop" ? "Stopping..." : "Stop"}
+                            </button>
+                          </Show>
+                        </div>
+                      </div>
+                    </div>
 
-              <PairedIdentitiesTable
-                identities={payload.identities}
-                onUnpair={requestUnpair}
-              />
-            </Show>
-          </div>
-        )}
-      </DataGate>
-
-      <Show when={drawerChannel()}>
-        {(name) => {
-          const def = () => channelDefs().find((c) => c.name === name())!;
-          const channelPayload = () => data()?.by_channel[name()] || {};
-          const pending = () => pendingByChannel()[name()] || [];
-          return (
-            <Dialog
-              open={true}
-              title={`${def().title} settings`}
-              wide
-              onClose={() => setDrawerChannel(null)}
-              footer={
-                <div class="row-wrap" style={{ "justify-content": "space-between", width: "100%" }}>
-                  <div class="row-wrap">
-                    <button
-                      class="btn"
-                      type="button"
-                      disabled={busy()[name()] === "test"}
-                      onClick={() => void testChannel(name())}
-                    >
-                      <PlugZap size={14} />
-                      {busy()[name()] === "test" ? "Testing..." : "Test connection"}
-                    </button>
+                    {/* Test Feedback if any */}
                     <Show when={testResults()[name()]}>
                       {(result) => (
                         <TestFeedback channel={name()} result={result()} />
                       )}
                     </Show>
+
+                    {/* Section Groups */}
+                    <div class="channel-sections-list">
+                      <For each={def()!.sections}>
+                        {(section) => {
+                          const visible = () =>
+                            section.visibleWhen?.((suffix) =>
+                              draftValueFor(name(), suffix),
+                            ) ?? true;
+                          return (
+                            <Show when={visible()}>
+                              <ChannelSectionGroup
+                                channel={name()}
+                                settings={channelPayload()}
+                                section={section}
+                                drafts={drafts()}
+                                pending={pending()}
+                                agentNames={agentNames()}
+                                onChange={setDraft}
+                                onRestore={restoreDraft}
+                                helper={section.helper?.((suffix) =>
+                                  draftValueFor(name(), suffix),
+                                ) ?? null}
+                              />
+                            </Show>
+                          );
+                        }}
+                      </For>
+                    </div>
                   </div>
-                  <div class="row-wrap">
-                    <button class="btn" type="button" onClick={() => setDrawerChannel(null)}>
-                      Close
-                    </button>
-                    <button
-                      class="btn btn-primary"
-                      type="button"
-                      disabled={pending().length === 0 || busy()[name()] === "save"}
-                      onClick={() => void saveChannel(name())}
-                    >
-                      <Save size={14} />
-                      {busy()[name()] === "save"
-                        ? "Saving..."
-                        : `Save ${pending().length ? `(${pending().length})` : ""}`}
-                    </button>
-                  </div>
-                </div>
-              }
-            >
-              <div class="channel-drawer-sections">
-                <For each={def().sections}>
-                  {(section) => {
-                    const visible = () =>
-                      section.visibleWhen?.((suffix) =>
-                        draftValueFor(name(), suffix),
-                      ) ?? true;
-                    const id = `${name()}:${section.id}`;
-                    return (
-                      <Show when={visible()}>
-                        <DrawerSection
-                          channel={name()}
-                          settings={channelPayload()}
-                          section={section}
-                          drafts={drafts()}
-                          pending={pending()}
-                          agentNames={agentNames()}
-                          collapsed={Boolean(collapsed()[id])}
-                          onToggle={() => toggleSection(name(), section.id)}
-                          onChange={setDraft}
-                          onRestore={restoreDraft}
-                          helper={section.helper?.((suffix) =>
-                            draftValueFor(name(), suffix),
-                          ) ?? null}
-                        />
-                      </Show>
-                    );
-                  }}
-                </For>
-              </div>
-            </Dialog>
-          );
-        }}
-      </Show>
+                </Show>
+              )}
+            </DataGate>
+          </SettingsLayout>
+        );
+      }}
+    </Show>
 
       <ConfirmDialog
         open={stopTarget() !== null}
@@ -802,7 +883,7 @@ export function ChannelsPage() {
         onClose={() => setUnpairTarget(null)}
         onConfirm={() => void confirmUnpair()}
       />
-    </SettingsLayout>
+    </>
   );
 }
 
@@ -912,6 +993,7 @@ function PairedIdentitiesTable(props: {
 
 function ChannelCard(props: {
   channel: ChannelDefinition;
+  active?: boolean;
   runtime: ChannelRuntime;
   enabled: boolean;
   configured: boolean;
@@ -929,7 +1011,11 @@ function ChannelCard(props: {
     props.runtime.status === "running" || props.runtime.status === "starting";
   const statusLabel = () => formatStatus(props.runtime);
   return (
-    <article class="channel-card">
+    <article
+      class={`channel-card ${props.active ? "channel-card--active" : ""}`}
+      onClick={props.onConfigure}
+      style={{ cursor: "pointer" }}
+    >
       <header class="channel-card-header">
         <div
           class="channel-brand-icon"
@@ -988,7 +1074,7 @@ function ChannelCard(props: {
       </div>
 
       <footer class="channel-card-footer">
-        <label class="channel-toggle-cell">
+        <label class="channel-toggle-cell" onClick={(e) => e.stopPropagation()}>
           <button
             class={`toggle-control ${props.enabled ? "active" : ""}`}
             type="button"
@@ -1018,7 +1104,10 @@ function ChannelCard(props: {
                     ? "Start channel"
                     : "Configure credentials first"
                 }
-                onClick={props.onStart}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  props.onStart();
+                }}
               >
                 <Play size={13} />
                 {props.busy === "start" ? "Starting..." : "Start"}
@@ -1029,7 +1118,10 @@ function ChannelCard(props: {
               class="btn btn-sm btn-warning"
               type="button"
               disabled={props.busy === "stop"}
-              onClick={props.onStopRequest}
+              onClick={(e) => {
+                e.stopPropagation();
+                props.onStopRequest();
+              }}
             >
               <StopCircle size={13} />
               {props.busy === "stop" ? "Stopping..." : "Stop"}
@@ -1039,7 +1131,10 @@ function ChannelCard(props: {
             class="btn btn-sm"
             type="button"
             disabled={props.busy === "test" || !props.configured}
-            onClick={props.onTest}
+            onClick={(e) => {
+              e.stopPropagation();
+              props.onTest();
+            }}
             title={
               props.configured
                 ? "Verify credentials with provider API"
@@ -1052,7 +1147,10 @@ function ChannelCard(props: {
           <button
             class="btn btn-sm btn-primary"
             type="button"
-            onClick={props.onConfigure}
+            onClick={(e) => {
+              e.stopPropagation();
+              props.onConfigure();
+            }}
           >
             <SettingsIcon size={13} />
             Configure
@@ -1074,16 +1172,14 @@ function ChannelCard(props: {
   );
 }
 
-function DrawerSection(props: {
+function ChannelSectionGroup(props: {
   channel: string;
   settings: Record<string, SettingInfo>;
   section: DrawerSection;
   drafts: Record<string, unknown>;
   pending: PendingChange[];
   agentNames: string[];
-  collapsed: boolean;
   helper: JSX.Element | null;
-  onToggle: () => void;
   onChange: (key: string, value: unknown) => void;
   onRestore: (key: string) => void;
 }) {
@@ -1103,26 +1199,24 @@ function DrawerSection(props: {
   });
 
   return (
-    <section class="channel-drawer-section" data-collapsed={props.collapsed}>
-      <button
-        type="button"
-        class="channel-drawer-section-header"
-        onClick={props.onToggle}
-      >
-        <div>
-          <div class="channel-drawer-section-title">
-            <Show when={props.section.icon}>{props.section.icon!()}</Show>
-            {props.section.title}
-            <Show when={dirtyCount() > 0}>
-              <span class="badge badge-warning">{dirtyCount()}</span>
+    <section class="channel-section-group">
+      <div class="channel-section-header">
+        <div class="channel-section-header-left">
+          <Show when={props.section.icon}>{props.section.icon!()}</Show>
+          <div>
+            <div class="channel-section-title">
+              {props.section.title}
+              <Show when={dirtyCount() > 0}>
+                <span class="badge badge-warning">{dirtyCount()}</span>
+              </Show>
+            </div>
+            <Show when={props.section.subtitle}>
+              <div class="hint channel-section-subtitle">{props.section.subtitle}</div>
             </Show>
           </div>
         </div>
-        <span class="channel-drawer-section-caret" aria-hidden="true">
-          <ChevronDown size={16} />
-        </span>
-      </button>
-      <div class="channel-drawer-section-body">
+      </div>
+      <div class="channel-section-body">
         <For
           each={fieldEntries()}
           fallback={

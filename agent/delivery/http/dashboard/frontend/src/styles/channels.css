@@ -25,6 +25,12 @@
   box-shadow: 0 6px 22px rgba(0, 0, 0, 0.04);
 }
 
+.channel-card--active {
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--fg) 12%, transparent);
+  background: color-mix(in srgb, var(--surface-2) 35%, var(--surface));
+}
+
 .channel-card-header {
   display: grid;
   grid-template-columns: 38px minmax(0, 1fr) auto;
@@ -211,7 +217,107 @@
   font-size: 12px;
 }
 
-/* --- Drawer (Dialog wide) sub-sections --- */
+/* --- Content Page Channel Configuration --- */
+
+.channel-config-card {
+  display: grid;
+  gap: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 20px;
+}
+
+.channel-config-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.channel-config-header-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.channel-config-title {
+  font-size: 17px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.channel-config-subtitle {
+  margin: 3px 0 0;
+  font-size: 12.5px;
+}
+
+.channel-config-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.channel-sections-list {
+  display: grid;
+  gap: 16px;
+}
+
+.channel-section-group {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.channel-section-group:has(.select-control.open) {
+  overflow: visible;
+}
+
+.channel-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  background: color-mix(in srgb, var(--surface-2) 60%, var(--surface));
+  color: var(--fg);
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.channel-section-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.channel-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+.channel-section-subtitle {
+  margin-top: 2px;
+  font-size: 11.5px;
+}
+
+.channel-section-body {
+  display: grid;
+  gap: 0;
+}
+
+.channel-section-body .setting-card + .setting-card {
+  border-top: 1px solid var(--border);
+}
+
+/* --- Drawer (Dialog wide) sub-sections (legacy) --- */
 
 .channel-drawer-sections {
   display: grid;

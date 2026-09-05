@@ -7,7 +7,9 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import { useNavigate } from "@solidjs/router";
 import {
+  ArrowLeft,
   Bot,
   CheckCircle2,
   Copy,
@@ -22,13 +24,13 @@ import {
   XCircle,
 } from "lucide-solid";
 
-import { Dialog } from "@/components/Dialog";
 import { SelectControl, type SelectControlOption } from "@/components/SelectControl";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
 import { apiFetch, postJson, putJson } from "@/lib/api";
 import { writeToClipboard } from "@/lib/utils";
 import type { GitHubPayload, SettingInfo } from "@/types";
+import { SettingsLayout } from "../SettingsLayout";
 
 import {
   type PendingChange,
@@ -37,7 +39,7 @@ import {
   typedValue,
 } from "../shared";
 
-type DrawerSection = {
+type SectionGroupDef = {
   id: string;
   title: string;
   subtitle?: string;
@@ -55,7 +57,7 @@ type TestOutcome = {
   message: string;
 };
 
-const GITHUB_SECTIONS: DrawerSection[] = [
+const GITHUB_SECTIONS: SectionGroupDef[] = [
   {
     id: "app",
     title: "GitHub App",
@@ -79,22 +81,12 @@ const GITHUB_SECTIONS: DrawerSection[] = [
 
 const ENABLED_FIELD = "enabled";
 
-export function RepositoriesTab() {
-  return (
-    <div class="channels-grid">
-      <GitHubConnectionCard />
-    </div>
-  );
-}
-
-function GitHubConnectionCard() {
+function useGitHubData() {
   const [channelsData, setChannelsData] = createSignal<ChannelsPayload>();
   const [channelsError, setChannelsError] = createSignal("");
   const [github, setGitHub] = createSignal<GitHubPayload>();
   const [githubError, setGitHubError] = createSignal("");
   const [drafts, setDrafts] = createSignal<Record<string, unknown>>({});
-  const [collapsed, setCollapsed] = createSignal<Record<string, boolean>>({});
-  const [drawerOpen, setDrawerOpen] = createSignal(false);
   const [busy, setBusy] = createSignal<string | null>(null);
   const [testResult, setTestResult] = createSignal<TestOutcome | null>(null);
   const { showToast } = useToast();
@@ -128,29 +120,6 @@ function GitHubConnectionCard() {
   };
 
   onMount(load);
-
-  createEffect(() => {
-    const data = channelsData();
-    if (!data) {
-      return;
-    }
-    const channelSettings = data.by_channel["github"] || {};
-    setCollapsed((current) => {
-      const next = { ...current };
-      for (const section of GITHUB_SECTIONS) {
-        const id = `github:${section.id}`;
-        if (id in next) {
-          continue;
-        }
-        const hasValue = section.fields.some((field) => {
-          const info = channelSettings[`channels.github.${field}`];
-          return info?.value && String(info.value).length > 0;
-        });
-        next[id] = !hasValue && section.id !== "app";
-      }
-      return next;
-    });
-  });
 
   const settingKey = (suffix: string) => `channels.github.${suffix}`;
 
@@ -244,7 +213,6 @@ function GitHubConnectionCard() {
   const save = async () => {
     const changes = pendingChanges();
     if (!changes.length) {
-      setDrawerOpen(false);
       return;
     }
     setBusy("save");
@@ -254,7 +222,6 @@ function GitHubConnectionCard() {
       );
       await putJson("/settings", { values });
       showToast(`Updated ${changes.length} GitHub setting(s).`);
-      setDrawerOpen(false);
       await load();
     } catch (err) {
       showToast(
@@ -266,16 +233,37 @@ function GitHubConnectionCard() {
     }
   };
 
-  const toggleSection = (sectionId: string) => {
-    setCollapsed((current) => ({
-      ...current,
-      [`github:${sectionId}`]: !current[`github:${sectionId}`],
-    }));
+  return {
+    channelsData,
+    channelsError,
+    github,
+    githubError,
+    drafts,
+    busy,
+    testResult,
+    pendingChanges,
+    isConfigured,
+    load,
+    setDraft,
+    restoreDraft,
+    toggleEnabled,
+    sync,
+    test,
+    save,
   };
+}
+
+export function RepositoriesTab() {
+  const navigate = useNavigate();
+  const gh = useGitHubData();
 
   return (
-    <>
-      <article class="channel-card">
+    <div class="channels-grid">
+      <article
+        class="channel-card"
+        onClick={() => navigate("/settings/connections/github")}
+        style={{ cursor: "pointer" }}
+      >
         <header class="channel-card-header">
           <div
             class="channel-brand-icon"
@@ -290,21 +278,22 @@ function GitHubConnectionCard() {
           <div class="row-wrap">
             <span
               class={
-                github()?.enabled
+                gh.github()?.enabled
                   ? "badge badge-success"
                   : "badge badge-warning"
               }
-              title={github()?.enabled ? "Enabled" : "Disabled"}
+              title={gh.github()?.enabled ? "Enabled" : "Disabled"}
             >
-              {github()?.enabled ? "enabled" : "disabled"}
+              {gh.github()?.enabled ? "enabled" : "disabled"}
             </span>
-            <Show when={github()?.install_url}>
+            <Show when={gh.github()?.install_url}>
               <a
                 class="btn btn-sm"
-                href={github()!.install_url}
+                href={gh.github()!.install_url}
                 target="_blank"
                 rel="noreferrer"
                 title="Open GitHub App installation page"
+                onClick={(e) => e.stopPropagation()}
               >
                 <ExternalLink size={13} />
                 Install App
@@ -314,20 +303,19 @@ function GitHubConnectionCard() {
         </header>
 
         <div class="channel-card-body">
-          <Show when={!isConfigured() && (channelsData() || github())}>
+          <Show when={!gh.isConfigured() && (gh.channelsData() || gh.github())}>
             <div class="channel-card-empty-hint">
               <TriangleAlert size={14} />
               <div>
-                Add credentials in <strong>Configure</strong> to enable this
-                connection.
+                Add credentials in <strong>Configure</strong> to enable this connection.
               </div>
             </div>
           </Show>
 
           <DataGate
-            data={github()}
-            error={channelsError() || githubError()}
-            onRetry={load}
+            data={gh.github()}
+            error={gh.channelsError() || gh.githubError()}
+            onRetry={gh.load}
           >
             {(payload) => (
               <>
@@ -343,7 +331,7 @@ function GitHubConnectionCard() {
                 </div>
                 <div class="field">
                   <label>Webhook URL</label>
-                  <div class="channel-webhook-helper-value">
+                  <div class="channel-webhook-helper-value" onClick={(e) => e.stopPropagation()}>
                     <code>{payload.webhook_url}</code>
                     <button
                       class="btn btn-sm"
@@ -363,68 +351,77 @@ function GitHubConnectionCard() {
         </div>
 
         <footer class="channel-card-footer">
-          <label class="channel-toggle-cell">
+          <label class="channel-toggle-cell" onClick={(e) => e.stopPropagation()}>
             <button
-              class={`toggle-control ${github()?.enabled ? "active" : ""}`}
+              class={`toggle-control ${gh.github()?.enabled ? "active" : ""}`}
               type="button"
               role="switch"
-              aria-checked={Boolean(github()?.enabled)}
-              disabled={busy() === "toggle"}
-              onClick={() => void toggleEnabled(!github()?.enabled)}
+              aria-checked={Boolean(gh.github()?.enabled)}
+              disabled={gh.busy() === "toggle"}
+              onClick={() => void gh.toggleEnabled(!gh.github()?.enabled)}
             >
               <span class="toggle-track">
                 <span class="toggle-thumb" />
               </span>
               <span class="toggle-label">Enabled</span>
             </button>
-            <span>{github()?.enabled ? "Enabled" : "Disabled"}</span>
+            <span>{gh.github()?.enabled ? "Enabled" : "Disabled"}</span>
           </label>
 
           <div class="channel-card-actions">
             <button
               class="btn btn-sm"
               type="button"
-              disabled={busy() === "sync"}
-              onClick={() => void sync()}
+              disabled={gh.busy() === "sync"}
+              onClick={(e) => {
+                e.stopPropagation();
+                void gh.sync();
+              }}
               title="Sync repositories from GitHub"
             >
               <GitPullRequest size={13} />
-              {busy() === "sync" ? "Syncing..." : "Sync"}
+              {gh.busy() === "sync" ? "Syncing..." : "Sync"}
             </button>
             <button
               class="btn btn-sm"
               type="button"
-              disabled={busy() === "test" || !isConfigured()}
-              onClick={() => void test()}
+              disabled={gh.busy() === "test" || !gh.isConfigured()}
+              onClick={(e) => {
+                e.stopPropagation();
+                void gh.test();
+              }}
               title={
-                isConfigured()
+                gh.isConfigured()
                   ? "Verify credentials with GitHub API"
                   : "Configure credentials first"
               }
             >
               <PlugZap size={13} />
-              {busy() === "test" ? "Testing..." : "Test"}
+              {gh.busy() === "test" ? "Testing..." : "Test"}
             </button>
             <button
               class="btn btn-sm btn-primary"
               type="button"
-              onClick={() => setDrawerOpen(true)}
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate("/settings/connections/github");
+              }}
             >
               <SettingsIcon size={13} />
               Configure
-              <Show when={pendingChanges().length > 0}>
+              <Show when={gh.pendingChanges().length > 0}>
                 <span
                   class="badge badge-warning"
                   style={{ "margin-left": "4px" }}
                 >
-                  {pendingChanges().length}
+                  {gh.pendingChanges().length}
                 </span>
               </Show>
             </button>
           </div>
         </footer>
 
-        <Show when={testResult()}>
+        <Show when={gh.testResult()}>
           {(result) => (
             <div
               class="channel-test-feedback"
@@ -440,97 +437,176 @@ function GitHubConnectionCard() {
           )}
         </Show>
       </article>
-
-      <Show when={drawerOpen()}>
-        <Dialog
-          open={true}
-          title="GitHub settings"
-          wide
-          onClose={() => setDrawerOpen(false)}
-          footer={
-            <div
-              class="row-wrap"
-              style={{
-                "justify-content": "space-between",
-                width: "100%",
-              }}
-            >
-              <div class="row-wrap">
-                <button
-                  class="btn"
-                  type="button"
-                  disabled={busy() === "test"}
-                  onClick={() => void test()}
-                >
-                  <PlugZap size={14} />
-                  {busy() === "test" ? "Testing..." : "Test connection"}
-                </button>
-              </div>
-              <div class="row-wrap">
-                <button
-                  class="btn"
-                  type="button"
-                  onClick={() => setDrawerOpen(false)}
-                >
-                  Close
-                </button>
-                <button
-                  class="btn btn-primary"
-                  type="button"
-                  disabled={
-                    pendingChanges().length === 0 || busy() === "save"
-                  }
-                  onClick={() => void save()}
-                >
-                  <Save size={14} />
-                  {busy() === "save"
-                    ? "Saving..."
-                    : `Save ${
-                        pendingChanges().length
-                          ? `(${pendingChanges().length})`
-                          : ""
-                      }`}
-                </button>
-              </div>
-            </div>
-          }
-        >
-          <div class="channel-drawer-sections">
-            <For each={GITHUB_SECTIONS}>
-              {(section) => {
-                const id = `github:${section.id}`;
-                const channelSettings = () =>
-                  channelsData()?.by_channel["github"] || {};
-                return (
-                  <DrawerSection
-                    section={section}
-                    settings={channelSettings()}
-                    drafts={drafts()}
-                    pending={pendingChanges()}
-                    agentNames={github()?.agent_names || []}
-                    collapsed={Boolean(collapsed()[id])}
-                    onToggle={() => toggleSection(section.id)}
-                    onChange={setDraft}
-                    onRestore={restoreDraft}
-                  />
-                );
-              }}
-            </For>
-          </div>
-        </Dialog>
-      </Show>
-    </>
+    </div>
   );
 }
 
-function DrawerSection(props: {
-  section: DrawerSection;
+export function GitHubSettingsPage() {
+  const navigate = useNavigate();
+  const gh = useGitHubData();
+
+  return (
+    <SettingsLayout
+      title="GitHub Settings"
+      description="Configure GitHub App credentials, triggers, and webhook."
+      breadcrumbSegments={[
+        { label: "Connections", href: "/settings/connections" },
+        { label: "GitHub" },
+      ]}
+      contentWidth="wide"
+      actions={
+        <div class="row-wrap" style={{ gap: "8px" }}>
+          <button
+            class="btn btn-sm"
+            type="button"
+            onClick={() => navigate("/settings/connections")}
+          >
+            <ArrowLeft size={14} />
+            Back to Connections
+          </button>
+          <button
+            class="btn btn-sm"
+            type="button"
+            disabled={gh.busy() === "test" || !gh.isConfigured()}
+            onClick={() => void gh.test()}
+          >
+            <PlugZap size={13} />
+            {gh.busy() === "test" ? "Testing..." : "Test connection"}
+          </button>
+          <button
+            class="btn btn-sm btn-primary"
+            type="button"
+            disabled={gh.pendingChanges().length === 0 || gh.busy() === "save"}
+            onClick={() => void gh.save()}
+          >
+            <Save size={13} />
+            {gh.busy() === "save"
+              ? "Saving..."
+              : `Save changes ${
+                  gh.pendingChanges().length
+                    ? `(${gh.pendingChanges().length})`
+                    : ""
+                }`}
+          </button>
+        </div>
+      }
+    >
+      <DataGate
+        data={gh.github()}
+        error={gh.channelsError() || gh.githubError()}
+        onRetry={gh.load}
+      >
+        {(payload) => (
+          <div class="stack" style={{ gap: "20px" }}>
+            {/* Overview Header */}
+            <div class="channel-config-card">
+              <div class="channel-config-header" style={{ "border-bottom": "none", padding: "0" }}>
+                <div class="channel-config-header-left">
+                  <div
+                    class="channel-brand-icon"
+                    data-brand="github"
+                    aria-hidden="true"
+                  >
+                    <GitHubIcon />
+                  </div>
+                  <div>
+                    <h2 class="channel-config-title">GitHub Connection</h2>
+                    <p class="hint channel-config-subtitle">
+                      App Slug: {payload.app_slug || "Not set"} &bull; Repositories: {payload.repositories.length}
+                    </p>
+                  </div>
+                </div>
+                <div class="row-wrap channel-config-header-actions">
+                  <label class="channel-toggle-cell">
+                    <button
+                      class={`toggle-control ${gh.github()?.enabled ? "active" : ""}`}
+                      type="button"
+                      role="switch"
+                      aria-checked={Boolean(gh.github()?.enabled)}
+                      disabled={gh.busy() === "toggle"}
+                      onClick={() => void gh.toggleEnabled(!gh.github()?.enabled)}
+                    >
+                      <span class="toggle-track">
+                        <span class="toggle-thumb" />
+                      </span>
+                      <span class="toggle-label">Enabled</span>
+                    </button>
+                    <span>{gh.github()?.enabled ? "Enabled" : "Disabled"}</span>
+                  </label>
+                  <button
+                    class="btn btn-sm"
+                    type="button"
+                    disabled={gh.busy() === "sync"}
+                    onClick={() => void gh.sync()}
+                  >
+                    <GitPullRequest size={13} />
+                    {gh.busy() === "sync" ? "Syncing..." : "Sync Repos"}
+                  </button>
+                  <Show when={payload.install_url}>
+                    <a
+                      class="btn btn-sm"
+                      href={payload.install_url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <ExternalLink size={13} />
+                      Install App
+                    </a>
+                  </Show>
+                </div>
+              </div>
+            </div>
+
+            {/* Test feedback */}
+            <Show when={gh.testResult()}>
+              {(result) => (
+                <div
+                  class="channel-test-feedback"
+                  data-state={result().ok ? "ok" : "error"}
+                >
+                  <div class="channel-test-feedback-title">
+                    <Show when={result().ok} fallback={<XCircle size={14} />}>
+                      <CheckCircle2 size={14} />
+                    </Show>
+                    <span>{result().message}</span>
+                  </div>
+                </div>
+              )}
+            </Show>
+
+            {/* Section Groups */}
+            <div class="channel-sections-list">
+              <For each={GITHUB_SECTIONS}>
+                {(section) => {
+                  const channelSettings = () =>
+                    gh.channelsData()?.by_channel["github"] || {};
+                  return (
+                    <GitHubSectionGroup
+                      section={section}
+                      settings={channelSettings()}
+                      drafts={gh.drafts()}
+                      pending={gh.pendingChanges()}
+                      agentNames={gh.github()?.agent_names || []}
+                      onChange={gh.setDraft}
+                      onRestore={gh.restoreDraft}
+                    />
+                  );
+                }}
+              </For>
+            </div>
+          </div>
+        )}
+      </DataGate>
+    </SettingsLayout>
+  );
+}
+
+function GitHubSectionGroup(props: {
+  section: SectionGroupDef;
   settings: Record<string, SettingInfo>;
   drafts: Record<string, unknown>;
   pending: PendingChange[];
   agentNames: string[];
-  collapsed: boolean;
-  onToggle: () => void;
   onChange: (key: string, value: unknown) => void;
   onRestore: (key: string) => void;
 }) {
@@ -547,18 +623,21 @@ function DrawerSection(props: {
   });
 
   return (
-    <section class="channel-drawer-section" data-collapsed={props.collapsed}>
-      <button
-        type="button"
-        class="channel-drawer-section-header"
-        onClick={props.onToggle}
-      >
-        <div class="channel-drawer-section-title">
-          <Show when={props.section.icon}>{props.section.icon!()}</Show>
-          {props.section.title}
+    <div class="channel-section-group">
+      <div class="channel-section-header">
+        <div class="channel-section-header-left">
+          <div class="channel-section-title">
+            <Show when={props.section.icon}>{props.section.icon!()}</Show>
+            {props.section.title}
+          </div>
+          <Show when={props.section.subtitle}>
+            <span class="hint channel-section-subtitle">
+              {props.section.subtitle}
+            </span>
+          </Show>
         </div>
-      </button>
-      <div class="channel-drawer-section-body">
+      </div>
+      <div class="channel-section-body">
         <For
           each={fieldEntries()}
           fallback={
@@ -569,7 +648,7 @@ function DrawerSection(props: {
         >
           {(entry) => {
             const dirty = () =>
-              props.pending.some((change) => change.key === entry.key);
+              props.pending.some((change: PendingChange) => change.key === entry.key);
             const isPrivateKey = entry.key === "channels.github.private_key";
             const isDefaultAgent = entry.key === "channels.github.default_agent";
             return (
@@ -601,7 +680,7 @@ function DrawerSection(props: {
           }}
         </For>
       </div>
-    </section>
+    </div>
   );
 }
 

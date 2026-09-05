@@ -1,20 +1,19 @@
 import {
-  createEffect,
   createMemo,
   createSignal,
   For,
   JSX,
   Show,
 } from "solid-js";
+import { useNavigate, useParams } from "@solidjs/router";
 import {
-  ChevronDown,
+  ArrowLeft,
   Save,
   Settings as SettingsIcon,
   TriangleAlert,
 } from "lucide-solid";
 
 import { DataGate } from "@/components/State";
-import { Dialog } from "@/components/Dialog";
 import { useToast } from "@/components/Toast";
 import { apiFetch, putJson } from "@/lib/api";
 import { getBackends } from "@/lib/catalogStore";
@@ -209,8 +208,7 @@ export function BackendsPage() {
   const [data, setData] = createSignal<SettingsPayload>();
   const [error, setError] = createSignal("");
   const [drafts, setDrafts] = createSignal<Record<string, unknown>>({});
-  const [drawerBackend, setDrawerBackend] = createSignal<string | null>(null);
-  const [collapsed, setCollapsed] = createSignal<Record<string, boolean>>({});
+  const [selectedBackend, setSelectedBackend] = createSignal<string>("daytona");
   const [busy, setBusy] = createSignal<Record<string, string>>({});
 
   const load = async () => {
@@ -229,26 +227,6 @@ export function BackendsPage() {
   };
 
   useCatalogAndLoad(load);
-
-  createEffect(() => {
-    const payload = data();
-    if (!payload) {
-      return;
-    }
-    setCollapsed((current) => {
-      const next = { ...current };
-      for (const backend of visibleBackendDefs()) {
-        for (const section of backend.sections) {
-          const id = `${backend.name}:${section.id}`;
-          if (id in next) {
-            continue;
-          }
-          next[id] = section.defaultCollapsed ?? false;
-        }
-      }
-      return next;
-    });
-  });
 
   const settingsByBackend = (backend: string): Record<string, SettingInfo> => {
     const payload = data();
@@ -396,121 +374,192 @@ export function BackendsPage() {
     }
   };
 
-  const toggleSection = (backend: string, sectionId: string) => {
-    const id = `${backend}:${sectionId}`;
-    setCollapsed((current) => ({ ...current, [id]: !current[id] }));
-  };
+  const params = useParams<{ backendName?: string }>();
+  const navigate = useNavigate();
 
   return (
-    <SettingsLayout
-      title="Workspace Backends"
-      breadcrumbLabel="Backends"
-      contentWidth="wide"
-    >
-      <DataGate data={data()} error={error()} onRetry={load}>
-        {() => (
-          <div class="backends-grid">
-            <For each={getBackends()}>
-              {(entry) => {
-                const backend = resolveBackendDef(entry);
-                if (!backend) {
-                  return null;
-                }
-                return (
-                  <BackendCard
-                    backend={backend}
-                    status={backendStatus(backend)}
-                    configured={isBackendConfigured(backend)}
-                    pendingCount={(pendingByBackend()[backend.name] || []).length}
-                    busy={busy()[backend.name] || null}
-                    onToggle={(value) => void toggleEnabled(backend, value)}
-                    onConfigure={() => setDrawerBackend(backend.name)}
-                  />
-                );
-              }}
-            </For>
-          </div>
-        )}
-      </DataGate>
-
-      <Show when={drawerBackend()}>
-        {(name) => {
-          const def = () => BACKEND_DEFS_BY_NAME[name()] ?? null;
-          const backendSettings = () => settingsByBackend(name());
-          const pending = () => pendingByBackend()[name()] || [];
-          return (
-            <Show when={def()}>
-              {(currentDef) => (
-                <Dialog
-                  open={true}
-                  title={`${currentDef().title} settings`}
-                  wide
-                  onClose={() => setDrawerBackend(null)}
-                  footer={
-                    <div class="row-wrap" style={{ "justify-content": "space-between", width: "100%" }}>
-                      <Show
-                        when={currentDef().toggleable}
-                        fallback={
-                          <span class="hint">
-                            The local backend is always available.
-                          </span>
+    <Show
+      when={params.backendName}
+      fallback={
+        <SettingsLayout
+          title="Workspace Backends"
+          breadcrumbLabel="Backends"
+          contentWidth="wide"
+        >
+          <DataGate data={data()} error={error()} onRetry={load}>
+            {() => (
+              <div class="stack" style={{ gap: "24px" }}>
+                <div>
+                  <div class="settings-section-title" style={{ "margin-bottom": "12px" }}>
+                    Select Backend
+                  </div>
+                  <div class="backends-grid">
+                    <For each={getBackends()}>
+                      {(entry) => {
+                        const backend = resolveBackendDef(entry);
+                        if (!backend) {
+                          return null;
                         }
-                      >
-                        <span class="hint">
-                          Status: {isEnabled(currentDef()) ? "Enabled" : "Disabled"}
-                        </span>
-                      </Show>
-                      <div class="row-wrap">
-                        <button class="btn" type="button" onClick={() => setDrawerBackend(null)}>
-                          Close
-                        </button>
-                        <button
-                          class="btn btn-primary"
-                          type="button"
-                          disabled={pending().length === 0 || busy()[name()] === "save"}
-                          onClick={() => void saveBackend(name())}
-                        >
-                          <Save size={14} />
-                          {busy()[name()] === "save"
-                            ? "Saving..."
-                            : `Save ${pending().length ? `(${pending().length})` : ""}`}
-                        </button>
-                      </div>
-                    </div>
-                  }
-                >
-                  <div class="backend-drawer-sections">
-                    <For each={currentDef().sections}>
-                      {(section) => {
-                        const id = `${name()}:${section.id}`;
                         return (
-                          <DrawerSection
-                            backend={name()}
-                            settings={backendSettings()}
-                            section={section}
-                            drafts={drafts()}
-                            pending={pending()}
-                            collapsed={Boolean(collapsed()[id])}
-                            onToggle={() => toggleSection(name(), section.id)}
-                            onChange={setDraft}
-                            onRestore={restoreDraft}
+                          <BackendCard
+                            backend={backend}
+                            status={backendStatus(backend)}
+                            configured={isBackendConfigured(backend)}
+                            pendingCount={(pendingByBackend()[backend.name] || []).length}
+                            busy={busy()[backend.name] || null}
+                            onToggle={(value) => void toggleEnabled(backend, value)}
+                            onConfigure={() => navigate(`/settings/backends/${backend.name}`)}
                           />
                         );
                       }}
                     </For>
                   </div>
-                </Dialog>
+                </div>
+              </div>
+            )}
+          </DataGate>
+        </SettingsLayout>
+      }
+    >
+      {(backendName) => {
+        const def = () =>
+          BACKEND_DEFS_BY_NAME[backendName()] ??
+          visibleBackendDefs().find((b) => b.name === backendName()) ??
+          null;
+        const name = () => backendName();
+        const backendSettings = () => settingsByBackend(name());
+        const pending = () => pendingByBackend()[name()] || [];
+
+        return (
+          <SettingsLayout
+            title={def() ? `${def()!.title} Settings` : "Backend Settings"}
+            description={def()?.summary}
+            breadcrumbSegments={[
+              { label: "Backends", href: "/settings/backends" },
+              { label: def()?.title || name() },
+            ]}
+            contentWidth="wide"
+            actions={
+              <div class="row-wrap" style={{ gap: "8px" }}>
+                <button
+                  class="btn btn-sm"
+                  type="button"
+                  onClick={() => navigate("/settings/backends")}
+                >
+                  <ArrowLeft size={14} />
+                  Back to Backends
+                </button>
+                <button
+                  class="btn btn-sm btn-primary"
+                  type="button"
+                  disabled={pending().length === 0 || busy()[name()] === "save"}
+                  onClick={() => void saveBackend(name())}
+                >
+                  <Save size={14} />
+                  {busy()[name()] === "save"
+                    ? "Saving..."
+                    : `Save changes ${pending().length ? `(${pending().length})` : ""}`}
+                </button>
+              </div>
+            }
+          >
+            <DataGate data={data()} error={error()} onRetry={load}>
+              {() => (
+                <Show
+                  when={def()}
+                  fallback={
+                    <div class="panel empty" style={{ padding: "32px", "text-align": "center" }}>
+                      <h3>Backend not found</h3>
+                      <button
+                        class="btn"
+                        style={{ "margin-top": "12px" }}
+                        type="button"
+                        onClick={() => navigate("/settings/backends")}
+                      >
+                        <ArrowLeft size={14} />
+                        Back to Backends
+                      </button>
+                    </div>
+                  }
+                >
+                  <div class="stack" style={{ gap: "20px" }}>
+                    {/* Header overview card */}
+                    <div class="backend-config-card">
+                      <div class="backend-config-header" style={{ "border-bottom": "none", padding: "0" }}>
+                        <div class="backend-config-header-left">
+                          <div
+                            class="backend-brand-icon"
+                            data-brand={name()}
+                            aria-hidden="true"
+                          >
+                            {getBackendIcon(name())()}
+                          </div>
+                          <div>
+                            <h2 class="backend-config-title">{def()!.title}</h2>
+                            <p class="hint backend-config-subtitle">{def()!.tagline} &mdash; {def()!.summary}</p>
+                          </div>
+                        </div>
+                        <div class="row-wrap backend-config-header-actions">
+                          <Show
+                            when={def()!.toggleable}
+                            fallback={
+                              <span class="badge badge-success">
+                                Always available
+                              </span>
+                            }
+                          >
+                            <label class="backend-toggle-cell">
+                              <button
+                                class={`toggle-control ${isEnabled(def()!) ? "active" : ""}`}
+                                type="button"
+                                role="switch"
+                                aria-checked={isEnabled(def()!)}
+                                disabled={busy()[name()] === "toggle"}
+                                onClick={() => void toggleEnabled(def()!, !isEnabled(def()!))}
+                              >
+                                <span class="toggle-track">
+                                  <span class="toggle-thumb" />
+                                </span>
+                                <span class="toggle-label">
+                                  {isEnabled(def()!) ? "Enabled" : "Disabled"}
+                                </span>
+                              </button>
+                            </label>
+                          </Show>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Section groups */}
+                    <div class="backend-sections-list">
+                      <For each={def()!.sections}>
+                        {(section) => (
+                          <BackendSectionGroup
+                            backend={name()}
+                            settings={backendSettings()}
+                            section={section}
+                            drafts={drafts()}
+                            pending={pending()}
+                            onChange={setDraft}
+                            onRestore={restoreDraft}
+                          />
+                        )}
+                      </For>
+                    </div>
+                  </div>
+                </Show>
               )}
-            </Show>
-          );
-        }}
-      </Show>
-    </SettingsLayout>
+            </DataGate>
+          </SettingsLayout>
+        );
+      }}
+    </Show>
   );
 }
 
 function BackendCard(props: {
   backend: BackendDefinition;
+  active?: boolean;
   status: BackendStatus;
   configured: boolean;
   pendingCount: number;
@@ -537,7 +586,11 @@ function BackendCard(props: {
   };
 
   return (
-    <article class="backend-card">
+    <article
+      class={`backend-card ${props.active ? "backend-card--active" : ""}`}
+      onClick={props.onConfigure}
+      style={{ cursor: "pointer" }}
+    >
       <header class="backend-card-header">
         <div
           class="backend-brand-icon"
@@ -594,7 +647,7 @@ function BackendCard(props: {
             </span>
           }
         >
-          <label class="backend-toggle-cell">
+          <label class="backend-toggle-cell" onClick={(e) => e.stopPropagation()}>
             <button
               class={`toggle-control ${props.status === "enabled" ? "active" : ""}`}
               type="button"
@@ -616,7 +669,10 @@ function BackendCard(props: {
           <button
             class="btn btn-sm btn-primary"
             type="button"
-            onClick={props.onConfigure}
+            onClick={(e) => {
+              e.stopPropagation();
+              props.onConfigure();
+            }}
           >
             <SettingsIcon size={13} />
             Configure
@@ -632,14 +688,12 @@ function BackendCard(props: {
   );
 }
 
-function DrawerSection(props: {
+function BackendSectionGroup(props: {
   backend: string;
   settings: Record<string, SettingInfo>;
   section: DrawerSection;
   drafts: Record<string, unknown>;
   pending: PendingChange[];
-  collapsed: boolean;
-  onToggle: () => void;
   onChange: (key: string, value: unknown) => void;
   onRestore: (key: string) => void;
 }) {
@@ -659,25 +713,21 @@ function DrawerSection(props: {
   });
 
   return (
-    <section class="backend-drawer-section" data-collapsed={props.collapsed}>
-      <button
-        type="button"
-        class="backend-drawer-section-header"
-        onClick={props.onToggle}
-      >
+    <section class="backend-section-group">
+      <div class="backend-section-header">
         <div>
-          <div class="backend-drawer-section-title">
+          <div class="backend-section-title">
             {props.section.title}
             <Show when={dirtyCount() > 0}>
               <span class="badge badge-warning">{dirtyCount()}</span>
             </Show>
           </div>
+          <Show when={props.section.subtitle}>
+            <div class="hint backend-section-subtitle">{props.section.subtitle}</div>
+          </Show>
         </div>
-        <span class="backend-drawer-section-caret" aria-hidden="true">
-          <ChevronDown size={16} />
-        </span>
-      </button>
-      <div class="backend-drawer-section-body">
+      </div>
+      <div class="backend-section-body">
         <For
           each={fieldEntries()}
           fallback={

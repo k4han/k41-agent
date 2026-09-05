@@ -1,5 +1,5 @@
-import { createMemo, createSignal, For, JSX, Show } from "solid-js";
-import { ArrowRight, Check, RotateCcw, TriangleAlert, ChevronDown } from "lucide-solid";
+import { createMemo, createSignal, For, type JSX, Show } from "solid-js";
+import { ArrowRight, Check, RotateCcw, TriangleAlert } from "lucide-solid";
 
 import { Dialog } from "@/components/Dialog";
 import { useToast } from "@/components/Toast";
@@ -159,7 +159,7 @@ export function useSettingsData(endpoint: string) {
   });
 
   const setDraft = (key: string, value: unknown) => {
-    setDrafts((current) => ({ ...current, [key]: value }));
+    setDrafts((current: Record<string, unknown>) => ({ ...current, [key]: value }));
   };
 
   const restoreDraft = (key: string) => {
@@ -187,10 +187,10 @@ export function useSettingsData(endpoint: string) {
     const payload = data();
     const settings = payload ? settingsFromPayload(payload) : {};
     const restartRequired = changes.some(
-      (change) => settings[change.key]?.restart_required === true,
+      (change: PendingChange) => settings[change.key]?.restart_required === true,
     );
     const values = Object.fromEntries(
-      changes.map((change) => [change.key, change.newValue]),
+      changes.map((change: PendingChange) => [change.key, change.newValue]),
     );
     try {
       await putJson("/settings", { values });
@@ -333,64 +333,25 @@ export function SettingsSection(props: {
   onToggle?: () => void;
   children: JSX.Element;
 }) {
-  const [internalOpen, setInternalOpen] = createSignal(props.defaultOpen ?? true);
-  const isCollapsible = () => props.collapsible === true;
-  const open = () => (props.isOpen !== undefined ? props.isOpen : internalOpen());
-
-  const handleToggle = () => {
-    if (props.onToggle) {
-      props.onToggle();
-    } else {
-      setInternalOpen((v) => !v);
-    }
-  };
-
   return (
-    <section class={`settings-group ${props.class || ""} ${isCollapsible() && !open() ? "settings-group--collapsed" : ""}`}>
+    <section class={`settings-group ${props.class || ""}`}>
       <div class="settings-section-header">
-        <Show
-          when={isCollapsible()}
-          fallback={
-            <div class="settings-section-header-text">
-              <div class="settings-section-title">
-                {props.title}
-                <Show when={props.count !== undefined}>
-                  <span class="settings-section-count">{props.count}</span>
-                </Show>
-              </div>
-              <Show when={props.description}>
-                <div class="hint settings-section-desc">{props.description}</div>
-              </Show>
-            </div>
-          }
-        >
-          <button
-            type="button"
-            class="settings-section-header-btn"
-            onClick={handleToggle}
-            aria-expanded={open()}
-          >
-            <span class="settings-section-header-text">
-              <span class="settings-section-title">
-                <ChevronDown size={14} class={`settings-section-chevron ${open() ? "open" : ""}`} />
-                {props.title}
-                <Show when={props.count !== undefined}>
-                  <span class="settings-section-count">{props.count}</span>
-                </Show>
-              </span>
-              <Show when={props.description}>
-                <span class="hint settings-section-desc">{props.description}</span>
-              </Show>
-            </span>
-          </button>
-        </Show>
+        <div class="settings-section-header-text">
+          <div class="settings-section-title">
+            {props.title}
+            <Show when={props.count !== undefined}>
+              <span class="settings-section-count">{props.count}</span>
+            </Show>
+          </div>
+          <Show when={props.description}>
+            <div class="hint settings-section-desc">{props.description}</div>
+          </Show>
+        </div>
         <Show when={props.actions}>
           <div class="row-wrap settings-section-actions">{props.actions}</div>
         </Show>
       </div>
-      <Show when={!isCollapsible() || open()}>
-        <div class="settings-section-body">{props.children}</div>
-      </Show>
+      <div class="settings-section-body">{props.children}</div>
     </section>
   );
 }
@@ -495,7 +456,7 @@ export function ChangesPreview(props: {
   return (
     <div class="change-list">
       <For each={props.changes}>
-        {(change) => {
+        {(change: PendingChange) => {
           const info = () => props.settings[change.key];
           const isRestart = () => info()?.restart_required === true;
           return (
@@ -636,8 +597,8 @@ export function SettingsTabBar<T extends string>(props: {
 }) {
   return (
     <div class="settings-tabs" role="tablist" aria-label={props.ariaLabel}>
-      <For each={props.items}>
-        {(item) => (
+      <For each={props.items as SettingsTabItem<T>[]}>
+        {(item: SettingsTabItem<T>) => (
           <button
             class={`settings-tab ${props.value === item.value ? "active" : ""}`}
             type="button"

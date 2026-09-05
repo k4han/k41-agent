@@ -1,8 +1,6 @@
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import {
   AlignJustify,
-  ChevronDown,
-  ChevronUp,
   RotateCcw,
   Rows3,
   Save,
@@ -13,10 +11,12 @@ import {
 import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { DataGate } from "@/components/State";
 import { STORAGE_KEYS } from "@/lib/uiConstants";
+import type { SettingInfo } from "@/types";
 
 import { SettingsLayout } from "./SettingsLayout";
 import {
   categoryLabel,
+  type PendingChange,
   RESTART_REQUIRED_NOTICE,
   SettingRow,
   SettingsConfirmDialog,
@@ -41,7 +41,6 @@ export function ConfigPage() {
   const [search, setSearch] = createSignal("");
   const [selectedCategory, setSelectedCategory] = createSignal("all");
   const [density, setDensity] = createSignal<"compact" | "detailed">("compact");
-  const [collapsedMap, setCollapsedMap] = createSignal<Record<string, boolean>>({});
   const [confirmOpen, setConfirmOpen] = createSignal(false);
   const [saving, setSaving] = createSignal(false);
 
@@ -62,7 +61,8 @@ export function ConfigPage() {
   const categoriesWithCounts = createMemo(() => {
     const payload = data();
     if (!payload) return [];
-    return Object.entries(payload.by_category).map(([category, settings]) => ({
+    const byCategory = payload.by_category as Record<string, Record<string, SettingInfo>>;
+    return Object.entries(byCategory).map(([category, settings]) => ({
       id: category,
       label: categoryLabel(category),
       totalCount: Object.keys(settings).length,
@@ -78,8 +78,9 @@ export function ConfigPage() {
     if (!payload) return [];
     const needle = search().trim().toLowerCase();
     const catFilter = selectedCategory();
+    const byCategory = payload.by_category as Record<string, Record<string, SettingInfo>>;
 
-    return Object.entries(payload.by_category)
+    return Object.entries(byCategory)
       .filter(([category]) => catFilter === "all" || category === catFilter)
       .map(([category, settings]) => ({
         category,
@@ -101,31 +102,9 @@ export function ConfigPage() {
     const payload = data();
     if (!payload) return [];
     return pendingChanges().filter(
-      (change) => payload.settings[change.key]?.restart_required === true,
+      (change: PendingChange) => payload.settings[change.key]?.restart_required === true,
     );
   });
-
-  const areAllCollapsed = createMemo(() => {
-    const groups = filteredCategories();
-    if (groups.length === 0) return false;
-    return groups.every((g) => Boolean(collapsedMap()[g.category]));
-  });
-
-  const toggleAllCollapse = () => {
-    const nextCollapsed = !areAllCollapsed();
-    const updated: Record<string, boolean> = {};
-    for (const g of filteredCategories()) {
-      updated[g.category] = nextCollapsed;
-    }
-    setCollapsedMap(updated);
-  };
-
-  const toggleSectionCollapse = (cat: string) => {
-    setCollapsedMap((prev) => ({
-      ...prev,
-      [cat]: !prev[cat],
-    }));
-  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -165,19 +144,6 @@ export function ConfigPage() {
                   />
                 </div>
                 <div class="settings-toolbar-controls">
-                  <Show when={selectedCategory() === "all" && filteredCategories().length > 1}>
-                    <button
-                      type="button"
-                      class="btn btn-sm btn-ghost settings-toolbar-action-btn"
-                      onClick={toggleAllCollapse}
-                      title={areAllCollapsed() ? "Expand all sections" : "Collapse all sections"}
-                    >
-                      <Show when={areAllCollapsed()} fallback={<ChevronUp size={13} />}>
-                        <ChevronDown size={13} />
-                      </Show>
-                      <span>{areAllCollapsed() ? "Expand all" : "Collapse all"}</span>
-                    </button>
-                  </Show>
                   <button
                     type="button"
                     class={`btn btn-sm ${density() === "compact" ? "btn-secondary" : "btn-ghost"} settings-toolbar-action-btn`}
@@ -264,35 +230,28 @@ export function ConfigPage() {
             >
               <div class="settings-sections-wrapper">
                 <For each={filteredCategories()}>
-                  {(group) => {
-                    const isSingleView = () => selectedCategory() !== "all";
-                    const isCollapsed = () => Boolean(collapsedMap()[group.category]);
-                    return (
-                      <SettingsSection
-                        title={categoryLabel(group.category)}
-                        count={group.settings.length}
-                        collapsible={!isSingleView()}
-                        isOpen={isSingleView() || !isCollapsed()}
-                        onToggle={() => toggleSectionCollapse(group.category)}
-                      >
-                        <div class="settings-list settings-table">
-                          <For each={group.settings}>
-                            {([key, info]) => (
-                              <SettingRow
-                                settingKey={key}
-                                info={info}
-                                draft={drafts()[key]}
-                                dirty={pendingChanges().some((change) => change.key === key)}
-                                density={density()}
-                                onChange={(value) => setDraft(key, value)}
-                                onRestore={() => restoreDraft(key)}
-                              />
-                            )}
-                          </For>
-                        </div>
-                      </SettingsSection>
-                    );
-                  }}
+                  {(group) => (
+                    <SettingsSection
+                      title={categoryLabel(group.category)}
+                      count={group.settings.length}
+                    >
+                      <div class="settings-list settings-table">
+                        <For each={group.settings as [string, SettingInfo][]}>
+                          {([key, info]: [string, SettingInfo]) => (
+                            <SettingRow
+                              settingKey={key}
+                              info={info}
+                              draft={drafts()[key]}
+                              dirty={pendingChanges().some((change: PendingChange) => change.key === key)}
+                              density={density()}
+                              onChange={(value) => setDraft(key, value)}
+                              onRestore={() => restoreDraft(key)}
+                            />
+                          )}
+                        </For>
+                      </div>
+                    </SettingsSection>
+                  )}
                 </For>
               </div>
             </Show>

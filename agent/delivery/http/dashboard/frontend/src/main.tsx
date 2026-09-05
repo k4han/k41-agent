@@ -101,10 +101,14 @@ render(
         <Route path="/settings" component={() => <Navigate href="/settings/config" />} />
         <Route path="/settings/config" component={ConfigPage} />
         <Route path="/settings/backends" component={BackendsPage} />
+        <Route path="/settings/backends/:backendName" component={BackendsPage} />
         <Route path="/settings/sandboxes" component={SandboxesPage} />
         <Route path="/settings/providers" component={ProvidersPage} />
+        <Route path="/settings/providers/:providerName" component={ProvidersPage} />
         <Route path="/settings/connections" component={ConnectionsPage} />
+        <Route path="/settings/connections/:subpage" component={ConnectionsPage} />
         <Route path="/settings/channels" component={ChannelsPage} />
+        <Route path="/settings/channels/:channelName" component={ChannelsPage} />
         <Route path="/settings/pairing" component={() => <Navigate href="/settings/channels?tab=pairing" />} />
         <Route path="/settings/agents" component={AgentsPage} />
         <Route path="/settings/agents/new" component={AgentsPage} />

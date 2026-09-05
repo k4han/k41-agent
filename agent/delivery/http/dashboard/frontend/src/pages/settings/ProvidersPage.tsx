@@ -1,5 +1,6 @@
 import { createMemo, createSignal, createEffect, For, Show } from "solid-js";
-import { Check, Copy, Edit3, Plus, RefreshCw, Save, Search, ShieldAlert, Star, Trash2, Globe, Shield, Coins, Sparkles, Sliders } from "lucide-solid";
+import { useNavigate, useParams } from "@solidjs/router";
+import { ArrowLeft, Check, Copy, Edit3, Plus, RefreshCw, Save, Search, ShieldAlert, Star, Trash2, Globe, Shield, Coins, Sparkles, Sliders } from "lucide-solid";
 
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { CopyButton } from "@/components/CopyButton";
@@ -187,8 +188,10 @@ export function ProvidersPage() {
   const { data, error, drafts, load, pendingChanges, setDraft, restoreDraft } =
     useSettingsData("/dashboard-api/providers");
 
+  const params = useParams<{ providerName?: string }>();
+  const navigate = useNavigate();
+
   const [search, setSearch] = createSignal("");
-  const [selectedProviderName, setSelectedProviderName] = createSignal<string | null>(null);
   const [addOpen, setAddOpen] = createSignal(false);
   const [addForm, setAddForm] = createSignal<ProviderCreateForm>({
     name: "",
@@ -211,7 +214,7 @@ export function ProvidersPage() {
   const { showToast } = useToast();
 
   const searchNeedle = createMemo(() => search().trim().toLowerCase());
-  const dirtyKeys = createMemo(() => new Set(pendingChanges().map((change) => change.key)));
+  const dirtyKeys = createMemo<Set<string>>(() => new Set(pendingChanges().map((change: PendingChange) => change.key)));
 
   const typeOptions = createMemo(() => providerTypeOptions(data()?.provider_type_options));
 
@@ -223,7 +226,7 @@ export function ProvidersPage() {
     if (!payload) {
       return [];
     }
-    return (payload.provider_rows || []).map((provider) =>
+    return (payload.provider_rows || []).map((provider: ProviderRow) =>
       buildProviderView(
         provider,
         payload.provider_field_order || [],
@@ -314,14 +317,18 @@ export function ProvidersPage() {
     providerCards().filter((card) => card.matchesSearch && !card.configured),
   );
 
-  const selectedProvider = createMemo(() => {
-    const selectedName = selectedProviderName();
+  const currentProviderName = () =>
+    params.providerName ? decodeURIComponent(params.providerName) : null;
+
+  const currentProvider = createMemo(() => {
+    const selectedName = currentProviderName();
+    if (!selectedName) return null;
     const rows = providerRows();
-    return rows.find((provider) => provider.name === selectedName) || null;
+    return rows.find((provider) => provider.name.toLowerCase() === selectedName.toLowerCase()) || null;
   });
 
   const providerPendingChanges = (providerName: string): PendingChange[] =>
-    pendingChanges().filter((change) => change.key.startsWith(`llm.providers.${providerName}.`));
+    pendingChanges().filter((change: PendingChange) => change.key.startsWith(`llm.providers.${providerName}.`));
 
   const loadProviderModels = async (providerName: string) => {
     try {
@@ -408,7 +415,7 @@ export function ProvidersPage() {
       showToast("Provider created.");
       setAddOpen(false);
       await load();
-      setSelectedProviderName(form.name.trim());
+      navigate(`/settings/providers/${encodeURIComponent(form.name.trim())}`);
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to create provider", "error");
     } finally {
@@ -425,8 +432,10 @@ export function ProvidersPage() {
       await deleteJson(`/dashboard-api/providers/${encodeURIComponent(provider.name)}`);
       showToast("Provider deleted.");
       setDeleteTarget(null);
-      setSelectedProviderName(null);
       await load();
+      if (params.providerName) {
+        navigate("/settings/providers");
+      }
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to delete provider", "error");
     }
@@ -439,7 +448,7 @@ export function ProvidersPage() {
 
   const handleCardClick = (card: any) => {
     if (card.configured) {
-      setSelectedProviderName(card.configuredRow?.name ?? card.id);
+      navigate(`/settings/providers/${encodeURIComponent(card.configuredRow?.name ?? card.id)}`);
     } else {
       // Setup helper prefilled from catalog
       setAddForm({
@@ -509,23 +518,7 @@ export function ProvidersPage() {
   useCatalogAndLoad(load);
 
   return (
-    <SettingsLayout
-      title="Provider Configuration"
-      breadcrumbLabel="Providers"
-      contentWidth="wide"
-      actions={
-        <button
-          class="btn"
-          type="button"
-          disabled={updatingCatalog()}
-          onClick={syncCatalog}
-          title="Sync provider catalog and models list from models.dev"
-        >
-          <RefreshCw size={14} class={updatingCatalog() ? "animate-spin" : ""} />
-          {updatingCatalog() ? "Syncing..." : "Sync Catalog"}
-        </button>
-      }
-    >
+    <>
       <style>{`
         .providers-grid {
           display: grid;
@@ -848,165 +841,214 @@ export function ProvidersPage() {
 
       <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => (
-          <div class="stack">
-            <SettingsResourceToolbar
-              searchValue={search()}
-              searchPlaceholder="Search providers and models..."
-              onSearchInput={setSearch}
-              actions={
-                <button class="btn btn-primary" type="button" onClick={openAddDialog}>
-                  <Plus size={15} />
-                  Custom Provider
-                </button>
+          <>
+            <Show
+              when={params.providerName}
+              fallback={
+                <SettingsLayout
+                  title="Provider Configuration"
+                  breadcrumbLabel="Providers"
+                  contentWidth="wide"
+                  actions={
+                    <button
+                      class="btn"
+                      type="button"
+                      disabled={updatingCatalog()}
+                      onClick={syncCatalog}
+                      title="Sync provider catalog and models list from models.dev"
+                    >
+                      <RefreshCw size={14} class={updatingCatalog() ? "animate-spin" : ""} />
+                      {updatingCatalog() ? "Syncing..." : "Sync Catalog"}
+                    </button>
+                  }
+                >
+                  <div class="stack">
+                    <SettingsResourceToolbar
+                      searchValue={search()}
+                      searchPlaceholder="Search providers and models..."
+                      onSearchInput={setSearch}
+                      actions={
+                        <button class="btn btn-primary" type="button" onClick={openAddDialog}>
+                          <Plus size={15} />
+                          Custom Provider
+                        </button>
+                      }
+                    />
+
+                    <FallbackModelSection
+                      catalogs={payload.model_catalogs || []}
+                      providerNames={payload.provider_name_options || payload.provider_names || []}
+                      defaultProvider={payload.default_provider || ""}
+                      defaultModel={payload.default_model || ""}
+                      provider={fallbackProvider()}
+                      model={fallbackModel()}
+                      dirty={fallbackDirty()}
+                      saving={savingFallback()}
+                      onProviderModelChange={(nextProvider, nextModel) => {
+                        setFallbackProvider(nextProvider);
+                        setFallbackModel(nextModel);
+                      }}
+                      onSave={saveFallback}
+                      onClear={clearFallback}
+                    />
+
+                    {/* Connected Providers Grid */}
+                    <Show when={connectedProviderCards().length > 0}>
+                      <div>
+                        <div class="provider-section-title">Connected Providers</div>
+                        <div class="providers-grid">
+                          <For each={connectedProviderCards()}>
+                            {(card) => (
+                              <div
+                                class={`provider-card ${card.configured ? "card-configured" : ""} ${
+                                  card.enabled ? "card-enabled" : ""
+                                }`}
+                                onClick={() => handleCardClick(card)}
+                              >
+                                <div class="logo-wrap">
+                                  <Show
+                                    when={!logoErrors()[card.id]}
+                                    fallback={
+                                      <div class="logo-fallback">
+                                        {card.name.charAt(0).toUpperCase()}
+                                      </div>
+                                    }
+                                  >
+                                    <img
+                                      src={providerLogoUrl(card)}
+                                      alt={card.name}
+                                      class="logo-img"
+                                      onError={() => setLogoErrors((curr) => ({ ...curr, [card.id]: true }))}
+                                    />
+                                  </Show>
+                                </div>
+                                <div class="card-right">
+                                  <div class="card-title">{card.name}</div>
+                                  <div class="card-status-row">
+                                    <Show
+                                      when={card.configured && card.enabled}
+                                      fallback={<span class="status-no-connection">No connections</span>}
+                                    >
+                                      <div class="status-pill status-active">
+                                        <span class="status-dot"></span>
+                                        1 Connected
+                                      </div>
+                                    </Show>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </For>
+                        </div>
+                      </div>
+                    </Show>
+
+                    {/* Available Providers Grid */}
+                    <Show when={unconnectedProviderCards().length > 0}>
+                      <div>
+                        <div class="provider-section-title">Available Providers</div>
+                        <div class="providers-grid">
+                          <For each={unconnectedProviderCards()}>
+                            {(card) => (
+                              <div
+                                class={`provider-card ${card.configured ? "card-configured" : ""} ${
+                                  card.enabled ? "card-enabled" : ""
+                                }`}
+                                onClick={() => handleCardClick(card)}
+                              >
+                                <div class="logo-wrap">
+                                  <Show
+                                    when={!logoErrors()[card.id]}
+                                    fallback={
+                                      <div class="logo-fallback">
+                                        {card.name.charAt(0).toUpperCase()}
+                                      </div>
+                                    }
+                                  >
+                                    <img
+                                      src={providerLogoUrl(card)}
+                                      alt={card.name}
+                                      class="logo-img"
+                                      onError={() => setLogoErrors((curr) => ({ ...curr, [card.id]: true }))}
+                                    />
+                                  </Show>
+                                </div>
+                                <div class="card-right">
+                                  <div class="card-title">{card.name}</div>
+                                  <div class="card-status-row">
+                                    <Show
+                                      when={card.configured && card.enabled}
+                                      fallback={<span class="status-no-connection">No connections</span>}
+                                    >
+                                      <div class="status-pill status-active">
+                                        <span class="status-dot"></span>
+                                        1 Connected
+                                      </div>
+                                    </Show>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </For>
+                        </div>
+                      </div>
+                    </Show>
+
+                    {/* Empty view */}
+                    <Show when={providerCards().filter((card) => card.matchesSearch).length === 0}>
+                      <div class="panel empty" style={{ padding: "40px 20px", "text-align": "center" }}>
+                        <Globe size={32} class="muted" style={{ "margin-bottom": "10px" }} />
+                        <h3>No providers match your search</h3>
+                        <p class="hint">Try searching for other brand names or sync the catalog.</p>
+                      </div>
+                    </Show>
+                  </div>
+                </SettingsLayout>
               }
-            />
-
-            <FallbackModelSection
-              catalogs={payload.model_catalogs || []}
-              providerNames={payload.provider_name_options || payload.provider_names || []}
-              defaultProvider={payload.default_provider || ""}
-              defaultModel={payload.default_model || ""}
-              provider={fallbackProvider()}
-              model={fallbackModel()}
-              dirty={fallbackDirty()}
-              saving={savingFallback()}
-              onProviderModelChange={(nextProvider, nextModel) => {
-                setFallbackProvider(nextProvider);
-                setFallbackModel(nextModel);
-              }}
-              onSave={saveFallback}
-              onClear={clearFallback}
-            />
-
-            {/* Connected Providers Grid */}
-            <Show when={connectedProviderCards().length > 0}>
-              <div>
-                <div class="provider-section-title">Connected Providers</div>
-                <div class="providers-grid">
-                  <For each={connectedProviderCards()}>
-                    {(card) => (
-                      <div
-                        class={`provider-card ${card.configured ? "card-configured" : ""} ${
-                          card.enabled ? "card-enabled" : ""
-                        }`}
-                        onClick={() => handleCardClick(card)}
-                      >
-                        <div class="logo-wrap">
-                          <Show
-                            when={!logoErrors()[card.id]}
-                            fallback={
-                              <div class="logo-fallback">
-                                {card.name.charAt(0).toUpperCase()}
-                              </div>
-                            }
-                          >
-                            <img
-                              src={providerLogoUrl(card)}
-                              alt={card.name}
-                              class="logo-img"
-                              onError={() => setLogoErrors((curr) => ({ ...curr, [card.id]: true }))}
-                            />
-                          </Show>
-                        </div>
-                        <div class="card-right">
-                          <div class="card-title">{card.name}</div>
-                          <div class="card-status-row">
-                            <Show
-                              when={card.configured && card.enabled}
-                              fallback={<span class="status-no-connection">No connections</span>}
-                            >
-                              <div class="status-pill status-active">
-                                <span class="status-dot"></span>
-                                1 Connected
-                              </div>
-                            </Show>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </For>
-                </div>
-              </div>
-            </Show>
-
-            {/* Available Providers Grid */}
-            <Show when={unconnectedProviderCards().length > 0}>
-              <div>
-                <div class="provider-section-title">Available Providers</div>
-                <div class="providers-grid">
-                  <For each={unconnectedProviderCards()}>
-                    {(card) => (
-                      <div
-                        class={`provider-card ${card.configured ? "card-configured" : ""} ${
-                          card.enabled ? "card-enabled" : ""
-                        }`}
-                        onClick={() => handleCardClick(card)}
-                      >
-                        <div class="logo-wrap">
-                          <Show
-                            when={!logoErrors()[card.id]}
-                            fallback={
-                              <div class="logo-fallback">
-                                {card.name.charAt(0).toUpperCase()}
-                              </div>
-                            }
-                          >
-                            <img
-                              src={providerLogoUrl(card)}
-                              alt={card.name}
-                              class="logo-img"
-                              onError={() => setLogoErrors((curr) => ({ ...curr, [card.id]: true }))}
-                            />
-                          </Show>
-                        </div>
-                        <div class="card-right">
-                          <div class="card-title">{card.name}</div>
-                          <div class="card-status-row">
-                            <Show
-                              when={card.configured && card.enabled}
-                              fallback={<span class="status-no-connection">No connections</span>}
-                            >
-                              <div class="status-pill status-active">
-                                <span class="status-dot"></span>
-                                1 Connected
-                              </div>
-                            </Show>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </For>
-                </div>
-              </div>
-            </Show>
-
-            {/* Empty view */}
-            <Show when={providerCards().filter((card) => card.matchesSearch).length === 0}>
-              <div class="panel empty" style={{ padding: "40px 20px", "text-align": "center" }}>
-                <Globe size={32} class="muted" style={{ "margin-bottom": "10px" }} />
-                <h3>No providers match your search</h3>
-                <p class="hint">Try searching for other brand names or sync the catalog.</p>
-              </div>
-            </Show>
-
-            <Show when={selectedProvider()}>
-              {(provider) => (
-                <ProviderEditDialog
-                  provider={provider()}
-                  drafts={drafts()}
-                  dirtyKeys={dirtyKeys()}
-                  savingDefault={savingDefaultProvider()}
-                  savingProvider={savingProvider()}
-                  catalog={providersCatalog()}
-                  onClose={() => setSelectedProviderName(null)}
-                  onSetDefault={() => setDefaultProvider(provider())}
-                  onLoadModels={() => loadProviderModels(provider().name)}
-                  onSave={() => saveProviderChanges(provider().name)}
-                  onChange={(key, value) => setDraft(key, value)}
-                  onRestore={(key) => restoreDraft(key)}
-                  onDelete={() => setDeleteTarget(provider())}
-                />
-              )}
+            >
+              <Show
+                when={currentProvider()}
+                fallback={
+                  <SettingsLayout
+                    title="Provider Not Found"
+                    breadcrumbSegments={[
+                      { label: "Providers", href: "/settings/providers" },
+                      { label: currentProviderName() || "Unknown" },
+                    ]}
+                    actions={
+                      <button class="btn" type="button" onClick={() => navigate("/settings/providers")}>
+                        <ArrowLeft size={14} />
+                        Back to Providers
+                      </button>
+                    }
+                  >
+                    <div class="panel empty" style={{ padding: "40px 20px", "text-align": "center" }}>
+                      <h3>Provider not found</h3>
+                      <p class="hint">The provider "{currentProviderName()}" could not be found or has been removed.</p>
+                    </div>
+                  </SettingsLayout>
+                }
+              >
+                {(provider) => (
+                  <ProviderDetailPage
+                    provider={provider()}
+                    drafts={drafts()}
+                    dirtyKeys={dirtyKeys()}
+                    savingDefault={savingDefaultProvider()}
+                    savingProvider={savingProvider()}
+                    catalog={providersCatalog()}
+                    logoErrors={logoErrors()}
+                    onLogoError={(id) => setLogoErrors((curr) => ({ ...curr, [id]: true }))}
+                    onBack={() => navigate("/settings/providers")}
+                    onSetDefault={() => setDefaultProvider(provider())}
+                    onLoadModels={() => loadProviderModels(provider().name)}
+                    onSave={() => saveProviderChanges(provider().name)}
+                    onChange={(key, value) => setDraft(key, value)}
+                    onRestore={(key) => restoreDraft(key)}
+                    onDelete={() => setDeleteTarget(provider())}
+                  />
+                )}
+              </Show>
             </Show>
 
             <AddProviderDialog
@@ -1037,21 +1079,23 @@ export function ProvidersPage() {
               onClose={() => setDeleteTarget(null)}
               onConfirm={deleteProvider}
             />
-          </div>
+          </>
         )}
       </DataGate>
-    </SettingsLayout>
+    </>
   );
 }
 
-function ProviderEditDialog(props: {
+function ProviderDetailPage(props: {
   provider: ProviderView;
   drafts: Record<string, unknown>;
   dirtyKeys: Set<string>;
   savingDefault: boolean;
   savingProvider: boolean;
   catalog: any;
-  onClose: () => void;
+  logoErrors: Record<string, boolean>;
+  onLogoError: (id: string) => void;
+  onBack: () => void;
   onSetDefault: () => void;
   onLoadModels: () => void;
   onSave: () => void;
@@ -1088,22 +1132,26 @@ function ProviderEditDialog(props: {
   });
 
   return (
-    <Dialog
-      open
+    <SettingsLayout
       title={`Configure ${props.provider.name}`}
-      wide
-      onClose={props.onClose}
-      footer={
-        <>
+      description={`Manage credentials, models, and settings for ${props.provider.name}`}
+      breadcrumbSegments={[
+        { label: "Providers", href: "/settings/providers" },
+        { label: props.provider.name },
+      ]}
+      contentWidth="wide"
+      actions={
+        <div class="row-wrap">
+          <button class="btn" type="button" onClick={props.onBack}>
+            <ArrowLeft size={14} />
+            Back to Providers
+          </button>
           <Show when={props.provider.canDelete}>
-            <button class="btn btn-danger" type="button" onClick={props.onDelete} style={{ "margin-right": "auto" }}>
+            <button class="btn btn-danger" type="button" onClick={props.onDelete}>
               <Trash2 size={13} />
               Delete Provider
             </button>
           </Show>
-          <button class="btn" type="button" onClick={props.onClose}>
-            Close
-          </button>
           <button
             class="btn"
             type="button"
@@ -1121,74 +1169,106 @@ function ProviderEditDialog(props: {
             onClick={props.onSave}
           >
             <Save size={13} />
-            Save{props.provider.dirtyCount ? ` (${props.provider.dirtyCount})` : ""}
+            Save changes{props.provider.dirtyCount ? ` (${props.provider.dirtyCount})` : ""}
           </button>
-        </>
+        </div>
       }
     >
-      <div class="stack">
-        <div class="provider-edit-summary">
-          <span class="chip">{props.provider.providerType}</span>
-          <Show when={props.provider.isDefault}>
-            <span class="badge badge-info">Default</span>
-          </Show>
-          <span class={props.provider.enabled ? "badge badge-success" : "badge badge-warning"}>
-            {props.provider.enabled ? "Enabled" : "Disabled"}
-          </span>
-          <Show when={props.provider.dirtyCount > 0}>
-            <span class="badge badge-warning">{props.provider.dirtyCount} unsaved</span>
-          </Show>
+      <div class="stack" style={{ gap: "20px" }}>
+        <div class="panel" style={{ padding: "20px" }}>
+          <div class="row-wrap" style={{ "justify-content": "space-between", "align-items": "center" }}>
+            <div class="row-wrap" style={{ gap: "12px", "align-items": "center" }}>
+              <div class="logo-wrap" style={{ width: "44px", height: "44px" }}>
+                <Show
+                  when={!props.logoErrors[props.provider.name.toLowerCase()]}
+                  fallback={
+                    <div class="logo-fallback" style={{ "font-size": "18px" }}>
+                      {props.provider.name.charAt(0).toUpperCase()}
+                    </div>
+                  }
+                >
+                  <img
+                    src={providerLogoUrl({
+                      id: props.provider.name.toLowerCase(),
+                      catalogEntry: catalogEntry(),
+                    })}
+                    alt={props.provider.name}
+                    class="logo-img"
+                    onError={() => props.onLogoError(props.provider.name.toLowerCase())}
+                  />
+                </Show>
+              </div>
+              <div>
+                <h2 style={{ margin: "0", "font-size": "18px", "font-weight": "700" }}>{props.provider.name}</h2>
+                <span class="chip">{props.provider.providerType}</span>
+              </div>
+            </div>
+            <div class="row-wrap" style={{ gap: "8px" }}>
+              <Show when={props.provider.isDefault}>
+                <span class="badge badge-info">Default Provider</span>
+              </Show>
+              <span class={props.provider.enabled ? "badge badge-success" : "badge badge-warning"}>
+                {props.provider.enabled ? "Enabled" : "Disabled"}
+              </span>
+              <Show when={props.provider.dirtyCount > 0}>
+                <span class="badge badge-warning">{props.provider.dirtyCount} unsaved</span>
+              </Show>
+            </div>
+          </div>
+
+          <div class="provider-summary-grid" style={{ "margin-top": "16px" }}>
+            <div>
+              <span class="setting-detail-label">Type</span>
+              <span class="chip">{props.provider.providerType}</span>
+            </div>
+            <div>
+              <span class="setting-detail-label">Default Model</span>
+              <span class="provider-summary-value mono">{props.provider.defaultModel || "Not set"}</span>
+            </div>
+            <div>
+              <span class="setting-detail-label">Models List</span>
+              <span class="provider-summary-value">{props.provider.modelCount}</span>
+            </div>
+            <div>
+              <span class="setting-detail-label">Status</span>
+              <span class={props.provider.enabled ? "badge badge-success" : "badge badge-warning"}>
+                {props.provider.enabled ? "Active" : "Disabled"}
+              </span>
+            </div>
+          </div>
         </div>
 
-        <div class="provider-summary-grid">
-          <div>
-            <span class="setting-detail-label">Type</span>
-            <span class="chip">{props.provider.providerType}</span>
+        <div class="panel" style={{ padding: "20px" }}>
+          <h3 style={{ "margin-top": "0", "margin-bottom": "16px", "font-size": "15px" }}>Provider Settings</h3>
+          <div class="settings-list">
+            <For each={props.provider.detailFields} fallback={<div class="empty">No settings found.</div>}>
+              {(entry) => (
+                <SettingRow
+                  settingKey={entry.key}
+                  info={entry.info}
+                  draft={props.drafts[entry.key]}
+                  dirty={props.dirtyKeys.has(entry.key)}
+                  showDescription={false}
+                  trimProviderPrefix
+                  actions={
+                    entry.key.endsWith(".models") ? (
+                      <button class="btn btn-sm" type="button" onClick={props.onLoadModels}>
+                        <RefreshCw size={13} />
+                        Fetch Active Models
+                      </button>
+                    ) : undefined
+                  }
+                  onChange={(value) => props.onChange(entry.key, value)}
+                  onRestore={() => props.onRestore(entry.key)}
+                />
+              )}
+            </For>
           </div>
-          <div>
-            <span class="setting-detail-label">Default Model</span>
-            <span class="provider-summary-value mono">{props.provider.defaultModel || "Not set"}</span>
-          </div>
-          <div>
-            <span class="setting-detail-label">Models List</span>
-            <span class="provider-summary-value">{props.provider.modelCount}</span>
-          </div>
-          <div>
-            <span class="setting-detail-label">Status</span>
-            <span class={props.provider.enabled ? "badge badge-success" : "badge badge-warning"}>
-              {props.provider.enabled ? "Active" : "Disabled"}
-            </span>
-          </div>
-        </div>
-
-        <div class="settings-list">
-          <For each={props.provider.detailFields} fallback={<div class="empty">No settings found.</div>}>
-            {(entry) => (
-              <SettingRow
-                settingKey={entry.key}
-                info={entry.info}
-                draft={props.drafts[entry.key]}
-                dirty={props.dirtyKeys.has(entry.key)}
-                showDescription={false}
-                trimProviderPrefix
-                actions={
-                  entry.key.endsWith(".models") ? (
-                    <button class="btn btn-sm" type="button" onClick={props.onLoadModels}>
-                      <RefreshCw size={13} />
-                      Fetch Active Models
-                    </button>
-                  ) : undefined
-                }
-                onChange={(value) => props.onChange(entry.key, value)}
-                onRestore={() => props.onRestore(entry.key)}
-              />
-            )}
-          </For>
         </div>
 
         {/* Detailed Model Metadata Section from models.dev */}
         <Show when={catalogEntry() && catalogEntry().models?.length > 0}>
-          <div class="model-spec-section">
+          <div class="panel" style={{ padding: "20px" }}>
             <div class="model-spec-toolbar">
               <div class="model-spec-title">
                 <Sparkles size={14} style={{ color: "var(--accent, #6366f1)" }} />
@@ -1256,7 +1336,7 @@ function ProviderEditDialog(props: {
           </div>
         </Show>
       </div>
-    </Dialog>
+    </SettingsLayout>
   );
 }
 

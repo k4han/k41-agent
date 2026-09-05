@@ -1,9 +1,9 @@
 import { Show } from "solid-js";
-import { useSearchParams } from "@solidjs/router";
+import { useParams, useSearchParams } from "@solidjs/router";
 import { FolderGit2, PlugZap } from "lucide-solid";
 
 import { McpTab } from "./connections/McpTab";
-import { RepositoriesTab } from "./connections/RepositoriesTab";
+import { GitHubSettingsPage, RepositoriesTab } from "./connections/RepositoriesTab";
 import { SettingsLayout } from "./SettingsLayout";
 import { SettingsTabBar, type SettingsTabItem } from "./shared";
 
@@ -15,6 +15,7 @@ const TAB_ITEMS: ReadonlyArray<SettingsTabItem<TabKey>> = [
 ];
 
 export function ConnectionsPage() {
+  const params = useParams<{ subpage?: string }>();
   const [searchParams, setSearchParams] = useSearchParams<{ tab?: string }>();
   const tab = (): TabKey => {
     const t = searchParams.tab;
@@ -28,24 +29,31 @@ export function ConnectionsPage() {
   };
 
   return (
-    <SettingsLayout
-      title="Connections"
-      breadcrumbLabel="Connections"
-      contentWidth="wide"
-    >
-      <SettingsTabBar
-        items={TAB_ITEMS}
-        value={tab()}
-        ariaLabel="Connection category"
-        onChange={(value) => setSearchParams({ tab: value })}
-      />
+    <Show
+      when={params.subpage === "github"}
+      fallback={
+        <SettingsLayout
+          title="Connections"
+          breadcrumbLabel="Connections"
+          contentWidth="wide"
+        >
+          <SettingsTabBar
+            items={TAB_ITEMS}
+            value={tab()}
+            ariaLabel="Connection category"
+            onChange={(value) => setSearchParams({ tab: value })}
+          />
 
-      <Show when={tab() === "repositories"}>
-        <RepositoriesTab />
-      </Show>
-      <Show when={tab() === "mcp"}>
-        <McpTab />
-      </Show>
-    </SettingsLayout>
+          <Show when={tab() === "repositories"}>
+            <RepositoriesTab />
+          </Show>
+          <Show when={tab() === "mcp"}>
+            <McpTab />
+          </Show>
+        </SettingsLayout>
+      }
+    >
+      <GitHubSettingsPage />
+    </Show>
   );
 }
