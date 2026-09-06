@@ -465,6 +465,8 @@ if [ ! -x "\$PYTHON_EXE" ]; then
   echo "python was not found at \$PYTHON_EXE." >&2
   exit 1
 fi
+export VIRTUAL_ENV="\$AGENT_HOME/envs"
+export PATH="\$AGENT_HOME/envs/bin:\$AGENT_HOME/tools:\$PATH"
 exec "\$PYTHON_EXE" -m agent.bootstrap.cli "\$@"
 EOF
   chmod +x "$K41Cmd"

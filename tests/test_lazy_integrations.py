@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from asyncio import run
 from importlib.machinery import ModuleSpec
@@ -336,3 +337,68 @@ def test_channel_connection_reports_auto_install_failure(monkeypatch) -> None:
         "channel-telegram",
     ]
     assert result.details["install_error"] == "network unavailable"
+
+
+def test_build_install_env_sets_virtual_env_and_path(monkeypatch) -> None:
+    from agent.shared.integrations import _build_install_env
+
+    monkeypatch.setattr(sys, "prefix", "/test/custom/prefix")
+    monkeypatch.setattr(sys, "base_prefix", "/usr")
+    monkeypatch.setattr(sys, "executable", "/test/custom/prefix/bin/python")
+
+    env = _build_install_env("/opt/tools/uv")
+    assert env["VIRTUAL_ENV"] == "/test/custom/prefix"
+    assert os.path.normpath("/test/custom/prefix/bin") in env["PATH"]
+    assert os.path.normpath("/opt/tools") in env["PATH"]
+
+
+def test_find_uv_executable_falls_back_to_tools_dir(monkeypatch, tmp_path) -> None:
+    from agent.shared.integrations import _find_uv_executable
+
+    monkeypatch.setattr("shutil.which", lambda name: None)
+
+    agent_home = tmp_path / "k41-agent"
+    tools_dir = agent_home / "tools"
+    tools_dir.mkdir(parents=True)
+    exe_name = "uv.exe" if os.name == "nt" else "uv"
+    fake_uv = tools_dir / exe_name
+    fake_uv.write_text("fake uv")
+
+    envs_dir = agent_home / "envs" / ("Scripts" if os.name == "nt" else "bin")
+    envs_dir.mkdir(parents=True)
+    fake_python = envs_dir / ("python.exe" if os.name == "nt" else "python")
+    fake_python.write_text("fake python")
+
+    monkeypatch.setattr(sys, "executable", str(fake_python))
+
+    found = _find_uv_executable()
+    assert found == str(fake_uv)
+
+
+def test_install_integration_extra_passes_env_to_subprocess(monkeypatch) -> None:
+    from agent.shared.integrations import install_integration_extra
+
+    captured_kwargs: dict = {}
+
+    def fake_subprocess_run(cmd, **kwargs):
+        captured_kwargs.update(kwargs)
+        captured_kwargs["cmd"] = cmd
+
+        class Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        return Result()
+
+    monkeypatch.setattr("subprocess.run", fake_subprocess_run)
+    monkeypatch.setattr("agent.shared.integrations._find_uv_executable", lambda: "/bin/uv")
+    monkeypatch.setattr("agent.shared.integrations._has_active_virtualenv", lambda: True)
+    monkeypatch.setattr(sys, "prefix", "/env/active")
+    monkeypatch.setattr(sys, "executable", "/env/active/bin/python")
+
+    result = install_integration_extra("channel-telegram")
+    assert result.attempted is True
+    assert result.error == ""
+    assert "env" in captured_kwargs
+    assert captured_kwargs["env"]["VIRTUAL_ENV"] == "/env/active"

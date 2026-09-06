@@ -193,6 +193,10 @@ def spawn_detached_process(
     update.start_tray and tray._start_server.
     """
     log_file.parent.mkdir(parents=True, exist_ok=True)
+    spawn_env = (os.environ if env is None else env).copy()
+    if "VIRTUAL_ENV" not in spawn_env and sys.prefix != sys.base_prefix:
+        spawn_env["VIRTUAL_ENV"] = sys.prefix
+
     with log_file.open("ab") as lf:
         if os.name == "nt":
             startupinfo = subprocess.STARTUPINFO()  # type: ignore[attr-defined]
@@ -200,7 +204,7 @@ def spawn_detached_process(
             startupinfo.wShowWindow = subprocess.SW_HIDE  # type: ignore[attr-defined]
             subprocess.Popen(
                 cmd,
-                env=env,
+                env=spawn_env,
                 cwd=str(cwd) if cwd else None,
                 stdin=subprocess.DEVNULL,
                 stdout=lf,
@@ -216,7 +220,7 @@ def spawn_detached_process(
         else:
             subprocess.Popen(
                 cmd,
-                env=env,
+                env=spawn_env,
                 cwd=str(cwd) if cwd else None,
                 stdin=subprocess.DEVNULL,
                 stdout=lf,

@@ -372,6 +372,8 @@ if not exist "%PYTHON_EXE%" (
   echo python.exe was not found at "%PYTHON_EXE%".
   exit /b 1
 )
+set "VIRTUAL_ENV=%AGENT_HOME%\envs"
+set "PATH=%AGENT_HOME%\envs\Scripts;%AGENT_HOME%\tools;%PATH%"
 "%PYTHON_EXE%" -m agent.bootstrap.cli %*
 exit /b %ERRORLEVEL%
 "@ | Set-Content -LiteralPath $K41Cmd -Encoding ASCII

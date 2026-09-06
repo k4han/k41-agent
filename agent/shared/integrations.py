@@ -135,19 +135,21 @@ def install_integration_extra(extra: str) -> IntegrationInstallResult:
                 error="Unable to find pyproject.toml for the current project.",
             )
 
-        uv_executable = shutil.which("uv")
+        uv_executable = _find_uv_executable()
         if uv_executable is None:
             return IntegrationInstallResult(
                 attempted=True,
                 command=command,
-                error="uv executable was not found on PATH.",
+                error="uv executable was not found on PATH or in managed tools.",
             )
 
+        install_env = _build_install_env(uv_executable)
         run_command = (uv_executable, *command[1:])
         try:
             completed = subprocess.run(
                 run_command,
                 cwd=str(project_root),
+                env=install_env,
                 capture_output=True,
                 text=True,
                 timeout=INSTALL_TIMEOUT_SECONDS,
@@ -176,6 +178,55 @@ def install_integration_extra(extra: str) -> IntegrationInstallResult:
             )
 
         return IntegrationInstallResult(attempted=True, command=command)
+
+
+def _find_uv_executable() -> str | None:
+    found = shutil.which("uv")
+    if found:
+        return found
+
+    exe_name = "uv.exe" if os.name == "nt" else "uv"
+
+    python_dir = Path(sys.executable).parent
+    candidate = python_dir / exe_name
+    if candidate.is_file():
+        return str(candidate)
+
+    for parent in (python_dir, *python_dir.parents):
+        candidate = parent / "tools" / exe_name
+        if candidate.is_file():
+            return str(candidate)
+
+    for env_name in ("K41_AGENT_HOME", "AGENT_HOME"):
+        home_val = os.environ.get(env_name)
+        if home_val:
+            candidate = Path(home_val) / "tools" / exe_name
+            if candidate.is_file():
+                return str(candidate)
+
+    project_root = _find_project_root()
+    if project_root:
+        candidate = project_root / "tools" / exe_name
+        if candidate.is_file():
+            return str(candidate)
+
+    return None
+
+
+def _build_install_env(uv_executable: str | None = None) -> dict[str, str]:
+    env = os.environ.copy()
+    if _has_active_virtualenv():
+        env["VIRTUAL_ENV"] = sys.prefix
+        scripts_dir = str(Path(sys.executable).parent)
+        current_path = env.get("PATH", "")
+        if scripts_dir not in current_path:
+            env["PATH"] = f"{scripts_dir}{os.pathsep}{current_path}"
+    if uv_executable:
+        uv_dir = str(Path(uv_executable).parent)
+        current_path = env.get("PATH", "")
+        if uv_dir not in current_path:
+            env["PATH"] = f"{uv_dir}{os.pathsep}{current_path}"
+    return env
 
 
 def _build_uv_sync_command(extra: str) -> tuple[str, ...]:
@@ -327,6 +378,16 @@ class LazyIntegrationRegistry:
             return availability, None
 
         install_result = install_integration_extra(descriptor.install_extra)
+        try:
+            import site
+
+            site_dirs = site.getsitepackages()
+            if isinstance(site_dirs, (list, tuple)):
+                for site_dir in site_dirs:
+                    if os.path.isdir(site_dir):
+                        site.addsitedir(site_dir)
+        except Exception:
+            pass
         importlib.invalidate_caches()
         availability = self.availability(descriptor.name)
         if availability.available:
