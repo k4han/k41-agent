@@ -762,10 +762,15 @@ export function ChatPage() {
     }
   });
 
+  let restoredThreadAgentKey = "";
   createEffect(() => {
     const td = threadData();
     const cards = validCards();
     if (!td || cards.length === 0) {
+      return;
+    }
+    const threadKey = `${td.thread_id}\u001f${td.agent_name || ""}`;
+    if (restoredThreadAgentKey === threadKey) {
       return;
     }
     const threadAgent = String(td.agent_name || "").trim();
@@ -775,10 +780,20 @@ export function ChatPage() {
     const match = cards.find((card) => card.name === threadAgent);
     const fallback = cards.find((card) => card.name === "default") || cards[0];
     const next = match || fallback;
-    if (next && next.name !== agentName()) {
+    if (next) {
+      restoredThreadAgentKey = threadKey;
       setAgentName(next.name);
     }
   });
+
+  const handleAgentChange = (nextAgentName: string) => {
+    setAgentName(nextAgentName);
+    updateCurrentThreadAgent(nextAgentName);
+    const td = threadData();
+    if (td) {
+      restoredThreadAgentKey = `${td.thread_id}\u001f${nextAgentName}`;
+    }
+  };
 
   let restoredThreadModelKey = "";
   let lastDefaultedAgentName = "";
@@ -830,6 +845,8 @@ export function ChatPage() {
       setCurrentStreamThreadId(null);
       setActiveCheckpointId("");
       setThreadData(undefined);
+      restoredThreadModelKey = "";
+      restoredThreadAgentKey = "";
       setThreadError("");
       setThreadLoading(false);
       setItems([]);
@@ -1742,7 +1759,7 @@ export function ChatPage() {
                 attachmentAccept={attachmentAccept()}
                 agentName={agentName()}
                 agents={validCards()}
-                onAgentChange={setAgentName}
+                onAgentChange={handleAgentChange}
                 provider={provider()}
                 model={model()}
                 onProviderModelChange={(nextProvider, nextModel) => {

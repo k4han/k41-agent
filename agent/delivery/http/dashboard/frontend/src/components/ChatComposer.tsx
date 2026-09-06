@@ -2,18 +2,19 @@ import {
   FileText,
   Image as ImageIcon,
   MoreHorizontal,
-  Plus,
+  Paperclip,
   Send,
   Square,
+  Trash2,
+  Upload,
   X,
 } from "lucide-solid";
-import { createEffect, createSignal, For, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 
-import { AgentPicker } from "@/components/AgentPicker";
+import { AgentModelPicker } from "@/components/AgentModelPicker";
 import { ChatTodos, type TodoProgress } from "@/components/ChatTodos";
 import { ContextWindowIndicator, type ContextWindowData } from "@/components/ContextWindowIndicator";
 import { Dialog } from "@/components/Dialog";
-import { ModelPicker } from "@/components/ModelPicker";
 import {
   UserInputRequestCard,
   type UserInputRequestSubmitPayload,
@@ -21,7 +22,7 @@ import {
 import { formatBytes } from "@/lib/chatAttachments";
 import { PASTE_AS_ATTACHMENT_THRESHOLD, type PendingAttachment } from "@/lib/chatTypes";
 import type { TranscriptUserInputRequest } from "@/components/Transcript";
-import type { AgentCard, AgentChatPayload, ModelCatalog } from "@/types";
+import type { AgentCard, AgentChatPayload } from "@/types";
 
 export interface ChatComposerProps {
   prompt: string;
@@ -29,7 +30,7 @@ export interface ChatComposerProps {
   onSend: () => void;
   onStop: () => void;
   onResume: () => void;
-  onAddFiles: (files: FileList | null) => Promise<void>;
+  onAddFiles: (files: FileList | File[] | null) => Promise<void>;
   onPasteAsAttachment: (text: string) => void;
   onRemoveAttachment: (id: number) => void;
   stopActive: boolean;
@@ -60,19 +61,25 @@ export interface ChatComposerProps {
 export function ChatComposer(props: ChatComposerProps) {
   let chatPromptRef: HTMLTextAreaElement | undefined;
   let fileInputRef: HTMLInputElement | undefined;
+  let moreMenuRef: HTMLDivElement | undefined;
+
   const [previewAttachment, setPreviewAttachment] = createSignal<PendingAttachment | null>(null);
+  const [isDragging, setIsDragging] = createSignal(false);
+  const [showMoreMenu, setShowMoreMenu] = createSignal(false);
+  const [showPasteDialog, setShowPasteDialog] = createSignal(false);
+  const [customPasteText, setCustomPasteText] = createSignal("");
+
+  let dragCounter = 0;
 
   const resizeChatPromptInput = () => {
     if (!chatPromptRef) {
       return;
     }
-    const computed = window.getComputedStyle(chatPromptRef);
-    const maxHeight = Number.parseFloat(computed.maxHeight);
     chatPromptRef.style.height = "auto";
-    chatPromptRef.style.height = `${Math.min(
-      chatPromptRef.scrollHeight,
-      Number.isFinite(maxHeight) ? maxHeight : chatPromptRef.scrollHeight,
-    )}px`;
+    const computed = window.getComputedStyle(chatPromptRef);
+    const maxHeight = Number.parseFloat(computed.maxHeight) || 220;
+    const nextHeight = Math.min(chatPromptRef.scrollHeight, maxHeight);
+    chatPromptRef.style.height = `${Math.max(nextHeight, 42)}px`;
     chatPromptRef.style.overflowY = chatPromptRef.scrollHeight > maxHeight ? "auto" : "hidden";
   };
 
@@ -81,8 +88,75 @@ export function ChatComposer(props: ChatComposerProps) {
     resizeChatPromptInput();
   });
 
+  const handleGlobalClick = (e: MouseEvent) => {
+    if (showMoreMenu() && moreMenuRef && !moreMenuRef.contains(e.target as Node)) {
+      setShowMoreMenu(false);
+    }
+  };
+
+  const handleGlobalKeyDown = (e: KeyboardEvent) => {
+    if (e.key === "Escape" && showMoreMenu()) {
+      setShowMoreMenu(false);
+    }
+  };
+
+  onMount(() => {
+    document.addEventListener("click", handleGlobalClick);
+    document.addEventListener("keydown", handleGlobalKeyDown);
+  });
+
+  onCleanup(() => {
+    document.removeEventListener("click", handleGlobalClick);
+    document.removeEventListener("keydown", handleGlobalKeyDown);
+  });
+
+  const handleDragEnter = (e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (props.composerDisabled) return;
+    dragCounter += 1;
+    if (e.dataTransfer?.items && e.dataTransfer.items.length > 0) {
+      setIsDragging(true);
+    }
+  };
+
+  const handleDragOver = (e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!props.composerDisabled && e.dataTransfer) {
+      e.dataTransfer.dropEffect = "copy";
+    }
+  };
+
+  const handleDragLeave = (e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter -= 1;
+    if (dragCounter <= 0) {
+      dragCounter = 0;
+      setIsDragging(false);
+    }
+  };
+
+  const handleDrop = async (e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter = 0;
+    setIsDragging(false);
+    if (props.composerDisabled) return;
+    if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+      await props.onAddFiles(e.dataTransfer.files);
+    }
+  };
+
   return (
-    <div class="composer chat-composer">
+    <div
+      class={`composer chat-composer ${isDragging() ? "is-drag-over" : ""}`}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       <input
         ref={fileInputRef}
         class="is-hidden"
@@ -94,6 +168,14 @@ export function ChatComposer(props: ChatComposerProps) {
           event.currentTarget.value = "";
         }}
       />
+      <Show when={isDragging()}>
+        <div class="chat-composer-dropzone" aria-hidden="true">
+          <div class="chat-composer-dropzone-badge">
+            <Upload size={18} class="chat-composer-dropzone-icon" />
+            <span>Drop images or files here to attach</span>
+          </div>
+        </div>
+      </Show>
       <ChatTodos
         todos={props.currentTodos}
         progress={props.todoProgress}
@@ -139,17 +221,13 @@ export function ChatComposer(props: ChatComposerProps) {
                     setPreviewAttachment(attachment);
                   }
                 }}
+                title={`Click to preview ${attachment.name}`}
               >
                 <Show
                   when={attachment.kind === "image" && attachment.preview_url}
                   fallback={
                     <span class="chat-attachment-icon">
-                      <Show
-                        when={attachment.kind === "image"}
-                        fallback={<FileText size={14} />}
-                      >
-                        <ImageIcon size={14} />
-                      </Show>
+                      <FileText size={15} />
                     </span>
                   }
                 >
@@ -159,12 +237,17 @@ export function ChatComposer(props: ChatComposerProps) {
                     alt=""
                   />
                 </Show>
-                <span class="chat-attachment-name">{attachment.name}</span>
-                <span class="chat-attachment-size">{formatBytes(attachment.size)}</span>
+                <div class="chat-attachment-info">
+                  <span class="chat-attachment-name">{attachment.name}</span>
+                  <span class="chat-attachment-size">{formatBytes(attachment.size)}</span>
+                </div>
                 <button
                   class="chat-attachment-remove"
                   type="button"
-                  onClick={() => props.onRemoveAttachment(attachment.id)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    props.onRemoveAttachment(attachment.id);
+                  }}
                   disabled={props.composerDisabled}
                   title="Remove file"
                   aria-label={`Remove ${attachment.name}`}
@@ -186,7 +269,7 @@ export function ChatComposer(props: ChatComposerProps) {
           props.backgroundTaskActive
             ? "Background task is running..."
             : props.currentThreadId
-              ? "Continue this thread..."
+              ? "Reply to this thread or drag files here..."
               : "Ask Kai to build features, fix bugs, or work on your code"
         }
         inputMode="text"
@@ -196,6 +279,13 @@ export function ChatComposer(props: ChatComposerProps) {
           resizeChatPromptInput();
         }}
         onPaste={(event) => {
+          const clipboardFiles = event.clipboardData?.files;
+          if (clipboardFiles && clipboardFiles.length > 0) {
+            event.preventDefault();
+            void props.onAddFiles(clipboardFiles);
+            return;
+          }
+
           const pastedText = event.clipboardData?.getData("text/plain") || "";
           if (pastedText.length > PASTE_AS_ATTACHMENT_THRESHOLD) {
             event.preventDefault();
@@ -203,7 +293,10 @@ export function ChatComposer(props: ChatComposerProps) {
           }
         }}
         onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.ctrlKey && !event.shiftKey) {
+          if (event.isComposing || event.keyCode === 229) {
+            return;
+          }
+          if ((event.key === "Enter" && !event.shiftKey) || (event.key === "Enter" && (event.ctrlKey || event.metaKey))) {
             event.preventDefault();
             if (!props.composerDisabled) {
               props.onSend();
@@ -213,27 +306,18 @@ export function ChatComposer(props: ChatComposerProps) {
       />
       <div class="chat-composer-toolbar">
         <div class="chat-composer-tier chat-composer-tier-selectors">
-          <AgentPicker
-            class="chat-agent-picker"
-            value={props.agentName}
+          <AgentModelPicker
+            agentName={props.agentName}
             agents={props.agents}
-            disabled={props.composerDisabled}
-            onChange={props.onAgentChange}
-          />
-          <ModelPicker
-            class="chat-model-picker"
+            onAgentChange={props.onAgentChange}
+            provider={props.provider}
+            model={props.model}
+            onProviderModelChange={props.onProviderModelChange}
             catalogs={props.payload.model_catalogs}
             providerNames={props.payload.provider_names}
             defaultProvider={props.payload.default_provider}
             defaultModel={props.payload.default_model}
-            provider={props.provider}
-            model={props.model}
             disabled={props.composerDisabled}
-            dropdownPlacement="top"
-            resolveDefault={true}
-            onChange={(nextProvider, nextModel) => {
-              props.onProviderModelChange(nextProvider, nextModel);
-            }}
           />
         </div>
         <div class="chat-composer-tier chat-composer-tier-actions">
@@ -243,49 +327,114 @@ export function ChatComposer(props: ChatComposerProps) {
               type="button"
               onClick={() => fileInputRef?.click()}
               disabled={props.composerDisabled}
-              title="Attach files"
-              aria-label="Attach files"
+              title="Attach files or images"
+              aria-label="Attach files or images"
             >
-              <Plus size={18} />
+              <Paperclip size={17} />
             </button>
-            <button
-              class="chat-composer-icon"
-              type="button"
-              title="More options"
-              aria-label="More options"
-            >
-              <MoreHorizontal size={18} />
-            </button>
+            <div class="chat-composer-more-wrapper" ref={moreMenuRef}>
+              <button
+                class={`chat-composer-icon ${showMoreMenu() ? "active" : ""}`}
+                type="button"
+                onClick={() => setShowMoreMenu(!showMoreMenu())}
+                title="More options"
+                aria-label="More options"
+              >
+                <MoreHorizontal size={17} />
+              </button>
+              <Show when={showMoreMenu()}>
+                <div class="chat-composer-more-menu" role="menu">
+                  <button
+                    class="chat-composer-menu-item"
+                    type="button"
+                    onClick={() => {
+                      fileInputRef?.click();
+                      setShowMoreMenu(false);
+                    }}
+                    disabled={props.composerDisabled}
+                  >
+                    <Paperclip size={15} />
+                    <span>Attach files</span>
+                  </button>
+                  <button
+                    class="chat-composer-menu-item"
+                    type="button"
+                    onClick={() => {
+                      setShowPasteDialog(true);
+                      setShowMoreMenu(false);
+                    }}
+                    disabled={props.composerDisabled}
+                  >
+                    <FileText size={15} />
+                    <span>Paste as attachment</span>
+                  </button>
+                  <button
+                    class="chat-composer-menu-item"
+                    type="button"
+                    onClick={() => {
+                      props.onPromptChange("");
+                      setShowMoreMenu(false);
+                    }}
+                    disabled={props.composerDisabled || !props.prompt.trim()}
+                  >
+                    <Trash2 size={15} />
+                    <span>Clear prompt</span>
+                  </button>
+                  <div class="chat-composer-menu-divider" />
+                  <div class="chat-composer-menu-shortcuts">
+                    <div class="chat-composer-shortcut-row">
+                      <span>Send message</span>
+                      <span class="chat-composer-kbd"><kbd>Enter</kbd></span>
+                    </div>
+                    <div class="chat-composer-shortcut-row">
+                      <span>New line</span>
+                      <span class="chat-composer-kbd"><kbd>Shift</kbd> + <kbd>Enter</kbd></span>
+                    </div>
+                    <div class="chat-composer-shortcut-row">
+                      <span>Attach files</span>
+                      <span class="chat-composer-kbd">Drag / Paste</span>
+                    </div>
+                  </div>
+                </div>
+              </Show>
+            </div>
             <Show when={props.currentThreadId}>
               <ContextWindowIndicator data={props.contextWindowData} />
             </Show>
           </div>
-          <div class="chat-composer-send-wrapper">
-            <Show
-              when={props.stopActive}
-              fallback={
-                <button
-                  class="chat-composer-icon chat-composer-send"
-                  type="button"
-                  onClick={() => props.onSend()}
-                  disabled={props.composerDisabled || (!props.prompt.trim() && !props.attachments.length)}
-                  title="Send"
-                  aria-label="Send"
-                >
-                  <Send size={16} />
-                </button>
-              }
-            >
-              <button
-                class="chat-composer-icon chat-composer-stop"
-                type="button"
-                onClick={props.onStop}
-                title="Stop"
-                aria-label="Stop"
+          <div class="chat-composer-right-group">
+            <div class="chat-composer-shortcut-hint" aria-hidden="true">
+              <span><kbd>↵</kbd> Send</span>
+              <span class="chat-composer-hint-sep">·</span>
+              <span><kbd>Shift ↵</kbd> Line</span>
+            </div>
+            <div class="chat-composer-send-wrapper">
+              <Show
+                when={props.stopActive}
+                fallback={
+                  <button
+                    class="chat-composer-icon chat-composer-send"
+                    type="button"
+                    onClick={() => props.onSend()}
+                    disabled={props.composerDisabled || (!props.prompt.trim() && !props.attachments.length)}
+                    title="Send message (Enter)"
+                    aria-label="Send message"
+                  >
+                    <Send size={15} />
+                  </button>
+                }
               >
-                <Square size={15} />
-              </button>
-            </Show>
+                <button
+                  class="chat-composer-icon chat-composer-stop"
+                  type="button"
+                  onClick={props.onStop}
+                  title="Stop generating"
+                  aria-label="Stop generating"
+                >
+                  <Square size={14} />
+                </button>
+              </Show>
+            </div>
           </div>
         </div>
       </div>
@@ -318,6 +467,50 @@ export function ChatComposer(props: ChatComposerProps) {
             style={{ "max-width": "100%", "max-height": "60vh", "border-radius": "6px", display: "block", margin: "0 auto" }}
           />
         </Show>
+      </Dialog>
+      <Dialog
+        open={showPasteDialog()}
+        title="Paste Text Attachment"
+        subtitle="Paste code, logs, or large text to attach as a file"
+        size="lg"
+        onClose={() => {
+          setShowPasteDialog(false);
+          setCustomPasteText("");
+        }}
+      >
+        <div class="chat-paste-dialog-content">
+          <textarea
+            class="chat-paste-dialog-textarea"
+            rows={10}
+            placeholder="Paste your code, log output, or text content here..."
+            value={customPasteText()}
+            onInput={(e) => setCustomPasteText(e.currentTarget.value)}
+          />
+          <div class="chat-paste-dialog-actions">
+            <button
+              class="btn btn-secondary"
+              type="button"
+              onClick={() => {
+                setShowPasteDialog(false);
+                setCustomPasteText("");
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              class="btn btn-primary"
+              type="button"
+              disabled={!customPasteText().trim()}
+              onClick={() => {
+                props.onPasteAsAttachment(customPasteText());
+                setShowPasteDialog(false);
+                setCustomPasteText("");
+              }}
+            >
+              Add as Attachment
+            </button>
+          </div>
+        </div>
       </Dialog>
     </div>
   );

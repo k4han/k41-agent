@@ -58,7 +58,7 @@ export function useChatAttachments(params: UseChatAttachmentsParams) {
     clearAttachments([target]);
   };
 
-  const addFiles = async (fileList: FileList | null) => {
+  const addFiles = async (fileList: FileList | File[] | null) => {
     const files = Array.from(fileList || []);
     if (!files.length) {
       return;
@@ -73,9 +73,10 @@ export function useChatAttachments(params: UseChatAttachmentsParams) {
         break;
       }
 
+      const fileName = file.name || (file.type.startsWith("image/") ? `screenshot-${Date.now()}.png` : `attachment-${Date.now()}`);
       const kind = attachmentKind(file);
       if (!kind) {
-        showToast(`Unsupported file type: ${file.name}`, "warning");
+        showToast(`Unsupported file type: ${fileName}`, "warning");
         continue;
       }
       if (kind === "image" && !getModelSupportsImage()) {
@@ -90,7 +91,7 @@ export function useChatAttachments(params: UseChatAttachmentsParams) {
           ? MAX_FILE_ATTACHMENT_BYTES
           : MAX_TEXT_ATTACHMENT_BYTES;
       if (file.size > maxSize) {
-        showToast(`${file.name} exceeds ${formatBytes(maxSize)}.`, "warning");
+        showToast(`${fileName} exceeds ${formatBytes(maxSize)}.`, "warning");
         continue;
       }
       if (totalSize + file.size > MAX_TOTAL_ATTACHMENT_BYTES) {
@@ -104,7 +105,7 @@ export function useChatAttachments(params: UseChatAttachmentsParams) {
             ...nextAttachments,
             {
               id: nextAttachmentId++,
-              name: file.name,
+              name: fileName,
               mime_type: file.type || "image/png",
               size: file.size,
               kind,
