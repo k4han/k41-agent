@@ -65,6 +65,9 @@ User default prompt.
     assert cards["scheduler-executor"].source == "builtin"
     assert cards["scheduler-executor"].editable is False
     assert cards["scheduler-executor"].hidden is True
+    assert cards["channel-agent"].source == "builtin"
+    assert cards["channel-agent"].editable is False
+    assert cards["channel-agent"].hidden is False
 
 
 def test_agent_card_create_update_delete_preserves_sub_agent_semantics(

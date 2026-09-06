@@ -11,6 +11,6 @@
 ## Environment & dependencies
 - This project uses **`uv`** to manage Python versions and dependencies.
 - Do not use `pip`, `poetry`, or `conda` directly.
-
+- Use **`pnpm`** to manage Node.js dependencies.
 ## Code style
 - Follow the existing patterns and conventions already present in the codebase.

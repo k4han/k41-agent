@@ -34,7 +34,10 @@ def format_status_text(tools_called: Sequence[str], total_tool_calls: int = 0) -
 def resolve_default_agent_name(platform: str) -> str:
     config = get_config_service()
     configured = config.get_str(f"channels.{platform}.default_agent", "")
-    return resolve_catalog_agent_name(configured, "default-agent", "default") or "default"
+    return (
+        resolve_catalog_agent_name(configured, "channel-agent", "default-agent", "default")
+        or "default"
+    )
 
 
 def resolve_code_agent_name(platform: str) -> str:

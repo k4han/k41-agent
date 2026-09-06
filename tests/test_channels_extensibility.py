@@ -194,3 +194,11 @@ def test_dashboard_catalog_and_channels_include_adapter_schema(
     assert any(item["name"] == "fakechat" for item in catalog["channels"])
     assert "fakechat" in channels["by_channel"]
     assert "channels.fakechat.api_token" in channels["settings"]
+
+
+def test_resolve_default_agent_name_prefers_channel_agent() -> None:
+    from agent.modules.channels.agent_bridge import resolve_default_agent_name
+
+    # When no default_agent is configured for a platform, it should prefer "channel-agent"
+    agent_name = resolve_default_agent_name("telegram")
+    assert agent_name == "channel-agent"
