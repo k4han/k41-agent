@@ -1,6 +1,7 @@
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import {
   AlignJustify,
+  Code,
   RotateCcw,
   Rows3,
   Save,
@@ -41,6 +42,7 @@ export function ConfigPage() {
   const [search, setSearch] = createSignal("");
   const [selectedCategory, setSelectedCategory] = createSignal("all");
   const [density, setDensity] = createSignal<"compact" | "detailed">("compact");
+  const [showKeys, setShowKeys] = createSignal(false);
   const [confirmOpen, setConfirmOpen] = createSignal(false);
   const [saving, setSaving] = createSignal(false);
 
@@ -58,20 +60,15 @@ export function ConfigPage() {
     window.localStorage.setItem(STORAGE_KEYS.SETTINGS_DENSITY, next);
   };
 
-  const categoriesWithCounts = createMemo(() => {
+  const categories = createMemo(() => {
     const payload = data();
     if (!payload) return [];
     const byCategory = payload.by_category as Record<string, Record<string, SettingInfo>>;
-    return Object.entries(byCategory).map(([category, settings]) => ({
+    return Object.keys(byCategory).map((category) => ({
       id: category,
       label: categoryLabel(category),
-      totalCount: Object.keys(settings).length,
     }));
   });
-
-  const totalSettingsCount = createMemo(() =>
-    categoriesWithCounts().reduce((acc, c) => acc + c.totalCount, 0),
-  );
 
   const filteredCategories = createMemo(() => {
     const payload = data();
@@ -117,8 +114,8 @@ export function ConfigPage() {
 
   return (
     <SettingsLayout
-      title="Runtime Configuration"
-      breadcrumbLabel="Runtime"
+      title="Server Runtime Configuration"
+      breadcrumbLabel="Server Runtime"
       actions={
         <button
           class="btn btn-primary"
@@ -146,6 +143,15 @@ export function ConfigPage() {
                 <div class="settings-toolbar-controls">
                   <button
                     type="button"
+                    class={`btn btn-sm ${showKeys() ? "btn-secondary" : "btn-ghost"} settings-toolbar-action-btn`}
+                    onClick={() => setShowKeys(!showKeys())}
+                    title={showKeys() ? "Hide technical keys" : "Show technical keys"}
+                  >
+                    <Code size={13} />
+                    <span>{showKeys() ? "Hide Keys" : "Show Keys"}</span>
+                  </button>
+                  <button
+                    type="button"
                     class={`btn btn-sm ${density() === "compact" ? "btn-secondary" : "btn-ghost"} settings-toolbar-action-btn`}
                     onClick={toggleDensity}
                     title={
@@ -162,7 +168,7 @@ export function ConfigPage() {
                 </div>
               </div>
 
-              <Show when={categoriesWithCounts().length > 1}>
+              <Show when={categories().length > 1}>
                 <div class="settings-category-nav" role="tablist" aria-label="Settings Categories">
                   <button
                     type="button"
@@ -172,9 +178,8 @@ export function ConfigPage() {
                     onClick={() => setSelectedCategory("all")}
                   >
                     <span>All</span>
-                    <span class="settings-category-pill-badge">{totalSettingsCount()}</span>
                   </button>
-                  <For each={categoriesWithCounts()}>
+                  <For each={categories()}>
                     {(cat) => (
                       <button
                         type="button"
@@ -184,7 +189,6 @@ export function ConfigPage() {
                         onClick={() => setSelectedCategory(cat.id)}
                       >
                         <span>{cat.label}</span>
-                        <span class="settings-category-pill-badge">{cat.totalCount}</span>
                       </button>
                     )}
                   </For>
@@ -233,7 +237,6 @@ export function ConfigPage() {
                   {(group) => (
                     <SettingsSection
                       title={categoryLabel(group.category)}
-                      count={group.settings.length}
                     >
                       <div class="settings-list settings-table">
                         <For each={group.settings as [string, SettingInfo][]}>
@@ -244,6 +247,7 @@ export function ConfigPage() {
                               draft={drafts()[key]}
                               dirty={pendingChanges().some((change: PendingChange) => change.key === key)}
                               density={density()}
+                              showKey={showKeys()}
                               onChange={(value) => setDraft(key, value)}
                               onRestore={() => restoreDraft(key)}
                             />

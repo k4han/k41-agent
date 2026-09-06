@@ -43,10 +43,10 @@ type SettingsNavGroup = {
 const settingsNavGroups: SettingsNavGroup[] = [
   {
     id: "general",
-    label: "General",
+    label: "Preferences",
     items: [
-      { href: "/settings/config", label: "Runtime", icon: () => <Cog size={15} />, description: "Bootstrap & env", keywords: "bootstrap config env runtime" },
-      { href: "/settings/appearance", label: "Appearance", icon: () => <Palette size={15} />, description: "Theme", keywords: "theme dark light system appearance" },
+      { href: "/settings/appearance", label: "Appearance", icon: () => <Palette size={15} />, description: "Theme & display", keywords: "theme dark light system appearance timezone display preferences" },
+      { href: "/settings/security", label: "Security", icon: () => <KeyRound size={15} />, description: "Password & access", keywords: "security password auth credentials" },
     ],
   },
   {
@@ -54,8 +54,8 @@ const settingsNavGroups: SettingsNavGroup[] = [
     label: "Workspace",
     items: [
       { href: "/settings/backends", label: "Backends", icon: () => <ServerCog size={15} />, description: "Local / Daytona / Modal", keywords: "workspace backend local daytona modal" },
-      { href: "/settings/sandboxes", label: "Sandboxes", icon: () => <CloudCog size={15} />, description: "Active sandboxes", keywords: "sandbox container" },
       { href: "/settings/connections", label: "Connections", icon: () => <Link2 size={15} />, description: "Repos & MCP", keywords: "repositories mcp connections github" },
+      { href: "/settings/sandboxes", label: "Active Sandboxes", icon: () => <CloudCog size={15} />, description: "Live instances", keywords: "sandbox container live instances" },
     ],
   },
   {
@@ -72,8 +72,14 @@ const settingsNavGroups: SettingsNavGroup[] = [
     id: "integration",
     label: "Integrations",
     items: [
-      { href: "/settings/channels", label: "Channels", icon: () => <Network size={15} />, description: "Telegram / Discord", keywords: "channel telegram discord" },
-      { href: "/settings/security", label: "Security", icon: () => <KeyRound size={15} />, description: "Password", keywords: "security password auth" },
+      { href: "/settings/channels", label: "Channels", icon: () => <Network size={15} />, description: "Telegram / Discord / Zalo", keywords: "channel telegram discord zalo messaging" },
+    ],
+  },
+  {
+    id: "system",
+    label: "System",
+    items: [
+      { href: "/settings/config", label: "Server Runtime", icon: () => <Cog size={15} />, description: "Host, port, DB & bootstrap", keywords: "bootstrap config env runtime server database host port" },
     ],
   },
   {

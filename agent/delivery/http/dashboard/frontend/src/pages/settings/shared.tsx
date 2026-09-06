@@ -339,9 +339,6 @@ export function SettingsSection(props: {
         <div class="settings-section-header-text">
           <div class="settings-section-title">
             {props.title}
-            <Show when={props.count !== undefined}>
-              <span class="settings-section-count">{props.count}</span>
-            </Show>
           </div>
           <Show when={props.description}>
             <div class="hint settings-section-desc">{props.description}</div>
@@ -366,6 +363,7 @@ export function SettingRow(props: {
   actions?: JSX.Element;
   control?: JSX.Element;
   density?: "compact" | "detailed";
+  showKey?: boolean;
   onChange: (value: unknown) => void;
   onRestore: () => void;
 }) {
@@ -402,9 +400,11 @@ export function SettingRow(props: {
             <Show when={props.info.required}>
               <span class="setting-required" title="Required">*</span>
             </Show>
-            <span class="setting-key-tag mono" title={props.settingKey}>
-              {props.settingKey}
-            </span>
+            <Show when={props.showKey}>
+              <span class="setting-key-tag mono" title={props.settingKey}>
+                {props.settingKey}
+              </span>
+            </Show>
             <Show when={props.info.restart_required}>
               <span class="badge badge-warning setting-restart-badge" title={RESTART_REQUIRED_NOTICE}>
                 Restart

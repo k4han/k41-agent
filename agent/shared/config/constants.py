@@ -409,13 +409,13 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
     "workspace.root": {
         "type": "text",
         "description": "Root directory for local workspaces (supports ~)",
-        "category": "general",
+        "category": "workspace",
         "label": "Workspace Root",
     },
     "workspace.github.root": {
         "type": "text",
         "description": "Root directory for GitHub repository checkouts managed by the agent (supports ~)",
-        "category": "general",
+        "category": "workspace",
         "label": "GitHub Workspace Root",
     },
     "workspace.daytona.enabled": {
@@ -836,15 +836,15 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
     DISPLAY_TIMEZONE_CONFIG_KEY: {
         "type": "select",
         "description": "IANA timezone used to display dashboard timestamps (e.g. Asia/Bangkok)",
-        "category": "general",
+        "category": "preferences",
         "label": "Display Timezone",
         "options": DISPLAY_TIMEZONE_OPTIONS,
     },
-    # General / Workflows settings
+    # Workflow execution settings
     "recursion_limit": {
         "type": "number",
         "description": "Max recursion limit for LangGraph workflows",
-        "category": "general",
+        "category": "workflow",
         "label": "Recursion Limit",
         "min": 1,
         "max": 1000,
@@ -859,7 +859,7 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
             "stripped from the final visible text; this flag only controls "
             "whether the intermediate deltas are forwarded."
         ),
-        "category": "general",
+        "category": "preferences",
         "label": "Stream Thinking to UI",
     },
 }
