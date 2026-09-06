@@ -33,6 +33,7 @@ def spa_index_response() -> Response:
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link id="app-favicon" rel="icon" type="image/x-icon" href="/dashboard-assets/favicon.ico">
   <title>Kai</title>
 </head>
 <body>

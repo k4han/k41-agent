@@ -53,3 +53,24 @@ async def test_web_server_uses_bounded_graceful_shutdown(monkeypatch):
         captured["timeout_graceful_shutdown"]
         == app_module.SERVER_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS
     )
+
+
+@pytest.mark.asyncio
+async def test_favicon_endpoints():
+    import httpx
+
+    fastapi_app = app_module.create_app()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=fastapi_app),
+        base_url="http://testserver",
+    ) as client:
+        resp = await client.get("/favicon.ico")
+        assert resp.status_code == 200
+        assert "image/x-icon" in resp.headers.get("content-type", "")
+        assert len(resp.content) > 0
+
+        resp_yellow = await client.get("/favicon-yellow.ico")
+        assert resp_yellow.status_code == 200
+        assert "image/x-icon" in resp_yellow.headers.get("content-type", "")
+        assert len(resp_yellow.content) > 0
+

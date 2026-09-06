@@ -232,3 +232,42 @@ def test_auto_start_server_skips_when_tray_stopped(monkeypatch) -> None:
 
     assert calls["start"] == 0
 
+
+def test_get_resources_icon_bundled() -> None:
+    green_icon = tray._get_resources_icon("green")
+    assert green_icon is not None
+    assert green_icon.exists()
+    assert green_icon.suffix.lower() == ".ico"
+    assert "tray.ico" in green_icon.name
+
+    yellow_icon = tray._get_resources_icon("yellow")
+    assert yellow_icon is not None
+    assert yellow_icon.exists()
+    assert yellow_icon.suffix.lower() == ".ico"
+    assert "tray-yellow.ico" in yellow_icon.name
+
+
+def test_load_tray_icon_returns_valid_images() -> None:
+    running_icon = tray.load_tray_icon(True)
+    assert running_icon is not None
+    assert hasattr(running_icon, "size")
+
+    yellow_icon = tray.load_tray_icon("yellow")
+    assert yellow_icon is not None
+    assert hasattr(yellow_icon, "size")
+
+    stopped_icon = tray.load_tray_icon(False)
+    assert stopped_icon is not None
+    assert hasattr(stopped_icon, "size")
+
+
+def test_generate_icon_supports_yellow_status() -> None:
+    img_green = tray._generate_icon(True)
+    img_yellow = tray._generate_icon("yellow")
+    img_stopped = tray._generate_icon(False)
+
+    assert img_green.size == (64, 64)
+    assert img_yellow.size == (64, 64)
+    assert img_stopped.size == (64, 64)
+
+

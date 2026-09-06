@@ -84,6 +84,10 @@ k41-agent-tray = "agent.bootstrap.tray:main"
 include = ["agent*"]
 exclude = ["tests*", "tmp*", "data*"]
 
+[tool.setuptools.package-data]
+"agent.bootstrap" = ["resources/*"]
+"agent.delivery.http.dashboard" = ["static/**/*"]
+
 [tool.pytest.ini_options]
 addopts = "-p no:cacheprovider"
 cache_dir = ".tmp_pytest/cache"

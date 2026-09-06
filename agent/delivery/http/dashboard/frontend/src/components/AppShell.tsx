@@ -25,7 +25,7 @@ import {
   Trash2,
   X,
 } from "lucide-solid";
-import { createMemo, createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
 
 import { DeleteThreadDialog } from "@/components/DeleteThreadDialog";
 import { InlineRenameInput } from "@/components/InlineRenameInput";
@@ -41,6 +41,7 @@ import {
 import type { ThreadListPayload, ThreadSummary, ThreadWorkspaceGroup } from "@/lib/chatThreads";
 import { CUSTOM_DOM_EVENTS, SESSION_EVENTS } from "@/lib/eventConstants";
 import { API_PATHS, SSE_URLS } from "@/lib/endpoints";
+import { updateDashboardFavicon } from "@/lib/favicon";
 import {
   HISTORY_MENU_MIN_SPACE_PX,
   HISTORY_PAGE_SIZE,
@@ -163,6 +164,11 @@ export function AppShell(props: {
       }
     }
     return activeIds;
+  });
+
+  createEffect(() => {
+    const isRunning = activeSessions().length > 0 || runningThreadIds().size > 0;
+    updateDashboardFavicon(isRunning);
   });
 
   const connectSessionEvents = () => {

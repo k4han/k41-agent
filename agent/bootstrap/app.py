@@ -8,6 +8,7 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
@@ -159,6 +160,30 @@ def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:
             GZipMiddleware(dashboard_assets_app, minimum_size=500),
             name="dashboard-assets",
         )
+
+    @fastapi_app.get("/favicon.ico", include_in_schema=False)
+    async def favicon() -> Response:
+        candidates = [
+            STATIC_DIR / "favicon.ico",
+            Path(__file__).parent / "resources" / "tray.ico",
+            Path(__file__).parent / "resources" / "favicon.ico",
+        ]
+        for p in candidates:
+            if p.is_file():
+                return FileResponse(p, media_type="image/x-icon")
+        return Response(status_code=404)
+
+    @fastapi_app.get("/favicon-yellow.ico", include_in_schema=False)
+    async def favicon_yellow() -> Response:
+        candidates = [
+            STATIC_DIR / "favicon-yellow.ico",
+            Path(__file__).parent / "resources" / "tray-yellow.ico",
+            Path(__file__).parent / "resources" / "favicon-yellow.ico",
+        ]
+        for p in candidates:
+            if p.is_file():
+                return FileResponse(p, media_type="image/x-icon")
+        return Response(status_code=404)
 
     @fastapi_app.get("/health")
     async def health(request: Request):

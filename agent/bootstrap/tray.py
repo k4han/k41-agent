@@ -159,7 +159,7 @@ def _get_dashboard_url() -> str:
         return "http://127.0.0.1:4141"
 
 
-def _generate_icon(running: bool):
+def _generate_icon(running: bool | str = True):
     try:
         from PIL import Image, ImageDraw
     except ImportError as exc:
@@ -170,12 +170,18 @@ def _generate_icon(running: bool):
     draw = ImageDraw.Draw(image)
 
     # Background circle color based on status
-    if running:
+    if running is True or running in ("running", "green"):
         color = (34, 197, 94, 255)  # green-500
-        border = (22, 163, 74, 255)
+        border = (22, 163, 74, 255)  # green-600
+        dot_color = (34, 197, 94, 255)
+    elif running in ("yellow", "active", "busy"):
+        color = (234, 179, 8, 255)  # yellow-500
+        border = (202, 138, 4, 255)  # yellow-600
+        dot_color = (234, 179, 8, 255)
     else:
         color = (107, 114, 128, 255)  # gray-500
         border = (75, 85, 99, 255)
+        dot_color = (239, 68, 68, 255)
 
     # Outer circle with border
     draw.ellipse([2, 2, size - 2, size - 2], fill=color, outline=border, width=2)
@@ -205,29 +211,39 @@ def _generate_icon(running: bool):
         draw.line([22, 32, 42, 48], fill=(255, 255, 255, 255), width=4)
 
     # Small status dot at bottom-right
-    dot_color = (34, 197, 94, 255) if running else (239, 68, 68, 255)
     draw.ellipse([size - 18, size - 18, size - 6, size - 6], fill=dot_color, outline=(255, 255, 255, 255), width=2)
 
     return image
 
 
-def _get_resources_icon() -> Path | None:
-    # Try to find bundled icon
-    candidates = [
-        Path(__file__).parent / "resources" / "tray.png",
-        Path(__file__).parent / "resources" / "tray.ico",
-        Path(__file__).parent.parent / "bootstrap" / "resources" / "tray.png",
-    ]
+def _get_resources_icon(status: str = "green") -> Path | None:
+    # Try to find bundled icon in installation directory
+    if status in ("yellow", "active", "busy"):
+        candidates = [
+            Path(__file__).parent / "resources" / "tray-yellow.png",
+            Path(__file__).parent / "resources" / "tray-yellow.ico",
+            Path(__file__).parent / "resources" / "favicon-yellow.ico",
+        ]
+    else:
+        candidates = [
+            Path(__file__).parent / "resources" / "tray.png",
+            Path(__file__).parent / "resources" / "tray.ico",
+            Path(__file__).parent / "resources" / "favicon.ico",
+            Path(__file__).parent.parent / "bootstrap" / "resources" / "tray.png",
+        ]
     for p in candidates:
         if p.exists():
             return p
     return None
 
 
-def load_tray_icon(running: bool):
+def load_tray_icon(running: bool | str = True):
+    if not running:
+        return _generate_icon(False)
     # Prefer bundled file if exists
-    icon_path = _get_resources_icon()
-    if icon_path is not None and icon_path.suffix.lower() == ".png":
+    status = "yellow" if running in ("yellow", "active", "busy") else "green"
+    icon_path = _get_resources_icon(status)
+    if icon_path is not None and icon_path.suffix.lower() in {".png", ".ico"}:
         try:
             from PIL import Image
 
