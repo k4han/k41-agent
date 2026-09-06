@@ -8,8 +8,7 @@ from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCapability, ToolCategory
 from agent.modules.tools.builtin.workspace import get_file_io
 from agent.modules.tools.result import ToolError, ToolErrorCode
-from agent.modules.workspaces.backends import UnsupportedWorkspaceCapabilityError
-from agent.modules.workspaces.constants import MAX_IMAGE_READ_BYTES
+from agent.modules.workspaces import MAX_IMAGE_READ_BYTES, UnsupportedWorkspaceCapabilityError
 
 
 _BINARY_READ_UNSUPPORTED_MARKER = "does not support binary"
