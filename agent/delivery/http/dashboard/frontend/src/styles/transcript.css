@@ -507,9 +507,16 @@
   min-width: 0;
 }
 
-.plan-review-markdown pre,
-.plan-review-markdown table {
+.plan-review-markdown pre {
   max-width: 100%;
+}
+
+.plan-review-markdown table {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .plan-review-markdown code {

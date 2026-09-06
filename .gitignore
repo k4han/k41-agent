@@ -33,4 +33,5 @@ agent/modules/providers/api.json
 
 .vscode
 
+.agents/
 .agent/

@@ -28,12 +28,14 @@
 
 .brand-mark {
   display: grid;
-  width: 28px;
-  height: 28px;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
   flex-shrink: 0;
   place-items: center;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: 8px;
   background: var(--surface-2);
 }
 
@@ -55,12 +57,14 @@
 
 .brand-collapse-btn {
   display: grid;
-  width: 24px;
-  height: 24px;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
   flex-shrink: 0;
   place-items: center;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--surface);
   color: var(--muted);
   cursor: pointer;
@@ -75,7 +79,40 @@
   color: var(--fg);
 }
 
+.drawer-close-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
+  margin-left: auto;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.drawer-close-btn:hover {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+
+.drawer-close-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .brand-expand-btn {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
   cursor: pointer;
   position: relative;
 }
@@ -300,7 +337,7 @@
 }
 
 .nav-history-item .nav-history-link {
-  padding-right: 34px;
+  padding-right: 44px;
 }
 
 .nav-history-rename-input {
@@ -324,10 +361,12 @@
 .nav-history-action {
   position: absolute;
   top: 50%;
-  right: 3px;
+  right: 2px;
   display: grid;
-  width: 24px;
-  height: 24px;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
   place-items: center;
   border: 0;
   border-radius: 6px;
@@ -481,7 +520,7 @@
 }
 
 .nav-history-filter .select-control-trigger {
-  min-height: 34px;
+  min-height: 40px;
   background: var(--surface-2);
   font-size: 14px;
   font-weight: 600;
@@ -495,8 +534,10 @@
 .nav-history-all-btn {
   display: grid;
   place-items: center;
-  width: 34px;
-  height: 34px;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
   flex-shrink: 0;
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -603,15 +644,17 @@
 
 .user-avatar {
   display: grid;
-  width: 32px;
-  height: 32px;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
   place-items: center;
   border: 0;
   border-radius: 50%;
   background: var(--accent);
   color: var(--accent-fg);
   cursor: pointer;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 650;
   transition: opacity 120ms ease;
 }

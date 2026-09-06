@@ -22,13 +22,18 @@
 }
 
 .sandboxes-filter-group {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 6px;
   padding: 4px;
+  padding-bottom: 4px;
   border: 1px solid var(--border);
   background: var(--surface);
   border-radius: 999px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+  white-space: nowrap;
 }
 
 .sandboxes-filter-chip {
@@ -210,6 +215,7 @@
 }
 
 .sandboxes-table {
+  min-width: 680px;
   width: 100%;
   border-collapse: collapse;
   font-size: 12.5px;
@@ -396,5 +402,13 @@
   }
   to {
     transform: rotate(360deg);
+  }
+}
+
+/* --- Mobile search input (≤640px) ----------------------------------- */
+@media (max-width: 640px) {
+  .sandboxes-search input {
+    font-size: 16px !important;
+    min-height: 42px !important;
   }
 }

@@ -12,15 +12,7 @@ export function AgentPromptTab(props: {
   textareaRef?: HTMLTextAreaElement | undefined;
 }) {
   return (
-    <div
-      style={{
-        display: "grid",
-        "grid-template-columns": "minmax(0, 1fr) 280px",
-        gap: "20px",
-        padding: "4px 2px",
-        "min-height": "0",
-      }}
-    >
+    <div class="agent-prompt-grid">
       <div
         class="field"
         style={{

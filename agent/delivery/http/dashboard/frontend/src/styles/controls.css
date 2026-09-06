@@ -1813,3 +1813,41 @@
   margin-bottom: 18px;
 }
 
+/* --- Mobile touch controls (≤640px) ----------------------------------- */
+@media (max-width: 640px) {
+  .dialog-close-btn {
+    width: 36px;
+    height: 36px;
+    position: relative;
+  }
+
+  .dialog-close-btn::after {
+    content: "";
+    position: absolute;
+    inset: -6px;
+  }
+
+  .select-control-option {
+    min-height: 42px;
+    padding: 10px 12px;
+    font-size: 14px;
+  }
+
+  .model-picker-option {
+    min-height: 42px;
+    padding: 8px 10px;
+  }
+
+  .model-picker-option-star {
+    width: 40px;
+    min-height: 40px;
+  }
+
+  .toggle-control {
+    min-height: 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+

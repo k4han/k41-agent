@@ -826,3 +826,35 @@
   gap: 8px;
   flex-shrink: 0;
 }
+
+@media (max-width: 640px) {
+  .workspace-tabs-list {
+    display: flex;
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .workspace-tabs-list::-webkit-scrollbar {
+    display: none;
+  }
+
+  .workspace-input-row {
+    flex-wrap: wrap;
+  }
+
+  .workspace-path-input-container {
+    width: 100%;
+    flex: 1 1 100%;
+  }
+
+  .workspace-temp-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .workspace-temp-btn {
+    width: 100%;
+  }
+}

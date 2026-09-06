@@ -23,6 +23,7 @@ import {
   Settings,
   Square,
   Trash2,
+  X,
 } from "lucide-solid";
 import { createMemo, createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
 
@@ -135,6 +136,7 @@ export function AppShell(props: {
     setMobileDrawerOpen,
     closeMobileDrawer,
     handleAppLayoutClick,
+    handleNavClick,
     handleKeydown,
   } = useMobileDrawer({ sidebarId: "app-shell-sidebar" });
   let disposed = false;
@@ -893,7 +895,7 @@ export function AppShell(props: {
       <aside id="app-shell-sidebar" class="sidebar">
         <div class="brand">
           <Show
-            when={!collapsed()}
+            when={!collapsed() || isMobileViewport()}
             fallback={
               <button
                 class="brand-mark brand-expand-btn"
@@ -913,17 +915,31 @@ export function AppShell(props: {
               <div class="brand-title">Kai Console</div>
               {/* <div class="brand-subtitle">Agent control plane</div> */}
             </div>
-            <button
-              class="brand-collapse-btn"
-              type="button"
-              onClick={toggleSidebar}
-              title="Collapse sidebar"
+            <Show
+              when={isMobileViewport()}
+              fallback={
+                <button
+                  class="brand-collapse-btn"
+                  type="button"
+                  onClick={toggleSidebar}
+                  title="Collapse sidebar"
+                >
+                  <ChevronsLeft size={14} />
+                </button>
+              }
             >
-              <ChevronsLeft size={14} />
-            </button>
+              <button
+                class="drawer-close-btn"
+                type="button"
+                onClick={closeMobileDrawer}
+                aria-label="Close navigation"
+              >
+                <X size={18} />
+              </button>
+            </Show>
           </Show>
         </div>
-        <nav class="nav">
+        <nav class="nav" onClick={handleNavClick}>
           <For each={navItems}>
             {(item) => (
               <A

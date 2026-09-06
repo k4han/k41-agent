@@ -1,32 +1,61 @@
 import { useLocation } from "@solidjs/router";
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
-import { MOBILE_MEDIA_QUERY } from "@/lib/uiConstants";
+import { DRAWER_MEDIA_QUERY } from "@/lib/uiConstants";
 import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
 import { createMediaQuery } from "@/lib/useMediaQuery";
 
+let activeCloseDrawerHandler: (() => void) | null = null;
+
+export function closeMobileDrawer(): void {
+  activeCloseDrawerHandler?.();
+}
+
 export interface UseMobileDrawerOptions {
   sidebarId: string;
+  breakpointQuery?: string;
   onClose?: () => void;
+  onOpen?: () => void;
 }
 
 export interface UseMobileDrawerReturn {
+  isDrawerActive: () => boolean;
   isMobileViewport: () => boolean;
   mobileDrawerOpen: () => boolean;
   setMobileDrawerOpen: (open: boolean) => void;
   closeMobileDrawer: () => void;
+  openMobileDrawer: () => void;
   handleAppLayoutClick: (event: MouseEvent) => void;
+  handleNavClick: (event: MouseEvent) => void;
   handleKeydown: (event: KeyboardEvent) => void;
 }
 
 export function useMobileDrawer(options: UseMobileDrawerOptions): UseMobileDrawerReturn {
   const location = useLocation();
   const [mobileDrawerOpen, setMobileDrawerOpen] = createSignal(false);
-  const isMobileViewport = createMediaQuery(MOBILE_MEDIA_QUERY);
+  const isDrawerActive = createMediaQuery(options.breakpointQuery ?? DRAWER_MEDIA_QUERY);
+  const isMobileViewport = isDrawerActive;
 
-  useBodyScrollLock(() => isMobileViewport() && mobileDrawerOpen());
+  const closeDrawer = () => {
+    setMobileDrawerOpen(false);
+    options.onClose?.();
+  };
+
+  const openDrawer = () => {
+    setMobileDrawerOpen(true);
+    options.onOpen?.();
+  };
+
+  activeCloseDrawerHandler = closeDrawer;
+  onCleanup(() => {
+    if (activeCloseDrawerHandler === closeDrawer) {
+      activeCloseDrawerHandler = null;
+    }
+  });
+
+  useBodyScrollLock(() => isDrawerActive() && mobileDrawerOpen());
 
   createEffect(() => {
-    if (!isMobileViewport()) {
+    if (!isDrawerActive()) {
       setMobileDrawerOpen(false);
     }
   });
@@ -38,17 +67,16 @@ export function useMobileDrawer(options: UseMobileDrawerOptions): UseMobileDrawe
       return;
     }
     lastPathname = currentPathname;
-    if (isMobileViewport() && mobileDrawerOpen()) {
-      setMobileDrawerOpen(false);
-      options.onClose?.();
+    if (isDrawerActive() && mobileDrawerOpen()) {
+      closeDrawer();
     }
   });
 
   let orientationDisposer: (() => void) | null = null;
   onMount(() => {
     const handleOrientationChange = () => {
-      if (isMobileViewport() && mobileDrawerOpen()) {
-        setMobileDrawerOpen(false);
+      if (isDrawerActive() && mobileDrawerOpen()) {
+        closeDrawer();
       }
     };
     window.addEventListener("orientationchange", handleOrientationChange);
@@ -60,27 +88,49 @@ export function useMobileDrawer(options: UseMobileDrawerOptions): UseMobileDrawe
   let previousActiveElement: HTMLElement | null = null;
   let focusTrapCleanup: (() => void) | null = null;
 
+  const isElementVisible = (el: HTMLElement): boolean => {
+    if (el.offsetParent === null && window.getComputedStyle(el).position !== "fixed") {
+      return false;
+    }
+    const style = window.getComputedStyle(el);
+    return style.display !== "none" && style.visibility !== "hidden";
+  };
+
+  const getFocusableElements = (container: HTMLElement): HTMLElement[] => {
+    const elements = container.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    );
+    return Array.from(elements).filter(isElementVisible);
+  };
+
   const trapFocus = (element: HTMLElement) => {
     focusTrapElement = element;
     previousActiveElement = document.activeElement as HTMLElement;
-    const focusableElements = element.querySelectorAll<HTMLElement>(
-      'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    );
+
+    const focusableElements = getFocusableElements(element);
     const firstElement = focusableElements[0];
-    const lastElement = focusableElements[focusableElements.length - 1];
 
     const handleTab = (event: KeyboardEvent) => {
       if (event.key !== "Tab") return;
 
+      const currentFocusable = getFocusableElements(element);
+      if (currentFocusable.length === 0) {
+        event.preventDefault();
+        return;
+      }
+
+      const first = currentFocusable[0];
+      const last = currentFocusable[currentFocusable.length - 1];
+
       if (event.shiftKey) {
-        if (document.activeElement === firstElement) {
+        if (document.activeElement === first) {
           event.preventDefault();
-          lastElement?.focus();
+          last?.focus();
         }
       } else {
-        if (document.activeElement === lastElement) {
+        if (document.activeElement === last) {
           event.preventDefault();
-          firstElement?.focus();
+          first?.focus();
         }
       }
     };
@@ -102,7 +152,7 @@ export function useMobileDrawer(options: UseMobileDrawerOptions): UseMobileDrawe
   };
 
   createEffect(() => {
-    if (isMobileViewport() && mobileDrawerOpen()) {
+    if (isDrawerActive() && mobileDrawerOpen()) {
       const sidebar = document.getElementById(options.sidebarId);
       if (sidebar) {
         focusTrapCleanup = trapFocus(sidebar);
@@ -121,29 +171,32 @@ export function useMobileDrawer(options: UseMobileDrawerOptions): UseMobileDrawe
 
   const handleAppLayoutClick = (event: MouseEvent) => {
     if (mobileDrawerOpen() && event.target === event.currentTarget) {
-      setMobileDrawerOpen(false);
-      options.onClose?.();
+      closeDrawer();
+    }
+  };
+
+  const handleNavClick = (event: MouseEvent) => {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest("a") && isDrawerActive() && mobileDrawerOpen()) {
+      closeDrawer();
     }
   };
 
   const handleKeydown = (event: KeyboardEvent) => {
     if (event.key === "Escape" && mobileDrawerOpen()) {
-      setMobileDrawerOpen(false);
-      options.onClose?.();
+      closeDrawer();
     }
   };
 
-  const closeMobileDrawer = () => {
-    setMobileDrawerOpen(false);
-    options.onClose?.();
-  };
-
   return {
+    isDrawerActive,
     isMobileViewport,
     mobileDrawerOpen,
     setMobileDrawerOpen,
-    closeMobileDrawer,
+    closeMobileDrawer: closeDrawer,
+    openMobileDrawer: openDrawer,
     handleAppLayoutClick,
+    handleNavClick,
     handleKeydown,
   };
 }

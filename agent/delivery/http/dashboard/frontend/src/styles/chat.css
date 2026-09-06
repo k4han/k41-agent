@@ -73,9 +73,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 38px;
-  min-height: 38px;
-  padding: 0 16px;
+  min-height: 48px;
+  padding: calc(var(--safe-top) + 6px) 14px 6px;
   background: transparent;
   border-bottom: none;
   box-sizing: border-box;
@@ -96,9 +95,12 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
+  flex: 1;
 }
 
 .chat-header-title {
+  min-width: 0;
+  flex: 1;
   font-size: 13.5px;
   font-weight: 600;
   color: var(--fg);
@@ -120,8 +122,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
   padding: 0;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -139,8 +143,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
   padding: 0;
   border: none;
   background: transparent;
@@ -148,6 +154,7 @@
   cursor: pointer;
   border-radius: 6px;
   transition: color 120ms ease, background-color 120ms ease;
+  flex-shrink: 0;
 }
 
 .chat-header-workspace-btn:hover {
@@ -337,8 +344,10 @@
 
 .message-action-btn {
   display: inline-grid;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
   place-items: center;
   border: 0;
   border-radius: 6px;
@@ -407,8 +416,9 @@
   align-items: center;
   justify-content: center;
   min-width: 72px;
-  height: 32px;
-  padding: 0 14px;
+  min-height: 40px;
+  height: 40px;
+  padding: 0 16px;
   border: 1px solid transparent;
   border-radius: 999px;
   background: transparent;
@@ -572,6 +582,46 @@
   .status-indicator-dot {
     animation: none;
     opacity: 0.6;
+  }
+}
+
+@media (max-width: 640px) {
+  .content-no-header .chat-panel {
+    padding-bottom: 0;
+  }
+
+  .message.user .message-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .message-action-btn {
+    width: 38px;
+    height: 38px;
+    min-width: 38px;
+    min-height: 38px;
+  }
+
+  .message-branch-switcher {
+    min-height: 38px;
+  }
+
+  .message-edit {
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .message-edit-btn {
+    min-height: 40px;
+    height: 40px;
+    padding: 0 16px;
+  }
+
+  .chat-shell-resizable.workspace-open .chat-composer,
+  .chat-shell-resizable.workspace-closed .chat-composer {
+    width: calc(100% - 16px);
+    margin-inline: auto;
   }
 }
 

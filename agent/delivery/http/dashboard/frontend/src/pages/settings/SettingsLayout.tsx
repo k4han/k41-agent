@@ -106,7 +106,9 @@ export function SettingsLayout(props: {
     isMobileViewport,
     mobileDrawerOpen,
     setMobileDrawerOpen,
+    closeMobileDrawer,
     handleAppLayoutClick,
+    handleNavClick,
     handleKeydown,
   } = useMobileDrawer({ sidebarId: "settings-layout-sidebar" });
 
@@ -181,7 +183,7 @@ export function SettingsLayout(props: {
       <aside id="settings-layout-sidebar" class="sidebar settings-sidebar">
         <div class="brand">
           <Show
-            when={!collapsed()}
+            when={!collapsed() || isMobileViewport()}
             fallback={
               <button
                 class="brand-mark brand-expand-btn"
@@ -201,18 +203,32 @@ export function SettingsLayout(props: {
               <div class="brand-title">Kai Console</div>
               <div class="brand-subtitle">Settings</div>
             </div>
-            <button
-              class="brand-collapse-btn"
-              type="button"
-              onClick={toggleSidebar}
-              title="Collapse sidebar"
-              aria-label="Collapse sidebar"
+            <Show
+              when={isMobileViewport()}
+              fallback={
+                <button
+                  class="brand-collapse-btn"
+                  type="button"
+                  onClick={toggleSidebar}
+                  title="Collapse sidebar"
+                  aria-label="Collapse sidebar"
+                >
+                  <ChevronsLeft size={14} />
+                </button>
+              }
             >
-              <ChevronsLeft size={14} />
-            </button>
+              <button
+                class="drawer-close-btn"
+                type="button"
+                onClick={closeMobileDrawer}
+                aria-label="Close navigation"
+              >
+                <X size={18} />
+              </button>
+            </Show>
           </Show>
         </div>
-        <nav class="nav settings-nav">
+        <nav class="nav settings-nav" onClick={handleNavClick}>
           <A
             href={homeHref}
             class="nav-link settings-back-home"
@@ -326,10 +342,12 @@ export function SettingsLayout(props: {
                   <Show
                     when={index() !== segments().length - 1 && segment.href}
                     fallback={
-                      <span class="settings-breadcrumb-current" aria-current="page">{segment.label}</span>
+                      <span class="settings-breadcrumb-current" aria-current="page" title={segment.label}>
+                        {segment.label}
+                      </span>
                     }
                   >
-                    <A href={segment.href!} class="settings-breadcrumb-link">
+                    <A href={segment.href!} class="settings-breadcrumb-link" title={segment.label}>
                       {segment.label}
                     </A>
                   </Show>

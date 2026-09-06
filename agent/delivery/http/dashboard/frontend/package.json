@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "test": "node scripts/verify-responsive.mjs --skip-build"
   },
   "dependencies": {
     "@solidjs/router": "^0.15.3",

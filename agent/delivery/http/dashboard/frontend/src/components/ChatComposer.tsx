@@ -113,14 +113,14 @@ export function ChatComposer(props: ChatComposerProps) {
         <div class="chat-recursion-warning">
           <div class="chat-recursion-warning-left">
             <span style="font-size: 16px;">⚠️</span>
-            <span>Agent đã đạt giới hạn bước xử lý mà chưa hoàn thành nhiệm vụ. Bạn có muốn tiếp tục chạy không?</span>
+            <span>Agent reached the step limit without completing the task. Do you want to continue running?</span>
           </div>
           <button
             class="chat-recursion-warning-btn"
             type="button"
             onClick={props.onResume}
           >
-            Tiếp tục chạy
+            Continue running
           </button>
         </div>
       </Show>
@@ -212,7 +212,7 @@ export function ChatComposer(props: ChatComposerProps) {
         }}
       />
       <div class="chat-composer-toolbar">
-        <div class="chat-composer-actions">
+        <div class="chat-composer-tier chat-composer-tier-selectors">
           <AgentPicker
             class="chat-agent-picker"
             value={props.agentName}
@@ -235,53 +235,59 @@ export function ChatComposer(props: ChatComposerProps) {
               props.onProviderModelChange(nextProvider, nextModel);
             }}
           />
-          <button
-            class="chat-composer-icon"
-            type="button"
-            onClick={() => fileInputRef?.click()}
-            disabled={props.composerDisabled}
-            title="Attach files"
-            aria-label="Attach files"
-          >
-            <Plus size={18} />
-          </button>
-          <button
-            class="chat-composer-icon"
-            type="button"
-            title="More options"
-            aria-label="More options"
-          >
-            <MoreHorizontal size={18} />
-          </button>
-          <Show when={props.currentThreadId}>
-            <ContextWindowIndicator data={props.contextWindowData} />
-          </Show>
         </div>
-        <Show
-          when={props.stopActive}
-          fallback={
+        <div class="chat-composer-tier chat-composer-tier-actions">
+          <div class="chat-composer-actions">
             <button
               class="chat-composer-icon"
               type="button"
-              onClick={() => props.onSend()}
-              disabled={props.composerDisabled || (!props.prompt.trim() && !props.attachments.length)}
-              title="Send"
-              aria-label="Send"
+              onClick={() => fileInputRef?.click()}
+              disabled={props.composerDisabled}
+              title="Attach files"
+              aria-label="Attach files"
             >
-              <Send size={16} />
+              <Plus size={18} />
             </button>
-          }
-        >
-          <button
-            class="chat-composer-icon chat-composer-stop"
-            type="button"
-            onClick={props.onStop}
-            title="Stop"
-            aria-label="Stop"
-          >
-            <Square size={15} />
-          </button>
-        </Show>
+            <button
+              class="chat-composer-icon"
+              type="button"
+              title="More options"
+              aria-label="More options"
+            >
+              <MoreHorizontal size={18} />
+            </button>
+            <Show when={props.currentThreadId}>
+              <ContextWindowIndicator data={props.contextWindowData} />
+            </Show>
+          </div>
+          <div class="chat-composer-send-wrapper">
+            <Show
+              when={props.stopActive}
+              fallback={
+                <button
+                  class="chat-composer-icon chat-composer-send"
+                  type="button"
+                  onClick={() => props.onSend()}
+                  disabled={props.composerDisabled || (!props.prompt.trim() && !props.attachments.length)}
+                  title="Send"
+                  aria-label="Send"
+                >
+                  <Send size={16} />
+                </button>
+              }
+            >
+              <button
+                class="chat-composer-icon chat-composer-stop"
+                type="button"
+                onClick={props.onStop}
+                title="Stop"
+                aria-label="Stop"
+              >
+                <Square size={15} />
+              </button>
+            </Show>
+          </div>
+        </div>
       </div>
       <Dialog
         open={previewAttachment() !== null}

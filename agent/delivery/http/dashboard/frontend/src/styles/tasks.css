@@ -132,6 +132,8 @@
   position: sticky;
   top: 58px;
   z-index: 12;
+  flex-wrap: wrap;
+  gap: 10px;
   border-radius: var(--radius) var(--radius) 0 0;
   background: var(--surface);
 }
@@ -155,5 +157,16 @@
 
 .is-hidden {
   display: none;
+}
+
+@media (max-width: 640px) {
+  .task-history-header {
+    top: 48px;
+  }
+
+  .task-workspace-filter {
+    width: 100%;
+    max-width: 100%;
+  }
 }
 

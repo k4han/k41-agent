@@ -8,7 +8,6 @@ import {
   FolderPlus,
   GitCompare,
   MoreHorizontal,
-  PanelRightClose,
   Pencil,
   Plus,
   RefreshCw,
@@ -1001,13 +1000,13 @@ export function WorkspaceExplorer(props: {
         </button>
         <Show when={props.onCollapse}>
           <button
-            class="workspace-icon-btn workspace-collapse-btn"
+            class="workspace-icon-btn workspace-collapse-btn workspace-explorer-close-btn"
             type="button"
             onClick={props.onCollapse}
-            title="Collapse workspace"
-            aria-label="Collapse workspace"
+            title="Close workspace explorer"
+            aria-label="Close workspace explorer"
           >
-            <PanelRightClose size={20} />
+            <X size={18} />
           </button>
         </Show>
       </div>

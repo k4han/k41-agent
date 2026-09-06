@@ -340,7 +340,11 @@
   color: #fff;
   font-size: 12px;
   font-weight: 600;
-  padding: 4px 12px;
+  padding: 8px 12px;
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   border-radius: 4px;
   flex-shrink: 0;
@@ -349,6 +353,18 @@
 
 .chat-recursion-warning-btn:hover {
   opacity: 0.9;
+}
+
+@media (max-width: 640px) {
+  .chat-recursion-warning {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .chat-recursion-warning-btn {
+    width: 100%;
+    min-height: 40px;
+  }
 }
 
 

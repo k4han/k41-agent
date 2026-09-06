@@ -73,7 +73,7 @@ import {
   ATTACHMENT_ACCEPT,
   DEFAULT_ATTACHMENT_MESSAGE,
 } from "@/lib/chatTypes";
-import { ACTIVE_TASK_STATUSES, MOBILE_MEDIA_QUERY } from "@/lib/uiConstants";
+import { ACTIVE_TASK_STATUSES, DRAWER_MEDIA_QUERY, MOBILE_MEDIA_QUERY } from "@/lib/uiConstants";
 import { createMediaQuery } from "@/lib/useMediaQuery";
 import { useChatScroll } from "@/lib/useChatScroll";
 import { useChatStreams } from "@/lib/useChatStreams";
@@ -179,6 +179,7 @@ export function ChatPage() {
   const [currentThreadId, setCurrentThreadId] = createSignal("");
   const [activeCheckpointId, setActiveCheckpointId] = createSignal("");
   const [threadTitleOverride, setThreadTitleOverride] = createSignal("");
+  const isDrawerActive = createMediaQuery(DRAWER_MEDIA_QUERY);
   const isMobileViewport = createMediaQuery(MOBILE_MEDIA_QUERY);
 
   const [agentName, setAgentName] = createSignal("");
@@ -1646,7 +1647,7 @@ export function ChatPage() {
             <section class="panel chat-panel">
               <div class="chat-header">
                 <div class="chat-header-left">
-                  <Show when={isMobileViewport()}>
+                  <Show when={isDrawerActive()}>
                     <button
                       class="chat-header-menu-toggle"
                       type="button"

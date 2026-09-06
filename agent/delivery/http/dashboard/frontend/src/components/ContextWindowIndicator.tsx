@@ -1,3 +1,4 @@
+import { createSignal, onCleanup, onMount } from "solid-js";
 import { useToast } from "@/components/Toast";
 
 export interface ContextWindowData {
@@ -22,23 +23,45 @@ export interface ContextWindowIndicatorProps {
 
 export function ContextWindowIndicator(props: ContextWindowIndicatorProps) {
   const { showToast } = useToast();
+  const [isOpen, setIsOpen] = createSignal(false);
+  let containerRef: HTMLDivElement | undefined;
+
+  const handleToggle = (e: MouseEvent) => {
+    e.stopPropagation();
+    setIsOpen(!isOpen());
+  };
+
+  const handleDocumentClick = (e: MouseEvent) => {
+    if (isOpen() && containerRef && !containerRef.contains(e.target as Node)) {
+      setIsOpen(false);
+    }
+  };
+
+  onMount(() => {
+    document.addEventListener("click", handleDocumentClick);
+  });
+
+  onCleanup(() => {
+    document.removeEventListener("click", handleDocumentClick);
+  });
 
   const handleCompactClick = (e: MouseEvent) => {
     e.preventDefault();
     if (props.onCompactClick) {
       props.onCompactClick();
     } else {
-      showToast("Tính năng Compact Conversation đang được phát triển!", "warning");
+      showToast("Compact Conversation feature is under development!", "warning");
     }
   };
 
   return (
-    <div class="context-window-wrapper">
+    <div ref={containerRef} class={`context-window-wrapper ${isOpen() ? "is-open" : ""}`}>
       <button
         class="context-window-circle-btn"
         type="button"
-        title="Xem chi tiết Context Window"
-        aria-label="Xem chi tiết Context Window"
+        onClick={handleToggle}
+        title="View Context Window details"
+        aria-label="View Context Window details"
       >
         <svg width="18" height="18" viewBox="0 0 20 20">
           <circle cx="10" cy="10" r="8" fill="none" stroke="rgba(255, 255, 255, 0.15)" stroke-width="2.5" />

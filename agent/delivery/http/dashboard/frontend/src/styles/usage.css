@@ -215,3 +215,12 @@
   text-align: center;
   line-height: 1.5;
 }
+
+/* --- Mobile search input (≤640px) ----------------------------------- */
+@media (max-width: 640px) {
+  .usage-search input {
+    font-size: 16px !important;
+    min-height: 42px !important;
+  }
+}
+
