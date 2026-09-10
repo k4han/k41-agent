@@ -19,6 +19,7 @@ export interface ContextWindowData {
 export interface ContextWindowIndicatorProps {
   data: ContextWindowData;
   onCompactClick?: () => void;
+  compacting?: boolean;
 }
 
 export function ContextWindowIndicator(props: ContextWindowIndicatorProps) {
@@ -47,6 +48,9 @@ export function ContextWindowIndicator(props: ContextWindowIndicatorProps) {
 
   const handleCompactClick = (e: MouseEvent) => {
     e.preventDefault();
+    if (props.compacting) {
+      return;
+    }
     if (props.onCompactClick) {
       props.onCompactClick();
     } else {
@@ -131,9 +135,10 @@ export function ContextWindowIndicator(props: ContextWindowIndicatorProps) {
         <button 
           class="cw-compact-btn" 
           type="button" 
+          disabled={props.compacting}
           onClick={handleCompactClick}
         >
-          Compact Conversation
+          {props.compacting ? "Compacting..." : "Compact Conversation"}
         </button>
       </div>
     </div>

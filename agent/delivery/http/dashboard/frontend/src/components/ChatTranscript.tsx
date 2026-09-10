@@ -1,4 +1,4 @@
-import { ArrowDown } from "lucide-solid";
+import { ArrowDown, Loader2 } from "lucide-solid";
 import { For, Show } from "solid-js";
 
 import { TranscriptItemView, type TranscriptAttachment, type TranscriptRole } from "@/components/Transcript";
@@ -16,6 +16,7 @@ export interface ChatTranscriptProps {
   currentThreadId: string;
   streaming: boolean;
   backgroundLive: boolean;
+  compacting?: boolean;
   autoScroll: boolean;
   turnAnchorSpacerHeight: number;
   onScrollToBottomClick: () => void;
@@ -102,6 +103,14 @@ export function ChatTranscript(props: ChatTranscriptProps) {
               />
             )}
           </For>
+          <Show when={props.compacting}>
+            <div class="transcript-compacting-indicator" role="status" aria-live="polite">
+              <div class="transcript-compacting-indicator-inner">
+                <Loader2 size={16} class="spin-icon" />
+                <span class="transcript-compacting-text">Compacting conversation...</span>
+              </div>
+            </div>
+          </Show>
           <Show when={props.turnAnchorSpacerHeight > 0}>
             <div
               class="transcript-anchor-spacer"

@@ -335,7 +335,7 @@ export function ChatPage() {
   });
   const { attachments, addFiles, addTextContent, removeAttachment, clearAttachments, clearAllAttachments } = attach;
 
-  const { contextWindowData } = useContextWindow({
+  const { contextWindowData, refreshThreadUsage, updateContextTokens } = useContextWindow({
     getCurrentThreadId: currentThreadId,
     getStreaming: streaming,
     getSelectedCard: selectedCard,
@@ -345,6 +345,8 @@ export function ChatPage() {
     getAttachments: attachments,
     getItems: items,
   });
+
+  const [compacting, setCompacting] = createSignal(false);
 
   const filteredItems = createMemo(() =>
     items().filter(
@@ -371,6 +373,21 @@ export function ChatPage() {
     }
     return null;
   });
+
+  const pendingPlanReview = createMemo(() => {
+    const allItems = items();
+    for (let index = allItems.length - 1; index >= 0; index -= 1) {
+      const item = allItems[index];
+      if (item.type === "plan_review" && item.status === "pending") {
+        return item;
+      }
+    }
+    return null;
+  });
+
+  const hasPendingInterrupt = createMemo(() => (
+    Boolean(pendingUserInputRequest()) || Boolean(pendingPlanReview())
+  ));
 
   const currentTodos = createMemo(() => {
     const allItems = items();
@@ -662,12 +679,12 @@ export function ChatPage() {
   ));
   const workspaceLocked = createMemo(() => Boolean(currentThreadId() && workingDir().trim()));
   const composerDisabled = createMemo(() => (
-    conversationBusy() || Boolean(pendingUserInputRequest())
+    conversationBusy() || hasPendingInterrupt() || compacting()
   ));
   const inputDisabled = createMemo(() => (
-    threadLoading() || Boolean(pendingUserInputRequest())
+    threadLoading() || hasPendingInterrupt() || compacting()
   ));
-  const userInputRequestDisabled = createMemo(() => conversationBusy());
+  const userInputRequestDisabled = createMemo(() => conversationBusy() || compacting());
 
   const loadThread = async (threadId: string, checkpointId = "") => {
     const requestId = threadLoadRequestId + 1;
@@ -932,6 +949,10 @@ export function ChatPage() {
     cleanupStaleStreams();
     if (streaming()) {
       showToast("Wait for the current response to finish.", "warning");
+      return;
+    }
+    if (compacting()) {
+      showToast("Wait for compaction to finish.", "warning");
       return;
     }
     const selectedAttachments = attachments();
@@ -1277,7 +1298,7 @@ export function ChatPage() {
       showToast("Select a target agent.", "warning");
       return;
     }
-    if (conversationBusy()) {
+    if (conversationBusy() || compacting()) {
       showToast("Wait for the current response to finish.", "warning");
       return;
     }
@@ -1322,7 +1343,7 @@ export function ChatPage() {
       showToast("Enter feedback before sending.", "warning");
       return;
     }
-    if (conversationBusy()) {
+    if (conversationBusy() || compacting()) {
       showToast("Wait for the current response to finish.", "warning");
       return;
     }
@@ -1340,7 +1361,7 @@ export function ChatPage() {
   };
 
   const handleSubmitUserInputRequest = (payload: UserInputRequestSubmitPayload) => {
-    if (conversationBusy()) {
+    if (conversationBusy() || compacting()) {
       showToast("Wait for the current response to finish.", "warning");
       return;
     }
@@ -1371,7 +1392,7 @@ export function ChatPage() {
 
   const handleBranchSelect = (checkpointId: string) => {
     const threadId = currentThreadId();
-    if (!threadId || !checkpointId || checkpointId === activeCheckpointId() || conversationBusy()) {
+    if (!threadId || !checkpointId || checkpointId === activeCheckpointId() || conversationBusy() || compacting()) {
       return;
     }
     void loadThread(threadId, checkpointId);
@@ -1388,7 +1409,7 @@ export function ChatPage() {
     if (!threadId || !nextText) {
       return;
     }
-    if (conversationBusy()) {
+    if (conversationBusy() || compacting()) {
       showToast("Wait for the current response to finish.", "warning");
       return;
     }
@@ -1609,6 +1630,75 @@ export function ChatPage() {
     window.removeEventListener(CUSTOM_DOM_EVENTS.TRANSCRIPT_TOOL_TOGGLE, handleTranscriptToolToggle);
   });
 
+  const handleCompactConversation = async () => {
+    const threadId = currentThreadId();
+    if (!threadId) {
+      showToast("No active conversation to compact.", "warning");
+      return;
+    }
+    if (compacting()) {
+      return;
+    }
+    if (streaming() || conversationBusy()) {
+      showToast("Cannot compact while agent is running.", "warning");
+      return;
+    }
+    if (hasPendingInterrupt()) {
+      showToast("Cannot compact while conversation is awaiting your input.", "warning");
+      return;
+    }
+    const currentItems = items();
+    if (currentItems.length < 3) {
+      showToast("Conversation has too few messages to compact.", "warning");
+      return;
+    }
+
+    setCompacting(true);
+    scroll.setAutoScroll(true);
+    scroll.scrollToBottom(true);
+    try {
+      const payload = await postJson<ThreadMessagesPayload & {
+        compacted_count: number;
+        kept_count: number;
+        summary: string;
+        current_context_tokens?: number;
+        retained_tokens?: number;
+      }>(`/dashboard-api/chat-history/${encodeURIComponent(threadId)}/compact`, {});
+
+      if (currentThreadId() !== threadId) {
+        return;
+      }
+      if (payload && Array.isArray(payload.messages)) {
+        if (payload.thread_id && payload.thread_id !== threadId) {
+          showToast("Failed to compact conversation: invalid server response.", "error");
+          return;
+        }
+        setActiveCheckpointId(payload.active_checkpoint_id || "");
+        const newTranscriptItems = toThreadTranscript(payload.messages, threadId).map((item) => ({
+          ...item,
+          id: allocItemId(),
+        }));
+        setItems(newTranscriptItems, threadId);
+        const nextTokens = payload.current_context_tokens ?? payload.retained_tokens;
+        if (typeof nextTokens === "number") {
+          updateContextTokens(nextTokens);
+        }
+        void refreshThreadUsage(threadId);
+        showToast(
+          `Conversation compacted! Summarized ${payload.compacted_count} earlier message(s).`,
+          "success",
+        );
+      } else {
+        showToast("Failed to compact conversation: invalid server response.", "error");
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to compact conversation.";
+      showToast(message, "error");
+    } finally {
+      setCompacting(false);
+    }
+  };
+
   let touchStartX = 0;
   let touchStartY = 0;
 
@@ -1724,6 +1814,7 @@ export function ChatPage() {
                 currentThreadId={currentThreadId()}
                 streaming={streaming()}
                 backgroundLive={backgroundLive()}
+                compacting={compacting()}
                 autoScroll={autoScroll()}
                 turnAnchorSpacerHeight={turnAnchorSpacerHeight()}
                 onScrollToBottomClick={handleScrollToBottomClick}
@@ -1773,6 +1864,8 @@ export function ChatPage() {
                 todosExpanded={todosExpanded()}
                 onTodosToggle={() => setTodosExpanded(!todosExpanded())}
                 contextWindowData={contextWindowData()}
+                compacting={compacting()}
+                onCompactClick={handleCompactConversation}
                 userInputRequest={pendingUserInputRequest()}
                 userInputRequestDisabled={userInputRequestDisabled()}
                 onSubmitUserInputRequest={handleSubmitUserInputRequest}

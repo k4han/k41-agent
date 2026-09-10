@@ -1571,6 +1571,55 @@ def test_dashboard_api_renames_chat_thread(monkeypatch: pytest.MonkeyPatch) -> N
     assert response.json()["workspace_key"] == "no-workspace"
 
 
+def test_dashboard_api_compacts_chat_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_compact(thread_id: str, keep_recent_messages: int | None = None):
+        assert thread_id == "api_dashboard_123"
+        assert keep_recent_messages == 6
+        return {
+            "status": "compacted",
+            "thread_id": thread_id,
+            "active_checkpoint_id": "ckpt-compacted",
+            "messages": [
+                {"role": "user", "content": "summary"},
+                {"role": "assistant", "content": "ack"},
+            ],
+            "compacted_count": 5,
+            "kept_count": 4,
+            "summary": "Sample summary",
+        }
+
+    async def fake_get_conversation_thread(thread_id: str):
+        return {
+            "thread_id": thread_id,
+            "platform": "api",
+            "user_id": "dashboard",
+            "channel_id": "123",
+            "agent_name": "default",
+            "title": "Existing thread",
+            "kind": "user",
+        }
+
+    async def fake_workspace_ref_for_thread(thread_id: str, include_default: bool = True):
+        return None
+
+    _patch_dashboard_attr(monkeypatch, "compact_conversation_thread", fake_compact)
+    _patch_dashboard_attr(monkeypatch, "get_conversation_thread", fake_get_conversation_thread)
+    _patch_dashboard_attr(monkeypatch, "workspace_ref_for_thread", fake_workspace_ref_for_thread)
+
+    client = _create_dashboard_client(ChannelManager())
+    response = client.post(
+        "/dashboard-api/chat-history/api_dashboard_123/compact",
+        json={"keep_recent_messages": 6},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "compacted"
+    assert data["active_checkpoint_id"] == "ckpt-compacted"
+    assert len(data["messages"]) == 2
+    assert data["compacted_count"] == 5
+
+
 def test_dashboard_background_task_events_streams_snapshot_and_done(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

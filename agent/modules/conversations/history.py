@@ -353,6 +353,11 @@ def _checkpoint_messages(checkpoint_tuple: Any) -> list[Any]:
     return list(messages) if isinstance(messages, list) else []
 
 
+def checkpoint_messages(checkpoint_tuple: Any) -> list[Any]:
+    """Public accessor for messages stored in a checkpoint tuple."""
+    return _checkpoint_messages(checkpoint_tuple)
+
+
 def _message_content_key(msg: Any) -> str:
     if isinstance(msg, HumanMessage):
         attachments = _serialize_message_attachments(msg)

@@ -229,12 +229,14 @@
 .chat-shell-resizable.workspace-open .transcript > .tool-html-preview:not(.is-fullwidth),
 .chat-shell-resizable.workspace-open .transcript > .empty,
 .chat-shell-resizable.workspace-open .transcript > .chat-workspace-empty,
+.chat-shell-resizable.workspace-open .transcript > .transcript-compacting-indicator,
 .chat-shell-resizable.workspace-closed .transcript > .message,
 .chat-shell-resizable.workspace-closed .transcript > .tool-call,
 .chat-shell-resizable.workspace-closed .transcript > .plan-review,
 .chat-shell-resizable.workspace-closed .transcript > .tool-html-preview:not(.is-fullwidth),
 .chat-shell-resizable.workspace-closed .transcript > .empty,
-.chat-shell-resizable.workspace-closed .transcript > .chat-workspace-empty {
+.chat-shell-resizable.workspace-closed .transcript > .chat-workspace-empty,
+.chat-shell-resizable.workspace-closed .transcript > .transcript-compacting-indicator {
   width: min(960px, calc(100% - 32px));
   margin-inline: auto;
 }
@@ -619,10 +621,47 @@
   }
 
   .chat-shell-resizable.workspace-open .chat-composer,
-  .chat-shell-resizable.workspace-closed .chat-composer {
+  .chat-shell-resizable.workspace-open .transcript > .transcript-compacting-indicator,
+  .chat-shell-resizable.workspace-closed .chat-composer,
+  .chat-shell-resizable.workspace-closed .transcript > .transcript-compacting-indicator {
     width: calc(100% - 16px);
     margin-inline: auto;
   }
+}
+
+/* Bottom compaction indicator - clean, card-less, centered with composer */
+.transcript-compacting-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 0 10px;
+  margin: 4px auto;
+  width: min(960px, calc(100% - 32px));
+}
+
+.transcript-compacting-indicator-inner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+}
+
+.transcript-compacting-indicator-inner .spin-icon {
+  color: var(--info, var(--primary, #3b82f6));
+  flex-shrink: 0;
+}
+
+.transcript-compacting-text {
+  color: var(--muted);
+  font-size: 13px;
+  font-style: italic;
 }
 
 

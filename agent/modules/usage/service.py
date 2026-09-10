@@ -212,7 +212,33 @@ class UsageService:
             return 0
 
     async def get_thread_usage(self, thread_id: str) -> dict[str, Any]:
-        return await self._repository.aggregate_by_thread(thread_id)
+        payload = await self._repository.aggregate_by_thread(thread_id)
+        try:
+            from agent.modules.conversations.history import (
+                checkpoint_messages,
+                get_history_checkpointer,
+            )
+            from agent.modules.workflows import make_run_config
+            from langchain_core.messages.utils import count_tokens_approximately
+
+            checkpointer = get_history_checkpointer()
+            config = make_run_config(thread_id=thread_id)
+            checkpoint_tuple = await checkpointer.aget_tuple(config)
+            if checkpoint_tuple is not None:
+                messages = checkpoint_messages(checkpoint_tuple)
+                if messages:
+                    is_compacted = any(
+                        getattr(m, "additional_kwargs", {}).get("is_compact_summary")
+                        for m in messages
+                    )
+                    if is_compacted:
+                        approx_tokens = count_tokens_approximately(messages)
+                        if approx_tokens > 0:
+                            payload["current_context_tokens"] = approx_tokens
+        except Exception as exc:
+            logger.debug("Failed to calculate active checkpoint tokens for thread %s: %s", thread_id, exc)
+
+        return payload
 
     async def get_workspace_usage(self, key: str) -> dict[str, Any]:
         return await self._repository.aggregate_by_workspace(key)

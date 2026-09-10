@@ -46,6 +46,28 @@ export function useContextWindow(params: UseContextWindowParams) {
     }
   };
 
+  const updateContextTokens = (tokens: number) => {
+    setThreadUsage((prev) => {
+      if (!prev) {
+        return {
+          thread_id: getCurrentThreadId(),
+          total_tokens: 0,
+          input_tokens: 0,
+          output_tokens: 0,
+          current_context_tokens: tokens,
+          latest_input_tokens: tokens,
+          latest_output_tokens: 0,
+          latest_total_tokens: tokens,
+          models: [],
+        };
+      }
+      return {
+        ...prev,
+        current_context_tokens: tokens,
+      };
+    });
+  };
+
   createEffect(() => {
     const threadId = getCurrentThreadId();
     const isStreaming = getStreaming();
@@ -140,5 +162,9 @@ export function useContextWindow(params: UseContextWindowParams) {
     };
   });
 
-  return { contextWindowData };
+  return {
+    contextWindowData,
+    refreshThreadUsage: fetchThreadUsage,
+    updateContextTokens,
+  };
 }

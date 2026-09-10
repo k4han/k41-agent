@@ -25,12 +25,16 @@ from agent.delivery.http.dashboard.routes.helpers.workspace import (
 from agent.modules.agent_runtime import get_background_task_manager, get_background_task_repository
 from agent.modules.conversations import (
     CheckpointNotFoundError,
+    CompactionConflictError,
+    CompactionSummaryError,
     ConversationHistoryUnavailableError,
     THREAD_KIND_BACKGROUND,
+    compact_conversation_thread,
     get_checkpoint_stats,
     get_conversation_thread,
     get_thread_messages,
     get_thread_messages_payload,
+    has_pending_interrupt,
     list_background_threads_with_stats,
     list_user_threads_with_stats,
     mark_conversation_thread_deleted,
@@ -56,6 +60,17 @@ class RenameThreadBody(BaseModel):
     """Request body for renaming a conversation thread."""
 
     title: str = Field(..., min_length=1, max_length=255, description="New title for the thread (1-255 characters).")
+
+
+class CompactThreadBody(BaseModel):
+    """Request body for compacting a conversation thread."""
+
+    keep_recent_messages: int | None = Field(
+        default=None,
+        ge=2,
+        le=50,
+        description="Number of recent messages to keep intact (default: configured value or 6).",
+    )
 
 
 def _parse_thread_id_safe(thread_id: str) -> dict[str, str]:
@@ -228,6 +243,63 @@ async def delete_chat_thread(thread_id: str) -> dict[str, str]:
     await mark_conversation_thread_deleted(thread_id)
     await delete_workflow_thread_tree(thread_id)
     return {"status": "deleted", "thread_id": thread_id}
+
+
+@router.post("/dashboard-api/chat-history/{thread_id:path}/compact")
+async def compact_chat_thread(
+    thread_id: str,
+    body: CompactThreadBody = CompactThreadBody(),
+) -> dict[str, Any]:
+    """Compact older messages in a conversation thread into a summary."""
+    if active_session_for_thread(thread_id) is not None:
+        raise HTTPException(status_code=409, detail="Cannot compact while agent is running.")
+    try:
+        running_task = get_background_task_manager().get_by_thread_id(thread_id)
+    except Exception:
+        running_task = None
+    if is_active_background_task(running_task):
+        raise HTTPException(status_code=409, detail="Cannot compact while agent is running.")
+    try:
+        if await has_pending_interrupt(thread_id):
+            raise HTTPException(
+                status_code=409,
+                detail="Cannot compact while conversation is awaiting user input.",
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.debug("Failed to check pending interrupt for thread %s: %s", thread_id, exc)
+    try:
+        result = await compact_conversation_thread(
+            thread_id,
+            keep_recent_messages=body.keep_recent_messages,
+        )
+    except CompactionConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except CompactionSummaryError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Failed to compact conversation thread %s: %s", thread_id, exc)
+        raise HTTPException(status_code=500, detail="Failed to compact conversation thread.") from exc
+
+    try:
+        metadata = await get_conversation_thread(thread_id)
+        parsed = metadata or _parse_thread_id_safe(thread_id)
+        workspace = await workspace_ref_for_thread(thread_id, include_default=False)
+    except Exception as exc:
+        logger.warning("Failed to load thread metadata after compaction for %s: %s", thread_id, exc)
+        parsed = _parse_thread_id_safe(thread_id)
+        workspace = None
+
+    return {
+        **result,
+        "workspace": workspace.model_dump() if workspace else None,
+        **parsed,
+    }
 
 
 # --- background task conversation endpoints -------------------------------------------

@@ -53,6 +53,8 @@ export interface ChatComposerProps {
   todosExpanded: boolean;
   onTodosToggle: () => void;
   contextWindowData: ContextWindowData;
+  onCompactClick?: () => void;
+  compacting?: boolean;
   userInputRequest: TranscriptUserInputRequest | null;
   userInputRequestDisabled: boolean;
   onSubmitUserInputRequest: (payload: UserInputRequestSubmitPayload) => void;
@@ -399,7 +401,11 @@ export function ChatComposer(props: ChatComposerProps) {
               </Show>
             </div>
             <Show when={props.currentThreadId}>
-              <ContextWindowIndicator data={props.contextWindowData} />
+              <ContextWindowIndicator
+                data={props.contextWindowData}
+                onCompactClick={props.onCompactClick}
+                compacting={props.compacting}
+              />
             </Show>
           </div>
           <div class="chat-composer-right-group">
