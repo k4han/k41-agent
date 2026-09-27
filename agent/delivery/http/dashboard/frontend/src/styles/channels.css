@@ -63,6 +63,11 @@
   color: var(--fg);
 }
 
+.channel-brand-icon[data-brand="google-calendar"] {
+  background: color-mix(in srgb, #4285f4 14%, var(--surface));
+  color: #4285f4;
+}
+
 .dark .channel-brand-icon[data-brand="github"] {
   background: color-mix(in srgb, #ffffff 8%, var(--surface));
   color: var(--fg);
@@ -525,4 +530,197 @@
     grid-column: 1 / -1;
     justify-self: start;
   }
+}
+
+/* --- Google Calendar connection card --- */
+
+.gcal-card {
+  max-width: 640px;
+  width: 100%;
+  min-width: 0;
+}
+
+.gcal-account-box {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: 1px solid color-mix(in srgb, var(--success) 35%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--success) 6%, var(--surface));
+  padding: 14px 16px;
+  min-width: 0;
+}
+
+.gcal-account-info {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.gcal-account-avatar {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--success) 18%, var(--surface));
+  color: var(--success);
+  flex-shrink: 0;
+}
+
+.gcal-account-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.gcal-account-label {
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.gcal-account-email {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+
+.gcal-account-status {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.gcal-account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+
+.gcal-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  min-width: 0;
+}
+
+.gcal-toggle-desc {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.gcal-toggle-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.gcal-connect-cta {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.gcal-connect-desc {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.gcal-details-dropdown {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow: hidden;
+  min-width: 0;
+}
+
+.gcal-details-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  user-select: none;
+  background: var(--surface-2);
+  transition: background-color 120ms ease;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.gcal-details-summary:hover {
+  background: var(--surface-3);
+}
+
+.gcal-details-content {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  min-width: 0;
+}
+
+.gcal-scopes-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.gcal-scope-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
+  color: var(--muted);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gcal-text-break {
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.gcal-code-break {
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap !important;
+  max-height: 80px;
+  overflow-y: auto;
 }
