@@ -202,6 +202,16 @@ export function ToolsPage() {
                           DuckDuckGo operates without API credentials.
                         </div>
                       </Show>
+                      <Show when={group.tool === "web_fetch" && (drafts()["tools.web_fetch.provider"] ?? payload.settings["tools.web_fetch.provider"]?.value) === "local"}>
+                        <div class="hint" style={{ padding: "10px 16px" }}>
+                          Local fetch operates directly via HTTP without API credentials.
+                        </div>
+                      </Show>
+                      <Show when={group.tool === "web_search" || group.tool === "web_fetch"}>
+                        <div class="hint" style={{ padding: "6px 16px 12px", "font-size": "12px", opacity: 0.85 }}>
+                          💡 Firecrawl and Tavily credentials configured in either web_search or web_fetch are automatically shared if one is left empty.
+                        </div>
+                      </Show>
                     </SettingsSection>
                   )}
                 </For>

@@ -504,3 +504,555 @@ def test_tool_config_field_show_when_serialization():
     )
     d = field.to_dict()
     assert d["show_when"] == {"provider": ["auto", "google"]}
+
+
+def test_web_fetch_registers_config_schema():
+    meta = getattr(web_fetch_module.web_fetch, META_ATTR)
+    assert meta.config_schema is not None
+    fields = meta.config_schema.field_map()
+    assert set(fields) == {
+        "provider",
+        "firecrawl_api_key",
+        "firecrawl_base_url",
+        "tavily_api_key",
+    }
+    assert fields["provider"].options == ("auto", "local", "firecrawl", "tavily")
+    assert fields["provider"].default == "auto"
+    assert fields["firecrawl_api_key"].secret is True
+    assert fields["firecrawl_api_key"].input_type == "password"
+    assert fields["firecrawl_api_key"].show_when == {"provider": ("auto", "firecrawl")}
+    assert fields["firecrawl_base_url"].show_when == {"provider": ("auto", "firecrawl")}
+    assert fields["tavily_api_key"].secret is True
+    assert fields["tavily_api_key"].input_type == "password"
+    assert fields["tavily_api_key"].show_when == {"provider": ("auto", "tavily")}
+    assert meta.factory is web_fetch_module._build_web_fetch_tool
+
+
+def test_web_fetch_unknown_provider_raises():
+    import pytest
+
+    with pytest.raises(ValueError, match="Unknown web_fetch provider 'invalid'"):
+        web_fetch_module._build_web_fetch_tool({"provider": "invalid"})
+
+
+def test_web_fetch_local_mode(monkeypatch):
+    html = b"<html><body><main><h1>Hello World</h1><p>Test paragraph</p></main></body></html>"
+
+    class _FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def stream(self, method, url):
+            resp = _FakeResponse([html])
+            resp.headers = {"content-type": "text/html"}
+            return resp
+
+    monkeypatch.setattr(web_fetch_module.httpx, "Client", _FakeClient)
+
+    tool = web_fetch_module._build_web_fetch_tool({"provider": "local"})
+    result = tool.func("https://example.com")
+    assert "# Hello World" in result
+    assert "Test paragraph" in result
+
+
+def test_web_fetch_firecrawl_mode_credentials(monkeypatch):
+    seen = {}
+
+    def _fake_firecrawl(url, **kwargs):
+        seen.update(kwargs)
+        return "firecrawl-content"
+
+    monkeypatch.setattr(web_fetch_module, "_firecrawl_fetch", _fake_firecrawl)
+
+    # Missing credentials raises INVALID_INPUT
+    monkeypatch.delenv("FIRECRAWL_API_KEY", raising=False)
+    monkeypatch.delenv("FIRECRAWL_BASE_URL", raising=False)
+    tool_missing = web_fetch_module._build_web_fetch_tool({"provider": "firecrawl"})
+    try:
+        tool_missing.func("https://example.com")
+    except ToolError as exc:
+        assert exc.code == ToolErrorCode.INVALID_INPUT
+        assert "Firecrawl" in str(exc)
+    else:
+        raise AssertionError("expected ToolError for missing Firecrawl credentials")
+
+    # Self-hosted base URL alone is accepted (keyless)
+    seen.clear()
+    tool_self_hosted = web_fetch_module._build_web_fetch_tool(
+        {"provider": "firecrawl", "firecrawl_base_url": "https://custom.firecrawl.local/v2"}
+    )
+    assert tool_self_hosted.func("https://example.com") == "firecrawl-content"
+    assert seen == {"api_key": "", "base_url": "https://custom.firecrawl.local/v2"}
+
+    # Configured credentials
+    seen.clear()
+    tool_configured = web_fetch_module._build_web_fetch_tool(
+        {
+            "provider": "firecrawl",
+            "firecrawl_api_key": "fc-key-123",
+            "firecrawl_base_url": "https://custom.firecrawl.local/v2",
+        }
+    )
+    assert tool_configured.func("https://example.com") == "firecrawl-content"
+    assert seen == {
+        "api_key": "fc-key-123",
+        "base_url": "https://custom.firecrawl.local/v2",
+    }
+
+    # Env credentials fallback
+    seen.clear()
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "env-fc-key")
+    monkeypatch.setenv("FIRECRAWL_BASE_URL", "https://env.firecrawl.local/v2")
+    tool_env = web_fetch_module._build_web_fetch_tool({"provider": "firecrawl"})
+    assert tool_env.func("https://example.com") == "firecrawl-content"
+    assert seen == {
+        "api_key": "env-fc-key",
+        "base_url": "https://env.firecrawl.local/v2",
+    }
+
+
+def test_firecrawl_scrape_url_resolution(monkeypatch):
+    recorded_urls = []
+
+    class _CaptureClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, url, json, **kwargs):
+            recorded_urls.append(url)
+            import httpx
+
+            req = httpx.Request("POST", url)
+            return httpx.Response(
+                200,
+                request=req,
+                json={"success": True, "data": {"markdown": "# Scraped"}},
+            )
+
+    monkeypatch.setattr(web_fetch_module.httpx, "Client", _CaptureClient)
+
+    # Empty base URL -> defaults to official scrape endpoint
+    web_fetch_module._firecrawl_fetch("https://example.com", base_url="")
+    assert recorded_urls[-1] == "https://api.firecrawl.dev/v2/scrape"
+
+    # Whitespace base URL -> defaults to official scrape endpoint
+    web_fetch_module._firecrawl_fetch("https://example.com", base_url="   ")
+    assert recorded_urls[-1] == "https://api.firecrawl.dev/v2/scrape"
+
+    # Trailing slash base URL
+    web_fetch_module._firecrawl_fetch("https://example.com", base_url="https://api.firecrawl.dev/v2/")
+    assert recorded_urls[-1] == "https://api.firecrawl.dev/v2/scrape"
+
+    # Already containing /scrape
+    web_fetch_module._firecrawl_fetch("https://example.com", base_url="https://api.firecrawl.dev/v2/scrape")
+    assert recorded_urls[-1] == "https://api.firecrawl.dev/v2/scrape"
+
+    # Custom self-hosted instance
+    web_fetch_module._firecrawl_fetch("https://example.com", base_url="http://localhost:3002")
+    assert recorded_urls[-1] == "http://localhost:3002/scrape"
+
+
+def test_firecrawl_scrape_response_handling(monkeypatch):
+    import httpx
+
+    class _MockClient:
+        def __init__(self, response_data, status_code=200):
+            self._response_data = response_data
+            self._status_code = status_code
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, url, json, **kwargs):
+            req = httpx.Request("POST", url)
+            return httpx.Response(self._status_code, request=req, json=self._response_data)
+
+    # Success with markdown
+    monkeypatch.setattr(
+        web_fetch_module.httpx,
+        "Client",
+        lambda *args, **kwargs: _MockClient({"success": True, "data": {"markdown": "Hello Firecrawl"}}),
+    )
+    assert web_fetch_module._firecrawl_fetch("https://example.com") == "Hello Firecrawl"
+
+    # Success: false raises ToolError UPSTREAM
+    monkeypatch.setattr(
+        web_fetch_module.httpx,
+        "Client",
+        lambda *args, **kwargs: _MockClient({"success": False, "error": "Rate limit exceeded"}),
+    )
+    try:
+        web_fetch_module._firecrawl_fetch("https://example.com")
+    except ToolError as exc:
+        assert exc.code == ToolErrorCode.UPSTREAM
+        assert "Rate limit exceeded" in str(exc)
+    else:
+        raise AssertionError("expected ToolError for success: false")
+
+    # Status code >= 400 in metadata raises ToolError UPSTREAM
+    monkeypatch.setattr(
+        web_fetch_module.httpx,
+        "Client",
+        lambda *args, **kwargs: _MockClient(
+            {"success": True, "data": {"markdown": "", "metadata": {"statusCode": 404, "error": "Not Found"}}}
+        ),
+    )
+    try:
+        web_fetch_module._firecrawl_fetch("https://example.com")
+    except ToolError as exc:
+        assert exc.code == ToolErrorCode.UPSTREAM
+        assert "404" in str(exc)
+    else:
+        raise AssertionError("expected ToolError for page 404")
+
+    # Empty content
+    monkeypatch.setattr(
+        web_fetch_module.httpx,
+        "Client",
+        lambda *args, **kwargs: _MockClient({"success": True, "data": {"markdown": ""}}),
+    )
+    assert web_fetch_module._firecrawl_fetch("https://example.com") == "No content found."
+
+
+def test_firecrawl_scrape_network_errors(monkeypatch):
+    import httpx
+
+    class _TimeoutClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, *args, **kwargs):
+            raise httpx.TimeoutException("scrape timed out")
+
+    monkeypatch.setattr(web_fetch_module.httpx, "Client", _TimeoutClient)
+    try:
+        web_fetch_module._firecrawl_fetch("https://example.com")
+    except ToolError as exc:
+        assert exc.code == ToolErrorCode.TIMEOUT
+        assert "timed out" in str(exc)
+    else:
+        raise AssertionError("expected Timeout ToolError")
+
+    class _StatusClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, *args, **kwargs):
+            req = httpx.Request("POST", "https://api.firecrawl.dev/v2/scrape")
+            resp = httpx.Response(401, request=req)
+            raise httpx.HTTPStatusError("unauthorized", request=req, response=resp)
+
+    monkeypatch.setattr(web_fetch_module.httpx, "Client", _StatusClient)
+    try:
+        web_fetch_module._firecrawl_fetch("https://example.com")
+    except ToolError as exc:
+        assert exc.code == ToolErrorCode.UPSTREAM
+        assert "401" in str(exc)
+    else:
+        raise AssertionError("expected UPSTREAM ToolError")
+
+
+def test_web_fetch_tavily_mode(monkeypatch):
+    seen = {}
+
+    def _fake_tavily(url, **kwargs):
+        seen.update(kwargs)
+        return "tavily-content"
+
+    monkeypatch.setattr(web_fetch_module, "_tavily_fetch", _fake_tavily)
+
+    # Missing credentials
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    tool_missing = web_fetch_module._build_web_fetch_tool({"provider": "tavily"})
+    try:
+        tool_missing.func("https://example.com")
+    except ToolError as exc:
+        assert exc.code == ToolErrorCode.INVALID_INPUT
+        assert "Tavily" in str(exc)
+    else:
+        raise AssertionError("expected ToolError for missing Tavily key")
+
+    # Configured credentials
+    tool_configured = web_fetch_module._build_web_fetch_tool(
+        {"provider": "tavily", "tavily_api_key": "tvly-123"}
+    )
+    assert tool_configured.func("https://example.com") == "tavily-content"
+    assert seen == {"api_key": "tvly-123"}
+
+    # Env credentials fallback
+    seen.clear()
+    monkeypatch.setenv("TAVILY_API_KEY", "env-tvly")
+    tool_env = web_fetch_module._build_web_fetch_tool({"provider": "tavily"})
+    assert tool_env.func("https://example.com") == "tavily-content"
+    assert seen == {"api_key": "env-tvly"}
+
+
+def test_tavily_extract_response_handling(monkeypatch):
+    import httpx
+
+    class _MockClient:
+        def __init__(self, response_data):
+            self._response_data = response_data
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, url, json, **kwargs):
+            req = httpx.Request("POST", url)
+            return httpx.Response(200, request=req, json=self._response_data)
+
+    # Success with raw_content
+    monkeypatch.setattr(
+        web_fetch_module.httpx,
+        "Client",
+        lambda *args, **kwargs: _MockClient(
+            {"results": [{"url": "https://example.com", "raw_content": "# Tavily Extracted"}]}
+        ),
+    )
+    assert (
+        web_fetch_module._tavily_fetch("https://example.com", api_key="test-key")
+        == "# Tavily Extracted"
+    )
+
+    # Failed results raises ToolError UPSTREAM
+    monkeypatch.setattr(
+        web_fetch_module.httpx,
+        "Client",
+        lambda *args, **kwargs: _MockClient(
+            {"results": [], "failed_results": [{"url": "https://example.com", "error": "Blocked by robots.txt"}]}
+        ),
+    )
+    try:
+        web_fetch_module._tavily_fetch("https://example.com", api_key="test-key")
+    except ToolError as exc:
+        assert exc.code == ToolErrorCode.UPSTREAM
+        assert "Blocked by robots.txt" in str(exc)
+    else:
+        raise AssertionError("expected ToolError for failed_results")
+
+    # Missing API key returns None
+    assert web_fetch_module._tavily_fetch("https://example.com", api_key="") is None
+
+
+def test_web_fetch_auto_cascades_through_providers(monkeypatch):
+    calls = []
+
+    def _failing_firecrawl(*args, **kwargs):
+        calls.append("firecrawl")
+        raise ToolError(ToolErrorCode.UPSTREAM, "firecrawl down")
+
+    def _failing_tavily(*args, **kwargs):
+        calls.append("tavily")
+        raise ToolError(ToolErrorCode.UPSTREAM, "tavily down")
+
+    def _fake_local(*args, **kwargs):
+        calls.append("local")
+        return "local-cascade-result"
+
+    monkeypatch.setattr(web_fetch_module, "_firecrawl_fetch", _failing_firecrawl)
+    monkeypatch.setattr(web_fetch_module, "_tavily_fetch", _failing_tavily)
+    monkeypatch.setattr(web_fetch_module, "_local_fetch", _fake_local)
+
+    tool = web_fetch_module._build_web_fetch_tool(
+        {
+            "provider": "auto",
+            "firecrawl_api_key": "fc-key",
+            "tavily_api_key": "tv-key",
+        }
+    )
+    assert tool.func("https://example.com") == "local-cascade-result"
+    assert calls == ["firecrawl", "tavily", "local"]
+
+
+def test_web_fetch_explicit_firecrawl_propagates_upstream_error(monkeypatch):
+    def _failing_firecrawl(*args, **kwargs):
+        raise ToolError(ToolErrorCode.UPSTREAM, "firecrawl down")
+
+    monkeypatch.setattr(web_fetch_module, "_firecrawl_fetch", _failing_firecrawl)
+
+    tool = web_fetch_module._build_web_fetch_tool(
+        {
+            "provider": "firecrawl",
+            "firecrawl_api_key": "fc-key",
+        }
+    )
+    try:
+        tool.func("https://example.com")
+    except ToolError as exc:
+        assert exc.code == ToolErrorCode.UPSTREAM
+        assert "firecrawl down" in str(exc)
+    else:
+        raise AssertionError("expected ToolError to propagate in firecrawl mode")
+
+
+def test_materialized_web_fetch_applies_error_normalization(monkeypatch):
+    from agent.modules.tools import ToolSource, find_descriptors, materialize_tool
+    from agent.modules.tools.middleware.base import MIDDLEWARE_APPLIED_ATTR
+
+    def _failing_firecrawl(*args, **kwargs):
+        raise ToolError(ToolErrorCode.UPSTREAM, "firecrawl down")
+
+    monkeypatch.setattr(web_fetch_module, "_firecrawl_fetch", _failing_firecrawl)
+
+    descriptor = next(
+        item
+        for item in find_descriptors(source=ToolSource.BUILTIN)
+        if item.name == "web_fetch"
+    )
+    tool = materialize_tool(
+        descriptor,
+        {
+            "web_fetch": {
+                "provider": "firecrawl",
+                "firecrawl_api_key": "fc-key",
+            }
+        },
+    )
+
+    assert getattr(tool, MIDDLEWARE_APPLIED_ATTR, False)
+    assert tool.invoke({"url": "https://example.com"}) == "[error] upstream: firecrawl down"
+
+
+def test_web_fetch_falls_back_to_web_search_settings(monkeypatch):
+    seen = {}
+
+    def _fake_firecrawl(url, **kwargs):
+        seen.update(kwargs)
+        return "firecrawl-shared"
+
+    def _fake_tavily(url, **kwargs):
+        seen.update(kwargs)
+        return "tavily-shared"
+
+    monkeypatch.setattr(web_fetch_module, "_firecrawl_fetch", _fake_firecrawl)
+    monkeypatch.setattr(web_fetch_module, "_tavily_fetch", _fake_tavily)
+    monkeypatch.delenv("FIRECRAWL_API_KEY", raising=False)
+    monkeypatch.delenv("FIRECRAWL_BASE_URL", raising=False)
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+
+    class _MockConfigService:
+        def __init__(self, settings):
+            self._settings = settings
+
+        def get(self, key):
+            return self._settings.get(key)
+
+    mock_service = _MockConfigService(
+        {
+            "tools.web_search.firecrawl_api_key": "fc-from-search",
+            "tools.web_search.firecrawl_base_url": "https://search-fc.local/v2",
+            "tools.web_search.tavily_api_key": "tv-from-search",
+        }
+    )
+    monkeypatch.setattr("agent.shared.config.get_config_service", lambda: mock_service)
+
+    # web_fetch firecrawl without explicit key uses web_search key
+    tool_fc = web_fetch_module._build_web_fetch_tool({"provider": "firecrawl"})
+    assert tool_fc.func("https://example.com") == "firecrawl-shared"
+    assert seen == {"api_key": "fc-from-search", "base_url": "https://search-fc.local/v2"}
+
+    # web_fetch tavily without explicit key uses web_search key
+    seen.clear()
+    tool_tv = web_fetch_module._build_web_fetch_tool({"provider": "tavily"})
+    assert tool_tv.func("https://example.com") == "tavily-shared"
+    assert seen == {"api_key": "tv-from-search"}
+
+
+def test_web_search_falls_back_to_web_fetch_settings(monkeypatch):
+    seen = {}
+
+    def _fake_firecrawl(query, num_results=5, **kwargs):
+        seen.update(kwargs)
+        return "firecrawl-shared-search"
+
+    def _fake_tavily(query, num_results=5, **kwargs):
+        seen.update(kwargs)
+        return "tavily-shared-search"
+
+    monkeypatch.setattr(web_search_module, "_firecrawl_search", _fake_firecrawl)
+    monkeypatch.setattr(web_search_module, "_tavily_search", _fake_tavily)
+    monkeypatch.delenv("FIRECRAWL_API_KEY", raising=False)
+    monkeypatch.delenv("FIRECRAWL_BASE_URL", raising=False)
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+
+    class _MockConfigService:
+        def __init__(self, settings):
+            self._settings = settings
+
+        def get(self, key):
+            return self._settings.get(key)
+
+    mock_service = _MockConfigService(
+        {
+            "tools.web_fetch.firecrawl_api_key": "fc-from-fetch",
+            "tools.web_fetch.firecrawl_base_url": "https://fetch-fc.local/v2",
+            "tools.web_fetch.tavily_api_key": "tv-from-fetch",
+        }
+    )
+    monkeypatch.setattr("agent.shared.config.get_config_service", lambda: mock_service)
+
+    # web_search firecrawl without explicit key uses web_fetch key
+    tool_fc = web_search_module._build_web_search_tool({"provider": "firecrawl"})
+    assert tool_fc.func("example") == "firecrawl-shared-search"
+    assert seen == {"api_key": "fc-from-fetch", "base_url": "https://fetch-fc.local/v2"}
+
+    # web_search tavily without explicit key uses web_fetch key
+    seen.clear()
+    tool_tv = web_search_module._build_web_search_tool({"provider": "tavily"})
+    assert tool_tv.func("example") == "tavily-shared-search"
+    assert seen == {"api_key": "tv-from-fetch"}
+
+
+def test_web_fetch_tool_config_overrides_peer_settings(monkeypatch):
+    seen = {}
+
+    def _fake_firecrawl(url, **kwargs):
+        seen.update(kwargs)
+        return "firecrawl-content"
+
+    monkeypatch.setattr(web_fetch_module, "_firecrawl_fetch", _fake_firecrawl)
+
+    class _MockConfigService:
+        def get(self, key):
+            if key == "tools.web_search.firecrawl_api_key":
+                return "fc-from-search"
+            return None
+
+    monkeypatch.setattr("agent.shared.config.get_config_service", lambda: _MockConfigService())
+
+    # When web_fetch has its own configured key, it wins over peer tool config
+    tool = web_fetch_module._build_web_fetch_tool(
+        {"provider": "firecrawl", "firecrawl_api_key": "fc-fetch-override"}
+    )
+    assert tool.func("https://example.com") == "firecrawl-content"
+    assert seen["api_key"] == "fc-fetch-override"

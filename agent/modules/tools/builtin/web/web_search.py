@@ -19,7 +19,11 @@ from agent.modules.tools.domain import (
     ToolConfigSchema,
     ToolConfigValue,
 )
-from agent.modules.tools.builtin.web.web_fetch import DEFAULT_HEADERS, _read_limited_response
+from agent.modules.tools.builtin.web.web_fetch import (
+    DEFAULT_HEADERS,
+    _effective_credential,
+    _read_limited_response,
+)
 from agent.modules.tools.result import ToolError, ToolErrorCode
 
 logger = logging.getLogger(__name__)
@@ -82,8 +86,8 @@ WEB_SEARCH_CONFIG_SCHEMA = ToolConfigSchema(
             input_type="password",
             label="Tavily API Key",
             description=(
-                "Tavily Search API key. Falls back to the "
-                "TAVILY_API_KEY environment variable when empty."
+                "Tavily Search API key. Falls back to tools.web_fetch.tavily_api_key "
+                "or the TAVILY_API_KEY environment variable when empty."
             ),
             default=None,
             secret=True,
@@ -118,8 +122,8 @@ WEB_SEARCH_CONFIG_SCHEMA = ToolConfigSchema(
             input_type="password",
             label="Firecrawl API Key",
             description=(
-                "Firecrawl API key. Falls back to the "
-                "FIRECRAWL_API_KEY environment variable when empty."
+                "Firecrawl API key. Falls back to tools.web_fetch.firecrawl_api_key "
+                "or the FIRECRAWL_API_KEY environment variable when empty."
             ),
             default=None,
             secret=True,
@@ -132,7 +136,8 @@ WEB_SEARCH_CONFIG_SCHEMA = ToolConfigSchema(
             description=(
                 "Optional Firecrawl API base URL (default: https://api.firecrawl.dev/v2). "
                 "Leave empty to use the official Firecrawl API. "
-                "Falls back to the FIRECRAWL_BASE_URL environment variable when empty."
+                "Falls back to tools.web_fetch.firecrawl_base_url or the "
+                "FIRECRAWL_BASE_URL environment variable when empty."
             ),
             default="",
             show_when={"provider": ("auto", "firecrawl")},
@@ -154,19 +159,6 @@ def _format_search_results(results: list[SearchResult]) -> str:
         f"{i}. {result['title']}\n   {result['link']}\n   {result['snippet']}"
         for i, result in enumerate(results, 1)
     )
-
-
-def _effective_credential(configured: Any, env_name: str) -> str:
-    """Resolve a credential from tool config with env fallback.
-
-    The closure captures the configured value at materialization time while
-    the environment is read lazily so long-lived default instances still pick
-    up local-dev env changes.
-    """
-    text = str(configured or "").strip()
-    if text:
-        return text
-    return os.environ.get(env_name, "").strip()
 
 
 def _google_search(
@@ -534,14 +526,19 @@ def _build_web_search_tool(config: dict[str, ToolConfigValue]) -> StructuredTool
             return "No results found."
 
         if provider == "tavily":
-            api_key = _effective_credential(configured_tavily_key, "TAVILY_API_KEY")
+            api_key = _effective_credential(
+                configured_tavily_key,
+                "TAVILY_API_KEY",
+                fallback_setting_key="tools.web_fetch.tavily_api_key",
+            )
             if not api_key:
                 raise ToolError(
                     ToolErrorCode.INVALID_INPUT,
                     (
                         "Tavily search is not configured. Set the web_search "
                         "tavily_api_key in Dashboard > Settings > Tools > web_search "
-                        "(or the TAVILY_API_KEY environment variable)."
+                        "(or tools.web_fetch.tavily_api_key / the TAVILY_API_KEY "
+                        "environment variable)."
                     ),
                 )
             result = _tavily_search(query, count, api_key=api_key)
@@ -582,16 +579,25 @@ def _build_web_search_tool(config: dict[str, ToolConfigValue]) -> StructuredTool
             return "No results found."
 
         if provider == "firecrawl":
-            api_key = _effective_credential(configured_firecrawl_key, "FIRECRAWL_API_KEY")
-            base_url = _effective_credential(configured_firecrawl_base_url, "FIRECRAWL_BASE_URL")
+            api_key = _effective_credential(
+                configured_firecrawl_key,
+                "FIRECRAWL_API_KEY",
+                fallback_setting_key="tools.web_fetch.firecrawl_api_key",
+            )
+            base_url = _effective_credential(
+                configured_firecrawl_base_url,
+                "FIRECRAWL_BASE_URL",
+                fallback_setting_key="tools.web_fetch.firecrawl_base_url",
+            )
             if not (api_key or base_url):
                 raise ToolError(
                     ToolErrorCode.INVALID_INPUT,
                     (
                         "Firecrawl search is not configured. Set the web_search "
                         "firecrawl_api_key in Dashboard > Settings > Tools > web_search "
-                        "(or the FIRECRAWL_API_KEY environment variable). "
-                        "A self-hosted FIRECRAWL_BASE_URL alone is also accepted."
+                        "(or tools.web_fetch.firecrawl_api_key / the FIRECRAWL_API_KEY "
+                        "environment variable). A self-hosted FIRECRAWL_BASE_URL alone "
+                        "is also accepted."
                     ),
                 )
             result = _firecrawl_search(query, count, api_key=api_key, base_url=base_url)
@@ -613,7 +619,11 @@ def _build_web_search_tool(config: dict[str, ToolConfigValue]) -> StructuredTool
                     exc_info=True,
                 )
 
-        tavily_key = _effective_credential(configured_tavily_key, "TAVILY_API_KEY")
+        tavily_key = _effective_credential(
+            configured_tavily_key,
+            "TAVILY_API_KEY",
+            fallback_setting_key="tools.web_fetch.tavily_api_key",
+        )
         if tavily_key:
             try:
                 res = _tavily_search(query, count, api_key=tavily_key)
@@ -625,8 +635,16 @@ def _build_web_search_tool(config: dict[str, ToolConfigValue]) -> StructuredTool
                     exc_info=True,
                 )
 
-        firecrawl_key = _effective_credential(configured_firecrawl_key, "FIRECRAWL_API_KEY")
-        firecrawl_base = _effective_credential(configured_firecrawl_base_url, "FIRECRAWL_BASE_URL")
+        firecrawl_key = _effective_credential(
+            configured_firecrawl_key,
+            "FIRECRAWL_API_KEY",
+            fallback_setting_key="tools.web_fetch.firecrawl_api_key",
+        )
+        firecrawl_base = _effective_credential(
+            configured_firecrawl_base_url,
+            "FIRECRAWL_BASE_URL",
+            fallback_setting_key="tools.web_fetch.firecrawl_base_url",
+        )
         if firecrawl_key or firecrawl_base:
             try:
                 res = _firecrawl_search(
