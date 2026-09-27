@@ -5,6 +5,7 @@ param(
     [string]$ReleaseTag,
     [string]$ArtifactName,
     [string]$PythonVersion,
+    [string]$UvVersion,
     [switch]$UseBranchSource,
     [switch]$SkipInit
 )
@@ -18,6 +19,7 @@ $Branch = if ($Branch) { $Branch } elseif ($env:K41_AGENT_BRANCH) { $env:K41_AGE
 $ReleaseTag = if ($ReleaseTag) { $ReleaseTag } elseif ($env:K41_AGENT_RELEASE_TAG) { $env:K41_AGENT_RELEASE_TAG } else { "" }
 $ArtifactName = if ($ArtifactName) { $ArtifactName } elseif ($env:K41_AGENT_ARTIFACT_NAME) { $env:K41_AGENT_ARTIFACT_NAME } else { "k41-agent-release.zip" }
 $PythonVersion = if ($PythonVersion) { $PythonVersion } elseif ($env:K41_AGENT_PYTHON_VERSION) { $env:K41_AGENT_PYTHON_VERSION } else { "3.13" }
+$UvVersion = if ($UvVersion) { $UvVersion } elseif ($env:K41_AGENT_UV_VERSION) { $env:K41_AGENT_UV_VERSION } else { "0.12.13" }
 $UseBranchSource = $UseBranchSource -or ($env:K41_AGENT_USE_BRANCH_SOURCE -match "^(1|true|yes)$")
 
 $AgentName = "k41-agent"
@@ -32,6 +34,7 @@ $BinDir = Join-Path $AgentHome "bin"
 $ToolsDir = Join-Path $AgentHome "tools"
 $EnvsDir = Join-Path $AgentHome "envs"
 $DownloadDir = Join-Path $AgentHome "download"
+$BackupDir = Join-Path $AgentHome "backup"
 
 $UvExe = Join-Path $ToolsDir "uv.exe"
 $PythonExe = Join-Path $EnvsDir "Scripts\python.exe"
@@ -75,6 +78,9 @@ function Add-UserPath {
 
     if (-not $exists) {
         $newPath = (@($entries) + $PathToAdd) -join ";"
+        if ($newPath.Length -gt 1900) {
+            Write-Host "WARNING: User PATH is getting long ($($newPath.Length) chars). Windows may truncate values over ~2047 chars." -ForegroundColor Yellow
+        }
         [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
         if ($env:Path) {
             $env:Path = "$env:Path;$PathToAdd"
@@ -160,6 +166,8 @@ function Get-LocalSourceRoot {
 }
 
 function Get-UvDownloadUrl {
+    param([string]$Version = $UvVersion)
+
     $architecture = $null
     try {
         $osArchitecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
@@ -182,11 +190,19 @@ function Get-UvDownloadUrl {
 
     $architecture = $architecture.ToLowerInvariant()
 
+    if ([string]::IsNullOrWhiteSpace($Version) -or $Version -ieq "latest") {
+        $base = "https://github.com/astral-sh/uv/releases/latest/download"
+    } else {
+        # Upstream uv tags carry no "v" prefix (e.g. 0.12.13).
+        $pinned = $Version.Trim().TrimStart("v", "V")
+        $base = "https://github.com/astral-sh/uv/releases/download/$pinned"
+    }
+
     switch ($architecture) {
-        "amd64" { return "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip" }
-        "x64" { return "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip" }
-        "aarch64" { return "https://github.com/astral-sh/uv/releases/latest/download/uv-aarch64-pc-windows-msvc.zip" }
-        "arm64" { return "https://github.com/astral-sh/uv/releases/latest/download/uv-aarch64-pc-windows-msvc.zip" }
+        "amd64" { return "$base/uv-x86_64-pc-windows-msvc.zip" }
+        "x64" { return "$base/uv-x86_64-pc-windows-msvc.zip" }
+        "aarch64" { return "$base/uv-aarch64-pc-windows-msvc.zip" }
+        "arm64" { return "$base/uv-aarch64-pc-windows-msvc.zip" }
         default { throw "Unsupported Windows architecture: $architecture." }
     }
 }
@@ -205,8 +221,23 @@ function Install-Uv {
     }
 
     if (Test-Path -LiteralPath $UvExe -PathType Leaf) {
-        Invoke-CheckedCommand $UvExe @("--version")
-        return
+        try {
+            $installed = & $UvExe --version 2>$null
+            Write-Host "Found $installed"
+            if (-not [string]::IsNullOrWhiteSpace($UvVersion) -and $UvVersion -ine "latest") {
+                $wanted = $UvVersion.Trim().TrimStart("v", "V")
+                $installedVersion = ($installed.Trim() -split '\s+')[-1]
+                if ($installedVersion -ne $wanted) {
+                    Write-Host "Updating uv to $wanted (was: $installed)."
+                } else {
+                    return
+                }
+            } else {
+                return
+            }
+        } catch {
+            Write-Host "Existing uv check failed, reinstalling."
+        }
     }
 
     $uvArchive = Join-Path $DownloadDir "uv.zip"
@@ -217,7 +248,13 @@ function Install-Uv {
 
     $uvUrl = Get-UvDownloadUrl
     Write-Host "Downloading $uvUrl"
-    Invoke-WebRequest -Uri $uvUrl -OutFile $uvArchive
+    try {
+        Invoke-WebRequest -Uri $uvUrl -OutFile $uvArchive
+    } catch {
+        Write-Host "Failed to download uv from $uvUrl" -ForegroundColor Red
+        Write-Host "The pinned version may not exist. Retry with -UvVersion latest or set K41_AGENT_UV_VERSION=latest."
+        throw
+    }
 
     New-Item -ItemType Directory -Force -Path $uvExtractDir | Out-Null
     Expand-Archive -LiteralPath $uvArchive -DestinationPath $uvExtractDir -Force
@@ -256,6 +293,7 @@ function Copy-SourceTree {
         throw "The app directory cannot be inside the source tree. Run the installer from a clone outside AGENT_HOME."
     }
 
+    # Keep in sync with install.sh, release.yml and agent/bootstrap/update.py.
     $excludedDirs = @(
         ".git",
         ".github",
@@ -269,9 +307,11 @@ function Copy-SourceTree {
         "dist",
         "node_modules",
         "wheels",
+        "local-dev",
+        "data",
         "*.egg-info"
     )
-    $excludedFiles = @("*.pyc", "*.pyo")
+    $excludedFiles = @("*.pyc", "*.pyo", ".env", ".env.*")
 
     & robocopy $sourceResolved $destinationResolved /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /NP /XD $excludedDirs /XF $excludedFiles | Out-Host
     $robocopyExitCode = $LASTEXITCODE
@@ -319,13 +359,32 @@ function Install-Source {
     Assert-DashboardBuild $AppDir
 }
 
+function Get-NormalizedPythonVersion {
+    param([string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return ""
+    }
+    $match = [regex]::Match($Value.Trim(), "^(\d+)(?:\.(\d+))?")
+    if (-not $match.Success) {
+        return $Value.Trim()
+    }
+    $major = $match.Groups[1].Value
+    $minor = $match.Groups[2].Value
+    if ([string]::IsNullOrEmpty($minor)) {
+        return $major
+    }
+    return "$major.$minor"
+}
+
 function Ensure-Venv {
     Invoke-CheckedCommand $UvExe @("python", "install", $PythonVersion)
 
+    $wantedVersion = Get-NormalizedPythonVersion $PythonVersion
     $needsCreate = $true
     if (Test-Path -LiteralPath $PythonExe -PathType Leaf) {
         $currentVersion = & $PythonExe -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
-        if ($LASTEXITCODE -eq 0 -and $currentVersion -eq $PythonVersion) {
+        if ($LASTEXITCODE -eq 0 -and (Get-NormalizedPythonVersion $currentVersion) -eq $wantedVersion) {
             $needsCreate = $false
         }
     }
@@ -417,10 +476,12 @@ if not exist "%PYTHON_EXE%" goto no_python
 "%PYTHON_EXE%" -m agent.bootstrap.cli stop --with-tray 2>nul
 echo Existing app stop command completed (including tray).
 "%PYTHON_EXE%" -c "from agent.bootstrap.tray import disable_autostart; disable_autostart()" 2>nul
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'k41-agent-tray' -ErrorAction SilentlyContinue; Write-Host 'Removed tray autostart registry entry (if present).'"
 goto after_stop
 
 :no_python
 echo No existing virtual environment found.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'k41-agent-tray' -ErrorAction SilentlyContinue; Write-Host 'Removed tray autostart registry entry (if present).'"
 
 :after_stop
 
@@ -477,12 +538,82 @@ function Initialize-App {
     Invoke-CheckedCommand $PythonExe @("-m", "agent.bootstrap.cli", "init")
 }
 
+function Wait-ProcessExit {
+    param(
+        [int]$ProcessId,
+        [int]$TimeoutSeconds = 15
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $proc = Get-Process -Id $ProcessId -ErrorAction Stop
+            if ($proc.HasExited) {
+                return $true
+            }
+        } catch {
+            return $true
+        }
+        Start-Sleep -Milliseconds 500
+    }
+    try {
+        $proc = Get-Process -Id $ProcessId -ErrorAction Stop
+        return $proc.HasExited
+    } catch {
+        return $true
+    }
+}
+
+function Get-RunningServerPid {
+    $pidFile = Join-Path $HOME ".k41-agent\server.pid"
+    if (-not (Test-Path -LiteralPath $pidFile -PathType Leaf)) {
+        return $null
+    }
+    try {
+        return [int]((Get-Content -LiteralPath $pidFile -Raw).Trim())
+    } catch {
+        return $null
+    }
+}
+
+function Backup-AppSource {
+    if (-not (Test-Path -LiteralPath $AppDir)) {
+        return $null
+    }
+    if (-not (Test-K41ProjectRoot $AppDir)) {
+        Write-Host "Existing app directory is not a k41-agent project, skipping backup."
+        return $null
+    }
+
+    $version = "unknown"
+    try {
+        $content = Get-Content -LiteralPath (Join-Path $AppDir "pyproject.toml") -Raw
+        $match = [regex]::Match($content, '(?m)^\s*version\s*=\s*["'']([^"'']+)["'']')
+        if ($match.Success) {
+            $version = $match.Groups[1].Value
+        }
+    } catch {
+    }
+    $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddHHmmss")
+    New-Item -ItemType Directory -Force -Path $BackupDir | Out-Null
+    $backupPath = Join-Path $BackupDir "app-$version-$timestamp"
+    Write-Host "Backing up existing app to $backupPath"
+    Copy-SourceTree -SourcePath $AppDir -DestinationPath $backupPath
+
+    Get-ChildItem -LiteralPath $BackupDir -Directory -Filter "app-*" |
+        Sort-Object CreationTime -Descending |
+        Select-Object -Skip 2 |
+        ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force }
+    return $backupPath
+}
+
 function Stop-ExistingApp {
     if (-not (Test-Path -LiteralPath $PythonExe -PathType Leaf)) {
         Write-Host "No existing virtual environment found."
         return
     }
 
+    $runningPid = Get-RunningServerPid
     & $PythonExe -m agent.bootstrap.cli stop --with-tray
     if ($LASTEXITCODE -eq 0) {
         Write-Host "Existing app stop command completed (including tray)."
@@ -490,6 +621,14 @@ function Stop-ExistingApp {
         Write-Host "Existing app stop command was skipped with exit code $LASTEXITCODE."
     }
     $global:LASTEXITCODE = 0
+
+    if ($null -ne $runningPid) {
+        if (Wait-ProcessExit -ProcessId $runningPid -TimeoutSeconds 15) {
+            Write-Host "Server process $runningPid stopped."
+        } else {
+            Write-Host "WARNING: Server process $runningPid is still running. Files may be locked." -ForegroundColor Yellow
+        }
+    }
 
     # Remove tray autostart to avoid orphaned entry on reinstall
     try {
@@ -507,36 +646,54 @@ function Clear-DownloadDirectory {
 }
 
 Stage "1. Prepare AGENT_HOME"
-New-Item -ItemType Directory -Force -Path $AgentHome, $AppDir, $BinDir, $ToolsDir, $DownloadDir | Out-Null
+New-Item -ItemType Directory -Force -Path $AgentHome, $AppDir, $BinDir, $ToolsDir, $DownloadDir, $BackupDir | Out-Null
 Write-Host "AGENT_HOME=$AgentHome"
 
 Stage "2. Stop existing app"
 Stop-ExistingApp
 
-Stage "3. Install uv"
+Stage "3. Install uv (pinned: $UvVersion)"
 Install-Uv
 
-Stage "4. Install source"
-Install-Source
+$BackupPath = $null
+try {
+    Stage "4. Backup existing app"
+    $BackupPath = Backup-AppSource
+    if ($BackupPath) {
+        Write-Host "Backup created at $BackupPath"
+    } else {
+        Write-Host "No backup needed (fresh install)."
+    }
 
-Stage "5. Prepare virtual environment"
-Ensure-Venv
+    Stage "5. Install source"
+    Install-Source
 
-Stage "6. Sync application"
-Sync-App
+    Stage "6. Prepare virtual environment"
+    Ensure-Venv
 
-Stage "7. Create command wrappers"
+    Stage "7. Sync application"
+    Sync-App
+} catch {
+    Write-Host "Installation failed: $_" -ForegroundColor Red
+    if ($BackupPath -and (Test-Path -LiteralPath $BackupPath)) {
+        Write-Host "Previous app backup was kept at $BackupPath."
+        Write-Host "To restore manually, copy it back to $AppDir and run uv sync."
+    }
+    throw
+}
+
+Stage "8. Create command wrappers"
 Write-CommandWrappers
 Write-UninstallWrapper
 Invoke-CheckedCommand $PythonExe @("-m", "agent.bootstrap.cli", "--version")
 
-Stage "8. Initialize runtime"
+Stage "9. Initialize runtime"
 Initialize-App
 
-Stage "9. Update PATH"
+Stage "10. Update PATH"
 Add-UserPath $BinDir
 
-Stage "10. Clean download cache"
+Stage "11. Clean download cache"
 Clear-DownloadDirectory
 
 Write-Host ""

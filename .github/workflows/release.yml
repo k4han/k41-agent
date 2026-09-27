@@ -17,6 +17,8 @@ permissions:
 env:
   ARTIFACT_NAME: k41-agent-release.zip
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+  UV_VERSION: 0.12.13
+  PYTHON_VERSION: "3.13"
 
 jobs:
   build-release-artifact:
@@ -28,9 +30,11 @@ jobs:
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v6
+        with:
+          version: ${{ env.UV_VERSION }}
 
       - name: Set up Python
-        run: uv python install 3.13
+        run: uv python install ${{ env.PYTHON_VERSION }}
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -54,10 +58,13 @@ jobs:
         run: pnpm dashboard:build
 
       - name: Sync Python dependencies
-        run: uv sync --frozen --no-dev
+        run: uv sync --frozen
 
       - name: Run tests
         run: uv run pytest
+
+      - name: Sync Python dependencies without dev
+        run: uv sync --frozen --no-dev
 
       - name: Package release artifact
         shell: pwsh
@@ -75,6 +82,7 @@ jobs:
 
           New-Item -ItemType Directory -Force -Path $stagingDir | Out-Null
 
+          # Keep in sync with install.ps1, install.sh and agent/bootstrap/update.py.
           $excludedDirs = @(
             ".git",
             ".github",
@@ -108,15 +116,27 @@ jobs:
 
           Compress-Archive -LiteralPath $stagingDir -DestinationPath $artifactPath -Force
 
+          $checksumPath = "$artifactPath.sha256"
+          $hash = (Get-FileHash -LiteralPath $artifactPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $env:ARTIFACT_NAME" | Set-Content -LiteralPath $checksumPath -Encoding ASCII
+          Write-Host "SHA256: $hash"
+
       - name: Upload artifact to workflow run
         uses: actions/upload-artifact@v4
         with:
           name: k41-agent-release
-          path: ${{ env.ARTIFACT_NAME }}
+          path: |
+            ${{ env.ARTIFACT_NAME }}
+            ${{ env.ARTIFACT_NAME }}.sha256
 
       - name: Upload artifact to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
-          files: ${{ env.ARTIFACT_NAME }}
+          files: |
+            ${{ env.ARTIFACT_NAME }}
+            ${{ env.ARTIFACT_NAME }}.sha256
+            install.ps1
+            install.sh
+            uninstall.ps1
           fail_on_unmatched_files: true

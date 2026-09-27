@@ -7,6 +7,7 @@ Branch="${K41_AGENT_BRANCH:-main}"
 ReleaseTag="${K41_AGENT_RELEASE_TAG:-}"
 ArtifactName="${K41_AGENT_ARTIFACT_NAME:-k41-agent-release.zip}"
 PythonVersion="${K41_AGENT_PYTHON_VERSION:-3.13}"
+UvVersion="${K41_AGENT_UV_VERSION:-0.12.13}"
 UseBranchSource="${K41_AGENT_USE_BRANCH_SOURCE:-}"
 SkipInit="${K41_AGENT_SKIP_INIT:-}"
 
@@ -18,6 +19,7 @@ BinDir="$AgentHome/bin"
 ToolsDir="$AgentHome/tools"
 EnvsDir="$AgentHome/envs"
 DownloadDir="$AgentHome/download"
+BackupDir="$AgentHome/backup"
 
 UvExe="$ToolsDir/uv"
 PythonExe="$EnvsDir/bin/python"
@@ -37,6 +39,7 @@ Options:
   --release-tag VALUE      Install a specific release tag.
   --artifact-name VALUE    Release artifact name. Defaults to k41-agent-release.zip.
   --python-version VALUE   Python version managed by uv. Defaults to 3.13.
+  --uv-version VALUE       Pinned uv version. Defaults to 0.12.13 (use "latest" to follow upstream).
   --use-branch-source      Download source from the configured branch instead of a release artifact.
   --skip-init              Skip runtime initialization.
   -h, --help               Show this help.
@@ -93,6 +96,14 @@ while [[ $# -gt 0 ]]; do
       PythonVersion="${1#*=}"
       shift
       ;;
+    --uv-version)
+      UvVersion="${2:?Missing value for --uv-version}"
+      shift 2
+      ;;
+    --uv-version=*)
+      UvVersion="${1#*=}"
+      shift
+      ;;
     --use-branch-source)
       UseBranchSource="true"
       shift
@@ -130,12 +141,12 @@ download_file() {
 
   echo "Downloading $url"
   if command -v curl >/dev/null 2>&1; then
-    curl -fL "$url" -o "$output"
+    curl -fL --retry 3 --retry-delay 2 "$url" -o "$output"
     return
   fi
 
   if command -v wget >/dev/null 2>&1; then
-    wget -O "$output" "$url"
+    wget --tries=3 -O "$output" "$url"
     return
   fi
 
@@ -177,6 +188,17 @@ get_uv_download_url() {
   local os
   local arch
   local libc="gnu"
+  local version="${UvVersion:-0.12.13}"
+  local base
+
+  if [[ -z "$version" || "$version" == "latest" ]]; then
+    base="https://github.com/astral-sh/uv/releases/latest/download"
+  else
+    # Upstream uv tags carry no "v" prefix (e.g. 0.12.13).
+    version="${version#v}"
+    version="${version#V}"
+    base="https://github.com/astral-sh/uv/releases/download/$version"
+  fi
 
   os="$(uname -s)"
   arch="$(uname -m)"
@@ -184,8 +206,8 @@ get_uv_download_url() {
   case "$os" in
     Darwin)
       case "$arch" in
-        x86_64) echo "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-apple-darwin.tar.gz" ;;
-        arm64|aarch64) echo "https://github.com/astral-sh/uv/releases/latest/download/uv-aarch64-apple-darwin.tar.gz" ;;
+        x86_64) echo "$base/uv-x86_64-apple-darwin.tar.gz" ;;
+        arm64|aarch64) echo "$base/uv-aarch64-apple-darwin.tar.gz" ;;
         *) echo "Unsupported macOS architecture: $arch" >&2; exit 1 ;;
       esac
       ;;
@@ -195,8 +217,8 @@ get_uv_download_url() {
       fi
 
       case "$arch" in
-        x86_64|amd64) echo "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-$libc.tar.gz" ;;
-        aarch64|arm64) echo "https://github.com/astral-sh/uv/releases/latest/download/uv-aarch64-unknown-linux-$libc.tar.gz" ;;
+        x86_64|amd64) echo "$base/uv-x86_64-unknown-linux-$libc.tar.gz" ;;
+        aarch64|arm64) echo "$base/uv-aarch64-unknown-linux-$libc.tar.gz" ;;
         *) echo "Unsupported Linux architecture: $arch" >&2; exit 1 ;;
       esac
       ;;
@@ -209,8 +231,21 @@ get_uv_download_url() {
 
 install_uv() {
   if [[ -x "$UvExe" ]]; then
-    "$UvExe" --version
-    return
+    local installed
+    installed="$("$UvExe" --version 2>/dev/null || true)"
+    echo "Found $installed"
+    if [[ -n "${UvVersion:-}" && "$UvVersion" != "latest" ]]; then
+      local wanted="${UvVersion#v}"
+      wanted="${wanted#V}"
+      local installed_version
+      installed_version="$(printf '%s' "$installed" | awk '{print $NF}')"
+      if [[ "$installed_version" == "$wanted" ]]; then
+        return
+      fi
+      echo "Updating uv to $wanted (was: $installed)."
+    else
+      return
+    fi
   fi
 
   local uv_archive="$DownloadDir/uv.tar.gz"
@@ -221,7 +256,11 @@ install_uv() {
   mkdir -p "$uv_extract_dir"
 
   uv_url="$(get_uv_download_url)"
-  download_file "$uv_url" "$uv_archive"
+  if ! download_file "$uv_url" "$uv_archive"; then
+    echo "Failed to download uv from $uv_url" >&2
+    echo "The pinned version may not exist. Retry with --uv-version latest or set K41_AGENT_UV_VERSION=latest." >&2
+    exit 1
+  fi
   tar -xzf "$uv_archive" -C "$uv_extract_dir"
 
   local found_uv
@@ -320,6 +359,7 @@ copy_source_tree() {
       ;;
   esac
 
+  # Keep in sync with install.ps1, release.yml and agent/bootstrap/update.py.
   if command -v rsync >/dev/null 2>&1; then
     rsync -a --delete \
       --exclude .git \
@@ -334,9 +374,13 @@ copy_source_tree() {
       --exclude dist \
       --exclude node_modules \
       --exclude wheels \
+      --exclude local-dev \
+      --exclude data \
       --exclude '*.egg-info' \
       --exclude '*.pyc' \
       --exclude '*.pyo' \
+      --exclude .env \
+      --exclude '.env.*' \
       "$source_resolved/" "$destination_resolved/"
     return
   fi
@@ -359,9 +403,13 @@ copy_source_tree() {
       --exclude dist \
       --exclude node_modules \
       --exclude wheels \
+      --exclude local-dev \
+      --exclude data \
       --exclude '*.egg-info' \
       --exclude '*.pyc' \
       --exclude '*.pyo' \
+      --exclude .env \
+      --exclude '.env.*' \
       -cf - .
   ) | (
     cd "$destination_parent"
@@ -375,7 +423,25 @@ extract_zip() {
   local zip_path="$1"
   local destination="$2"
 
-  "$PythonExe" - "$zip_path" "$destination" <<'PY'
+  mkdir -p "$destination"
+  if command -v unzip >/dev/null 2>&1; then
+    unzip -q -o "$zip_path" -d "$destination"
+    return
+  fi
+
+  local py_bin=""
+  if command -v python3 >/dev/null 2>&1; then
+    py_bin="python3"
+  elif [[ -x "$PythonExe" ]]; then
+    py_bin="$PythonExe"
+  elif command -v python >/dev/null 2>&1; then
+    py_bin="python"
+  else
+    echo "unzip or python3 is required to extract release archives." >&2
+    exit 1
+  fi
+
+  "$py_bin" - "$zip_path" "$destination" <<'PY'
 import sys
 import zipfile
 from pathlib import Path
@@ -429,14 +495,29 @@ install_source() {
   assert_dashboard_build "$AppDir"
 }
 
+normalize_python_version() {
+  local value="${1:-}"
+  if [[ "$value" =~ ^([0-9]+)(\.([0-9]+))? ]]; then
+    if [[ -n "${BASH_REMATCH[3]:-}" ]]; then
+      echo "${BASH_REMATCH[1]}.${BASH_REMATCH[3]}"
+    else
+      echo "${BASH_REMATCH[1]}"
+    fi
+  else
+    echo "$value"
+  fi
+}
+
 ensure_venv() {
   "$UvExe" python install "$PythonVersion"
 
+  local wanted_version
+  wanted_version="$(normalize_python_version "$PythonVersion")"
   local needs_create="true"
   if [[ -x "$PythonExe" ]]; then
     local current_version
     current_version="$("$PythonExe" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
-    if [[ "$current_version" == "$PythonVersion" ]]; then
+    if [[ "$(normalize_python_version "$current_version")" == "$wanted_version" ]]; then
       needs_create="false"
     fi
   fi
@@ -536,6 +617,7 @@ stage "Update PATH"
 remove_profile_block "\$HOME/.profile"
 remove_profile_block "\$HOME/.bashrc"
 remove_profile_block "\$HOME/.zshrc"
+rm -f "\$HOME/.config/fish/conf.d/k41-agent.fish" 2>/dev/null || true
 echo "Removed K41 Agent PATH block from supported shell profiles."
 
 if [[ "\$RemoveRuntimeData" == "true" ]]; then
@@ -565,16 +647,75 @@ initialize_app() {
   "$PythonExe" -m agent.bootstrap.cli init
 }
 
+wait_for_pid_exit() {
+  local pid="$1"
+  local timeout_seconds="${2:-15}"
+  local waited=0
+
+  while kill -0 "$pid" 2>/dev/null; do
+    if [[ "$waited" -ge "$timeout_seconds" ]]; then
+      return 1
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  return 0
+}
+
+backup_app_source() {
+  BACKUP_PATH=""
+  if [[ ! -d "$AppDir" ]]; then
+    return
+  fi
+  if ! test_k41_project_root "$AppDir"; then
+    echo "Existing app directory is not a k41-agent project, skipping backup."
+    return
+  fi
+
+  local version="unknown"
+  version="$(grep -E '^[[:space:]]*version[[:space:]]*=' "$AppDir/pyproject.toml" 2>/dev/null | head -n 1 | sed -E 's/.*["'\'']([^"'\'']+)["'\''].*/\1/' || true)"
+  [[ -n "$version" ]] || version="unknown"
+  local timestamp
+  timestamp="$(date -u +%Y%m%d%H%M%S)"
+  mkdir -p "$BackupDir"
+  BACKUP_PATH="$BackupDir/app-$version-$timestamp"
+  echo "Backing up existing app to $BACKUP_PATH"
+  copy_source_tree "$AppDir" "$BACKUP_PATH"
+
+  # Keep the 2 newest backups.
+  local count=0
+  while IFS= read -r old_backup; do
+    [[ -n "$old_backup" ]] || continue
+    count=$((count + 1))
+    if [[ "$count" -gt 2 ]]; then
+      safe_rm_rf "$old_backup"
+    fi
+  done < <(ls -dt "$BackupDir"/app-* 2>/dev/null || true)
+}
+
 stop_existing_app() {
   if [[ ! -x "$PythonExe" ]]; then
     echo "No existing virtual environment found."
     return
   fi
 
+  local running_pid=""
+  if [[ -f "$HOME/.k41-agent/server.pid" ]]; then
+    running_pid="$(cat "$HOME/.k41-agent/server.pid" 2>/dev/null | tr -d '[:space:]' || true)"
+  fi
+
   if "$PythonExe" -m agent.bootstrap.cli stop --with-tray 2>/dev/null; then
     echo "Existing app stop command completed (including tray)."
   else
     echo "Existing app stop command was skipped."
+  fi
+
+  if [[ -n "$running_pid" && "$running_pid" =~ ^[0-9]+$ ]]; then
+    if wait_for_pid_exit "$running_pid" 15; then
+      echo "Server process $running_pid stopped."
+    else
+      echo "WARNING: Server process $running_pid is still running. Files may be locked." >&2
+    fi
   fi
 
   "$PythonExe" -c "from agent.bootstrap.tray import disable_autostart; disable_autostart()" 2>/dev/null || true
@@ -591,14 +732,8 @@ select_profile_file() {
   esac
 }
 
-add_user_path() {
-  case ":$PATH:" in
-    *":$BinDir:"*) ;;
-    *) export PATH="$BinDir:$PATH" ;;
-  esac
-
-  local profile_file
-  profile_file="$(select_profile_file)"
+write_path_block() {
+  local profile_file="$1"
   touch "$profile_file"
 
   if grep -Fq "$PathBlockBegin" "$profile_file"; then
@@ -616,6 +751,38 @@ add_user_path() {
   echo "Added $BinDir to PATH in $profile_file."
 }
 
+add_user_path() {
+  case ":$PATH:" in
+    *":$BinDir:"*) ;;
+    *) export PATH="$BinDir:$PATH" ;;
+  esac
+
+  if [[ "${#PATH}" -gt 1900 ]]; then
+    echo "WARNING: PATH is getting long (${#PATH} chars)." >&2
+  fi
+
+  # Fish shell uses a different config location.
+  local fish_config="$HOME/.config/fish/conf.d/k41-agent.fish"
+  if command -v fish >/dev/null 2>&1 || [[ -d "$HOME/.config/fish" ]]; then
+    mkdir -p "$(dirname "$fish_config")"
+    if [[ ! -f "$fish_config" ]] || ! grep -Fq "$BinDir" "$fish_config"; then
+      echo "fish_add_path \"$BinDir\"" >"$fish_config"
+      echo "Added $BinDir to PATH in $fish_config."
+    else
+      echo "$BinDir is already configured in $fish_config."
+    fi
+  fi
+
+  local profile_file
+  profile_file="$(select_profile_file)"
+  write_path_block "$profile_file"
+  # Also ensure .profile has the block so login shells pick it up
+  # even when the installer guessed bash/zsh from $SHELL.
+  if [[ "$profile_file" != "$HOME/.profile" ]]; then
+    write_path_block "$HOME/.profile"
+  fi
+}
+
 clear_download_directory() {
   if [[ -d "$DownloadDir" ]]; then
     find "$DownloadDir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
@@ -628,37 +795,74 @@ require_command grep
 require_command find
 require_command chmod
 
+if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+  echo "curl or wget is required to download files." >&2
+  exit 1
+fi
+
+if ! command -v unzip >/dev/null 2>&1 && ! command -v python3 >/dev/null 2>&1 && ! command -v python >/dev/null 2>&1; then
+  echo "unzip or python3 is required to extract release archives." >&2
+  exit 1
+fi
+
 stage "1. Prepare AGENT_HOME"
-mkdir -p "$AgentHome" "$AppDir" "$BinDir" "$ToolsDir" "$DownloadDir"
+mkdir -p "$AgentHome" "$AppDir" "$BinDir" "$ToolsDir" "$DownloadDir" "$BackupDir"
 echo "AGENT_HOME=$AgentHome"
 
 stage "2. Stop existing app"
 stop_existing_app
 
-stage "3. Install uv"
+stage "3. Install uv (pinned: $UvVersion)"
 install_uv
 
-stage "4. Prepare virtual environment"
-ensure_venv
+BACKUP_PATH=""
+stage "4. Backup existing app"
+backup_app_source
+if [[ -n "$BACKUP_PATH" ]]; then
+  echo "Backup created at $BACKUP_PATH"
+else
+  echo "No backup needed (fresh install)."
+fi
 
+report_install_failure() {
+  local step="$1"
+  echo "Installation failed during $step." >&2
+  if [[ -n "$BACKUP_PATH" && -d "$BACKUP_PATH" ]]; then
+    echo "Previous app backup was kept at $BACKUP_PATH." >&2
+    echo "To restore manually, copy it back to $AppDir and re-run uv sync." >&2
+  fi
+  exit 1
+}
+
+# Keep install.sh stage order in sync with install.ps1:
+# source -> venv -> sync, so a fresh venv never blocks archive extraction.
 stage "5. Install source"
-install_source
+if ! install_source; then
+  report_install_failure "source installation"
+fi
 
-stage "6. Sync application"
-sync_app
+stage "6. Prepare virtual environment"
+if ! ensure_venv; then
+  report_install_failure "virtual environment setup"
+fi
 
-stage "7. Create command wrappers"
+stage "7. Sync application"
+if ! sync_app; then
+  report_install_failure "dependency sync"
+fi
+
+stage "8. Create command wrappers"
 write_command_wrappers
 write_uninstall_wrapper
 "$PythonExe" -m agent.bootstrap.cli --version
 
-stage "8. Initialize runtime"
+stage "9. Initialize runtime"
 initialize_app
 
-stage "9. Update PATH"
+stage "10. Update PATH"
 add_user_path
 
-stage "10. Clean download cache"
+stage "11. Clean download cache"
 clear_download_directory
 
 echo

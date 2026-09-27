@@ -58,34 +58,70 @@ function Remove-UserPath {
     }
 }
 
+function Wait-ProcessExit {
+    param(
+        [int]$ProcessId,
+        [int]$TimeoutSeconds = 15
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $proc = Get-Process -Id $ProcessId -ErrorAction Stop
+            if ($proc.HasExited) {
+                return $true
+            }
+        } catch {
+            return $true
+        }
+        Start-Sleep -Milliseconds 500
+    }
+    try {
+        $proc = Get-Process -Id $ProcessId -ErrorAction Stop
+        return $proc.HasExited
+    } catch {
+        return $true
+    }
+}
+
 function Stop-ExistingApp {
     if (-not (Test-Path -LiteralPath $PythonExe -PathType Leaf)) {
         Write-Host "No existing virtual environment found."
-        return
-    }
-
-    & $PythonExe -m agent.bootstrap.cli stop --with-tray 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "Existing app stop command completed."
     } else {
-        Write-Host "Existing app stop command was skipped with exit code $LASTEXITCODE."
-    }
-    $global:LASTEXITCODE = 0
+        $pidFile = Join-Path $HOME ".k41-agent\server.pid"
+        $runningPid = $null
+        if (Test-Path -LiteralPath $pidFile -PathType Leaf) {
+            try {
+                $runningPid = [int]((Get-Content -LiteralPath $pidFile -Raw).Trim())
+            } catch {
+                $runningPid = $null
+            }
+        }
 
-    & $PythonExe -m agent.bootstrap.cli tray --stop 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "Tray stop command completed."
-    } else {
-        Write-Host "Tray stop skipped."
-    }
-    $global:LASTEXITCODE = 0
+        # Keep in sync with install.ps1 generated uninstall.cmd.
+        & $PythonExe -m agent.bootstrap.cli stop --with-tray 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "Existing app stop command completed (including tray)."
+        } else {
+            Write-Host "Existing app stop command was skipped with exit code $LASTEXITCODE."
+        }
+        $global:LASTEXITCODE = 0
 
-    try {
-        & $PythonExe -c "from agent.bootstrap.tray import disable_autostart; disable_autostart()" 2>$null
-        Write-Host "Autostart disabled."
-    } catch {
+        if ($null -ne $runningPid) {
+            if (Wait-ProcessExit -ProcessId $runningPid -TimeoutSeconds 15) {
+                Write-Host "Server process $runningPid stopped."
+            } else {
+                Write-Host "WARNING: Server process $runningPid is still running." -ForegroundColor Yellow
+            }
+        }
+
+        try {
+            & $PythonExe -c "from agent.bootstrap.tray import disable_autostart; disable_autostart()" 2>$null
+            Write-Host "Autostart disabled."
+        } catch {
+        }
+        $global:LASTEXITCODE = 0
     }
-    $global:LASTEXITCODE = 0
 
     # Also remove autostart registry entry directly in case Python is broken
     try {

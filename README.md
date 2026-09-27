@@ -118,7 +118,9 @@ To only check whether a new release is available:
 k41 update --check
 ```
 
-If the installation is damaged and `k41 update` cannot run, run the installer again. Your configuration, database, and runtime data are kept.
+If the installation is damaged and `k41 update` cannot run, run the installer again. Your configuration, database, and runtime data are kept. Reinstalls keep a backup of the previous app source under `backup/` (last 2 kept).
+
+Installer options: `--python-version`, `--uv-version` (pinned by default via `K41_AGENT_UV_VERSION`), `--release-tag`, `--skip-init`, `--use-branch-source`. On macOS/Linux, `fish` shells are configured via `~/.config/fish/conf.d/k41-agent.fish`.
 
 Windows:
 

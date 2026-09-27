@@ -468,6 +468,7 @@ def restore_app_source(install: ManagedInstall, backup_path: Path) -> None:
 def copy_tree(source: Path, destination: Path) -> None:
     if destination.exists():
         safe_remove_tree(destination, destination.parent)
+    # Keep in sync with install.ps1, install.sh and release.yml.
     shutil.copytree(
         source,
         destination,
@@ -485,6 +486,7 @@ def copy_tree(source: Path, destination: Path) -> None:
             "node_modules",
             "wheels",
             "local-dev",
+            "data",
             "*.egg-info",
             "*.pyc",
             "*.pyo",

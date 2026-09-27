@@ -953,8 +953,6 @@ dependencies = [
     { name = "psycopg-binary" },
     { name = "pyjwt" },
     { name = "pystray" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
     { name = "python-dotenv" },
     { name = "python-multipart" },
     { name = "pyyaml" },
@@ -990,6 +988,12 @@ sandbox-modal = [
 sandboxes = [
     { name = "daytona" },
     { name = "modal" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
 ]
 
 [package.metadata]
@@ -1032,8 +1036,6 @@ requires-dist = [
     { name = "psycopg-binary", specifier = ">=3.3.3" },
     { name = "pyjwt", specifier = ">=2.12.1" },
     { name = "pystray", specifier = ">=0.19.0" },
-    { name = "pytest", specifier = ">=8.0.0" },
-    { name = "pytest-asyncio", specifier = ">=0.23.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "python-multipart", specifier = ">=0.0.22" },
     { name = "pyyaml", specifier = ">=6.0.0" },
@@ -1043,6 +1045,12 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.42.0" },
 ]
 provides-extras = ["channel-telegram", "channel-discord", "channel-zalo", "sandbox-daytona", "sandbox-modal", "channels", "sandboxes", "integrations"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8.0.0" },
+    { name = "pytest-asyncio", specifier = ">=0.23.0" },
+]
 
 [[package]]
 name = "langchain"
