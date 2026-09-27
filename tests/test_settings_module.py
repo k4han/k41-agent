@@ -20,6 +20,7 @@ from agent.shared.config.constants import (
     DEFAULT_WORKSPACE_ROOT,
     get_setting_metadata,
     is_database_runtime_key,
+    is_platform_managed_key,
     is_runtime_key,
 )
 from agent.shared.config.default_source import DefaultConfigSource
@@ -600,7 +601,10 @@ class TestDatabaseConfigSource:
         assert is_database_runtime_key("mcp.servers.foo.env.GITHUB_TOKEN")
         assert is_database_runtime_key("channels.telegram.enabled")
         assert is_database_runtime_key("channels.telegram.bot_token")
-        assert is_database_runtime_key("channels.github.webhook_secret")
+        assert is_database_runtime_key("channels.github.enabled")
+        assert not is_database_runtime_key("channels.github.webhook_secret")
+        assert not is_database_runtime_key("channels.github.app_id")
+        assert not is_database_runtime_key("google_calendar.client_secret")
         assert is_database_runtime_key("workspace.daytona.enabled")
         assert is_database_runtime_key("workspace.daytona.api_key")
         assert is_database_runtime_key("workspace.daytona.default_root")
@@ -764,8 +768,20 @@ class TestRuntimeKeyMetadata:
         assert is_runtime_key("llm.providers.openai-main.default_model")
         assert is_runtime_key("llm.providers.openai-main.models")
         assert is_runtime_key("llm.providers.openai-main.temperature")
-        assert is_runtime_key("channels.github.app_id")
-        assert is_runtime_key("channels.github.webhook_secret")
+        assert is_runtime_key("channels.github.enabled")
+        assert is_runtime_key("channels.github.default_agent")
+        assert is_runtime_key("channels.github.trigger_label")
+        # Platform-managed App identity is env-only, never runtime.
+        assert not is_runtime_key("channels.github.app_id")
+        assert not is_runtime_key("channels.github.app_slug")
+        assert not is_runtime_key("channels.github.private_key")
+        assert not is_runtime_key("channels.github.private_key_path")
+        assert not is_runtime_key("channels.github.webhook_secret")
+        assert not is_runtime_key("google_calendar.client_id")
+        assert not is_runtime_key("google_calendar.client_secret")
+        assert not is_runtime_key("google_calendar.redirect_uri")
+        assert is_platform_managed_key("channels.github.app_id")
+        assert is_platform_managed_key("google_calendar.client_secret")
         assert is_runtime_key("workspace.daytona.enabled")
         assert is_runtime_key("workspace.daytona.api_key")
         assert is_runtime_key("workspace.daytona.default_root")

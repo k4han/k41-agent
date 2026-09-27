@@ -13,7 +13,9 @@ from sqlalchemy.orm import Session, sessionmaker
 from agent.shared.config.constants import (
     DEFAULT_GITHUB_WORKSPACE_ROOT,
     DEFAULT_WORKSPACE_ROOT,
+    PLATFORM_MANAGED_ENV_VARS,
     is_database_runtime_key,
+    is_platform_managed_key,
     is_sensitive_runtime_key,
 )
 from agent.shared.config.models import SettingsSource, SettingsValue, build_settings_values
@@ -200,6 +202,30 @@ class DatabaseConfigSource:
 
         self.update_settings(updates)
         return set(updates)
+
+    def find_ignored_platform_keys(self) -> list[str]:
+        """List platform-managed keys still stored in runtime_settings.
+
+        These rows were writable before GitHub/Google identity moved to
+        platform-managed env. They are now ignored by get()/get_all()/_load()
+        so they linger as orphans. Operators must copy them to server env
+        or operator YAML manually, then delete the rows.
+        """
+        try:
+            with self._session_maker() as session:
+                rows = session.execute(select(RuntimeSetting.key)).scalars().all()
+        except Exception:
+            return []
+        return sorted(
+            {key for key in rows if isinstance(key, str) and is_platform_managed_key(key)}
+        )
+
+    def describe_ignored_platform_keys(self) -> dict[str, str]:
+        """Map ignored platform keys to their env var names for warnings."""
+        return {
+            key: PLATFORM_MANAGED_ENV_VARS.get(key, key)
+            for key in self.find_ignored_platform_keys()
+        }
 
     def delete_setting_tree(self, key: str) -> bool:
         prefix = f"{key}."

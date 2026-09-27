@@ -375,7 +375,10 @@ class TestDashboardSettingsEndpoints:
         data = resp.json()
         assert data["identities"] == []
         assert "channels.telegram.bot_token" in data["settings"]
-        assert "channels.github.webhook_secret" in data["settings"]
+        assert "channels.github.trigger_label" in data["settings"]
+        assert "channels.github.webhook_secret" not in data["settings"]
+        assert "channels.github.app_id" not in data["settings"]
+        assert "channels.github.private_key" not in data["settings"]
         assert "telegram" in data["by_channel"]
         assert "github" in data["by_channel"]
 

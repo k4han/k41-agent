@@ -9,7 +9,7 @@ from langchain_core.tools import InjectedToolArg, tool
 from langgraph.prebuilt import ToolRuntime
 from pydantic import BaseModel, Field
 
-from agent.modules.google_calendar.service import get_google_calendar_service
+from agent.modules.google_calendar import get_google_calendar_service
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCapability, ToolCategory
 from agent.modules.tools.result import ToolError, ToolErrorCode

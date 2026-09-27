@@ -581,6 +581,9 @@ export type RepositoryActivity = {
 export type GitHubPayload = {
   configured: boolean;
   enabled: boolean;
+  platform_managed?: boolean;
+  platform_env_status?: Record<string, boolean>;
+  missing_requirements?: string[];
   app_slug: string;
   webhook_url: string;
   install_url: string;

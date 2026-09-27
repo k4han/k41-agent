@@ -88,9 +88,14 @@ async def get_dashboard_github(request: Request) -> dict[str, Any]:
         else ""
     )
     repositories = await service.list_repository_bindings()
+    platform_env_status = settings.platform_env_status
+    missing_requirements = settings.missing_requirements()
     return {
         "configured": settings.is_configured,
         "enabled": settings.enabled,
+        "platform_managed": True,
+        "platform_env_status": platform_env_status,
+        "missing_requirements": missing_requirements,
         "app_slug": settings.app_slug,
         "webhook_url": webhook_url,
         "install_url": install_url,

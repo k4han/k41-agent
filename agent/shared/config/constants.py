@@ -94,6 +94,38 @@ LLM_FALLBACK_PROVIDER_KEY = "llm.fallback.provider"
 LLM_FALLBACK_MODEL_KEY = "llm.fallback.model"
 REPOSITORY_SKILLS_DIR_KEY = "skills.repository_dir"
 
+# Platform-managed keys: App identity owned by the operator (env-first,
+# operator YAML fallback, never DB/dashboard). These keys must never be
+# written through the dashboard. User only connects personal accounts
+# (GitHub App installation, Google OAuth tokens stored in dedicated tables).
+# Self-host operators set the env vars below or config.yaml.
+PLATFORM_MANAGED_KEYS: frozenset[str] = frozenset({
+    "channels.github.app_id",
+    "channels.github.app_slug",
+    "channels.github.private_key",
+    "channels.github.private_key_path",
+    "channels.github.webhook_secret",
+    "google_calendar.client_id",
+    "google_calendar.client_secret",
+    "google_calendar.redirect_uri",
+})
+
+PLATFORM_MANAGED_ENV_VARS: dict[str, str] = {
+    "channels.github.app_id": "GITHUB_APP_ID",
+    "channels.github.app_slug": "GITHUB_APP_SLUG",
+    "channels.github.private_key": "GITHUB_APP_PRIVATE_KEY",
+    "channels.github.private_key_path": "GITHUB_APP_PRIVATE_KEY_PATH",
+    "channels.github.webhook_secret": "GITHUB_WEBHOOK_SECRET",
+    "google_calendar.client_id": "GOOGLE_CALENDAR_CLIENT_ID",
+    "google_calendar.client_secret": "GOOGLE_CALENDAR_CLIENT_SECRET",
+    "google_calendar.redirect_uri": "GOOGLE_CALENDAR_REDIRECT_URI",
+}
+
+
+def is_platform_managed_key(key: str) -> bool:
+    """Check whether a key is operator-owned (env-first, YAML fallback, never DB/dashboard)."""
+    return key in PLATFORM_MANAGED_KEYS
+
 # Runtime configuration key patterns
 # These patterns define which keys can be updated at runtime
 RUNTIME_KEY_PATTERNS = [
@@ -103,7 +135,7 @@ RUNTIME_KEY_PATTERNS = [
     r"^channels\.telegram\.(enabled|bot_token|default_agent|code_agent|research_agent|update_mode|webhook_url|webhook_secret)$",
     r"^channels\.discord\.(enabled|bot_token|default_agent|code_agent|research_agent)$",
     r"^channels\.zalo\.(enabled|bot_token|default_agent|code_agent|research_agent|update_mode|webhook_url|webhook_secret)$",
-    r"^channels\.github\.(enabled|app_id|app_slug|private_key|private_key_path|webhook_secret|default_agent|trigger_label|mention_triggers)$",
+    r"^channels\.github\.(enabled|default_agent|trigger_label|mention_triggers)$",
     r"^llm\.default_model$",
     rf"^{re.escape(LLM_FALLBACK_PROVIDER_KEY)}$",
     rf"^{re.escape(LLM_FALLBACK_MODEL_KEY)}$",
@@ -116,7 +148,7 @@ RUNTIME_KEY_PATTERNS = [
     r"^workspace\.github\.root$",
     r"^workspace\.daytona\.(enabled|api_key|default_root|target|image|cpu|memory|disk|language|auto_stop_minutes|auto_archive_days|sweeper_interval_seconds|start_timeout_seconds|stop_timeout_seconds|sandbox_auto_stop_minutes|sandbox_auto_archive_minutes|sandbox_auto_delete_minutes|ephemeral|network_block_all|network_allow_list)$",
     r"^workspace\.modal\.(enabled|token_id|token_secret|app_name|default_root|image|sandbox_timeout_seconds|idle_timeout_seconds)$",
-    r"^google_calendar\.(enabled|client_id|client_secret|redirect_uri)$",
+    r"^google_calendar\.enabled$",
     rf"^{re.escape(REPOSITORY_SKILLS_DIR_KEY)}$",
     r"^database\.url$",
     rf"^{re.escape(DISPLAY_TIMEZONE_CONFIG_KEY)}$",
@@ -129,7 +161,7 @@ DATABASE_RUNTIME_KEY_PATTERNS = [
     r"^channels\.telegram\.(enabled|bot_token|default_agent|code_agent|research_agent|update_mode|webhook_url|webhook_secret)$",
     r"^channels\.discord\.(enabled|bot_token|default_agent|code_agent|research_agent)$",
     r"^channels\.zalo\.(enabled|bot_token|default_agent|code_agent|research_agent|update_mode|webhook_url|webhook_secret)$",
-    r"^channels\.github\.(enabled|app_id|app_slug|private_key|private_key_path|webhook_secret|default_agent|trigger_label|mention_triggers)$",
+    r"^channels\.github\.(enabled|default_agent|trigger_label|mention_triggers)$",
     r"^llm\.default_model$",
     rf"^{re.escape(LLM_FALLBACK_PROVIDER_KEY)}$",
     rf"^{re.escape(LLM_FALLBACK_MODEL_KEY)}$",
@@ -142,7 +174,7 @@ DATABASE_RUNTIME_KEY_PATTERNS = [
     r"^workspace\.github\.root$",
     r"^workspace\.daytona\.(enabled|api_key|default_root|target|image|cpu|memory|disk|language|auto_stop_minutes|auto_archive_days|sweeper_interval_seconds|start_timeout_seconds|stop_timeout_seconds|sandbox_auto_stop_minutes|sandbox_auto_archive_minutes|sandbox_auto_delete_minutes|ephemeral|network_block_all|network_allow_list)$",
     r"^workspace\.modal\.(enabled|token_id|token_secret|app_name|default_root|image|sandbox_timeout_seconds|idle_timeout_seconds)$",
-    r"^google_calendar\.(enabled|client_id|client_secret|redirect_uri)$",
+    r"^google_calendar\.enabled$",
     rf"^{re.escape(REPOSITORY_SKILLS_DIR_KEY)}$",
     rf"^{re.escape(DISPLAY_TIMEZONE_CONFIG_KEY)}$",
     r"^recursion_limit$",
@@ -153,24 +185,26 @@ SENSITIVE_RUNTIME_KEY_PATTERNS = [
     r"^channels\.telegram\.(bot_token|webhook_secret)$",
     r"^channels\.discord\.bot_token$",
     r"^channels\.zalo\.(bot_token|webhook_secret)$",
-    r"^channels\.github\.(private_key|webhook_secret)$",
     r"^llm\.providers\.[A-Za-z0-9_-]+\.api_key$",
     r"^tools\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*(api_key|token|secret|password)[A-Za-z0-9_-]*$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.env\.[A-Za-z0-9_-]+$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.headers\.[A-Za-z0-9_-]+$",
     r"^workspace\.daytona\.api_key$",
     r"^workspace\.modal\.(token_id|token_secret)$",
-    r"^google_calendar\.client_secret$",
 ]
 
 
 def is_runtime_key(key: str) -> bool:
     """Check if a key is a valid runtime configuration key."""
+    if key in PLATFORM_MANAGED_KEYS:
+        return False
     return any(re.match(pattern, key) for pattern in RUNTIME_KEY_PATTERNS)
 
 
 def is_database_runtime_key(key: str) -> bool:
     """Check whether a runtime key is owned by the database source."""
+    if key in PLATFORM_MANAGED_KEYS:
+        return False
     return any(re.match(pattern, key) for pattern in DATABASE_RUNTIME_KEY_PATTERNS)
 
 
@@ -216,11 +250,6 @@ def _expand_runtime_keys() -> set[str]:
         keys.add(f"channels.zalo.{prop}")
     for prop in (
         "enabled",
-        "app_id",
-        "app_slug",
-        "private_key",
-        "private_key_path",
-        "webhook_secret",
         "default_agent",
         "trigger_label",
         "mention_triggers",
@@ -264,8 +293,7 @@ def _expand_runtime_keys() -> set[str]:
     keys.add(DISPLAY_TIMEZONE_CONFIG_KEY)
     keys.add("recursion_limit")
     keys.add("chat.stream_thinking")
-    for prop in ("enabled", "client_id", "client_secret", "redirect_uri"):
-        keys.add(f"google_calendar.{prop}")
+    keys.add("google_calendar.enabled")
     return keys
 
 
@@ -306,11 +334,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "channels.zalo.webhook_url": "",
     "channels.zalo.webhook_secret": "",
     "channels.github.enabled": False,
-    "channels.github.app_id": "",
-    "channels.github.app_slug": "",
-    "channels.github.private_key": "",
-    "channels.github.private_key_path": "",
-    "channels.github.webhook_secret": "",
     "channels.github.default_agent": "",
     "channels.github.trigger_label": "k41-agent",
     "channels.github.mention_triggers": "@k41-agent,/k41",
@@ -349,9 +372,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
     REPOSITORY_SKILLS_DIR_KEY: ".agent/skills",
     DISPLAY_TIMEZONE_CONFIG_KEY: DEFAULT_DISPLAY_TIMEZONE,
     "google_calendar.enabled": True,
-    "google_calendar.client_id": "",
-    "google_calendar.client_secret": "",
-    "google_calendar.redirect_uri": "http://localhost:4141/integrations/google/callback",
     "security.jwt_secret": "",
     "recursion_limit": 100,
     "tray.enabled": True,
@@ -767,36 +787,6 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "category": "channels",
         "label": "GitHub Enabled",
     },
-    "channels.github.app_id": {
-        "type": "text",
-        "description": "GitHub App ID used to mint installation tokens",
-        "category": "channels",
-        "label": "GitHub App ID",
-    },
-    "channels.github.app_slug": {
-        "type": "text",
-        "description": "GitHub App slug used to build the install URL",
-        "category": "channels",
-        "label": "GitHub App Slug",
-    },
-    "channels.github.private_key": {
-        "type": "password",
-        "description": "PEM private key for the GitHub App",
-        "category": "channels",
-        "label": "GitHub Private Key",
-    },
-    "channels.github.private_key_path": {
-        "type": "text",
-        "description": "Path to the PEM private key for the GitHub App",
-        "category": "channels",
-        "label": "GitHub Private Key Path",
-    },
-    "channels.github.webhook_secret": {
-        "type": "password",
-        "description": "Secret used to validate GitHub webhook signatures",
-        "category": "channels",
-        "label": "GitHub Webhook Secret",
-    },
     "channels.github.default_agent": {
         "type": "select",
         "description": "Default agent for GitHub repository automation",
@@ -821,24 +811,6 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "description": "Enable Google Calendar integration",
         "category": "integrations",
         "label": "Google Calendar Enabled",
-    },
-    "google_calendar.client_id": {
-        "type": "text",
-        "description": "Google Cloud OAuth Client ID",
-        "category": "integrations",
-        "label": "Google Calendar Client ID",
-    },
-    "google_calendar.client_secret": {
-        "type": "password",
-        "description": "Google Cloud OAuth Client Secret",
-        "category": "integrations",
-        "label": "Google Calendar Client Secret",
-    },
-    "google_calendar.redirect_uri": {
-        "type": "url",
-        "description": "OAuth redirect URI registered in Google Cloud Console",
-        "category": "integrations",
-        "label": "Google Calendar Redirect URI",
     },
     # LLM settings
     "llm.default_model": {
@@ -1140,6 +1112,9 @@ __all__ = [
     "DATABASE_RUNTIME_KEY_PATTERNS",
     "RUNTIME_KEY_PATTERNS",
     "SENSITIVE_RUNTIME_KEY_PATTERNS",
+    "PLATFORM_MANAGED_KEYS",
+    "PLATFORM_MANAGED_ENV_VARS",
+    "is_platform_managed_key",
     "is_runtime_key",
     "is_database_runtime_key",
     "is_sensitive_runtime_key",

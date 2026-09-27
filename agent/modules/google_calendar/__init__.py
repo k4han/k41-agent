@@ -7,8 +7,12 @@ from agent.modules.google_calendar.client import GoogleCalendarClient, get_googl
 from agent.modules.google_calendar.config import (
     DEFAULT_GOOGLE_CALENDAR_REDIRECT_URI,
     DEFAULT_GOOGLE_CALENDAR_SCOPES,
+    GOOGLE_CALENDAR_CLIENT_ID_ENV_VAR,
+    GOOGLE_CALENDAR_CLIENT_SECRET_ENV_VAR,
+    GOOGLE_CALENDAR_REDIRECT_URI_ENV_VAR,
     GoogleCalendarSettings,
     get_google_calendar_settings,
+    get_google_platform_env_status,
 )
 from agent.modules.google_calendar.migrations import migrate_google_calendar_tables
 from agent.modules.google_calendar.models import (
@@ -36,4 +40,8 @@ __all__ = [
     "migrate_google_calendar_tables",
     "DEFAULT_GOOGLE_CALENDAR_REDIRECT_URI",
     "DEFAULT_GOOGLE_CALENDAR_SCOPES",
+    "GOOGLE_CALENDAR_CLIENT_ID_ENV_VAR",
+    "GOOGLE_CALENDAR_CLIENT_SECRET_ENV_VAR",
+    "GOOGLE_CALENDAR_REDIRECT_URI_ENV_VAR",
+    "get_google_platform_env_status",
 ]

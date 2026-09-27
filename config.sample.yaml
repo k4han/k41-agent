@@ -24,12 +24,34 @@ enable_dashboard: true
 # Runtime/admin configuration is stored in the database and managed from the dashboard:
 # - LLM providers, default model, provider API keys, models, and enabled state
 # - MCP servers, including encrypted env.* and headers.*
-# - Telegram/Discord/GitHub channel settings, including encrypted tokens and secrets
-# - google_calendar.* (single shared account: enabled, client_id, client_secret, redirect_uri)
-#   managed at Settings > Connections > Google Calendar
+# - Telegram/Discord/Zalo channel settings, including encrypted tokens and secrets
+# - GitHub user preferences (channels.github.enabled, default_agent, trigger_label,
+#   mention_triggers) plus per-repository bindings in Settings > Connections > GitHub.
+#   GitHub App identity is platform-managed via server environment, never dashboard:
+#   GITHUB_APP_ID, GITHUB_APP_SLUG, GITHUB_APP_PRIVATE_KEY(_PATH), GITHUB_WEBHOOK_SECRET.
+# - google_calendar.enabled (single shared account) managed at Settings > Connections.
+#   Google OAuth App is platform-managed via server environment, never dashboard:
+#   GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_REDIRECT_URI.
 # - tools.* (global tool config, e.g. web_search / generate_image credentials)
 # - display.timezone (IANA timezone used to render dashboard timestamps)
 # - recursion_limit
+
+# Platform-managed fallback in operator YAML (self-host only, optional).
+# Environment variables always win over these values. Prefer .env / secret
+# manager; use this block only when env is impractical (e.g. single-file deploy).
+# If you upgraded from a version that stored these keys in runtime_settings,
+# copy the old DB values here (or to .env) once, then delete the orphan rows.
+# channels:
+#   github:
+#     app_id: "123456"
+#     app_slug: "k41-agent"
+#     # private_key: "-----BEGIN RSA PRIVATE KEY-----\n..."
+#     # private_key_path: "/run/secrets/github-app.pem"
+#     # webhook_secret: "..."
+# google_calendar:
+#   client_id: ""
+#   client_secret: ""
+#   redirect_uri: "http://localhost:4141/integrations/google/callback"
 
 # Tool credentials and per-tool defaults (database-owned).
 # Existing tools.* keys in this file are copied into the database once when the

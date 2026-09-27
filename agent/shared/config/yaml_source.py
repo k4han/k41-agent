@@ -4,7 +4,11 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from agent.shared.config.constants import DEFAULT_CONFIG, is_database_runtime_key
+from agent.shared.config.constants import (
+    DEFAULT_CONFIG,
+    is_database_runtime_key,
+    is_platform_managed_key,
+)
 from agent.shared.config.models import SettingsSource, SettingsValue, build_settings_values
 from agent.shared.infrastructure.config_file import (
     DEFAULT_CONFIG_PATH,
@@ -65,7 +69,11 @@ class YamlConfigSource:
         self._priority = 100  # Middle priority
 
     def get(self, key: str) -> Any | None:
-        """Get a config value from YAML file."""
+        """Get a config value from YAML file.
+
+        Platform-managed keys are readable from the operator-owned YAML file
+        but never writable through the dashboard (see can_update_key).
+        """
         if is_database_runtime_key(key):
             return None
         data = self._load()
@@ -104,7 +112,7 @@ class YamlConfigSource:
         self.update_settings({key: value})
 
     def can_update_key(self, key: str) -> bool:
-        return not is_database_runtime_key(key)
+        return not is_database_runtime_key(key) and not is_platform_managed_key(key)
 
     def ensure_default_file(self) -> bool:
         """Create or backfill config.yaml with missing YAML-owned defaults."""

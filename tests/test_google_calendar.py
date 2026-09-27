@@ -357,20 +357,27 @@ async def test_calendar_tools_execution():
 
 
 # 7. HTTP API Router Tests
-def test_google_calendar_api_routes(calendar_test_db):
+def test_google_calendar_api_routes(calendar_test_db, monkeypatch: pytest.MonkeyPatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("GOOGLE_CALENDAR_CLIENT_ID", "my-client-id")
+    monkeypatch.setenv("GOOGLE_CALENDAR_CLIENT_SECRET", "my-secret")
+    monkeypatch.setenv(
+        "GOOGLE_CALENDAR_REDIRECT_URI",
+        "http://localhost:4141/integrations/google/callback",
+    )
 
     app = FastAPI()
     app.include_router(google_calendar_router)
     client = TestClient(app)
 
-    # Test GET config
+    # Test GET config reads platform env
     cfg_resp = client.get("/integrations/google/config")
     assert cfg_resp.status_code == 200
     assert "client_id" in cfg_resp.json()
 
-    # Test POST config
+    # Test POST config is blocked: OAuth App is env-managed
     update_resp = client.post(
         "/integrations/google/config",
         json={
@@ -379,10 +386,9 @@ def test_google_calendar_api_routes(calendar_test_db):
             "redirect_uri": "http://localhost:4141/integrations/google/callback",
         },
     )
-    assert update_resp.status_code == 200
-    assert update_resp.json() == {"success": True}
+    assert update_resp.status_code == 403
 
-    # Verify updated config
+    # Verify config still comes from env
     cfg_resp2 = client.get("/integrations/google/config")
     assert cfg_resp2.json()["client_id"] == "my-client-id"
     assert cfg_resp2.json()["client_secret_configured"] is True

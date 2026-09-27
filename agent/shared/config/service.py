@@ -404,6 +404,22 @@ def attach_database_config_source(database_url: str) -> None:
                 "Migrated legacy workspace setting(s): %s.",
                 ", ".join(sorted(migrated_keys)),
             )
+    describe_ignored = getattr(source, "describe_ignored_platform_keys", None)
+    if callable(describe_ignored):
+        try:
+            ignored = describe_ignored()
+        except Exception:
+            ignored = {}
+        if ignored:
+            details = ", ".join(f"{key} ({env})" for key, env in sorted(ignored.items()))
+            logger.warning(
+                "Ignoring %s legacy platform-managed setting(s) still stored in "
+                "runtime_settings: %s. They are no longer read from the database. "
+                "Copy the values to server environment (.env) or operator "
+                "config.yaml, then delete the rows. See docs/configuration.md.",
+                len(ignored),
+                details,
+            )
     service.add_source(source)
     if _config_sources is not None:
         _config_sources.append(source)

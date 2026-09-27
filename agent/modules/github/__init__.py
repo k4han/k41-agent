@@ -2,7 +2,13 @@ from agent.modules.github.client import GitHubAppClient
 from agent.modules.github.config import (
     DEFAULT_MENTION_TRIGGERS,
     DEFAULT_TRIGGER_LABEL,
+    GITHUB_APP_ID_ENV_VAR,
+    GITHUB_APP_PRIVATE_KEY_ENV_VAR,
+    GITHUB_APP_PRIVATE_KEY_PATH_ENV_VAR,
+    GITHUB_APP_SLUG_ENV_VAR,
+    GITHUB_WEBHOOK_SECRET_ENV_VAR,
     GitHubSettings,
+    get_github_platform_env_status,
     get_github_workspace_root,
     get_github_settings,
 )
@@ -41,6 +47,12 @@ __all__ = [
     "get_github_workspace_root",
     "get_github_repository_store",
     "get_github_settings",
+    "get_github_platform_env_status",
+    "GITHUB_APP_ID_ENV_VAR",
+    "GITHUB_APP_SLUG_ENV_VAR",
+    "GITHUB_APP_PRIVATE_KEY_ENV_VAR",
+    "GITHUB_APP_PRIVATE_KEY_PATH_ENV_VAR",
+    "GITHUB_WEBHOOK_SECRET_ENV_VAR",
     "migrate_github_tables",
     "verify_webhook_signature",
 ]

@@ -17,8 +17,10 @@ from agent.modules.providers import load_providers_catalog
 from agent.shared.config import (
     BOOTSTRAP_BOOLEAN_CONFIG_KEYS,
     BOOTSTRAP_CONFIG_KEYS,
+    PLATFORM_MANAGED_ENV_VARS,
     PROVIDER_SETTING_FIELD_ORDER,
     ConfigService,
+    is_platform_managed_key,
     is_runtime_key,
 )
 from agent.shared.infrastructure.config_file import coerce_bool
@@ -215,6 +217,20 @@ def validate_default_model_update(
 
 
 def ensure_runtime_keys(keys: list[str]) -> None:
+    platform_keys = sorted(k for k in keys if is_platform_managed_key(k))
+    if platform_keys:
+        env_names = sorted(
+            {PLATFORM_MANAGED_ENV_VARS.get(k, k) for k in platform_keys}
+        )
+        suffix = "" if len(platform_keys) == 1 else "s"
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Setting{suffix} managed by server environment "
+                f"({', '.join(env_names)}). "
+                f"Update the environment instead: {', '.join(platform_keys)}."
+            ),
+        )
     if invalid_keys := sorted(k for k in keys if not is_runtime_key(k)):
         suffix = "" if len(invalid_keys) == 1 else "s"
         raise HTTPException(

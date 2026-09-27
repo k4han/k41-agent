@@ -22,17 +22,11 @@ import type { GoogleCalendarAuthUrlPayload, GoogleCalendarPayload } from "@/type
 
 type Drafts = {
   enabled: boolean;
-  client_id: string;
-  client_secret: string;
-  redirect_uri: string;
 };
 
 function draftsFromPayload(payload: GoogleCalendarPayload): Drafts {
   return {
     enabled: Boolean(payload.enabled),
-    client_id: payload.client_id || "",
-    redirect_uri: payload.redirect_uri || "",
-    client_secret: "",
   };
 }
 
@@ -41,11 +35,7 @@ export function GoogleCalendarTab() {
   const [loadError, setLoadError] = createSignal("");
   const [drafts, setDrafts] = createSignal<Drafts>({
     enabled: true,
-    client_id: "",
-    client_secret: "",
-    redirect_uri: "",
   });
-  const [secretEdited, setSecretEdited] = createSignal(false);
   const [busy, setBusy] = createSignal<string | null>(null);
   const [confirmDisconnect, setConfirmDisconnect] = createSignal(false);
   const { showToast } = useToast();
@@ -56,7 +46,6 @@ export function GoogleCalendarTab() {
       const data = await apiFetch<GoogleCalendarPayload>(API_PATHS.googleCalendar);
       setPayload(data);
       setDrafts(draftsFromPayload(data));
-      setSecretEdited(false);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Failed to load Google Calendar");
     }
@@ -85,15 +74,11 @@ export function GoogleCalendarTab() {
     const next = drafts();
     let count = 0;
     if (Boolean(next.enabled) !== Boolean(current.enabled)) count += 1;
-    if (next.client_id.trim() !== (current.client_id || "")) count += 1;
-    if (next.redirect_uri.trim() !== (current.redirect_uri || "")) count += 1;
-    if (secretEdited() && next.client_secret.trim().length > 0) count += 1;
     return count;
   });
 
   const setDraft = <K extends keyof Drafts>(key: K, value: Drafts[K]) => {
     setDrafts((current) => ({ ...current, [key]: value }));
-    if (key === "client_secret") setSecretEdited(true);
   };
 
   const toggleEnabled = async (next: boolean) => {
@@ -121,15 +106,9 @@ export function GoogleCalendarTab() {
     setBusy("save");
     try {
       const next = drafts();
-      const body: Record<string, unknown> = {
+      await putJson(API_PATHS.googleCalendarConfig, {
         enabled: next.enabled,
-        client_id: next.client_id.trim(),
-        redirect_uri: next.redirect_uri.trim(),
-      };
-      if (secretEdited() && next.client_secret.trim()) {
-        body.client_secret = next.client_secret.trim();
-      }
-      await putJson(API_PATHS.googleCalendarConfig, body);
+      });
       showToast("Google Calendar settings saved.");
       await load();
     } catch (err) {
@@ -143,7 +122,7 @@ export function GoogleCalendarTab() {
     setBusy("connect");
     try {
       const params = new URLSearchParams();
-      const redirect = drafts().redirect_uri.trim() || payload()?.redirect_uri?.trim();
+      const redirect = payload()?.redirect_uri?.trim();
       if (redirect) params.set("redirect_uri", redirect);
       const query = params.toString();
       const data = await apiFetch<GoogleCalendarAuthUrlPayload>(
@@ -172,7 +151,7 @@ export function GoogleCalendarTab() {
   };
 
   const copyRedirectUri = async () => {
-    const value = drafts().redirect_uri || payload()?.redirect_uri || "";
+    const value = payload()?.redirect_uri || "";
     if (!value) return;
     try {
       await writeToClipboard(value);
@@ -212,12 +191,22 @@ export function GoogleCalendarTab() {
         </header>
 
         <div class="channel-card-body">
+          <div class="channel-card-empty-hint">
+            <TriangleAlert size={14} />
+            <div>
+              Google OAuth credentials (<strong>GOOGLE_CALENDAR_CLIENT_ID</strong>,{" "}
+              <strong>GOOGLE_CALENDAR_CLIENT_SECRET</strong>) are managed by the server
+              environment. End users only press <strong>Connect</strong>.
+            </div>
+          </div>
           <Show when={!payload()?.configured && (payload() || loadError())}>
             <div class="channel-card-empty-hint">
               <TriangleAlert size={14} />
               <div>
-                Add your Google OAuth <strong>Client ID</strong> and <strong>Client Secret</strong>,
-                save, then <strong>Connect</strong>.
+                Server is missing Google OAuth env. Ask your operator to set{" "}
+                <strong>GOOGLE_CALENDAR_CLIENT_ID</strong> and{" "}
+                <strong>GOOGLE_CALENDAR_CLIENT_SECRET</strong>, then{" "}
+                <strong>Connect</strong>.
               </div>
             </div>
           </Show>
@@ -258,52 +247,23 @@ export function GoogleCalendarTab() {
                   </button>
                 </div>
 
-                <div class="field">
-                  <label for="gcal-client-id">Client ID</label>
-                  <input
-                    id="gcal-client-id"
-                    class="input"
-                    type="text"
-                    autocomplete="off"
-                    spellcheck={false}
-                    value={drafts().client_id}
-                    onInput={(e) => setDraft("client_id", e.currentTarget.value)}
-                    placeholder="xxxx.apps.googleusercontent.com"
-                  />
+                <div class="channel-card-meta">
+                  <div class="channel-card-meta-row">
+                    <span class="channel-card-meta-label">Client ID</span>
+                    <span class="mono">{data.client_id || "Not set (server env)"}</span>
+                  </div>
+                  <div class="channel-card-meta-row">
+                    <span class="channel-card-meta-label">Client Secret</span>
+                    <span class="mono">
+                      {data.client_secret_configured ? "Set (server env)" : "Not set"}
+                    </span>
+                  </div>
                 </div>
 
                 <div class="field">
-                  <label for="gcal-client-secret">
-                    Client Secret {data.client_secret_configured && !secretEdited() ? "(saved)" : ""}
-                  </label>
-                  <input
-                    id="gcal-client-secret"
-                    class="input"
-                    type="password"
-                    autocomplete="new-password"
-                    value={drafts().client_secret}
-                    onInput={(e) => setDraft("client_secret", e.currentTarget.value)}
-                    placeholder={
-                      data.client_secret_configured
-                        ? "Leave empty to keep the saved secret"
-                        : "Google OAuth client secret"
-                    }
-                  />
-                </div>
-
-                <div class="field">
-                  <label for="gcal-redirect-uri">Redirect URI</label>
+                  <label for="gcal-redirect-uri">Redirect URI (server env, read-only)</label>
                   <div class="channel-webhook-helper-value">
-                    <input
-                      id="gcal-redirect-uri"
-                      class="input mono"
-                      type="url"
-                      autocomplete="off"
-                      spellcheck={false}
-                      value={drafts().redirect_uri}
-                      onInput={(e) => setDraft("redirect_uri", e.currentTarget.value)}
-                      placeholder="http://localhost:4141/integrations/google/callback"
-                    />
+                    <code>{data.redirect_uri || "—"}</code>
                     <button class="btn btn-sm" type="button" onClick={() => void copyRedirectUri()}>
                       <Copy size={13} />
                       Copy
@@ -372,7 +332,7 @@ export function GoogleCalendarTab() {
               type="button"
               disabled={pendingCount() === 0 || busy() === "save"}
               onClick={() => void save()}
-              title="Save Client ID / Secret / Redirect URI"
+              title="Save enabled state"
             >
               <Save size={13} />
               {busy() === "save"
@@ -422,7 +382,7 @@ export function GoogleCalendarTab() {
           <Show when={payload() && !payload()!.configured}>
             <div class="hint" style={{ display: "flex", "align-items": "center", gap: "6px" }}>
               <XCircle size={13} />
-              <span>Missing Client ID or Secret.</span>
+              <span>Missing server env GOOGLE_CALENDAR_CLIENT_ID or GOOGLE_CALENDAR_CLIENT_SECRET.</span>
             </div>
           </Show>
         </footer>

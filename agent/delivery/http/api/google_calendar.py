@@ -18,7 +18,6 @@ from agent.modules.google_calendar import (
     get_google_calendar_settings,
     get_google_oauth_manager,
 )
-from agent.shared.config import get_config_service
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +25,10 @@ router = APIRouter(prefix="/integrations/google", tags=["google_calendar"])
 
 
 class GoogleCalendarConfigRequest(BaseModel):
-    client_id: str = Field(..., description="Google Cloud OAuth Client ID")
+    # All fields optional: endpoint is deprecated and always returns 403.
+    # Optional fields ensure missing payloads reach the 403 handler
+    # instead of failing with 422 validation errors first.
+    client_id: str | None = Field(default=None, description="Google Cloud OAuth Client ID")
     client_secret: str | None = Field(default=None, description="Google Cloud OAuth Client Secret")
     redirect_uri: str | None = Field(default=None, description="OAuth redirect URI")
 
@@ -159,16 +161,16 @@ async def get_google_calendar_config() -> dict[str, Any]:
 
 
 @router.post("/config")
-async def update_google_calendar_config(payload: GoogleCalendarConfigRequest) -> dict[str, bool]:
-    """Update Google OAuth Client ID and Secret in runtime settings."""
-    cfg = get_config_service()
-    cfg.update_setting("google_calendar.client_id", payload.client_id.strip())
-    if payload.client_secret is not None and payload.client_secret.strip():
-        cfg.update_setting("google_calendar.client_secret", payload.client_secret.strip())
-    if payload.redirect_uri is not None and payload.redirect_uri.strip():
-        cfg.update_setting("google_calendar.redirect_uri", payload.redirect_uri.strip())
-
-    return {"success": True}
+async def update_google_calendar_config(_payload: GoogleCalendarConfigRequest) -> dict[str, bool]:
+    """Deprecated: OAuth credentials are managed by server environment."""
+    raise HTTPException(
+        status_code=403,
+        detail=(
+            "Google OAuth credentials are managed by server environment "
+            "(GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, "
+            "GOOGLE_CALENDAR_REDIRECT_URI). Update the environment instead."
+        ),
+    )
 
 
 __all__ = ["router"]

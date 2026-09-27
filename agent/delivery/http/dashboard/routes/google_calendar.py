@@ -27,9 +27,18 @@ class GoogleCalendarDashboardConfigBody(BaseModel):
     """Request body for updating Google Calendar settings from the dashboard."""
 
     enabled: bool | None = Field(default=None, description="Enable Google Calendar integration.")
-    client_id: str | None = Field(default=None, description="Google Cloud OAuth Client ID.")
-    client_secret: str | None = Field(default=None, description="Google Cloud OAuth Client Secret.")
-    redirect_uri: str | None = Field(default=None, description="OAuth redirect URI.")
+    client_id: str | None = Field(
+        default=None,
+        description="Deprecated: OAuth Client ID is managed by GOOGLE_CALENDAR_CLIENT_ID env.",
+    )
+    client_secret: str | None = Field(
+        default=None,
+        description="Deprecated: OAuth secret is managed by GOOGLE_CALENDAR_CLIENT_SECRET env.",
+    )
+    redirect_uri: str | None = Field(
+        default=None,
+        description="Deprecated: redirect URI is managed by GOOGLE_CALENDAR_REDIRECT_URI env.",
+    )
 
 
 @router.get("/dashboard-api/google-calendar")
@@ -74,15 +83,22 @@ async def update_dashboard_google_calendar_config(
     request: Request,
 ) -> dict[str, Any]:
     """Update Google Calendar runtime settings from the dashboard."""
+    if (
+        (body.client_id is not None and body.client_id.strip())
+        or (body.client_secret is not None and body.client_secret.strip())
+        or (body.redirect_uri is not None and body.redirect_uri.strip())
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Google OAuth credentials are managed by server environment "
+                "(GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, "
+                "GOOGLE_CALENDAR_REDIRECT_URI). Update the environment instead."
+            ),
+        )
     values: dict[str, Any] = {}
     if body.enabled is not None:
         values["google_calendar.enabled"] = bool(body.enabled)
-    if body.client_id is not None and body.client_id.strip():
-        values["google_calendar.client_id"] = body.client_id.strip()
-    if body.client_secret is not None and body.client_secret.strip():
-        values["google_calendar.client_secret"] = body.client_secret.strip()
-    if body.redirect_uri is not None and body.redirect_uri.strip():
-        values["google_calendar.redirect_uri"] = body.redirect_uri.strip()
     if not values:
         raise HTTPException(status_code=400, detail="No Google Calendar settings to update.")
     ensure_runtime_keys(list(values))

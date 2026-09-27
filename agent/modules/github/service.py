@@ -135,7 +135,20 @@ class GitHubAutomationService:
 
     async def sync_installations(self) -> dict[str, int]:
         if not self.settings.is_configured:
-            raise ValueError("GitHub App is not configured.")
+            parts: list[str] = []
+            # getattr for backward compat with test doubles lacking `enabled`.
+            if not getattr(self.settings, "enabled", True):
+                parts.append(
+                    "integration is disabled "
+                    "(enable channels.github.enabled in dashboard)"
+                )
+            try:
+                parts.extend(self.settings.missing_requirements())
+            except AttributeError:
+                pass
+            if not parts:
+                raise ValueError("GitHub App is not configured.")
+            raise ValueError(f"GitHub App is not configured: {'; '.join(parts)}.")
 
         installations = await self.client.list_installations()
         repo_count = 0

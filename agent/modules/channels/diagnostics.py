@@ -292,19 +292,22 @@ async def test_zalo_connection() -> TestResult:
 
 
 async def test_github_connection() -> TestResult:
-    config = get_config_service()
-    app_id = config.get_str("channels.github.app_id", "")
-    private_key_inline = config.get_str("channels.github.private_key", "")
-    private_key_path = config.get_str("channels.github.private_key_path", "")
+    from agent.modules.github import get_github_settings
+
+    settings = get_github_settings()
+    app_id = settings.app_id
 
     if is_placeholder_value(app_id):
-        return TestResult(ok=False, message="GitHub App ID is not configured.")
+        return TestResult(
+            ok=False,
+            message="GitHub App ID is not configured. Set GITHUB_APP_ID in server .env or config.yaml.",
+        )
 
-    private_key = _resolve_github_private_key(private_key_inline, private_key_path)
+    private_key = settings.resolve_private_key()
     if not private_key:
         return TestResult(
             ok=False,
-            message="GitHub App private key is not configured.",
+            message="GitHub App private key is not configured. Set GITHUB_APP_PRIVATE_KEY in server .env or config.yaml.",
         )
 
     try:
@@ -371,20 +374,6 @@ async def test_github_connection() -> TestResult:
         latency_ms=latency_ms,
         details=details,
     )
-
-
-def _resolve_github_private_key(inline_value: str, path_value: str) -> str:
-    if inline_value and not is_placeholder_value(inline_value):
-        return inline_value.strip()
-    candidate = (path_value or "").strip()
-    if not candidate or is_placeholder_value(candidate):
-        return ""
-    try:
-        with open(candidate, encoding="utf-8") as handle:
-            return handle.read().strip()
-    except OSError as exc:
-        logger.warning("Unable to read GitHub private key from '%s': %s", candidate, exc)
-        return ""
 
 
 def _sign_github_jwt(app_id: str, private_key: str) -> str:

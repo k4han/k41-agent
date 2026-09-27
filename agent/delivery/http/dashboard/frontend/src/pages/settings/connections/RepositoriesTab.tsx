@@ -19,8 +19,6 @@ import {
   Save,
   Settings as SettingsIcon,
   TriangleAlert,
-  Upload,
-  Webhook,
   XCircle,
 } from "lucide-solid";
 
@@ -59,25 +57,16 @@ type TestOutcome = {
 
 const GITHUB_SECTIONS: SectionGroupDef[] = [
   {
-    id: "app",
-    title: "GitHub App",
-    subtitle: "App identity and private key",
-    fields: ["app_id", "app_slug", "private_key", "private_key_path"],
-  },
-  {
     id: "triggers",
     title: "Triggers",
     subtitle: "Labels and mentions that summon the agent",
     fields: ["default_agent", "trigger_label", "mention_triggers"],
   },
-  {
-    id: "webhook",
-    title: "Webhook",
-    subtitle: "Shared secret for webhook signature verification",
-    icon: () => <Webhook size={14} />,
-    fields: ["webhook_secret"],
-  },
 ];
+
+// GitHub App identity (app_id, private key, webhook secret) is platform-managed
+// via server environment (GITHUB_APP_*). End users only install the App and
+// configure per-repository bindings. See GitHubSettingsPage banner below.
 
 const ENABLED_FIELD = "enabled";
 
@@ -286,7 +275,7 @@ export function RepositoriesTab() {
             >
               {gh.github()?.enabled ? "enabled" : "disabled"}
             </span>
-            <Show when={gh.github()?.install_url}>
+            <Show when={gh.github()?.install_url && gh.isConfigured()}>
               <a
                 class="btn btn-sm"
                 href={gh.github()!.install_url}
@@ -306,9 +295,37 @@ export function RepositoriesTab() {
           <Show when={!gh.isConfigured() && (gh.channelsData() || gh.github())}>
             <div class="channel-card-empty-hint">
               <TriangleAlert size={14} />
-              <div>
-                Add credentials in <strong>Configure</strong> to enable this connection.
-              </div>
+              <Show
+                when={gh.github()?.enabled === false}
+                fallback={
+                  <div>
+                    GitHub App is not configured on the server.{" "}
+                    <Show
+                      when={
+                        gh.github()?.missing_requirements &&
+                        (gh.github()?.missing_requirements?.length ?? 0) > 0
+                      }
+                      fallback={
+                        <span>
+                          Set <strong>GITHUB_APP_ID</strong>,{" "}
+                          <strong>GITHUB_APP_PRIVATE_KEY</strong> and{" "}
+                          <strong>GITHUB_WEBHOOK_SECRET</strong> in the server
+                          environment.
+                        </span>
+                      }
+                    >
+                      <span>
+                        Missing: {gh.github()?.missing_requirements?.join("; ")}.
+                      </span>
+                    </Show>
+                  </div>
+                }
+              >
+                <div>
+                  GitHub integration is disabled. Enable it in the dashboard to
+                  use automation.
+                </div>
+              </Show>
             </div>
           </Show>
 
@@ -448,7 +465,7 @@ export function GitHubSettingsPage() {
   return (
     <SettingsLayout
       title="GitHub Settings"
-      description="Configure GitHub App credentials, triggers, and webhook."
+      description="GitHub App identity is managed by server environment (GITHUB_APP_*). Configure triggers here, connect repos via Install App."
       breadcrumbSegments={[
         { label: "Connections", href: "/settings/connections" },
         { label: "GitHub" },
@@ -542,7 +559,7 @@ export function GitHubSettingsPage() {
                     <GitPullRequest size={13} />
                     {gh.busy() === "sync" ? "Syncing..." : "Sync Repos"}
                   </button>
-                  <Show when={payload.install_url}>
+                  <Show when={payload.install_url && payload.configured}>
                     <a
                       class="btn btn-sm"
                       href={payload.install_url}
@@ -554,6 +571,17 @@ export function GitHubSettingsPage() {
                     </a>
                   </Show>
                 </div>
+              </div>
+            </div>
+
+            <div class="channel-card-empty-hint">
+              <TriangleAlert size={14} />
+              <div>
+                GitHub App credentials (<strong>GITHUB_APP_ID</strong>,{" "}
+                <strong>GITHUB_APP_PRIVATE_KEY</strong>,{" "}
+                <strong>GITHUB_WEBHOOK_SECRET</strong>) are managed by the server
+                environment. Ask your operator to set them. End users only{" "}
+                <strong>Install App</strong> and configure triggers per repository.
               </div>
             </div>
 
@@ -649,7 +677,6 @@ function GitHubSectionGroup(props: {
           {(entry) => {
             const dirty = () =>
               props.pending.some((change: PendingChange) => change.key === entry.key);
-            const isPrivateKey = entry.key === "channels.github.private_key";
             const isDefaultAgent = entry.key === "channels.github.default_agent";
             return (
               <SettingRow
@@ -657,13 +684,6 @@ function GitHubSectionGroup(props: {
                 info={entry.info}
                 draft={props.drafts[entry.key]}
                 dirty={dirty()}
-                actions={
-                  isPrivateKey ? (
-                    <PrivateKeyUpload
-                      onLoad={(content) => props.onChange(entry.key, content)}
-                    />
-                  ) : undefined
-                }
                 control={
                   isDefaultAgent ? (
                     <AgentNameSelect
@@ -707,64 +727,6 @@ function AgentNameSelect(props: {
       ariaLabel="GitHub default agent"
       icon={<Bot size={14} />}
     />
-  );
-}
-
-function PrivateKeyUpload(props: { onLoad: (content: string) => void }) {
-  let inputRef!: HTMLInputElement;
-  const { showToast } = useToast();
-
-  const handleFile = async (event: Event) => {
-    const target = event.currentTarget as HTMLInputElement;
-    const file = target.files?.[0];
-    if (!file) {
-      return;
-    }
-    try {
-      const content = await file.text();
-      const trimmed = content.trim();
-      if (!trimmed) {
-        showToast("Selected file is empty.", "warning");
-        return;
-      }
-      if (!trimmed.includes("PRIVATE KEY")) {
-        showToast(
-          "File does not look like a PEM private key, loaded anyway.",
-          "warning",
-        );
-      } else {
-        showToast(`Loaded private key from ${file.name}.`);
-      }
-      props.onLoad(trimmed);
-    } catch (err) {
-      showToast(
-        err instanceof Error ? err.message : "Failed to read file",
-        "error",
-      );
-    } finally {
-      target.value = "";
-    }
-  };
-
-  return (
-    <>
-      <input
-        ref={inputRef}
-        type="file"
-        accept=".pem,.key,.crt,application/x-pem-file,text/plain"
-        style={{ display: "none" }}
-        onChange={(event) => void handleFile(event)}
-      />
-      <button
-        class="btn btn-sm"
-        type="button"
-        title="Read a PEM file from your computer"
-        onClick={() => inputRef.click()}
-      >
-        <Upload size={13} />
-        Upload .pem
-      </button>
-    </>
   );
 }
 

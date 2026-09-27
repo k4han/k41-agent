@@ -15,7 +15,12 @@ Trên Linux/Mac: `/home/<username>/.k41-agent/config.yaml`
 
 ## Environment File (.env)
 
-Ngoài `config.yaml`, agent đọc file `.env` lúc khởi động để set biến môi trường (fallback cho tool credential, `K41_AGENT_HOME`, ...):
+Ngoài `config.yaml`, agent đọc file `.env` lúc khởi động để set biến môi trường (platform App identity, fallback cho tool credential, `K41_AGENT_HOME`, ...):
+
+Platform-managed (operator-only, không nhập trong dashboard):
+
+- `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_PRIVATE_KEY` hoặc `GITHUB_APP_PRIVATE_KEY_PATH`, `GITHUB_WEBHOOK_SECRET`
+- `GOOGLE_CALENDAR_CLIENT_ID`, `GOOGLE_CALENDAR_CLIENT_SECRET`, `GOOGLE_CALENDAR_REDIRECT_URI`
 
 1. `.env` trong thư mục working directory (nơi bạn chạy `k41` / `python main.py`)
 2. `.env` trong agent home (`~/.k41-agent/.env`, đổi được qua `K41_AGENT_HOME`)
@@ -186,9 +191,60 @@ Nếu dùng Telegram webhook mà channel chuyển sang `error`, kiểm tra thêm
 
 ### GitHub automation
 
-GitHub App V1 dùng một app cho toàn instance, không dùng OAuth từng user nên không cần `client_secret`. Cấu hình bắt buộc:
+GitHub App V1 dùng một app cho toàn instance, không dùng OAuth từng user nên không cần `client_secret`. Cấu hình bắt buộc (platform-managed, operator-only):
 
-Đặt `channels.github.enabled`, `app_id`, `private_key` hoặc `private_key_path`, và `webhook_secret` trong dashboard Settings > Channels.
+Đặt trong server environment (self-host `.env`), không nhập trong dashboard:
+
+```bash
+GITHUB_APP_ID=
+GITHUB_APP_SLUG=
+GITHUB_APP_PRIVATE_KEY=
+# hoặc GITHUB_APP_PRIVATE_KEY_PATH=/path/to/app.pem
+GITHUB_WEBHOOK_SECRET=
+```
+
+Fallback operator YAML (cùng file `config.yaml`, self-host only) nếu không dùng env:
+
+```yaml
+channels:
+  github:
+    app_id: "123456"
+    app_slug: "k41-agent"
+    # private_key: "-----BEGIN RSA PRIVATE KEY-----\n..."
+    # private_key_path: "/run/secrets/github-app.pem"
+    # webhook_secret: "..."
+```
+
+#### Upgrade migration: credential cũ trong DB bị bỏ qua
+
+Từ phiên bản platform-managed env, các key sau **không còn đọc từ database** (`runtime_settings`), dù hàng cũ vẫn nằm trong DB:
+
+- `channels.github.app_id`, `channels.github.app_slug`, `channels.github.private_key`, `channels.github.private_key_path`, `channels.github.webhook_secret`
+- `google_calendar.client_id`, `google_calendar.client_secret`, `google_calendar.redirect_uri`
+
+Hệ quả: sau upgrade, `is_configured` có thể chuyển `False` dù DB còn giá trị. Lúc attach database source, app log warning liệt kê key bị bỏ qua, ví dụ:
+
+```
+Ignoring 2 legacy platform-managed setting(s) still stored in runtime_settings:
+channels.github.private_key (GITHUB_APP_PRIVATE_KEY), ...
+```
+
+Operator cần copy thủ công một lần:
+
+1. Đọc giá trị cũ từ DB (sqlite: `SELECT key, value_json FROM runtime_settings WHERE key LIKE 'channels.github.%' OR key LIKE 'google_calendar.%'`; postgres tương tự).
+2. Ghi vào server environment (`.env` hoặc secret manager) hoặc operator `config.yaml` như mẫu trên. Env thắng YAML.
+3. Xóa hàng orphan trong DB để tránh nhầm lẫn (sau khi đã verify `Test connection` chạy được).
+4. Restart agent và bấm `Test` / `Sync` trong dashboard để verify.
+
+Google Calendar tương tự:
+
+```bash
+GOOGLE_CALENDAR_CLIENT_ID=
+GOOGLE_CALENDAR_CLIENT_SECRET=
+GOOGLE_CALENDAR_REDIRECT_URI=http://localhost:4141/integrations/google/callback
+```
+
+Trong dashboard Settings > Connections > GitHub, end user chỉ bật `channels.github.enabled`, chỉnh `default_agent`, `trigger_label`, `mention_triggers`, rồi bấm `Install App -> Sync` và cấu hình từng repository binding.
 
 App cần quyền Metadata read, Issues read/write, Contents read/write, Pull requests read/write. Bật events `issues`, `issue_comment`, `pull_request_review_comment`, `installation`, `installation_repositories`, `ping`. Endpoint nhận webhook là `/channels/github/webhook`.
 
