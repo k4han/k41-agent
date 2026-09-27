@@ -14,6 +14,20 @@ export type SystemHealth = {
   version: string;
 };
 
+export type SystemVersionInfo = {
+  current_version: string;
+  latest_version: string;
+  has_update: boolean;
+  release_name: string;
+  release_notes: string;
+  release_url: string;
+  published_at: string | null;
+  is_managed_install: boolean;
+  install_type: "managed" | "development";
+  last_checked_at: string;
+  error?: string | null;
+};
+
 export type HomeCounters = {
   channels: { total: number; running: number; error: number };
   agents: number;

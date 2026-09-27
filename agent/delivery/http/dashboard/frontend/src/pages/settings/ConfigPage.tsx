@@ -2,16 +2,19 @@ import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import {
   AlignJustify,
   Code,
+  RefreshCw,
   RotateCcw,
   Rows3,
   Save,
   SearchX,
+  Sparkles,
   TriangleAlert,
 } from "lucide-solid";
 
 import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { DataGate } from "@/components/State";
 import { STORAGE_KEYS } from "@/lib/uiConstants";
+import { checkForUpdates, openUpdateDialog, versionInfo, versionLoading } from "@/lib/versionStore";
 import type { SettingInfo } from "@/types";
 
 import { SettingsLayout } from "./SettingsLayout";
@@ -131,6 +134,61 @@ export function ConfigPage() {
       <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => (
           <div class="stack settings-page-stack">
+            {/* Version and System Update Card */}
+            <section class="panel settings-section-card version-settings-card">
+              <div class="panel-header split">
+                <div>
+                  <div class="panel-title">Agent Runtime Version</div>
+                  <div class="panel-subtitle">Release channel, current version, and system updates.</div>
+                </div>
+                <div class="row-wrap">
+                  <button
+                    type="button"
+                    class="btn btn-secondary btn-sm"
+                    onClick={() => void checkForUpdates(true)}
+                    disabled={versionLoading()}
+                  >
+                    <RefreshCw size={13} class={versionLoading() ? "spinner-animate" : ""} />
+                    <span>Check for updates</span>
+                  </button>
+                  <button
+                    type="button"
+                    class={`btn btn-sm ${versionInfo()?.has_update ? "btn-primary" : "btn-secondary"}`}
+                    onClick={openUpdateDialog}
+                  >
+                    <Sparkles size={13} />
+                    <span>{versionInfo()?.has_update ? `Update to v${versionInfo()?.latest_version}` : "Version Details"}</span>
+                  </button>
+                </div>
+              </div>
+              <div class="panel-body">
+                <div class="version-settings-grid">
+                  <div class="version-settings-item">
+                    <span class="version-settings-label">Current Version</span>
+                    <span class="version-settings-val">v{versionInfo()?.current_version || "..."}</span>
+                  </div>
+                  <div class="version-settings-item">
+                    <span class="version-settings-label">Latest Version</span>
+                    <span class="version-settings-val">
+                      v{versionInfo()?.latest_version || "..."}
+                      <Show when={versionInfo()?.has_update}>
+                        <span class="badge badge-warning" style={{ "margin-left": "8px" }}>Update Available</span>
+                      </Show>
+                      <Show when={versionInfo() && !versionInfo()?.has_update}>
+                        <span class="badge badge-success" style={{ "margin-left": "8px" }}>Up to date</span>
+                      </Show>
+                    </span>
+                  </div>
+                  <div class="version-settings-item">
+                    <span class="version-settings-label">Installation Type</span>
+                    <span class="version-settings-val" style={{ "text-transform": "capitalize" }}>
+                      {versionInfo()?.install_type || "..."}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </section>
+
             <div class="settings-config-header">
               <div class="settings-toolbar-container">
                 <div class="settings-toolbar-search-wrap">

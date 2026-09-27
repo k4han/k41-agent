@@ -200,6 +200,7 @@ def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:
         channel_manager = request.app.state.channel_manager
         return {
             "status": "ok",
+            "version": APP_VERSION,
             "web": current_settings.enable_web,
             "features": {
                 "api": current_settings.enable_api,

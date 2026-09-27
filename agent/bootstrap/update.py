@@ -51,6 +51,9 @@ class ReleaseInfo:
     version: str
     asset_url: str
     html_url: str
+    name: str = ""
+    body: str = ""
+    published_at: str = ""
 
 
 @dataclass(frozen=True)
@@ -344,7 +347,22 @@ def fetch_latest_release(
         version=normalize_version(tag_name),
         asset_url=asset_url,
         html_url=str(payload.get("html_url") or ""),
+        name=str(payload.get("name") or tag_name),
+        body=str(payload.get("body") or ""),
+        published_at=str(payload.get("published_at") or ""),
     )
+
+
+def is_managed_install(
+    *,
+    module_file: Path | None = None,
+    executable: str | None = None,
+) -> bool:
+    try:
+        resolve_managed_install(module_file=module_file, executable=executable)
+        return True
+    except UpdateError:
+        return False
 
 
 def download_release_artifact(url: str, destination: Path) -> None:
@@ -763,6 +781,7 @@ __all__ = [
     "detect_agent_home",
     "extract_release_artifact",
     "fetch_latest_release",
+    "is_managed_install",
     "is_version_newer",
     "read_project_metadata",
     "resolve_managed_install",

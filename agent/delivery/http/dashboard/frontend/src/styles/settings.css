@@ -1212,3 +1212,35 @@
 .dark .settings-pending-bar {
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4), 0 2px 10px rgba(0, 0, 0, 0.3);
 }
+
+/* System Version settings card */
+.version-settings-card {
+  margin-bottom: 16px;
+}
+
+.version-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.version-settings-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.version-settings-label {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.version-settings-val {
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+}
+

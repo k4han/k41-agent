@@ -1254,9 +1254,17 @@ def update_app(
         "-y",
         help="Confirm the update without prompting.",
     ),
+    delay: float = typer.Option(
+        0.0,
+        "--delay",
+        help="Seconds to wait before starting update.",
+    ),
 ) -> None:
     """Update K41 Agent from the latest GitHub release."""
     from agent.bootstrap.update import UpdateError, UpdateOptions, run_update
+
+    if delay > 0:
+        time.sleep(delay)
 
     try:
         run_update(

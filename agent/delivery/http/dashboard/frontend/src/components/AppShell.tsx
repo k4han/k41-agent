@@ -30,7 +30,10 @@ import { createEffect, createMemo, createSignal, For, JSX, onCleanup, onMount, S
 import { DeleteThreadDialog } from "@/components/DeleteThreadDialog";
 import { InlineRenameInput } from "@/components/InlineRenameInput";
 import { SelectControl } from "@/components/SelectControl";
+import { UpdateDialog } from "@/components/UpdateDialog";
+import { VersionBadge } from "@/components/VersionBadge";
 import { apiFetch, deleteJson, patchJson, postJson } from "@/lib/api";
+import { checkForUpdates, openUpdateDialog, versionInfo } from "@/lib/versionStore";
 import {
   chatThreadHref,
   groupThreadsByWorkspace,
@@ -875,6 +878,7 @@ export function AppShell(props: {
     window.addEventListener(CUSTOM_DOM_EVENTS.THREAD_TITLE_UPDATED, handleThreadTitleUpdated);
 
     connectSessionEvents();
+    void checkForUpdates();
   });
 
   onCleanup(() => {
@@ -919,7 +923,21 @@ export function AppShell(props: {
             </div>
             <div class="brand-text">
               <div class="brand-title">Kai Console</div>
-              {/* <div class="brand-subtitle">Agent control plane</div> */}
+              <button
+                type="button"
+                class="brand-subtitle brand-version-btn"
+                onClick={openUpdateDialog}
+                title={
+                  versionInfo()?.has_update
+                    ? `Update available: v${versionInfo()?.latest_version}`
+                    : `Version v${versionInfo()?.current_version || ""}`
+                }
+              >
+                <span>v{versionInfo()?.current_version || "..."}</span>
+                <Show when={versionInfo()?.has_update}>
+                  <span class="brand-update-badge">New</span>
+                </Show>
+              </button>
             </div>
             <Show
               when={isMobileViewport()}
@@ -1131,6 +1149,7 @@ export function AppShell(props: {
           </Show>
         </nav>
         <div class="sidebar-footer">
+          <VersionBadge collapsed={collapsed() && !isMobileViewport()} />
           <div class="sidebar-footer-row">
             <div class="user-menu-wrapper">
               <button
@@ -1194,6 +1213,7 @@ export function AppShell(props: {
         onClose={cancelDelete}
         onConfirm={() => void confirmDeleteHistoryThread()}
       />
+      <UpdateDialog />
     </div>
   );
 }
