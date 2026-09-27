@@ -3,7 +3,9 @@ from agent.modules.conversations.migrations import migrate_conversation_tables
 from agent.modules.conversations.history import (
     CheckpointNotFoundError,
     ConversationHistoryUnavailableError,
+    checkpoint_messages,
     get_checkpoint_stats,
+    get_history_checkpointer,
     get_thread_messages,
     get_thread_messages_payload,
     list_background_threads_with_stats,
@@ -51,6 +53,8 @@ __all__ = [
     "CheckpointNotFoundError",
     "ConversationHistoryUnavailableError",
     "ConversationThread",
+    "checkpoint_messages",
+    "get_history_checkpointer",
     "ConversationThreadRepository",
     "CompactionConflictError",
     "CompactionSummaryError",

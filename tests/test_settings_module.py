@@ -5,6 +5,8 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
+import pytest
+
 from agent.shared.config import (
     BOOTSTRAP_CONFIG_KEYS,
     KNOWN_RUNTIME_KEYS,
@@ -100,6 +102,191 @@ class TestDefaultConfigSource:
     def test_get_missing_key(self) -> None:
         source = DefaultConfigSource()
         assert source.get_settings_value("nonexistent") is None
+
+    def test_register_defaults_merges_new_keys(self) -> None:
+        source = DefaultConfigSource()
+        key = "tools.probe_register_defaults.flag"
+        assert source.get_settings_value(key) is None
+
+        source.register_defaults({key: "auto"})
+
+        val = source.get_settings_value(key)
+        assert val is not None
+        assert val.value == "auto"
+        assert val.source == SettingsSource.DEFAULT
+
+    def test_register_defaults_does_not_overwrite_existing(self) -> None:
+        source = DefaultConfigSource()
+        source.register_defaults({"host": "1.2.3.4"})
+
+        assert source.get("host") == "0.0.0.0"
+
+
+# =====================================================================
+# Runtime seeding helpers
+# =====================================================================
+
+
+class TestRegisterRuntimeDefaults:
+    def test_registers_runtime_keys_and_defaults(self) -> None:
+        from agent.shared.config import register_runtime_defaults
+        from agent.shared.config.constants import DEFAULT_CONFIG, KNOWN_RUNTIME_KEYS
+
+        key = "tools.register_defaults_probe.enabled"
+        previous_known = key in KNOWN_RUNTIME_KEYS
+        previous_default = DEFAULT_CONFIG.get(key, sentinel := object())
+        try:
+            service = ConfigService(sources=[DefaultConfigSource()])
+
+            register_runtime_defaults({key: True}, service)
+
+            assert key in KNOWN_RUNTIME_KEYS
+            assert DEFAULT_CONFIG.get(key) is True
+            overview = service.get_settings_overview()
+            assert overview[key]["value"] is True
+            assert overview[key]["source"] == "default"
+        finally:
+            if not previous_known:
+                KNOWN_RUNTIME_KEYS.discard(key)
+            if previous_default is sentinel:
+                DEFAULT_CONFIG.pop(key, None)
+            else:
+                DEFAULT_CONFIG[key] = previous_default
+
+    def test_skips_non_runtime_keys(self, caplog) -> None:
+        from agent.shared.config import register_runtime_defaults
+        from agent.shared.config.constants import KNOWN_RUNTIME_KEYS
+
+        key = "security.not_a_runtime_key"
+        with caplog.at_level("WARNING"):
+            register_runtime_defaults({key: "x"})
+
+        assert key not in KNOWN_RUNTIME_KEYS
+        assert any("non-runtime default key" in record.message for record in caplog.records)
+
+
+class TestSeedToolRuntimeDefaults:
+    def test_seed_registers_builtin_tool_keys(self) -> None:
+        from agent.modules.tools.config import seed_tool_runtime_defaults
+
+        service = ConfigService(sources=[DefaultConfigSource()])
+        seeded = seed_tool_runtime_defaults(service)
+
+        assert seeded > 0
+        overview = service.get_settings_overview()
+        assert "tools.web_search.provider" in overview
+        assert "tools.generate_image.model" in overview
+
+    def test_seed_is_idempotent(self) -> None:
+        from agent.modules.tools.config import seed_tool_runtime_defaults
+
+        service = ConfigService(sources=[DefaultConfigSource()])
+        first = seed_tool_runtime_defaults(service)
+        second = seed_tool_runtime_defaults(service)
+
+        assert first > 0
+        assert second == first
+
+    def test_seed_survives_descriptor_failure(self, monkeypatch) -> None:
+        import agent.modules.tools as tools_pkg
+        from agent.modules.tools.config import seed_tool_runtime_defaults
+
+        def _boom(*args, **kwargs):
+            raise RuntimeError("descriptor load failed")
+
+        monkeypatch.setattr(tools_pkg, "find_descriptors", _boom)
+
+        assert seed_tool_runtime_defaults(ConfigService(sources=[DefaultConfigSource()])) == 0
+
+
+class TestNormalizeToolSettingValue:
+    def test_unknown_tool_raises(self) -> None:
+        from agent.modules.tools.config import normalize_tool_setting_value
+
+        with pytest.raises(ValueError, match="Unknown tool"):
+            normalize_tool_setting_value("tools.no_such_tool.field", "x")
+
+    def test_unknown_field_raises(self) -> None:
+        from agent.modules.tools.config import normalize_tool_setting_value
+
+        with pytest.raises(ValueError, match="Unknown config field"):
+            normalize_tool_setting_value("tools.web_search.nope", "x")
+
+    def test_empty_string_becomes_none(self) -> None:
+        from agent.modules.tools.config import normalize_tool_setting_value
+
+        assert normalize_tool_setting_value("tools.web_search.google_api_key", "  ") is None
+        assert normalize_tool_setting_value("tools.web_search.google_api_key", "") is None
+
+    def test_invalid_select_option_raises(self) -> None:
+        from agent.modules.tools.config import normalize_tool_setting_value
+
+        with pytest.raises(ValueError, match="must be one of"):
+            normalize_tool_setting_value("tools.web_search.provider", "bogus")
+
+    def test_valid_select_and_number_coercion(self) -> None:
+        from agent.modules.tools.config import normalize_tool_setting_value
+
+        assert (
+            normalize_tool_setting_value("tools.web_search.provider", "google") == "google"
+        )
+        assert normalize_tool_setting_value("tools.generate_image.model", " gpt-image-1 ") == (
+            "gpt-image-1"
+        )
+
+    def test_non_tool_key_passes_through(self) -> None:
+        from agent.modules.tools.config import normalize_tool_setting_value
+
+        assert normalize_tool_setting_value("host", "0.0.0.0") == "0.0.0.0"
+        assert normalize_tool_setting_value("channels.telegram.enabled", True) is True
+
+
+class TestResolveGlobalToolConfigSchemas:
+    def test_resolves_defaults_and_global_overrides(self) -> None:
+        from agent.modules.tools.config import resolve_global_tool_config_schemas
+
+        source = StubSource(
+            {
+                "tools.web_search.provider": _sv(
+                    "tools.web_search.provider",
+                    "google",
+                    SettingsSource.DATABASE,
+                ),
+                "tools.web_search.google_api_key": _sv(
+                    "tools.web_search.google_api_key",
+                    "key-123",
+                    SettingsSource.DATABASE,
+                ),
+            },
+            priority=200,
+        )
+        service = ConfigService(sources=[DefaultConfigSource(), source])
+
+        effective = resolve_global_tool_config_schemas(service)
+
+        assert effective["web_search"]["provider"] == "google"
+        # Secret fields are masked in display-only payloads.
+        assert effective["web_search"]["google_api_key"] == "set"
+        assert effective["generate_image"]["model"] == "gpt-image-1"
+
+    def test_ignores_stored_null_override(self) -> None:
+        from agent.modules.tools.config import resolve_global_tool_config_schemas
+
+        source = StubSource(
+            {
+                "tools.web_search.provider": _sv(
+                    "tools.web_search.provider",
+                    None,
+                    SettingsSource.DATABASE,
+                ),
+            },
+            priority=200,
+        )
+        service = ConfigService(sources=[DefaultConfigSource(), source])
+
+        effective = resolve_global_tool_config_schemas(service)
+
+        assert effective["web_search"]["provider"] == "auto"
 
 
 # =====================================================================

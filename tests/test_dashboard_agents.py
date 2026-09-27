@@ -82,6 +82,9 @@ def test_agents_page_serves_spa_and_agent_api_returns_cards(dashboard_agent_clie
     assert "ask_user" in tools_data["tools"]
     assert "tool_config_schemas" in tools_data
     assert "generate_image" in tools_data["tool_config_schemas"]
+    assert "tool_config_effective" in tools_data
+    assert "web_search" in tools_data["tool_config_effective"]
+    assert "generate_image" in tools_data["tool_config_effective"]
 
     index_response = client.get("/")
     assert index_response.status_code == 200

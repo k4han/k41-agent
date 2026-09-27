@@ -13,6 +13,15 @@ Kai-agent sử dụng `~/.k41-agent/config.yaml` cho cấu hình bootstrap và d
 Trên Windows: `C:\Users\<username>\.k41-agent\config.yaml`
 Trên Linux/Mac: `/home/<username>/.k41-agent/config.yaml`
 
+## Environment File (.env)
+
+Ngoài `config.yaml`, agent đọc file `.env` lúc khởi động để set biến môi trường (fallback cho tool credential, `K41_AGENT_HOME`, ...):
+
+1. `.env` trong thư mục working directory (nơi bạn chạy `k41` / `python main.py`)
+2. `.env` trong agent home (`~/.k41-agent/.env`, đổi được qua `K41_AGENT_HOME`)
+
+Biến đã tồn tại trong process environment **không** bị ghi đè, nên export từ shell/service manager luôn thắng `.env`. Xem [.env.example](../.env.example) cho danh sách biến.
+
 ## Configuration Structure
 
 ```yaml
@@ -32,8 +41,9 @@ database:
   # url: "postgresql+asyncpg://user:password@localhost:5432/k41_agent"
 
 # Runtime settings
-# Configure LLM providers, MCP servers, channels, and recursion_limit
+# Configure LLM providers, MCP servers, channels, tools, and recursion_limit
 # from the dashboard. Channel settings live at Settings > Channels.
+# Global tool credentials live at Settings > Tools.
 
 # Paths
 paths:
@@ -68,6 +78,19 @@ Telegram có hai chế độ nhận update:
 Channel token, webhook secret và GitHub private key được mã hóa trong DB. Nếu nâng cấp từ YAML cũ, các key `channels.*` còn thiếu trong DB sẽ được copy một lần từ YAML.
 
 Các chat channel mới nên khai báo field qua `ChatChannelAdapter.settings_schema`. Dashboard Settings > Channels đọc schema này để render form, kiểm tra required credential và gửi notification qua adapter `send()` thay vì thêm nhánh hard-code trong notification service.
+
+### Optional: Tool Credentials (Settings > Tools)
+
+Cấu hình global cho built-in tool (ví dụ provider và credentials của `web_search`: Google Custom Search, Tavily, Firecrawl, Brave, Bing, DuckDuckGo; model mặc định của `generate_image`) nằm ở dashboard `Settings > Tools`.
+
+- Key dạng `tools.<tool>.<field>` được lưu trong database (DB-owned) và mã hóa khi là secret.
+- Nếu `config.yaml` có khai báo `tools.*`, các key này chỉ được copy một lần vào database khi runtime database source được attach. Sau đó mọi chỉnh sửa làm tại Settings > Tools (YAML không còn overlay).
+- Gửi `null` (hoặc chuỗi rỗng) từ dashboard sẽ **xóa override đang lưu** và quay lại default của tool schema — không lưu giá trị null vào DB.
+- Validate theo schema của tool: unknown tool/field, select option sai, number ngoài range đều trả HTTP 400.
+- Per-agent override trong `Settings > Agents > Tools` hiển thị badge `Override`; placeholder/select option hiển thị giá trị global (`Global: ...` / `Global (set)` cho secret).
+- Form cấu hình `web_search` tự động ẩn/hiện các trường credential linh hoạt theo provider đang chọn (ví dụ: chọn DuckDuckGo không cần key, chọn Tavily hiện Tavily API Key, chọn Firecrawl hiện Firecrawl API Key & Base URL, chọn Bing hiện Bing API Key, chọn Brave hiện Brave API Key, chọn Google hiện Google API Key & CSE ID, chọn Auto hiển thị đầy đủ để cấu hình theo thứ tự ưu tiên).
+
+Fallback env (chỉ dùng khi global tool config để trống): `GOOGLE_API_KEY`, `GOOGLE_CSE_ID`, `TAVILY_API_KEY`, `FIRECRAWL_API_KEY`, `FIRECRAWL_BASE_URL`, `BING_API_KEY`, `BRAVE_API_KEY` cho `web_search`.
 
 ## Configuration Precedence
 
@@ -117,7 +140,9 @@ Với `google`, trường `base_url` sẽ bị bỏ qua.
 
 ## Runtime Database Configuration
 
-Các key `llm.*`, `mcp.servers.*`, `channels.*` và `recursion_limit` được lưu trong DB. Dashboard ghi qua endpoint `/settings`; ConfigService đọc DB với priority cao hơn YAML.
+Các key `llm.*`, `mcp.servers.*`, `channels.*`, `tools.*` và `recursion_limit` được lưu trong DB. Dashboard ghi qua endpoint `/settings`; ConfigService đọc DB với priority cao hơn YAML.
+
+`tools.*` là DB-owned: `YamlConfigSource` lọc các key này khỏi listings; chỉ có bước seed một lần khi attach database source mới copy từ `config.yaml` (nếu có) vào DB.
 
 ## Validation
 

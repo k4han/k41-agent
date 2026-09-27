@@ -59,6 +59,11 @@ function providerNameFromKey(settingKey: string): string | null {
   return match?.[1] ?? null;
 }
 
+function toolNameFromKey(settingKey: string): string | null {
+  const match = /^tools\.([^.]+)\./.exec(settingKey);
+  return match?.[1] ?? null;
+}
+
 export function categoryLabel(category: string): string {
   return category
     .replace(/[_-]/g, " ")
@@ -68,18 +73,24 @@ export function categoryLabel(category: string): string {
 export function settingLabel(
   settingKey: string,
   info?: Pick<SettingInfo, "label">,
-  options: { trimProviderPrefix?: boolean } = {},
+  options: { trimProviderPrefix?: boolean; trimToolPrefix?: boolean } = {},
 ): string {
-  const label = info?.label || settingKey;
-  if (!options.trimProviderPrefix) {
-    return label;
+  let label = info?.label || settingKey;
+  if (options.trimProviderPrefix) {
+    const providerName = providerNameFromKey(settingKey);
+    const providerPrefix = providerName ? `${providerName}: ` : "";
+    if (providerPrefix && label.startsWith(providerPrefix)) {
+      label = label.slice(providerPrefix.length);
+    }
   }
-
-  const providerName = providerNameFromKey(settingKey);
-  const providerPrefix = providerName ? `${providerName}: ` : "";
-  return providerPrefix && label.startsWith(providerPrefix)
-    ? label.slice(providerPrefix.length)
-    : label;
+  if (options.trimToolPrefix) {
+    const toolName = toolNameFromKey(settingKey);
+    const toolPrefix = toolName ? `${toolName}: ` : "";
+    if (toolPrefix && label.startsWith(toolPrefix)) {
+      label = label.slice(toolPrefix.length);
+    }
+  }
+  return label;
 }
 
 export function formatSettingValue(info: SettingInfo | undefined, value: unknown): string {
@@ -360,6 +371,7 @@ export function SettingRow(props: {
   dirty: boolean;
   showDescription?: boolean;
   trimProviderPrefix?: boolean;
+  trimToolPrefix?: boolean;
   actions?: JSX.Element;
   control?: JSX.Element;
   density?: "compact" | "detailed";
@@ -370,6 +382,7 @@ export function SettingRow(props: {
   const label = createMemo(() =>
     settingLabel(props.settingKey, props.info, {
       trimProviderPrefix: props.trimProviderPrefix,
+      trimToolPrefix: props.trimToolPrefix,
     }),
   );
 

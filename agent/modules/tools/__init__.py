@@ -19,7 +19,15 @@ from agent.modules.tools.domain import (
     ToolDescriptor,
     ToolSource,
 )
-from agent.modules.tools.config import serialize_tool_config_schemas
+from agent.modules.tools.config import (
+    coerce_tool_config_value,
+    materialize_tool,
+    normalize_tool_setting_value,
+    resolve_global_tool_config_schemas,
+    seed_tool_runtime_defaults,
+    serialize_tool_config_schemas,
+    ToolConfigService,
+)
 from agent.modules.tools.policy import ToolPolicy
 from agent.modules.tools.registry_service import (
     ensure_mcp_loaded,
@@ -197,6 +205,7 @@ __all__ = [
     "ToolCategory",
     "ToolConfigField",
     "ToolConfigSchema",
+    "ToolConfigService",
     "ToolConfigValue",
     "ToolContext",
     "ToolDescriptor",
@@ -244,6 +253,11 @@ __all__ = [
     "resolve_safe_path",
     "resolve_tools",
     "resolve_tools_for_agent",
+    "coerce_tool_config_value",
+    "materialize_tool",
+    "normalize_tool_setting_value",
+    "resolve_global_tool_config_schemas",
+    "seed_tool_runtime_defaults",
     "serialize_tool_config_schemas",
     "THREAD_STORAGE_BASE_DIR",
     "THREAD_STORAGE_DIRS",

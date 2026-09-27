@@ -72,6 +72,7 @@ class ToolConfigField:
     min: float | None = None
     max: float | None = None
     step: float | None = None
+    show_when: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -88,6 +89,8 @@ class ToolConfigField:
             value = getattr(self, key)
             if value is not None:
                 data[key] = value
+        if self.show_when:
+            data["show_when"] = {k: list(v) for k, v in self.show_when.items()}
         return data
 
 

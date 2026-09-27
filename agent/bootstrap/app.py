@@ -46,6 +46,15 @@ SERVER_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 2
 
 async def _warm_dashboard_caches() -> None:
     try:
+        from agent.modules.tools import seed_tool_runtime_defaults
+
+        seeded = seed_tool_runtime_defaults()
+        if seeded:
+            logger.info("Seeded %s tool runtime config default(s).", seeded)
+    except Exception as exc:
+        logger.warning("Failed to seed tool runtime defaults: %s", exc)
+
+    try:
         from agent.delivery.http.dashboard.routes.helpers.agents import (
             warm_agent_options_caches,
         )

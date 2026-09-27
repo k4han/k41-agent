@@ -1,6 +1,7 @@
 export const API_PATHS = {
   catalog: "/dashboard-api/catalog",
   config: "/dashboard-api/config",
+  tools: "/dashboard-api/tools",
   providers: "/dashboard-api/providers",
   backends: "/dashboard-api/backends",
   scheduler: "/dashboard-api/scheduler",

@@ -29,6 +29,7 @@ from agent.shared.config.service import (
     attach_database_config_source,
     detach_database_config_source,
     get_config_service,
+    register_runtime_defaults,
     reload_config,
 )
 from agent.shared.config.database_source import DatabaseConfigSource
@@ -41,6 +42,7 @@ __all__ = [
     "get_config_service",
     "attach_database_config_source",
     "detach_database_config_source",
+    "register_runtime_defaults",
     "reload_config",
     # Models
     "RuntimeSettings",

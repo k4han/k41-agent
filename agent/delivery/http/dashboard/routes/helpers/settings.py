@@ -56,6 +56,10 @@ def _is_mcp_setting_key(key: str) -> bool:
     return key.startswith("mcp.servers.")
 
 
+def _is_tool_setting_key(key: str) -> bool:
+    return key.startswith("tools.")
+
+
 def _filter_settings[T](
     settings: dict[str, T],
     *,
@@ -78,6 +82,7 @@ def _filter_config_settings[T](settings: dict[str, T]) -> dict[str, T]:
             and not _is_workspace_setting_key(key)
             and not _is_skill_setting_key(key)
             and not _is_mcp_setting_key(key)
+            and not _is_tool_setting_key(key)
         )
     }
 
@@ -275,6 +280,13 @@ def normalize_setting_value(key: str, value: Any | None) -> Any | None:
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Invalid timezone '{tz_name}': {exc}") from exc
         return tz_name
+    if _is_tool_setting_key(key):
+        from agent.modules.tools import normalize_tool_setting_value
+
+        try:
+            return normalize_tool_setting_value(key, value)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     if value is None or not key.endswith(".models"):
         return value
     if isinstance(value, str):

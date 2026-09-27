@@ -55,6 +55,9 @@ const ConnectionsPage = lazy(() =>
 const ConfigPage = lazy(() =>
   import("@/pages/settings/ConfigPage").then((module) => ({ default: module.ConfigPage })),
 );
+const ToolsPage = lazy(() =>
+  import("@/pages/settings/ToolsPage").then((module) => ({ default: module.ToolsPage })),
+);
 const PromptVariablesPage = lazy(() =>
   import("@/pages/settings/PromptVariablesPage").then((module) => ({
     default: module.PromptVariablesPage,
@@ -100,6 +103,7 @@ render(
         <Route path="/scheduler" component={SchedulerPage} />
         <Route path="/settings" component={() => <Navigate href="/settings/config" />} />
         <Route path="/settings/config" component={ConfigPage} />
+        <Route path="/settings/tools" component={ToolsPage} />
         <Route path="/settings/backends" component={BackendsPage} />
         <Route path="/settings/backends/:backendName" component={BackendsPage} />
         <Route path="/settings/sandboxes" component={SandboxesPage} />

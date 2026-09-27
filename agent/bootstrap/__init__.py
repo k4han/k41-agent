@@ -1,4 +1,7 @@
+import logging
+import os
 from importlib import import_module
+from pathlib import Path
 from typing import Any
 
 # Keep package import light: heavy submodules (runtime, settings) are only
@@ -13,6 +16,34 @@ _LAZY_EXPORTS = {
 }
 
 _APP_EXPORTS = {"app", "create_app", "main", "run", "settings"}
+
+
+def load_env_files() -> None:
+    """Load local ``.env`` files into the process environment.
+
+    Runs once at package import so every entry point (CLI server, tray,
+    ``main.py``) reads the same values. Files are searched in the working
+    directory first, then in the agent home. Existing environment variables
+    are never overwritten, so shell/service exports always win.
+    """
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        logging.getLogger(__name__).warning(
+            "python-dotenv is not installed; skipping .env loading."
+        )
+        return
+
+    load_dotenv(Path.cwd() / ".env")
+    agent_home = (
+        os.environ.get("K41_AGENT_HOME")
+        or os.environ.get("AGENT_HOME")
+        or str(Path.home() / ".k41-agent")
+    )
+    load_dotenv(Path(agent_home) / ".env")
+
+
+load_env_files()
 
 
 def __getattr__(name: str) -> Any:
@@ -32,6 +63,7 @@ def __dir__() -> list[str]:
 __all__ = [
     "app",
     "create_app",
+    "load_env_files",
     "main",
     "run",
     "settings",

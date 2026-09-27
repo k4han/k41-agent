@@ -469,8 +469,7 @@ async def _compact_conversation_thread_locked(
     retained_tokens = count_tokens_approximately(injected_messages)
 
     try:
-        from agent.modules.usage import get_usage_service
-        from agent.modules.usage.repository import UsageEventInput
+        from agent.modules.usage import UsageEventInput, get_usage_service
 
         usage_event = UsageEventInput(
             thread_id=thread_id,

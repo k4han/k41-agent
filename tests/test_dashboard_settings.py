@@ -181,6 +181,168 @@ class TestDashboardSettingsEndpoints:
         assert "mcp" not in data["by_category"]
         assert "database.url" in data["settings"]
 
+    def test_get_config_api_excludes_tool_settings(self, dashboard_client) -> None:
+        resp = dashboard_client.get("/dashboard-api/config")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert not any(key.startswith("tools.") for key in data["settings"])
+        assert "tools" not in data["by_category"]
+
+    def test_get_tools_api_seeds_and_returns_tool_payload(self, dashboard_client) -> None:
+        resp = dashboard_client.get("/dashboard-api/tools")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["active_nav"] == "tools"
+        assert data["page_title"] == "Tool Configuration"
+        assert "web_search" in data["tool_config_schemas"]
+        assert "generate_image" in data["tool_config_schemas"]
+        assert "web_search" in data["tool_config_effective"]
+        assert all(key.startswith("tools.") for key in data["settings"])
+        assert "tools.web_search.provider" in data["settings"]
+        assert "tools.web_search.google_api_key" in data["settings"]
+        assert "tools" in data["by_category"]
+        assert set(data["settings_sources"]) == set(data["settings"])
+
+    def test_put_tool_setting_unknown_tool_returns_bad_request(self, dashboard_client) -> None:
+        resp = dashboard_client.put(
+            "/settings/tools.nonexistent.field",
+            json={"value": "x"},
+        )
+
+        assert resp.status_code == 400
+        assert "Unknown tool" in resp.json()["detail"]
+
+    def test_put_tool_setting_unknown_field_returns_bad_request(self, dashboard_client) -> None:
+        resp = dashboard_client.put(
+            "/settings/tools.web_search.bogus",
+            json={"value": "x"},
+        )
+
+        assert resp.status_code == 400
+        assert "Unknown config field" in resp.json()["detail"]
+        assert "Allowed fields" in resp.json()["detail"]
+
+    def test_put_tool_setting_invalid_select_option_returns_bad_request(
+        self,
+        dashboard_client,
+    ) -> None:
+        resp = dashboard_client.put(
+            "/settings/tools.web_search.provider",
+            json={"value": "bogus"},
+        )
+
+        assert resp.status_code == 400
+        assert "must be one of" in resp.json()["detail"]
+
+    def test_put_tool_setting_saves_valid_value(self, make_dashboard_client) -> None:
+        service, db_source = _db_config_service(
+            """
+            tools:
+              web_search:
+                provider: auto
+            """
+        )
+        client = make_dashboard_client(service)
+
+        resp = client.put(
+            "/settings/tools.web_search.provider",
+            json={"value": "google"},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "status": "success",
+            "key": "tools.web_search.provider",
+            "value": "google",
+        }
+        assert db_source.get("tools.web_search.provider") == "google"
+
+    def test_put_tool_setting_null_deletes_override(self, make_dashboard_client) -> None:
+        service, db_source = _db_config_service(
+            """
+            tools:
+              web_search:
+                provider: google
+                google_api_key: key-123
+            """
+        )
+        client = make_dashboard_client(service)
+
+        resp = client.put(
+            "/settings/tools.web_search.google_api_key",
+            json={"value": None},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["value"] is None
+        flat = db_source.get_all()
+        assert "tools.web_search.google_api_key" not in flat
+        assert flat["tools.web_search.provider"] == "google"
+
+    def test_put_tool_setting_empty_string_normalizes_to_reset(
+        self,
+        make_dashboard_client,
+    ) -> None:
+        service, db_source = _db_config_service(
+            """
+            tools:
+              web_search:
+                google_api_key: key-123
+            """
+        )
+        client = make_dashboard_client(service)
+
+        resp = client.put(
+            "/settings/tools.web_search.google_api_key",
+            json={"value": "   "},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["value"] is None
+        assert "tools.web_search.google_api_key" not in db_source.get_all()
+
+    def test_put_settings_batch_tool_reset_deletes_overrides(
+        self,
+        make_dashboard_client,
+    ) -> None:
+        service, db_source = _db_config_service(
+            """
+            tools:
+              web_search:
+                provider: google
+                google_api_key: key-123
+                google_cse_id: cse-1
+              generate_image:
+                model: gpt-image-1
+            """
+        )
+        client = make_dashboard_client(service)
+
+        resp = client.put(
+            "/settings",
+            json={
+                "values": {
+                    "tools.web_search.google_api_key": None,
+                    "tools.web_search.provider": "duckduckgo",
+                    "tools.generate_image.model": None,
+                }
+            },
+        )
+
+        assert resp.status_code == 200
+        assert set(resp.json()["updated"]) == {
+            "tools.web_search.google_api_key",
+            "tools.web_search.provider",
+            "tools.generate_image.model",
+        }
+        flat = db_source.get_all()
+        assert "tools.web_search.google_api_key" not in flat
+        assert "tools.generate_image.model" not in flat
+        assert flat["tools.web_search.provider"] == "duckduckgo"
+        assert flat["tools.web_search.google_cse_id"] == "cse-1"
+
     def test_get_backends_api_includes_workspace_backend_settings(self, dashboard_client) -> None:
         resp = dashboard_client.get("/dashboard-api/backends")
         assert resp.status_code == 200

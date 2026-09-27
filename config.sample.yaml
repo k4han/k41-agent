@@ -25,8 +25,15 @@ enable_dashboard: true
 # - LLM providers, default model, provider API keys, models, and enabled state
 # - MCP servers, including encrypted env.* and headers.*
 # - Telegram/Discord/GitHub channel settings, including encrypted tokens and secrets
+# - tools.* (global tool config, e.g. web_search / generate_image credentials)
 # - display.timezone (IANA timezone used to render dashboard timestamps)
 # - recursion_limit
+
+# Tool credentials and per-tool defaults (database-owned).
+# Existing tools.* keys in this file are copied into the database once when the
+# runtime database source attaches; manage them in the dashboard at
+# Settings > Tools. Sending a null value from the dashboard deletes the stored
+# override so the schema default applies again.
 
 # Internal security configuration
 security:

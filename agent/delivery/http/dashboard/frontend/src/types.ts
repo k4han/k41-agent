@@ -153,6 +153,7 @@ export type ToolConfigField = {
   min?: number;
   max?: number;
   step?: number;
+  show_when?: Record<string, string[]>;
 };
 
 export type ToolConfigSchema = {
@@ -189,6 +190,7 @@ export type AgentToolsPayload = {
   tools: string[];
   tool_groups?: ToolGroup[];
   tool_config_schemas?: Record<string, ToolConfigSchema>;
+  tool_config_effective?: Record<string, Record<string, unknown>>;
 };
 
 export type AgentWorkflowsPayload = {
@@ -407,7 +409,7 @@ export type CatalogResponse = {
 };
 
 export type SettingsPayload = {
-  active_nav: "config" | "providers" | "backends";
+  active_nav: "config" | "providers" | "backends" | "tools";
   page_title: string;
   page_subtitle: string;
   settings: Record<string, SettingInfo>;
@@ -423,6 +425,8 @@ export type SettingsPayload = {
   model_catalog_error?: string;
   default_provider?: string;
   default_model?: string;
+  tool_config_schemas?: Record<string, ToolConfigSchema>;
+  tool_config_effective?: Record<string, Record<string, unknown>>;
 };
 
 export type UsageSummary = {

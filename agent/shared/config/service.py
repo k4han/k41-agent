@@ -432,10 +432,53 @@ def reload_config() -> None:
     service.reload()
 
 
+def register_runtime_defaults(
+    values: dict[str, Any],
+    service: ConfigService | None = None,
+) -> None:
+    """Register additional default runtime keys at runtime.
+
+    Updates ``KNOWN_RUNTIME_KEYS`` and ``DEFAULT_CONFIG``, then merges the
+    defaults into live ``DefaultConfigSource`` instances so settings listings
+    can see keys that were not present when those sources were constructed.
+
+    Args:
+        values: Mapping of runtime key -> default value.
+        service: Optional config service whose sources should also be updated.
+                 The global singleton is always updated when it exists.
+    """
+    from agent.shared.config.constants import DEFAULT_CONFIG
+
+    defaults: dict[str, Any] = {}
+    for key, value in values.items():
+        if not is_runtime_key(key):
+            logger.warning("Skipping non-runtime default key: %s", key)
+            continue
+        KNOWN_RUNTIME_KEYS.add(key)
+        DEFAULT_CONFIG.setdefault(key, value)
+        defaults[key] = DEFAULT_CONFIG[key]
+
+    if not defaults:
+        return
+
+    targets: list[ConfigService] = []
+    if service is not None:
+        targets.append(service)
+    if _config_service is not None and all(target is not _config_service for target in targets):
+        targets.append(_config_service)
+
+    for target in targets:
+        for source in target._sources:
+            register = getattr(source, "register_defaults", None)
+            if callable(register):
+                register(defaults)
+
+
 __all__ = [
     "ConfigService",
     "attach_database_config_source",
     "detach_database_config_source",
     "get_config_service",
+    "register_runtime_defaults",
     "reload_config",
 ]

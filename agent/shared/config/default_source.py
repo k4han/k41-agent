@@ -17,6 +17,16 @@ class DefaultConfigSource:
         self._priority = 0  # Lowest priority
         self._defaults: dict[str, Any] = dict(DEFAULT_CONFIG)
 
+    def register_defaults(self, values: dict[str, Any]) -> None:
+        """Merge additional default keys registered after construction.
+
+        Used by runtime seeding (e.g. tool config schemas) so keys that were
+        unknown when this source was created still resolve to their defaults.
+        """
+        for key, value in values.items():
+            if key not in self._defaults:
+                self._defaults[key] = value
+
     def get(self, key: str) -> Any | None:
         """Get a default config value by key."""
         return self._defaults.get(key)

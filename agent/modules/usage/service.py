@@ -214,7 +214,7 @@ class UsageService:
     async def get_thread_usage(self, thread_id: str) -> dict[str, Any]:
         payload = await self._repository.aggregate_by_thread(thread_id)
         try:
-            from agent.modules.conversations.history import (
+            from agent.modules.conversations import (
                 checkpoint_messages,
                 get_history_checkpointer,
             )

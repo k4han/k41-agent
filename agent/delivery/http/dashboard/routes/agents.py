@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from agent.modules.workflows import REACT_AGENT_GRAPH_TYPE
@@ -20,6 +20,8 @@ from agent.delivery.http.dashboard.routes.helpers.agents import (
 )
 from agent.modules.agents import get_catalog_service
 from agent.modules.prompt_variables import get_prompt_variable_service
+from agent.modules.tools import resolve_global_tool_config_schemas
+from agent.shared.config import get_config_service
 
 
 router = APIRouter()
@@ -57,9 +59,11 @@ async def list_dashboard_agent_cards() -> dict[str, Any]:
 
 
 @router.get("/dashboard-api/agents/tools")
-async def list_dashboard_agent_tools() -> dict[str, Any]:
+async def list_dashboard_agent_tools(request: Request) -> dict[str, Any]:
     """List built-in tool options and config schemas for agent editing."""
-    return await agent_tools_payload()
+    payload = await agent_tools_payload()
+    service = getattr(request.app.state, "config_service", None) or get_config_service()
+    return {**payload, "tool_config_effective": resolve_global_tool_config_schemas(service)}
 
 
 @router.get("/dashboard-api/agents/workflows")

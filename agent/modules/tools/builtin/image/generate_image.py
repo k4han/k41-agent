@@ -138,7 +138,8 @@ def _resolve_provider(provider_name: str):
             ToolErrorCode.INVALID_INPUT,
             (
                 "Image provider is not configured. Set the generate_image "
-                "provider config or llm.default_model provider."
+                "provider config in Dashboard > Settings > Tools > "
+                "generate_image (or configure llm.default_model provider)."
             ),
         )
     if provider.provider_type not in {ProviderType.OPENAI, ProviderType.OPENAI_COMPATIBLE}:

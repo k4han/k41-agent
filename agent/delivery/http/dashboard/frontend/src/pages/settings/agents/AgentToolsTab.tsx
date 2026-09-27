@@ -33,11 +33,28 @@ function fieldValue(form: AgentForm, toolName: string, field: ToolConfigField) {
   return field.input_type === "boolean" ? false : "";
 }
 
-function formatDefault(field: ToolConfigField) {
+function schemaDefaultLabel(field: ToolConfigField) {
   if (field.default === undefined || field.default === null || field.default === "") {
     return "Inherit";
   }
   return `Inherit (${String(field.default)})`;
+}
+
+function formatDefault(
+  field: ToolConfigField,
+  toolName: string,
+  effective: Record<string, Record<string, unknown>> | undefined,
+) {
+  const globalValue = effective?.[toolName]?.[field.name];
+  const hasGlobal =
+    globalValue !== undefined && globalValue !== null && globalValue !== "";
+  if (!hasGlobal) {
+    return schemaDefaultLabel(field);
+  }
+  if (field.secret || field.input_type === "password") {
+    return "Global (set)";
+  }
+  return `Global: ${String(globalValue)}`;
 }
 
 function isImageOutputModel(model: { output_types?: string[] | null }) {
@@ -55,6 +72,7 @@ export function AgentToolsTab(props: {
   subAgentOptions: string[];
   planApprovalTargetOptions: string[];
   toolConfigSchemas: Record<string, ToolConfigSchema>;
+  toolConfigEffective?: Record<string, Record<string, unknown>>;
   payload: AgentsPayload;
   onToggleListValue: (
     key: "tools" | "sub_agents" | "plan_approval_targets",
@@ -70,6 +88,44 @@ export function AgentToolsTab(props: {
     props.mcpInstalls.filter((install) => install.agent_enabled).length;
   const installForServer = (serverName: string) =>
     props.mcpInstalls.find((install) => install.server_name === serverName);
+
+  const isFieldVisible = (tool: string, field: ToolConfigField) => {
+    if (tool === "generate_image" && field.name === "provider") {
+      return false;
+    }
+    if (!field.show_when || Object.keys(field.show_when).length === 0) {
+      return true;
+    }
+    for (const [depField, allowedValues] of Object.entries(field.show_when)) {
+      const overrideVal = props.form.tool_configs[tool]?.[depField];
+      const globalVal = props.toolConfigEffective?.[tool]?.[depField];
+      const defaultVal = props.toolConfigSchemas[tool]?.fields.find((f) => f.name === depField)?.default;
+      const currentVal =
+        overrideVal !== undefined && overrideVal !== "" && overrideVal !== null
+          ? overrideVal
+          : globalVal !== undefined && globalVal !== "" && globalVal !== null
+            ? globalVal
+            : (defaultVal ?? "");
+      if (!allowedValues.includes(String(currentVal))) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const isDuckDuckGo = (tool: string) => {
+    if (tool !== "web_search") return false;
+    const overrideVal = props.form.tool_configs[tool]?.provider;
+    const globalVal = props.toolConfigEffective?.[tool]?.provider;
+    const defaultVal = props.toolConfigSchemas[tool]?.fields.find((f) => f.name === "provider")?.default;
+    const currentVal =
+      overrideVal !== undefined && overrideVal !== "" && overrideVal !== null
+        ? overrideVal
+        : globalVal !== undefined && globalVal !== "" && globalVal !== null
+          ? globalVal
+          : (defaultVal ?? "auto");
+    return String(currentVal) === "duckduckgo";
+  };
 
   return (
     <div class="agent-config-tools">
@@ -168,15 +224,16 @@ export function AgentToolsTab(props: {
                                 <For each={schema().fields}>
                                   {(field) => {
                                     const value = () => fieldValue(props.form, tool, field);
-                                    if (tool === "generate_image" && field.name === "provider") {
-                                      return null;
-                                    }
                                     return (
-                                      <div class="agent-config-tool-field">
+                                      <Show when={isFieldVisible(tool, field)}>
+                                        <div class="agent-config-tool-field">
                                         <label class="agent-config-tool-field-label" for={`${tool}-${field.name}`}>
                                           <span>{field.label}</span>
                                           <Show when={field.required}>
                                             <span class="badge">Required</span>
+                                          </Show>
+                                          <Show when={hasOverride(props.form, tool, field.name)}>
+                                            <span class="badge badge-info" title="This agent overrides the global value.">Override</span>
                                           </Show>
                                         </label>
                                         <Show
@@ -201,7 +258,7 @@ export function AgentToolsTab(props: {
                                                     }
                                                     value={String(value() ?? "")}
                                                     disabled={props.readOnly}
-                                                    placeholder={formatDefault(field)}
+                                                    placeholder={formatDefault(field, tool, props.toolConfigEffective)}
                                                     min={field.min}
                                                     max={field.max}
                                                     step={field.step}
@@ -230,7 +287,7 @@ export function AgentToolsTab(props: {
                                                     props.onUpdateToolConfig(tool, field.name, nextValue);
                                                   }}
                                                 >
-                                                  <option value="">{formatDefault(field)}</option>
+                                                  <option value="">{formatDefault(field, tool, props.toolConfigEffective)}</option>
                                                   <For each={field.options}>
                                                     {(option) => <option value={option}>{option}</option>}
                                                   </For>
@@ -307,10 +364,16 @@ export function AgentToolsTab(props: {
                                           <div class="hint">{field.description}</div>
                                         </Show>
                                       </div>
-                                    );
-                                  }}
-                                </For>
-                              </div>
+                                    </Show>
+                                  );
+                                }}
+                              </For>
+                              <Show when={isDuckDuckGo(tool)}>
+                                <div class="hint" style={{ "grid-column": "1 / -1", "margin-top": "4px" }}>
+                                  DuckDuckGo operates without API credentials.
+                                </div>
+                              </Show>
+                            </div>
                             </div>
                           );
                         }}

@@ -8,3 +8,4 @@ export { PromptVariablesPage } from "./PromptVariablesPage";
 export { ProvidersPage } from "./ProvidersPage";
 export { SecurityPage } from "./SecurityPage";
 export { SettingsLayout } from "./SettingsLayout";
+export { ToolsPage } from "./ToolsPage";

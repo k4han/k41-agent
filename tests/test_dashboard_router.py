@@ -217,6 +217,12 @@ def test_dashboard_spa_route_serves_index() -> None:
     assert '<div id="root">' in skills_response.text
     assert "/dashboard-assets/" in skills_response.text
 
+    tools_response = client.get("/settings/tools")
+
+    assert tools_response.status_code == 200
+    assert '<div id="root">' in tools_response.text
+    assert "/dashboard-assets/" in tools_response.text
+
 
 def test_dashboard_api_home_returns_runtime_snapshot() -> None:
     channel_manager = ChannelManager()

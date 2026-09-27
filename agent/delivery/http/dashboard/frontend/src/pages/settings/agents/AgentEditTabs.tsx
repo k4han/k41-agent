@@ -82,6 +82,7 @@ export function AgentEditTabs(props: {
               subAgentOptions={props.subAgentOptions}
               planApprovalTargetOptions={props.planApprovalTargetOptions}
               toolConfigSchemas={props.payload.tool_config_schemas || {}}
+              toolConfigEffective={props.payload.tool_config_effective || {}}
               payload={props.payload}
               onToggleListValue={props.onToggleListValue}
               onToggleToolGroup={props.onToggleToolGroup}

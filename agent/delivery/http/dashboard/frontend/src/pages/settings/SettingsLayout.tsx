@@ -18,6 +18,7 @@ import {
   Search,
   ServerCog,
   Users,
+  Wrench,
   Workflow,
   X,
 } from "lucide-solid";
@@ -63,6 +64,7 @@ const settingsNavGroups: SettingsNavGroup[] = [
     label: "Intelligence",
     items: [
       { href: "/settings/providers", label: "Providers", icon: () => <Workflow size={15} />, description: "LLM providers & models", keywords: "llm provider model openai anthropic" },
+      { href: "/settings/tools", label: "Tools", icon: () => <Wrench size={15} />, description: "Global tool config", keywords: "tool api key search image web config" },
       { href: "/settings/agents", label: "Agents", icon: () => <Users size={15} />, description: "Agent profiles", keywords: "agent persona" },
       { href: "/settings/skills", label: "Skills", icon: () => <BookOpen size={15} />, description: "Reusable skills", keywords: "skill repository" },
       { href: "/settings/prompt-variables", label: "Prompt Variables", icon: () => <Braces size={15} />, description: "Template variables", keywords: "prompt variable template" },

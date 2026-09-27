@@ -9,11 +9,20 @@ from agent.delivery.http.dashboard.routes.helpers.agents import (
 )
 from agent.delivery.http.dashboard.routes.helpers.deps import get_request_config_service
 from agent.delivery.http.dashboard.routes.helpers.settings import (
+    delete_config_tree,
     ensure_runtime_keys,
+    group_settings_by_category,
     normalize_setting_updates,
     normalize_setting_value,
     update_config_settings,
     validate_default_model_update,
+)
+from agent.modules.tools import (
+    ToolSource,
+    find_descriptors,
+    resolve_global_tool_config_schemas,
+    seed_tool_runtime_defaults,
+    serialize_tool_config_schemas,
 )
 
 
@@ -32,6 +41,29 @@ async def get_settings_sources(request: Request) -> dict[str, dict[str, Any]]:
     """Get the source (config file, environment, etc.) for each setting."""
     service = get_request_config_service(request)
     return {"sources": service.get_settings_sources()}
+
+
+@router.get("/dashboard-api/tools")
+async def get_dashboard_tools_settings(request: Request) -> dict[str, Any]:
+    """Global tool configuration page: schemas, effective values, and settings."""
+    service = get_request_config_service(request)
+    seed_tool_runtime_defaults(service)
+    settings_raw, settings_sources_raw = service.get_settings_overview_and_sources()
+    settings = {key: info for key, info in settings_raw.items() if key.startswith("tools.")}
+    settings_sources = {
+        key: info for key, info in settings_sources_raw.items() if key.startswith("tools.")
+    }
+    descriptors = find_descriptors(source=ToolSource.BUILTIN)
+    return {
+        "active_nav": "tools",
+        "page_title": "Tool Configuration",
+        "page_subtitle": "Manage global configuration and credentials for built-in tools.",
+        "tool_config_schemas": serialize_tool_config_schemas(descriptors),
+        "tool_config_effective": resolve_global_tool_config_schemas(service),
+        "settings": settings,
+        "by_category": group_settings_by_category(settings),
+        "settings_sources": settings_sources,
+    }
 
 
 class UpdateSettingBody(BaseModel):
@@ -65,7 +97,11 @@ async def update_setting(
         value = normalize_setting_value(key, body.value)
 
     validate_default_model_update(service, {key: value})
-    service.update_setting(key, value)
+    if key.startswith("tools.") and value is None:
+        # Reset: remove the stored override so the schema default applies.
+        delete_config_tree(service, key)
+    else:
+        service.update_setting(key, value)
     invalidate_agent_provider_options_cache()
     return {"status": "success", "key": key, "value": value}
 
@@ -90,7 +126,13 @@ async def update_settings(body: UpdateSettingsBody, request: Request) -> dict[st
     values = normalize_setting_updates(raw_values)
     service = get_request_config_service(request)
     validate_default_model_update(service, values)
-    update_config_settings(service, values)
+    reset_keys = {
+        key for key, value in values.items() if key.startswith("tools.") and value is None
+    }
+    update_values = {key: value for key, value in values.items() if key not in reset_keys}
+    for key in sorted(reset_keys):
+        delete_config_tree(service, key)
+    update_config_settings(service, update_values)
     invalidate_agent_provider_options_cache()
 
     return {"status": "success", "updated": list(values.keys())}
