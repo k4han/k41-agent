@@ -725,6 +725,31 @@ export type McpTestResult = {
   tools: McpToolInfo[];
 };
 
+export type GoogleCalendarAccountInfo = {
+  email: string;
+  user_id: string;
+  is_primary: boolean;
+  updated_at: string | null;
+};
+
+export type GoogleCalendarPayload = {
+  connected: boolean;
+  email: string;
+  configured: boolean;
+  enabled: boolean;
+  client_id: string;
+  client_secret_configured: boolean;
+  redirect_uri: string;
+  scopes: string[];
+  updated_at: string | null;
+  accounts: GoogleCalendarAccountInfo[];
+};
+
+export type GoogleCalendarAuthUrlPayload = {
+  url: string;
+  state: string;
+};
+
 export interface ModelUsageDetail {
   model: string;
   provider: string;

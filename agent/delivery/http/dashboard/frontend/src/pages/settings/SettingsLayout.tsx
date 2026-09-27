@@ -55,7 +55,7 @@ const settingsNavGroups: SettingsNavGroup[] = [
     label: "Workspace",
     items: [
       { href: "/settings/backends", label: "Backends", icon: () => <ServerCog size={15} />, description: "Local / Daytona / Modal", keywords: "workspace backend local daytona modal" },
-      { href: "/settings/connections", label: "Connections", icon: () => <Link2 size={15} />, description: "Repos & MCP", keywords: "repositories mcp connections github" },
+      { href: "/settings/connections", label: "Connections", icon: () => <Link2 size={15} />, description: "Repos, MCP & Calendar", keywords: "repositories mcp connections github google calendar" },
       { href: "/settings/sandboxes", label: "Active Sandboxes", icon: () => <CloudCog size={15} />, description: "Live instances", keywords: "sandbox container live instances" },
     ],
   },

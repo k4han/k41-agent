@@ -116,6 +116,7 @@ RUNTIME_KEY_PATTERNS = [
     r"^workspace\.github\.root$",
     r"^workspace\.daytona\.(enabled|api_key|default_root|target|image|cpu|memory|disk|language|auto_stop_minutes|auto_archive_days|sweeper_interval_seconds|start_timeout_seconds|stop_timeout_seconds|sandbox_auto_stop_minutes|sandbox_auto_archive_minutes|sandbox_auto_delete_minutes|ephemeral|network_block_all|network_allow_list)$",
     r"^workspace\.modal\.(enabled|token_id|token_secret|app_name|default_root|image|sandbox_timeout_seconds|idle_timeout_seconds)$",
+    r"^google_calendar\.(enabled|client_id|client_secret|redirect_uri)$",
     rf"^{re.escape(REPOSITORY_SKILLS_DIR_KEY)}$",
     r"^database\.url$",
     rf"^{re.escape(DISPLAY_TIMEZONE_CONFIG_KEY)}$",
@@ -141,6 +142,7 @@ DATABASE_RUNTIME_KEY_PATTERNS = [
     r"^workspace\.github\.root$",
     r"^workspace\.daytona\.(enabled|api_key|default_root|target|image|cpu|memory|disk|language|auto_stop_minutes|auto_archive_days|sweeper_interval_seconds|start_timeout_seconds|stop_timeout_seconds|sandbox_auto_stop_minutes|sandbox_auto_archive_minutes|sandbox_auto_delete_minutes|ephemeral|network_block_all|network_allow_list)$",
     r"^workspace\.modal\.(enabled|token_id|token_secret|app_name|default_root|image|sandbox_timeout_seconds|idle_timeout_seconds)$",
+    r"^google_calendar\.(enabled|client_id|client_secret|redirect_uri)$",
     rf"^{re.escape(REPOSITORY_SKILLS_DIR_KEY)}$",
     rf"^{re.escape(DISPLAY_TIMEZONE_CONFIG_KEY)}$",
     r"^recursion_limit$",
@@ -158,6 +160,7 @@ SENSITIVE_RUNTIME_KEY_PATTERNS = [
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.headers\.[A-Za-z0-9_-]+$",
     r"^workspace\.daytona\.api_key$",
     r"^workspace\.modal\.(token_id|token_secret)$",
+    r"^google_calendar\.client_secret$",
 ]
 
 
@@ -261,6 +264,8 @@ def _expand_runtime_keys() -> set[str]:
     keys.add(DISPLAY_TIMEZONE_CONFIG_KEY)
     keys.add("recursion_limit")
     keys.add("chat.stream_thinking")
+    for prop in ("enabled", "client_id", "client_secret", "redirect_uri"):
+        keys.add(f"google_calendar.{prop}")
     return keys
 
 
@@ -343,6 +348,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "workspace.modal.idle_timeout_seconds": 900,
     REPOSITORY_SKILLS_DIR_KEY: ".agent/skills",
     DISPLAY_TIMEZONE_CONFIG_KEY: DEFAULT_DISPLAY_TIMEZONE,
+    "google_calendar.enabled": True,
+    "google_calendar.client_id": "",
+    "google_calendar.client_secret": "",
+    "google_calendar.redirect_uri": "http://localhost:4141/integrations/google/callback",
     "security.jwt_secret": "",
     "recursion_limit": 100,
     "tray.enabled": True,
@@ -805,6 +814,31 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "description": "Comma-separated comment triggers for GitHub automation",
         "category": "channels",
         "label": "GitHub Mention Triggers",
+    },
+    # Google Calendar integration settings (single-account mode)
+    "google_calendar.enabled": {
+        "type": "boolean",
+        "description": "Enable Google Calendar integration",
+        "category": "integrations",
+        "label": "Google Calendar Enabled",
+    },
+    "google_calendar.client_id": {
+        "type": "text",
+        "description": "Google Cloud OAuth Client ID",
+        "category": "integrations",
+        "label": "Google Calendar Client ID",
+    },
+    "google_calendar.client_secret": {
+        "type": "password",
+        "description": "Google Cloud OAuth Client Secret",
+        "category": "integrations",
+        "label": "Google Calendar Client Secret",
+    },
+    "google_calendar.redirect_uri": {
+        "type": "url",
+        "description": "OAuth redirect URI registered in Google Cloud Console",
+        "category": "integrations",
+        "label": "Google Calendar Redirect URI",
     },
     # LLM settings
     "llm.default_model": {

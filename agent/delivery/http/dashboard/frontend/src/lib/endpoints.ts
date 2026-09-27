@@ -24,6 +24,10 @@ export const API_PATHS = {
   mcpAgentInstallToggle: (agentName: string, installId: number) =>
     `/api/mcp/agents/${encodeURIComponent(agentName)}/installs/${encodeURIComponent(String(installId))}/toggle`,
   githubRepositories: "/dashboard-api/github/repositories",
+  googleCalendar: "/dashboard-api/google-calendar",
+  googleCalendarConfig: "/dashboard-api/google-calendar/config",
+  googleCalendarAuthUrl: "/dashboard-api/google-calendar/auth-url",
+  googleCalendarDisconnect: "/dashboard-api/google-calendar/disconnect",
   usage: "/dashboard-api/usage",
   usageWorkspaces: "/dashboard-api/usage/workspaces",
   usageThreads: "/dashboard-api/usage/threads",

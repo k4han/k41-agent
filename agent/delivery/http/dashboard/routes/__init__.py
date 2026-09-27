@@ -7,6 +7,7 @@ __all__ = [
     "dashboard",
     "generated_images",
     "github",
+    "google_calendar",
     "mcp",
     "providers",
     "scheduler",

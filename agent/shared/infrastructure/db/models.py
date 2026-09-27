@@ -24,6 +24,7 @@ def load_orm_models() -> tuple[type[object], ...]:
     from agent.modules.usage import LLMUsageEvent
     from agent.modules.workspaces import ThreadWorkspace
     from agent.modules.users import User
+    from agent.modules.google_calendar import GoogleCalendarAccount
     from agent.shared.infrastructure.db.runtime_settings import RuntimeSetting
     from agent.shared.infrastructure.db.user_preferences import UserPreferences
 
@@ -45,6 +46,7 @@ def load_orm_models() -> tuple[type[object], ...]:
         PromptVariable,
         LLMUsageEvent,
         RuntimeSetting,
+        GoogleCalendarAccount,
     )
 
 

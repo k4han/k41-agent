@@ -23,6 +23,7 @@ from agent.delivery.http import (
     api_router,
     dashboard_router,
     github_webhook_router,
+    google_calendar_router,
     telegram_webhook_router,
     zalo_webhook_router,
 )
@@ -159,6 +160,7 @@ def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:
     fastapi_app.include_router(telegram_webhook_router)
     fastapi_app.include_router(zalo_webhook_router)
     fastapi_app.include_router(github_webhook_router)
+    fastapi_app.include_router(google_calendar_router)
 
     if bootstrap_config.enable_dashboard:
         fastapi_app.include_router(auth_router)

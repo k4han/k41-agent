@@ -25,6 +25,8 @@ enable_dashboard: true
 # - LLM providers, default model, provider API keys, models, and enabled state
 # - MCP servers, including encrypted env.* and headers.*
 # - Telegram/Discord/GitHub channel settings, including encrypted tokens and secrets
+# - google_calendar.* (single shared account: enabled, client_id, client_secret, redirect_uri)
+#   managed at Settings > Connections > Google Calendar
 # - tools.* (global tool config, e.g. web_search / generate_image credentials)
 # - display.timezone (IANA timezone used to render dashboard timestamps)
 # - recursion_limit
