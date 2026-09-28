@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
+import { batch, createEffect, createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
 import { useBeforeLeave, useNavigate } from "@solidjs/router";
 import { ArrowLeft, Bot, Save } from "lucide-solid";
 
@@ -129,21 +129,25 @@ export function AgentEditPage(props: { agentName?: string }) {
     setError("");
     try {
       const data = await fetchAgentEditorOptions();
-      setPayload(data);
 
       if (isCreate) {
+        setPayload(data);
         return;
       }
 
       const target = data.cards.find((card) => card.name === props.agentName);
       if (!target) {
+        setPayload(data);
         setError(`Agent "${props.agentName}" was not found.`);
         return;
       }
       const initial = cardToForm(target);
-      setForm(initial);
-      setInitialForm(initial);
-      setMode(target.editable ? "edit" : "view");
+      batch(() => {
+        setForm(initial);
+        setInitialForm(initial);
+        setPayload(data);
+        setMode(target.editable ? "edit" : "view");
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load agent");
     }
@@ -162,16 +166,16 @@ export function AgentEditPage(props: { agentName?: string }) {
 
   const subAgentOptions = createMemo(() =>
     uniqueSorted([
-      ...(payload()?.agent_names || []).filter((name) => name !== form().name),
-      ...form().sub_agents,
+      ...(payload()?.agent_names || []).filter((name) => name !== (props.agentName || form().name)),
+      ...initialForm().sub_agents,
     ]),
   );
   const planApprovalTargetOptions = createMemo(() =>
     uniqueSorted([
       ...(payload()?.cards || [])
-        .filter((card) => card.valid && !card.hidden && card.name !== form().name)
+        .filter((card) => card.valid && !card.hidden && card.name !== (props.agentName || form().name))
         .map((card) => card.name),
-      ...form().plan_approval_targets.filter((name) => name !== form().name),
+      ...initialForm().plan_approval_targets.filter((name) => name !== (props.agentName || form().name)),
     ]),
   );
   const mcpInstalls = createMemo(() => {
@@ -192,7 +196,7 @@ export function AgentEditPage(props: { agentName?: string }) {
     if (!p) {
       return [];
     }
-    return buildToolGroups(p, form().tools);
+    return buildToolGroups(p, initialForm().tools);
   });
   const totalBuiltInTools = createMemo(() =>
     toolGroups().reduce((total, group) => total + group.tools.length, 0),
@@ -203,9 +207,11 @@ export function AgentEditPage(props: { agentName?: string }) {
     const p = payload();
     if (isCreate && p && !createInitialized()) {
       const initial = blankForm(defaultWorkflow(p.workflows));
-      setForm(initial);
-      setInitialForm(initial);
-      setCreateInitialized(true);
+      batch(() => {
+        setForm(initial);
+        setInitialForm(initial);
+        setCreateInitialized(true);
+      });
     }
   });
 
@@ -363,56 +369,6 @@ export function AgentEditPage(props: { agentName?: string }) {
     ];
   });
 
-  const body = createMemo(() => {
-    const p = payload();
-    const err = error();
-    if (!p && !err) {
-      return <AgentEditSkeleton loading />;
-    }
-    if (!p && err) {
-      return <ErrorPanel message={err} onRetry={load} />;
-    }
-    if (notFound()) {
-      return (
-        <AgentEditSkeleton
-          icon={<Bot size={20} />}
-          title={`Agent "${props.agentName}" was not found`}
-          description="The agent may have been deleted or renamed."
-          actions={
-            <button class="btn" type="button" onClick={() => navigate(AGENTS_LIST_HREF)}>
-              <ArrowLeft size={14} />
-              Back to agents
-            </button>
-          }
-        />
-      );
-    }
-    return (
-      <AgentEditTabs
-        form={form()}
-        readOnly={readOnly()}
-        payload={p!}
-        promptVariables={promptVariables()}
-        activeTab={activeTab()}
-        onTabChange={setActiveTab}
-        toolGroups={toolGroups()}
-        totalBuiltInTools={totalBuiltInTools()}
-        mcpServerOptions={mcpServerOptions()}
-        mcpInstalls={mcpInstalls()}
-        mcpUpdating={mcpUpdating()}
-        subAgentOptions={subAgentOptions()}
-        planApprovalTargetOptions={planApprovalTargetOptions()}
-        onUpdate={updateForm}
-        onToggleListValue={toggleListValue}
-        onToggleToolGroup={toggleToolGroup}
-        onToggleMcpInstall={toggleMcpInstall}
-        onUpdateToolConfig={updateToolConfig}
-        onResetToolConfigField={resetToolConfigField}
-        onInsertVariable={handleInsertVariable}
-      />
-    );
-  });
-
   return (
     <SettingsLayout
       title={title()}
@@ -432,7 +388,56 @@ export function AgentEditPage(props: { agentName?: string }) {
         </Show>
       }
     >
-      {body()}
+      <Show
+        when={payload()}
+        fallback={
+          <Show when={error()} fallback={<AgentEditSkeleton loading />}>
+            <ErrorPanel message={error()} onRetry={load} />
+          </Show>
+        }
+      >
+        {(p) => (
+          <Show
+            when={!notFound()}
+            fallback={
+              <AgentEditSkeleton
+                icon={<Bot size={20} />}
+                title={`Agent "${props.agentName}" was not found`}
+                description="The agent may have been deleted or renamed."
+                actions={
+                  <button class="btn" type="button" onClick={() => navigate(AGENTS_LIST_HREF)}>
+                    <ArrowLeft size={14} />
+                    Back to agents
+                  </button>
+                }
+              />
+            }
+          >
+            <AgentEditTabs
+              form={form()}
+              readOnly={readOnly()}
+              payload={p()}
+              promptVariables={promptVariables()}
+              activeTab={activeTab()}
+              onTabChange={setActiveTab}
+              toolGroups={toolGroups()}
+              totalBuiltInTools={totalBuiltInTools()}
+              mcpServerOptions={mcpServerOptions()}
+              mcpInstalls={mcpInstalls()}
+              mcpUpdating={mcpUpdating()}
+              subAgentOptions={subAgentOptions()}
+              planApprovalTargetOptions={planApprovalTargetOptions()}
+              onUpdate={updateForm}
+              onToggleListValue={toggleListValue}
+              onToggleToolGroup={toggleToolGroup}
+              onToggleMcpInstall={toggleMcpInstall}
+              onUpdateToolConfig={updateToolConfig}
+              onResetToolConfigField={resetToolConfigField}
+              onInsertVariable={handleInsertVariable}
+            />
+          </Show>
+        )}
+      </Show>
 
       <ConfirmDialog
         open={confirmDiscardOpen()}
