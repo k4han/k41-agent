@@ -198,6 +198,12 @@ export function ChatPage() {
 
   let transcriptRef: HTMLDivElement | undefined;
   let chatShellRef: HTMLDivElement | undefined;
+  let chatPromptRef: HTMLTextAreaElement | undefined;
+
+  const handleSelectPrompt = (promptText: string) => {
+    setPrompt(promptText);
+    chatPromptRef?.focus();
+  };
   let loadedThreadId: string | null = null;
   let isUnmounting = false;
   let threadLoadRequestId = 0;
@@ -1530,6 +1536,53 @@ export function ChatPage() {
     }
   };
 
+  const handleRegenerateMessage = (payload?: {
+    itemId?: number;
+    messageIndex?: number;
+    sourceCheckpointId?: string;
+    text?: string;
+  }) => {
+    if (conversationBusy() || compacting()) {
+      showToast("Wait for the current response to finish.", "warning");
+      return;
+    }
+
+    if (payload?.sourceCheckpointId && payload.messageIndex !== undefined && typeof payload.text === "string") {
+      void handleEditMessage({
+        itemId: payload.itemId,
+        messageIndex: payload.messageIndex,
+        sourceCheckpointId: payload.sourceCheckpointId,
+        text: payload.text,
+      });
+      return;
+    }
+
+    const currentItems = items();
+    let targetIndex = -1;
+    if (payload?.itemId !== undefined) {
+      targetIndex = currentItems.findIndex((it) => it.id === payload.itemId);
+    } else if (payload?.messageIndex !== undefined) {
+      targetIndex = currentItems.findIndex(
+        (it) => it.type === "message" && it.role === "assistant" && it.messageIndex === payload.messageIndex
+      );
+    }
+
+    const searchSlice = targetIndex >= 0 ? currentItems.slice(0, targetIndex) : currentItems;
+    for (let i = searchSlice.length - 1; i >= 0; i--) {
+      const it = searchSlice[i];
+      if (it.type === "message" && it.role === "user" && it.messageIndex !== undefined && it.sourceCheckpointId) {
+        void handleEditMessage({
+          itemId: it.id,
+          messageIndex: it.messageIndex,
+          sourceCheckpointId: it.sourceCheckpointId,
+          text: it.text || "",
+        });
+        return;
+      }
+    }
+    showToast("No earlier user prompt found to regenerate from.", "warning");
+  };
+
   const handleSessionStartedOrUpdated = (event: Event) => {
     const customEvent = event as CustomEvent<ActiveSession>;
     const session = customEvent.detail;
@@ -1826,13 +1879,17 @@ export function ChatPage() {
                 agents={validCards()}
                 activeAgentName={agentName()}
                 onWorkspaceSelectionChange={setWorkspaceDraft}
+                onSelectPrompt={handleSelectPrompt}
                 onEditMessage={(payload) => void handleEditMessage(payload)}
+                onRegenerateMessage={handleRegenerateMessage}
                 onBranchSelect={handleBranchSelect}
                 onApprovePlanReview={handleApprovePlanReview}
                 onRevisePlanReview={handleRevisePlanReview}
                 onMessageClick={setViewingMessage}
               />
               <ChatComposer
+                setChatPromptRef={(el) => (chatPromptRef = el)}
+                chatPromptRef={(el) => (chatPromptRef = el)}
                 prompt={prompt()}
                 onPromptChange={setPrompt}
                 onSend={() => void sendMessage()}

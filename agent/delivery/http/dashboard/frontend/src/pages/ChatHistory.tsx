@@ -1,5 +1,5 @@
 import { A } from "@solidjs/router";
-import { FolderOpen, MessageSquare, Pencil, PlaySquare, Trash2 } from "lucide-solid";
+import { Folder, Folders, FolderOpen, GitBranch, MessageSquare, Pencil, PlaySquare, Trash2 } from "lucide-solid";
 import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 
 import { AppShell } from "@/components/AppShell";
@@ -42,14 +42,16 @@ export function ChatHistoryListPage() {
     });
   });
   const workspaceFilterOptions = createMemo(() => [
-    { value: ALL_WORKSPACES_KEY, label: "🗂 All workspaces" },
-    ...workspaceGroups().map((group) => {
-      const icon = group.isRepo ? "⎇" : "🗀";
-      return {
-        value: group.key,
-        label: `${icon} ${group.label}`,
-      };
-    }),
+    {
+      value: ALL_WORKSPACES_KEY,
+      label: "All workspaces",
+      icon: <Folders size={13} />,
+    },
+    ...workspaceGroups().map((group) => ({
+      value: group.key,
+      label: group.label,
+      icon: group.isRepo ? <GitBranch size={13} /> : <Folder size={13} />,
+    })),
   ]);
   const selectedCount = createMemo(() => selectedThreadIds().size);
   const isBackgroundThread = (thread: ThreadSummary) => thread.kind === "background";

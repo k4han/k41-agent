@@ -98,6 +98,9 @@ type BreadcrumbSegment = {
   href?: string;
 };
 
+const SETTINGS_AUTO_COLLAPSE_BREAKPOINT = 1280;
+const SETTINGS_AUTO_COLLAPSE_QUERY = `(max-width: ${SETTINGS_AUTO_COLLAPSE_BREAKPOINT}px)`;
+
 export function SettingsLayout(props: {
   title: string;
   description?: string | JSX.Element;
@@ -109,6 +112,7 @@ export function SettingsLayout(props: {
 }) {
   const location = useLocation();
   const [collapsed, setCollapsed] = createSignal(false);
+  const [userLocked, setUserLocked] = createSignal(false);
   const [navQuery, setNavQuery] = createSignal("");
   const {
     isMobileViewport,
@@ -127,21 +131,53 @@ export function SettingsLayout(props: {
   const toggleSidebar = () => {
     const next = !collapsed();
     setCollapsed(next);
+    setUserLocked(true);
     window.localStorage.setItem(STORAGE_KEYS.SETTINGS_SIDEBAR_COLLAPSED, next ? "collapsed" : "expanded");
   };
 
   onMount(() => {
-    if (window.localStorage.getItem(STORAGE_KEYS.SETTINGS_SIDEBAR_COLLAPSED) === "collapsed") {
+    const saved = window.localStorage.getItem(STORAGE_KEYS.SETTINGS_SIDEBAR_COLLAPSED);
+    if (saved === "collapsed") {
       setCollapsed(true);
+      setUserLocked(true);
+    } else if (saved === "expanded") {
+      setCollapsed(false);
+      setUserLocked(true);
+    } else {
+      // Auto-collapse on displays <= 1280px when no explicit preference is stored
+      if (typeof window !== "undefined" && window.innerWidth <= SETTINGS_AUTO_COLLAPSE_BREAKPOINT) {
+        setCollapsed(true);
+      }
     }
+
+    // Responsive listener when not manually locked by user
+    if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
+      const mql = window.matchMedia(SETTINGS_AUTO_COLLAPSE_QUERY);
+      const handleMediaChange = (event: MediaQueryListEvent) => {
+        if (!userLocked()) {
+          setCollapsed(event.matches);
+        }
+      };
+      mql.addEventListener("change", handleMediaChange);
+      onCleanup(() => mql.removeEventListener("change", handleMediaChange));
+    }
+
     document.addEventListener("keydown", handleKeydown);
 
+    // Global keyboard search handler: auto-expand and focus search on '/' or 'Ctrl+K'
     const onGlobalKey = (e: KeyboardEvent) => {
-      if ((e.key === "/" || (e.key === "k" && (e.ctrlKey || e.metaKey))) && !collapsed() && !isMobileViewport()) {
+      if ((e.key === "/" || (e.key === "k" && (e.ctrlKey || e.metaKey))) && !isMobileViewport()) {
         const target = e.target as HTMLElement;
         if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
         e.preventDefault();
-        searchInputRef?.focus();
+        if (collapsed()) {
+          setCollapsed(false);
+          setUserLocked(true);
+          window.localStorage.setItem(STORAGE_KEYS.SETTINGS_SIDEBAR_COLLAPSED, "expanded");
+          setTimeout(() => searchInputRef?.focus(), 50);
+        } else {
+          searchInputRef?.focus();
+        }
       }
     };
     document.addEventListener("keydown", onGlobalKey);
@@ -185,7 +221,7 @@ export function SettingsLayout(props: {
 
   return (
     <div
-      class={`app-layout ${collapsed() ? "sidebar-collapsed" : ""} ${isMobileViewport() && mobileDrawerOpen() ? "app-layout--drawer-open" : ""}`}
+      class={`app-layout settings-app-layout ${collapsed() ? "sidebar-collapsed" : ""} ${isMobileViewport() && mobileDrawerOpen() ? "app-layout--drawer-open" : ""}`}
       onClick={handleAppLayoutClick}
     >
       <aside id="settings-layout-sidebar" class="sidebar settings-sidebar">

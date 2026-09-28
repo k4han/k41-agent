@@ -121,9 +121,10 @@
 
 .chat-attachment-remove {
   display: grid;
-  width: 22px;
-  height: 22px;
-  min-width: 22px;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
   place-items: center;
   border: 0;
   border-radius: 6px;
@@ -147,6 +148,7 @@
   justify-content: space-between;
   gap: 12px;
   padding-top: 4px;
+  flex-wrap: wrap;
 }
 
 .chat-composer-tier-selectors {
@@ -214,14 +216,16 @@
 .chat-agent-picker {
   max-width: 240px;
   min-width: 0;
-  min-height: 38px;
+  min-height: 40px;
+  height: 40px;
   border-radius: 999px;
   font-weight: 600;
   flex: 0 1 auto;
 }
 
 .chat-agent-picker .select-control-trigger {
-  min-height: 38px;
+  min-height: 40px;
+  height: 40px;
   background: var(--surface-2);
   border: 1px solid var(--border);
   font-size: 12.5px;
@@ -235,13 +239,15 @@
 .chat-model-picker {
   max-width: 380px;
   min-width: 0;
-  min-height: 38px;
+  min-height: 40px;
+  height: 40px;
   flex: 0 1 auto;
 }
 
 .chat-model-picker .model-picker-control {
-  grid-template-columns: minmax(0, 1fr) 38px;
-  min-height: 38px;
+  grid-template-columns: minmax(0, 1fr) 40px;
+  min-height: 40px;
+  height: 40px;
   border-radius: 999px;
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -253,7 +259,8 @@
 }
 
 .chat-model-picker .model-picker-input {
-  min-height: 38px;
+  min-height: 40px;
+  height: 40px;
   border: 0;
   border-radius: 999px 0 0 999px;
   background: transparent;
@@ -269,8 +276,10 @@
 }
 
 .chat-model-picker .model-picker-star {
-  min-height: 38px;
-  min-width: 38px;
+  min-height: 40px;
+  min-width: 40px;
+  width: 40px;
+  height: 40px;
   border: 0;
   border-radius: 0 999px 999px 0;
   background: transparent;
@@ -282,10 +291,10 @@
 
 .chat-composer-icon {
   display: grid;
-  width: 34px;
-  height: 34px;
-  min-width: 34px;
-  min-height: 34px;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
   flex-shrink: 0;
   place-items: center;
   border: 0;
@@ -316,10 +325,10 @@
   background: var(--fg);
   color: var(--bg);
   border-radius: 9px;
-  width: 34px;
-  height: 34px;
-  min-width: 34px;
-  min-height: 34px;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
   transition:
     background-color 140ms ease,
@@ -353,10 +362,10 @@
   color: var(--danger, #dc2626);
   border: 1px solid color-mix(in srgb, var(--danger, #dc2626) 35%, transparent);
   border-radius: 9px;
-  width: 34px;
-  height: 34px;
-  min-width: 34px;
-  min-height: 34px;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
   animation: stopPulse 1.8s ease-in-out infinite;
 }
 
@@ -514,9 +523,9 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 36px;
-  height: 36px;
-  padding: 0 12px 0 10px;
+  min-height: 40px;
+  height: 40px;
+  padding: 0 14px;
   border-radius: 999px;
   border: 1px solid var(--border);
   background: var(--surface-2);
@@ -935,7 +944,7 @@
   border-color: color-mix(in srgb, var(--warning, #b45309) 20%, transparent);
 }
 
-@media (max-width: 640px) {
+@media (max-width: 768px) {
   .chat-prompt-input {
     font-size: 16px !important;
   }
@@ -945,6 +954,7 @@
     align-items: stretch;
     gap: 8px;
     width: 100%;
+    flex-wrap: wrap;
   }
 
   .chat-composer-tier-selectors {
@@ -962,6 +972,8 @@
     max-width: 100%;
     width: 100%;
     justify-content: space-between;
+    min-height: 40px;
+    height: 40px;
   }
 
   .agent-model-popover {
@@ -1037,7 +1049,7 @@
   }
 
   .chat-composer-shortcut-hint {
-    display: none;
+    display: none !important;
   }
 
   .chat-attachment-chip {
@@ -1045,8 +1057,10 @@
   }
 
   .chat-attachment-remove {
-    width: 32px;
-    height: 32px;
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    min-height: 40px;
   }
 }
 

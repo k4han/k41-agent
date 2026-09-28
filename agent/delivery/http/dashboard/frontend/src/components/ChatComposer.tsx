@@ -58,6 +58,8 @@ export interface ChatComposerProps {
   userInputRequest: TranscriptUserInputRequest | null;
   userInputRequestDisabled: boolean;
   onSubmitUserInputRequest: (payload: UserInputRequestSubmitPayload) => void;
+  setChatPromptRef?: (el: HTMLTextAreaElement) => void;
+  chatPromptRef?: (el: HTMLTextAreaElement) => void;
 }
 
 export function ChatComposer(props: ChatComposerProps) {
@@ -262,7 +264,11 @@ export function ChatComposer(props: ChatComposerProps) {
         </div>
       </Show>
       <textarea
-        ref={chatPromptRef}
+        ref={(el) => {
+          chatPromptRef = el;
+          props.setChatPromptRef?.(el);
+          props.chatPromptRef?.(el);
+        }}
         class="chat-prompt-input"
         rows={1}
         value={props.prompt}

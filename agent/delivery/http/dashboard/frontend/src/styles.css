@@ -19,6 +19,7 @@
 @import "./styles/workspace.css";
 @import "./styles/repositories.css";
 @import "./styles/tasks.css";
+@import "./styles/scheduler.css";
 @import "./styles/history.css";
 @import "./styles/sidebar-collapsed.css";
 @import "./styles/responsive.css";

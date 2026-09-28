@@ -1,11 +1,13 @@
 import { A } from "@solidjs/router";
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import { MessageSquare, Play, Square, Trash2 } from "lucide-solid";
+import { AlertTriangle, CheckCircle2, MessageSquare, Play, Square, Trash2 } from "lucide-solid";
 
 import { AgentPicker } from "@/components/AgentPicker";
 import { AppShell } from "@/components/AppShell";
+import { CopyButton } from "@/components/CopyButton";
 import { DataGate } from "@/components/State";
 import { IdentityPicker } from "@/components/IdentityPicker";
+import { Markdown } from "@/components/Markdown";
 import { SelectControl } from "@/components/SelectControl";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
@@ -578,7 +580,62 @@ export function TasksPage() {
                               </Show>
                             </div>
                             <Show when={expanded()[task.task_id] && hasDetails}>
-                              <pre class="code-block">{task.result || task.error}</pre>
+                              <div class="task-output-stack">
+                                <Show when={task.result}>
+                                  <section class="task-output-card task-output-card--result" aria-label="Task result">
+                                    <header class="task-output-header">
+                                      <div class="task-output-title">
+                                        <CheckCircle2 size={15} class="task-output-icon task-output-icon--result" />
+                                        <span>Result</span>
+                                      </div>
+                                      <CopyButton
+                                        value={() => task.result || ""}
+                                        class="btn btn-sm task-output-copy-btn"
+                                        title="Copy result"
+                                        ariaLabel="Copy result"
+                                        copiedTitle="Copied!"
+                                        successMessage="Result copied."
+                                        showIcon
+                                        iconSize={13}
+                                      >
+                                        <span class="task-output-copy-text">Copy result</span>
+                                      </CopyButton>
+                                    </header>
+                                    <div class="task-output-body">
+                                      <Markdown
+                                        class="message-markdown task-result-markdown"
+                                        text={task.result}
+                                        threadId={task.thread_id}
+                                      />
+                                    </div>
+                                  </section>
+                                </Show>
+                                <Show when={task.error}>
+                                  <section class="task-output-card task-output-card--error" aria-label="Task error">
+                                    <header class="task-output-header task-output-header--error">
+                                      <div class="task-output-title task-output-title--error">
+                                        <AlertTriangle size={15} class="task-output-icon task-output-icon--error" />
+                                        <span>Error</span>
+                                      </div>
+                                      <CopyButton
+                                        value={() => task.error || ""}
+                                        class="btn btn-sm task-output-copy-btn task-output-copy-btn--error"
+                                        title="Copy error"
+                                        ariaLabel="Copy error"
+                                        copiedTitle="Copied!"
+                                        successMessage="Error copied."
+                                        showIcon
+                                        iconSize={13}
+                                      >
+                                        <span class="task-output-copy-text">Copy error</span>
+                                      </CopyButton>
+                                    </header>
+                                    <div class="task-output-body task-output-body--error">
+                                      <pre class="task-error-pre">{task.error}</pre>
+                                    </div>
+                                  </section>
+                                </Show>
+                              </div>
                             </Show>
                           </div>
                         </article>

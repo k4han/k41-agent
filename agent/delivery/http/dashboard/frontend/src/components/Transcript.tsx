@@ -342,6 +342,11 @@ export function TranscriptMessageView(props: {
     sourceCheckpointId: string;
     text: string;
   }) => void;
+  onRegenerateMessage?: (payload: {
+    itemId?: number;
+    messageIndex?: number;
+    sourceCheckpointId?: string;
+  }) => void;
   onBranchSelect?: (checkpointId: string) => void;
   onMessageClick?: (payload: { text: string; role: TranscriptRole; attachments?: TranscriptAttachment[] }) => void;
   threadId?: string | null;
@@ -611,6 +616,35 @@ export function TranscriptMessageView(props: {
                 </button>
               </div>
             </Show>
+          </div>
+        </Show>
+        <Show when={props.role === "assistant" && props.text && !isChatStatusText(props.text)}>
+          <div class="message-actions assistant-actions" aria-label="Message actions" onClick={(e) => e.stopPropagation()}>
+            <CopyButton
+              value={props.text}
+              class="message-action-btn"
+              title="Copy response"
+              ariaLabel="Copy response"
+              copiedTitle="Copied!"
+              successMessage="Response copied."
+              iconSize={15}
+            />
+            <button
+              class="message-action-btn"
+              type="button"
+              onClick={() => {
+                props.onRegenerateMessage?.({
+                  itemId: props.itemId,
+                  messageIndex: props.messageIndex,
+                  sourceCheckpointId: props.sourceCheckpointId,
+                });
+              }}
+              disabled={props.actionsDisabled}
+              title="Regenerate response"
+              aria-label="Regenerate response"
+            >
+              <RotateCcw size={15} />
+            </button>
           </div>
         </Show>
       </div>
@@ -1568,6 +1602,11 @@ export function TranscriptItemView(props: {
     sourceCheckpointId: string;
     text: string;
   }) => void;
+  onRegenerateMessage?: (payload: {
+    itemId?: number;
+    messageIndex?: number;
+    sourceCheckpointId?: string;
+  }) => void;
   onBranchSelect?: (checkpointId: string) => void;
   onApprovePlanReview?: (payload: {
     toolCallId?: string | null;
@@ -1600,6 +1639,7 @@ export function TranscriptItemView(props: {
       itemId={props.itemId}
       actionsDisabled={props.actionsDisabled}
       onEdit={props.onEditMessage}
+      onRegenerateMessage={props.onRegenerateMessage}
       onBranchSelect={props.onBranchSelect}
       onMessageClick={props.onMessageClick}
       threadId={props.threadId}

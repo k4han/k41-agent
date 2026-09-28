@@ -76,6 +76,167 @@
   white-space: pre-wrap;
 }
 
+/* Structured Task Output Container */
+.task-output-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.task-output-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+  background: var(--surface);
+  overflow: hidden;
+  min-width: 0;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.task-output-card--result {
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.task-output-card--error {
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
+  background: color-mix(in srgb, var(--danger) 4%, var(--surface));
+}
+
+.task-output-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  min-height: 40px;
+}
+
+.task-output-header--error {
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface-2));
+  border-bottom-color: color-mix(in srgb, var(--danger) 25%, var(--border));
+}
+
+.task-output-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.task-output-title--error {
+  color: var(--danger);
+}
+
+.task-output-icon--result {
+  color: var(--success);
+  flex-shrink: 0;
+}
+
+.task-output-icon--error {
+  color: var(--danger);
+  flex-shrink: 0;
+}
+
+.task-output-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 10px;
+  min-height: 32px;
+  border-radius: var(--radius-sm, 6px);
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.task-output-copy-btn:hover {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+}
+
+.task-output-copy-btn--error {
+  border-color: color-mix(in srgb, var(--danger) 30%, var(--border));
+  color: var(--danger);
+}
+
+.task-output-copy-btn--error:hover {
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+  border-color: var(--danger);
+}
+
+.task-output-body {
+  padding: 12px;
+  max-height: 480px;
+  overflow-y: auto;
+  overflow-x: auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.task-output-body--error {
+  padding: 0;
+  background: transparent;
+}
+
+.task-error-pre {
+  margin: 0;
+  padding: 12px;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--danger);
+  background: transparent;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  overflow-x: auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.task-result-markdown {
+  font-size: 13px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.task-result-markdown > :first-child {
+  margin-top: 0;
+}
+
+.task-result-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.task-result-markdown pre {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.task-result-markdown table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
 .task-live {
   display: grid;
   gap: 10px;
@@ -167,6 +328,23 @@
   .task-workspace-filter {
     width: 100%;
     max-width: 100%;
+  }
+
+  .task-output-header {
+    padding: 8px 10px;
+  }
+
+  .task-output-copy-btn {
+    min-height: 40px;
+    padding: 0 12px;
+  }
+
+  .task-history-list .btn-sm {
+    min-height: 40px;
+    padding: 0 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
 }
 
