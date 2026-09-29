@@ -37,7 +37,7 @@ def test_get_system_version_cached_and_force(monkeypatch: pytest.MonkeyPatch) ->
 
     call_count = 0
 
-    def mock_fetch():
+    def mock_fetch(**kwargs):
         nonlocal call_count
         call_count += 1
         return ReleaseInfo(

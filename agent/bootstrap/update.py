@@ -286,19 +286,43 @@ def resolve_managed_install(
     return install
 
 
+def _agent_home_from_envs_parent(path: Path) -> Path | None:
+    if path.name.lower() == "envs":
+        return path.parent
+    for parent in path.parents:
+        if parent.name.lower() == "envs":
+            return parent.parent
+    return None
+
+
 def detect_agent_home(*, executable: str | None = None) -> Path:
     for env_name in ("K41_AGENT_HOME", "AGENT_HOME"):
         value = os.environ.get(env_name)
         if value:
             return Path(value).expanduser().resolve()
 
-    executable_path = Path(executable or sys.executable).resolve()
-    for parent in executable_path.parents:
-        if parent.name.lower() == "envs":
+    virtual_env = os.environ.get("VIRTUAL_ENV")
+    if virtual_env:
+        candidate = _agent_home_from_envs_parent(Path(virtual_env).expanduser())
+        if candidate is not None:
+            return candidate.resolve()
+
+    raw_executable = executable or sys.executable
+    for candidate_path in (Path(raw_executable), Path(raw_executable).resolve()):
+        candidate = _agent_home_from_envs_parent(candidate_path)
+        if candidate is not None:
+            return candidate.resolve()
+
+    module_path = Path(__file__).resolve()
+    for parent in module_path.parents:
+        if parent.name == "app":
             return parent.parent.resolve()
 
     raise UpdateError(
-        "Could not determine AGENT_HOME. Run updates from an installed K41 Agent."
+        "Could not determine AGENT_HOME. Run updates from an installed K41 Agent "
+        f"(tried executable={raw_executable}, module={module_path}). "
+        "Set K41_AGENT_HOME to your install directory, e.g. "
+        "export K41_AGENT_HOME=~/.local/share/k41-agent."
     )
 
 
@@ -342,9 +366,9 @@ def python_executable(agent_home: Path) -> Path:
 
 def fetch_latest_release(
     *,
-    owner: str,
-    repo: str,
-    artifact_name: str,
+    owner: str = DEFAULT_OWNER,
+    repo: str = DEFAULT_REPO,
+    artifact_name: str = DEFAULT_ARTIFACT_NAME,
 ) -> ReleaseInfo:
     api_url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
     headers = {
@@ -880,6 +904,9 @@ def version_key(value: str) -> tuple[int, int, int] | None:
 
 
 __all__ = [
+    "DEFAULT_ARTIFACT_NAME",
+    "DEFAULT_OWNER",
+    "DEFAULT_REPO",
     "ManagedInstall",
     "ReleaseInfo",
     "UpdateError",

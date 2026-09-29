@@ -10,6 +10,9 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from agent.bootstrap.process_utils import spawn_detached_process
 from agent.bootstrap.update import (
+    DEFAULT_ARTIFACT_NAME,
+    DEFAULT_OWNER,
+    DEFAULT_REPO,
     fetch_latest_release,
     is_managed_install,
     is_version_newer,
@@ -40,7 +43,11 @@ async def get_system_version(
     install_type = "managed" if managed else "development"
 
     try:
-        release = fetch_latest_release()
+        release = fetch_latest_release(
+            owner=DEFAULT_OWNER,
+            repo=DEFAULT_REPO,
+            artifact_name=DEFAULT_ARTIFACT_NAME,
+        )
         latest_version = release.version
         has_update = is_version_newer(latest_version, current_version)
         release_name = release.name or f"v{latest_version}"

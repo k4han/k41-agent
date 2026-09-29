@@ -34,10 +34,18 @@ def get_agent_home() -> Path:
         value = os.environ.get(env_name)
         if value:
             return Path(value).expanduser().resolve()
-    executable_path = Path(sys.executable).resolve()
-    for parent in executable_path.parents:
-        if parent.name.lower() == "envs":
-            return parent.parent.resolve()
+    virtual_env = os.environ.get("VIRTUAL_ENV")
+    if virtual_env:
+        venv_path = Path(virtual_env).expanduser()
+        if venv_path.name.lower() == "envs":
+            return venv_path.parent.resolve()
+        for parent in venv_path.parents:
+            if parent.name.lower() == "envs":
+                return parent.parent.resolve()
+    for candidate_path in (Path(sys.executable), Path(sys.executable).resolve()):
+        for parent in candidate_path.parents:
+            if parent.name.lower() == "envs":
+                return parent.parent.resolve()
     data_home = os.environ.get("XDG_DATA_HOME")
     if data_home:
         return Path(data_home).expanduser().resolve() / "k41-agent"

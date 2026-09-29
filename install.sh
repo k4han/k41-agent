@@ -552,7 +552,8 @@ sync_app() {
 write_command_wrappers() {
   cat >"$K41Cmd" <<EOF
 #!/usr/bin/env sh
-AGENT_HOME="$AgentHome"
+export K41_AGENT_HOME="$AgentHome"
+export AGENT_HOME="$AgentHome"
 PYTHON_EXE="\$AGENT_HOME/envs/bin/python"
 if [ ! -x "\$PYTHON_EXE" ]; then
   echo "python was not found at \$PYTHON_EXE." >&2
