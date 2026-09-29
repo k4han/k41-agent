@@ -88,8 +88,9 @@ async def get_dashboard_github(request: Request) -> dict[str, Any]:
         else ""
     )
     repositories = await service.list_repository_bindings()
-    platform_env_status = settings.platform_env_status
-    missing_requirements = settings.missing_requirements()
+    platform_env_status = getattr(settings, "platform_env_status", {})
+    missing_fn = getattr(settings, "missing_requirements", None)
+    missing_requirements = missing_fn() if callable(missing_fn) else []
     return {
         "configured": settings.is_configured,
         "enabled": settings.enabled,

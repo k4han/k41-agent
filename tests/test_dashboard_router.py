@@ -2352,6 +2352,8 @@ def test_dashboard_api_github_returns_repository_bindings(monkeypatch: pytest.Mo
             default_agent="default",
             trigger_label="k41-agent",
             mention_triggers=("@k41-agent", "/k41"),
+            platform_env_status={"app_id": True, "app_slug": True, "private_key": True, "webhook_secret": True},
+            missing_requirements=lambda: [],
         ),
     )
     _patch_dashboard_attr(monkeypatch, "get_github_automation_service", lambda _req=None: FakeService(),
