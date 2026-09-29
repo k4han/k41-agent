@@ -139,8 +139,18 @@ def run_update(
 
     running_pid = get_running_server_pid()
     running_tray_pid = get_running_tray_pid()
-    should_restart = running_pid is not None
+    systemd_active = is_systemd_service_active()
+    should_restart_systemd = systemd_active
+    should_restart = running_pid is not None and not systemd_active
     should_restart_tray = running_tray_pid is not None
+    if systemd_active:
+        echo("Stopping systemd service k41-agent.service")
+        stop_systemd_service()
+        # Re-read PIDs after systemd stop; the server may have exited already.
+        time.sleep(0.5)
+        running_pid = get_running_server_pid()
+        # If systemd stop did not fully exit the server, fall through to
+        # the regular shutdown-signal path below.
     if running_tray_pid is not None:
         echo(f"Stopping running tray (PID {running_tray_pid})")
         tray_stopped = False
@@ -184,7 +194,15 @@ def run_update(
                     "Update failed and rollback dependency sync failed: "
                     f"{rollback_exc}"
                 ) from exc
-        if should_restart:
+        if should_restart_systemd:
+            try:
+                if not refresh_systemd_unit(install):
+                    echo("Warning: Could not refresh systemd unit file")
+            except Exception as exc:
+                echo(f"Warning: Could not refresh systemd unit file: {exc}")
+            if not restart_systemd_service():
+                echo("Warning: Could not restart systemd service")
+        elif should_restart:
             start_server(install)
         if should_restart_tray:
             if get_running_tray_pid() is None:
@@ -196,7 +214,22 @@ def run_update(
             raise
         raise UpdateError(f"Update failed: {exc}") from exc
 
-    if should_restart:
+    if should_restart_systemd:
+        echo("Restarting systemd service k41-agent.service")
+        try:
+            if not refresh_systemd_unit(install):
+                echo("Warning: Could not refresh systemd unit file")
+        except Exception as exc:
+            echo(f"Warning: Could not refresh systemd unit file: {exc}")
+        if not restart_systemd_service():
+            echo("Warning: Could not restart systemd service; starting server directly")
+            start_server(install)
+            should_restart = True
+        else:
+            should_restart = True
+        # Brief pause to let server write PID file before checking tray
+        time.sleep(0.5)
+    elif should_restart:
         echo("Restarting server")
         start_server(install)
         # Brief pause to let server write PID file before checking tray
@@ -709,6 +742,80 @@ def start_server(install: ManagedInstall) -> None:
         env=env,
         cwd=install.app_dir,
     )
+
+
+def is_systemd_service_active() -> bool:
+    try:
+        from agent.bootstrap.service import is_service_active, is_systemd_available
+
+        available, _ = is_systemd_available()
+        if not available:
+            return False
+        return is_service_active()
+    except Exception:
+        return False
+
+
+def stop_systemd_service() -> bool:
+    try:
+        from agent.bootstrap.service import is_systemd_available, stop_service
+
+        available, _ = is_systemd_available()
+        if not available:
+            return False
+        stop_service()
+        return True
+    except Exception:
+        return False
+
+
+def refresh_systemd_unit(install: ManagedInstall) -> bool:
+    try:
+        from agent.bootstrap.service import (
+            ServicePaths,
+            daemon_reload,
+            get_service_path,
+            is_service_installed,
+            is_systemd_available,
+            render_unit,
+        )
+
+        available, _ = is_systemd_available()
+        if not available:
+            return False
+        service_file = get_service_path()
+        if not is_service_installed(service_file):
+            return False
+        paths = ServicePaths(
+            agent_home=install.agent_home,
+            app_dir=install.app_dir,
+            python_exe=install.python_exe,
+            service_file=service_file,
+        )
+        service_file.parent.mkdir(parents=True, exist_ok=True)
+        service_file.write_text(render_unit(paths), encoding="utf-8")
+        try:
+            daemon_reload()
+        except Exception:
+            pass
+        return True
+    except Exception:
+        return False
+
+
+def restart_systemd_service(*, reload_daemon: bool = True) -> bool:
+    try:
+        from agent.bootstrap.service import daemon_reload, restart_service
+
+        if reload_daemon:
+            try:
+                daemon_reload()
+            except Exception:
+                pass
+        restart_service()
+        return True
+    except Exception:
+        return False
 
 
 def is_process_alive(pid: int) -> bool:

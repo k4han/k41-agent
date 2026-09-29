@@ -10,6 +10,7 @@ PythonVersion="${K41_AGENT_PYTHON_VERSION:-3.13}"
 UvVersion="${K41_AGENT_UV_VERSION:-0.12.13}"
 UseBranchSource="${K41_AGENT_USE_BRANCH_SOURCE:-}"
 SkipInit="${K41_AGENT_SKIP_INIT:-}"
+EnableAutostart="${K41_AGENT_ENABLE_AUTOSTART:-true}"
 
 AgentName="k41-agent"
 DataHome="${XDG_DATA_HOME:-$HOME/.local/share}"
@@ -42,6 +43,9 @@ Options:
   --uv-version VALUE       Pinned uv version. Defaults to 0.12.13 (use "latest" to follow upstream).
   --use-branch-source      Download source from the configured branch instead of a release artifact.
   --skip-init              Skip runtime initialization.
+  --enable-autostart       Enable systemd user service autostart on boot (default).
+  --no-autostart           Disable systemd user service autostart.
+  --skip-autostart         Alias for --no-autostart.
   -h, --help               Show this help.
 EOF
 }
@@ -110,6 +114,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-init)
       SkipInit="true"
+      shift
+      ;;
+    --enable-autostart)
+      EnableAutostart="true"
+      shift
+      ;;
+    --no-autostart|--skip-autostart|--disable-autostart)
+      EnableAutostart="false"
       shift
       ;;
     -h|--help)
@@ -602,6 +614,12 @@ remove_profile_block() {
 }
 
 stage "Stop app"
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl --user disable --now k41-agent.service 2>/dev/null || true
+  rm -f "\$HOME/.config/systemd/user/k41-agent.service" 2>/dev/null || true
+  systemctl --user daemon-reload 2>/dev/null || true
+  echo "Removed systemd user service (if present)."
+fi
 if [[ -x "\$PythonExe" ]]; then
   "\$PythonExe" -m agent.bootstrap.cli stop --with-tray 2>/dev/null || true
   echo "Existing app stop command completed (including tray)."
@@ -694,6 +712,12 @@ backup_app_source() {
 }
 
 stop_existing_app() {
+  if command -v systemctl >/dev/null 2>&1; then
+    if systemctl --user is-active --quiet k41-agent.service 2>/dev/null; then
+      echo "Stopping systemd service k41-agent.service."
+      systemctl --user stop k41-agent.service 2>/dev/null || true
+    fi
+  fi
   if [[ ! -x "$PythonExe" ]]; then
     echo "No existing virtual environment found."
     return
@@ -789,6 +813,46 @@ clear_download_directory() {
   fi
 }
 
+install_systemd_service() {
+  if ! normalize_bool "$EnableAutostart"; then
+    echo "Autostart disabled (--no-autostart or K41_AGENT_ENABLE_AUTOSTART=false)."
+    if command -v systemctl >/dev/null 2>&1; then
+      systemctl --user disable --now k41-agent.service 2>/dev/null || true
+      rm -f "$HOME/.config/systemd/user/k41-agent.service" 2>/dev/null || true
+      systemctl --user daemon-reload 2>/dev/null || true
+    fi
+    return
+  fi
+
+  if [[ "$(uname -s)" != "Linux" ]]; then
+    echo "Systemd autostart is only supported on Linux, skipping."
+    return
+  fi
+
+  if ! command -v systemctl >/dev/null 2>&1; then
+    echo "WARNING: systemctl was not found, skipping systemd autostart." >&2
+    return
+  fi
+
+  if [[ ! -x "$PythonExe" ]]; then
+    echo "WARNING: Python was not found at $PythonExe, skipping systemd autostart." >&2
+    return
+  fi
+
+  export K41_AGENT_HOME="$AgentHome"
+  export AGENT_HOME="$AgentHome"
+  if "$PythonExe" -m agent.bootstrap.cli service install; then
+    echo "Systemd user service installed and started."
+    if systemctl --user is-active --quiet k41-agent.service 2>/dev/null; then
+      echo "Verified k41-agent.service is active."
+    else
+      echo "WARNING: k41-agent.service is not active. Check logs with: journalctl --user -u k41-agent.service -e" >&2
+    fi
+  else
+    echo "WARNING: Could not install systemd user service. The app still runs via 'k41'." >&2
+  fi
+}
+
 require_command uname
 require_command tar
 require_command grep
@@ -865,9 +929,13 @@ add_user_path
 stage "11. Clean download cache"
 clear_download_directory
 
+stage "12. Enable autostart (systemd)"
+install_systemd_service
+
 echo
 echo "Installation completed."
 echo "Open a new terminal and run:"
 echo "  k41"
 echo "  k41 status"
 echo "  k41 stop"
+echo "  k41 service status"

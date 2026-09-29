@@ -100,6 +100,42 @@ k41 update          # Update to the latest release
 k41 cli             # Open the chat CLI
 k41 reset-password  # Reset the admin password
 k41 pair-code       # Create a pairing code for Telegram or Discord
+k41 service status  # Check systemd autostart service (Linux)
+```
+
+## Autostart on Ubuntu
+
+On Linux, the installer creates and enables a systemd user service
+`k41-agent.service`, so the server restarts automatically on boot without
+requiring a desktop session:
+
+```sh
+k41 service status   # Show unit file, enabled/active state
+k41 service restart  # Restart the background service
+k41 service stop     # Stop the background service
+k41 service disable --now  # Disable autostart on boot
+k41 service install  # Reinstall and enable autostart
+```
+
+Check logs with:
+
+```sh
+journalctl --user -u k41-agent -e
+tail -f ~/.k41-agent/server.log
+```
+
+To start the service at boot without login, enable linger once:
+
+```sh
+sudo loginctl enable-linger $USER
+```
+
+The installer attempts this automatically and warns when it lacks permission.
+To skip autostart during install:
+
+```sh
+./install.sh --no-autostart
+K41_AGENT_ENABLE_AUTOSTART=false ./install.sh
 ```
 
 ## Update
@@ -120,7 +156,7 @@ k41 update --check
 
 If the installation is damaged and `k41 update` cannot run, run the installer again. Your configuration, database, and runtime data are kept. Reinstalls keep a backup of the previous app source under `backup/` (last 2 kept).
 
-Installer options: `--python-version`, `--uv-version` (pinned by default via `K41_AGENT_UV_VERSION`), `--release-tag`, `--skip-init`, `--use-branch-source`. On macOS/Linux, `fish` shells are configured via `~/.config/fish/conf.d/k41-agent.fish`.
+Installer options: `--python-version`, `--uv-version` (pinned by default via `K41_AGENT_UV_VERSION`), `--release-tag`, `--skip-init`, `--use-branch-source`, `--no-autostart` (`K41_AGENT_ENABLE_AUTOSTART=false`). On macOS/Linux, `fish` shells are configured via `~/.config/fish/conf.d/k41-agent.fish`.
 
 Windows:
 

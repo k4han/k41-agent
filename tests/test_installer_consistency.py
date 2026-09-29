@@ -105,3 +105,30 @@ def test_ps1_backup_and_registry_cleanup() -> None:
     assert "Backup-AppSource" in content
     assert "k41-agent-tray" in content
     assert "Wait-ProcessExit" in content
+
+
+def test_install_sh_systemd_autostart() -> None:
+    content = _read("install.sh")
+    assert "install_systemd_service" in content
+    assert "k41-agent.service" in content
+    assert "daemon-reload" in content
+    assert "--no-autostart" in content
+    assert "K41_AGENT_ENABLE_AUTOSTART" in content
+    assert "service install" in content
+    assert "k41 service status" in content
+
+
+def test_install_sh_uninstall_cleans_systemd_service() -> None:
+    # Uninstall logic lives as a heredoc inside install.sh, not a separate file.
+    content = _read("install.sh")
+    assert ".config/systemd/user/k41-agent.service" in content
+    assert "systemctl --user disable --now" in content
+
+
+def test_update_handles_systemd_service() -> None:
+    content = (REPO_ROOT / "agent" / "bootstrap" / "update.py").read_text(
+        encoding="utf-8"
+    )
+    assert "is_systemd_service_active" in content
+    assert "restart_systemd_service" in content
+    assert "should_restart_systemd" in content

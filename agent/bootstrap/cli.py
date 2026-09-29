@@ -1277,6 +1277,94 @@ def update_app(
         raise typer.Exit(1) from exc
 
 
+@app.command("service")
+def service_cmd(
+    action: str = typer.Argument(
+        ...,
+        help="Service action: install, uninstall, enable, disable, start, stop, restart, status.",
+    ),
+    now: bool = typer.Option(
+        True,
+        "--now/--no-now",
+        help="Also start/stop the service when enabling/disabling/installing.",
+    ),
+) -> None:
+    """Manage the Linux systemd user service (autostart on boot)."""
+    from agent.bootstrap import service as service_module
+
+    normalized = action.strip().lower()
+    valid = {
+        "install",
+        "uninstall",
+        "enable",
+        "disable",
+        "start",
+        "stop",
+        "restart",
+        "status",
+    }
+    if normalized not in valid:
+        _echo_error(f"Unknown service action: {action}. Expected one of: {', '.join(sorted(valid))}.")
+        raise typer.Exit(2)
+
+    if normalized == "status":
+        status = service_module.get_status()
+        _print_section("Service")
+        _print_key_value("Service", status["service"])
+        _print_key_value("Unit file", status["service_file"])
+        _print_key_value("Agent home", status["agent_home"])
+        _print_key_value("Python", status["python_exe"])
+        _print_key_value("Installed", status["installed"])
+        _print_key_value("Systemd available", status["systemd_available"])
+        if not status["systemd_available"]:
+            _echo_warning(str(status["systemd_reason"]))
+            raise typer.Exit(1)
+        _print_key_value("Enabled", status["enabled"])
+        _print_key_value("Active", status["active"])
+        if not status["installed"]:
+            _echo_warning("Service is not installed. Run: k41 service install")
+            raise typer.Exit(1)
+        return
+
+    try:
+        if normalized == "install":
+            paths = service_module.install_service(start=now)
+            _echo_success(f"Service installed at {paths.service_file}.")
+            linger_ok, linger_msg = service_module.ensure_linger()
+            if linger_ok:
+                _echo_success(linger_msg)
+            else:
+                _echo_warning(linger_msg)
+            if now:
+                _echo_success("Service enabled and started. It will restart on boot.")
+            else:
+                _echo_success("Service enabled. Start it with: systemctl --user start k41-agent")
+        elif normalized == "uninstall":
+            removed = service_module.uninstall_service()
+            if removed:
+                _echo_success("Service uninstalled.")
+            else:
+                _echo_warning("Service file was not found.")
+        elif normalized == "enable":
+            service_module.enable_service(start=now)
+            _echo_success("Service enabled." + (" Started." if now else ""))
+        elif normalized == "disable":
+            service_module.disable_service(stop=now)
+            _echo_success("Service disabled." + (" Stopped." if now else ""))
+        elif normalized == "start":
+            service_module.start_service()
+            _echo_success("Service started.")
+        elif normalized == "stop":
+            service_module.stop_service()
+            _echo_success("Service stopped.")
+        elif normalized == "restart":
+            service_module.restart_service()
+            _echo_success("Service restarted.")
+    except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
+        _echo_error(str(exc))
+        raise typer.Exit(1) from exc
+
+
 def run_main() -> None:
     app()
 
@@ -1285,4 +1373,4 @@ if __name__ == "__main__":
     run_main()
 
 
-__all__ = ["app", "run_main", "reset_password", "update_app"]
+__all__ = ["app", "run_main", "reset_password", "service_cmd", "update_app"]
