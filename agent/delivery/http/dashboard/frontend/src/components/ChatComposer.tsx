@@ -10,6 +10,7 @@ import {
   X,
 } from "lucide-solid";
 import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { Portal } from "solid-js/web";
 
 import { AgentModelPicker } from "@/components/AgentModelPicker";
 import { ChatTodos, type TodoProgress } from "@/components/ChatTodos";
@@ -65,13 +66,44 @@ export interface ChatComposerProps {
 export function ChatComposer(props: ChatComposerProps) {
   let chatPromptRef: HTMLTextAreaElement | undefined;
   let fileInputRef: HTMLInputElement | undefined;
-  let moreMenuRef: HTMLDivElement | undefined;
 
   const [previewAttachment, setPreviewAttachment] = createSignal<PendingAttachment | null>(null);
   const [isDragging, setIsDragging] = createSignal(false);
   const [showMoreMenu, setShowMoreMenu] = createSignal(false);
   const [showPasteDialog, setShowPasteDialog] = createSignal(false);
   const [customPasteText, setCustomPasteText] = createSignal("");
+  const [moreMenuPos, setMoreMenuPos] = createSignal({ top: 0, left: 0 });
+  let moreTriggerRef: HTMLButtonElement | undefined;
+  let moreMenuRef: HTMLDivElement | undefined;
+
+  const updateMoreMenuPosition = () => {
+    if (!moreTriggerRef || !showMoreMenu()) return;
+    const rect = moreTriggerRef.getBoundingClientRect();
+    const gap = 8;
+    const width = 230;
+    let left = rect.left;
+    if (left + width > window.innerWidth - 8) {
+      left = Math.max(8, rect.right - width);
+    }
+    const estimatedHeight = 260;
+    let top = rect.top - estimatedHeight - gap;
+    if (top < 8) {
+      top = rect.bottom + gap;
+    }
+    setMoreMenuPos({ top, left });
+  };
+
+  createEffect(() => {
+    if (!showMoreMenu()) return;
+    updateMoreMenuPosition();
+    const handler = () => updateMoreMenuPosition();
+    window.addEventListener("scroll", handler, true);
+    window.addEventListener("resize", handler);
+    onCleanup(() => {
+      window.removeEventListener("scroll", handler, true);
+      window.removeEventListener("resize", handler);
+    });
+  });
 
   let dragCounter = 0;
 
@@ -93,9 +125,13 @@ export function ChatComposer(props: ChatComposerProps) {
   });
 
   const handleGlobalClick = (e: MouseEvent) => {
-    if (showMoreMenu() && moreMenuRef && !moreMenuRef.contains(e.target as Node)) {
-      setShowMoreMenu(false);
-    }
+    if (!showMoreMenu()) return;
+    const target = e.target as Node | null;
+    if (target && moreMenuRef?.contains(target)) return;
+    if (target && moreTriggerRef?.contains(target)) return;
+    const wrapper = moreTriggerRef?.closest(".chat-composer-more-wrapper");
+    if (target && wrapper?.contains(target)) return;
+    setShowMoreMenu(false);
   };
 
   const handleGlobalKeyDown = (e: KeyboardEvent) => {
@@ -340,8 +376,9 @@ export function ChatComposer(props: ChatComposerProps) {
             >
               <Paperclip size={17} />
             </button>
-            <div class="chat-composer-more-wrapper" ref={moreMenuRef}>
+            <div class="chat-composer-more-wrapper">
               <button
+                ref={moreTriggerRef}
                 class={`chat-composer-icon ${showMoreMenu() ? "active" : ""}`}
                 type="button"
                 onClick={() => setShowMoreMenu(!showMoreMenu())}
@@ -351,7 +388,16 @@ export function ChatComposer(props: ChatComposerProps) {
                 <MoreHorizontal size={17} />
               </button>
               <Show when={showMoreMenu()}>
-                <div class="chat-composer-more-menu" role="menu">
+                <Portal>
+                <div
+                  ref={moreMenuRef}
+                  class="chat-composer-more-menu chat-composer-more-menu--portal"
+                  role="menu"
+                  style={{
+                    top: `${moreMenuPos().top}px`,
+                    left: `${moreMenuPos().left}px`,
+                  }}
+                >
                   <button
                     class="chat-composer-menu-item"
                     type="button"
@@ -404,6 +450,7 @@ export function ChatComposer(props: ChatComposerProps) {
                     </div>
                   </div>
                 </div>
+                </Portal>
               </Show>
             </div>
             <Show when={props.currentThreadId}>

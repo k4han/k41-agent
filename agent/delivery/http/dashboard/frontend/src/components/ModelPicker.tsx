@@ -1,6 +1,8 @@
 import { Star } from "lucide-solid";
-import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { Portal } from "solid-js/web";
 
+import { computeFloatingPosition } from "@/lib/floating";
 import { classNames } from "@/lib/utils";
 import type { ModelCatalog, ModelOption } from "@/types";
 
@@ -163,8 +165,33 @@ export function ModelPicker(props: ModelPickerProps) {
   const [open, setOpen] = createSignal(false);
   const [query, setQuery] = createSignal("");
   const [favorites, setFavorites] = createSignal<string[]>([]);
+  const [menuPos, setMenuPos] = createSignal({ top: 0, left: 0, width: 0, maxHeight: 320 });
   let rootRef: HTMLDivElement | undefined;
   let inputRef: HTMLInputElement | undefined;
+  let controlRef: HTMLDivElement | undefined;
+  let menuRef: HTMLDivElement | undefined;
+
+  const updateMenuPosition = () => {
+    if (!controlRef || !open()) return;
+    const rect = computeFloatingPosition(controlRef, {
+      preferred: props.dropdownPlacement === "top" ? "top" : "bottom",
+      defaultMaxHeight: 320,
+      align: "left",
+    });
+    setMenuPos({ top: rect.top, left: rect.left, width: rect.width, maxHeight: rect.maxHeight });
+  };
+
+  createEffect(() => {
+    if (!open()) return;
+    updateMenuPosition();
+    const handler = () => updateMenuPosition();
+    window.addEventListener("scroll", handler, true);
+    window.addEventListener("resize", handler);
+    onCleanup(() => {
+      window.removeEventListener("scroll", handler, true);
+      window.removeEventListener("resize", handler);
+    });
+  });
 
   const selectedProvider = createMemo(() => {
     if (props.resolveDefault) {
@@ -410,7 +437,10 @@ export function ModelPicker(props: ModelPickerProps) {
   onMount(() => {
     setFavorites(readFavorites());
     const handlePointerDown = (event: MouseEvent) => {
-      if (rootRef && !rootRef.contains(event.target as Node)) {
+      const target = event.target as Node | null;
+      if (target && rootRef?.contains(target)) return;
+      if (target && menuRef?.contains(target)) return;
+      if (open()) {
         setOpen(false);
         setQuery("");
       }
@@ -437,7 +467,7 @@ export function ModelPicker(props: ModelPickerProps) {
       )}
       ref={rootRef}
     >
-      <div class="model-picker-control">
+      <div class="model-picker-control" ref={controlRef}>
         <input
           class="input model-picker-input"
           ref={inputRef}
@@ -477,7 +507,17 @@ export function ModelPicker(props: ModelPickerProps) {
       </div>
 
       <Show when={open() && !props.disabled}>
-        <div class="model-picker-dropdown">
+        <Portal>
+        <div
+          ref={menuRef}
+          class="model-picker-dropdown model-picker-dropdown--portal"
+          style={{
+            top: `${menuPos().top}px`,
+            left: `${menuPos().left}px`,
+            width: `${menuPos().width}px`,
+            "max-height": `${menuPos().maxHeight}px`,
+          }}
+        >
           <Show
             when={hasDropdownContent()}
             fallback={<div class="model-picker-empty">No models found.</div>}
@@ -562,6 +602,7 @@ export function ModelPicker(props: ModelPickerProps) {
             </For>
           </Show>
         </div>
+        </Portal>
       </Show>
     </div>
   );

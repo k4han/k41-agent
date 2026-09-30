@@ -26,6 +26,7 @@ import {
   X,
 } from "lucide-solid";
 import { createEffect, createMemo, createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
+import { Portal } from "solid-js/web";
 
 import { DeleteThreadDialog } from "@/components/DeleteThreadDialog";
 import { InlineRenameInput } from "@/components/InlineRenameInput";
@@ -46,7 +47,6 @@ import { CUSTOM_DOM_EVENTS, SESSION_EVENTS } from "@/lib/eventConstants";
 import { API_PATHS, SSE_URLS } from "@/lib/endpoints";
 import { updateDashboardFavicon } from "@/lib/favicon";
 import {
-  HISTORY_MENU_MIN_SPACE_PX,
   HISTORY_PAGE_SIZE,
   SSE_RECONNECT_DELAY_MS,
   STORAGE_KEYS,
@@ -126,7 +126,12 @@ export function AppShell(props: {
   const [historyHasMore, setHistoryHasMore] = createSignal(historyCache.hasMore);
   const [historyLoading, setHistoryLoading] = createSignal(false);
   const [historyMenuThreadId, setHistoryMenuThreadId] = createSignal<string | null>(null);
-  const [historyMenuOpensUp, setHistoryMenuOpensUp] = createSignal(false);
+  const [historyMenuPos, setHistoryMenuPos] = createSignal({ top: 0, left: 0, opensUp: false });
+  let historyMenuAnchor: HTMLElement | null = null;
+  let historyMenuRef: HTMLDivElement | undefined;
+  const historyMenuThread = createMemo(() =>
+    historyThreads().find((item) => item.thread_id === historyMenuThreadId()) ?? null,
+  );
   const [historyNextOffset, setHistoryNextOffset] = createSignal(historyCache.nextOffset);
   const [historyLoaded, setHistoryLoaded] = createSignal(historyCache.loaded);
   const [editingHistoryThreadId, setEditingHistoryThreadId] = createSignal<string | null>(null);
@@ -667,36 +672,6 @@ export function AppShell(props: {
             </button>
           </Show>
         </div>
-        <Show when={historyMenuThreadId() === thread.thread_id}>
-          <div class={`nav-history-menu ${historyMenuOpensUp() ? "open-up" : ""}`}>
-            <Show when={runningThreadIds().has(thread.thread_id)}>
-              <button
-                class="nav-history-menu-item nav-history-menu-danger"
-                type="button"
-                onClick={(event) => stopThreadExecution(thread, event)}
-              >
-                <Square size={13} fill="currentColor" />
-                <span>Stop Execution</span>
-              </button>
-            </Show>
-            <button
-              class="nav-history-menu-item"
-              type="button"
-              onClick={(event) => startRenameHistoryThread(thread, event)}
-            >
-              <Pencil size={13} />
-              <span>Rename</span>
-            </button>
-            <button
-              class="nav-history-menu-item nav-history-menu-danger"
-              type="button"
-              onClick={(event) => requestDeleteHistoryThread(thread, event)}
-            >
-              <Trash2 size={13} />
-              <span>Delete</span>
-            </button>
-          </div>
-        </Show>
       </div>
     );
   };
@@ -713,11 +688,35 @@ export function AppShell(props: {
       `${thread.checkpoint_count} steps`,
     ].filter(Boolean).join(" / ");
   };
+  const positionHistoryMenu = () => {
+    if (!historyMenuAnchor || !historyMenuThreadId()) return;
+    const targetRect = historyMenuAnchor.getBoundingClientRect();
+    if (targetRect.bottom < 0 || targetRect.top > window.innerHeight) {
+      setHistoryMenuThreadId(null);
+      historyMenuAnchor = null;
+      return;
+    }
+    const menuWidth = 160;
+    const thread = historyMenuThread();
+    const isRunning = thread ? runningThreadIds().has(thread.thread_id) : false;
+    const estimatedHeight = isRunning ? 140 : 104;
+    const spaceBelow = window.innerHeight - targetRect.bottom;
+    const spaceAbove = targetRect.top;
+    const opensUp = spaceBelow < estimatedHeight + 8 && spaceAbove > spaceBelow;
+    let left = targetRect.right - menuWidth;
+    left = Math.max(8, Math.min(left, window.innerWidth - menuWidth - 8));
+    const top = opensUp
+      ? Math.max(8, targetRect.top - estimatedHeight - 4)
+      : Math.min(targetRect.bottom + 4, window.innerHeight - estimatedHeight - 8);
+    setHistoryMenuPos({ top, left, opensUp });
+  };
   const handleHistoryScroll = (event: Event) => {
     const target = event.currentTarget as HTMLElement;
     const distanceToBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
 
-    setHistoryMenuThreadId(null);
+    if (historyMenuThreadId()) {
+      positionHistoryMenu();
+    }
 
     if (distanceToBottom <= 48 && historyHasMore() && !historyLoading()) {
       void loadHistory();
@@ -727,20 +726,44 @@ export function AppShell(props: {
     event.preventDefault();
     event.stopPropagation();
     setEditingHistoryThreadId(null);
-    setHistoryMenuThreadId((current) => {
-      if (current === threadId) {
-        setHistoryMenuOpensUp(false);
-        return null;
-      }
-
-      const target = event.currentTarget as HTMLElement;
-      const list = target.closest(".nav-history-list") as HTMLElement | null;
-      const targetRect = target.getBoundingClientRect();
-      const boundaryBottom = list?.getBoundingClientRect().bottom ?? window.innerHeight;
-      setHistoryMenuOpensUp(boundaryBottom - targetRect.bottom < HISTORY_MENU_MIN_SPACE_PX);
-      return threadId;
-    });
+    const current = historyMenuThreadId();
+    if (current === threadId) {
+      setHistoryMenuThreadId(null);
+      historyMenuAnchor = null;
+      return;
+    }
+    historyMenuAnchor = event.currentTarget as HTMLElement;
+    setHistoryMenuThreadId(threadId);
+    positionHistoryMenu();
   };
+  createEffect(() => {
+    if (!historyMenuThreadId()) return;
+    positionHistoryMenu();
+    const handler = () => positionHistoryMenu();
+    window.addEventListener("scroll", handler, true);
+    window.addEventListener("resize", handler);
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (target && historyMenuRef?.contains(target)) return;
+      if (target && (target as Element).closest?.(".nav-history-action")) return;
+      setHistoryMenuThreadId(null);
+      historyMenuAnchor = null;
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setHistoryMenuThreadId(null);
+        historyMenuAnchor = null;
+      }
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    onCleanup(() => {
+      window.removeEventListener("scroll", handler, true);
+      window.removeEventListener("resize", handler);
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    });
+  });
   const requestDeleteHistoryThread = (thread: ThreadSummary, event: MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
@@ -1069,34 +1092,6 @@ export function AppShell(props: {
                               </button>
                             </Show>
                           </div>
-                          <Show when={historyMenuThreadId() === thread.thread_id}>
-                            <div class={`nav-history-menu ${historyMenuOpensUp() ? "open-up" : ""}`}>
-                              <button
-                                class="nav-history-menu-item nav-history-menu-danger"
-                                type="button"
-                                onClick={(event) => stopThreadExecution(thread, event)}
-                              >
-                                <Square size={13} fill="currentColor" />
-                                <span>Stop Execution</span>
-                              </button>
-                              <button
-                                class="nav-history-menu-item"
-                                type="button"
-                                onClick={(event) => startRenameHistoryThread(thread, event)}
-                              >
-                                <Pencil size={13} />
-                                <span>Rename</span>
-                              </button>
-                              <button
-                                class="nav-history-menu-item nav-history-menu-danger"
-                                type="button"
-                                onClick={(event) => requestDeleteHistoryThread(thread, event)}
-                              >
-                                <Trash2 size={13} />
-                                <span>Delete</span>
-                              </button>
-                            </div>
-                          </Show>
                         </div>
                       )}
                     </For>
@@ -1206,6 +1201,48 @@ export function AppShell(props: {
         <div class={`content ${props.noHeader ? "content-no-header" : ""}`}>{props.children}</div>
       </main>
 
+      <Show when={historyMenuThread()}>
+        {(thread) => (
+          <Portal>
+            <div
+              ref={historyMenuRef}
+              class="nav-history-menu nav-history-menu--portal"
+              role="menu"
+              style={{
+                top: `${historyMenuPos().top}px`,
+                left: `${historyMenuPos().left}px`,
+              }}
+            >
+              <Show when={runningThreadIds().has(thread().thread_id)}>
+                <button
+                  class="nav-history-menu-item nav-history-menu-danger"
+                  type="button"
+                  onClick={(event) => stopThreadExecution(thread(), event)}
+                >
+                  <Square size={13} fill="currentColor" />
+                  <span>Stop Execution</span>
+                </button>
+              </Show>
+              <button
+                class="nav-history-menu-item"
+                type="button"
+                onClick={(event) => startRenameHistoryThread(thread(), event)}
+              >
+                <Pencil size={13} />
+                <span>Rename</span>
+              </button>
+              <button
+                class="nav-history-menu-item nav-history-menu-danger"
+                type="button"
+                onClick={(event) => requestDeleteHistoryThread(thread(), event)}
+              >
+                <Trash2 size={13} />
+                <span>Delete</span>
+              </button>
+            </div>
+          </Portal>
+        )}
+      </Show>
       <DeleteThreadDialog
         open={deleteTarget() !== null}
         thread={deleteTarget()}

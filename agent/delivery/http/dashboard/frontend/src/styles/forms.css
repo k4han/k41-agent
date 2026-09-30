@@ -408,7 +408,7 @@
   top: calc(100% + 4px);
   left: 0;
   right: 0;
-  z-index: 100;
+  z-index: var(--z-form-select-menu);
   max-height: 240px;
   overflow-y: auto;
   border: 1px solid var(--border);
@@ -421,7 +421,7 @@
   position: fixed;
   left: auto;
   right: auto;
-  z-index: 999;
+  z-index: var(--z-floating-menu);
   /* top/left/width/max-height set inline via JS */
   max-height: 240px;
   overflow-y: auto;

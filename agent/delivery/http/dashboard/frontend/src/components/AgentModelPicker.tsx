@@ -1,5 +1,6 @@
 import { Bot, Check, ChevronDown, Search, Sparkles, X } from "lucide-solid";
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { Portal } from "solid-js/web";
 
 import type { AgentCard, ModelCatalog } from "@/types";
 
@@ -50,8 +51,42 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
   const [open, setOpen] = createSignal(false);
   const [searchQuery, setSearchQuery] = createSignal("");
   const [activeTab, setActiveTab] = createSignal<"agent" | "model">("agent");
+  const [menuPos, setMenuPos] = createSignal({ top: 0, left: 0, width: 540 });
   let rootRef: HTMLDivElement | undefined;
+  let triggerRef: HTMLButtonElement | undefined;
+  let menuRef: HTMLDivElement | undefined;
   let searchInputRef: HTMLInputElement | undefined;
+
+  const updateMenuPosition = () => {
+    if (!triggerRef || !open()) return;
+    const rect = triggerRef.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const gap = 8;
+    const width = Math.min(540, viewportWidth - 32);
+    let left = rect.left;
+    if (left + width > viewportWidth - 16) {
+      left = Math.max(16, viewportWidth - width - 16);
+    }
+    const estimatedHeight = Math.min(380, viewportHeight - 32);
+    let top = rect.top - estimatedHeight - gap;
+    if (top < 8) {
+      top = Math.min(rect.bottom + gap, Math.max(8, viewportHeight - estimatedHeight - 8));
+    }
+    setMenuPos({ top, left, width });
+  };
+
+  createEffect(() => {
+    if (!open()) return;
+    updateMenuPosition();
+    const handler = () => updateMenuPosition();
+    window.addEventListener("scroll", handler, true);
+    window.addEventListener("resize", handler);
+    onCleanup(() => {
+      window.removeEventListener("scroll", handler, true);
+      window.removeEventListener("resize", handler);
+    });
+  });
 
   const selectedAgent = createMemo(() =>
     props.agents.find((a) => a.name === props.agentName) || props.agents[0]
@@ -121,7 +156,11 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
   });
 
   const handlePointerDown = (event: MouseEvent) => {
-    if (rootRef && !rootRef.contains(event.target as Node)) {
+    const target = event.target as Node | null;
+    if (target && rootRef?.contains(target)) return;
+    if (target && menuRef?.contains(target)) return;
+    if (target && triggerRef?.contains(target)) return;
+    if (open()) {
       setOpen(false);
       setSearchQuery("");
     }
@@ -153,6 +192,7 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
   return (
     <div class={`agent-model-picker-wrapper ${props.class || ""}`} ref={rootRef}>
       <button
+        ref={triggerRef}
         class={`agent-model-badge ${open() ? "is-open" : ""}`}
         type="button"
         onClick={() => {
@@ -174,7 +214,18 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
       </button>
 
       <Show when={open()}>
-        <div class="agent-model-popover" role="dialog" aria-label="Select Agent and Model">
+        <Portal>
+        <div
+          ref={menuRef}
+          class="agent-model-popover agent-model-popover--portal"
+          role="dialog"
+          aria-label="Select Agent and Model"
+          style={{
+            top: `${menuPos().top}px`,
+            left: `${menuPos().left}px`,
+            width: `${menuPos().width}px`,
+          }}
+        >
           <div class="agent-model-popover-header">
             <div class="agent-model-popover-title-wrap">
               <Sparkles size={14} class="agent-model-popover-title-icon" />
@@ -369,6 +420,7 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
             </div>
           </div>
         </div>
+        </Portal>
       </Show>
     </div>
   );

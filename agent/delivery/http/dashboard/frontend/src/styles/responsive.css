@@ -175,7 +175,7 @@
     content: "";
     position: absolute;
     inset: 0;
-    z-index: 55;
+    z-index: var(--z-mobile-backdrop);
     background: rgba(0, 0, 0, 0.4);
     backdrop-filter: blur(2px);
     opacity: 0;
@@ -197,7 +197,7 @@
     top: 0;
     bottom: 0;
     right: 0;
-    z-index: 60;
+    z-index: var(--z-mobile-drawer);
     width: min(320px, 86vw);
     height: 100vh;
     height: 100dvh;
@@ -281,7 +281,7 @@
     top: 0;
     bottom: 0;
     left: 0;
-    z-index: 60;
+    z-index: var(--z-mobile-drawer);
     width: min(300px, 86vw);
     height: 100vh;
     height: 100dvh;
@@ -349,7 +349,7 @@
     content: "";
     position: fixed;
     inset: 0;
-    z-index: 55;
+    z-index: var(--z-mobile-backdrop);
     background: rgba(0, 0, 0, 0.42);
     opacity: 0;
     visibility: hidden;
@@ -512,14 +512,12 @@
     flex-direction: column;
   }
 
-  .dialog-backdrop,
-  .dialog-overlay {
+  .dialog-backdrop {
     padding: 0;
     align-items: flex-end;
   }
 
-  .dialog,
-  .dialog-container {
+  .dialog {
     max-width: 100vw;
     width: 100%;
     margin: 0;
@@ -727,6 +725,25 @@
   .topbar .topbar-menu-toggle:hover,
   .agent-config-option:hover {
     background: inherit;
+  }
+}
+
+/* --- Tablet: settings tab pills scroll like on mobile ------------------ */
+@media (max-width: 980px) {
+  .settings-tabs {
+    display: flex;
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .settings-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .settings-tab {
+    flex: 0 0 auto;
+    white-space: nowrap;
   }
 }
 

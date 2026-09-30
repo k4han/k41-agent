@@ -10,11 +10,12 @@
   --primary-hover: #4338ca;
   --primary-subtle: rgba(79, 70, 229, 0.08);
   --bg: #fafafa;
-  /* --bg: #8b8b8b; */
   --fg: #0a0a0a;
+  --fg-muted: #595959;
   --muted: #595959;
   --muted-2: #6b6b6b;
   --surface: #ffffff;
+  --surface-1: #fafafa;
   --surface-2: #f5f5f5;
   --surface-3: #ededed;
   --border: #e5e5e5;
@@ -31,6 +32,26 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
   --touch-target: 44px;
+  /* Centralized stacking scale: menus < popovers < portal selects < dialogs < toasts */
+  --z-topbar: 20;
+  --z-history-menu: 20;
+  --z-sticky-table-head: 12;
+  --z-composer-dropzone: 25;
+  --z-workspace-tree-menu: 30;
+  --z-pending-bar: 40;
+  --z-composer-menu: 50;
+  --z-scroll-button: 50;
+  --z-mobile-backdrop: 55;
+  --z-mobile-drawer: 60;
+  --z-user-menu: 60;
+  --z-agent-popover: 60;
+  --z-model-picker: 70;
+  --z-select-menu: 80;
+  --z-suggest-menu: 80;
+  --z-form-select-menu: 100;
+  --z-floating-menu: 1300;
+  --z-dialog: 1100;
+  --z-toast: 1200;
 }
 
 .dark {
@@ -40,9 +61,11 @@
   --primary-subtle: rgba(99, 102, 241, 0.15);
   --bg: #0a0a0a;
   --fg: #fafafa;
+  --fg-muted: #a3a3a3;
   --muted: #a3a3a3;
   --muted-2: #949494;
   --surface: #111111;
+  --surface-1: #141414;
   --surface-2: #171717;
   --surface-3: #262626;
   --border: rgba(255, 255, 255, 0.1);

@@ -809,7 +809,7 @@ body.workspace-resizing * {
   position: absolute;
   top: calc(100% + 2px);
   right: 0;
-  z-index: 30;
+  z-index: var(--z-workspace-tree-menu);
   display: flex;
   width: 175px;
   flex-direction: column;

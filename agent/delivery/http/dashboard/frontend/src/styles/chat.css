@@ -507,7 +507,7 @@
   bottom: 16px;
   left: 50%;
   transform: translateX(-50%) scale(0.9);
-  z-index: 50;
+  z-index: var(--z-scroll-button);
   display: flex;
   align-items: center;
   justify-content: center;

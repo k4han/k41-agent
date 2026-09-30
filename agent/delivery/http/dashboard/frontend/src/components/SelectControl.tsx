@@ -1,5 +1,8 @@
 import { ChevronDown } from "lucide-solid";
-import { createMemo, createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
+import { Portal } from "solid-js/web";
+
+import { computeFloatingPosition, floatingMenuStyle } from "@/lib/floating";
 
 export type SelectControlOption = {
   value: string;
@@ -21,7 +24,36 @@ export function SelectControl(props: {
   style?: JSX.CSSProperties | string;
 }) {
   const [open, setOpen] = createSignal(false);
+  const [menuPos, setMenuPos] = createSignal({ top: 0, left: 0, width: 0, maxHeight: 260 });
   let controlRef: HTMLDivElement | undefined;
+  let triggerRef: HTMLButtonElement | undefined;
+  let menuRef: HTMLDivElement | undefined;
+
+  const updateMenuPosition = () => {
+    if (!triggerRef || !open()) return;
+    const prefersTop = Boolean(
+      controlRef?.closest(".chat-agent-picker, .chat-composer, .composer, .chat-panel"),
+    );
+    const rect = computeFloatingPosition(triggerRef, {
+      preferred: prefersTop ? "top" : "bottom",
+      defaultMaxHeight: 260,
+      minWidth: 220,
+      align: "right",
+    });
+    setMenuPos({ top: rect.top, left: rect.left, width: rect.width, maxHeight: rect.maxHeight });
+  };
+
+  createEffect(() => {
+    if (!open()) return;
+    updateMenuPosition();
+    const handler = () => updateMenuPosition();
+    window.addEventListener("scroll", handler, true);
+    window.addEventListener("resize", handler);
+    onCleanup(() => {
+      window.removeEventListener("scroll", handler, true);
+      window.removeEventListener("resize", handler);
+    });
+  });
 
   const selectedOption = createMemo(() =>
     props.options.find((option) => option.value === props.value),
@@ -43,8 +75,9 @@ export function SelectControl(props: {
   };
   const handleDocumentPointerDown = (event: PointerEvent) => {
     const target = event.target;
-    if (target instanceof Node && controlRef?.contains(target)) {
-      return;
+    if (target instanceof Node) {
+      if (controlRef?.contains(target)) return;
+      if (menuRef?.contains(target)) return;
     }
     close();
   };
@@ -78,6 +111,7 @@ export function SelectControl(props: {
       style={props.style}
     >
       <button
+        ref={triggerRef}
         class={`select-control-trigger ${props.icon || selectedOption()?.icon ? "select-control-with-icon" : ""}`}
         type="button"
         disabled={props.disabled}
@@ -99,28 +133,41 @@ export function SelectControl(props: {
         <ChevronDown class="select-control-caret" size={14} />
       </button>
       <Show when={open()}>
-        <div class="select-control-menu" role="listbox" aria-label={props.ariaLabel}>
-          <For each={props.options}>
-            {(option) => (
-              <button
-                class={`select-control-option ${option.value === props.value ? "active" : ""}`}
-                type="button"
-                disabled={option.disabled}
-                role="option"
-                aria-selected={option.value === props.value}
-                title={option.title || option.label}
-                onClick={() => selectOption(option)}
-              >
-                <Show when={option.icon}>
-                  <span class="select-control-icon select-control-option-icon" aria-hidden="true">
-                    {option.icon}
-                  </span>
-                </Show>
-                {option.label}
-              </button>
-            )}
-          </For>
-        </div>
+        <Portal>
+          <div
+            ref={menuRef}
+            class="select-control-menu select-control-menu--portal"
+            role="listbox"
+            aria-label={props.ariaLabel}
+            style={{
+              top: `${menuPos().top}px`,
+              left: `${menuPos().left}px`,
+              width: `${menuPos().width}px`,
+              "max-height": `${menuPos().maxHeight}px`,
+            }}
+          >
+            <For each={props.options}>
+              {(option) => (
+                <button
+                  class={`select-control-option ${option.value === props.value ? "active" : ""}`}
+                  type="button"
+                  disabled={option.disabled}
+                  role="option"
+                  aria-selected={option.value === props.value}
+                  title={option.title || option.label}
+                  onClick={() => selectOption(option)}
+                >
+                  <Show when={option.icon}>
+                    <span class="select-control-icon select-control-option-icon" aria-hidden="true">
+                      {option.icon}
+                    </span>
+                  </Show>
+                  {option.label}
+                </button>
+              )}
+            </For>
+          </div>
+        </Portal>
       </Show>
     </div>
   );

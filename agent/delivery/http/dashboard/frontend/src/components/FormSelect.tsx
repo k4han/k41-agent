@@ -2,6 +2,7 @@ import { createEffect, createMemo, createSignal, For, JSX, onCleanup, onMount, S
 import { Portal } from "solid-js/web";
 import { ChevronDown, Check, AlertCircle, Search } from "lucide-solid";
 
+import { computeFloatingPosition } from "@/lib/floating";
 import { classNames } from "@/lib/utils";
 import type { SelectControlOption } from "./SelectControl";
 
@@ -360,7 +361,32 @@ export function FormMultiSelect(props: FormMultiSelectProps) {
 
   const [open, setOpen] = createSignal(false);
   const [touched, setTouched] = createSignal(false);
+  const [menuPos, setMenuPos] = createSignal({ top: 0, left: 0, width: 0, maxHeight: 240 });
   let controlRef: HTMLDivElement | undefined;
+  let triggerBoxRef: HTMLDivElement | undefined;
+  let menuRef: HTMLDivElement | undefined;
+
+  const updateMultiMenuPosition = () => {
+    if (!triggerBoxRef || !open()) return;
+    const rect = computeFloatingPosition(triggerBoxRef, {
+      preferred: "bottom",
+      defaultMaxHeight: 240,
+      align: "left",
+    });
+    setMenuPos({ top: rect.top, left: rect.left, width: rect.width, maxHeight: rect.maxHeight });
+  };
+
+  createEffect(() => {
+    if (!open()) return;
+    updateMultiMenuPosition();
+    const handler = () => updateMultiMenuPosition();
+    window.addEventListener("scroll", handler, true);
+    window.addEventListener("resize", handler);
+    onCleanup(() => {
+      window.removeEventListener("scroll", handler, true);
+      window.removeEventListener("resize", handler);
+    });
+  });
 
   const selectedOptions = createMemo(() =>
     local.options.filter((option) => local.values.includes(option.value)),
@@ -396,8 +422,9 @@ export function FormMultiSelect(props: FormMultiSelectProps) {
 
   const handleDocumentPointerDown = (event: PointerEvent) => {
     const target = event.target;
-    if (target instanceof Node && controlRef?.contains(target)) {
-      return;
+    if (target instanceof Node) {
+      if (controlRef?.contains(target)) return;
+      if (menuRef?.contains(target)) return;
     }
     close();
   };
@@ -441,6 +468,7 @@ export function FormMultiSelect(props: FormMultiSelectProps) {
       </Show>
 
       <div
+        ref={triggerBoxRef}
         class={classNames(
           "form-select form-select--multi",
           open() && "form-select--open",
@@ -485,7 +513,19 @@ export function FormMultiSelect(props: FormMultiSelectProps) {
         </button>
 
         <Show when={open()}>
-          <div class="form-select-menu" role="listbox" aria-label={local.ariaLabel || local.label}>
+          <Portal>
+          <div
+            ref={menuRef}
+            class="form-select-menu form-select-menu--portal"
+            role="listbox"
+            aria-label={local.ariaLabel || local.label}
+            style={{
+              top: `${menuPos().top}px`,
+              left: `${menuPos().left}px`,
+              width: `${menuPos().width}px`,
+              "max-height": `${menuPos().maxHeight}px`,
+            }}
+          >
             <For each={local.options}>
               {(option) => {
                 const isSelected = local.values.includes(option.value);
@@ -511,8 +551,9 @@ export function FormMultiSelect(props: FormMultiSelectProps) {
                   </button>
                 );
               }}
-            </For>
+              </For>
           </div>
+          </Portal>
         </Show>
       </div>
 

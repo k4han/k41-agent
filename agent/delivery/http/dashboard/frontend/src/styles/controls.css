@@ -637,7 +637,7 @@
   position: absolute;
   top: calc(100% + 5px);
   right: 0;
-  z-index: 80;
+  z-index: var(--z-select-menu);
   display: grid;
   min-width: max(100%, 220px);
   max-height: 260px;
@@ -647,6 +647,17 @@
   background: var(--surface);
   box-shadow: var(--shadow);
   padding: 4px;
+}
+
+.select-control-menu--portal {
+  position: fixed;
+  left: auto;
+  right: auto;
+  /* Base rule uses min-width: max(100%, 220px); 100% would resolve
+     against the viewport for a fixed element and stretch the menu
+     full-screen. Inline width from JS already guarantees >= 220px. */
+  min-width: 0;
+  z-index: var(--z-floating-menu);
 }
 
 .chat-agent-picker .select-control-menu {
@@ -751,7 +762,7 @@
   top: calc(100% + 5px);
   right: 0;
   left: 0;
-  z-index: 70;
+  z-index: var(--z-model-picker);
   max-height: 320px;
   overflow: auto;
   border: 1px solid var(--border);
@@ -759,6 +770,13 @@
   background: var(--surface);
   box-shadow: var(--shadow);
   padding: 6px;
+}
+
+.model-picker-dropdown--portal {
+  position: fixed;
+  left: auto;
+  right: auto;
+  z-index: var(--z-floating-menu);
 }
 
 .model-picker-up .model-picker-dropdown {
@@ -1002,7 +1020,7 @@
 .dialog-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 1100;
+  z-index: var(--z-dialog);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1234,11 +1252,9 @@
 @keyframes dialogContentEnter {
   from {
     opacity: 0;
-    transform: scale(0.96) translateY(6px);
   }
   to {
     opacity: 1;
-    transform: scale(1) translateY(0);
   }
 }
 
@@ -1254,7 +1270,7 @@
   position: fixed;
   right: 18px;
   bottom: 18px;
-  z-index: 1200;
+  z-index: var(--z-toast);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1295,7 +1311,7 @@
 
 .prompt-variable-suggest {
   position: absolute;
-  z-index: 80;
+  z-index: var(--z-suggest-menu);
   margin-top: 2px;
   min-width: 220px;
   max-width: min(360px, 100%);
@@ -1423,6 +1439,8 @@
   height: min(560px, calc(86vh - 148px));
   min-height: 0;
   flex-direction: column;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 /* --- Agent card tool configuration --- */

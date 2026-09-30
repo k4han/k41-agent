@@ -741,7 +741,7 @@ export function WorkspaceExplorer(props: {
   const updatePlusMenuPosition = () => {
     if (!plusBtnRef) return;
     const rect = plusBtnRef.getBoundingClientRect();
-    const menuWidth = 185;
+    const menuWidth = 195;
     let left = rect.left;
     if (left + menuWidth > window.innerWidth - 8) {
       left = Math.max(8, window.innerWidth - menuWidth - 8);

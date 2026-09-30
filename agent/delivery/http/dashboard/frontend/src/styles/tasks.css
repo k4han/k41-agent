@@ -292,7 +292,7 @@
 .task-history-header {
   position: sticky;
   top: 58px;
-  z-index: 12;
+  z-index: var(--z-sticky-table-head);
   flex-wrap: wrap;
   gap: 10px;
   border-radius: var(--radius) var(--radius) 0 0;

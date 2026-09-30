@@ -392,7 +392,7 @@
   position: absolute;
   bottom: calc(100% + 8px);
   left: 0;
-  z-index: 50;
+  z-index: var(--z-composer-menu);
   min-width: 210px;
   border: 1px solid var(--border-strong);
   border-radius: 12px;
@@ -602,12 +602,22 @@
   transform: rotate(180deg);
 }
 
+.chat-composer-more-menu--portal {
+  position: fixed;
+  left: auto;
+  right: auto;
+  top: auto;
+  bottom: auto;
+  z-index: var(--z-floating-menu);
+  width: 230px;
+}
+
 /* Agent & Model Popover */
 .agent-model-popover {
   position: absolute;
   bottom: calc(100% + 8px);
   left: 0;
-  z-index: 60;
+  z-index: var(--z-agent-popover);
   width: min(540px, calc(100vw - 32px));
   border: 1px solid var(--border-strong);
   border-radius: 14px;
@@ -617,6 +627,15 @@
   flex-direction: column;
   overflow: hidden;
   animation: composerMenuPopIn 150ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.agent-model-popover--portal {
+  position: fixed;
+  left: auto;
+  right: auto;
+  top: auto;
+  bottom: auto;
+  z-index: var(--z-floating-menu);
 }
 
 .dark .agent-model-popover {

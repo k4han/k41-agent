@@ -701,7 +701,9 @@
 }
 
 .settings-list:has(.form-select--open),
-.settings-table:has(.form-select--open) {
+.settings-table:has(.form-select--open),
+.settings-list:has(.select-control.open),
+.settings-table:has(.select-control.open) {
   overflow: visible;
   z-index: 10;
   position: relative;
@@ -720,7 +722,9 @@
 }
 
 .setting-card:has(.form-select--open),
-.setting-row:has(.form-select--open) {
+.setting-row:has(.form-select--open),
+.setting-card:has(.select-control.open),
+.setting-row:has(.select-control.open) {
   overflow: visible;
   z-index: 20;
 }
@@ -934,7 +938,7 @@
   bottom: 18px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 40;
+  z-index: var(--z-pending-bar);
   display: flex;
   align-items: center;
   justify-content: space-between;
