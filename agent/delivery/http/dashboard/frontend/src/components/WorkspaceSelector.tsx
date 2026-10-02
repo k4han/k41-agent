@@ -23,12 +23,7 @@ import { SelectControl } from "@/components/SelectControl";
 import { useToast } from "@/components/Toast";
 import { apiFetch, postJson } from "@/lib/api";
 import { API_PATHS } from "@/lib/endpoints";
-import {
-  getBackends,
-  getBackendDisplayName,
-  getEnabledBackends,
-  isBackendEnabled,
-} from "@/lib/catalogStore";
+import { getBackends, getBackendDisplayName, isBackendEnabled } from "@/lib/catalogStore";
 import { getBackendIcon } from "@/lib/iconRegistry";
 import { useCatalogAndLoad } from "@/lib/useCatalogAndLoad";
 import {
@@ -280,12 +275,18 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
     );
   });
 
-  const backendOptions = createMemo(() =>
-    getEnabledBackends().map((b) => ({
-      value: b.name,
-      label: b.title,
-    })),
-  );
+  const backendOptions = createMemo(() => {
+    const options = getBackends()
+      .filter((b) => isBackendEnabled(b.name))
+      .map((b) => ({
+        value: b.name,
+        label: b.title,
+      }));
+    if (options.length > 0) {
+      return options;
+    }
+    return [{ value: "local", label: "Local" }];
+  });
 
   const selectedBackendIcon = createMemo(() => {
     const iconFn = getBackendIcon(backend());
@@ -653,10 +654,18 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
                   value={backend()}
                   options={backendOptions()}
                   disabled={props.disabled}
-                  onChange={(value) => setBackend(value as WorkspaceBackendKey)}
+                  onChange={(value) => {
+                    const nextBackend = value as WorkspaceBackendKey;
+                    setBackend(nextBackend);
+                    const allowed = sourceForBackend(nextBackend);
+                    if (!allowed.includes(source())) {
+                      setSource(defaultSourceForBackend(nextBackend));
+                    }
+                  }}
                   ariaLabel="Workspace backend"
                   title={backendOptions().find((b) => b.value === backend())?.label || backend()}
                   icon={selectedBackendIcon()}
+                  align="right"
                 />
               </div>
             </Show>

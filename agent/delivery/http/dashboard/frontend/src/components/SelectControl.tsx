@@ -22,6 +22,7 @@ export function SelectControl(props: {
   icon?: JSX.Element;
   title?: string;
   style?: JSX.CSSProperties | string;
+  align?: "left" | "right";
 }) {
   const [open, setOpen] = createSignal(false);
   const [menuPos, setMenuPos] = createSignal({ top: 0, left: 0, width: 0, maxHeight: 260 });
@@ -29,16 +30,26 @@ export function SelectControl(props: {
   let triggerRef: HTMLButtonElement | undefined;
   let menuRef: HTMLDivElement | undefined;
 
-  const updateMenuPosition = () => {
-    if (!triggerRef || !open()) return;
-    const prefersTop = Boolean(
-      controlRef?.closest(".chat-agent-picker, .chat-composer, .composer, .chat-panel"),
-    );
+  const resolveAlign = (): "left" | "right" => {
+    if (props.align) return props.align;
+    const anchor = triggerRef ?? controlRef;
+    if (anchor) {
+      const rect = anchor.getBoundingClientRect();
+      if (rect.left < window.innerWidth / 2) {
+        return "left";
+      }
+    }
+    return "right";
+  };
+
+  const updateMenuPosition = (force = false) => {
+    if (!triggerRef || (!open() && !force)) return;
+    const prefersTop = Boolean(controlRef?.closest(".chat-agent-picker, .chat-composer"));
     const rect = computeFloatingPosition(triggerRef, {
       preferred: prefersTop ? "top" : "bottom",
       defaultMaxHeight: 260,
       minWidth: 220,
-      align: "right",
+      align: resolveAlign(),
     });
     setMenuPos({ top: rect.top, left: rect.left, width: rect.width, maxHeight: rect.maxHeight });
   };
@@ -63,7 +74,11 @@ export function SelectControl(props: {
   const close = () => setOpen(false);
   const toggle = () => {
     if (!props.disabled) {
-      setOpen((current) => !current);
+      const next = !open();
+      if (next) {
+        updateMenuPosition(true);
+      }
+      setOpen(next);
     }
   };
   const selectOption = (option: SelectControlOption) => {
