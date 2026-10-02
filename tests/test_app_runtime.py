@@ -142,3 +142,124 @@ async def test_runtime_starts_only_channels_enabled_for_boot(
     assert runtime.channel_manager.status("discord")["status"] == ChannelStatus.STOPPED
 
     await runtime.channel_manager.stop_all()
+
+
+@pytest.mark.asyncio
+async def test_shutdown_without_startup_preserves_active_container(tmp_path):
+    from agent.bootstrap.container import (
+        clear_active_container,
+        create_test_container,
+        get_active_container,
+    )
+
+    active = create_test_container(tmp_path=tmp_path / "active")
+    runtime_container = create_test_container(tmp_path=tmp_path / "runtime")
+    previous = active.activate()
+    try:
+        runtime = AppRuntime(container=runtime_container)
+        await runtime.shutdown()
+
+        assert get_active_container() is active
+        assert runtime._started is False
+    finally:
+        active.deactivate(previous)
+        clear_active_container()
+
+
+@pytest.mark.asyncio
+async def test_startup_failure_restores_previous_active_container(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    from agent.bootstrap.container import (
+        clear_active_container,
+        create_test_container,
+        get_active_container,
+    )
+
+    active = create_test_container(tmp_path=tmp_path / "active")
+    runtime_container = create_test_container(tmp_path=tmp_path / "runtime")
+
+    async def failing_persistence():
+        raise RuntimeError("persistence failed")
+
+    monkeypatch.setattr(
+        runtime_container, "initialize_persistence", failing_persistence
+    )
+
+    previous = active.activate()
+    try:
+        runtime = AppRuntime(container=runtime_container)
+        with pytest.raises(RuntimeError, match="persistence failed"):
+            await runtime.startup()
+
+        assert get_active_container() is active
+        assert runtime._started is False
+        assert runtime._activated is False
+    finally:
+        active.deactivate(previous)
+        clear_active_container()
+
+
+@pytest.mark.asyncio
+async def test_shutdown_continues_after_step_failure(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    """A failing step must not skip cleanup of the remaining ones."""
+    import agent.modules.scheduler as scheduler_module
+    import agent.modules.workspaces as workspaces_module
+
+    from agent.bootstrap.container import (
+        clear_active_container,
+        create_test_container,
+        get_active_container,
+    )
+
+    holder = create_test_container(tmp_path=tmp_path / "holder")
+    runtime_container = create_test_container(tmp_path=tmp_path / "runtime")
+
+    calls: list[str] = []
+
+    class FakeChannelManager:
+        def names(self):
+            return ["telegram"]
+
+    async def failing_channels(manager):
+        calls.append("channels")
+        raise RuntimeError("channels failed")
+
+    async def ok_scheduler(container=None):
+        calls.append("scheduler")
+
+    async def ok_workspace_services():
+        calls.append("workspace")
+
+    async def ok_close_persistence():
+        calls.append("persistence")
+
+    monkeypatch.setattr(runtime_module, "stop_all_channels", failing_channels)
+    monkeypatch.setattr(scheduler_module, "stop_scheduler", ok_scheduler)
+    monkeypatch.setattr(
+        workspaces_module, "stop_workspace_background_services", ok_workspace_services
+    )
+    monkeypatch.setattr(runtime_container, "_channel_manager", FakeChannelManager())
+    monkeypatch.setattr(
+        runtime_container, "close_persistence", ok_close_persistence
+    )
+    runtime_container._persistence_ready = True
+
+    runtime = AppRuntime(container=runtime_container)
+    previous = holder.activate()
+    try:
+        runtime._previous_active = runtime_container.activate()
+        runtime._activated = True
+        runtime._started = True
+
+        await runtime.shutdown()
+
+        assert calls == ["channels", "scheduler", "workspace", "persistence"]
+        assert runtime._started is False
+        assert runtime._activated is False
+        assert get_active_container() is holder
+    finally:
+        holder.deactivate(previous)
+        clear_active_container()

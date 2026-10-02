@@ -20,14 +20,12 @@ class _StubConfigService:
 
 @pytest_asyncio.fixture
 async def admin_auth_db(monkeypatch: pytest.MonkeyPatch, tmp_path):
+    from agent.bootstrap.container import AppContainer, set_active_container
+
     db_path = tmp_path / "admin-auth.sqlite"
     db_url = f"sqlite+aiosqlite:///{db_path.resolve().as_posix()}"
     monkeypatch.setattr(db_engine, "DEFAULT_DATABASE_URL", db_url)
-    monkeypatch.setattr(db_engine, "_cached_database_url", None)
-    monkeypatch.setattr(db_engine, "_async_engine", None)
-    monkeypatch.setattr(db_engine, "_async_session_maker", None)
-    monkeypatch.setattr(db_engine, "_tables_created", False)
-    monkeypatch.setattr(db_engine, "get_config_service", lambda: _StubConfigService(""))
+    set_active_container(AppContainer(config_service=_StubConfigService("")))
 
     load_orm_models()
     await initialize_async_engine(metadata=Base.metadata)

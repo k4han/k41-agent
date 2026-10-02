@@ -153,14 +153,11 @@ class PromptVariableService:
         bump_revision(PROMPT_VARIABLES_REVISION)
 
 
-_service: PromptVariableService | None = None
+def get_prompt_variable_service(container=None) -> PromptVariableService:
+    """Return container-scoped prompt variable service."""
+    from agent.bootstrap.container import require_active_container
 
-
-def get_prompt_variable_service() -> PromptVariableService:
-    global _service
-    if _service is None:
-        _service = PromptVariableService()
-    return _service
+    return require_active_container(container).prompt_variable_service
 
 
 async def get_prompt_variable_values() -> dict[str, str]:

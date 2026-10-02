@@ -34,12 +34,8 @@ class InMemoryCache:
         self._cache.clear()
 
 
-_cache_instance: InMemoryCache | None = None
+def get_cache(container=None) -> InMemoryCache:
+    """Return container-scoped cache."""
+    from agent.bootstrap.container import require_active_container
 
-
-def get_cache() -> InMemoryCache:
-    """Get or create singleton cache instance."""
-    global _cache_instance
-    if _cache_instance is None:
-        _cache_instance = InMemoryCache()
-    return _cache_instance
+    return require_active_container(container).cache

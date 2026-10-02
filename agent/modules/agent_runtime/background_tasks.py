@@ -786,13 +786,11 @@ class BackgroundTaskManager:
                     pass
 
 
-# Module-level singleton
-_manager = BackgroundTaskManager()
+def get_background_task_manager(container=None) -> BackgroundTaskManager:
+    """Return container-scoped background task manager."""
+    from agent.bootstrap.container import require_active_container
 
-
-def get_background_task_manager() -> BackgroundTaskManager:
-    """Return the global background task manager."""
-    return _manager
+    return require_active_container(container).task_manager
 
 
 __all__ = [

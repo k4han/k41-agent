@@ -5,8 +5,12 @@ Other modules should import from here, not from internal packages.
 
 from langchain_core.language_models import BaseChatModel
 
+from agent.modules.providers.anthropic.factory import AnthropicFactory
+from agent.modules.providers.google.factory import GoogleFactory
 from agent.modules.providers.models import ProviderModelCatalog, ResolvedChatModel
+from agent.modules.providers.openai_compatible.factory import OpenAICompatibleFactory
 from agent.modules.providers.provider import ProviderConfig, ProviderType
+from agent.modules.providers.repository import ConfigProviderRepository
 from agent.modules.providers.service import ProviderService
 from agent.modules.providers.resolve_chat_model import (
     get_default_llm_settings,
@@ -14,29 +18,12 @@ from agent.modules.providers.resolve_chat_model import (
     resolve_chat_model_info,
 )
 
-# --- Module-level singleton ---
 
-_provider_service: ProviderService | None = None
+def _get_provider_service(container=None) -> ProviderService:
+    """Return container-scoped provider service."""
+    from agent.bootstrap.container import require_active_container
 
-
-def _get_provider_service() -> ProviderService:
-    global _provider_service
-    if _provider_service is None:
-        from agent.modules.providers.anthropic.factory import AnthropicFactory
-        from agent.modules.providers.google.factory import GoogleFactory
-        from agent.modules.providers.openai_compatible.factory import OpenAICompatibleFactory
-        from agent.modules.providers.provider import ProviderType
-        from agent.modules.providers.repository import ConfigProviderRepository
-
-        repo = ConfigProviderRepository()
-        service = ProviderService(repository=repo)
-        service.register_factory(
-            ProviderType.OPENAI_COMPATIBLE, OpenAICompatibleFactory()
-        )
-        service.register_factory(ProviderType.GOOGLE, GoogleFactory())
-        service.register_factory(ProviderType.ANTHROPIC, AnthropicFactory())
-        _provider_service = service
-    return _provider_service
+    return require_active_container(container).provider_service
 
 
 def reload_provider_service() -> None:
@@ -117,6 +104,10 @@ from agent.modules.providers.catalog import (
 )
 
 __all__ = [
+    "AnthropicFactory",
+    "ConfigProviderRepository",
+    "GoogleFactory",
+    "OpenAICompatibleFactory",
     "ProviderService",
     "ProviderType",
     "ResolvedChatModel",

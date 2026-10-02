@@ -29,9 +29,9 @@ class BootstrapConfig:
     tray_autostart: bool = False
 
 
-def load_bootstrap_config() -> BootstrapConfig:
-    """Build bootstrap config from config service."""
-    config = get_config_service()
+def load_bootstrap_config(config_service=None) -> BootstrapConfig:
+    """Build bootstrap config from injected service or active container."""
+    config = config_service if config_service is not None else get_config_service()
     config.ensure_default_files()
 
     # Load CORS origins - default to localhost only for security

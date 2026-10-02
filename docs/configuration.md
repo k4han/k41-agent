@@ -109,25 +109,30 @@ Higher priority overrides lower priority.
 
 ## Accessing Configuration
 
-### From Code
+### From Code (DI via AppContainer, preferred)
 
 ```python
-from agent.shared.config import get_config_service
+from agent.bootstrap.container import AppContainer
 
-config = get_config_service()
+def my_handler(container: AppContainer):
+    config = container.config_service
 
-# Typed getters
-host = config.get_str("host", "0.0.0.0")
-port = config.get_int("port", 4141)
-enabled = config.get_bool("enable_web", True)
-db_url = config.get_str("database.url")
+    # Typed getters
+    host = config.get_str("host", "0.0.0.0")
+    port = config.get_int("port", 4141)
+    enabled = config.get_bool("enable_web", True)
 
-# Path with ~ expansion
-data_path = config.get_path("paths.data")
+    # Live settings, never snapshotted
+    channel_enabled = container.runtime_settings.channel_enabled
 
-# Reload config from file
-config.reload()
+    # Path with ~ expansion
+    data_path = config.get_path("paths.data")
 ```
+
+Legacy `get_config_service()` still resolves via the active container
+for migration, but new code must receive `AppContainer` explicitly
+(FastAPI `get_container(request)`, `CLIRuntime.container`, or
+`isolated_container` fixture in tests).
 
 ### Nested Keys
 

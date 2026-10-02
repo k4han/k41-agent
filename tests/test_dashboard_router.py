@@ -250,11 +250,13 @@ def test_dashboard_api_skills_crud_and_reload(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    import agent.modules.skills as skills_module
     from agent.modules.skills.repository import FilesystemSkillRepository
+    from agent.bootstrap.container import AppContainer, set_active_container
 
     repo = FilesystemSkillRepository(skills_root=tmp_path)
-    monkeypatch.setattr(skills_module, "_repository", repo)
+    container = AppContainer()
+    container._skill_repository = repo
+    set_active_container(container)
     client = _create_dashboard_client(ChannelManager())
 
     empty = client.get("/dashboard-api/skills")

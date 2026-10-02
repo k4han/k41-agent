@@ -373,14 +373,11 @@ class GitHubRepositoryStore:
             await session.commit()
 
 
-_store: GitHubRepositoryStore | None = None
-
-
 def get_github_repository_store() -> GitHubRepositoryStore:
-    global _store
-    if _store is None:
-        _store = GitHubRepositoryStore()
-    return _store
+    """Return the GitHub repository store owned by the active container."""
+    from agent.bootstrap.container import require_active_container
+
+    return require_active_container().github_repository_store
 
 
 __all__ = [

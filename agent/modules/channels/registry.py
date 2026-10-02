@@ -7,10 +7,7 @@ from agent.modules.channels.contracts import (
     ChannelSettingField,
     ChatChannelAdapter,
 )
-from agent.modules.channels.service_specs import (
-    BUILTIN_CHANNEL_DESCRIPTORS,
-    ChannelDescriptor,
-)
+from agent.modules.channels.service_specs import ChannelDescriptor
 from agent.shared.integrations import (
     IntegrationAvailability,
     LazyIntegrationRegistry,
@@ -125,22 +122,18 @@ def parse_channel_setting_key(key: str) -> tuple[str, str] | None:
     return channel_name, field_name
 
 
-_registry = ChannelRegistry()
-_builtins_registered = False
+def get_channel_registry(container=None) -> ChannelRegistry:
+    """Return container-scoped channel registry."""
+    from agent.bootstrap.container import require_active_container
+
+    return require_active_container(container).channel_registry
 
 
-def get_channel_registry() -> ChannelRegistry:
-    ensure_builtin_channel_descriptors()
-    return _registry
+def ensure_builtin_channel_descriptors(container=None) -> None:
+    """Touch container-scoped registry so builtin descriptors are registered."""
+    from agent.bootstrap.container import require_active_container
 
-
-def ensure_builtin_channel_descriptors() -> None:
-    global _builtins_registered
-    if _builtins_registered:
-        return
-    for descriptor in BUILTIN_CHANNEL_DESCRIPTORS:
-        _registry.register_descriptor(descriptor, replace=True)
-    _builtins_registered = True
+    _ = require_active_container(container).channel_registry
 
 
 def register_channel_descriptors(

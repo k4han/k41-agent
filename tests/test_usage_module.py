@@ -31,16 +31,15 @@ from agent.shared.infrastructure.db.engine import close_async_engine, initialize
 
 
 @pytest_asyncio.fixture
-async def usage_db(monkeypatch: pytest.MonkeyPatch, tmp_path, request):
+async def usage_db(tmp_path, request):
     await close_async_engine()
 
     db_path = tmp_path / f"{request.node.name}.sqlite"
     db_url = f"sqlite:///{db_path.resolve().as_posix()}"
 
-    import agent.shared.infrastructure.db.engine as engine_module
+    from agent.bootstrap.container import create_test_container, set_active_container
 
-    monkeypatch.setattr(engine_module, "get_database_url", lambda: db_url)
-    engine_module._cached_database_url = None
+    set_active_container(create_test_container(database_url=db_url))
 
     load_orm_models()
     await initialize_async_engine(metadata=Base.metadata)

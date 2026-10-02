@@ -25,16 +25,18 @@ class ZaloWebhookRuntime:
     webhook_url: str
 
 
-_zalo_webhook_runtime: ZaloWebhookRuntime | None = None
+def get_zalo_webhook_runtime(container=None) -> ZaloWebhookRuntime | None:
+    """Return container-scoped zalo webhook runtime."""
+    from agent.bootstrap.container import require_active_container
+
+    return require_active_container(container)._zalo_webhook_runtime
 
 
-def get_zalo_webhook_runtime() -> ZaloWebhookRuntime | None:
-    return _zalo_webhook_runtime
+def set_zalo_webhook_runtime(runtime: ZaloWebhookRuntime | None, container=None) -> None:
+    """Store zalo webhook runtime in container scope."""
+    from agent.bootstrap.container import require_active_container
 
-
-def set_zalo_webhook_runtime(runtime: ZaloWebhookRuntime | None) -> None:
-    global _zalo_webhook_runtime
-    _zalo_webhook_runtime = runtime
+    require_active_container(container)._zalo_webhook_runtime = runtime
 
 
 def _resolve_update_mode(value: str) -> str:

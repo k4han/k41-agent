@@ -12,7 +12,7 @@ from agent.modules.github.workspace import PreparedWorkspace, GitHubWorkspaceMan
 
 
 @pytest_asyncio.fixture()
-async def github_store_db(monkeypatch: pytest.MonkeyPatch, tmp_path):
+async def github_store_db(tmp_path):
     from agent.shared.infrastructure.db import (
         Base,
         close_async_engine,
@@ -25,10 +25,9 @@ async def github_store_db(monkeypatch: pytest.MonkeyPatch, tmp_path):
     db_path = tmp_path / "github_store.sqlite"
     db_url = f"sqlite:///{db_path.resolve().as_posix()}"
 
-    import agent.shared.infrastructure.db.engine as engine_module
+    from agent.bootstrap.container import create_test_container, set_active_container
 
-    monkeypatch.setattr(engine_module, "get_database_url", lambda: db_url)
-    engine_module._cached_database_url = None
+    set_active_container(create_test_container(database_url=db_url))
 
     load_orm_models()
     await initialize_async_engine(metadata=Base.metadata)

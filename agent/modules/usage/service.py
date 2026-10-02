@@ -244,14 +244,11 @@ class UsageService:
         return await self._repository.aggregate_by_workspace(key)
 
 
-_service: UsageService | None = None
+def get_usage_service(container=None) -> UsageService:
+    """Return container-scoped usage service."""
+    from agent.bootstrap.container import require_active_container
 
-
-def get_usage_service() -> UsageService:
-    global _service
-    if _service is None:
-        _service = UsageService()
-    return _service
+    return require_active_container(container).usage_service
 
 
 async def prune_usage_events() -> int:

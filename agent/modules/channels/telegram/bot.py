@@ -25,16 +25,18 @@ class TelegramWebhookRuntime:
     secret: str
 
 
-_telegram_webhook_runtime: TelegramWebhookRuntime | None = None
+def get_telegram_webhook_runtime(container=None) -> TelegramWebhookRuntime | None:
+    """Return container-scoped telegram webhook runtime."""
+    from agent.bootstrap.container import require_active_container
+
+    return require_active_container(container)._telegram_webhook_runtime
 
 
-def get_telegram_webhook_runtime() -> TelegramWebhookRuntime | None:
-    return _telegram_webhook_runtime
+def set_telegram_webhook_runtime(runtime: TelegramWebhookRuntime | None, container=None) -> None:
+    """Store telegram webhook runtime in container scope."""
+    from agent.bootstrap.container import require_active_container
 
-
-def set_telegram_webhook_runtime(runtime: TelegramWebhookRuntime | None) -> None:
-    global _telegram_webhook_runtime
-    _telegram_webhook_runtime = runtime
+    require_active_container(container)._telegram_webhook_runtime = runtime
 
 
 def _resolve_update_mode(value: str) -> str:

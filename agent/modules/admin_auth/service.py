@@ -11,7 +11,6 @@ from agent.shared.infrastructure.db.session import get_async_session
 
 DEFAULT_ADMIN_USERNAME: Final[str] = "admin"
 DEFAULT_ADMIN_PASSWORD: Final[str] = "1234"
-_admin_auth_service: "AdminAuthService | None" = None
 
 
 def _active_admin_query():
@@ -103,8 +102,8 @@ class AdminAuthService:
                 raise
 
 
-def get_admin_auth_service() -> AdminAuthService:
-    global _admin_auth_service
-    if _admin_auth_service is None:
-        _admin_auth_service = AdminAuthService()
-    return _admin_auth_service
+def get_admin_auth_service(container=None) -> AdminAuthService:
+    """Return container-scoped admin auth service."""
+    from agent.bootstrap.container import require_active_container
+
+    return require_active_container(container).admin_auth_service

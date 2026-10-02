@@ -170,22 +170,18 @@ class WorkspaceBackendRegistry:
         return self._lazy.resolve_loader(name, loader)
 
 
-_registry = WorkspaceBackendRegistry()
-_builtins_registered = False
+def get_workspace_backend_registry(container=None) -> WorkspaceBackendRegistry:
+    """Return container-scoped workspace backend registry."""
+    from agent.bootstrap.container import require_active_container
+
+    return require_active_container(container).workspace_backend_registry
 
 
-def get_workspace_backend_registry() -> WorkspaceBackendRegistry:
-    ensure_builtin_workspace_backend_descriptors()
-    return _registry
+def ensure_builtin_workspace_backend_descriptors(container=None) -> None:
+    """Register builtin descriptors on the container-scoped registry."""
+    from agent.bootstrap.container import require_active_container
 
-
-def ensure_builtin_workspace_backend_descriptors() -> None:
-    global _builtins_registered
-    if _builtins_registered:
-        return
-    for descriptor in BUILTIN_WORKSPACE_BACKEND_DESCRIPTORS:
-        _registry.register(descriptor, replace=True)
-    _builtins_registered = True
+    _ = require_active_container(container).workspace_backend_registry
 
 
 def _is_backend_enabled(

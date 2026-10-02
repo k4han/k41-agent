@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from agent.shared.config import get_config_service
 from agent.shared.infrastructure.db.base import Base
 
 
@@ -24,55 +23,20 @@ def _get_default_db_path() -> str:
 
 DEFAULT_DATABASE_URL = _get_default_db_path()
 
-_async_engine: AsyncEngine | None = None
-_async_session_maker: async_sessionmaker[AsyncSession] | None = None
-_tables_created = False
-_cached_database_url: str | None = None
-
 
 def get_database_url() -> str:
-    """Return effective database URL based on policy.
+    """Return effective database URL from the active container scope."""
+    from agent.bootstrap.container import require_active_container
 
-    Policy:
-    - If database.url is empty, use internal SQLite path in ~/.k41-agent/data/
-    - If database.url is set, only PostgreSQL URLs are allowed
-    """
-    global _cached_database_url
-    if _cached_database_url is not None:
-        return _cached_database_url
-
-    config = get_config_service()
-    config_url = config.get_str("database.url", "").strip()
-
-    if not config_url:
-        _cached_database_url = DEFAULT_DATABASE_URL
-        return _cached_database_url
-
-    try:
-        parsed = make_url(config_url)
-    except Exception as exc:
-        raise ValueError(f"Invalid database.url: {config_url}") from exc
-
-    base_driver = _extract_base_driver(parsed.drivername)
-    if base_driver in ("postgresql", "asyncpg", "psycopg2", "psycopg"):
-        _cached_database_url = config_url
-        return _cached_database_url
-
-    if base_driver in ("sqlite", "aiosqlite", "pysqlite"):
-        raise ValueError(
-            "Custom SQLite URL is not allowed in 'database.url'. "
-            "Leave 'database.url' empty to use internal SQLite, "
-            "or set a PostgreSQL URL."
-        )
-
-    raise ValueError(
-        f"Unsupported database driver: {base_driver}. "
-        "Use internal SQLite (empty 'database.url') or PostgreSQL URL."
-    )
+    return require_active_container().database_url
 
 
-def _get_parsed_url() -> URL:
-    return make_url(get_database_url())
+def _get_parsed_url(database_url: str | None = None) -> URL:
+    if database_url is not None:
+        return make_url(database_url)
+    from agent.bootstrap.container import require_active_container
+
+    return make_url(require_active_container().database_url)
 
 
 def _extract_base_driver(drivername: str) -> str:
@@ -82,9 +46,9 @@ def _extract_base_driver(drivername: str) -> str:
     return drivername
 
 
-def get_database_type() -> str:
-    """Return the normalized database type based on the configured URL."""
-    parsed = _get_parsed_url()
+def get_database_type(database_url: str | None = None) -> str:
+    """Return normalized database type, preferring container scope."""
+    parsed = _get_parsed_url(database_url)
     base_driver = _extract_base_driver(parsed.drivername)
 
     if base_driver in ("sqlite", "aiosqlite", "pysqlite"):
@@ -96,9 +60,9 @@ def get_database_type() -> str:
     )
 
 
-def get_sqlite_conn_string() -> str:
+def get_sqlite_conn_string(database_url: str | None = None) -> str:
     """Return sqlite path/connection string expected by AsyncSqliteSaver."""
-    parsed = _get_parsed_url()
+    parsed = _get_parsed_url(database_url)
     if parsed.drivername != "sqlite" and "sqlite" not in parsed.drivername:
         raise ValueError(
             "SQLite checkpointer requires a sqlite URL. "
@@ -122,9 +86,9 @@ def get_sqlite_conn_string() -> str:
     return str(resolved_path)
 
 
-def get_postgres_conn_string() -> str:
+def get_postgres_conn_string(database_url: str | None = None) -> str:
     """Return postgres connection string for LangGraph checkpointer."""
-    parsed = _get_parsed_url()
+    parsed = _get_parsed_url(database_url)
 
     if "postgresql" not in parsed.drivername:
         raise ValueError(
@@ -137,20 +101,22 @@ def get_postgres_conn_string() -> str:
     return normalized.render_as_string(hide_password=False)
 
 
-async def initialize_async_engine(metadata: MetaData | None = None) -> AsyncEngine:
-    """Initialize and cache the async engine used by module repositories."""
-    global _async_engine, _async_session_maker, _tables_created
+async def initialize_async_engine(metadata: MetaData | None = None, container=None) -> AsyncEngine:
+    """Initialize engine in container scope (idempotent)."""
+    from agent.bootstrap.container import require_active_container
 
-    if _async_engine is not None:
-        return _async_engine
+    active = require_active_container(container)
+    if active._async_engine is not None:
+        return active._async_engine
 
-    database_url = get_database_url()
-    db_type = get_database_type()
+    database_url = active.database_url
+    db_type = active.database_type
+    original_url = database_url
 
     if db_type == "sqlite":
         if not ("+" in database_url and "aiosqlite" in database_url):
             database_url = database_url.replace("sqlite://", "sqlite+aiosqlite://")
-        _async_engine = create_async_engine(
+        engine = create_async_engine(
             database_url,
             connect_args={"check_same_thread": False},
             future=True,
@@ -160,7 +126,7 @@ async def initialize_async_engine(metadata: MetaData | None = None) -> AsyncEngi
             database_url = database_url.replace(
                 "postgresql://", "postgresql+asyncpg://"
             )
-        _async_engine = create_async_engine(
+        engine = create_async_engine(
             database_url,
             pool_size=10,
             max_overflow=20,
@@ -171,46 +137,58 @@ async def initialize_async_engine(metadata: MetaData | None = None) -> AsyncEngi
     else:
         raise ValueError(f"Unsupported database type: {db_type}")
 
-    _async_session_maker = async_sessionmaker(
-        _async_engine,
+    session_maker = async_sessionmaker(
+        engine,
         class_=AsyncSession,
         expire_on_commit=False,
     )
 
-    if not _tables_created:
-        create_tables(database_url, metadata=metadata)
-        _tables_created = True
+    if not active._tables_created:
+        create_tables(original_url, metadata=metadata)
+        active._tables_created = True
 
-    return _async_engine
+    active._async_engine = engine
+    active._async_session_maker = session_maker
+    return engine
 
 
-def get_async_engine() -> AsyncEngine:
-    """Return the initialized async engine."""
-    if _async_engine is None:
+def get_async_engine(container=None) -> AsyncEngine:
+    """Return initialized engine from container scope."""
+    from agent.bootstrap.container import require_active_container
+
+    active = require_active_container(container)
+    if active._async_engine is None:
         raise RuntimeError(
             "Async engine not initialized. Call 'await initialize_async_engine()' first."
         )
-    return _async_engine
+    return active._async_engine
 
 
-def _get_async_session_maker() -> async_sessionmaker[AsyncSession]:
-    if _async_session_maker is None:
+def _get_async_session_maker(container=None) -> async_sessionmaker[AsyncSession]:
+    from agent.bootstrap.container import require_active_container
+
+    active = require_active_container(container)
+    if active._async_session_maker is None:
         raise RuntimeError(
             "Async engine not initialized. Call 'await initialize_async_engine()' first."
         )
-    return _async_session_maker
+    return active._async_session_maker
 
 
-async def close_async_engine() -> None:
-    """Dispose the async engine and clear cached session state."""
-    global _async_engine, _async_session_maker, _tables_created, _cached_database_url
+async def close_async_engine(container=None) -> None:
+    """Dispose engine in container scope (idempotent)."""
+    from agent.bootstrap.container import require_active_container
 
-    if _async_engine is not None:
-        await _async_engine.dispose()
-        _async_engine = None
-        _async_session_maker = None
-        _tables_created = False
-        _cached_database_url = None
+    active = require_active_container(container)
+    if active._async_engine is None:
+        return
+    try:
+        await active._async_engine.dispose()
+    finally:
+        active._async_engine = None
+        active._async_session_maker = None
+        active._tables_created = False
+        active._database_url = None
 
 
 def _normalize_url_to_sync(database_url: str) -> str:

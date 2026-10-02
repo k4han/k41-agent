@@ -306,14 +306,11 @@ class ConversationThreadRepository:
             return True
 
 
-_repository: ConversationThreadRepository | None = None
+def get_conversation_thread_repository(container=None) -> ConversationThreadRepository:
+    """Return container-scoped conversation repository."""
+    from agent.bootstrap.container import require_active_container
 
-
-def get_conversation_thread_repository() -> ConversationThreadRepository:
-    global _repository
-    if _repository is None:
-        _repository = ConversationThreadRepository()
-    return _repository
+    return require_active_container(container).conversation_repository
 
 
 __all__ = [

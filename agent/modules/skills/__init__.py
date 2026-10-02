@@ -17,10 +17,9 @@ logger = logging.getLogger(__name__)
 
 from agent.modules.skills.repository import (  # noqa: E402
     DEFAULT_SKILLS_ROOT,
+    FilesystemSkillRepository,
     normalize_repository_skill_dir,
 )
-
-_repository = None
 
 # TTL cache for repository-local skill discovery. The same workspace
 # is hit many times per agent run (once for the catalog at llm_node,
@@ -31,12 +30,11 @@ _repository_discovery_cache: dict[tuple, tuple[float, dict[str, Any]]] = {}
 _repository_discovery_lock = threading.Lock()
 
 
-def _get_repository():
-    global _repository
-    if _repository is None:
-        from agent.modules.skills.repository import FilesystemSkillRepository
-        _repository = FilesystemSkillRepository()
-    return _repository
+def _get_repository(container=None):
+    """Return container-scoped skill repository."""
+    from agent.bootstrap.container import require_active_container
+
+    return require_active_container(container).skill_repository
 
 
 def list_available_skills():
@@ -385,6 +383,7 @@ __all__ = [
     "Skill",
     "SkillSummary",
     "DEFAULT_SKILLS_ROOT",
+    "FilesystemSkillRepository",
     "create_skill",
     "delete_skill",
     "get_effective_skill_content_xml",

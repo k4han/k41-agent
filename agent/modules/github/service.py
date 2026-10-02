@@ -17,6 +17,7 @@ from agent.modules.github.config import (
     GitHubSettings,
 )
 from agent.modules.github.repository import (
+    GitHubRepositoryStore,
     get_github_repository_store,
     load_allowed_skills,
     load_allowed_tools,
@@ -120,9 +121,10 @@ class GitHubAutomationService:
         *,
         client: GitHubAppClient | None = None,
         workspace_manager: GitHubWorkspaceManager | None = None,
+        store: GitHubRepositoryStore | None = None,
     ) -> None:
         self.client = client or GitHubAppClient()
-        self.store = get_github_repository_store()
+        self.store = store if store is not None else get_github_repository_store()
         self.workspace_manager = workspace_manager or GitHubWorkspaceManager()
 
     @property
@@ -1123,21 +1125,28 @@ def _branch_prefix(binding: Any) -> str:
     return safe_prefix or "k41"
 
 
-_service: GitHubAutomationService | None = None
+def get_github_automation_service(request: Any = None, container: Any = None) -> GitHubAutomationService:
+    """Return container-scoped GitHub automation service."""
+    from agent.bootstrap.container import require_active_container
 
-
-def get_github_automation_service(request: Any = None) -> GitHubAutomationService:
     if request is not None:
         app = getattr(request, "app", None)
         if app is not None:
-            state_service = getattr(app.state, "github_automation_service", None)
-            if state_service is not None:
-                return state_service
-
-    global _service
-    if _service is None:
-        _service = GitHubAutomationService()
-    return _service
+            state = getattr(app, "state", None)
+            if state is not None:
+                state_service = getattr(state, "github_automation_service", None)
+                if state_service is not None:
+                    return state_service
+                state_container = getattr(state, "container", None)
+                if state_container is not None:
+                    container = state_container
+                else:
+                    runtime = getattr(state, "runtime", None)
+                    if runtime is not None:
+                        runtime_container = getattr(runtime, "container", None)
+                        if runtime_container is not None:
+                            container = runtime_container
+    return require_active_container(container).github_service
 
 
 __all__ = [

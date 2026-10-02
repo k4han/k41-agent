@@ -22,11 +22,10 @@ async def repository_db(monkeypatch: pytest.MonkeyPatch, tmp_path, request):
     monkeypatch.setenv("DATABASE_URL", db_url)
     monkeypatch.setenv("PERSISTENCE_ALLOW_ANY_PATH", "true")
     
-    # Also mock get_database_url so it uses the test DB
-    import agent.shared.infrastructure.db.engine as engine_module
-    monkeypatch.setattr(engine_module, "get_database_url", lambda: db_url)
-    # Clear the cached database URL if any
-    engine_module._cached_database_url = None
+    # Activate a container whose engine uses the per-test database
+    from agent.bootstrap.container import create_test_container, set_active_container
+
+    set_active_container(create_test_container(database_url=db_url))
 
     await initialize_async_engine(metadata=Base.metadata)
 

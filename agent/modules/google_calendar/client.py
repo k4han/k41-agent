@@ -323,15 +323,11 @@ class GoogleCalendarClient:
             return busy_list
 
 
-_global_calendar_client: GoogleCalendarClient | None = None
+def get_google_calendar_client(container=None) -> GoogleCalendarClient:
+    """Return container-scoped calendar client."""
+    from agent.bootstrap.container import require_active_container
 
-
-def get_google_calendar_client() -> GoogleCalendarClient:
-    """Return the global GoogleCalendarClient singleton."""
-    global _global_calendar_client
-    if _global_calendar_client is None:
-        _global_calendar_client = GoogleCalendarClient()
-    return _global_calendar_client
+    return require_active_container(container).google_calendar_client
 
 
 __all__ = [

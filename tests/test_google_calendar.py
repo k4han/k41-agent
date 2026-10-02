@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import pytest_asyncio
 
-import agent.shared.infrastructure.db.engine as db_engine
 from agent.delivery.http.api.google_calendar import router as google_calendar_router
 from agent.modules.google_calendar import (
     CalendarEventItem,
@@ -39,16 +38,14 @@ from agent.shared.infrastructure.db.models import load_orm_models
 
 
 @pytest_asyncio.fixture
-async def calendar_test_db(monkeypatch: pytest.MonkeyPatch, tmp_path):
+async def calendar_test_db(tmp_path):
     """Set up an isolated SQLite database for Google Calendar testing."""
+    from agent.bootstrap.container import AppContainer, set_active_container
+
     db_path = tmp_path / "calendar-test.sqlite"
     db_url = f"sqlite+aiosqlite:///{db_path.resolve().as_posix()}"
 
-    monkeypatch.setattr(db_engine, "DEFAULT_DATABASE_URL", db_url)
-    monkeypatch.setattr(db_engine, "_cached_database_url", None)
-    monkeypatch.setattr(db_engine, "_async_engine", None)
-    monkeypatch.setattr(db_engine, "_async_session_maker", None)
-    monkeypatch.setattr(db_engine, "_tables_created", False)
+    set_active_container(AppContainer(database_url_override=db_url))
 
     from agent.shared.config import attach_database_config_source, detach_database_config_source
 

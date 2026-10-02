@@ -27,6 +27,7 @@ from agent.shared.config.models import (
     SettingsValue,
     build_settings_values,
 )
+from agent.shared.config.factory import create_config_service
 from agent.shared.config.service import (
     ConfigService,
     attach_database_config_source,
@@ -42,6 +43,7 @@ from agent.shared.config.yaml_source import DEFAULT_CONFIG_PATH, YamlConfigSourc
 __all__ = [
     # Service
     "ConfigService",
+    "create_config_service",
     "get_config_service",
     "attach_database_config_source",
     "detach_database_config_source",

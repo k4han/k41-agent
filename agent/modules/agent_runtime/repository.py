@@ -253,14 +253,11 @@ class BackgroundTaskRepository:
             return True
 
 
-_repository: BackgroundTaskRepository | None = None
+def get_background_task_repository(container=None) -> BackgroundTaskRepository:
+    """Return container-scoped background task repository."""
+    from agent.bootstrap.container import require_active_container
 
-
-def get_background_task_repository() -> BackgroundTaskRepository:
-    global _repository
-    if _repository is None:
-        _repository = BackgroundTaskRepository()
-    return _repository
+    return require_active_container(container).background_task_repository
 
 
 __all__ = [

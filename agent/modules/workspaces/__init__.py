@@ -51,6 +51,7 @@ from agent.modules.workspaces.refs import (
     workspace_ref_from_columns,
 )
 from agent.modules.workspaces.registry import (
+    BUILTIN_WORKSPACE_BACKEND_DESCRIPTORS,
     DAYTONA_BACKEND,
     LOCAL_BACKEND,
     MODAL_BACKEND,
@@ -121,6 +122,7 @@ from agent.modules.workspaces.github_clone import (
 )
 
 __all__ = [
+    "BUILTIN_WORKSPACE_BACKEND_DESCRIPTORS",
     "CommandResult",
     "DAYTONA_BACKEND",
     "DaytonaWorkspaceLifecycleManager",

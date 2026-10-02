@@ -21,6 +21,14 @@ from agent.modules.skills.repository import (
 # ---------------------------------------------------------------------------
 
 
+def _use_skill_repository(repo: FilesystemSkillRepository) -> None:
+    from agent.bootstrap.container import AppContainer, set_active_container
+
+    container = AppContainer()
+    container._skill_repository = repo
+    set_active_container(container)
+
+
 def _create_skill_dir(
     base: Path,
     name: str,
@@ -319,7 +327,7 @@ class TestPublicAPI:
     def test_catalog_xml_empty(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         import agent.modules.skills as pub
         repo = FilesystemSkillRepository(skills_root=tmp_path)
-        monkeypatch.setattr(pub, "_repository", repo)
+        _use_skill_repository(repo)
 
         xml = pub.get_skills_catalog_xml()
         assert xml == "<available_skills/>"
@@ -328,7 +336,7 @@ class TestPublicAPI:
         _create_skill_dir(tmp_path, "xml-skill", description="XML test skill.")
         import agent.modules.skills as pub
         repo = FilesystemSkillRepository(skills_root=tmp_path)
-        monkeypatch.setattr(pub, "_repository", repo)
+        _use_skill_repository(repo)
 
         xml = pub.get_skills_catalog_xml()
         assert "<available_skills>" in xml
@@ -347,7 +355,7 @@ class TestPublicAPI:
         )
         import agent.modules.skills as pub
         repo = FilesystemSkillRepository(skills_root=tmp_path)
-        monkeypatch.setattr(pub, "_repository", repo)
+        _use_skill_repository(repo)
 
         xml = pub.get_skill_content_xml("content-skill")
         assert xml is not None
@@ -360,7 +368,7 @@ class TestPublicAPI:
     def test_skill_content_xml_not_found(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         import agent.modules.skills as pub
         repo = FilesystemSkillRepository(skills_root=tmp_path)
-        monkeypatch.setattr(pub, "_repository", repo)
+        _use_skill_repository(repo)
 
         assert pub.get_skill_content_xml("nope") is None
 
@@ -368,7 +376,7 @@ class TestPublicAPI:
         _create_skill_dir(tmp_path, "api-skill", description="API test.")
         import agent.modules.skills as pub
         repo = FilesystemSkillRepository(skills_root=tmp_path)
-        monkeypatch.setattr(pub, "_repository", repo)
+        _use_skill_repository(repo)
 
         summaries = pub.list_available_skills()
         assert len(summaries) == 1
@@ -381,7 +389,7 @@ class TestPublicAPI:
     def test_reload(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         import agent.modules.skills as pub
         repo = FilesystemSkillRepository(skills_root=tmp_path)
-        monkeypatch.setattr(pub, "_repository", repo)
+        _use_skill_repository(repo)
 
         assert pub.list_available_skills() == []
 
@@ -400,7 +408,7 @@ class TestPublicAPI:
         )
 
         repo = FilesystemSkillRepository(skills_root=tmp_path)
-        monkeypatch.setattr(pub, "_repository", repo)
+        _use_skill_repository(repo)
 
         before = get_revision(SKILLS_REVISION)
         pub.reload_skills()
@@ -417,7 +425,7 @@ class TestPublicAPI:
         import agent.modules.skills as pub
 
         repo = FilesystemSkillRepository(skills_root=tmp_path)
-        monkeypatch.setattr(pub, "_repository", repo)
+        _use_skill_repository(repo)
 
         xml = pub.get_skills_catalog_xml(["allowed-skill"])
 
@@ -442,7 +450,7 @@ class TestPublicAPI:
         import agent.modules.skills as pub
 
         repo = FilesystemSkillRepository(skills_root=global_root)
-        monkeypatch.setattr(pub, "_repository", repo)
+        _use_skill_repository(repo)
 
         xml = await pub.get_effective_skills_catalog_xml(
             allowed_names=[],
@@ -477,7 +485,7 @@ class TestPublicAPI:
         import agent.modules.skills as pub
 
         repo = FilesystemSkillRepository(skills_root=global_root)
-        monkeypatch.setattr(pub, "_repository", repo)
+        _use_skill_repository(repo)
 
         catalog = await pub.get_effective_skills_catalog_xml(
             allowed_names=["shared-skill"],
@@ -516,7 +524,7 @@ class TestPublicAPI:
         import agent.modules.skills as pub
 
         repo = FilesystemSkillRepository(skills_root=global_root)
-        monkeypatch.setattr(pub, "_repository", repo)
+        _use_skill_repository(repo)
 
         catalog = await pub.get_effective_skills_catalog_xml(
             allowed_names=["allowed-global"],

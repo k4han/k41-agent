@@ -247,15 +247,11 @@ class GoogleCalendarService:
         )
 
 
-_global_calendar_service: GoogleCalendarService | None = None
+def get_google_calendar_service(container=None) -> GoogleCalendarService:
+    """Return container-scoped calendar service."""
+    from agent.bootstrap.container import require_active_container
 
-
-def get_google_calendar_service() -> GoogleCalendarService:
-    """Return the global GoogleCalendarService singleton."""
-    global _global_calendar_service
-    if _global_calendar_service is None:
-        _global_calendar_service = GoogleCalendarService()
-    return _global_calendar_service
+    return require_active_container(container).google_calendar_service
 
 
 __all__ = [

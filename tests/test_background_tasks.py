@@ -26,10 +26,9 @@ async def background_task_db(monkeypatch: pytest.MonkeyPatch, tmp_path, request)
     monkeypatch.setenv("DATABASE_URL", db_url)
     monkeypatch.setenv("PERSISTENCE_ALLOW_ANY_PATH", "true")
 
-    import agent.shared.infrastructure.db.engine as engine_module
+    from agent.bootstrap.container import create_test_container, set_active_container
 
-    monkeypatch.setattr(engine_module, "get_database_url", lambda: db_url)
-    engine_module._cached_database_url = None
+    set_active_container(create_test_container(database_url=db_url))
 
     load_orm_models()
     await initialize_async_engine(metadata=Base.metadata)

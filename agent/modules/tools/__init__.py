@@ -29,7 +29,9 @@ from agent.modules.tools.config import (
     ToolConfigService,
 )
 from agent.modules.tools.policy import ToolPolicy
+from agent.modules.tools.sources.builtin import BuiltinToolSource
 from agent.modules.tools.registry_service import (
+    ToolRegistryService,
     ensure_mcp_loaded,
     get_registry_service,
     reload_mcp_descriptors,
@@ -201,6 +203,7 @@ async def aresolve_tools_for_agent(agent_name: str) -> list[BaseTool]:
 
 
 __all__ = [
+    "BuiltinToolSource",
     "ToolCapability",
     "ToolCategory",
     "ToolConfigField",
@@ -212,6 +215,7 @@ __all__ = [
     "ToolError",
     "ToolErrorCode",
     "ToolPolicy",
+    "ToolRegistryService",
     "ToolResolver",
     "ToolSource",
     "PLAN_MODE_TOOL_NAME",

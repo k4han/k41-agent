@@ -77,12 +77,16 @@ async def start_enabled_channels(
     channel_manager: ChannelManager,
     boot_flags: dict[str, bool],
     descriptors: tuple[ChannelDescriptor, ...] | None = None,
+    config_service=None,
+    container=None,
 ) -> None:
     if descriptors is None:
         descriptors = BUILTIN_CHANNEL_DESCRIPTORS
     channels_to_start: list[str] = []
 
-    config = get_config_service()
+    if config_service is None and container is not None:
+        config_service = container.config_service
+    config = config_service if config_service is not None else get_config_service()
 
     for descriptor in descriptors:
         if not descriptor.has_runner:

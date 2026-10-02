@@ -9,6 +9,7 @@ from agent.modules.agents.service import (
 )
 from agent.modules.agents.models import AgentCard, AgentConfig
 from agent.modules.agents.repository import (
+    FilesystemAgentRepository,
     load_agents_from_dir,
     reload_agents,
 )
@@ -30,6 +31,7 @@ __all__ = [
     "AgentConfig",
     "AgentCard",
     "AgentCatalogService",
+    "FilesystemAgentRepository",
     "get_catalog_service",
     "reload_agents",
     "load_agents_from_dir",

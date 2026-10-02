@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 
 from agent.modules.workflows.run_config import (
     DEFAULT_WORKING_DIR,
@@ -34,20 +35,20 @@ def list_registered_workflows() -> list[str]:
     return list(GraphRegistry.all().keys())
 
 
-async def initialize_checkpointer() -> None:
+async def initialize_checkpointer(container=None) -> Any:
     from agent.modules.workflows.checkpoint.store import (
         initialize_checkpointer as _initialize_checkpointer,
     )
 
-    await _initialize_checkpointer()
+    return await _initialize_checkpointer(container=container)
 
 
-async def close_checkpointer() -> None:
+async def close_checkpointer(container=None) -> None:
     from agent.modules.workflows.checkpoint.store import (
         close_checkpointer as _close_checkpointer,
     )
 
-    await _close_checkpointer()
+    await _close_checkpointer(container=container)
 
 
 def get_checkpointer():

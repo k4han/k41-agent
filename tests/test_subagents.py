@@ -281,12 +281,8 @@ class TestFilesystemAgentRepository:
 class TestAgentCatalogService:
     @pytest.fixture(autouse=True)
     def setup_service(self, agents_dir):
-        """Reset singleton and create service with test agents dir."""
-        import agent.modules.agents.repository as repo_mod
+        """Create service with test agents dir."""
         import agent.modules.agents.service as svc_mod
-
-        repo_mod._repository = None
-        svc_mod._service = None
 
         # Create repo with test data
         test_repo = FilesystemAgentRepository(agents_dir)

@@ -12,6 +12,7 @@ from agent.modules.channels.contracts import (
 from agent.modules.channels.commands import (
     CommandRegistry,
     CommandSpec,
+    build_default_command_registry,
     get_default_command_registry,
 )
 from agent.modules.channels.manager import (
@@ -69,6 +70,7 @@ __all__ = [
     "OutboundMessage",
     "ParsedCommand",
     "TestResult",
+    "build_default_command_registry",
     "get_channel_registry",
     "get_channel_status",
     "get_channel_webhook_runtime",

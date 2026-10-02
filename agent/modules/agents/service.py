@@ -6,15 +6,15 @@ import re
 
 from agent.modules.agents.models import AgentCard, AgentConfig
 from agent.modules.agents.parser import serialize_agent_config, parse_agent_markdown_content
-from agent.modules.agents.repository import get_repository
+from agent.modules.agents.repository import FilesystemAgentRepository, get_repository
 from agent.modules.workflows import ROUTER_GRAPH_TYPE
 
 
 class AgentCatalogService:
     """Manages agent configs loaded from MD files and enforces call_agent rules."""
 
-    def __init__(self):
-        self._repository = get_repository()
+    def __init__(self, repository: FilesystemAgentRepository | None = None):
+        self._repository = repository if repository is not None else get_repository()
 
     def get_agent(self, name: str) -> AgentConfig | None:
         """Get agent config by name. Returns None if not found."""
@@ -150,13 +150,8 @@ class AgentCatalogService:
             raise ValueError(f"Invalid plan approval target agent(s): {joined}.")
 
 
-# --- Module-level singleton ---
+def get_catalog_service(container=None) -> AgentCatalogService:
+    """Return container-scoped agent catalog service."""
+    from agent.bootstrap.container import require_active_container
 
-_service: AgentCatalogService | None = None
-
-
-def get_catalog_service() -> AgentCatalogService:
-    global _service
-    if _service is None:
-        _service = AgentCatalogService()
-    return _service
+    return require_active_container(container).agent_catalog_service

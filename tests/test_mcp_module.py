@@ -29,8 +29,9 @@ from agent.shared.infrastructure.config_file import flatten_config_mapping
 
 
 def _set_config_path(monkeypatch: MonkeyPatch, path: Path) -> None:
-    import agent.shared.config.service as service_module
     import yaml
+
+    from agent.bootstrap.container import AppContainer, set_active_container
 
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     flat = flatten_config_mapping(raw)
@@ -42,8 +43,7 @@ def _set_config_path(monkeypatch: MonkeyPatch, path: Path) -> None:
         }
     )
     service = ConfigService(sources=[DefaultConfigSource(), source])
-    monkeypatch.setattr(service_module, "_config_service", service)
-    monkeypatch.setattr(service_module, "_config_sources", service._sources)
+    set_active_container(AppContainer(config_service=service))
 
 
 class _RuntimeSource:

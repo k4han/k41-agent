@@ -145,15 +145,11 @@ class GoogleCalendarStore:
             return bool(res.rowcount > 0)
 
 
-_global_calendar_store: GoogleCalendarStore | None = None
+def get_google_calendar_store(container=None) -> GoogleCalendarStore:
+    """Return container-scoped calendar store."""
+    from agent.bootstrap.container import require_active_container
 
-
-def get_google_calendar_store() -> GoogleCalendarStore:
-    """Return the global GoogleCalendarStore singleton."""
-    global _global_calendar_store
-    if _global_calendar_store is None:
-        _global_calendar_store = GoogleCalendarStore()
-    return _global_calendar_store
+    return require_active_container(container).google_calendar_store
 
 
 __all__ = [

@@ -324,28 +324,15 @@ class ConfigService:
         self.reload()
 
 
-# Singleton instances
-_config_service: ConfigService | None = None
-_config_sources: list | None = None
-
-
 def get_config_service() -> ConfigService:
-    """Get or create the global config service.
+    """Resolve ConfigService from the active container (auto-creates default).
 
-    Returns:
-        Singleton ConfigService instance
+    New code should accept ConfigService via dependency injection; this
+    accessor exists for entry points that cannot receive a container.
     """
-    global _config_service, _config_sources
-    if _config_service is None:
-        from agent.shared.config.default_source import DefaultConfigSource
-        from agent.shared.config.yaml_source import YamlConfigSource
+    from agent.bootstrap.container import require_active_container
 
-        _config_sources = [
-            DefaultConfigSource(),
-            YamlConfigSource(),
-        ]
-        _config_service = ConfigService(_config_sources)
-    return _config_service
+    return require_active_container().config_service
 
 
 def _database_owned_values_from_yaml_sources(service: ConfigService) -> dict[str, Any]:
@@ -369,10 +356,10 @@ def _database_owned_values_from_yaml_sources(service: ConfigService) -> dict[str
     return values
 
 
-def attach_database_config_source(database_url: str) -> None:
-    """Attach the database config source after persistence has been initialized."""
-    global _config_sources
-    service = get_config_service()
+def attach_database_config_source(database_url: str, service: ConfigService | None = None) -> None:
+    """Attach database source to explicit service or active container service."""
+    if service is None:
+        service = get_config_service()
     for source in list(service._sources):
         if source.__class__.__name__ != "DatabaseConfigSource":
             continue
@@ -382,8 +369,6 @@ def attach_database_config_source(database_url: str) -> None:
         if callable(close):
             close()
         service._sources.remove(source)
-        if _config_sources is not None and source in _config_sources:
-            _config_sources.remove(source)
 
     from agent.shared.config.database_source import DatabaseConfigSource
 
@@ -421,15 +406,13 @@ def attach_database_config_source(database_url: str) -> None:
                 details,
             )
     service.add_source(source)
-    if _config_sources is not None:
-        _config_sources.append(source)
     service.reload()
 
 
-def detach_database_config_source() -> None:
-    """Detach and dispose the database config source."""
-    global _config_sources
-    service = get_config_service()
+def detach_database_config_source(service: ConfigService | None = None) -> None:
+    """Detach database source from explicit service or active service."""
+    if service is None:
+        service = get_config_service()
     for source in list(service._sources):
         if source.__class__.__name__ != "DatabaseConfigSource":
             continue
@@ -437,8 +420,6 @@ def detach_database_config_source() -> None:
         if callable(close):
             close()
         service._sources.remove(source)
-        if _config_sources is not None and source in _config_sources:
-            _config_sources.remove(source)
     service.reload()
 
 
@@ -461,7 +442,7 @@ def register_runtime_defaults(
     Args:
         values: Mapping of runtime key -> default value.
         service: Optional config service whose sources should also be updated.
-                 The global singleton is always updated when it exists.
+                 The active container's service is always updated.
     """
     from agent.shared.config.constants import DEFAULT_CONFIG
 
@@ -480,8 +461,14 @@ def register_runtime_defaults(
     targets: list[ConfigService] = []
     if service is not None:
         targets.append(service)
-    if _config_service is not None and all(target is not _config_service for target in targets):
-        targets.append(_config_service)
+    # Only update an already-activated container; never spawn a default one.
+    from agent.bootstrap.container import get_active_container
+
+    active_container = get_active_container()
+    if active_container is not None:
+        active = active_container.config_service
+        if all(target is not active for target in targets):
+            targets.append(active)
 
     for target in targets:
         for source in target._sources:

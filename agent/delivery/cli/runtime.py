@@ -1,4 +1,4 @@
-"""Slim runtime startup for the interactive CLI.
+"""Slim runtime startup for the interactive CLI via AppContainer.
 
 Brings up only the pieces required to run an agent locally:
 persistence, workflows, skills, and the scheduler. Web hosts and
@@ -8,21 +8,7 @@ managed channels (telegram/discord) are intentionally skipped.
 from __future__ import annotations
 
 import logging
-
-from agent.modules.scheduler import initialize_scheduler, stop_scheduler
-from agent.modules.skills import reload_skills
-from agent.modules.workflows import (
-    close_checkpointer,
-    initialize_checkpointer,
-    register_builtin_workflows,
-)
-from agent.shared.config import attach_database_config_source, detach_database_config_source
-from agent.shared.infrastructure.db import Base, load_orm_models
-from agent.shared.infrastructure.db.engine import (
-    close_async_engine,
-    get_database_url,
-    initialize_async_engine,
-)
+from collections.abc import Awaitable, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -30,35 +16,83 @@ logger = logging.getLogger(__name__)
 class CLIRuntime:
     """Lifecycle owner for resources used by the interactive CLI."""
 
-    def __init__(self) -> None:
+    def __init__(self, container=None) -> None:
+        from agent.bootstrap.container import create_app_container
+
+        self.container = container or create_app_container()
         self._started = False
+        self._activated = False
+        self._previous_active = None
 
     async def startup(self) -> None:
         if self._started:
             return
+        from agent.bootstrap.container import set_active_container
+        from agent.modules.scheduler import initialize_scheduler
+        from agent.modules.skills import reload_skills
+        from agent.modules.workflows import register_builtin_workflows
 
         logger.info("Initializing CLI runtime...")
-        load_orm_models()
-        await initialize_async_engine(metadata=Base.metadata)
-        attach_database_config_source(get_database_url())
-        await initialize_checkpointer()
-        register_builtin_workflows()
-        reload_skills()
-        await initialize_scheduler()
-        self._started = True
+        self._previous_active = set_active_container(self.container)
+        self._activated = True
+        try:
+            await self.container.initialize_persistence()
+            register_builtin_workflows()
+            reload_skills()
+            await initialize_scheduler(container=self.container)
+            self._started = True
+        except Exception:
+            logger.exception("CLI startup failed.")
+            await self.shutdown()
+            raise
         logger.info("CLI runtime ready.")
 
     async def shutdown(self) -> None:
-        if not self._started:
+        """Release every CLI resource, even when individual steps fail.
+
+        Steps are attempted independently so a failing scheduler stop can
+        never skip closing persistence, and restoring the previously active
+        container always runs in ``finally``.
+        """
+        if not self._started and not self._activated:
             return
+        from agent.bootstrap.container import set_active_container
+        from agent.modules.scheduler import stop_scheduler
 
         logger.info("Stopping CLI runtime...")
-        await stop_scheduler()
-        await close_checkpointer()
-        detach_database_config_source()
-        await close_async_engine()
-        self._started = False
+        errors: list[BaseException] = []
+        try:
+            await self._attempt(
+                errors,
+                "stop background scheduler",
+                lambda: stop_scheduler(container=self.container),
+            )
+            await self._attempt(
+                errors, "close persistence", self.container.close_persistence
+            )
+        finally:
+            set_active_container(self._previous_active)
+            self._previous_active = None
+            self._started = False
+            self._activated = False
+        if errors:
+            logger.warning(
+                "Shutdown completed with %d failed step(s): %s",
+                len(errors),
+                "; ".join(f"{type(error).__name__}: {error}" for error in errors),
+            )
         logger.info("CLI runtime stopped.")
+
+    @staticmethod
+    async def _attempt(
+        errors: list[BaseException], label: str, step: Callable[[], Awaitable[None]]
+    ) -> None:
+        """Run one shutdown step, collecting its error instead of raising."""
+        try:
+            await step()
+        except Exception as exc:
+            errors.append(exc)
+            logger.warning("Shutdown step '%s' failed: %s", label, exc, exc_info=True)
 
 
 __all__ = ["CLIRuntime"]

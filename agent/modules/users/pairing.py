@@ -5,15 +5,12 @@ from agent.shared.infrastructure.cache import get_cache
 
 AUTH_CACHE_TTL_SECONDS = 3600
 
-_pairing_service: PairingService | None = None
 
+def get_pairing_service(container=None) -> PairingService:
+    """Return container-scoped pairing service."""
+    from agent.bootstrap.container import require_active_container
 
-def get_pairing_service() -> PairingService:
-    """Get or create a singleton PairingService instance."""
-    global _pairing_service
-    if _pairing_service is None:
-        _pairing_service = PairingService()
-    return _pairing_service
+    return require_active_container(container).pairing_service
 
 
 def make_auth_cache_key(platform: str, user_id: str) -> str:

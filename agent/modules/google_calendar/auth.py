@@ -210,15 +210,11 @@ class GoogleOAuthManager:
         return await self._store.delete_account(user_id)
 
 
-_global_oauth_manager: GoogleOAuthManager | None = None
+def get_google_oauth_manager(container=None) -> GoogleOAuthManager:
+    """Return container-scoped OAuth manager."""
+    from agent.bootstrap.container import require_active_container
 
-
-def get_google_oauth_manager() -> GoogleOAuthManager:
-    """Return the global GoogleOAuthManager singleton."""
-    global _global_oauth_manager
-    if _global_oauth_manager is None:
-        _global_oauth_manager = GoogleOAuthManager()
-    return _global_oauth_manager
+    return require_active_container(container).google_oauth_manager
 
 
 __all__ = [

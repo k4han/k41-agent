@@ -276,13 +276,11 @@ class ActiveSessionRegistry:
             return len(self._sessions)
 
 
-# Module-level singleton
-_registry = ActiveSessionRegistry()
+def get_active_session_registry(container=None) -> ActiveSessionRegistry:
+    """Return container-scoped active session registry."""
+    from agent.bootstrap.container import require_active_container
 
-
-def get_active_session_registry() -> ActiveSessionRegistry:
-    """Return the global active session registry."""
-    return _registry
+    return require_active_container(container).active_session_registry
 
 
 __all__ = [

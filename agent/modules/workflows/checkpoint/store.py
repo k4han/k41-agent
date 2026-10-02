@@ -21,9 +21,6 @@ try:
 except ImportError:
     HAS_POSTGRES = False
 
-_checkpointer: BaseCheckpointSaver | None = None
-_checkpointer_cm = None
-
 
 def _create_serializer() -> JsonPlusSerializer:
     """Create a serializer with allowed custom types."""
@@ -45,61 +42,83 @@ async def _create_sqlite_saver(conn_string: str, serde: JsonPlusSerializer):
         await conn.close()
 
 
-async def initialize_checkpointer() -> BaseCheckpointSaver:
-    """Create and cache a checkpointer based on database type."""
-    global _checkpointer, _checkpointer_cm
-
-    if _checkpointer is not None:
-        return _checkpointer
+async def _build_checkpointer(database_url: str | None = None) -> tuple[BaseCheckpointSaver, object]:
+    from agent.bootstrap.container import require_active_container
 
     serde = _create_serializer()
-    db_type = get_database_type()
+    if database_url is not None:
+        db_type = get_database_type(database_url)
+    else:
+        active = require_active_container()
+        db_type = active.database_type
+        database_url = active.database_url
     if db_type == "sqlite":
-        _checkpointer_cm = _create_sqlite_saver(
-            get_sqlite_conn_string(), serde=serde
-        )
+        cm = _create_sqlite_saver(get_sqlite_conn_string(database_url), serde=serde)
     elif db_type == "postgres":
         if not HAS_POSTGRES:
             raise ImportError(
                 "PostgreSQL checkpointer not available. "
                 "Install langgraph-checkpoint-postgres: pip install langgraph-checkpoint-postgres"
             )
-        _checkpointer_cm = AsyncPostgresSaver.from_conn_string(
-            get_postgres_conn_string(), serde=serde
+        cm = AsyncPostgresSaver.from_conn_string(
+            get_postgres_conn_string(database_url), serde=serde
         )
     else:
         raise ValueError(f"Unsupported database type: {db_type}")
-
-    _checkpointer = await _checkpointer_cm.__aenter__()
-
-    setup = getattr(_checkpointer, "setup", None)
+    checkpointer = await cm.__aenter__()
+    setup = getattr(checkpointer, "setup", None)
     if callable(setup):
         result = setup()
         if inspect.isawaitable(result):
             await result
+    return checkpointer, cm
 
-    return _checkpointer
+
+async def initialize_checkpointer(
+    container=None, database_url: str | None = None
+) -> BaseCheckpointSaver:
+    """Create checkpointer in container scope."""
+    from agent.bootstrap.container import require_active_container
+
+    active = require_active_container(container)
+    if active._checkpointer is not None:
+        return active._checkpointer
+    checkpointer, cm = await _build_checkpointer(
+        active.database_url if database_url is None else database_url
+    )
+    active._checkpointer = checkpointer
+    active._checkpointer_cm = cm
+    return checkpointer
 
 
-def get_checkpointer() -> BaseCheckpointSaver:
-    """Return the singleton checkpointer instance."""
-    if _checkpointer is None:
+def get_checkpointer(container=None) -> BaseCheckpointSaver:
+    """Return container-scoped checkpointer."""
+    from agent.bootstrap.container import require_active_container
+
+    active = require_active_container(container)
+    if active._checkpointer is None:
         raise RuntimeError(
             "Checkpointer is not initialized. Call 'await initialize_checkpointer()' or "
             "'await initialize_persistence()' first."
         )
-    return _checkpointer
+    return active._checkpointer
 
 
-async def close_checkpointer() -> None:
-    """Close async checkpointer context and clear in-process references."""
-    global _checkpointer, _checkpointer_cm
+async def close_checkpointer(container=None) -> None:
+    """Close container-scoped checkpointer."""
+    from agent.bootstrap.container import require_active_container
 
-    if _checkpointer_cm is not None:
-        await _checkpointer_cm.__aexit__(None, None, None)
-        _checkpointer_cm = None
+    active = require_active_container(container)
+    if active._checkpointer_cm is not None:
+        try:
+            await active._checkpointer_cm.__aexit__(None, None, None)
+        finally:
+            active._checkpointer_cm = None
+            active._checkpointer = None
 
-    _checkpointer = None
 
-
-__all__ = ["close_checkpointer", "get_checkpointer", "initialize_checkpointer"]
+__all__ = [
+    "close_checkpointer",
+    "get_checkpointer",
+    "initialize_checkpointer",
+]

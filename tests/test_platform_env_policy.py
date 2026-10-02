@@ -96,7 +96,7 @@ def test_github_settings_fall_back_to_operator_yaml(monkeypatch, tmp_path) -> No
     from agent.shared.config import ConfigService
     from agent.shared.config.default_source import DefaultConfigSource
     from agent.shared.config.yaml_source import YamlConfigSource
-    import agent.shared.config.service as service_module
+    from agent.bootstrap.container import AppContainer, set_active_container
 
     for var in (
         "GITHUB_APP_ID",
@@ -117,7 +117,7 @@ def test_github_settings_fall_back_to_operator_yaml(monkeypatch, tmp_path) -> No
     service = ConfigService(
         sources=[DefaultConfigSource(), YamlConfigSource(path=yaml_path)]
     )
-    monkeypatch.setattr(service_module, "_config_service", service)
+    set_active_container(AppContainer(config_service=service))
 
     from agent.modules.github.config import get_github_settings
 

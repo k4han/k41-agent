@@ -31,14 +31,11 @@ from agent.modules.mcp.migrations import migrate_mcp_tables
 from agent.modules.mcp.registry_client import McpRegistryClient
 
 
-_mcp_service: MCPService | None = None
+def _get_mcp_service(container=None) -> MCPService:
+    """Return container-scoped MCP service."""
+    from agent.bootstrap.container import require_active_container
 
-
-def _get_mcp_service() -> MCPService:
-    global _mcp_service
-    if _mcp_service is None:
-        _mcp_service = MCPService(repository=ConfigMcpServerRepository())
-    return _mcp_service
+    return require_active_container(container).mcp_service
 
 
 def reload_mcp_service() -> None:

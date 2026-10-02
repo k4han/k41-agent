@@ -17,8 +17,9 @@ from agent.shared.infrastructure.http_logging import HTTPLoggingMiddleware
 from agent.shared.infrastructure.csrf_protection import CSRFProtectionMiddleware, CSRF_HEADER_NAME
 from agent.shared.infrastructure.http_errors import register_http_exception_handlers
 
+from agent.bootstrap.container import activate_context_container, restore_context_container
 from agent.bootstrap.runtime import AppRuntime
-from agent.bootstrap.settings import BootstrapConfig, load_bootstrap_config
+from agent.bootstrap.settings import BootstrapConfig
 from agent.delivery.http import (
     api_router,
     dashboard_router,
@@ -31,8 +32,6 @@ from agent.delivery.http.common import redirect_legacy_api
 from agent.delivery.http.dashboard.auth_router import router as auth_router
 from agent.delivery.http.dashboard.spa import STATIC_DIR, CachedStaticFiles
 from agent.modules.channels import list_channel_statuses
-from agent.modules.github import get_github_automation_service
-from agent.shared.config import get_config_service
 
 log_level = "INFO"
 logging.basicConfig(
@@ -43,6 +42,30 @@ logger = logging.getLogger(__name__)
 
 SHUTDOWN_SIGNAL = Path.home() / ".k41-agent" / "shutdown.signal"
 SERVER_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 2
+
+
+class ContainerActivationMiddleware:
+    """Re-activate the app container for every incoming request context.
+
+    Lifespan startup activates the container inside the lifespan task only,
+    while request handlers run in separate tasks that do not inherit that
+    context. Activating per request guarantees handlers resolve this app's
+    container instead of a stale process default.
+    """
+
+    def __init__(self, app, container) -> None:
+        self.app = app
+        self.container = container
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+        token = activate_context_container(self.container)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            restore_context_container(token)
 
 
 async def _warm_dashboard_caches() -> None:
@@ -70,18 +93,26 @@ async def _warm_dashboard_caches() -> None:
         logger.warning("Failed to warm dashboard agent options: %s", exc)
 
 
-def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:
-    bootstrap_config = bootstrap_config or load_bootstrap_config()
-    config_service = get_config_service()
-    runtime_settings = config_service.get_runtime_settings()
-    runtime = AppRuntime(bootstrap_config, runtime_settings)
+def create_app(bootstrap_config: BootstrapConfig | None = None, container=None) -> FastAPI:
+    from agent.bootstrap.container import create_app_container, set_active_container
+
+    if container is None:
+        # create_app_container loads bootstrap config through its own config
+        # service, so this path never spawns a process-default container.
+        container = create_app_container(bootstrap_config=bootstrap_config)
+    else:
+        if bootstrap_config is not None:
+            container.bootstrap_config = bootstrap_config
+    bootstrap_config = container.bootstrap_config
+    # Activate now so every task spawned later inherits this container.
+    set_active_container(container)
+    runtime = AppRuntime(container=container)
 
     @asynccontextmanager
     async def lifespan(fastapi_app: FastAPI):
         await runtime.startup()
         if bootstrap_config.enable_dashboard:
             await _warm_dashboard_caches()
-        fastapi_app.state.runtime_settings = runtime.runtime_settings
         try:
             yield
         finally:
@@ -108,12 +139,12 @@ def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:
         ],
     )
 
+    fastapi_app.state.container = container
     fastapi_app.state.runtime = runtime
     fastapi_app.state.channel_manager = runtime.channel_manager
     fastapi_app.state.bootstrap_config = bootstrap_config
-    fastapi_app.state.runtime_settings = runtime_settings
-    fastapi_app.state.config_service = config_service
-    fastapi_app.state.github_automation_service = get_github_automation_service()
+    fastapi_app.state.config_service = container.config_service
+    fastapi_app.state.github_automation_service = container.github_service
     fastapi_app.state.started_at = time.time()
 
     register_http_exception_handlers(fastapi_app)
@@ -211,11 +242,14 @@ def create_app(bootstrap_config: BootstrapConfig | None = None) -> FastAPI:
             "services": list_channel_statuses(channel_manager),
         }
 
+    # Outermost middleware: resolve this app's container inside request tasks.
+    fastapi_app.add_middleware(ContainerActivationMiddleware, container=container)
+
     return fastapi_app
 
 
-settings = load_bootstrap_config()
-app = create_app(settings)
+app = create_app()
+settings: BootstrapConfig = app.state.bootstrap_config
 
 
 async def main() -> None:

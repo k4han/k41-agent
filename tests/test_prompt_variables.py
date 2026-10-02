@@ -12,18 +12,15 @@ from agent.shared.infrastructure.db.models import load_orm_models
 
 
 @pytest_asyncio.fixture()
-async def prompt_variable_db(monkeypatch: pytest.MonkeyPatch, tmp_path):
+async def prompt_variable_db(tmp_path):
     await close_async_engine()
+
+    from agent.bootstrap.container import create_test_container, set_active_container
 
     db_path = tmp_path / "prompt_variables.sqlite"
     db_url = f"sqlite:///{db_path.resolve().as_posix()}"
 
-    import agent.shared.infrastructure.db.engine as engine_module
-    import agent.modules.prompt_variables.service as service_module
-
-    monkeypatch.setattr(engine_module, "get_database_url", lambda: db_url)
-    engine_module._cached_database_url = None
-    service_module._service = None
+    set_active_container(create_test_container(database_url=db_url))
 
     load_orm_models()
     await initialize_async_engine(metadata=Base.metadata)
@@ -31,7 +28,6 @@ async def prompt_variable_db(monkeypatch: pytest.MonkeyPatch, tmp_path):
     try:
         yield
     finally:
-        service_module._service = None
         await close_async_engine()
 
 

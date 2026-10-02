@@ -287,18 +287,11 @@ class FilesystemAgentRepository:
         return self.create_user_agent(builtin_card.to_agent_config())
 
 
-# --- Module-level singleton ---
+def get_repository(container=None) -> FilesystemAgentRepository:
+    """Return container-scoped agent repository."""
+    from agent.bootstrap.container import require_active_container
 
-_repository: FilesystemAgentRepository | None = None
-
-
-def get_repository() -> FilesystemAgentRepository:
-    global _repository
-    if _repository is None:
-        # Singleton repository always uses default scan directories.
-        # For one-off custom scans, call load_agents_from_dir(dir_path).
-        _repository = FilesystemAgentRepository(None)
-    return _repository
+    return require_active_container(container).agent_repository
 
 
 def load_agents_from_dir(dir_path: str | Path | None = None) -> dict[str, AgentConfig]:

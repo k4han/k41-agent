@@ -353,14 +353,11 @@ def update_thread_workspace_metadata_sync(
         return _execution_from_record(record)
 
 
-_repository: ThreadWorkspaceRepository | None = None
+def get_thread_workspace_repository(container=None) -> ThreadWorkspaceRepository:
+    """Return container-scoped workspace repository."""
+    from agent.bootstrap.container import require_active_container
 
-
-def get_thread_workspace_repository() -> ThreadWorkspaceRepository:
-    global _repository
-    if _repository is None:
-        _repository = ThreadWorkspaceRepository()
-    return _repository
+    return require_active_container(container).workspace_repository
 
 
 __all__ = [

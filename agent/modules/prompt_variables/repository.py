@@ -14,7 +14,12 @@ class PromptVariableRepository:
         self,
         session_maker: async_sessionmaker[AsyncSession] | None = None,
     ) -> None:
-        self._session_maker = session_maker or get_async_session_maker()
+        self._session_maker = session_maker
+
+    def _resolve_session_maker(self) -> async_sessionmaker[AsyncSession]:
+        if self._session_maker is not None:
+            return self._session_maker
+        return get_async_session_maker()
 
     async def _find_by_name(
         self,
@@ -27,18 +32,18 @@ class PromptVariableRepository:
         return result.scalar_one_or_none()
 
     async def list(self) -> list[PromptVariable]:
-        async with self._session_maker() as session:
+        async with self._resolve_session_maker()() as session:
             result = await session.execute(
                 select(PromptVariable).order_by(PromptVariable.name.asc())
             )
             return list(result.scalars().all())
 
     async def get(self, name: str) -> PromptVariable | None:
-        async with self._session_maker() as session:
+        async with self._resolve_session_maker()() as session:
             return await self._find_by_name(session, name)
 
     async def create(self, *, name: str, value: str) -> PromptVariable:
-        async with self._session_maker() as session:
+        async with self._resolve_session_maker()() as session:
             record = PromptVariable(name=name, value=value)
             session.add(record)
             try:
@@ -56,7 +61,7 @@ class PromptVariableRepository:
         name: str,
         value: str,
     ) -> PromptVariable:
-        async with self._session_maker() as session:
+        async with self._resolve_session_maker()() as session:
             record = await self._find_by_name(session, current_name)
             if record is None:
                 raise FileNotFoundError(f"Prompt variable '{current_name}' does not exist.")
@@ -78,7 +83,7 @@ class PromptVariableRepository:
             return record
 
     async def delete(self, name: str) -> bool:
-        async with self._session_maker() as session:
+        async with self._resolve_session_maker()() as session:
             record = await self._find_by_name(session, name)
             if record is None:
                 return False

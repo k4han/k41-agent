@@ -10,10 +10,7 @@ from agent.bootstrap.settings import BootstrapConfig, load_bootstrap_config
 
 def test_load_bootstrap_config_reads_config_file(monkeypatch: MonkeyPatch, tmp_path):
     """Test that load_bootstrap_config reads from ConfigService."""
-    # Reset singleton
-    import agent.shared.config.service as service_module
     import agent.shared.config.yaml_source as yaml_module
-    monkeypatch.setattr(service_module, "_config_service", None)
 
     # Create test config
     k41_dir = tmp_path / ".k41-agent"
@@ -46,10 +43,7 @@ def test_load_bootstrap_config_reads_config_file(monkeypatch: MonkeyPatch, tmp_p
 
 def test_load_bootstrap_config_uses_defaults(monkeypatch: MonkeyPatch, tmp_path):
     """Test that load_bootstrap_config uses defaults when no config exists."""
-    # Reset singleton
-    import agent.shared.config.service as service_module
     import agent.shared.config.yaml_source as yaml_module
-    monkeypatch.setattr(service_module, "_config_service", None)
 
     # Point to non-existent config
     config_path = tmp_path / "nonexistent.yaml"

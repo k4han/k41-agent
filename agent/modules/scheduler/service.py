@@ -2,7 +2,7 @@ import logging
 import pickle
 import uuid
 from html import escape as escape_html
-from typing import Any, Optional
+from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
@@ -12,7 +12,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from agent.modules.agent_runtime import SessionManager, run_agent_full
 from agent.modules.notifications import send_notification as _send_notification
 from agent.shared.infrastructure.db.engine import (
-    get_database_url,
     _normalize_url_to_sync,
 )
 from agent.shared.timezone import resolve_display_timezone
@@ -28,11 +27,6 @@ LEGACY_EXECUTE_TASK_REF = (
 CURRENT_EXECUTE_TASK_REF = "agent.modules.scheduler.service:execute_scheduled_task"
 
 logger = logging.getLogger(__name__)
-
-_sync_engine = None
-
-
-_scheduler: Optional[AsyncIOScheduler] = None
 
 
 async def execute_scheduled_task(platform: str, user_id: str, task: str):
@@ -78,12 +72,14 @@ async def execute_scheduled_task(platform: str, user_id: str, task: str):
         await _send_notification(platform, user_id, error_msg)
 
 
-def get_scheduler() -> AsyncIOScheduler:
-    """Return the global scheduler instance. Raises RuntimeError if not initialized."""
-    global _scheduler
-    if _scheduler is None:
+def get_scheduler(container=None) -> AsyncIOScheduler:
+    """Return container-scoped scheduler."""
+    from agent.bootstrap.container import require_active_container
+
+    active = require_active_container(container)
+    if active._scheduler is None:
         raise RuntimeError("Scheduler not initialized. Call initialize_scheduler() first.")
-    return _scheduler
+    return active._scheduler
 
 
 def _migrate_legacy_job_references(engine: Any) -> int:
@@ -140,36 +136,50 @@ def _migrate_legacy_job_references(engine: Any) -> int:
     return migrated
 
 
-async def initialize_scheduler():
-    """Initialize and start the APScheduler. Must be called from an async context."""
-    global _scheduler, _sync_engine
-    if _scheduler is not None:
-        return
+async def initialize_scheduler(container=None):
+    """Initialize container-scoped scheduler idempotently."""
+    from agent.bootstrap.container import require_active_container
 
-    sync_url = _normalize_url_to_sync(get_database_url())
-    _sync_engine = create_engine(sync_url, echo=False, pool_size=2, max_overflow=0)
-    _migrate_legacy_job_references(_sync_engine)
+    active = require_active_container(container)
+    if active._scheduler is not None:
+        return active._scheduler
 
+    sync_url = _normalize_url_to_sync(active.database_url)
     timezone_name, scheduler_tz = resolve_display_timezone()
 
-    _scheduler = AsyncIOScheduler(
-        jobstores={"default": SQLAlchemyJobStore(engine=_sync_engine)},
+    sync_engine = create_engine(sync_url, echo=False, pool_size=2, max_overflow=0)
+    _migrate_legacy_job_references(sync_engine)
+    scheduler = AsyncIOScheduler(
+        jobstores={"default": SQLAlchemyJobStore(engine=sync_engine)},
         timezone=scheduler_tz,
     )
-    _scheduler.start()
+    scheduler.start()
+    active._scheduler = scheduler
+    active._scheduler_sync_engine = sync_engine
     logger.info(
         "Background scheduler initialized and started. Timezone: %s",
         timezone_name,
     )
+    return scheduler
 
 
-async def stop_scheduler():
-    """Stop the scheduler gracefully."""
-    global _scheduler, _sync_engine
-    if _scheduler:
-        _scheduler.shutdown(wait=True)
-        _scheduler = None
-    if _sync_engine:
-        _sync_engine.dispose()
-        _sync_engine = None
+async def stop_scheduler(container=None):
+    """Stop container-scoped scheduler idempotently."""
+    from agent.bootstrap.container import require_active_container
+
+    active = require_active_container(container)
+    scheduler = active._scheduler
+    sync_engine = active._scheduler_sync_engine
+    if scheduler is None and sync_engine is None:
+        return
+    if scheduler is not None:
+        try:
+            scheduler.shutdown(wait=True)
+        finally:
+            active._scheduler = None
+    if sync_engine is not None:
+        try:
+            sync_engine.dispose()
+        finally:
+            active._scheduler_sync_engine = None
     logger.info("Background scheduler stopped.")

@@ -52,16 +52,11 @@ class ExtensionRegistry:
         self._entries.clear()
 
 
-# Module-level singleton
-_registry: ExtensionRegistry | None = None
+def get_extension_registry(container=None) -> ExtensionRegistry:
+    """Return container-scoped extension registry."""
+    from agent.bootstrap.container import require_active_container
 
-
-def get_extension_registry() -> ExtensionRegistry:
-    """Return the global extension registry singleton."""
-    global _registry
-    if _registry is None:
-        _registry = ExtensionRegistry()
-    return _registry
+    return require_active_container(container).extension_registry
 
 
 __all__ = ["ExtensionPoint", "ExtensionRegistry", "get_extension_registry"]

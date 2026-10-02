@@ -188,12 +188,11 @@ class ChatStreamManager:
             self._sessions.pop(thread_id, None)
 
 
-_manager = ChatStreamManager()
+def get_chat_stream_manager(container=None) -> ChatStreamManager:
+    """Return container-scoped chat stream manager."""
+    from agent.bootstrap.container import require_active_container
 
-
-def get_chat_stream_manager() -> ChatStreamManager:
-    """Return the global chat stream manager instance."""
-    return _manager
+    return require_active_container(container).chat_stream_manager
 
 
 __all__ = [

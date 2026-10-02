@@ -225,9 +225,6 @@ async def cmd_agents(message: InboundMessage, parsed: ParsedCommand) -> None:
     await _reply(message, "\n".join(lines), mode="plain")
 
 
-_default_registry: CommandRegistry | None = None
-
-
 def build_default_command_registry() -> CommandRegistry:
     registry = CommandRegistry()
     registry.register(
@@ -257,11 +254,11 @@ def build_default_command_registry() -> CommandRegistry:
     return registry
 
 
-def get_default_command_registry() -> CommandRegistry:
-    global _default_registry
-    if _default_registry is None:
-        _default_registry = build_default_command_registry()
-    return _default_registry
+def get_default_command_registry(container=None) -> CommandRegistry:
+    """Return container-scoped command registry."""
+    from agent.bootstrap.container import require_active_container
+
+    return require_active_container(container).command_registry
 
 
 __all__ = [

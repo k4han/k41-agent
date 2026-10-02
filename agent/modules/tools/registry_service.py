@@ -1,4 +1,4 @@
-"""Tool registry service with singleton pattern.
+"""Tool registry service with container-scoped resolution.
 
 Thin orchestration layer on top of ``ToolRegistry`` that loads built-in tools
 via ``BuiltinToolSource`` on first access. Exposes a stable API to the rest of
@@ -16,10 +16,6 @@ from agent.modules.tools.domain import (
     ToolSource,
 )
 from agent.modules.tools.registry import ToolRegistry
-from agent.modules.tools.sources.builtin import BuiltinToolSource
-
-_registry_service: ToolRegistryService | None = None
-_mcp_loaded: bool = False
 
 
 class ToolRegistryService:
@@ -95,47 +91,50 @@ class ToolRegistryService:
         ]
 
 
-def get_registry_service() -> ToolRegistryService:
-    """Get the singleton tool registry service.
+def get_registry_service(container=None) -> ToolRegistryService:
+    """Return container-scoped tool registry service.
 
     Loads built-in tools eagerly. MCP tools require an async call to
     :func:`ensure_mcp_loaded` because the MCP service itself is async.
     """
-    global _registry_service
-    if _registry_service is None:
-        service = ToolRegistryService()
-        service.load_descriptors(BuiltinToolSource().load())
-        _registry_service = service
-    return _registry_service
+    from agent.bootstrap.container import require_active_container
+
+    return require_active_container(container).tool_registry_service
 
 
-async def ensure_mcp_loaded(*, force: bool = False) -> None:
-    """Load MCP-backed tools into the unified registry (idempotent)."""
-    global _mcp_loaded
-    if _mcp_loaded and not force:
+async def ensure_mcp_loaded(*, force: bool = False, container=None) -> None:
+    """Load MCP-backed tools into the unified registry (idempotent per scope)."""
+    from agent.bootstrap.container import require_active_container
+
+    active = require_active_container(container)
+    if bool(getattr(active, "_mcp_loaded", False)) and not force:
         return
     from agent.modules.tools.sources.mcp import McpToolSource
 
-    service = get_registry_service()
+    service = get_registry_service(container=active)
     if force:
         service.remove_by_source(ToolSource.MCP)
     descriptors = await McpToolSource().load()
     service.load_descriptors(descriptors)
-    _mcp_loaded = True
+    active._mcp_loaded = True
 
 
-async def reload_mcp_descriptors() -> None:
+async def reload_mcp_descriptors(container=None) -> None:
     """Reload MCP service state and replace MCP descriptors in the registry."""
+    from agent.bootstrap.container import require_active_container
+
     from agent.modules.mcp import reload_mcp_service
 
-    global _mcp_loaded
+    active = require_active_container(container)
     reload_mcp_service()
-    _mcp_loaded = False
-    await ensure_mcp_loaded(force=True)
+    active._mcp_loaded = False
+    await ensure_mcp_loaded(force=True, container=active)
 
 
 def _reset_registry_service_for_tests() -> None:
     """Test-only helper to force re-initialization."""
-    global _registry_service, _mcp_loaded
-    _registry_service = None
-    _mcp_loaded = False
+    from agent.bootstrap.container import require_active_container
+
+    active = require_active_container()
+    active._tool_registry_service = None
+    active._mcp_loaded = False

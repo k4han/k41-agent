@@ -197,7 +197,11 @@ def test_dashboard_catalog_and_channels_include_adapter_schema(
 
 
 def test_resolve_default_agent_name_prefers_channel_agent() -> None:
+    from agent.modules.agents import reload_agents
     from agent.modules.channels.agent_bridge import resolve_default_agent_name
+
+    # The container-scoped catalog starts empty; load builtin agents first.
+    reload_agents()
 
     # When no default_agent is configured for a platform, it should prefer "channel-agent"
     agent_name = resolve_default_agent_name("telegram")
