@@ -145,6 +145,12 @@ def run_update(
     should_restart_tray = running_tray_pid is not None
     if systemd_active:
         echo("Stopping systemd service k41-agent.service")
+        if running_pid is not None:
+            try:
+                SHUTDOWN_SIGNAL.parent.mkdir(parents=True, exist_ok=True)
+                SHUTDOWN_SIGNAL.write_text(str(running_pid), encoding="utf-8")
+            except OSError:
+                pass
         stop_systemd_service()
         # Re-read PIDs after systemd stop; the server may have exited already.
         time.sleep(0.5)

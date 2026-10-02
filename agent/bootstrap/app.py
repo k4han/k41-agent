@@ -234,6 +234,7 @@ def create_app(bootstrap_config: BootstrapConfig | None = None, container=None) 
         return {
             "status": "ok",
             "version": APP_VERSION,
+            "started_at": getattr(request.app.state, "started_at", None),
             "web": current_settings.enable_web,
             "features": {
                 "api": current_settings.enable_api,

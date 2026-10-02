@@ -67,29 +67,66 @@ export async function startSystemUpdate(): Promise<void> {
 
 async function pollForServerRestart(): Promise<void> {
   const start = Date.now();
-  const timeoutMs = 120000; // 2 minutes max
+  const timeoutMs = 180000; // 3 minutes max (downloading artifact + syncing dependencies may take time)
   const initialCurrentVersion = versionInfo()?.current_version;
+  const targetVersion = versionInfo()?.latest_version;
+  let initialStartedAt: number | null = null;
+  let hasSeenServerDown = false;
+
+  // Capture initial server started_at before shutdown
+  try {
+    const probe = await fetch("/health", { cache: "no-store" });
+    if (probe.ok) {
+      const probeData = (await probe.json()) as { started_at?: number };
+      if (typeof probeData.started_at === "number") {
+        initialStartedAt = probeData.started_at;
+      }
+    }
+  } catch {
+    hasSeenServerDown = true;
+  }
 
   while (Date.now() - start < timeoutMs) {
     await new Promise((resolve) => setTimeout(resolve, 2000));
     try {
       const resp = await fetch("/health", { cache: "no-store" });
       if (resp.ok) {
-        const data = (await resp.json()) as { status?: string; version?: string };
-        const elapsed = Date.now() - start;
-        // Server has restarted with new version, or is back up healthy after at least 8 seconds
-        if (data.status === "ok" && (data.version !== initialCurrentVersion || elapsed > 8000)) {
-          setUpdateState("success");
-          // Re-fetch version info with force
-          await checkForUpdates(true);
-          setTimeout(() => {
-            window.location.reload();
-          }, 1500);
-          return;
+        const data = (await resp.json()) as {
+          status?: string;
+          version?: string;
+          started_at?: number;
+        };
+
+        if (data.status === "ok") {
+          const versionChanged = Boolean(
+            initialCurrentVersion && data.version && data.version !== initialCurrentVersion
+          );
+          const reachedTarget = Boolean(targetVersion && data.version === targetVersion);
+          const startedAtChanged = Boolean(
+            initialStartedAt !== null &&
+              typeof data.started_at === "number" &&
+              data.started_at !== initialStartedAt
+          );
+          const restartedAfterDown = hasSeenServerDown;
+
+          // Only consider restart complete when server has actually updated or restarted.
+          // Never rely solely on an elapsed timer while connected to the old, un-restarted server!
+          if (versionChanged || reachedTarget || startedAtChanged || restartedAfterDown) {
+            setUpdateState("success");
+            // Re-fetch version info with force
+            await checkForUpdates(true);
+            setTimeout(() => {
+              window.location.reload();
+            }, 1500);
+            return;
+          }
         }
+      } else {
+        hasSeenServerDown = true;
       }
     } catch {
-      // Server is restarting or temporarily unreachable, continue polling
+      // Server is restarting or temporarily unreachable
+      hasSeenServerDown = true;
     }
   }
 

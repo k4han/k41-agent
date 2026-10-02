@@ -83,7 +83,11 @@ async def _run_polling_bot(bot: Any, dispatcher: Any) -> None:
     try:
         with contextlib.suppress(Exception):
             await bot.delete_webhook(drop_pending_updates=False)
-        await dispatcher.start_polling(bot, close_bot_session=False)
+        await dispatcher.start_polling(
+            bot,
+            close_bot_session=False,
+            handle_signals=False,
+        )
     except asyncio.CancelledError:
         logger.info("Telegram polling cancelled.")
         raise

@@ -10,10 +10,13 @@ DEFAULT_VERSION = "0.0.0"
 
 
 def get_app_version() -> str:
+    version = _read_project_version()
+    if version != DEFAULT_VERSION:
+        return version
     try:
         return metadata.version(PACKAGE_NAME)
     except metadata.PackageNotFoundError:
-        return _read_project_version()
+        return DEFAULT_VERSION
 
 
 def _read_project_version() -> str:

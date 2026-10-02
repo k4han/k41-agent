@@ -97,6 +97,10 @@ async def trigger_system_update(request: Request) -> dict[str, Any]:
             ),
         )
 
+    global _cached_version_info, _last_check_time
+    _cached_version_info = None
+    _last_check_time = 0.0
+
     try:
         install = resolve_managed_install()
         update_log = Path.home() / ".k41-agent" / "update.log"
