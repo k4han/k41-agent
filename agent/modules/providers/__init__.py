@@ -26,10 +26,16 @@ def _get_provider_service(container=None) -> ProviderService:
     return require_active_container(container).provider_service
 
 
-def reload_provider_service() -> None:
+def reload_provider_service(container=None) -> None:
     """Reload provider configs (e.g. after config service reload)."""
-    service = _get_provider_service()
+    from agent.bootstrap.container import require_active_container
+
+    active_container = require_active_container(container)
+    service = active_container.provider_service
     service.reload()
+    from agent.modules.providers.internal_loader import load_internal_providers
+
+    load_internal_providers(service, container=active_container)
     from agent.modules.providers.resolve_chat_model import _get_cached_model
     _get_cached_model.cache_clear()
 
@@ -100,6 +106,8 @@ from agent.modules.providers.catalog import (
     ensure_catalog_available,
     get_provider_catalog_entry,
     load_providers_catalog,
+    normalize_provider_key,
+    register_provider_catalog_entry,
     update_catalog_from_url,
 )
 
@@ -122,6 +130,7 @@ __all__ = [
     "ensure_catalog_available",
     "load_providers_catalog",
     "get_provider_catalog_entry",
+    "register_provider_catalog_entry",
     "update_catalog_from_url",
     "ModelCatalogEntry",
     "ProviderCatalogEntry",

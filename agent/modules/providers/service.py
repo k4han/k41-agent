@@ -13,6 +13,7 @@ class ProviderService:
     def __init__(self, repository: ProviderRepository) -> None:
         self._repository = repository
         self._factories: dict[ProviderType, ChatModelFactory] = {}
+        self._named_factories: dict[str, ChatModelFactory] = {}
 
     # --- Factory registration ---
 
@@ -21,7 +22,25 @@ class ProviderService:
     ) -> None:
         self._factories[provider_type] = factory
 
-    def get_factory(self, provider_type: ProviderType) -> ChatModelFactory:
+    def register_provider_factory(
+        self, provider_name: str, factory: ChatModelFactory
+    ) -> None:
+        """Register a factory for a specific provider name."""
+        from agent.modules.providers.catalog import normalize_provider_key
+
+        self._named_factories[normalize_provider_key(provider_name)] = factory
+
+    def get_factory(
+        self,
+        provider_type: ProviderType,
+        provider_name: str | None = None,
+    ) -> ChatModelFactory:
+        if provider_name:
+            from agent.modules.providers.catalog import normalize_provider_key
+
+            named = self._named_factories.get(normalize_provider_key(provider_name))
+            if named is not None:
+                return named
         factory = self._factories.get(provider_type)
         if factory is None:
             raise RuntimeError(
@@ -51,7 +70,7 @@ class ProviderService:
             if provider_name
             else self.get_default_provider()
         )
-        factory = self.get_factory(provider.provider_type)
+        factory = self.get_factory(provider.provider_type, provider_name=provider.name)
         list_models = getattr(factory, "list_models", None)
         can_list_models = callable(list_models)
 

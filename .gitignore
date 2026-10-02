@@ -31,6 +31,9 @@ agent/delivery/http/dashboard/static/
 
 agent/modules/providers/api.json
 
+# Internal private modules
+agent/internal/
+
 .vscode
 
 .agents/

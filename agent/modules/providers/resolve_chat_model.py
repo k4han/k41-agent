@@ -113,11 +113,15 @@ def _resolve_chat_model_info_impl(
         temperature=resolved_temperature,
     )
 
-    factory = provider_service.get_factory(provider_config.provider_type)
+    factory = provider_service.get_factory(
+        provider_config.provider_type,
+        provider_name=provider_config.name,
+    )
 
     chat_model = _get_cached_model(
         factory=factory,
         provider_type=str(provider_config.provider_type),
+        provider_name=provider_config.name,
         base_url=provider_config.base_url,
         api_key=resolved_api_key,
         model_name=model_config.model_name,
@@ -187,6 +191,7 @@ def _get_cached_model(
     model_name: str,
     temperature: float,
     extra_body_json: str = "",
+    provider_name: str = "",
 ) -> BaseChatModel:
     """Cache model instances by their full config fingerprint."""
     import json as _json
@@ -202,7 +207,7 @@ def _get_cached_model(
             extra_body = None
 
     provider_config = ProviderConfig(
-        name=provider_type,
+        name=provider_name or provider_type,
         provider_type=ProviderType(provider_type),
         base_url=base_url,
         api_key=api_key,

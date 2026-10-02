@@ -44,8 +44,22 @@ class ProviderCatalogEntry:
     logo_url: str
 
 
-# --- In-memory Cache ---
+# --- In-memory Cache & Dynamic Extensions ---
 _catalog_cache: dict[str, ProviderCatalogEntry] | None = None
+_custom_catalog_entries: dict[str, ProviderCatalogEntry] = {}
+
+
+def normalize_provider_key(provider_id: str) -> str:
+    """Normalize provider id for catalog and factory lookups."""
+    return provider_id.strip().lower().replace("-", "_")
+
+
+def register_provider_catalog_entry(entry: ProviderCatalogEntry) -> None:
+    """Register or override a provider catalog entry dynamically."""
+    normalized = normalize_provider_key(entry.id)
+    _custom_catalog_entries[normalized] = entry
+    if _catalog_cache is not None:
+        _catalog_cache[normalized] = entry
 
 
 def get_api_json_path() -> str:
@@ -157,59 +171,63 @@ def load_providers_catalog(force_reload: bool = False) -> dict[str, ProviderCata
         return _catalog_cache
 
     json_path = _read_api_json_path()
-    if not json_path.exists():
-        logger.error("Provider api.json not found at: %s", json_path)
-        return {}
-
-    try:
-        raw_data = json.loads(json_path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        logger.error("Failed to load provider api.json: %s", exc)
-        return {}
-
     catalog: dict[str, ProviderCatalogEntry] = {}
-    for provider_id, pinfo in raw_data.items():
-        npm = pinfo.get("npm") or ""
-        api_url = pinfo.get("api")
-        name = pinfo.get("name") or provider_id
+    if json_path.exists():
+        try:
+            raw_data = json.loads(json_path.read_text(encoding="utf-8"))
+            for provider_id, pinfo in raw_data.items():
+                npm = pinfo.get("npm") or ""
+                api_url = pinfo.get("api")
+                name = pinfo.get("name") or provider_id
 
-        provider_type, base_url = _resolve_provider_type_and_base_url(provider_id, npm, api_url)
+                provider_type, base_url = _resolve_provider_type_and_base_url(provider_id, npm, api_url)
 
-        # Parse models
-        models_dict = pinfo.get("models") or {}
-        models_list = []
-        for model_id, minfo in models_dict.items():
-            models_list.append(_parse_model_entry(model_id, minfo))
+                # Parse models
+                models_dict = pinfo.get("models") or {}
+                models_list = []
+                for model_id, minfo in models_dict.items():
+                    models_list.append(_parse_model_entry(model_id, minfo))
 
-        # Default model is usually the first model in the list, or one with 'flash' / 'mini'
-        default_model = ""
-        if models_list:
-            # Look for a common fast/cheap model to use as default
-            for m in models_list:
-                m_id_lower = m.id.lower()
-                if "flash" in m_id_lower or "mini" in m_id_lower or "3.5-sonnet" in m_id_lower or "gpt-4o-mini" in m_id_lower:
-                    default_model = m.id
-                    break
-            if not default_model:
-                default_model = models_list[0].id
+                # Default model is usually the first model in the list, or one with 'flash' / 'mini'
+                default_model = ""
+                if models_list:
+                    # Look for a common fast/cheap model to use as default
+                    for m in models_list:
+                        m_id_lower = m.id.lower()
+                        if "flash" in m_id_lower or "mini" in m_id_lower or "3.5-sonnet" in m_id_lower or "gpt-4o-mini" in m_id_lower:
+                            default_model = m.id
+                            break
+                    if not default_model:
+                        default_model = models_list[0].id
 
-        raw_logo = pinfo.get("logo") or pinfo.get("logo_url")
-        if isinstance(raw_logo, str) and raw_logo.strip():
-            logo_url = raw_logo.strip()
-        else:
-            logo_url = _build_default_logo_url(provider_id)
+                raw_logo = pinfo.get("logo") or pinfo.get("logo_url")
+                if isinstance(raw_logo, str) and raw_logo.strip():
+                    logo_url = raw_logo.strip()
+                else:
+                    logo_url = _build_default_logo_url(provider_id)
 
-        catalog[provider_id] = ProviderCatalogEntry(
-            id=provider_id,
-            name=name,
-            provider_type=provider_type,
-            base_url=base_url,
-            env_vars=tuple(pinfo.get("env") or []),
-            doc_url=pinfo.get("doc"),
-            models=tuple(models_list),
-            default_model=default_model,
-            logo_url=logo_url,
-        )
+                catalog[provider_id] = ProviderCatalogEntry(
+                    id=provider_id,
+                    name=name,
+                    provider_type=provider_type,
+                    base_url=base_url,
+                    env_vars=tuple(pinfo.get("env") or []),
+                    doc_url=pinfo.get("doc"),
+                    models=tuple(models_list),
+                    default_model=default_model,
+                    logo_url=logo_url,
+                )
+        except Exception as exc:
+            logger.error("Failed to load provider api.json: %s", exc)
+            # Do not cache transient parse errors so the next call retries.
+            if _custom_catalog_entries:
+                return dict(_custom_catalog_entries)
+            return {}
+    else:
+        logger.warning("Provider api.json not found at: %s", json_path)
+
+    if _custom_catalog_entries:
+        catalog.update(_custom_catalog_entries)
 
     _catalog_cache = catalog
     return catalog
@@ -217,20 +235,21 @@ def load_providers_catalog(force_reload: bool = False) -> dict[str, ProviderCata
 
 def get_provider_catalog_entry(provider_id: str) -> ProviderCatalogEntry | None:
     """Look up a provider in the loaded catalog."""
+    normalized = normalize_provider_key(provider_id)
+    if normalized in _custom_catalog_entries:
+        return _custom_catalog_entries[normalized]
+
     catalog = load_providers_catalog()
-    # Support lookup by normalized key
-    normalized = provider_id.strip().lower().replace("-", "_")
-    
     # Try direct match
     entry = catalog.get(provider_id)
     if entry:
         return entry
-        
+
     # Try normalized match
     for k, val in catalog.items():
-        if k.strip().lower().replace("-", "_") == normalized:
+        if normalize_provider_key(k) == normalized:
             return val
-            
+
     return None
 
 

@@ -552,6 +552,9 @@ class AppContainer:
             service.register_factory(ProviderType.OPENAI_COMPATIBLE, OpenAICompatibleFactory())
             service.register_factory(ProviderType.GOOGLE, GoogleFactory())
             service.register_factory(ProviderType.ANTHROPIC, AnthropicFactory())
+            from agent.modules.providers.internal_loader import load_internal_providers
+
+            load_internal_providers(service, container=self)
             self._provider_service = service
         return self._provider_service
 
