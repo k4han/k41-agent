@@ -1,11 +1,11 @@
-import { ArrowDown, Bug, Compass, Loader2, Sparkles, Zap } from "lucide-solid";
+import { ArrowDown, Loader2, Sparkles } from "lucide-solid";
 import { For, Show } from "solid-js";
 
 import { TranscriptItemView, type TranscriptAttachment, type TranscriptRole } from "@/components/Transcript";
 import { WorkspaceSelector } from "@/components/WorkspaceSelector";
-import type { WorkspaceSelectionDraft } from "@/components/WorkspaceSelector";
 import type { ChatTranscriptItem } from "@/lib/chatStreamStore";
 import type { AgentCard, WorkspaceRef } from "@/types";
+import type { WorkspaceSelectionDraft } from "@/components/WorkspaceSelector";
 
 export interface ChatWelcomeHeroProps {
   workingDir: string;
@@ -18,29 +18,6 @@ export interface ChatWelcomeHeroProps {
 }
 
 export function ChatWelcomeHero(props: ChatWelcomeHeroProps) {
-  const starterPrompts = [
-    {
-      title: "Explore Architecture",
-      prompt: "Analyze this repository structure and summarize key modules",
-      icon: Compass,
-    },
-    {
-      title: "Implement Feature",
-      prompt: "Implement a new feature with structured tests and validation",
-      icon: Sparkles,
-    },
-    {
-      title: "Find & Fix Bugs",
-      prompt: "Inspect recent errors or issues and propose concrete fixes",
-      icon: Bug,
-    },
-    {
-      title: "Review & Optimize",
-      prompt: "Review codebase performance, accessibility, and clean code",
-      icon: Zap,
-    },
-  ];
-
   return (
     <div class="chat-welcome-hero">
       <div class="chat-welcome-hero-header">
@@ -49,51 +26,21 @@ export function ChatWelcomeHero(props: ChatWelcomeHeroProps) {
         </div>
         <h1 class="chat-welcome-hero-title">How can Kai help you today?</h1>
         <p class="chat-welcome-hero-desc">
-          Select a workspace context and pick a starter task below, or write your own instructions.
+          Select a workspace context below, or write your own instructions.
         </p>
       </div>
 
-      <div class="chat-welcome-workspace-wrapper">
-        <div class="chat-welcome-workspace-label">Workspace Context</div>
-        <div class="chat-workspace-empty">
-          <div class="chat-workspace-empty-inner">
-            <WorkspaceSelector
-              workingDir={props.workingDir}
-              defaultWorkingDir={props.defaultWorkingDir}
-              workspace={props.workspace}
-              selection={props.workspaceSelection}
-              locked={false}
-              disabled={props.conversationBusy}
-              onSelectionChange={props.onWorkspaceSelectionChange}
-            />
-          </div>
-        </div>
-      </div>
-
-      <div class="chat-welcome-starters-section">
-        <div class="chat-welcome-starters-grid">
-          <For each={starterPrompts}>
-            {(card) => {
-              const Icon = card.icon;
-              return (
-                <button
-                  type="button"
-                  class="chat-welcome-card"
-                  onClick={() => props.onSelectPrompt?.(card.prompt)}
-                  title={card.prompt}
-                  aria-label={`${card.title}: ${card.prompt}`}
-                >
-                  <div class="chat-welcome-card-header">
-                    <span class="chat-welcome-card-icon">
-                      <Icon size={18} />
-                    </span>
-                    <span class="chat-welcome-card-title">{card.title}</span>
-                  </div>
-                  <p class="chat-welcome-card-prompt">{card.prompt}</p>
-                </button>
-              );
-            }}
-          </For>
+      <div class="chat-workspace-empty">
+        <div class="chat-workspace-empty-inner">
+          <WorkspaceSelector
+            workingDir={props.workingDir}
+            defaultWorkingDir={props.defaultWorkingDir}
+            workspace={props.workspace}
+            selection={props.workspaceSelection}
+            locked={false}
+            disabled={props.conversationBusy}
+            onSelectionChange={props.onWorkspaceSelectionChange}
+          />
         </div>
       </div>
     </div>

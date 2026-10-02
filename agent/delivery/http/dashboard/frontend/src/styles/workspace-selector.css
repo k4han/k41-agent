@@ -57,7 +57,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .workspace-tabs-list {
@@ -68,6 +68,15 @@
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: 8px;
+  order: 1;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.workspace-tabs-list::-webkit-scrollbar {
+  display: none;
 }
 
 .workspace-tab-btn {
@@ -84,6 +93,7 @@
   cursor: pointer;
   transition: all 0.15s ease;
   white-space: nowrap;
+  flex: 0 0 auto;
 }
 
 .workspace-tab-btn:hover:not(:disabled) {
@@ -108,6 +118,8 @@
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
+  order: 2;
+  margin-left: auto;
 }
 
 .workspace-backend-label {
@@ -849,22 +861,26 @@
 
 @media (max-width: 640px) {
   .workspace-nav-bar {
-    flex-direction: column;
-    align-items: stretch;
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: nowrap;
   }
 
   .workspace-backend-control {
-    width: 100%;
+    width: auto;
+    flex-shrink: 0;
   }
 
   .workspace-backend-control .select-control {
-    flex: 1;
-    min-width: 0;
+    flex: none;
+    min-width: 120px;
   }
 
   .workspace-tabs-list {
-    display: flex;
-    width: 100%;
+    display: inline-flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    width: auto;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
