@@ -12,6 +12,7 @@ from agent.modules.providers.openai_compatible.factory import OpenAICompatibleFa
 from agent.modules.providers.provider import ProviderConfig, ProviderType
 from agent.modules.providers.repository import ConfigProviderRepository
 from agent.modules.providers.service import ProviderService
+from agent.modules.providers.internal_loader import load_internal_providers
 from agent.modules.providers.resolve_chat_model import (
     get_default_llm_settings,
     resolve_chat_model,
@@ -129,6 +130,7 @@ __all__ = [
     "resolve_chat_model_info",
     "ensure_catalog_available",
     "load_providers_catalog",
+    "load_internal_providers",
     "get_provider_catalog_entry",
     "register_provider_catalog_entry",
     "update_catalog_from_url",
