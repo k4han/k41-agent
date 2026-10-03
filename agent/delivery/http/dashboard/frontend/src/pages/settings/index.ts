@@ -4,6 +4,7 @@ export { BackendsPage } from "./BackendsPage";
 export { ChannelsPage } from "./ChannelsPage";
 export { ConnectionsPage } from "./ConnectionsPage";
 export { ConfigPage } from "./ConfigPage";
+export { DecisionsPage } from "./DecisionsPage";
 export { PromptVariablesPage } from "./PromptVariablesPage";
 export { ProvidersPage } from "./ProvidersPage";
 export { SecurityPage } from "./SecurityPage";

@@ -237,7 +237,7 @@ class TestFilesystemAgentRepository:
     def test_load_from_directory(self, agents_dir):
         repo = FilesystemAgentRepository(agents_dir)
         agents = repo.load()
-        assert len(agents) == 7
+        assert len(agents) == 8
         assert "researcher" in agents
         assert "coder" in agents
         assert "default" in agents
@@ -245,6 +245,7 @@ class TestFilesystemAgentRepository:
         assert "conversation-title" in agents
         assert "github-issue-fixer" in agents
         assert "channel-agent" in agents
+        assert "router" in agents
         assert agents["researcher"].graph_type == "react_agent"
         assert agents["default"].name == "default"
 
@@ -252,28 +253,30 @@ class TestFilesystemAgentRepository:
         d = tempfile.mkdtemp()
         repo = FilesystemAgentRepository(d)
         agents = repo.load()
-        assert len(agents) == 5
+        assert len(agents) == 6
         assert "default" in agents
         assert "conversation-title" in agents
         assert "github-issue-fixer" in agents
         assert "channel-agent" in agents
+        assert "router" in agents
         assert agents["default"].display_name == "kaka"
         os.rmdir(d)
 
     def test_load_nonexistent_directory(self):
         repo = FilesystemAgentRepository("/nonexistent/path/12345")
         agents = repo.load()
-        assert len(agents) == 5
+        assert len(agents) == 6
         assert "default" in agents
         assert "conversation-title" in agents
         assert "github-issue-fixer" in agents
         assert "channel-agent" in agents
+        assert "router" in agents
 
     def test_reload(self, agents_dir):
         repo = FilesystemAgentRepository(agents_dir)
         repo.load()
         agents2 = repo.reload()
-        assert len(agents2) == 7
+        assert len(agents2) == 8
 
 
 # --- service tests ---
@@ -313,6 +316,7 @@ class TestAgentCatalogService:
             "conversation-title",
             "github-issue-fixer",
             "channel-agent",
+            "router",
         }
 
     def test_get_callable_agents_none_sub_agents(self):
@@ -352,4 +356,4 @@ class TestAgentCatalogService:
 
     def test_reload(self):
         agents = self.service.reload_agents()
-        assert len(agents) == 7
+        assert len(agents) == 8

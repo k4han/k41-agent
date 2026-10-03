@@ -15,6 +15,7 @@ import {
   Menu,
   Network,
   Palette,
+  Route,
   Search,
   ServerCog,
   Users,
@@ -64,6 +65,7 @@ const settingsNavGroups: SettingsNavGroup[] = [
     label: "Intelligence",
     items: [
       { href: "/settings/providers", label: "Providers", icon: () => <Workflow size={15} />, description: "LLM providers & models", keywords: "llm provider model openai anthropic" },
+      { href: "/settings/decisions", label: "Decisions & Routing", icon: () => <Route size={15} />, description: "Clef-flash & routing", keywords: "decision routing clef cloudflare model strategy cascade" },
       { href: "/settings/tools", label: "Tools", icon: () => <Wrench size={15} />, description: "Global tool config", keywords: "tool api key search image web config" },
       { href: "/settings/agents", label: "Agents", icon: () => <Users size={15} />, description: "Agent profiles", keywords: "agent persona" },
       { href: "/settings/skills", label: "Skills", icon: () => <BookOpen size={15} />, description: "Reusable skills", keywords: "skill repository" },

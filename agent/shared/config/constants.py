@@ -153,6 +153,9 @@ RUNTIME_KEY_PATTERNS = [
     r"^database\.url$",
     rf"^{re.escape(DISPLAY_TIMEZONE_CONFIG_KEY)}$",
     r"^recursion_limit$",
+    r"^decision\.(model|timeout|max_retries)$",
+    r"^decision\.cloudflare\.(account_id|api_token|base_url)$",
+    r"^decision\.router\.(mode|threshold|log_telemetry)$",
 ]
 
 DATABASE_RUNTIME_KEY_PATTERNS = [
@@ -178,6 +181,9 @@ DATABASE_RUNTIME_KEY_PATTERNS = [
     rf"^{re.escape(REPOSITORY_SKILLS_DIR_KEY)}$",
     rf"^{re.escape(DISPLAY_TIMEZONE_CONFIG_KEY)}$",
     r"^recursion_limit$",
+    r"^decision\.(model|timeout|max_retries)$",
+    r"^decision\.cloudflare\.(account_id|api_token|base_url)$",
+    r"^decision\.router\.(mode|threshold|log_telemetry)$",
 ]
 
 SENSITIVE_RUNTIME_KEY_PATTERNS = [
@@ -191,6 +197,7 @@ SENSITIVE_RUNTIME_KEY_PATTERNS = [
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.headers\.[A-Za-z0-9_-]+$",
     r"^workspace\.daytona\.api_key$",
     r"^workspace\.modal\.(token_id|token_secret)$",
+    r"^decision\.cloudflare\.api_token$",
 ]
 
 
@@ -294,6 +301,15 @@ def _expand_runtime_keys() -> set[str]:
     keys.add("recursion_limit")
     keys.add("chat.stream_thinking")
     keys.add("google_calendar.enabled")
+    keys.add("decision.router.mode")
+    keys.add("decision.router.threshold")
+    keys.add("decision.router.log_telemetry")
+    keys.add("decision.model")
+    keys.add("decision.timeout")
+    keys.add("decision.max_retries")
+    keys.add("decision.cloudflare.account_id")
+    keys.add("decision.cloudflare.api_token")
+    keys.add("decision.cloudflare.base_url")
     return keys
 
 
@@ -376,6 +392,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "recursion_limit": 100,
     "tray.enabled": True,
     "tray.autostart": False,
+    # Decision model configuration
+    "decision.router.mode": "cascade",
+    "decision.router.threshold": 0.75,
+    "decision.router.log_telemetry": True,
+    "decision.model": "@cf/cloudflare/clef-flash",
+    "decision.timeout": 5.0,
+    "decision.max_retries": 2,
+    "decision.cloudflare.account_id": "",
+    "decision.cloudflare.api_token": "",
+    "decision.cloudflare.base_url": "https://api.cloudflare.com/client/v4",
 }
 
 
@@ -867,6 +893,71 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         ),
         "category": "preferences",
         "label": "Stream Thinking to UI",
+    },
+    # Decision settings
+    "decision.router.mode": {
+        "type": "select",
+        "options": ["llm_only", "clef_only", "shadow", "cascade"],
+        "description": "Agent routing strategy mode using Clef-flash and LLM.",
+        "category": "decision",
+        "label": "Router Decision Strategy",
+    },
+    "decision.router.threshold": {
+        "type": "number",
+        "min": 0.0,
+        "max": 1.0,
+        "step": 0.05,
+        "description": "Confidence threshold to accept Clef fast-path routing.",
+        "category": "decision",
+        "label": "Cascade Confidence Threshold",
+    },
+    "decision.cloudflare.account_id": {
+        "type": "text",
+        "description": "Cloudflare account ID for Workers AI. Falls back to CLOUDFLARE_ACCOUNT_ID env.",
+        "category": "decision",
+        "label": "Cloudflare Account ID",
+    },
+    "decision.cloudflare.api_token": {
+        "type": "password",
+        "description": "Cloudflare API token for Workers AI. Falls back to CLOUDFLARE_API_TOKEN env.",
+        "category": "decision",
+        "label": "Cloudflare API Token",
+    },
+    "decision.cloudflare.base_url": {
+        "type": "text",
+        "description": "Cloudflare API base URL for Workers AI.",
+        "category": "decision",
+        "label": "Cloudflare Base URL",
+    },
+    "decision.model": {
+        "type": "text",
+        "description": "Decision model name on Cloudflare Workers AI.",
+        "category": "decision",
+        "label": "Decision Model",
+    },
+    "decision.timeout": {
+        "type": "number",
+        "min": 0.5,
+        "max": 60.0,
+        "step": 0.5,
+        "description": "Timeout in seconds for decision model API requests.",
+        "category": "decision",
+        "label": "Decision Timeout (s)",
+    },
+    "decision.max_retries": {
+        "type": "number",
+        "min": 0,
+        "max": 10,
+        "step": 1,
+        "description": "Maximum retry attempts for transient API failures or rate limits.",
+        "category": "decision",
+        "label": "Decision Max Retries",
+    },
+    "decision.router.log_telemetry": {
+        "type": "boolean",
+        "description": "Log detailed decision routing latency, confidence, and agreement telemetry.",
+        "category": "decision",
+        "label": "Log Routing Telemetry",
     },
 }
 

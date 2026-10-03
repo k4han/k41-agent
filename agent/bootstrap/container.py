@@ -200,6 +200,7 @@ class AppContainer:
     _scheduler: Any = field(default=None, repr=False)
     _scheduler_sync_engine: Any = field(default=None, repr=False)
     _provider_service: Any = field(default=None, repr=False)
+    _decision_service: Any = field(default=None, repr=False)
     _persistence_ready: bool = field(default=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -556,6 +557,17 @@ class AppContainer:
             load_internal_providers(service, container=self)
             self._provider_service = service
         return self._provider_service
+
+    @property
+    @_locked_lazy
+    def decision_service(self) -> Any:
+        """Lazily owned DecisionService scoped to this container."""
+        if self._decision_service is None:
+            from agent.modules.decisions import DecisionService, load_decision_settings
+
+            settings = load_decision_settings(self.config_service)
+            self._decision_service = DecisionService(settings=settings)
+        return self._decision_service
 
     @property
     def async_engine(self) -> Any:

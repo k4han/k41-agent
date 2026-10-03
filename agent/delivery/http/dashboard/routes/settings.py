@@ -66,6 +66,25 @@ async def get_dashboard_tools_settings(request: Request) -> dict[str, Any]:
     }
 
 
+@router.get("/dashboard-api/decisions")
+async def get_dashboard_decisions_settings(request: Request) -> dict[str, Any]:
+    """Decision model and routing strategy settings."""
+    service = get_request_config_service(request)
+    settings_raw, settings_sources_raw = service.get_settings_overview_and_sources()
+    settings = {key: info for key, info in settings_raw.items() if key.startswith("decision.")}
+    settings_sources = {
+        key: info for key, info in settings_sources_raw.items() if key.startswith("decision.")
+    }
+    return {
+        "active_nav": "decisions",
+        "page_title": "Decisions & Routing",
+        "page_subtitle": "Configure Cloudflare Clef-flash decision model and agent routing strategies.",
+        "settings": settings,
+        "by_category": group_settings_by_category(settings),
+        "settings_sources": settings_sources,
+    }
+
+
 class UpdateSettingBody(BaseModel):
     """Request body for updating a single setting."""
 

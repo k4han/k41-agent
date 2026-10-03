@@ -68,6 +68,11 @@ User default prompt.
     assert cards["channel-agent"].source == "builtin"
     assert cards["channel-agent"].editable is False
     assert cards["channel-agent"].hidden is False
+    assert cards["router"].source == "builtin"
+    assert cards["router"].editable is False
+    assert cards["router"].hidden is False
+    assert cards["router"].graph_type == "router"
+    assert cards["router"].sub_agents == ["default", "channel-agent", "github-issue-fixer"]
 
 
 def test_agent_card_create_update_delete_preserves_sub_agent_semantics(
@@ -158,6 +163,25 @@ def test_clone_hidden_builtin_agent_preserves_hidden_flag(tmp_path: Path) -> Non
     parsed = parse_agent_file(Path(cloned.path))
     assert parsed is not None
     assert parsed.hidden is True
+
+
+def test_clone_builtin_router_agent_preserves_router_contract(tmp_path: Path) -> None:
+    service, _ = _make_service(tmp_path / "agents")
+
+    cloned = service.clone_builtin_agent("router")
+
+    assert cloned.source == "user"
+    assert cloned.overrides_builtin is True
+    assert cloned.graph_type == "router"
+    assert Path(cloned.path).name == "router.md"
+
+    from agent.modules.agents.parser import parse_agent_file
+
+    parsed = parse_agent_file(Path(cloned.path))
+    assert parsed is not None
+    assert parsed.graph_type == "router"
+    assert "{agent_options}" in parsed.system_prompt
+    assert "{user_input}" in parsed.system_prompt
 
 
 @pytest.mark.parametrize(
