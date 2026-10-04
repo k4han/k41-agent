@@ -20,7 +20,6 @@ from agent.modules.tools.result import ToolError, ToolErrorCode
 
 logger = logging.getLogger(__name__)
 
-MAX_DIFF_LENGTH = 100_000
 
 
 class GitHubIssuePullRequestsInput(BaseModel):
@@ -225,8 +224,6 @@ async def github_get_pull_request_diff(
             f"GitHub API request failed: {exc}",
         ) from exc
 
-    if len(diff) > MAX_DIFF_LENGTH:
-        diff = diff[:MAX_DIFF_LENGTH] + "\n\n[... diff truncated]"
     return f"Diff for PR #{pull_request_number} in {full_name}:\n\n{diff}"
 
 

@@ -623,6 +623,8 @@ class AppContainer:
             migrate_google_calendar_tables(database_url)
             await prune_usage_events()
             await self.initialize_checkpointer()
+            from agent.modules.tools import get_coding_service
+            get_coding_service(self)
         finally:
             restore_context_container(token)
         self._persistence_ready = True

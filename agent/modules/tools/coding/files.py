@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import codecs
 import base64
 import difflib
 import hashlib
@@ -18,7 +19,7 @@ from typing import Any
 
 from agent.modules.tools.coding.contracts import CodingError, InvocationContext, RuntimeResult as ToolResult
 from agent.modules.tools.coding.paths import PathPermissions
-from agent.modules.tools.coding.storage import MAX_MODEL_BYTES, MAX_MODEL_LINES
+from agent.modules.tools.coding.storage import MAX_MODEL_BYTES, MAX_MODEL_LINES, ensure_workspace_exclude
 from agent.modules.workspaces import IGNORED_DIR_NAMES, MAX_IMAGE_READ_BYTES
 from agent.modules.workspaces import compile_glob_pattern, match_glob_path, match_include_pattern
 from agent.shared.infrastructure.subprocess_utils import hidden_subprocess_kwargs
@@ -82,6 +83,35 @@ def read_page(path: Path, offset: int = 1, limit: int = MAX_MODEL_LINES) -> dict
             "next_offset": next_offset, "version": version, "line_truncated": line_truncated}
 
 
+def read_byte_page(path: Path, byte_offset: int, limit: int = MAX_MODEL_LINES - 2) -> dict[str, Any]:
+    """Read exact UTF-8 text without dropping the remainder of long lines."""
+    initial = path.stat()
+    if byte_offset > initial.st_size:
+        raise CodingError("invalid_input", "Byte offset is beyond the end of the file.")
+    version = file_version(path)
+    with path.open("rb") as handle:
+        handle.seek(byte_offset)
+        raw = handle.read(MAX_MODEL_BYTES - 1024)
+    if raw and raw[0] & 0xC0 == 0x80:
+        raise CodingError("invalid_input", "Use next_byte_offset on a UTF-8 boundary.")
+    if b"\x00" in raw:
+        raise CodingError("invalid_input", "Binary files cannot be read as text.")
+    # Ignore only an incomplete code point at the end, never invalid content.
+    decoder = codecs.getincrementaldecoder("utf-8")("strict")
+    try:
+        text = decoder.decode(raw, final=byte_offset + len(raw) >= initial.st_size)
+    except UnicodeDecodeError as exc:
+        raise CodingError("invalid_input", "File is not valid UTF-8 text.") from exc
+    text = "".join(text.splitlines(keepends=True)[:min(limit, MAX_MODEL_LINES - 2)])
+    consumed = len(text.encode("utf-8"))
+    current = path.stat()
+    if (initial.st_mtime_ns, initial.st_size) != (current.st_mtime_ns, current.st_size):
+        raise CodingError("stale_content", "File changed while it was being read. Read it again.")
+    return {"path": str(path), "content": text, "byte_offset": byte_offset,
+            "next_byte_offset": byte_offset + consumed if byte_offset + consumed < current.st_size else None,
+            "version": version, "line_truncated": False}
+
+
 class FileService:
     def __init__(self, permissions: PathPermissions, *, on_change=None) -> None:
         self.on_change = on_change
@@ -116,9 +146,16 @@ class FileService:
                     {"type": "text", "text": f"Image {path.name} ({mime})"},
                     {"type": "image", "base64": base64.b64encode(raw).decode("ascii"), "mime_type": mime},
                 ])
-            page = read_page(path, max(values.get("offset", 1), 1), min(values.get("limit") or MAX_MODEL_LINES, MAX_MODEL_LINES - 1))
+            limit = min(values.get("limit") or MAX_MODEL_LINES, MAX_MODEL_LINES - 1)
+            if values.get("byte_offset") is not None:
+                page = read_byte_page(path, values["byte_offset"], limit)
+            else:
+                page = read_page(path, max(values.get("offset", 1), 1), limit)
             content = page.pop("content")
-            content += f"\n[version={page['version']}; next_offset={page['next_offset']}]"
+            cursor_key = "next_byte_offset" if "next_byte_offset" in page else "next_offset"
+            content += f"\n[version={page['version']}; {cursor_key}={page[cursor_key]}]"
+            if page["line_truncated"]:
+                content += "\n[Long line truncated; read with byte_offset=0 to recover exact text.]"
             return ToolResult(data=page, content=content, output_truncated=page["line_truncated"],
                               warnings=["Some physical lines exceed the page budget."] if page["line_truncated"] else [])
         if name == "list_dir":
@@ -190,6 +227,9 @@ class FileService:
             raise CodingError("stale_content", "File changed before mutation; no overwrite was performed.")
         if content == current:
             raise CodingError("invalid_input", "No changes to apply.")
+        workspace = Path(context.workspace).resolve()
+        if path.is_relative_to(workspace) and path.relative_to(workspace).parts[0] == ".k41-agent":
+            ensure_workspace_exclude(workspace)
         # Re-resolve before committing to detect directory/symlink replacement.
         if path.resolve() != path:
             raise CodingError("stale_content", "Target path changed before mutation.")

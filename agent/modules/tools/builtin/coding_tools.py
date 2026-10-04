@@ -21,7 +21,6 @@ bash = registered("bash", ToolCategory.SHELL, True)
 read_process_output = registered("read_process_output", ToolCategory.SHELL)
 write_process_input = registered("write_process_input", ToolCategory.SHELL, True)
 stop_process = registered("stop_process", ToolCategory.SHELL, True)
-read_tool_output = registered("read_tool_output", ToolCategory.FILE)
 
 read = registered("read", ToolCategory.FILE)
 list_dir = registered("list_dir", ToolCategory.FILE)

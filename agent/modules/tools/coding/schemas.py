@@ -31,6 +31,7 @@ class ReadInput(Input):
     file_path: str
     offset: int = Field(default=1, ge=1)
     limit: int = Field(default=2000, ge=1, le=2000)
+    byte_offset: int | None = Field(default=None, ge=0, description="Read an exact UTF-8 byte page instead of a line page. Continue with next_byte_offset; useful for very long lines.")
 
 
 class ListInput(Input):
@@ -68,9 +69,3 @@ class GrepInput(Input):
     case_insensitive: bool = False
     fixed_strings: bool = False
     max_results: int = Field(default=100, ge=1, le=1000)
-
-
-class OutputReadInput(Input):
-    output_ref: str
-    offset: int = Field(default=1, ge=1)
-    limit: int = Field(default=2000, ge=1, le=2000)

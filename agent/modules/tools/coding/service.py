@@ -36,6 +36,7 @@ class CodingService(CodingEngine):
         self.processes.remote = self.remote
         self.invocation_locks: dict[str, asyncio.Lock] = {}
         self.storage.cleanup()
+        self.storage.start_cleanup()
 
     async def prepare(self, name: str, values: dict[str, Any], context: InvocationContext) -> None:
         if self._uses_remote(name, values, context):
@@ -52,23 +53,20 @@ class CodingService(CodingEngine):
     def _uses_remote(self, name: str, values: dict[str, Any], context: InvocationContext) -> bool:
         if context.backend == "local":
             return False
-        if name == "read_tool_output":
-            try:
-                self.storage.output_path(context, values["output_ref"])
-                return False
-            except CodingError as exc:
-                if exc.code != "not_found":
-                    raise
         return True
 
     async def invoke(self, definition: ToolDefinition, args: dict[str, Any], context: InvocationContext) -> ToolResult:
         started = time.monotonic()
-        fingerprint = digest(json.dumps([definition.name, args], sort_keys=True, ensure_ascii=True))
+        fingerprint_args = {key: value for key, value in args.items()
+                            if not (definition.name == "read" and key == "byte_offset" and value is None)}
+        fingerprint = digest(json.dumps([definition.name, fingerprint_args], sort_keys=True, ensure_ascii=True))
         key = f"{context.owner}\0{context.message_id}\0{context.tool_call_id}" if context.tool_call_id else os.urandom(16).hex()
         lock = self.invocation_locks.setdefault(key, asyncio.Lock())
         journal_started = False
         result = None
         try:
+            self.storage.owner_dir(context)
+            self.storage.start_cleanup()
             parsed = definition.input_schema.model_validate(args)
             values = parsed.model_dump()
             async with lock:
@@ -78,11 +76,13 @@ class CodingService(CodingEngine):
                     path = self.storage.journal_path(context)
                     if path.exists():
                         result = self.storage.begin(context, fingerprint)
+                        result = await self.restore_output_paths(result, context)
                         result = self.model_result(definition.name, result, context)
                         return result
                 await self.prepare(definition.name, values, context)
                 cached = self.storage.begin(context, fingerprint)
                 if cached is not None:
+                    cached = await self.restore_output_paths(cached, context)
                     result = self.model_result(definition.name, cached, context)
                     return result
                 journal_started = True
@@ -102,6 +102,7 @@ class CodingService(CodingEngine):
                     result = ToolResult(status="error", error=ResultError(code="unexpected", message="Tool execution failed unexpectedly."),
                                         content="[error] unexpected: Tool execution failed unexpectedly.")
                 result = self.model_result(definition.name, result, context)
+                result = await self.restore_output_paths(result, context)
                 result = self.storage.bound(result, context, tail=definition.name in PROCESS_TOOLS)
                 self.storage.complete(context, fingerprint, result)
                 return result
@@ -136,6 +137,32 @@ class CodingService(CodingEngine):
             result.content = content
             result.output_truncated = False
             result = self.storage.bound(result, context)
+        return result
+
+    async def restore_output_paths(self, result: ToolResult, context: InvocationContext) -> ToolResult:
+        if result.output_paths or not result.output_refs:
+            return result
+        from agent.modules.tools.coding.storage import output_relative_path, bounded_text
+        import re
+        for reference in result.output_refs:
+            try:
+                if context.backend == "local":
+                    await asyncio.to_thread(self.storage.output_path, context, reference)
+                    result.output_paths.append(output_relative_path(context, reference))
+                else:
+                    legacy = self.storage.owner_dir(context) / f"{reference}.output"
+                    from agent.modules.tools.coding.storage import RETENTION_SECONDS
+                    if legacy.is_file() and not legacy.is_symlink() and legacy.stat().st_mtime >= time.time() - RETENTION_SECONDS:
+                        content = await asyncio.to_thread(legacy.read_text, encoding="utf-8", errors="replace")
+                        result.output_paths.extend(await self.remote.migrate_outputs([reference], context, legacy_content=content))
+                    else:
+                        result.output_paths.extend(await self.remote.migrate_outputs([reference], context))
+            except (CodingError, OSError, ValueError):
+                continue
+        if result.output_paths and isinstance(result.content, str):
+            result.content = re.sub(r"read_tool_output output_ref=[a-f0-9]{32}", "read the retained output file", result.content)
+            notice = "\n[Retained output: " + "; ".join(f"read file_path={path} byte_offset=0" for path in result.output_paths) + "]"
+            result.content, _ = bounded_text(result.content + notice, notice)
         return result
 
     @staticmethod

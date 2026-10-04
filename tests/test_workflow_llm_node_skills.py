@@ -259,8 +259,9 @@ async def test_llm_node_prefers_runtime_allowed_tool_names_before_building_promp
         ),
     )
 
-    assert [tool.name for tool in captured["tools"]] == ["call_agent", "skill"]
-    assert [tool.name for tool in builder_calls["tools"]] == ["call_agent", "skill"]
+    assert [tool.name for tool in captured["tools"]] == ["call_agent", "skill", "read"]
+    assert [tool.name for tool in builder_calls["tools"]] == ["call_agent", "skill", "read"]
+    assert "retained tool output" in captured["tools"][-1].description
 
 
 @pytest.mark.asyncio

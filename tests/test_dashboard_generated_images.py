@@ -140,6 +140,7 @@ def test_storage_files_endpoint_serves_uploads_and_assets(
         derive_workspace_scope(workspace)
     ) / "uploads"
     upload_path = upload_dir / "report.pdf"
+    upload_dir.mkdir(parents=True, exist_ok=True)
     upload_path.write_bytes(b"%PDF-1.4 sample")
 
     async def fake_workspace_ref_for_thread(
@@ -164,6 +165,12 @@ def test_storage_files_endpoint_serves_uploads_and_assets(
     assert response.status_code == 200
     assert response.content == b"%PDF-1.4 sample"
     assert response.headers["content-type"].startswith("application/pdf")
+
+    legacy = upload_dir.parent / "assets" / "legacy.txt"
+    legacy.parent.mkdir()
+    legacy.write_bytes(b"legacy asset")
+    response = client.get("/dashboard-api/storage-files/assets/legacy.txt", params={"thread_id": "chat_user"})
+    assert response.status_code == 200 and response.content == b"legacy asset"
 
 
 def test_generated_image_endpoint_rejects_disallowed_extension(

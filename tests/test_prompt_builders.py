@@ -42,3 +42,21 @@ def test_workspace_storage_prompt_absent_when_no_tools_bound() -> None:
     prompt = _build([])
 
     assert prompt_builders.WORKSPACE_STORAGE_PROMPT not in prompt
+
+
+def test_workspace_storage_instructions_distinguish_projects_notes_and_output() -> None:
+    prompt = _build([SimpleNamespace(name="bash"), SimpleNamespace(name="read")])
+    assert "never as the project workspace" in prompt
+    assert "Keep shell workdir at the workspace" in prompt
+    assert "Do not create assets/ or memory/" in prompt
+    assert "next_byte_offset" in prompt and "seven days" in prompt
+    assert "read_tool_output" not in prompt
+
+
+def test_workspace_storage_instructions_provide_conversation_draft_directory() -> None:
+    prompt = prompt_builders.build_llm_system_prompt(
+        system_prompt_template="Base", working_dir="/workspace", agent_name="default",
+        tools=[SimpleNamespace(name="write")], catalog=SimpleNamespace(),
+        scratchpad_path=".k41-agent/scratchpad/conversation-key/",
+    )
+    assert "Your draft directory is .k41-agent/scratchpad/conversation-key/" in prompt

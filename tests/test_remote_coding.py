@@ -130,11 +130,15 @@ async def test_remote_process_stdin_cursor_output_ownership_and_cleanup(remote_c
     assert result.status == "running"
     process_id = result.data["process_id"]
     sent = await invoke(service, context, "write_process_input", process_id=process_id, text="hello\n", yield_time_ms=1000)
+    for _ in range(10):
+        if "hello" in sent.content:
+            break
+        sent = await invoke(service, context, "read_process_output", process_id=process_id, yield_time_ms=1000)
     assert "hello" in sent.content
     read = await invoke(service, context, "read_process_output", process_id=process_id)
     again = await invoke(service, context, "read_process_output", process_id=process_id)
     assert read.content == again.content and read.data["cursor"] == again.data["cursor"]
-    output = await invoke(service, context, "read_tool_output", output_ref=result.output_refs[0])
+    output = await invoke(service, context, "read", file_path=result.output_paths[0])
     assert "hello" in output.content
     foreign = await invoke(service, replace(context, thread_id="another"), "read_process_output", process_id=process_id)
     assert foreign.error.code == "not_found"

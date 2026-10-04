@@ -61,6 +61,7 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
     tools = ToolResolver().for_workspace(tools, workspace, agent_name)
 
     thread_id = get_thread_id(config)
+    from agent.modules.tools import conversation_key
     cache_key = build_system_prompt_cache_key(
         agent_name=agent_name,
         working_dir=working_dir,
@@ -91,15 +92,14 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
             catalog=catalog,
             prompt_variables=prompt_variables,
             skills_catalog_xml=skills_catalog_xml,
+            scratchpad_path=f".k41-agent/scratchpad/{conversation_key(thread_id or '')}/",
         )
         store_system_prompt(cache_key, system_prompt)
 
-    messages: list[BaseMessage] = normalize_messages_for_chat_model(
-        [
-            SystemMessage(content=system_prompt),
-            *state["messages"],
-        ]
-    )
+    from types import SimpleNamespace
+    from agent.modules.tools import migrate_history_outputs
+    history = await migrate_history_outputs(state["messages"], SimpleNamespace(context=ctx, config=config))
+    messages: list[BaseMessage] = normalize_messages_for_chat_model([SystemMessage(content=system_prompt), *history])
 
     resolved = get_resolved_chat_model(provider_name=provider, model=model)
     llm = resolved.model.bind_tools(tools)

@@ -46,7 +46,6 @@ tools:
   - read_process_output
   - write_process_input
   - stop_process
-  - read_tool_output
 ```
 
 Old `read_file`, `write_file`, `edit_file`, and `exec_command` allow-list
@@ -107,7 +106,7 @@ tool_permissions:
 ```
 
 Actions include `read`, `edit`, `glob`, `grep`, `shell`, `external_directory`,
-`read_tool_output`, `read_process_output`, `write_process_input`, and
+`read_process_output`, `write_process_input`, and
 `stop_process`. Default workspace reads/searches/writes and shell calls are
 allowed. Explicit external paths require approval. Relative traversal and
 symlink escapes are rejected. Mandatory destructive-command guards apply
@@ -155,13 +154,25 @@ their contiguous page. `output_truncated` describes omitted model content,
 independently of capture loss. Ordinary nonzero exits are reported in
 `exit_code`; timeout/cancellation produce structured errors.
 
-Artifacts default to `~/.k41-agent/coding-v2/<database-hash>/<owner-hash>`,
-outside repositories. An optional storage root still includes a database
-namespace. Opaque `output_ref` values can only be read in their owning
-workspace/thread through `read_tool_output(offset=1, limit=2000)`. Output files
-expire after seven days, with cleanup at startup and periodically when new
-outputs are created. Search excludes the output store even when a custom root
-is placed inside a workspace.
+Retained text lives in `.k41-agent/outputs/<thread-key>/<output-id>.txt` inside
+its workspace. Tool results expose `output_paths`; read them with the existing
+`read(file_path=..., offset=1, limit=2000)` tool. For JSON or other very long
+lines, use `byte_offset=0` and continue with `next_byte_offset`; byte pages
+preserve exact UTF-8 text, including newline sequences. `read_tool_output` is
+retired. Legacy references and journals remain decodable, and existing output
+files are migrated lazily when resuming history or replaying a completed call.
+
+Output expires after seven days. Cleanup runs at startup and every hour while
+the runtime is active, excluding running processes. Ownership records,
+invocation journals, and permission grants remain in the database-scoped
+application storage at `~/.k41-agent/coding-v2/<database-hash>/<owner-hash>`;
+`tools.storage_root` still configures that metadata location. Output retention
+also covers web and MCP text before checkpointing. Images, error status, and
+UI artifacts are preserved; paginated file tools retain their page semantics.
+Agents without project file tools get a reader limited to retained outputs.
+
+See [workspace storage](workspace-storage.md) for directory purposes and
+conversation-scoped scratchpad cleanup.
 
 Jobs survive chat turns. Stopping/deleting a conversation, deleting its
 temporary workspace, or closing the application stops jobs and releases

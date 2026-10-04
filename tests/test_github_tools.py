@@ -186,7 +186,7 @@ async def test_get_pull_request_diff_returns_diff(fake_client: FakeGitHubClient)
 
 
 @pytest.mark.asyncio
-async def test_get_pull_request_diff_truncates_large_diff(fake_client: FakeGitHubClient) -> None:
+async def test_get_pull_request_diff_preserves_text_for_shared_retention(fake_client: FakeGitHubClient) -> None:
     fake_client.diff = "a" * 200_000
 
     result = await _call(
@@ -195,8 +195,7 @@ async def test_get_pull_request_diff_truncates_large_diff(fake_client: FakeGitHu
         runtime=_make_runtime(),
     )
 
-    assert len(result) < 120_000
-    assert "[... diff truncated]" in result
+    assert fake_client.diff in result
 
 
 @pytest.mark.parametrize(

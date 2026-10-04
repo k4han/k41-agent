@@ -18,6 +18,15 @@ import posixpath
 logger = logging.getLogger(__name__)
 
 
+WORKSPACE_STORAGE_EXCLUDE_COMMAND = (
+    "if git rev-parse --git-dir >/dev/null 2>&1; then "
+    "k41_exclude=$(git rev-parse --git-path info/exclude); "
+    "mkdir -p \"$(dirname \"$k41_exclude\")\"; "
+    "grep -qxF '.k41-agent/' \"$k41_exclude\" 2>/dev/null || "
+    "printf '%s\\n' '.k41-agent/' >> \"$k41_exclude\"; fi"
+)
+
+
 def git_status_args() -> list[str]:
     """Return the standard ``git status`` arguments for porcelain output."""
     return [

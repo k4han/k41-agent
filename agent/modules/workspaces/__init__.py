@@ -36,6 +36,7 @@ from agent.modules.workspaces.search_utils import (
     match_include_pattern,
 )
 from agent.modules.workspaces.posix_utils import resolve_remote_path
+from agent.modules.workspaces.git_utils import WORKSPACE_STORAGE_EXCLUDE_COMMAND
 from agent.modules.workspaces.migrations import migrate_workspace_tables
 from agent.modules.workspaces.metadata_cache import invalidate_workspace_metadata_cache
 from agent.modules.workspaces.models import ThreadWorkspace
@@ -123,6 +124,7 @@ from agent.modules.workspaces.github_clone import (
 )
 
 __all__ = [
+    "WORKSPACE_STORAGE_EXCLUDE_COMMAND",
     "BUILTIN_WORKSPACE_BACKEND_DESCRIPTORS",
     "CommandResult",
     "DAYTONA_BACKEND",

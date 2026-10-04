@@ -13,7 +13,6 @@ tools:
   - "read_process_output"
   - "write_process_input"
   - "stop_process"
-  - "read_tool_output"
 context_trim_threshold: 50000
 ---
 

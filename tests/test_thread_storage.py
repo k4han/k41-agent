@@ -50,10 +50,8 @@ async def test_filesystem_tools_expose_workspace_storage_mount(
     root_listing = await list_dir_module.list_dir.coroutine(runtime=runtime, path="")
     mount_listing = await list_dir_module.list_dir.coroutine(runtime=runtime, path=".k41-agent")
 
-    assert ".k41-agent/" in root_listing
-    assert "generated-images/" in mount_listing
-    assert "assets/" in mount_listing
-    assert "memory/" in mount_listing
+    assert ".k41-agent/" not in root_listing
+    assert not (workspace / ".k41-agent").exists()
 
 
 @pytest.mark.asyncio
@@ -209,13 +207,14 @@ def test_dual_tier_sync_hydrate_and_sync_back(tmp_path: Path, monkeypatch: pytes
     assert ws_file.read_bytes() == b"excel_dummy_bytes"
 
     # Agent creates a new file in workspace
-    new_report = workspace / ".k41-agent" / "assets" / "report.pdf"
+    new_report = workspace / ".k41-agent" / "scratchpad" / "conversation" / "report.pdf"
+    new_report.parent.mkdir(parents=True)
     new_report.write_bytes(b"pdf_content")
 
     # Sync back to persistent storage
     thread_storage.sync_back_workspace_storage(workspace, workspace_key)
 
-    storage_report = storage_base / thread_storage.sanitize_workspace_key(workspace_key) / "assets" / "report.pdf"
+    storage_report = storage_base / thread_storage.sanitize_workspace_key(workspace_key) / "scratchpad" / "conversation" / "report.pdf"
     assert storage_report.exists()
     assert storage_report.read_bytes() == b"pdf_content"
 

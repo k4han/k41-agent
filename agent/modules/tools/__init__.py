@@ -299,3 +299,23 @@ from agent.modules.tools.coding.adapter import coding_message_for_model, invocat
 from agent.modules.tools.coding.service import get_coding_service
 from agent.modules.tools.coding.permissions import pending_permission_requests, permission_request_event
 from agent.modules.tools.coding.storage import bounded_text as bound_tool_text
+from agent.modules.tools.coding.storage import conversation_key
+from agent.modules.tools.runtime.thread_storage import clear_persistent_scratchpads
+from agent.modules.tools.runtime.output_retention import migrate_history_outputs, retain_tool_messages
+
+__all__ += ["conversation_key", "clear_persistent_scratchpads", "migrate_history_outputs", "retain_tool_messages"]
+
+
+async def clear_conversation_storage(thread_id: str) -> None:
+    """Stop writers before removing a conversation's scoped draft files."""
+    import asyncio
+    service = get_coding_service()
+    await service.processes.stop_thread(thread_id)
+    close_thread_shell_sessions(thread_id)
+    await service.remote.stop_thread(thread_id)
+    await asyncio.to_thread(service.storage.clear_scratchpads, thread_id)
+    await service.remote.clear_scratchpads(thread_id)
+    await asyncio.to_thread(clear_persistent_scratchpads, thread_id)
+
+
+__all__.append("clear_conversation_storage")

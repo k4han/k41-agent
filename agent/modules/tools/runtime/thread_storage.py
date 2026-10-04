@@ -9,10 +9,12 @@ import logging
 import os
 import re
 import shutil
+import shlex
 from pathlib import Path
 
 from agent.modules.tools.runtime.path_guard import resolve_safe_path
 from agent.modules.workspaces import (
+    WORKSPACE_STORAGE_EXCLUDE_COMMAND,
     UnsupportedWorkspaceCapabilityError,
     WorkspaceScope,
     WorkspaceFileIO,
@@ -22,7 +24,8 @@ logger = logging.getLogger(__name__)
 
 
 THREAD_STORAGE_MOUNT = ".k41-agent"
-THREAD_STORAGE_DIRS = ("generated-images", "assets", "memory", "uploads", "scratchpad")
+THREAD_STORAGE_DIRS = ("scratchpad", "outputs", "uploads", "generated-images")
+SYNC_STORAGE_DIRS = frozenset({"scratchpad", "uploads", "generated-images"})
 THREAD_STORAGE_BASE_DIR = Path.home() / ".k41-agent" / "workspace-storage"
 GENERATED_IMAGES_DIR = Path.home() / ".k41-agent" / "generated-images"
 _SANDBOX_BACKENDS = frozenset({"daytona", "modal"})
@@ -91,39 +94,41 @@ def thread_storage_root(thread_id: str) -> Path:
 
 def workspace_storage_root(workspace_scope: WorkspaceScope | str) -> Path:
     key = sanitize_workspace_key(workspace_storage_key(workspace_scope))
-    cached = _workspace_storage_root_cache.get(key)
+    cache_key = str(THREAD_STORAGE_BASE_DIR / key)
+    cached = _workspace_storage_root_cache.get(cache_key)
     if cached is not None:
         return cached
     root = THREAD_STORAGE_BASE_DIR / key
-    _workspace_storage_root_cache[key] = root
+    _workspace_storage_root_cache[cache_key] = root
     return root
 
 
 def ensure_thread_storage_root(thread_id: str) -> Path:
     root = thread_storage_root(thread_id)
-    key = root.name
+    key = str(root)
     if key in _thread_storage_ready:
         return root
-    for name in THREAD_STORAGE_DIRS:
-        (root / name).mkdir(parents=True, exist_ok=True)
+    root.mkdir(parents=True, exist_ok=True)
     _thread_storage_ready.add(key)
     return root
 
 
 def ensure_workspace_storage_root(workspace_scope: WorkspaceScope | str) -> Path:
     root = workspace_storage_root(workspace_scope)
-    key = root.name
+    key = str(root)
     if key in _workspace_storage_ready:
         return root
-    for name in THREAD_STORAGE_DIRS:
-        (root / name).mkdir(parents=True, exist_ok=True)
+    root.mkdir(parents=True, exist_ok=True)
     _workspace_storage_ready.add(key)
     return root
 
 
 def generated_images_dir_for_thread(thread_id: str, *, create: bool = True) -> Path:
     root = ensure_thread_storage_root(thread_id) if create else thread_storage_root(thread_id)
-    return root / "generated-images"
+    target = root / "generated-images"
+    if create:
+        target.mkdir(parents=True, exist_ok=True)
+    return target
 
 
 def generated_images_dir_for_workspace(
@@ -136,7 +141,10 @@ def generated_images_dir_for_workspace(
         if create
         else workspace_storage_root(workspace_scope)
     )
-    return root / "generated-images"
+    target = root / "generated-images"
+    if create:
+        target.mkdir(parents=True, exist_ok=True)
+    return target
 
 
 def virtual_generated_image_path(filename: str) -> str:
@@ -170,36 +178,47 @@ def resolve_workspace_storage_path(
 
 def ensure_git_exclude(workspace_root: Path | str, pattern: str = f"{THREAD_STORAGE_MOUNT}/") -> None:
     """Ensure a pattern is excluded in .git/info/exclude if .git exists."""
-    try:
-        git_dir = Path(workspace_root) / ".git"
-        if git_dir.is_dir():
-            info_dir = git_dir / "info"
-            info_dir.mkdir(parents=True, exist_ok=True)
-            exclude_file = info_dir / "exclude"
-            existing = ""
-            if exclude_file.exists():
-                existing = exclude_file.read_text(encoding="utf-8", errors="replace")
-            normalized_pattern = pattern.strip()
-            if normalized_pattern not in existing.splitlines():
-                with open(exclude_file, "a", encoding="utf-8") as file_handle:
-                    if existing and not existing.endswith("\n"):
-                        file_handle.write("\n")
-                    file_handle.write(f"{normalized_pattern}\n")
-    except OSError:
-        pass
+    from agent.modules.tools.coding.storage import ensure_workspace_exclude
+
+    if pattern == f"{THREAD_STORAGE_MOUNT}/":
+        ensure_workspace_exclude(Path(workspace_root))
+
 
 
 def ensure_physical_workspace_storage(workspace_root: Path | str) -> Path:
-    """Ensure physical .k41-agent directory exists inside workspace and is git-excluded."""
+    """Return the storage path and register Git exclusion without precreating directories."""
     root = Path(workspace_root)
     key = str(root.resolve())
     target = root / THREAD_STORAGE_MOUNT
     if key not in _physical_storage_ready:
-        for name in THREAD_STORAGE_DIRS:
-            (target / name).mkdir(parents=True, exist_ok=True)
         ensure_git_exclude(root, f"{THREAD_STORAGE_MOUNT}/")
         _physical_storage_ready.add(key)
     return target
+
+
+def managed_storage_walk(root: Path):
+    """Walk recognized persistent categories only, without following symlinks."""
+    if not root.is_dir() or root.is_symlink():
+        return
+    for category in sorted(SYNC_STORAGE_DIRS):
+        base = root / category
+        if not base.is_dir() or base.is_symlink():
+            continue
+        for directory, dirs, files in os.walk(base):
+            dirs[:] = [name for name in dirs if not (Path(directory) / name).is_symlink()]
+            yield directory, dirs, [name for name in files if not (Path(directory) / name).is_symlink()]
+
+
+def clear_persistent_scratchpads(thread_id: str) -> None:
+    """Remove only this conversation's managed notes from host mirrors."""
+    from agent.modules.tools.coding.storage import conversation_key
+    if not THREAD_STORAGE_BASE_DIR.is_dir():
+        return
+    for root in THREAD_STORAGE_BASE_DIR.iterdir():
+        target = root / "scratchpad" / conversation_key(thread_id)
+        if (root.is_dir() and not root.is_symlink() and target.is_dir() and not target.is_symlink()
+                and target.resolve().is_relative_to(root.resolve())):
+            shutil.rmtree(target)
 
 
 def hydrate_workspace_storage(
@@ -211,13 +230,13 @@ def hydrate_workspace_storage(
     target_root = ensure_physical_workspace_storage(workspace_root)
     if not source_root.is_dir():
         return
-    for current_root, _dirs, files in os.walk(source_root):
+    for current_root, _dirs, files in managed_storage_walk(source_root):
         rel_dir = os.path.relpath(current_root, source_root)
         dest_dir = target_root if rel_dir == "." else target_root / rel_dir
-        dest_dir.mkdir(parents=True, exist_ok=True)
         for filename in files:
             src_file = Path(current_root) / filename
             dest_file = dest_dir / filename
+            dest_dir.mkdir(parents=True, exist_ok=True)
             if not dest_file.exists() or src_file.stat().st_mtime > dest_file.stat().st_mtime:
                 try:
                     shutil.copy2(src_file, dest_file)
@@ -234,13 +253,13 @@ def sync_back_workspace_storage(
     if not source_root.is_dir():
         return
     dest_root = ensure_workspace_storage_root(workspace_scope)
-    for current_root, _dirs, files in os.walk(source_root):
+    for current_root, _dirs, files in managed_storage_walk(source_root):
         rel_dir = os.path.relpath(current_root, source_root)
         target_dir = dest_root if rel_dir == "." else dest_root / rel_dir
-        target_dir.mkdir(parents=True, exist_ok=True)
         for filename in files:
             src_file = Path(current_root) / filename
             target_file = target_dir / filename
+            target_dir.mkdir(parents=True, exist_ok=True)
             if not target_file.exists() or src_file.stat().st_mtime > target_file.stat().st_mtime:
                 try:
                     shutil.copy2(src_file, target_file)
@@ -308,7 +327,7 @@ async def ensure_sandbox_workspace_storage(
     *,
     thread_id: str | None = None,
 ) -> None:
-    """Ensure ``.k41-agent`` directories exist inside a sandbox workspace.
+    """Register internal storage Git exclusion inside a sandbox workspace.
 
     For ``daytona``/``modal`` backends the physical directory lives inside the
     remote sandbox and must be created via the workspace file I/O backend. This
@@ -324,24 +343,12 @@ async def ensure_sandbox_workspace_storage(
         if ref.backend not in _SANDBOX_BACKENDS:
             return
         file_io = await get_workspace_file_io(ref, thread_id=thread_id)
-        for dirname in THREAD_STORAGE_DIRS:
-            rel = f"{THREAD_STORAGE_MOUNT}/{dirname}"
-            try:
-                # ``execute("mkdir -p ...")`` works for both modal and daytona
-                # backends and creates the directory inside the sandbox root.
-                executor = getattr(file_io, "execute", None)
-                if callable(executor):
-                    await executor(f"mkdir -p {rel}", timeout=10)
-                else:
-                    await file_io.write_text(f"{rel}/.keep", "", append=False)
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("Failed to ensure sandbox storage dir %s: %s", rel, exc)
-        # Ensure git exclude for the mount if the sandbox is a git repo.
+        # Do not create an internal tree, or a .git tree in a non-repository.
         try:
             executor = getattr(file_io, "execute", None)
             if callable(executor):
                 await executor(
-                    "mkdir -p .git/info && grep -qF '.k41-agent/' .git/info/exclude 2>/dev/null || echo '.k41-agent/' >> .git/info/exclude",
+                    WORKSPACE_STORAGE_EXCLUDE_COMMAND,
                     timeout=10,
                 )
         except Exception as exc:  # noqa: BLE001
@@ -377,6 +384,10 @@ async def ingest_attachment_file_to_sandbox(
             return False
         file_io = await get_workspace_file_io(ref, thread_id=thread_id)
         raw_name = str(filename).replace("\\", "/").lstrip("/")
+        if raw_name.startswith(f"{THREAD_STORAGE_MOUNT}/"):
+            raw_name = raw_name[len(THREAD_STORAGE_MOUNT) + 1:]
+        if any(part in {"..", "."} for part in raw_name.split("/")):
+            raise ValueError("Attachment path escapes workspace storage.")
         if "/" in raw_name:
             # Preserve sub-directory (e.g. generated-images/foo.png)
             rel = f"{THREAD_STORAGE_MOUNT}/{raw_name}"
@@ -390,7 +401,7 @@ async def ingest_attachment_file_to_sandbox(
         try:
             executor = getattr(file_io, "execute", None)
             if callable(executor):
-                await executor(f"mkdir -p {parent_rel}", timeout=10)
+                await executor(f"mkdir -p {shlex.quote(parent_rel)}", timeout=10)
         except Exception:
             pass
 
@@ -431,12 +442,11 @@ async def ingest_attachment_file_to_sandbox(
             executor = getattr(file_io, "execute", None)
             if callable(executor):
                 await executor(
-                    f"base64 -d {tmp_rel} > {rel} && rm -f {tmp_rel}",
+                    f"base64 -d {shlex.quote(tmp_rel)} > {shlex.quote(rel)} && rm -f {shlex.quote(tmp_rel)}",
                     timeout=30,
                 )
             else:
-                # If no execute, try raw upload of decoded bytes via python.
-                await file_io.write_text(rel, b64, append=False)
+                return False
             return True
         except Exception as exc:  # noqa: BLE001
             logger.debug("Sandbox base64 fallback failed for %s: %s", rel, exc)
@@ -469,7 +479,7 @@ async def hydrate_workspace_storage_to_sandbox(
         if not source_root.is_dir():
             return
         file_io = await get_workspace_file_io(ref, thread_id=thread_id)
-        for current_root, _dirs, files in os.walk(source_root):
+        for current_root, _dirs, files in managed_storage_walk(source_root):
             rel_dir = os.path.relpath(current_root, source_root)
             for filename in files:
                 src_file = Path(current_root) / filename
@@ -477,24 +487,9 @@ async def hydrate_workspace_storage_to_sandbox(
                 target_rel = f"{THREAD_STORAGE_MOUNT}/{rel_path}"
                 try:
                     content = src_file.read_bytes()
-                    # Reuse the same upload logic as ingest.
                     await ingest_attachment_file_to_sandbox(
                         target_rel, content, workspace, thread_id=thread_id
                     )
-                    # Direct upload for generic paths: try _upload_file.
-                    if "/" in rel_path:
-                        from agent.modules.workspaces import resolve_remote_path
-
-                        root = getattr(file_io, "root", None) or str(ref.metadata.get("root") or "/workspace")
-                        try:
-                            abs_path = resolve_remote_path(str(root), target_rel)
-                            uploader = getattr(file_io, "_upload_file", None)
-                            if callable(uploader):
-                                res = uploader(content, abs_path)
-                                if inspect.isawaitable(res):
-                                    await res
-                        except Exception:
-                            pass
                 except OSError:
                     continue
                 except Exception as exc:  # noqa: BLE001
@@ -510,7 +505,7 @@ class WorkspaceStorageFileIO:
         self._base = base
         self._workspace_scope = workspace_storage_key(workspace_scope) if workspace_scope else None
         self.ref = base.ref
-        if hasattr(base, "root") and base.root:
+        if getattr(base.ref, "backend", "local") == "local" and hasattr(base, "root") and base.root:
             ensure_physical_workspace_storage(base.root)
 
     async def list_dir(self, path: str = "") -> str:

@@ -33,7 +33,6 @@ DEFAULT_HEADERS = {
     )
 }
 MAX_RESPONSE_BYTES = 1_000_000
-MAX_OUTPUT_LENGTH = 8000
 _NOISE_TAGS = ["script", "style", "nav", "footer", "header", "aside", "noscript"]
 
 FIRECRAWL_SCRAPE_URL = "https://api.firecrawl.dev/v2/scrape"
@@ -128,13 +127,16 @@ def _effective_credential(
     return os.environ.get(env_name, "").strip()
 
 
-def _truncate_text(text: str, max_length: int = MAX_OUTPUT_LENGTH) -> str:
-    if len(text) <= max_length:
+def _truncate_text(text: str, max_length: int | None = None) -> str:
+    from agent.modules.tools.coding.storage import MAX_STORED_BYTES
+    raw = text.encode("utf-8")
+    maximum = max_length if max_length is not None else MAX_STORED_BYTES
+    if len(raw) <= maximum:
         return text
-    return text[:max_length] + "\n\n[... truncated]"
+    return raw[:maximum].decode("utf-8", errors="ignore") + "\n\n[source capture limit reached; some content was lost]"
 
 
-def _html_to_markdown(html: str, max_length: int = MAX_OUTPUT_LENGTH) -> str:
+def _html_to_markdown(html: str, max_length: int | None = None) -> str:
     soup = BeautifulSoup(
         html,
         "html.parser",
@@ -189,10 +191,11 @@ def _local_fetch(url: str) -> str:
 
             content_type = response.headers.get("content-type", "")
             text = content.decode(response.encoding or "utf-8", errors="replace")
+            notice = "\n\n[source download limit reached; some content may be missing]" if len(content) >= MAX_RESPONSE_BYTES else ""
             if "text/html" in content_type:
-                return _html_to_markdown(text)
+                return _html_to_markdown(text) + notice
             if "application/json" in content_type or "text/" in content_type:
-                return _truncate_text(text)
+                return _truncate_text(text) + notice
             return f"[Info] Non-text content type: {content_type}. Response size: {len(content)} bytes."
     except httpx.TimeoutException as exc:
         raise ToolError(

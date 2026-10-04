@@ -25,4 +25,10 @@ class PathPermissions:
                 self.assert_allowed(context, "external_directory", str(target.parent if action != "shell" else target), allow_interrupt=allow_interrupt)
         if authorize:
             self.assert_allowed(context, action, str(target), allow_interrupt=allow_interrupt)
+        if inside:
+            relative = target.relative_to(base).parts
+            if len(relative) >= 3 and relative[:2] == (".k41-agent", "outputs"):
+                from agent.modules.tools.coding.storage import digest
+                if relative[2] != digest(context.thread_id)[:24]:
+                    raise CodingError("not_found", "Output file does not exist in this workspace/thread.")
         return target

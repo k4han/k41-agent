@@ -146,6 +146,7 @@ class ProcessManager:
         self.remote = None
         self.storage = storage
         self.jobs: dict[str, ProcessJob] = {}
+        self.retiring_jobs: dict[str, ProcessJob] = {}
 
     async def start(self, context: InvocationContext, command: str, cwd: Path,
                     timeout_seconds: float, shell: str) -> ProcessJob:
@@ -165,6 +166,7 @@ class ProcessManager:
             script.write_text(command, encoding="utf-8-sig" if suffix == ".ps1" else "utf-8")
             argv = [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(script)] if suffix == ".ps1" else [shell, "/D", "/C", str(script)] if suffix == ".cmd" else [shell, str(script)]
         reference, path = self.storage.create_output(context)
+        self.storage.active_paths.add(path)
         environment = build_safe_env(extra_vars={"PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1", "PYTHONUNBUFFERED": "1"})
         options = hidden_subprocess_kwargs(creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0)
         spawn = asyncio.create_task(asyncio.to_thread(spawn_contained, argv, cwd=str(cwd), stdin=subprocess.PIPE,
@@ -184,6 +186,7 @@ class ProcessManager:
                     containment.close()
                 raise
         except BaseException:
+            self.storage.active_paths.discard(path)
             if script:
                 script.unlink(missing_ok=True)
             path.unlink(missing_ok=True)
@@ -250,6 +253,8 @@ class ProcessManager:
             if script:
                 script.unlink(missing_ok=True)
             job.finished.set()
+            self.storage.active_paths.discard(job.path)
+            self.retiring_jobs.pop(job.id, None)
 
     def get(self, context: InvocationContext, process_id: str) -> ProcessJob:
         job = self.jobs.get(process_id)
@@ -290,11 +295,13 @@ class ProcessManager:
                     "stored_bytes": job.stored_bytes, "tail_preview": bool(tail_preview),
                     "elapsed_seconds": round(time.monotonic() - job.started, 3)}
         footer = f"\n\nProcess {job.id}: {job.status}; exit_code={data['exit_code']}; next_cursor={data['cursor']}."
-        marker = f"\n[more output; read_process_output process_id={job.id} cursor={data['cursor']}; read_tool_output output_ref={job.output_ref}]" if more else ""
+        relative = job.path.relative_to(Path(job.workspace)).as_posix()
+        data["output_paths"] = [relative]
+        marker = f"\n[more output; read_process_output process_id={job.id} cursor={data['cursor']}; read file_path={relative} byte_offset=0]" if more else ""
         loss_marker = "\n[capture quota exceeded or pipe drain incomplete; some output was lost]" if job.capture_truncated else ""
         content, cut = bounded_text((output or "(no output)") + tail_preview + footer + marker + loss_marker)
         result = ToolResult(status="running" if not job.finished.is_set() else "success", data=data,
-                            content=content, output_refs=[job.output_ref], capture_truncated=job.capture_truncated,
+                            content=content, output_refs=[job.output_ref], output_paths=[relative], capture_truncated=job.capture_truncated,
                             output_truncated=more or cut)
         if job.status in {"timeout", "cancelled"}:
             from agent.modules.tools.coding.contracts import RuntimeError as ResultError
@@ -330,9 +337,17 @@ class ProcessManager:
         for job in jobs:
             self.jobs.pop(job.id, None)
             if not job.finished.is_set():
+                self.retiring_jobs[job.id] = job
                 job.status = "cancelled"
                 threading.Thread(target=kill_tree, args=(job.process,), daemon=True).start()
         return len(jobs) + (self.remote.stop_thread_now(thread_id) if self.remote else 0)
+
+    async def stop_thread(self, thread_id: str) -> None:
+        jobs = {**self.jobs, **self.retiring_jobs}
+        owned = [job for job in jobs.values()
+                 if job.thread_id == thread_id or job.thread_id.startswith(f"{thread_id}:sub:")]
+        await asyncio.gather(*(self.stop(job) for job in owned))
+        self.stop_thread_now(thread_id)
 
     async def stop_workspace(self, workspace: str) -> None:
         jobs = [job for job in list(self.jobs.values()) if job.workspace == workspace]
@@ -341,7 +356,9 @@ class ProcessManager:
             self.jobs.pop(job.id, None)
 
     async def close(self) -> None:
+        await self.storage.close()
         if self.remote:
             await self.remote.close()
-        await asyncio.gather(*(self.stop(job) for job in list(self.jobs.values())))
+        await asyncio.gather(*(self.stop(job) for job in {**self.jobs, **self.retiring_jobs}.values()))
         self.jobs.clear()
+        self.retiring_jobs.clear()

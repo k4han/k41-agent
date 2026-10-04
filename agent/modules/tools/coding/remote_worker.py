@@ -56,8 +56,9 @@ class WorkerEngine(CodingEngine):
 
 class SandboxWorker:
     def __init__(self, output_root: Path, default_root: str):
-        self.storage = OutputStore(output_root)
+        self.storage = OutputStore(output_root, remote_worker=True)
         self.storage.cleanup()
+        self.storage.start_cleanup()
         self.processes = ProcessManager(self.storage, register_sessions=False)
         self.default_root = default_root
         self.file_locks = {}
@@ -96,9 +97,32 @@ class SandboxWorker:
         if operation == "close":
             await self.processes.close()
             return {"closed": True}
+        if operation == "clear_scratchpads":
+            self.storage.clear_scratchpads(request["thread_id"])
+            return {"cleared": True}
         name, values = request["name"], request["values"]
         context = InvocationContext(**request["context"])
         context = replace(context, workspace=str(Path(context.workspace or self.default_root).resolve()))
+        self.storage.owner_dir(context)
+        if operation == "retain":
+            result = RuntimeResult.from_dict(request["result"])
+            return self.storage.bound(result, context).to_dict()
+        if operation == "migrate_outputs":
+            paths = []
+            from agent.modules.tools.coding.storage import output_relative_path
+            for reference in request["references"]:
+                try:
+                    if "legacy_content" in request:
+                        from agent.modules.tools.coding.storage import MAX_STORED_BYTES
+                        path = self.storage.physical_output_path(context, reference)
+                        if not path.exists():
+                            raw = request["legacy_content"].encode("utf-8")[:MAX_STORED_BYTES]
+                            path.write_bytes(raw.decode("utf-8", errors="ignore").encode("utf-8"))
+                    self.storage.output_path(context, reference)
+                    paths.append(output_relative_path(context, reference))
+                except (CodingError, OSError):
+                    continue
+            return {"output_paths": paths}
         engine = WorkerEngine(self.storage, self.processes,
                               authorized=set(request.get("authorized", [])) if operation == "execute" else None)
         engine.files.locks = self.file_locks
@@ -107,7 +131,9 @@ class SandboxWorker:
             return {"permissions": list(engine.permissions.requests.values())}
         if operation != "execute":
             raise CodingError("invalid_input", "Unknown sandbox runtime operation.")
-        fingerprint = digest(json.dumps([name, values], sort_keys=True, ensure_ascii=True))
+        fingerprint_values = {key: value for key, value in values.items()
+                              if not (name == "read" and key == "byte_offset" and value is None)}
+        fingerprint = digest(json.dumps([name, fingerprint_values], sort_keys=True, ensure_ascii=True))
         key = f"{context.owner}\0{context.agent_name}\0{context.message_id}\0{context.tool_call_id}"
         lock = self.invocation_locks.setdefault(key, asyncio.Lock())
         try:

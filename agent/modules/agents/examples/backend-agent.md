@@ -15,7 +15,6 @@ tools:
   - "read_process_output"
   - "write_process_input"
   - "stop_process"
-  - "read_tool_output"
 max_context_tokens: 50000
 ---
 

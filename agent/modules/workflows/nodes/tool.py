@@ -152,4 +152,6 @@ async def tool_node(
             result.content, result.output_truncated = bound_tool_text(f"[error] Batch stopped before execution: {exc}")
             return {"messages": [ToolMessage(content=result.content, artifact=result.model_dump(exclude={"content"}),
                      name=item["name"], tool_call_id=item["id"], status="error") for item in calls]}
-    return await ToolNode(tools).ainvoke(state, config=next_config, runtime=runtime)
+    result = await ToolNode(tools).ainvoke(state, config=next_config, runtime=runtime)
+    from agent.modules.tools import retain_tool_messages
+    return await retain_tool_messages(result, SimpleNamespace(context=runtime.context, config=next_config))

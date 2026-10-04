@@ -235,6 +235,22 @@ class RemoteCodingRuntime:
                     break
         return result
 
+    async def retain(self, result, context):
+        client = await self.client(context)
+        await client.ensure_started()
+        request = self.request("retain", "", {}, context, workspace=client.backend.root)
+        request["result"] = result.model_dump()
+        return ToolResult.model_validate(await client.call(request))
+
+    async def migrate_outputs(self, references, context, *, legacy_content=None):
+        client = await self.client(context)
+        await client.ensure_started()
+        request = self.request("migrate_outputs", "", {}, context, workspace=client.backend.root)
+        request["references"] = references
+        if legacy_content is not None:
+            request["legacy_content"] = legacy_content
+        return (await client.call(request))["output_paths"]
+
     async def stop_thread(self, thread_id):
         async def stop(client):
             try:
@@ -242,6 +258,27 @@ class RemoteCodingRuntime:
             except Exception:
                 logger.warning("Failed to stop sandbox coding jobs for thread %s", thread_id, exc_info=True)
         await asyncio.gather(*(stop(client) for client in self.clients.values() if client.endpoint))
+
+    async def clear_scratchpads(self, thread_id):
+        # Recover sandbox connections from durable ownership records after restart.
+        for directory in self.service.storage.root.iterdir():
+            try:
+                if directory.is_symlink():
+                    continue
+                record = json.loads((directory / "owner.json").read_text(encoding="utf-8"))
+                owner_thread = record["thread_id"]
+                if (record.get("backend", "local") != "local"
+                        and (owner_thread == thread_id or owner_thread.startswith(f"{thread_id}:sub:"))):
+                    from agent.modules.tools.coding.models import InvocationContext
+                    context = InvocationContext("default", record["workspace"], owner_thread,
+                                                backend=record["backend"], locator=record["locator"])
+                    client = await self.client(context)
+                    await client.ensure_started()
+            except (OSError, ValueError, KeyError, CodingError):
+                logger.warning("Could not reconnect sandbox for scratchpad cleanup", exc_info=True)
+        for client in self.clients.values():
+            if client.endpoint:
+                await client.call({"operation": "clear_scratchpads", "thread_id": thread_id})
 
     def stop_thread_now(self, thread_id):
         if not self.clients:

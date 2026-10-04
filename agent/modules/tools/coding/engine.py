@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any
 
 from agent.modules.tools.coding.contracts import CodingError, InvocationContext, RuntimeResult as ToolResult
-from agent.modules.tools.coding.files import read_page
 from agent.modules.tools.coding.names import FILE_TOOLS
 from agent.modules.tools.coding.storage import digest
 from agent.modules.tools.runtime.shell_guard import check_command_blocked
@@ -38,9 +37,6 @@ class CodingEngine:
             self.permissions.assert_allowed(context, "shell", command, shell=self.shell, workdir=str(cwd))
             if not cwd.is_dir():
                 raise CodingError("invalid_input", f"Working directory is not a directory: {cwd}")
-        elif name == "read_tool_output":
-            self.storage.output_path(context, values["output_ref"])
-            self.permissions.assert_allowed(context, "read_tool_output", values["output_ref"])
         else:
             self.processes.get(context, values["process_id"])
             metadata = {"input_hash": digest(values["text"])} if name == "write_process_input" else {}
@@ -49,12 +45,6 @@ class CodingEngine:
     async def execute(self, name: str, values: dict[str, Any], context: InvocationContext) -> ToolResult:
         if name in FILE_TOOLS:
             return await self.files.execute(name, values, context)
-        if name == "read_tool_output":
-            path = self.storage.output_path(context, values["output_ref"])
-            page = await asyncio.to_thread(read_page, path, values.get("offset", 1), min(values.get("limit", 2000), 1999))
-            content = page.pop("content")
-            page.pop("path")
-            return ToolResult(data=page, content=content + f"\n[next_offset={page['next_offset']}]", output_refs=[values["output_ref"]])
         if name == "bash":
             cwd = self.permissions.resolve_path(context, values.get("workdir") or ".", "shell", authorize=False)
             if not cwd.is_relative_to(Path(context.workspace).resolve()):

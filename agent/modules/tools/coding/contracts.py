@@ -38,6 +38,7 @@ class RuntimeResult(ResultContent):
     display_content: str | None = None
     display_truncated: bool = False
     output_refs: list[str] = field(default_factory=list)
+    output_paths: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     error: RuntimeError | None = None
     capture_truncated: bool = False

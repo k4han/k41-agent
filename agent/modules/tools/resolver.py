@@ -39,6 +39,9 @@ class ToolResolver:
                 continue
             name = TOOL_ALIASES.get(tool.name, tool.name)
             result.append(make_coding_tool(name) if name in CODING_TOOLS else tool)
+        control_tools = {"ask_user", "plan_mode_respond", "write_todos"}
+        if result and not any(tool.name == "read" for tool in result) and any(tool.name not in control_tools for tool in result):
+            result.append(make_coding_tool("read", retained_only=True))
         return list({tool.name: tool for tool in result}.values())
 
     async def aresolve_for_agent(

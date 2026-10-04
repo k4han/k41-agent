@@ -16,7 +16,6 @@ tools:
 - read_process_output
 - write_process_input
 - stop_process
-- read_tool_output
 - schedule_task
 - web_fetch
 - web_search

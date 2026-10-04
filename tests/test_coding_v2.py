@@ -207,7 +207,7 @@ async def test_large_mutation_diff_bounds_ui_without_inflating_model_content(cod
     assert len(result.display_content.encode()) <= MAX_MODEL_BYTES
     assert len(result.display_content.splitlines()) <= MAX_MODEL_LINES
     assert result.data["diff_truncated"] and result.data["diff_output_refs"] == result.output_refs
-    retained = await invoke(service, context, "read_tool_output", output_ref=result.output_refs[0])
+    retained = await invoke(service, context, "read", file_path=result.output_paths[0])
     assert "+submitted-content" in retained.content
     assert (await invoke(service, called, "write", **args)) == result
 
@@ -314,7 +314,7 @@ async def test_process_large_output_has_bounded_capture_and_owned_artifact(codin
     assert len(job.head) + len(job.tail) <= MAX_CAPTURE_BYTES
     assert observed.capture_truncated and observed.output_truncated
     assert len(observed.content.encode()) <= MAX_MODEL_BYTES
-    read = await invoke(service, replace(context, thread_id="foreign"), "read_tool_output", output_ref=job.output_ref)
+    read = await invoke(service, replace(context, thread_id="foreign"), "read", file_path=observed.output_paths[0])
     assert read.error.code == "not_found"
 
 

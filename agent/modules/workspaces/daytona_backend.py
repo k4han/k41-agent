@@ -26,6 +26,7 @@ from agent.modules.workspaces.file_info_utils import (
     file_info_size,
 )
 from agent.modules.workspaces.git_utils import (
+    WORKSPACE_STORAGE_EXCLUDE_COMMAND,
     git_relative_path,
     git_status_args,
     parse_git_status,
@@ -914,17 +915,15 @@ class DaytonaWorkspaceBackend(SandboxBackendBase):
         self._exec(f"mkdir -p {shlex.quote(self.root)}", cwd="/")
 
     def ensure_storage(self) -> None:
-        """Ensure ``.k41-agent`` storage directories exist inside the sandbox."""
-        for dirname in (".k41-agent/generated-images", ".k41-agent/assets", ".k41-agent/memory", ".k41-agent/uploads", ".k41-agent/scratchpad"):
-            target = resolve_daytona_path(self.root, dirname)
-            try:
-                self._make_directory(target)
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("Failed to ensure daytona storage dir %s: %s", target, exc)
+        """Register Git exclusion without precreating storage directories."""
         try:
-            self._exec("mkdir -p .git/info && grep -qF '.k41-agent/' .git/info/exclude 2>/dev/null || echo '.k41-agent/' >> .git/info/exclude", cwd=self.root, timeout=10)
-        except Exception as exc:  # noqa: BLE001
+            self._exec(
+                WORKSPACE_STORAGE_EXCLUDE_COMMAND,
+                cwd=self.root, timeout=10,
+            )
+        except Exception as exc:
             logger.debug("Failed to ensure daytona git exclude: %s", exc)
+
 
     def clone_repository(
         self,
@@ -1458,6 +1457,7 @@ class DaytonaWorkspaceBackend(SandboxBackendBase):
     ) -> tuple[int, int]:
         """Compute addition/deletion line counts for a single change."""
         from agent.modules.workspaces.git_utils import (
+    WORKSPACE_STORAGE_EXCLUDE_COMMAND,
             compute_change_line_stats_from_numstat,
             git_relative_path,
         )
