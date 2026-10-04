@@ -302,8 +302,15 @@ from agent.modules.tools.coding.storage import bounded_text as bound_tool_text
 from agent.modules.tools.coding.storage import conversation_key
 from agent.modules.tools.runtime.thread_storage import clear_persistent_scratchpads
 from agent.modules.tools.runtime.output_retention import migrate_history_outputs, retain_tool_messages
+from agent.modules.tools.runtime.output_policy import TextCapture
 
-__all__ += ["conversation_key", "clear_persistent_scratchpads", "migrate_history_outputs", "retain_tool_messages"]
+__all__ += [
+    "conversation_key",
+    "clear_persistent_scratchpads",
+    "migrate_history_outputs",
+    "retain_tool_messages",
+    "TextCapture",
+]
 
 
 async def clear_conversation_storage(thread_id: str) -> None:

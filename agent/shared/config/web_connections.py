@@ -235,7 +235,7 @@ def translate_legacy_updates(service: Any, values: dict[str, Any]) -> dict[str, 
 
 def with_web_connections(schema: Any, tool: str) -> Any:
     from dataclasses import replace
-    from agent.modules.tools.domain import ToolConfigField
+    from agent.modules.tools import ToolConfigField
 
     fields = tuple(ToolConfigField(
         name=f"{kind}_connection", input_type="select", label=f"{definition['label']} connection",

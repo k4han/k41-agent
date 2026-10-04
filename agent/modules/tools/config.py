@@ -229,8 +229,9 @@ class ToolConfigService:
         }
 
         config_service = get_config_service()
+        has_migration = bool(getattr(config_service, "get", None) and config_service.get(MIGRATION_KEY))
         for field_name in field_map:
-            if config_service.get(MIGRATION_KEY) and is_legacy_web_key(_tool_config_key(descriptor.name, field_name)):
+            if has_migration and is_legacy_web_key(_tool_config_key(descriptor.name, field_name)):
                 values.pop(field_name, None)
                 continue
             setting = config_service.get_effective(

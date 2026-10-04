@@ -274,7 +274,7 @@ def render_sandbox_glob_output(output: str) -> str:
 
 
 def render_sandbox_grep_output(output: str, *, max_results: int) -> str:
-    from agent.modules.tools.runtime.output_policy import TextCapture
+    from agent.modules.tools import TextCapture
 
     effective_max = clamp_grep_results(max_results)
     lines = [line for line in output.splitlines() if line.strip()]

@@ -156,7 +156,7 @@ def _build_sub_agents_prompt_section(agent_name: str, catalog: Any) -> str:
 def get_system_default_variables(working_dir: str = "", workspace: str = "") -> dict[str, str]:
     import getpass
 
-    from agent.modules.prompt_variables.environment import (
+    from agent.modules.prompt_variables import (
         get_environment_defaults,
         get_host_os,
     )

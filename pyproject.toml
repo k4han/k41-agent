@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "k41-agent"
-version = "0.1.17"
+version = "0.1.18"
 description = "A modular, extensible agent framework for building AI agents with various capabilities and integrations."
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
@@ -33,7 +33,7 @@ dependencies = [
     "pyjwt>=2.12.1",
     "python-multipart>=0.0.22",
     "pyyaml>=6.0.0",
-    "sqlalchemy>=2.0.0",
+    "sqlalchemy[asyncio]>=2.0.0",
     "uvicorn>=0.42.0",
     "httpx>=0.28.0",
     "beautifulsoup4>=4.13.0",

@@ -202,7 +202,7 @@ class LocalWorkspaceBackend:
         case_insensitive: bool = False,
         max_results: int = 100,
     ) -> str:
-        from agent.modules.tools.runtime.output_policy import TextCapture
+        from agent.modules.tools import TextCapture
 
         if not pattern:
             raise ValueError("Grep pattern must not be empty.")
