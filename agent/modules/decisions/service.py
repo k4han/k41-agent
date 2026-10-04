@@ -6,7 +6,7 @@ import logging
 import time
 from typing import Any
 
-from agent.modules.decisions.cloudflare import CloudflareClefClient
+from agent.modules.decisions.providers import create_decision_client
 from agent.modules.decisions.models import (
     BaseAnswer,
     BaseQuestion,
@@ -32,25 +32,29 @@ class DecisionService:
         self,
         client: DecisionClient | None = None,
         settings: DecisionSettings | None = None,
+        config: Any = None,
     ) -> None:
-        self.settings = settings or load_decision_settings()
-        if client is not None:
-            self.client: DecisionClient | None = client
-        elif self.settings.cloudflare_account_id and self.settings.cloudflare_api_token:
-            self.client = CloudflareClefClient(
-                account_id=self.settings.cloudflare_account_id,
-                api_token=self.settings.cloudflare_api_token,
-                default_model=self.settings.model,
-                base_url=self.settings.cloudflare_base_url,
-                timeout=self.settings.timeout,
-                max_retries=self.settings.max_retries,
-            )
-        else:
-            self.client = None
+        self._config = config if client is None else None
+        self.settings = settings or load_decision_settings(config)
+        self._client = client if client is not None else create_decision_client(self.settings)
+        self._retired_clients: list[DecisionClient] = []
 
         self._total_evaluations: int = 0
         self._total_errors: int = 0
         self._total_latency_ms: float = 0.0
+
+    @property
+    def client(self) -> DecisionClient | None:
+        """Refresh the selected client before each use, retaining in-flight clients."""
+        if self._config is not None:
+            settings = load_decision_settings(self._config)
+            if settings != self.settings:
+                client = create_decision_client(settings)
+                if self._client is not None:
+                    self._retired_clients.append(self._client)
+                self._client = client
+                self.settings = settings
+        return self._client
 
     @property
     def is_configured(self) -> bool:
@@ -96,11 +100,12 @@ class DecisionService:
 
     def _require_client(self) -> DecisionClient:
         """Ensure an active client is configured or raise DecisionClientError."""
-        if self.client is None:
+        client = self.client
+        if client is None:
             raise DecisionClientError(
-                "DecisionClient is not configured. Cloudflare credentials or mock client required."
+                "DecisionClient is not configured. Provider credentials or an explicit client are required."
             )
-        return self.client
+        return client
 
     async def evaluate(
         self,
@@ -268,8 +273,11 @@ class DecisionService:
 
     async def close(self) -> None:
         """Release underlying client resources."""
-        if self.client is not None and hasattr(self.client, "close"):
-            await self.client.close()
+        clients = [*self._retired_clients, self._client]
+        self._retired_clients.clear()
+        for client in clients:
+            if client is not None and hasattr(client, "close"):
+                await client.close()
 
     async def __aenter__(self) -> DecisionService:
         return self

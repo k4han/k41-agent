@@ -51,6 +51,7 @@ class CreateProviderBody(BaseModel):
     type: str = Field(..., min_length=1)
     api_key: str = Field(..., min_length=1)
     base_url: str = ""
+    catalog_id: str | None = None
 
 
 @router.post("/dashboard-api/providers")
@@ -80,6 +81,13 @@ async def create_dashboard_provider(
             detail="Base URL is required for OpenAI-compatible providers.",
         )
 
+    if body.catalog_id:
+        from agent.modules.providers import load_providers_catalog
+        catalog = load_providers_catalog()
+        entry = next((entry for entry in catalog.values() if entry.id == body.catalog_id), None)
+        if entry is None or entry.provider_type != provider_type:
+            raise HTTPException(400, "Invalid provider catalog entry.")
+
     values: dict[str, Any | None] = {
         f"llm.providers.{provider_name}.type": provider_type,
         f"llm.providers.{provider_name}.api_key": api_key,
@@ -87,6 +95,8 @@ async def create_dashboard_provider(
         f"llm.providers.{provider_name}.models": [],
         f"llm.providers.{provider_name}.enabled": True,
     }
+    if body.catalog_id:
+        values[f"llm.providers.{provider_name}.catalog_id"] = body.catalog_id
     if provider_type == "openai_compatible":
         values[f"llm.providers.{provider_name}.base_url"] = base_url
 

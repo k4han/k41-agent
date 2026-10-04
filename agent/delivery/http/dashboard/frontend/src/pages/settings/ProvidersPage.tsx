@@ -1,10 +1,9 @@
 import { createMemo, createSignal, createEffect, For, Show } from "solid-js";
-import { useNavigate, useParams } from "@solidjs/router";
-import { ArrowLeft, Check, Copy, Edit3, Plus, RefreshCw, Save, Search, ShieldAlert, Star, Trash2, Globe, Shield, Coins, Sparkles, Sliders } from "lucide-solid";
+import { useNavigate, useParams, useSearchParams } from "@solidjs/router";
+import { ArrowLeft, Check, Copy, Plus, RefreshCw, Save, Search, Star, Trash2, Sparkles } from "lucide-solid";
 
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { CopyButton } from "@/components/CopyButton";
-import { Dialog } from "@/components/Dialog";
 import { ModelPicker } from "@/components/ModelPicker";
 import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { DataGate } from "@/components/State";
@@ -15,6 +14,8 @@ import { useCatalogAndLoad } from "@/lib/useCatalogAndLoad";
 import type { ModelCatalog, ProviderRow, ProviderTypeOption, SettingInfo } from "@/types";
 
 import { ProviderSettingsLayout as SettingsLayout } from "./ProviderSettingsLayout";
+import { ProviderConnectionList, ProviderPicker, ProviderFormPanel } from "./ProviderConnections";
+import { suggestProviderName } from "@/lib/providerConnections";
 import { useUnsavedChanges } from "@/lib/useUnsavedChanges";
 import {
   ChangesPreview,
@@ -29,12 +30,10 @@ import {
 import {
   FormField,
   FormSelect,
-  FormButton,
   FormCard,
-  FormActions,
 } from "@/components/forms";
 
-const DEFAULT_PROVIDER_KEY = "llm.default_provider";
+const DEFAULT_PROVIDER_KEY = "llm.default_model";
 
 type ProviderFieldEntry = {
   key: string;
@@ -43,6 +42,7 @@ type ProviderFieldEntry = {
 
 type ProviderView = {
   name: string;
+  catalogId: string;
   fields: ProviderFieldEntry[];
   detailFields: ProviderFieldEntry[];
   fieldMap: Record<string, ProviderFieldEntry>;
@@ -67,10 +67,9 @@ type ProviderCreateForm = {
   type: string;
   api_key: string;
   base_url: string;
+  catalog_id?: string;
   isCustom?: boolean;
 };
-
-// Grouped by connection state instead of static categories
 
 function hasDraftValue(drafts: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(drafts, key);
@@ -152,7 +151,7 @@ function buildProviderView(
         return false;
       }
       const name = fieldName(entry);
-      if (name === "provider" || name === "type") {
+      if (name === "provider" || name === "type" || name === "catalog_id") {
         return false;
       }
       return name !== "base_url" || provider.requires_base_url;
@@ -165,6 +164,7 @@ function buildProviderView(
 
   return {
     name: provider.name,
+    catalogId: provider.catalog_id || "",
     fields: orderedFields,
     detailFields,
     fieldMap,
@@ -191,18 +191,11 @@ export function ProvidersPage() {
 
   const params = useParams<{ providerName?: string }>();
   const navigate = useNavigate();
+  const [query] = useSearchParams<{ new?: string }>();
 
   const [search, setSearch] = createSignal("");
-  const [addOpen, setAddOpen] = createSignal(false);
-  const [addForm, setAddForm] = createSignal<ProviderCreateForm>({
-    name: "",
-    type: "google",
-    api_key: "",
-    base_url: "",
-  });
   const [savingDefaultProvider, setSavingDefaultProvider] = createSignal(false);
   const [savingProvider, setSavingProvider] = createSignal(false);
-  const [creatingProvider, setCreatingProvider] = createSignal(false);
   const [updatingCatalog, setUpdatingCatalog] = createSignal(false);
   const [confirmOpen, setConfirmOpen] = createSignal(false);
   const [changesToConfirm, setChangesToConfirm] = createSignal<PendingChange[]>([]);
@@ -238,85 +231,20 @@ export function ProvidersPage() {
     );
   });
 
-  // Derived catalog cards that represent all possible cards in the grid
-  const providerCards = createMemo(() => {
-    const cat = providersCatalog();
-    const rows = providerRows();
-    const needle = searchNeedle();
-
-    // Map each catalog entry to a card representation
-    const cards = Object.keys(cat).map((id) => {
-      const entry = cat[id];
-      const configured = rows.find((r) => r.name.toLowerCase() === id.toLowerCase());
-
-      const searchable = [entry.id, entry.name].join(" ").toLowerCase();
-
-      return {
-        id: entry.id,
-        name: entry.name,
-        providerType: entry.provider_type,
-        baseUrl: entry.base_url,
-        envVars: entry.env_vars || [],
-        docUrl: entry.doc_url,
-        defaultModel: configured?.defaultModel || entry.default_model,
-        modelCount: configured?.modelCount || entry.models?.length || 0,
-        configured: !!configured,
-        enabled: configured ? configured.enabled : false,
-        isDefault: configured ? configured.isDefault : false,
-        dirtyCount: configured ? configured.dirtyCount : 0,
-        matchesSearch: !needle || searchable.includes(needle),
-        configuredRow: configured || null,
-        catalogEntry: entry,
-      };
-    });
-
-    // If there are configured rows not in catalog, append them as custom providers
-    rows.forEach((row) => {
-      const alreadyInCatalog = Object.keys(cat).some((id) => id.toLowerCase() === row.name.toLowerCase());
-      if (!alreadyInCatalog) {
-        const searchable = row.name.toLowerCase();
-
-        cards.push({
-          id: row.name.toLowerCase(),
-          name: row.name,
-          providerType: row.providerType,
-          baseUrl: "",
-          envVars: [],
-          docUrl: "",
-          defaultModel: row.defaultModel,
-          modelCount: row.modelCount,
-          configured: true,
-          enabled: row.enabled,
-          isDefault: row.isDefault,
-          dirtyCount: row.dirtyCount,
-          matchesSearch: !needle || searchable.includes(needle),
-          configuredRow: row,
-          catalogEntry: null,
-        });
-      }
-    });
-
-    // Sort cards: configured/enabled first, then alphabetically
-    cards.sort((a, b) => {
-      if (a.configured !== b.configured) {
-        return a.configured ? -1 : 1;
-      }
-      if (a.enabled !== b.enabled) {
-        return a.enabled ? -1 : 1;
-      }
-      return a.name.localeCompare(b.name);
-    });
-
-    return cards;
-  });
-
-  const connectedProviderCards = createMemo(() =>
-    providerCards().filter((card) => card.matchesSearch && card.configured),
-  );
-
-  const unconnectedProviderCards = createMemo(() =>
-    providerCards().filter((card) => card.matchesSearch && !card.configured),
-  );
+  const catalogEntryFor = (row: ProviderView) =>
+    Object.values(providersCatalog()).find((entry: any) =>
+      entry.id.toLowerCase() === (row.catalogId || row.name).toLowerCase()) as any;
+  const pickerItems = createMemo(() => Object.values(providersCatalog())
+    .filter((entry: any) => !searchNeedle() || `${entry.id} ${entry.name}`.toLowerCase().includes(searchNeedle()))
+    .map((entry: any) => ({ id: entry.id, label: entry.name, logoUrl: entry.logo_url,
+      count: providerRows().filter((row) => catalogEntryFor(row)?.id === entry.id).length }))
+    .sort((a, b) => a.label.localeCompare(b.label)));
+  const connectionItems = createMemo(() => providerRows()
+    .filter((row) => !searchNeedle() || `${row.name} ${catalogEntryFor(row)?.name || row.typeLabel} ${row.defaultModel}`.toLowerCase().includes(searchNeedle()))
+    .map((row) => ({ name: row.name, label: catalogEntryFor(row)?.name || row.typeLabel,
+      model: row.defaultModel, configured: row.ready, enabled: row.enabled, isDefault: row.isDefault,
+      canSetDefault: row.canSetDefault, canDelete: row.canDelete,
+      defaultReason: row.defaultBlockReason, deleteReason: row.deleteBlockReason })));
 
   const currentProviderName = () =>
     params.providerName ? decodeURIComponent(params.providerName) : null;
@@ -398,29 +326,13 @@ export function ProvidersPage() {
     }
     setSavingDefaultProvider(true);
     try {
-      await putJson(`/settings/${DEFAULT_PROVIDER_KEY}`, { value: provider.name });
+      await putJson(`/settings/${DEFAULT_PROVIDER_KEY}`, { value: `${provider.name}/${provider.defaultModel}` });
       showToast("Default provider updated.");
       await load();
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to update default provider", "error");
     } finally {
       setSavingDefaultProvider(false);
-    }
-  };
-
-  const createProvider = async () => {
-    const form = addForm();
-    setCreatingProvider(true);
-    try {
-      await postJson("/dashboard-api/providers", form);
-      showToast("Provider created.");
-      setAddOpen(false);
-      await load();
-      navigate(`/settings/providers/llm/${encodeURIComponent(form.name.trim())}`);
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to create provider", "error");
-    } finally {
-      setCreatingProvider(false);
     }
   };
 
@@ -439,27 +351,6 @@ export function ProvidersPage() {
       }
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to delete provider", "error");
-    }
-  };
-
-  const openAddDialog = () => {
-    setAddForm({ name: "", type: "google", api_key: "", base_url: "", isCustom: true });
-    setAddOpen(true);
-  };
-
-  const handleCardClick = (card: any) => {
-    if (card.configured) {
-      navigate(`/settings/providers/llm/${encodeURIComponent(card.configuredRow?.name ?? card.id)}`);
-    } else {
-      // Setup helper prefilled from catalog
-      setAddForm({
-        name: card.id,
-        type: card.providerType,
-        api_key: "",
-        base_url: card.baseUrl || "",
-        isCustom: false,
-      });
-      setAddOpen(true);
     }
   };
 
@@ -490,12 +381,11 @@ export function ProvidersPage() {
     );
   });
 
-  useUnsavedChanges(() => pendingChanges().length > 0 || fallbackDirty() || (addOpen() && Boolean(addForm().api_key || addForm().name)), () => {
+  useUnsavedChanges(() => pendingChanges().length > 0 || fallbackDirty(), () => {
     discardAll();
     const settings = data() ? settingsFromPayload(data()!) : {};
     setFallbackProvider(String(settings["llm.fallback.provider"]?.value || ""));
     setFallbackModel(String(settings["llm.fallback.model"]?.value || ""));
-    setAddOpen(false);
   });
 
   const saveFallback = async () => {
@@ -851,6 +741,7 @@ export function ProvidersPage() {
       <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => (
           <>
+            <Show when={query.new} fallback={
             <Show
               when={params.providerName}
               fallback={
@@ -877,12 +768,20 @@ export function ProvidersPage() {
                       searchPlaceholder="Search providers and models..."
                       onSearchInput={setSearch}
                       actions={
-                        <button class="btn btn-primary" type="button" onClick={openAddDialog}>
+                        <button class="btn btn-primary" type="button" onClick={() => navigate("/settings/providers?tab=llm&new=custom")}>
                           <Plus size={15} />
                           Custom Provider
                         </button>
                       }
                     />
+
+                    <ProviderConnectionList
+                      items={connectionItems()} busy={savingDefaultProvider()}
+                      onEdit={(name) => navigate(`/settings/providers/llm/${encodeURIComponent(name)}`)}
+                      onSetDefault={(name) => { const row = providerRows().find((item) => item.name === name); if (row) void setDefaultProvider(row); }}
+                      onDelete={(name) => setDeleteTarget(providerRows().find((item) => item.name === name) || null)}
+                    />
+                    <ProviderPicker items={pickerItems()} onSelect={(id) => navigate(`/settings/providers?tab=llm&new=${encodeURIComponent(id)}`)} />
 
                     <FallbackModelSection
                       catalogs={payload.model_catalogs || []}
@@ -901,116 +800,6 @@ export function ProvidersPage() {
                       onClear={clearFallback}
                     />
 
-                    {/* Connected Providers Grid */}
-                    <Show when={connectedProviderCards().length > 0}>
-                      <div>
-                        <div class="provider-section-title">Connected Providers</div>
-                        <div class="providers-grid">
-                          <For each={connectedProviderCards()}>
-                            {(card) => (
-                              <div
-                                class={`provider-card ${card.configured ? "card-configured" : ""} ${
-                                  card.enabled ? "card-enabled" : ""
-                                }`}
-                                onClick={() => handleCardClick(card)}
-                              >
-                                <div class="logo-wrap">
-                                  <Show
-                                    when={!logoErrors()[card.id]}
-                                    fallback={
-                                      <div class="logo-fallback">
-                                        {card.name.charAt(0).toUpperCase()}
-                                      </div>
-                                    }
-                                  >
-                                    <img
-                                      src={providerLogoUrl(card)}
-                                      alt={card.name}
-                                      class="logo-img"
-                                      onError={() => setLogoErrors((curr) => ({ ...curr, [card.id]: true }))}
-                                    />
-                                  </Show>
-                                </div>
-                                <div class="card-right">
-                                  <div class="card-title">{card.name}</div>
-                                  <div class="card-status-row">
-                                    <Show
-                                      when={card.configured && card.enabled}
-                                      fallback={<span class="status-no-connection">No connections</span>}
-                                    >
-                                      <div class="status-pill status-active">
-                                        <span class="status-dot"></span>
-                                        1 Connected
-                                      </div>
-                                    </Show>
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-                          </For>
-                        </div>
-                      </div>
-                    </Show>
-
-                    {/* Available Providers Grid */}
-                    <Show when={unconnectedProviderCards().length > 0}>
-                      <div>
-                        <div class="provider-section-title">Available Providers</div>
-                        <div class="providers-grid">
-                          <For each={unconnectedProviderCards()}>
-                            {(card) => (
-                              <div
-                                class={`provider-card ${card.configured ? "card-configured" : ""} ${
-                                  card.enabled ? "card-enabled" : ""
-                                }`}
-                                onClick={() => handleCardClick(card)}
-                              >
-                                <div class="logo-wrap">
-                                  <Show
-                                    when={!logoErrors()[card.id]}
-                                    fallback={
-                                      <div class="logo-fallback">
-                                        {card.name.charAt(0).toUpperCase()}
-                                      </div>
-                                    }
-                                  >
-                                    <img
-                                      src={providerLogoUrl(card)}
-                                      alt={card.name}
-                                      class="logo-img"
-                                      onError={() => setLogoErrors((curr) => ({ ...curr, [card.id]: true }))}
-                                    />
-                                  </Show>
-                                </div>
-                                <div class="card-right">
-                                  <div class="card-title">{card.name}</div>
-                                  <div class="card-status-row">
-                                    <Show
-                                      when={card.configured && card.enabled}
-                                      fallback={<span class="status-no-connection">No connections</span>}
-                                    >
-                                      <div class="status-pill status-active">
-                                        <span class="status-dot"></span>
-                                        1 Connected
-                                      </div>
-                                    </Show>
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-                          </For>
-                        </div>
-                      </div>
-                    </Show>
-
-                    {/* Empty view */}
-                    <Show when={providerCards().filter((card) => card.matchesSearch).length === 0}>
-                      <div class="panel empty" style={{ padding: "40px 20px", "text-align": "center" }}>
-                        <Globe size={32} class="muted" style={{ "margin-bottom": "10px" }} />
-                        <h3>No providers match your search</h3>
-                        <p class="hint">Try searching for other brand names or sync the catalog.</p>
-                      </div>
-                    </Show>
                   </div>
                 </SettingsLayout>
               }
@@ -1060,15 +849,10 @@ export function ProvidersPage() {
               </Show>
             </Show>
 
-            <AddProviderDialog
-              open={addOpen()}
-              form={addForm()}
-              typeOptions={typeOptions()}
-              creating={creatingProvider()}
-              onClose={() => setAddOpen(false)}
-              onChange={(patch) => setAddForm((current) => ({ ...current, ...patch }))}
-              onSubmit={createProvider}
-            />
+            }>
+              <AIProviderCreatePage providerId={String(query.new || "")} catalog={providersCatalog()}
+                names={providerRows().map((row) => row.name)} typeOptions={typeOptions()} onCreated={load} />
+            </Show>
 
             <SettingsConfirmDialog
               open={confirmOpen()}
@@ -1113,10 +897,9 @@ function ProviderDetailPage(props: {
   onDelete: () => void;
 }) {
   // Try to find matching catalog item for models metadata
-  const catalogEntry = createMemo(() => {
-    const nameLower = props.provider.name.toLowerCase();
-    const typeLower = props.provider.providerType.toLowerCase();
-    return props.catalog[nameLower] || props.catalog[typeLower] || null;
+  const catalogEntry = createMemo<any>(() => {
+    const id = (props.provider.catalogId || props.provider.name).toLowerCase();
+    return Object.values(props.catalog).find((entry: any) => entry.id.toLowerCase() === id) || null;
   });
   const [modelSearch, setModelSearch] = createSignal("");
   const filteredModels = createMemo(() => {
@@ -1189,7 +972,7 @@ function ProviderDetailPage(props: {
             <div class="row-wrap" style={{ gap: "12px", "align-items": "center" }}>
               <div class="logo-wrap" style={{ width: "44px", height: "44px" }}>
                 <Show
-                  when={!props.logoErrors[props.provider.name.toLowerCase()]}
+                  when={catalogEntry() && !props.logoErrors[props.provider.name.toLowerCase()]}
                   fallback={
                     <div class="logo-fallback" style={{ "font-size": "18px" }}>
                       {props.provider.name.charAt(0).toUpperCase()}
@@ -1276,7 +1059,7 @@ function ProviderDetailPage(props: {
         </div>
 
         {/* Detailed Model Metadata Section from models.dev */}
-        <Show when={catalogEntry() && catalogEntry().models?.length > 0}>
+        <Show when={catalogEntry()?.models?.length > 0}>
           <div class="panel" style={{ padding: "20px" }}>
             <div class="model-spec-toolbar">
               <div class="model-spec-title">
@@ -1349,110 +1132,58 @@ function ProviderDetailPage(props: {
   );
 }
 
-function AddProviderDialog(props: {
-  open: boolean;
-  form: ProviderCreateForm;
-  typeOptions: ProviderTypeOption[];
-  creating: boolean;
-  onClose: () => void;
-  onChange: (patch: Partial<ProviderCreateForm>) => void;
-  onSubmit: () => void;
+function AIProviderCreatePage(props: {
+  providerId: string; catalog: Record<string, any>; names: string[];
+  typeOptions: ProviderTypeOption[]; onCreated: () => Promise<unknown>;
 }) {
-  const selectedType = createMemo(() =>
-    props.typeOptions.find((option) => option.value === props.form.type) || props.typeOptions[0],
-  );
-  const canSubmit = createMemo(() => {
-    const form = props.form;
-    if (!form.name.trim() || !form.api_key.trim()) {
-      return false;
-    }
-    if (selectedType()?.requires_base_url && !form.base_url.trim()) {
-      return false;
-    }
-    return true;
+  const navigate = useNavigate();
+  const { showToast } = useToast();
+  const entry = () => Object.values(props.catalog).find((item: any) => item.id === props.providerId);
+  const isCustom = () => props.providerId === "custom";
+  const [form, setForm] = createSignal<ProviderCreateForm>({ name: "", type: "google", api_key: "", base_url: "" });
+  const [initial, setInitial] = createSignal(form());
+  const [busy, setBusy] = createSignal(false);
+  createEffect(() => {
+    const item = entry();
+    const next = { name: suggestProviderName(isCustom() ? "custom" : props.providerId, props.names, true),
+      type: item?.provider_type || "google", api_key: "", base_url: item?.base_url || "",
+      catalog_id: item?.id, isCustom: isCustom() };
+    setForm(next); setInitial(next);
   });
-
+  const patch = (values: Partial<ProviderCreateForm>) => setForm((current) => ({ ...current, ...values }));
+  useUnsavedChanges(() => JSON.stringify(form()) !== JSON.stringify(initial()), () => setForm(initial()));
+  const save = async (event: SubmitEvent) => {
+    event.preventDefault();
+    if (busy()) return;
+    setBusy(true);
+    try {
+      const { name, type, api_key, base_url, catalog_id } = form();
+      await postJson("/dashboard-api/providers", { name, type, api_key, base_url, catalog_id });
+      setInitial(form());
+      await props.onCreated();
+      showToast("Provider configuration saved.");
+      navigate("/settings/providers?tab=llm");
+    } catch (err) { showToast(err instanceof Error ? err.message : "Failed to save provider.", "error"); }
+    finally { setBusy(false); }
+  };
   return (
-    <Dialog
-      open={props.open}
-      title={`Configure ${props.form.name || "New Provider"}`}
-      wide
-      onClose={props.onClose}
-      footer={
-        <>
-          <button class="btn" type="button" onClick={props.onClose}>
-            Cancel
-          </button>
-          <button
-            class="btn btn-primary"
-            type="button"
-            disabled={!canSubmit() || props.creating}
-            onClick={props.onSubmit}
-          >
-            <Plus size={14} />
-            Save & Enable
-          </button>
-        </>
-      }
-    >
-      <div class="stack">
-        <Show when={props.form.isCustom}>
-          <div class="provider-type-grid" style={{ "margin-bottom": "20px" }}>
-            <For each={props.typeOptions}>
-              {(option) => (
-                <button
-                  class={`provider-type-option ${props.form.type === option.value ? "active" : ""}`}
-                  type="button"
-                  onClick={() => props.onChange({ type: option.value, base_url: "" })}
-                  title={option.description}
-                >
-                  <span class="setting-title">{option.label}</span>
-                </button>
-              )}
-            </For>
-          </div>
-        </Show>
-
-        <div class="grid-2">
-          <label class="field">
-            <span>Provider ID</span>
-            <input
-              class="input mono"
-              value={props.form.name}
-              placeholder="e.g. deepseek, groq"
-              disabled={!props.form.isCustom}
-              onInput={(event) => props.onChange({ name: event.currentTarget.value })}
-            />
-          </label>
-          <label class="field">
-            <span>API Key</span>
-            <input
-              class="input"
-              type="password"
-              value={props.form.api_key}
-              placeholder="Paste your credentials here"
-              onInput={(event) => props.onChange({ api_key: event.currentTarget.value })}
-            />
-          </label>
-        </div>
-
-        <Show when={selectedType()?.requires_base_url || props.form.base_url}>
-          <label class="field">
-            <span>Base URL</span>
-            <input
-              class="input"
-              type="url"
-              value={props.form.base_url}
-              placeholder="https://api.example.com/v1"
-              onInput={(event) => props.onChange({ base_url: event.currentTarget.value })}
-            />
-          </label>
-        </Show>
-      </div>
-    </Dialog>
+    <SettingsLayout title="Add AI Provider" breadcrumbLabel="Providers">
+      <Show when={isCustom() || entry()} fallback={<div class="panel panel-body stack"><h3>Provider not found</h3><button class="btn" onClick={() => navigate("/settings/providers?tab=llm")}>Back to Providers</button></div>}>
+        <ProviderFormPanel title={`Add ${entry()?.name || "Custom Provider"}`} busy={busy()} onSubmit={save} onBack={() => navigate("/settings/providers?tab=llm")}>
+          <label class="stack">Configuration name<input class="input" required pattern="[A-Za-z0-9_-]+" value={form().name} onInput={(event) => patch({ name: event.currentTarget.value })} /></label>
+          <Show when={isCustom()}>
+            <label class="stack">Provider type<select class="input" value={form().type} onChange={(event) => patch({ type: event.currentTarget.value, base_url: "" })}><For each={props.typeOptions}>{(option) => <option value={option.value}>{option.label}</option>}</For></select></label>
+          </Show>
+          <label class="stack">API key<input class="input" type="password" required autocomplete="new-password" value={form().api_key} onInput={(event) => patch({ api_key: event.currentTarget.value })} /></label>
+          <Show when={form().type === "openai_compatible" || form().base_url}>
+            <label class="stack">Base URL<input class="input" type="url" required={form().type === "openai_compatible"} value={form().base_url} onInput={(event) => patch({ base_url: event.currentTarget.value })} /></label>
+          </Show>
+          <p class="hint">This saves a separate configuration. Edit it to select a model before setting it as default.</p>
+        </ProviderFormPanel>
+      </Show>
+    </SettingsLayout>
   );
 }
-
 
 function FallbackModelSection(props: {
   catalogs: ModelCatalog[];

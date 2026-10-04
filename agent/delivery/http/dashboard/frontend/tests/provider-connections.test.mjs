@@ -42,3 +42,13 @@ test("connection detours keep independent drafts without sharing mutable objects
   assert.equal(drafts.takeSettingsDraft("tools"), undefined);
   assert.deepEqual(drafts.takeSettingsDraft("agent:research"), { connection: "separate" });
 });
+
+const connections = await loadModule("../src/lib/providerConnections.ts");
+
+test("provider names use the first free suffix without case collisions", () => {
+  assert.equal(connections.suggestProviderName("google", []), "google");
+  assert.equal(connections.suggestProviderName("google", ["Google", "GOOGLE-2"]), "google-3");
+  assert.equal(connections.suggestProviderName("google", ["google", "google-3"]), "google-2");
+  assert.equal(connections.suggestProviderName("google", ["google", "google_2"], true), "google-3");
+  assert.equal(connections.suggestProviderName("default", []), "default-2");
+});

@@ -130,6 +130,9 @@ async def update_setting(
         value = normalize_setting_value(key, body.value)
 
     validate_default_model_update(service, {key: value})
+    if key.startswith("decision.providers.") or key in {"decision.default_provider", "decision.migration_version"}:
+        from fastapi import HTTPException
+        raise HTTPException(400, "Manage decision providers through the decision-providers API.")
     if key.startswith("web."):
         from fastapi import HTTPException
         raise HTTPException(400, "Manage web connections through the web-connections API.")
@@ -171,6 +174,9 @@ async def update_settings(body: UpdateSettingsBody, request: Request) -> dict[st
     values = normalize_setting_updates(raw_values)
     service = get_request_config_service(request)
     validate_default_model_update(service, values)
+    if any(key.startswith("decision.providers.") or key in {"decision.default_provider", "decision.migration_version"} for key in values):
+        from fastapi import HTTPException
+        raise HTTPException(400, "Manage decision providers through the decision-providers API.")
     if any(key.startswith("web.") for key in values):
         from fastapi import HTTPException
         raise HTTPException(400, "Manage web connections through the web-connections API.")

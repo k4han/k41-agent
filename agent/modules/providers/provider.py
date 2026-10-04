@@ -28,3 +28,4 @@ class ProviderConfig:
     models: tuple[str, ...] = ()
     enabled: bool = True
     extra_body: dict[str, Any] | None = field(default=None)
+    catalog_id: str = ""

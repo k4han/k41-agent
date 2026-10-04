@@ -142,7 +142,7 @@ RUNTIME_KEY_PATTERNS = [
     r"^llm\.default_model$",
     rf"^{re.escape(LLM_FALLBACK_PROVIDER_KEY)}$",
     rf"^{re.escape(LLM_FALLBACK_MODEL_KEY)}$",
-    r"^llm\.providers\.[A-Za-z0-9_-]+\.(provider|type|api_key|base_url|default_model|models|temperature|enabled|extra_body)$",
+    r"^llm\.providers\.[A-Za-z0-9_-]+\.(provider|type|catalog_id|api_key|base_url|default_model|models|temperature|enabled|extra_body)$",
     r"^tools\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.(transport|command|args|url|enabled)$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.env\.[A-Za-z0-9_-]+$",
@@ -156,7 +156,8 @@ RUNTIME_KEY_PATTERNS = [
     r"^database\.url$",
     rf"^{re.escape(DISPLAY_TIMEZONE_CONFIG_KEY)}$",
     r"^recursion_limit$",
-    r"^decision\.(model|timeout|max_retries)$",
+    r"^decision\.(model|timeout|max_retries|default_provider|migration_version)$",
+    r"^decision\.providers\.[A-Za-z0-9_-]+\.[A-Za-z0-9_]+$",
     r"^decision\.cloudflare\.(account_id|api_token|base_url)$",
     r"^decision\.router\.(mode|threshold|log_telemetry)$",
 ]
@@ -175,7 +176,7 @@ DATABASE_RUNTIME_KEY_PATTERNS = [
     r"^llm\.default_model$",
     rf"^{re.escape(LLM_FALLBACK_PROVIDER_KEY)}$",
     rf"^{re.escape(LLM_FALLBACK_MODEL_KEY)}$",
-    r"^llm\.providers\.[A-Za-z0-9_-]+\.(provider|type|api_key|base_url|default_model|models|temperature|enabled|extra_body)$",
+    r"^llm\.providers\.[A-Za-z0-9_-]+\.(provider|type|catalog_id|api_key|base_url|default_model|models|temperature|enabled|extra_body)$",
     r"^tools\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.(transport|command|args|url|enabled)$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.env\.[A-Za-z0-9_-]+$",
@@ -188,7 +189,8 @@ DATABASE_RUNTIME_KEY_PATTERNS = [
     rf"^{re.escape(REPOSITORY_SKILLS_DIR_KEY)}$",
     rf"^{re.escape(DISPLAY_TIMEZONE_CONFIG_KEY)}$",
     r"^recursion_limit$",
-    r"^decision\.(model|timeout|max_retries)$",
+    r"^decision\.(model|timeout|max_retries|default_provider|migration_version)$",
+    r"^decision\.providers\.[A-Za-z0-9_-]+\.[A-Za-z0-9_]+$",
     r"^decision\.cloudflare\.(account_id|api_token|base_url)$",
     r"^decision\.router\.(mode|threshold|log_telemetry)$",
 ]
@@ -206,6 +208,7 @@ SENSITIVE_RUNTIME_KEY_PATTERNS = [
     r"^workspace\.daytona\.api_key$",
     r"^workspace\.modal\.(token_id|token_secret)$",
     r"^decision\.cloudflare\.api_token$",
+    r"^decision\.providers\.[A-Za-z0-9_-]+\.[A-Za-z0-9_]*(api_key|token|secret|password)[A-Za-z0-9_]*$",
 ]
 
 
@@ -225,6 +228,12 @@ def is_database_runtime_key(key: str) -> bool:
 
 def is_sensitive_runtime_key(key: str) -> bool:
     """Check whether a runtime key should be encrypted at rest."""
+    if key.startswith("decision.providers."):
+        from agent.shared.config.decision_providers import DECISION_PROVIDERS
+        parts = key.split(".")
+        if len(parts) == 4 and any(field["name"] == parts[3] and field["input_type"] == "password"
+                                 for definition in DECISION_PROVIDERS.values() for field in definition["fields"]):
+            return True
     return any(re.match(pattern, key) for pattern in SENSITIVE_RUNTIME_KEY_PATTERNS)
 
 
@@ -408,6 +417,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "decision.router.mode": "cascade",
     "decision.router.threshold": 0.75,
     "decision.router.log_telemetry": True,
+    "decision.default_provider": "",
     "decision.model": "@cf/cloudflare/clef-flash",
     "decision.timeout": 5.0,
     "decision.max_retries": 2,

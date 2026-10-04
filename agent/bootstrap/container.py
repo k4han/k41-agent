@@ -567,7 +567,7 @@ class AppContainer:
             from agent.modules.decisions import DecisionService, load_decision_settings
 
             settings = load_decision_settings(self.config_service)
-            self._decision_service = DecisionService(settings=settings)
+            self._decision_service = DecisionService(settings=settings, config=self.config_service)
         return self._decision_service
 
     @property

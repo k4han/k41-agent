@@ -188,6 +188,24 @@ export type WebConnectionsPayload = {
   services: Array<{ type: string; label: string; fields: string[]; capabilities: string[] }>;
 };
 
+export type DecisionProvidersPayload = {
+  providers: Array<{
+    name: string;
+    type: string;
+    fields: Record<string, string | number>;
+    configured: boolean;
+    is_default: boolean;
+    has_api_token: boolean;
+    stored_secrets?: Record<string, boolean>;
+  }>;
+  default_provider: string;
+  services: Array<{
+    type: string;
+    label: string;
+    fields: Array<{ name: string; label: string; input_type: string; required?: boolean; default?: string | number; min?: number; step?: number }>;
+  }>;
+};
+
 export type ToolConfigSchema = {
   fields: ToolConfigField[];
   default_config: Record<string, unknown>;
@@ -364,6 +382,7 @@ export type SourceValue = {
 
 export type ProviderRow = {
   name: string;
+  catalog_id?: string;
   fields: Record<string, { key: string; info: SettingInfo }>;
   type: string;
   type_label: string;

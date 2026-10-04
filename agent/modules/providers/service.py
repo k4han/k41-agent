@@ -34,13 +34,15 @@ class ProviderService:
         self,
         provider_type: ProviderType,
         provider_name: str | None = None,
+        catalog_id: str = "",
     ) -> ChatModelFactory:
-        if provider_name:
-            from agent.modules.providers.catalog import normalize_provider_key
+        from agent.modules.providers.catalog import normalize_provider_key
 
-            named = self._named_factories.get(normalize_provider_key(provider_name))
-            if named is not None:
-                return named
+        for name in (provider_name, catalog_id):
+            if name:
+                named = self._named_factories.get(normalize_provider_key(name))
+                if named is not None:
+                    return named
         factory = self._factories.get(provider_type)
         if factory is None:
             raise RuntimeError(
@@ -70,7 +72,7 @@ class ProviderService:
             if provider_name
             else self.get_default_provider()
         )
-        factory = self.get_factory(provider.provider_type, provider_name=provider.name)
+        factory = self.get_factory(provider.provider_type, provider_name=provider.name, catalog_id=provider.catalog_id)
         list_models = getattr(factory, "list_models", None)
         can_list_models = callable(list_models)
 
@@ -95,7 +97,7 @@ class ProviderService:
             default_model=provider.default_model,
             can_list_models=can_list_models,
             models=_merge_model_options(
-                provider_name=provider.name,
+                provider_name=provider.catalog_id or provider.name,
                 remote_models=remote_models,
                 configured_models=list(provider.models),
                 default_model=provider.default_model,

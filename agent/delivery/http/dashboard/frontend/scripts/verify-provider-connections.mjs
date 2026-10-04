@@ -27,16 +27,84 @@ const services = [
 const connections = [{ name: 'team', type: 'tavily', fields: {}, has_api_key: true, configured: true,
   is_default: true, capabilities: ['search', 'fetch'], sources: { api_key: 'connection' } }];
 const defaults = { tavily: 'team' };
+const aiConnections = [];
+let aiDefault = '';
+const decisionConnections = [];
+let decisionDefault = '';
+const decisionServices = [{ type: 'cloudflare', label: 'Cloudflare', fields: [
+  { name: 'account_id', label: 'Account ID', input_type: 'text', required: true },
+  { name: 'api_token', label: 'API Token', input_type: 'password', required: true },
+  { name: 'model', label: 'Model', input_type: 'text', required: true, default: '@cf/cloudflare/clef-flash' },
+  { name: 'timeout', label: 'Timeout', input_type: 'number', min: 0.1, default: 5 },
+  { name: 'max_retries', label: 'Retries', input_type: 'number', min: 0, step: 1, default: 2 },
+] }];
+const fieldOrder = ['type', 'api_key', 'default_model', 'models', 'enabled'];
+const fieldLabels = { type: 'Type', api_key: 'API Key', default_model: 'Default Model', models: 'Models', enabled: 'Enabled' };
+const aiPayload = () => ({ settings: {}, by_category: {}, settings_sources: {}, default_provider: aiDefault.split('/')[0], default_model: aiDefault,
+  provider_names: aiConnections.map(item => item.name), provider_field_order: fieldOrder,
+  provider_type_options: [{ value: 'google', label: 'Google', requires_base_url: false }],
+  providers_catalog: { google: { id: 'google', name: 'Google', provider_type: 'google', models: [{ id: 'gemini-test', name: 'Gemini Test' }] } },
+  provider_rows: aiConnections.map(item => ({
+    name: item.name, type: item.type, type_label: 'Google', catalog_id: item.catalog_id,
+    fields: Object.fromEntries(fieldOrder.map(field => [field, { key: `llm.providers.${item.name}.${field}`,
+      info: { value: item[field], input_type: field === 'api_key' ? 'password' : field === 'enabled' ? 'boolean' : 'text', label: fieldLabels[field], source: 'database' } }])),
+    ready: !!item.default_model, enabled: true, is_default: aiDefault.startsWith(item.name + '/'),
+    can_set_default: !!item.default_model && !aiDefault.startsWith(item.name + '/'),
+    can_delete: !aiDefault.startsWith(item.name + '/'), requires_base_url: false,
+  })),
+});
 const writes = [];
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
-  if (url.pathname.startsWith('/dashboard-api') || url.pathname === '/settings') {
+  if (url.pathname.startsWith('/dashboard-api') || url.pathname.startsWith('/settings/') && req.method === 'PUT' || url.pathname === '/settings') {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('X-CSRF-Token', 'test-csrf');
     const body = req.method === 'GET' ? '' : await new Promise(resolve => {
       let value = ''; req.on('data', chunk => value += chunk); req.on('end', () => resolve(value));
     });
     if (req.method !== 'GET') writes.push({ path: url.pathname, body: JSON.parse(body || '{}') });
+    const submitted = JSON.parse(body || '{}');
+    if (url.pathname === '/dashboard-api/providers') {
+      if (req.method === 'POST') {
+        if (aiConnections.some(item => item.name.toLowerCase() === submitted.name.toLowerCase())) { res.statusCode = 409; res.end('{"detail":"Provider already exists."}'); return; }
+        aiConnections.push({ ...submitted, default_model: '', models: [], enabled: true });
+        res.end(JSON.stringify({ status: 'created', name: submitted.name }));
+      } else res.end(JSON.stringify(aiPayload()));
+      return;
+    }
+    if (url.pathname === '/settings' && req.method === 'PUT') {
+      for (const [key, value] of Object.entries(submitted.values)) {
+        const parts = key.split('.');
+        const entry = aiConnections.find(item => item.name === parts[2]);
+        if (entry) entry[parts[3]] = value;
+      }
+      res.end('{"status":"success"}'); return;
+    }
+    if (url.pathname === '/settings/llm.default_model') {
+      aiDefault = submitted.value;
+      res.end('{"status":"success"}'); return;
+    }
+    if (url.pathname === '/dashboard-api/decision-providers') {
+      if (req.method === 'POST') {
+        if (decisionConnections.some(item => item.name.toLowerCase() === submitted.name.toLowerCase())) { res.statusCode = 409; res.end('{"detail":"Provider already exists."}'); return; }
+        const { api_token, ...fields } = submitted.fields;
+        decisionConnections.push({ name: submitted.name, type: submitted.type, fields, has_api_token: !!api_token, configured: !!api_token && !!fields.account_id, is_default: false });
+        res.end(JSON.stringify({ status: 'created', name: submitted.name }));
+      } else res.end(JSON.stringify({ providers: decisionConnections, services: decisionServices, default_provider: decisionDefault }));
+      return;
+    }
+    if (url.pathname === '/dashboard-api/decision-providers/default') {
+      decisionDefault = submitted.name || '';
+      for (const entry of decisionConnections) entry.is_default = entry.name === decisionDefault;
+      res.end('{"status":"updated"}'); return;
+    }
+    if (url.pathname.startsWith('/dashboard-api/decision-providers/') && req.method === 'PUT') {
+      const entry = decisionConnections.find(item => item.name === decodeURIComponent(url.pathname.split('/').pop()));
+      const { api_token, ...fields } = submitted.fields;
+      Object.assign(entry.fields, fields);
+      if ('api_token' in submitted.fields) entry.has_api_token = !!api_token;
+      res.end('{"status":"updated"}'); return;
+    }
     if (url.pathname === '/dashboard-api/web-connections') {
       if (req.method === 'POST') {
         const data = JSON.parse(body);
@@ -128,7 +196,7 @@ try {
   await navigate('/settings/providers?tab=web');
   await until(() => js('document.body.textContent.includes("team")'), 'web connections');
   assert.equal(await js('document.querySelectorAll("aside.sidebar").length'), 1);
-  await js('Array.from(document.querySelectorAll("section.panel")).find(p => p.querySelector(".panel-title")?.textContent === "Tavily").querySelector("button").click()');
+  await js(`document.querySelector('[data-provider-id="tavily"]').click()`);
   await until(() => js('!!document.querySelector("form input[type=password]")'), 'create form');
   await js('const name = document.querySelector("form input.input"); name.value = "review"; name.dispatchEvent(new Event("input", { bubbles: true })); const key = document.querySelector("form input[type=password]"); key.value = "fake-key"; key.dispatchEvent(new Event("input", { bubbles: true }));');
   await js('Array.from(document.querySelectorAll("[role=tab]")).find(t => t.textContent.includes("Models")).click()');
@@ -137,7 +205,7 @@ try {
   await js('document.querySelector("form").requestSubmit()');
   await until(() => js('!document.querySelector("form") && document.body.textContent.includes("review")'), 'saved connection');
   assert.equal(writes.find(write => write.path === '/dashboard-api/web-connections').body.name, 'review');
-  await js('Array.from(document.querySelectorAll(".row-wrap")).find(r => r.querySelector("strong")?.textContent === "review").querySelector("button").click()');
+  await js(`document.querySelector('[data-connection-name="review"] button').click()`);
   await until(() => js('document.querySelector("form input.input")?.value === "review"'), 'connection detail');
   assert.equal(await js('!!document.querySelector("form input[type=password]")'), false);
   await js('const input = document.querySelector("form input[type=checkbox]"); input.click();');
@@ -146,17 +214,95 @@ try {
   await js('Array.from(document.querySelectorAll("[role=tab]")).find(t => t.textContent.includes("Models")).click()');
   await until(() => js('new URLSearchParams(location.search).get("tab") === "llm"'), 'confirmed tab change');
   assert.equal(dialogs, 2);
+  for (const [group, provider] of [['llm', 'google'], ['web', 'tavily'], ['decision', 'cloudflare']]) {
+    await navigate(`/settings/providers?tab=${group}`);
+    await until(() => js(`!!document.querySelector('[data-provider-id="${provider}"]')`), `${group} provider picker`);
+    for (const expected of [provider, `${provider}-2`]) {
+      await js(`document.querySelector('[data-provider-id="${provider}"]').click()`);
+      await until(() => js(`document.querySelector('form input.input')?.value === '${expected}'`), `${group} suggested name ${expected}`);
+      await js(`(() => { const key = document.querySelector('form input[type=password]'); key.value = 'fake-secret'; key.dispatchEvent(new Event('input', { bubbles: true }));
+        const account = Array.from(document.querySelectorAll('form label')).find(label => label.textContent.includes('Account ID'))?.querySelector('input');
+        if (account) { account.value = 'account'; account.dispatchEvent(new Event('input', { bubbles: true })); }
+        document.querySelector('form').requestSubmit(); })()`);
+      await until(() => js(`!!document.querySelector('[data-connection-name="${expected}"]') && !document.querySelector('form')`), `${group} saved configuration`);
+      assert.equal(await js(`!!document.querySelector('[data-provider-id="${provider}"]')`), true);
+      assert.equal(await js('document.querySelector("[data-provider-connections]").compareDocumentPosition(document.querySelector("[data-provider-picker]")) & Node.DOCUMENT_POSITION_FOLLOWING'), 4);
+      assert.equal(await js(`!!document.querySelector('[data-connection-name="${expected}"] .badge-info')`), false);
+    }
+    await navigate(`/settings/providers?tab=${group}`);
+    await until(() => js(`!!document.querySelector('[data-connection-name="${provider}-2"]')`), `${group} reload saved configurations`);
+    await js(`document.querySelector('[data-provider-id="${provider}"]').click()`);
+    await until(() => js(`document.querySelector('form input.input')?.value === '${provider}-3'`), `${group} third suggested name`);
+    await js(`(() => { const name = document.querySelector('form input.input'); name.value = '${provider}'; name.dispatchEvent(new Event('input', { bubbles: true }));
+      const key = document.querySelector('form input[type=password]'); key.value = 'duplicate-secret'; key.dispatchEvent(new Event('input', { bubbles: true }));
+      const account = Array.from(document.querySelectorAll('form label')).find(label => label.textContent.includes('Account ID'))?.querySelector('input');
+      if (account) { account.value = 'account'; account.dispatchEvent(new Event('input', { bubbles: true })); } })()`);
+    if (group !== 'web') {
+      await js('document.querySelector("form").requestSubmit()');
+      await until(() => js('document.body.textContent.includes("Provider already exists.")'), `${group} duplicate error`);
+      assert.equal(await js('document.querySelector("form input[type=password]").value'), 'duplicate-secret');
+    }
+    await js('Array.from(document.querySelectorAll("form button")).find(button => button.textContent.includes("Cancel")).click()');
+    await until(() => js('!document.querySelector("form")'), `${group} cancel form`);
+  }
+  assert.equal(aiDefault, '');
+  assert.equal(decisionDefault, '');
+  assert.equal(defaults.tavily, 'team');
+  await navigate('/settings/providers?tab=decision');
+  await until(() => js('!!document.querySelector("[data-connection-name=cloudflare]")'), 'decision default action');
+  await js('document.querySelectorAll("[data-connection-name=cloudflare] button")[1].click()');
+  await until(() => js('!!document.querySelector("[data-connection-name=cloudflare] .badge-info")'), 'decision selected default');
+  assert.equal(decisionDefault, 'cloudflare');
+  assert.equal(await js('document.querySelectorAll("[data-connection-name=cloudflare] button")[2].disabled'), true);
+  await js('document.querySelector("[data-connection-name=cloudflare-2] button").click()');
+  await until(() => js('!!document.querySelector("form")'), 'decision edit');
+  assert.equal(await js('document.querySelector("form input.input").disabled'), true);
+  assert.equal(await js('!!document.querySelector("form input[type=password]")'), false);
+  await js('document.querySelector("form input[type=checkbox]").click()');
+  await js(`(() => { const key = document.querySelector('form input[type=password]'); key.value = 'new-token'; key.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('form').requestSubmit(); })()`);
+  await until(() => js('!document.querySelector("form")'), 'decision edit saved');
+  assert.equal(writes.findLast(write => write.path.endsWith('/cloudflare-2')).body.fields.api_token, 'new-token');
+  await navigate('/settings/providers?tab=llm');
+  await until(() => js('!!document.querySelector("[data-connection-name=google-2]")'), 'AI edit action');
+  await js('document.querySelector("[data-connection-name=google-2] button").click()');
+  await until(() => js('!!Array.from(document.querySelectorAll(".setting-row")).find(row => row.textContent.includes("Default Model"))'), 'AI model field');
+  await js(`(() => { const input = Array.from(document.querySelectorAll('.setting-row')).find(row => row.textContent.includes('Default Model')).querySelector('input'); input.value = 'gemini-test'; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await js('Array.from(document.querySelectorAll("button")).find(button => button.textContent.includes("Save changes")).click()');
+  await until(() => js('!!document.querySelector(".dialog-footer")'), 'AI save confirmation');
+  await js('Array.from(document.querySelectorAll(".dialog-footer button")).find(button => button.textContent.includes("Save")).click()');
+  await until(() => js('!document.querySelector(".dialog-footer")'), 'AI settings saved');
+  await navigate('/settings/providers?tab=llm');
+  await until(() => js('!!document.querySelector("[data-connection-name=google-2]")'), 'AI list refreshed');
+  await js('document.querySelectorAll("[data-connection-name=google-2] button")[1].click()');
+  await until(() => js('!!document.querySelector("[data-connection-name=google-2] .badge-info")'), 'AI default selected');
+  assert.equal(aiDefault, 'google-2/gemini-test');
   await navigate('/settings/providers/web');
   await until(() => js('location.pathname === "/settings/providers/llm/web"'), 'legacy provider named web');
   await navigate('/settings/backends/local');
   await until(() => js('location.pathname === "/settings/providers/workspace/local"'), 'legacy backend detail');
-  await navigate('/settings/providers?tab=web');
-  await until(() => js('document.body.textContent.includes("review")'), 'mobile page');
   await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-  await delay(250);
-  assert.equal(await js('document.documentElement.scrollWidth <= window.innerWidth'), true);
+  for (const group of ['llm', 'web', 'decision']) {
+    await navigate(`/settings/providers?tab=${group}`);
+    await until(() => js('!!document.querySelector("[data-provider-connections]")'), `${group} mobile page`);
+    await delay(150);
+    assert.equal(await js('document.documentElement.scrollWidth <= window.innerWidth'), true);
+  }
+  for (const group of ['llm', 'web', 'decision']) {
+    await navigate(`/settings/providers?tab=${group}&new=missing`);
+    await until(() => js('document.body.textContent.includes("Provider not found")'), `${group} unknown provider`);
+    assert.equal(await js('!!document.querySelector("form")'), false);
+  }
+  await navigate('/settings/providers?tab=web&new=tavily&returnTo=%2Fsettings%2Ftools');
+  await until(() => js('!!document.querySelector("form input[type=password]")'), 'web return detour form');
+  await js(`(() => { const key = document.querySelector('form input[type=password]'); key.value = 'detour-key'; key.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('form').requestSubmit(); })()`);
+  await until(() => js('location.pathname === "/settings/tools"'), 'web returns to tools');
+  for (const [group, provider] of [['llm', 'google'], ['web', 'tavily'], ['decision', 'cloudflare']]) {
+    await navigate(`/settings/providers?tab=${group}&new=${provider}`);
+    await until(() => js('!!document.querySelector("form")'), `${group} mobile create form`);
+    assert.equal(await js('document.documentElement.scrollWidth <= window.innerWidth'), true);
+  }
   assert.deepEqual(exceptions, []);
-  console.log('PASS: four tabs, one layout, create/edit, discard guard, legacy redirects, mobile width.');
+  console.log('PASS: repeat creation in all three groups, suggested names, separate rows, defaults, token editing, errors, drafts, legacy redirects, mobile width.');
 } finally {
   await closeBrowser?.();
   ws?.close(); browser.kill();

@@ -138,7 +138,8 @@ def _build_provider_config(
 ) -> ProviderConfig:
     from agent.modules.providers.catalog import get_provider_catalog_entry
 
-    catalog_entry = get_provider_catalog_entry(provider_key)
+    catalog_id = str(provider_values.get("catalog_id") or "").strip()
+    catalog_entry = get_provider_catalog_entry(catalog_id or provider_key)
     provider_name = str(provider_values.get("_provider_name", provider_key)).strip() or provider_key
     enabled = coerce_bool(provider_values.get("enabled", True))
 
@@ -190,6 +191,7 @@ def _build_provider_config(
         models=models,
         enabled=enabled,
         extra_body=_resolve_extra_body(provider_values),
+        catalog_id=catalog_id,
     )
 
 

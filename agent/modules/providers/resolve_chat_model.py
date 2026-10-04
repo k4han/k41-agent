@@ -116,6 +116,7 @@ def _resolve_chat_model_info_impl(
     factory = provider_service.get_factory(
         provider_config.provider_type,
         provider_name=provider_config.name,
+        catalog_id=provider_config.catalog_id,
     )
 
     chat_model = _get_cached_model(

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 from typing import Any, Literal
 
@@ -316,44 +315,10 @@ def _resolve_decision_client(
         if provider == "mock":
             return MockDecisionClient()
 
-        account_id = (
-            config_service.get_str("decision.cloudflare.account_id", "")
-            or os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
-        ).strip()
-        api_token = (
-            config_service.get_str("decision.cloudflare.api_token", "")
-            or os.environ.get("CLOUDFLARE_API_TOKEN", "")
-        ).strip()
-
-        if account_id and api_token:
-            base_url = (
-                config_service.get_str("decision.cloudflare.base_url", "")
-                or os.environ.get("CLOUDFLARE_BASE_URL", "")
-            ).strip() or CloudflareClefClient.DEFAULT_BASE_URL
-            model = (
-                config_service.get_str("decision.model", "")
-                or config_service.get_str("decision.cloudflare.model", "")
-                or os.environ.get("CLOUDFLARE_MODEL", "")
-            ).strip() or CloudflareClefClient.DEFAULT_MODEL
-            timeout_val = config_service.get("decision.timeout")
-            if timeout_val is None:
-                timeout_val = config_service.get("decision.cloudflare.timeout")
-            timeout = float(timeout_val) if timeout_val is not None else 8.0
-            max_retries_val = config_service.get("decision.max_retries")
-            if max_retries_val is None:
-                max_retries_val = config_service.get("decision.cloudflare.max_retries")
-            max_retries = int(max_retries_val) if max_retries_val is not None else 2
-
-            return CloudflareClefClient(
-                account_id=account_id,
-                api_token=api_token,
-                base_url=base_url,
-                default_model=model,
-                timeout=timeout,
-                max_retries=max_retries,
-            )
+        from agent.modules.decisions import create_decision_client, load_decision_settings
+        return create_decision_client(load_decision_settings(config_service))
     except Exception as exc:
-        logger.debug("Failed resolving Cloudflare client from settings: %s", exc)
+        logger.debug("Failed resolving decision client from settings: %s", exc)
 
     return None
 

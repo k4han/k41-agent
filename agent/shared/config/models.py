@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
-from agent.shared.config.constants import DEFAULT_CONFIG, KNOWN_RUNTIME_KEYS, get_channel_enabled_key
+from agent.shared.config.constants import DEFAULT_CONFIG, KNOWN_RUNTIME_KEYS, get_channel_enabled_key, is_sensitive_runtime_key
 
 
 class SettingsSource(str, Enum):
@@ -29,10 +29,11 @@ class SettingsValue:
 
     def to_dict(self) -> dict[str, object]:
         """Serialize to dashboard-friendly dict format."""
-        return {
-            "value": bool(self.value) if self.key.startswith("web.connections.") and self.key.endswith(".api_key") else self.value,
-            "source": self.source.value,
-        }
+        masked = (
+            (self.key.startswith("web.connections.") and self.key.endswith(".api_key"))
+            or (self.key.startswith("decision.") and is_sensitive_runtime_key(self.key))
+        )
+        return {"value": bool(self.value) if masked else self.value, "source": self.source.value}
 
 
 def _default_channel_enabled() -> dict[str, bool]:

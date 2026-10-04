@@ -227,6 +227,7 @@ def build_provider_rows(
 
         provider_rows.append({
             "name": provider_name,
+            "catalog_id": _field_text(fields, "catalog_id"),
             "fields": fields,
             "type": provider_type,
             "type_label": _provider_type_label(provider_type),

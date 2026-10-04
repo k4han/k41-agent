@@ -6,6 +6,9 @@ import { DataGate } from "@/components/State";
 import { useUnsavedChanges } from "@/lib/useUnsavedChanges";
 import { connectionReturnTo } from "@/lib/providerRoutes";
 import type { WebConnectionsPayload } from "@/types";
+import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
+import { suggestProviderName } from "@/lib/providerConnections";
+import { ProviderConnectionList, ProviderPicker, ProviderFormPanel } from "./ProviderConnections";
 import { ProviderSettingsLayout } from "./ProviderSettingsLayout";
 
 const ROOT = "/settings/providers?tab=web";
@@ -23,12 +26,12 @@ export function WebConnectionsPage() {
   const [initial, setInitial] = createSignal(emptyForm(query.new));
   const [changeKey, setChangeKey] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
-  const [makeDefault, setMakeDefault] = createSignal(false);
+  const [search, setSearch] = createSignal("");
   const [createdName, setCreatedName] = createSignal("");
   const isEditing = () => Boolean(params.connectionName || createdName());
   const showForm = () => isEditing() || Boolean(query.new);
-  const dirty = () => showForm() && (JSON.stringify(form()) !== JSON.stringify(initial()) || changeKey() || makeDefault());
-  useUnsavedChanges(dirty, () => { setForm(initial()); setChangeKey(false); setMakeDefault(false); });
+  const dirty = () => showForm() && (JSON.stringify(form()) !== JSON.stringify(initial()) || changeKey());
+  useUnsavedChanges(dirty, () => { setForm(initial()); setChangeKey(false); });
   const service = createMemo(() => data()?.services.find((item) => item.type === form().type));
   const current = () => {
     const name = params.connectionName || createdName();
@@ -47,11 +50,11 @@ export function WebConnectionsPage() {
         const next = { ...emptyForm(entry.type), name: entry.name, ...entry.fields };
         setForm(next); setInitial(next);
       } else {
-        const type = payload.services.some((item) => item.type === query.new) ? query.new! : "tavily";
-        const next = emptyForm(type);
+        const type = query.new || "tavily";
+        const next = { ...emptyForm(type), name: query.new ? suggestProviderName(type, payload.connections.map((item) => item.name)) : "" };
         setForm(next); setInitial(next);
       }
-      setChangeKey(false); setMakeDefault(false);
+      setChangeKey(false);
     } catch (err) { setData(undefined); setError(err instanceof Error ? err.message : "Failed to load connections."); }
   };
   createEffect(() => {
@@ -60,6 +63,7 @@ export function WebConnectionsPage() {
     void load();
   });
   const action = async (work: () => Promise<unknown>) => {
+    if (busy()) return;
     setBusy(true);
     try { await work(); await load(); }
     catch (err) { showToast(err instanceof Error ? err.message : "Request failed.", "error"); }
@@ -67,6 +71,7 @@ export function WebConnectionsPage() {
   };
   const save = async (event: SubmitEvent) => {
     event.preventDefault();
+    if (busy()) return;
     setBusy(true);
     try {
       const values: Record<string, unknown> = {};
@@ -81,10 +86,6 @@ export function WebConnectionsPage() {
         setCreatedName(form().name);
       }
       setInitial(form()); setChangeKey(false);
-      if (makeDefault()) {
-        await putJson(`${API}/defaults/${form().type}`, { name: form().name });
-        setMakeDefault(false);
-      }
       showToast("Web connection saved.");
       navigate(returnTo());
     } catch (err) { showToast(err instanceof Error ? err.message : "Failed to save connection.", "error"); }
@@ -97,37 +98,31 @@ export function WebConnectionsPage() {
           <div class="stack settings-page-stack">
             <p class="hint">Manage credentials once. Tools and agents can use a shared default or a named connection. Empty fields fall back to the service environment variables.</p>
             <Show when={showForm()} fallback={
-              <For each={payload.services}>{(definition) => (
-                <section class="panel settings-section-card">
-                  <div class="panel-header split">
-                    <div><div class="panel-title">{definition.label}</div><div class="hint">{definition.capabilities.join(" / ")}</div></div>
-                    <button class="btn btn-primary btn-sm" type="button" onClick={() => navigate(`/settings/providers?tab=web&new=${definition.type}`)}>Add connection</button>
-                  </div>
-                  <div class="panel-body stack">
-                    <Show when={payload.defaults[definition.type]}>
-                      <button class="btn btn-sm" disabled={busy()} onClick={() => action(() => putJson(`${API}/defaults/${definition.type}`, { name: null }))}>Clear shared default</button>
-                    </Show>
-                    <For each={payload.connections.filter((entry) => entry.type === definition.type)}>{(entry) => (
-                      <div class="row-wrap">
-                        <strong style={{ "overflow-wrap": "anywhere", "max-width": "100%", "min-width": "0" }}>{entry.name}</strong>
-                        <span class="badge">{entry.configured ? "Configuration complete" : "Configuration incomplete"}</span>
-                        <Show when={entry.is_default}><span class="badge badge-info">Shared default</span></Show>
-                        <button class="btn btn-sm" onClick={() => navigate(`/settings/providers/web/${encodeURIComponent(entry.name)}`)}>Edit</button>
-                        <button class="btn btn-sm" disabled={busy() || entry.is_default} onClick={() => action(() => putJson(`${API}/defaults/${entry.type}`, { name: entry.name }))}>Set default</button>
-                        <button class="btn btn-sm btn-danger" disabled={busy()} onClick={() => {
-                          if (window.confirm(`Delete connection ${entry.name}?`)) void action(() => deleteJson(`${API}/${encodeURIComponent(entry.name)}`));
-                        }}>Delete</button>
-                      </div>
-                    )}</For>
-                    <Show when={!payload.connections.some((entry) => entry.type === definition.type)}><p class="hint">No saved connections. Environment credentials remain available.</p></Show>
-                  </div>
-                </section>
-              )}</For>
+              <>
+                <SettingsResourceToolbar searchValue={search()} searchPlaceholder="Search configurations and providers..." onSearchInput={setSearch} />
+                <ProviderConnectionList
+                  items={payload.connections.filter((entry) => `${entry.name} ${payload.services.find((item) => item.type === entry.type)?.label || entry.type}`.toLowerCase().includes(search().trim().toLowerCase())).map((entry) => ({
+                    name: entry.name, label: payload.services.find((item) => item.type === entry.type)?.label || entry.type,
+                    configured: entry.configured, isDefault: entry.is_default, canSetDefault: entry.configured && !entry.is_default, canDelete: true,
+                  }))}
+                  busy={busy()}
+                  emptyMessage="No saved configurations. Environment credentials remain available."
+                  onEdit={(name) => navigate(`/settings/providers/web/${encodeURIComponent(name)}`)}
+                  onSetDefault={(name) => { const entry = payload.connections.find((item) => item.name === name); if (entry) void action(() => putJson(`${API}/defaults/${entry.type}`, { name })); }}
+                  onDelete={(name) => { if (window.confirm(`Delete connection ${name}?`)) void action(() => deleteJson(`${API}/${encodeURIComponent(name)}`)); }}
+                />
+                <Show when={Object.values(payload.defaults).some(Boolean)}>
+                  <div class="row-wrap"><For each={payload.services.filter((item) => payload.defaults[item.type])}>{(item) => <button class="btn btn-sm" disabled={busy()} onClick={() => action(() => putJson(`${API}/defaults/${item.type}`, { name: null }))}>Clear {item.label} default</button>}</For></div>
+                </Show>
+                <ProviderPicker items={payload.services.filter((item) => item.label.toLowerCase().includes(search().trim().toLowerCase())).map((item) => ({
+                  id: item.type, label: item.label, description: item.capabilities.join(" / "), count: payload.connections.filter((entry) => entry.type === item.type).length,
+                }))} onSelect={(id) => navigate(`/settings/providers?tab=web&new=${id}`)} />
+              </>
             }>
-              <form class="panel panel-body stack" onSubmit={save}>
-                <h3>{isEditing() ? "Edit connection" : "Create connection"}</h3>
+              <Show when={service()} fallback={<div class="panel panel-body stack"><h3>Provider not found</h3><button class="btn" onClick={() => navigate(ROOT)}>Back to Providers</button></div>}>
+              <ProviderFormPanel title={isEditing() ? "Edit connection" : `Add ${service()?.label || "connection"}`} busy={busy()} onSubmit={save} onBack={() => navigate(returnTo())}>
                 <label class="stack">Name<input class="input" required pattern="[A-Za-z0-9_-]+" disabled={isEditing() || busy()} value={form().name} onInput={(event) => setForm({ ...form(), name: event.currentTarget.value })} /></label>
-                <label class="stack">Service<select class="input" disabled={isEditing() || busy()} value={form().type} onChange={(event) => setForm({ ...emptyForm(event.currentTarget.value), name: form().name })}>
+                <label class="stack">Service<select class="input" disabled={isEditing() || busy()} value={form().type} onChange={(event) => setForm({ ...emptyForm(event.currentTarget.value), name: suggestProviderName(event.currentTarget.value, payload.connections.map((item) => item.name)) })}>
                   <For each={payload.services}>{(item) => <option value={item.type}>{item.label}</option>}</For>
                 </select></label>
                 <Show when={isEditing()}>
@@ -138,9 +133,8 @@ export function WebConnectionsPage() {
                 <For each={(service()?.fields || []).filter((field) => field !== "api_key")}>{(field) => (
                   <label class="stack">{field === "cse_id" ? "Google CSE ID" : "Base URL"}<input class="input" type={field === "base_url" ? "url" : "text"} value={form()[field as "cse_id" | "base_url"]} onInput={(event) => setForm({ ...form(), [field]: event.currentTarget.value })} /></label>
                 )}</For>
-                <label><input type="checkbox" checked={makeDefault()} onChange={(event) => setMakeDefault(event.currentTarget.checked)} /> Use as the shared default for this service</label>
-                <div class="row-wrap"><button type="submit" class="btn btn-primary" disabled={busy()}>Save connection</button><button class="btn" type="button" disabled={busy()} onClick={() => navigate(returnTo())}>Cancel</button></div>
-              </form>
+              </ProviderFormPanel>
+              </Show>
             </Show>
           </div>
         )}

@@ -15,8 +15,7 @@ import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { DataGate } from "@/components/State";
 import type { SettingInfo } from "@/types";
 
-import { SettingsLayout as BaseSettingsLayout } from "./SettingsLayout";
-import { ProviderSettingsLayout } from "./ProviderSettingsLayout";
+import { SettingsLayout } from "./SettingsLayout";
 import { useUnsavedChanges } from "@/lib/useUnsavedChanges";
 import {
   type PendingChange,
@@ -60,8 +59,7 @@ const DOMAIN_EVALUATORS = [
   },
 ];
 
-export function DecisionsPage(props: { providerOnly?: boolean } = {}) {
-  const SettingsLayout = props.providerOnly ? ProviderSettingsLayout : BaseSettingsLayout;
+export function DecisionsPage() {
   const {
     data,
     error,
@@ -89,18 +87,7 @@ export function DecisionsPage(props: { providerOnly?: boolean } = {}) {
     if (!payload?.settings) return [];
     const needle = search().trim().toLowerCase();
     return Object.entries(payload.settings).filter(([key, info]) => {
-      if (props.providerOnly || !key.startsWith("decision.router")) return false;
-      const haystack = [key, info.label, info.description].join(" ").toLowerCase();
-      return !needle || haystack.includes(needle);
-    });
-  });
-
-  const providerSettings = createMemo(() => {
-    const payload = data();
-    if (!payload?.settings) return [];
-    const needle = search().trim().toLowerCase();
-    return Object.entries(payload.settings).filter(([key, info]) => {
-      if (!props.providerOnly || key.startsWith("decision.router")) return false;
+      if (!key.startsWith("decision.router")) return false;
       const haystack = [key, info.label, info.description].join(" ").toLowerCase();
       return !needle || haystack.includes(needle);
     });
@@ -117,7 +104,7 @@ export function DecisionsPage(props: { providerOnly?: boolean } = {}) {
 
   return (
     <SettingsLayout
-      title={props.providerOnly ? "Decision Model Provider" : "Decisions & Routing"}
+      title="Decisions & Routing"
       breadcrumbLabel="Decisions"
       actions={
         <button
@@ -188,7 +175,7 @@ export function DecisionsPage(props: { providerOnly?: boolean } = {}) {
             </div>
 
             <Show
-              when={routingSettings().length > 0 || providerSettings().length > 0}
+              when={routingSettings().length > 0}
               fallback={
                 <div class="panel" style={{ padding: "36px 20px", "text-align": "center" }}>
                   <div style={{ display: "grid", "place-items": "center", gap: "8px", color: "var(--muted)" }}>
@@ -226,31 +213,8 @@ export function DecisionsPage(props: { providerOnly?: boolean } = {}) {
                   </SettingsSection>
                 </Show>
 
-                {/* Section 2: Cloudflare Workers AI Config */}
-                <Show when={providerSettings().length > 0}>
-                  <SettingsSection
-                    title="Cloudflare Workers AI Connection"
-                    description="Credentials and request parameters for @cf/cloudflare/clef-flash."
-                  >
-                    <div class="settings-list settings-table">
-                      <For each={providerSettings() as [string, SettingInfo][]}>
-                        {([key, info]) => (
-                          <SettingRow
-                            settingKey={key}
-                            info={info}
-                            draft={drafts()[key]}
-                            dirty={pendingChanges().some((change: PendingChange) => change.key === key)}
-                            onChange={(value) => setDraft(key, value)}
-                            onRestore={() => restoreDraft(key)}
-                          />
-                        )}
-                      </For>
-                    </div>
-                  </SettingsSection>
-                </Show>
-
                 {/* Section 3: Extensible Domain Evaluators */}
-                <Show when={!props.providerOnly}><SettingsSection
+                <SettingsSection
                   title="Multi-Domain Decision Evaluators"
                   description="Built-in domain evaluators ready for extensible decision-making across the platform."
                 >
@@ -313,7 +277,7 @@ export function DecisionsPage(props: { providerOnly?: boolean } = {}) {
                       }}
                     </For>
                   </div>
-                </SettingsSection></Show>
+                </SettingsSection>
               </div>
             </Show>
 

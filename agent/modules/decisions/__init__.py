@@ -46,6 +46,7 @@ from agent.modules.decisions.models import (
     ScoreQuestion,
 )
 from agent.modules.decisions.ports import DecisionClient
+from agent.modules.decisions.providers import create_decision_client, register_decision_provider
 from agent.modules.decisions.service import DecisionService
 from agent.modules.decisions.settings import (
     DecisionSettings,
@@ -59,6 +60,8 @@ __all__ = [
     "CloudflareClefClient",
     "MockDecisionClient",
     "DecisionService",
+    "create_decision_client",
+    "register_decision_provider",
     # Settings
     "DecisionSettings",
     "RouterMode",

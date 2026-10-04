@@ -354,7 +354,7 @@ def _database_owned_values_from_yaml_sources(service: ConfigService) -> dict[str
             {
                 key: value
                 for key, value in flat.items()
-                if isinstance(key, str) and is_database_runtime_key(key) and key != "web.migration_version"
+                if isinstance(key, str) and is_database_runtime_key(key) and key not in {"web.migration_version", "decision.migration_version"}
             }
         )
     return values
@@ -385,6 +385,7 @@ def attach_database_config_source(database_url: str, service: ConfigService | No
                 "Seeded %s runtime setting(s) from legacy YAML config.",
                 len(seeded_keys),
             )
+    source.migrate_decision_providers()
     migrated_web_keys = source.migrate_web_connections()
     if migrated_web_keys:
         logger.info("Migrated %s web connection setting(s).", len(migrated_web_keys))

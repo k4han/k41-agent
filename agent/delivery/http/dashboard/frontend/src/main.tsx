@@ -116,6 +116,7 @@ render(
         <Route path="/settings/providers" component={ProviderHubPage} />
         <Route path="/settings/providers/llm/:providerName" component={ProviderHubPage} />
         <Route path="/settings/providers/web/:connectionName" component={ProviderHubPage} />
+        <Route path="/settings/providers/decision/:decisionProviderName" component={ProviderHubPage} />
         <Route path="/settings/providers/workspace/:backendName" component={ProviderHubPage} />
         <Route path="/settings/providers/:providerName" component={LegacyProviderDetail} />
         <Route path="/settings/connections" component={ConnectionsPage} />
