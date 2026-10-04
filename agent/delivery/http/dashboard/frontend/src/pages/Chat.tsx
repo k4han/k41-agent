@@ -1871,6 +1871,7 @@ export function ChatPage() {
               <ChatTranscript
                 setTranscriptRef={(el) => (transcriptRef = el)}
                 onScroll={handleTranscriptScroll}
+                onUserScroll={scroll.pauseAutoScroll}
                 items={items()}
                 filteredItems={filteredItems()}
                 threadLoading={threadLoading()}

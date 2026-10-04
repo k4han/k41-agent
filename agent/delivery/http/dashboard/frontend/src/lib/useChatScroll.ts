@@ -1,4 +1,4 @@
-import { createSignal } from "solid-js";
+import { createSignal, onCleanup } from "solid-js";
 
 export function useChatScroll(
   getTranscriptRef: () => HTMLDivElement | undefined,
@@ -6,8 +6,25 @@ export function useChatScroll(
   const [autoScroll, setAutoScroll] = createSignal(true);
   const [turnAnchorItemId, setTurnAnchorItemId] = createSignal<number | null>(null);
   const [turnAnchorSpacerHeight, setTurnAnchorSpacerHeight] = createSignal(0);
+  let pendingScrollTimer: number | undefined;
+  let pendingAnchorFrame: number | undefined;
+  let pausedScrollTop: number | undefined;
+
+  const cancelScheduledScroll = () => {
+    if (pendingScrollTimer !== undefined) {
+      window.clearTimeout(pendingScrollTimer);
+      pendingScrollTimer = undefined;
+    }
+    if (pendingAnchorFrame !== undefined) {
+      window.cancelAnimationFrame(pendingAnchorFrame);
+      pendingAnchorFrame = undefined;
+    }
+  };
+
+  onCleanup(cancelScheduledScroll);
 
   const clearTurnAnchor = () => {
+    cancelScheduledScroll();
     setTurnAnchorItemId(null);
     setTurnAnchorSpacerHeight(0);
   };
@@ -26,7 +43,12 @@ export function useChatScroll(
   };
 
   const scrollToTurnAnchor = (id: number) => {
-    window.requestAnimationFrame(() => {
+    cancelScheduledScroll();
+    pendingAnchorFrame = window.requestAnimationFrame(() => {
+      pendingAnchorFrame = undefined;
+      if (!autoScroll() || turnAnchorItemId() !== id) {
+        return;
+      }
       const transcriptRef = getTranscriptRef();
       if (!transcriptRef) {
         return;
@@ -49,7 +71,11 @@ export function useChatScroll(
         setTurnAnchorSpacerHeight(nextSpacerHeight);
       }
 
-      window.requestAnimationFrame(() => {
+      pendingAnchorFrame = window.requestAnimationFrame(() => {
+        pendingAnchorFrame = undefined;
+        if (!autoScroll() || turnAnchorItemId() !== id) {
+          return;
+        }
         const ref = getTranscriptRef();
         if (!ref) {
           return;
@@ -67,7 +93,12 @@ export function useChatScroll(
     if (!autoScroll() && !force) {
       return;
     }
-    window.setTimeout(() => {
+    cancelScheduledScroll();
+    pendingScrollTimer = window.setTimeout(() => {
+      pendingScrollTimer = undefined;
+      if (!autoScroll() && !force) {
+        return;
+      }
       const anchorId = turnAnchorItemId();
       if (anchorId !== null && !force) {
         scrollToTurnAnchor(anchorId);
@@ -88,17 +119,29 @@ export function useChatScroll(
     if (!transcriptRef) {
       return;
     }
+    // Removing the spacer can clamp scrollTop and emit a layout-driven scroll.
+    // That event must not resume following immediately after opening a tool.
+    if (pausedScrollTop === transcriptRef.scrollTop) {
+      pausedScrollTop = undefined;
+      return;
+    }
+    pausedScrollTop = undefined;
     const threshold = 50; // px
     const isAtBottom =
       transcriptRef.scrollHeight - transcriptRef.scrollTop - transcriptRef.clientHeight < threshold;
     if (isAtBottom) {
+      if (!autoScroll()) {
+        clearTurnAnchor();
+      }
       setAutoScroll(true);
     } else {
       setAutoScroll(false);
+      cancelScheduledScroll();
     }
   };
 
   const handleScrollToBottomClick = () => {
+    pausedScrollTop = undefined;
     clearTurnAnchor();
     setAutoScroll(true);
     scrollToBottom(true);
@@ -110,8 +153,9 @@ export function useChatScroll(
   // tool call to read its arguments/result). Scrolling back to the bottom
   // re-enables auto-scroll; the "scroll to bottom" button force-scrolls.
   const pauseAutoScroll = () => {
-    clearTurnAnchor();
     setAutoScroll(false);
+    clearTurnAnchor();
+    pausedScrollTop = getTranscriptRef()?.scrollTop;
   };
 
   return {

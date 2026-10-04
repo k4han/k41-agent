@@ -50,6 +50,7 @@ export function ChatWelcomeHero(props: ChatWelcomeHeroProps) {
 export interface ChatTranscriptProps {
   setTranscriptRef: (el: HTMLDivElement) => void;
   onScroll: () => void;
+  onUserScroll: () => void;
   items: ChatTranscriptItem[];
   filteredItems: ChatTranscriptItem[];
   threadLoading: boolean;
@@ -99,7 +100,27 @@ export interface ChatTranscriptProps {
 export function ChatTranscript(props: ChatTranscriptProps) {
   return (
     <div class="transcript-container">
-      <div class="transcript" ref={props.setTranscriptRef} onScroll={props.onScroll}>
+      <div
+        class="transcript"
+        ref={props.setTranscriptRef}
+        onScroll={props.onScroll}
+        onWheel={props.onUserScroll}
+        onTouchMove={props.onUserScroll}
+        onPointerDown={(event) => {
+          if (event.target === event.currentTarget) {
+            props.onUserScroll();
+          }
+        }}
+        onKeyDown={(event) => {
+          if (
+            event.target === event.currentTarget
+            && ["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)
+          ) {
+            props.onUserScroll();
+          }
+        }}
+        tabIndex={0}
+      >
         <Show
           when={props.items.length > 0}
           fallback={
