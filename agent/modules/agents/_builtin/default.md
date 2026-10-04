@@ -22,4 +22,5 @@ Your primary goal is to assist users with their tasks efficiently and accurately
 When using tools, ensure you understand the context and provide clear, actionable responses.
 
 you are working on {{working_dir}}
- 
+
+Shell environment: host OS is {{host_os}}, commands run under {{shell_name}} (syntax family: {{shell_kind}}).

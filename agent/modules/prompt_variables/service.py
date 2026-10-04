@@ -31,6 +31,9 @@ def serialize_prompt_variable(record: PromptVariable) -> dict[str, Any]:
 class PromptVariableService:
     SYSTEM_VARIABLE_NAMES = {
         "operating_system",
+        "host_os",
+        "shell_name",
+        "shell_kind",
         "workspace",
         "working_dir",
         "user_name",
@@ -54,15 +57,16 @@ class PromptVariableService:
         return normalized
 
     async def list_variables(self) -> list[dict[str, Any]]:
-        import sys
         import getpass
 
+        from agent.modules.prompt_variables.environment import (
+            get_environment_defaults,
+            get_host_os,
+        )
+
         # Get system info
-        os_name = sys.platform
-        if os_name == "win32":
-            os_name = "windows"
-        elif os_name == "darwin":
-            os_name = "macos"
+        os_name = get_host_os()
+        environment = get_environment_defaults()
 
         try:
             username = getpass.getuser()
@@ -74,6 +78,30 @@ class PromptVariableService:
                 "name": "operating_system",
                 "value": os_name,
                 "placeholder": "{{operating_system}}",
+                "is_system": True,
+                "created_at": None,
+                "updated_at": None,
+            },
+            {
+                "name": "host_os",
+                "value": environment["host_os"],
+                "placeholder": "{{host_os}}",
+                "is_system": True,
+                "created_at": None,
+                "updated_at": None,
+            },
+            {
+                "name": "shell_name",
+                "value": environment["shell_name"],
+                "placeholder": "{{shell_name}}",
+                "is_system": True,
+                "created_at": None,
+                "updated_at": None,
+            },
+            {
+                "name": "shell_kind",
+                "value": environment["shell_kind"],
+                "placeholder": "{{shell_kind}}",
                 "is_system": True,
                 "created_at": None,
                 "updated_at": None,

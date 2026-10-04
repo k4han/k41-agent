@@ -154,14 +154,15 @@ def _build_sub_agents_prompt_section(agent_name: str, catalog: Any) -> str:
 
 
 def get_system_default_variables(working_dir: str = "", workspace: str = "") -> dict[str, str]:
-    import sys
     import getpass
 
-    os_name = sys.platform
-    if os_name == "win32":
-        os_name = "windows"
-    elif os_name == "darwin":
-        os_name = "macos"
+    from agent.modules.prompt_variables.environment import (
+        get_environment_defaults,
+        get_host_os,
+    )
+
+    os_name = get_host_os()
+    environment = get_environment_defaults()
 
     try:
         username = getpass.getuser()
@@ -170,6 +171,9 @@ def get_system_default_variables(working_dir: str = "", workspace: str = "") -> 
 
     return {
         "operating_system": os_name,
+        "host_os": environment["host_os"],
+        "shell_name": environment["shell_name"],
+        "shell_kind": environment["shell_kind"],
         "workspace": workspace or working_dir or "",
         "working_dir": working_dir or "",
         "user_name": username,

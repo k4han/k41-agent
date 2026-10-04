@@ -93,10 +93,10 @@ async def test_prompt_variable_dashboard_api_crud(prompt_variable_db) -> None:
     empty = client.get("/dashboard-api/prompt-variables")
     assert empty.status_code == 200
     variables = empty.json()["variables"]
-    assert len(variables) == 4
+    assert len(variables) == 7
     assert all(var["is_system"] is True for var in variables)
     system_names = {var["name"] for var in variables}
-    assert {"operating_system", "workspace", "working_dir", "user_name"} <= system_names
+    assert {"operating_system", "host_os", "shell_name", "shell_kind", "workspace", "working_dir", "user_name"} <= system_names
 
     created = client.post(
         "/prompt-variables",
@@ -138,6 +138,15 @@ async def test_system_prompt_variables_read_only(prompt_variable_db) -> None:
     
     with pytest.raises(ValueError, match="reserved system prompt variable"):
         await service.create_variable(name="operating_system", value="custom")
+
+    with pytest.raises(ValueError, match="reserved system prompt variable"):
+        await service.create_variable(name="host_os", value="custom")
+
+    with pytest.raises(ValueError, match="reserved system prompt variable"):
+        await service.create_variable(name="shell_name", value="custom")
+
+    with pytest.raises(ValueError, match="reserved system prompt variable"):
+        await service.create_variable(name="shell_kind", value="custom")
         
     with pytest.raises(ValueError, match="reserved system prompt variable"):
         await service.update_variable(
