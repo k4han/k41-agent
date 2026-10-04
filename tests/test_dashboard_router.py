@@ -2393,7 +2393,7 @@ def test_dashboard_api_github_repository_detail_and_task(
                 "agent_name": "default",
                 "trigger_label": "k41-agent",
                 "mention_triggers": ["@k41-agent"],
-                "allowed_tools": ["read_file"],
+                "allowed_tools": ["read"],
                 "allowed_skills": ["code-style"],
             }
 
@@ -2412,8 +2412,8 @@ def test_dashboard_api_github_repository_detail_and_task(
 
     async def fake_agent_tools():
         return {
-            "tools": ["read_file"],
-            "tool_groups": [{"category": "file", "tools": ["read_file"]}],
+            "tools": ["read"],
+            "tool_groups": [{"category": "file", "tools": ["read"]}],
             "tool_config_schemas": {},
         }
 
@@ -2455,7 +2455,7 @@ def test_dashboard_api_github_repository_detail_and_task(
     assert data["repository"]["full_name"] == "octo/example"
     assert data["repository"]["allowed_skills"] == ["code-style"]
     assert data["agent_names"] == ["default"]
-    assert data["tools"] == ["read_file"]
+    assert data["tools"] == ["read"]
     assert data["skills"][0]["name"] == "code-style"
     assert data["repository_skill_dir"] == ".agent/skills"
 
@@ -2477,14 +2477,14 @@ def test_dashboard_api_github_repository_detail_and_task(
             "model_name": "model",
             "context_trim_threshold": 24000,
             "tool_policy_mode": "custom",
-            "allowed_tools": ["read_file"],
+            "allowed_tools": ["read"],
             "allowed_skills": ["code-style"],
             "branch_prefix": "repo-bot",
         },
     )
     assert updated.status_code == 200
     assert fake_service.updates[0]["repository_instructions"] == "Run tests first."
-    assert fake_service.updates[0]["allowed_tools"] == ["read_file"]
+    assert fake_service.updates[0]["allowed_tools"] == ["read"]
     assert fake_service.updates[0]["allowed_skills"] == ["code-style"]
 
     submitted = client.post(

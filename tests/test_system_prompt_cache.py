@@ -18,7 +18,7 @@ def _key(**overrides):
         "agent_name": "default",
         "working_dir": "D:/repo",
         "workspace_label": "owner/repo",
-        "tool_names": ["read_file", "skill"],
+        "tool_names": ["read", "skill"],
         "allowed_skill_names": None,
         "thread_id": "thread-1",
     }
@@ -51,11 +51,11 @@ def test_missing_key_returns_none() -> None:
 
 def test_tool_name_order_does_not_change_the_key() -> None:
     system_prompt_cache.store_system_prompt(
-        _key(tool_names=["read_file", "skill"]), "Prompt A"
+        _key(tool_names=["read", "skill"]), "Prompt A"
     )
 
     cached = system_prompt_cache.get_cached_system_prompt(
-        _key(tool_names=["skill", "read_file"])
+        _key(tool_names=["skill", "read"])
     )
 
     assert cached == "Prompt A"
@@ -67,7 +67,7 @@ def test_tool_name_order_does_not_change_the_key() -> None:
         {"agent_name": "other-agent"},
         {"working_dir": "D:/other"},
         {"workspace_label": "owner/other"},
-        {"tool_names": ["read_file"]},
+        {"tool_names": ["read"]},
         {"allowed_skill_names": []},
         {"allowed_skill_names": ["repo-docs"]},
         {"thread_id": "thread-2"},

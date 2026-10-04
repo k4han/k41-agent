@@ -6,18 +6,16 @@ provider: "default"
 model: ""
 tools:
   - "list_dir"
-  - "read_file"
-  - "write_file"
-  - "edit_file"
+  - "read"
+  - "write"
+  - "edit"
   - "glob"
   - "grep"
-  - "apply_patch"
-  - "exec_command"
+  - "bash"
   - "read_process_output"
   - "write_process_input"
   - "stop_process"
   - "read_tool_output"
-  - "exec_command"
 context_trim_threshold: 50000
 ---
 

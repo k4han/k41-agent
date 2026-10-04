@@ -179,13 +179,13 @@ class TestBuiltinToolSource:
         ids = {d.id for d in descriptors}
         names = {d.name for d in descriptors}
         expected_names = {
-            "read_file",
-            "write_file",
-            "edit_file",
+            "read",
+            "write",
+            "edit",
             "list_dir",
             "glob",
             "grep",
-            "exec_command",
+            "bash",
             "write_process_input",
             "stop_process",
             "skill",
@@ -202,16 +202,17 @@ class TestBuiltinToolSource:
             "web_fetch",
         }
         assert expected_names.issubset(names)
-        assert not any(name == "run_bash" or name == "bash" or name.startswith("bash_") for name in names)
+        assert names.isdisjoint({"read_file", "write_file", "edit_file", "exec_command", "run_bash", "apply_patch"})
+        assert not any(name.startswith("bash_") for name in names)
         assert all(id_.startswith("builtin.") for id_ in ids)
 
     def test_descriptors_have_correct_categories(self) -> None:
         by_name = {d.name: d for d in BuiltinToolSource().load()}
-        assert by_name["read_file"].category is ToolCategory.FILE
-        assert by_name["edit_file"].category is ToolCategory.FILE
+        assert by_name["read"].category is ToolCategory.FILE
+        assert by_name["edit"].category is ToolCategory.FILE
         assert by_name["glob"].category is ToolCategory.FILE
         assert by_name["grep"].category is ToolCategory.FILE
-        assert by_name["exec_command"].category is ToolCategory.SHELL
+        assert by_name["bash"].category is ToolCategory.SHELL
         assert by_name["web_fetch"].category is ToolCategory.WEB
         assert by_name["call_agent"].category is ToolCategory.AGENT
         assert by_name["schedule_task"].category is ToolCategory.SCHEDULE
@@ -219,12 +220,12 @@ class TestBuiltinToolSource:
 
     def test_descriptors_include_capabilities(self) -> None:
         by_name = {d.name: d for d in BuiltinToolSource().load()}
-        assert ToolCapability.READ_FS in by_name["read_file"].capabilities
+        assert ToolCapability.READ_FS in by_name["read"].capabilities
         assert ToolCapability.READ_FS in by_name["glob"].capabilities
         assert ToolCapability.READ_FS in by_name["grep"].capabilities
-        assert ToolCapability.WRITE_FS in by_name["write_file"].capabilities
-        assert ToolCapability.WRITE_FS in by_name["edit_file"].capabilities
-        assert ToolCapability.EXEC_SHELL in by_name["exec_command"].capabilities
+        assert ToolCapability.WRITE_FS in by_name["write"].capabilities
+        assert ToolCapability.WRITE_FS in by_name["edit"].capabilities
+        assert ToolCapability.EXEC_SHELL in by_name["bash"].capabilities
         assert ToolCapability.NETWORK in by_name["web_search"].capabilities
         assert ToolCapability.MUTATES_STATE in by_name["write_todos"].capabilities
         assert ToolCapability.MUTATES_STATE in by_name["ask_user"].capabilities
@@ -241,7 +242,7 @@ class TestPublicFacade:
     def test_get_default_tools_returns_builtin_tools(self) -> None:
         tools = get_default_tools()
         names = {t.name for t in tools}
-        assert "read_file" in names
+        assert "read" in names
         assert "web_search" in names
 
     def test_get_default_descriptors(self) -> None:
@@ -251,12 +252,12 @@ class TestPublicFacade:
 
     def test_get_default_tool_names_matches_tools(self) -> None:
         names = set(get_default_tool_names())
-        assert {"read_file", "write_file", "exec_command", "web_fetch"}.issubset(names)
+        assert {"read", "write", "bash", "web_fetch"}.issubset(names)
 
     def test_get_tool_by_name_known(self) -> None:
-        t = get_tool_by_name("read_file")
+        t = get_tool_by_name("read")
         assert t is not None
-        assert t.name == "read_file"
+        assert t.name == "read"
 
     def test_get_tool_by_name_unknown(self) -> None:
         assert get_tool_by_name("does_not_exist") is None
@@ -264,7 +265,7 @@ class TestPublicFacade:
     def test_find_tools_by_category(self) -> None:
         file_tools = find_tools(category=ToolCategory.FILE)
         names = {t.name for t in file_tools}
-        assert {"read_file", "write_file", "edit_file", "list_dir"}.issubset(names)
+        assert {"read", "write", "edit", "list_dir"}.issubset(names)
 
     def test_find_descriptors_by_capability(self) -> None:
         net = find_descriptors(capabilities=[ToolCapability.NETWORK])

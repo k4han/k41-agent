@@ -330,7 +330,7 @@ async def test_tool_node_allows_pending_plan_mode_tool_after_agent_switch(monkey
     monkeypatch.setattr(tool_node_module, "ToolNode", _FakeToolNode)
 
     async def _fake_resolve(self, agent_name, *, override_tool_names=None):
-        return [SimpleNamespace(name="read_file")]
+        return [SimpleNamespace(name="read")]
 
     monkeypatch.setattr(
         tool_node_module.ToolResolver,
@@ -359,13 +359,13 @@ async def test_tool_node_allows_pending_plan_mode_tool_after_agent_switch(monkey
         runtime=SimpleNamespace(
             context={
                 "agent_name": "worker",
-                "allowed_tool_names": ["read_file"],
+                "allowed_tool_names": ["read"],
             }
         ),
     )
 
     assert result == {"messages": []}
-    assert captured["tool_names"] == ["read_file", PLAN_MODE_TOOL_NAME]
+    assert captured["tool_names"] == ["read", PLAN_MODE_TOOL_NAME]
 
 
 @pytest.mark.asyncio
@@ -384,7 +384,7 @@ async def test_tool_node_allows_pending_ask_user_tool_after_agent_switch(monkeyp
     monkeypatch.setattr(tool_node_module, "ToolNode", _FakeToolNode)
 
     async def _fake_resolve(self, agent_name, *, override_tool_names=None):
-        return [SimpleNamespace(name="read_file")]
+        return [SimpleNamespace(name="read")]
 
     monkeypatch.setattr(
         tool_node_module.ToolResolver,
@@ -421,13 +421,13 @@ async def test_tool_node_allows_pending_ask_user_tool_after_agent_switch(monkeyp
         runtime=SimpleNamespace(
             context={
                 "agent_name": "worker",
-                "allowed_tool_names": ["read_file"],
+                "allowed_tool_names": ["read"],
             }
         ),
     )
 
     assert result == {"messages": []}
-    assert captured["tool_names"] == ["read_file", ASK_USER_TOOL_NAME]
+    assert captured["tool_names"] == ["read", ASK_USER_TOOL_NAME]
 
 
 def test_default_tool_registry_includes_runtime_tools():
@@ -770,7 +770,7 @@ def test_build_llm_system_prompt_injects_write_todos_section_only_when_bound() -
         system_prompt_template="Base prompt",
         working_dir="",
         agent_name="default",
-        tools=[SimpleNamespace(name="read_file")],
+        tools=[SimpleNamespace(name="read")],
         catalog=SimpleNamespace(),
     )
 
@@ -791,7 +791,7 @@ def test_build_llm_system_prompt_injects_ask_user_section_only_when_bound() -> N
         system_prompt_template="Base prompt",
         working_dir="",
         agent_name="default",
-        tools=[SimpleNamespace(name="read_file")],
+        tools=[SimpleNamespace(name="read")],
         catalog=SimpleNamespace(),
     )
 

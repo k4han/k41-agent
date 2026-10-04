@@ -368,7 +368,7 @@ async def _run_local(
 
     service = get_coding_service()
     context = invocation_context(runtime)
-    definition = make_coding_tool("exec_command").coding_definition
+    definition = make_coding_tool("bash").coding_definition
     result = await service.invoke(definition, {
         "command": command, "workdir": working_dir,
         "timeout_seconds": timeout_s, "yield_time_ms": 30000,

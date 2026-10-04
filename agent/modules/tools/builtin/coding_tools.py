@@ -17,16 +17,15 @@ def registered(name: str, category: ToolCategory, mutates: bool = False):
                          apply_middleware=False)(make_coding_tool(name))
 
 
-exec_command = registered("exec_command", ToolCategory.SHELL, True)
+bash = registered("bash", ToolCategory.SHELL, True)
 read_process_output = registered("read_process_output", ToolCategory.SHELL)
 write_process_input = registered("write_process_input", ToolCategory.SHELL, True)
 stop_process = registered("stop_process", ToolCategory.SHELL, True)
-apply_patch = registered("apply_patch", ToolCategory.FILE, True)
 read_tool_output = registered("read_tool_output", ToolCategory.FILE)
 
-read_file = registered("read_file", ToolCategory.FILE)
+read = registered("read", ToolCategory.FILE)
 list_dir = registered("list_dir", ToolCategory.FILE)
 glob = registered("glob", ToolCategory.FILE)
 grep = registered("grep", ToolCategory.FILE)
-edit_file = registered("edit_file", ToolCategory.FILE, True)
-write_file = registered("write_file", ToolCategory.FILE, True)
+edit = registered("edit", ToolCategory.FILE, True)
+write = registered("write", ToolCategory.FILE, True)

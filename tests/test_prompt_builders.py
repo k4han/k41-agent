@@ -18,7 +18,7 @@ def _build(tools: list[SimpleNamespace]) -> str:
 
 
 def test_workspace_storage_prompt_injects_for_filesystem_tools() -> None:
-    for tool_name in ("list_dir", "read_file", "write_file", "edit_file", "glob", "grep"):
+    for tool_name in ("list_dir", "read", "write", "edit", "glob", "grep"):
         prompt = _build([SimpleNamespace(name=tool_name)])
         assert prompt_builders.WORKSPACE_STORAGE_PROMPT in prompt, tool_name
 

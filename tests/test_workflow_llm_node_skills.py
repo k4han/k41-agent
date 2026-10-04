@@ -48,7 +48,7 @@ async def test_llm_node_uses_prompt_builder_output_for_system_message(monkeypatc
                 provider="provider-x",
                 model="model-x",
                 system_prompt="Agent prompt: {working_dir}",
-                tools=["skill", "read_file"],
+                tools=["skill", "read"],
             )
 
     def _fake_builder(**kwargs):
@@ -97,7 +97,7 @@ async def test_llm_node_uses_prompt_builder_output_for_system_message(monkeypatc
                 agent_name="builder-agent",
                 working_dir="D:/repo",
                 max_context_tokens=50000,
-                allowed_tool_names=["skill", "read_file"],
+                allowed_tool_names=["skill", "read"],
                 allowed_skill_names=["repo-docs"],
             )
         ),
@@ -109,11 +109,11 @@ async def test_llm_node_uses_prompt_builder_output_for_system_message(monkeypatc
     assert system_message.content == "Prompt built elsewhere"
     assert captured["model"] == "model-x"
     assert captured["provider"] == "provider-x"
-    assert [tool.name for tool in captured["tools"]] == ["skill", "read_file"]
+    assert [tool.name for tool in captured["tools"]] == ["skill", "read"]
     assert builder_calls["system_prompt_template"] == "Agent prompt: {working_dir}"
     assert builder_calls["working_dir"] == str(Path("D:/repo").resolve())
     assert builder_calls["agent_name"] == "builder-agent"
-    assert [tool.name for tool in builder_calls["tools"]] == ["skill", "read_file"]
+    assert [tool.name for tool in builder_calls["tools"]] == ["skill", "read"]
     assert builder_calls["prompt_variables"] == {}
     assert builder_calls["skills_catalog_xml"] == "<available_skills/>"
     assert skill_catalog_calls[0]["allowed_names"] == ["repo-docs"]
@@ -215,7 +215,7 @@ async def test_llm_node_prefers_runtime_allowed_tool_names_before_building_promp
                 provider="default",
                 model="model-y",
                 system_prompt="Override prompt",
-                tools=["read_file"],
+                tools=["read"],
             )
 
     def _fake_builder(**kwargs):

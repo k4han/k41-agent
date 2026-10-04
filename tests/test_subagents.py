@@ -82,7 +82,7 @@ class TestParseAgentFile:
         assert config.name == "researcher"
         assert config.display_name == "Research Agent"
         assert config.graph_type == "react_agent"
-        assert config.tools == ["read_file", "list_dir", "call_agent"]
+        assert config.tools == ["read", "list_dir", "call_agent"]
         assert config.sub_agents == []
         assert config.max_context_tokens == 30000
         assert "research assistant" in config.system_prompt

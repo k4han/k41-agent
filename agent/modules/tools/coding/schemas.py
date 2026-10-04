@@ -70,10 +70,6 @@ class GrepInput(Input):
     max_results: int = Field(default=100, ge=1, le=1000)
 
 
-class PatchInput(Input):
-    patch_text: str = Field(min_length=1)
-
-
 class OutputReadInput(Input):
     output_ref: str
     offset: int = Field(default=1, ge=1)

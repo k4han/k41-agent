@@ -5,7 +5,8 @@ from agent.modules.workflows.message_history import normalize_messages_for_chat_
 
 
 @pytest.mark.parametrize("legacy", [False, True])
-def test_coding_diff_is_removed_at_model_boundary_without_changing_ui_history(legacy):
+@pytest.mark.parametrize("name", ["write", "edit", "write_file", "edit_file"])
+def test_coding_diff_is_removed_at_model_boundary_without_changing_ui_history(legacy, name):
     from agent.modules.tools.coding.models import ToolResult
     from agent.modules.conversations.compaction import _format_messages_for_summary
     from agent.modules.conversations.history import _serialize_thread_messages
@@ -17,7 +18,7 @@ def test_coding_diff_is_removed_at_model_boundary_without_changing_ui_history(le
                              "version": "version-1", "diff": diff},
                         content=display if legacy else summary,
                         display_content=None if legacy else display)
-    message = ToolMessage(content=result.content, name="write_file", tool_call_id="coding-call",
+    message = ToolMessage(content=result.content, name=name, tool_call_id="coding-call",
                           artifact=result.model_dump(exclude={"content"}), id="coding-result")
     normalized = normalize_messages_for_chat_model([message])[0]
     assert normalized.content == summary
@@ -50,7 +51,7 @@ def test_serialized_coding_result_from_older_checkpoint_only_sends_receipt():
                         data={"path": "source.txt", "additions": 1, "deletions": 0,
                               "version": "version-1", "diff": "+submitted-content"})
     serialized = json.dumps(result.model_dump())
-    message = ToolMessage(content=serialized, name="write_file", tool_call_id="old-call")
+    message = ToolMessage(content=serialized, name="write", tool_call_id="old-call")
     normalized = normalize_messages_for_chat_model([message])[0]
     assert normalized.content == summary and normalized.artifact is None
     assert "submitted-content" not in _format_messages_for_summary([message])
@@ -63,7 +64,7 @@ def test_serialized_coding_result_from_older_checkpoint_only_sends_receipt():
     '{"status": "custom", "data": {}, "output_refs": [], "capture_truncated": false, "output_truncated": false}',
 ])
 def test_plain_json_tool_output_is_not_treated_as_a_coding_result(content):
-    message = ToolMessage(content=content, name="exec_command", tool_call_id="plain-call")
+    message = ToolMessage(content=content, name="bash", tool_call_id="plain-call")
     assert normalize_messages_for_chat_model([message])[0].content == content
 
 

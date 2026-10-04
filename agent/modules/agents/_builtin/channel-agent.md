@@ -11,8 +11,8 @@ tools:
 - get_current_time
 - list_dir
 - list_scheduled_tasks
-- read_file
-- exec_command
+- read
+- bash
 - read_process_output
 - write_process_input
 - stop_process

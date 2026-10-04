@@ -8,7 +8,7 @@ hidden: true
 tools:
   - "get_current_time"
   - "echo"
-  - "read_file"
+  - "read"
   - "list_dir"
 context_trim_threshold: 50000
 ---

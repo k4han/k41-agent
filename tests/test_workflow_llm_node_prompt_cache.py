@@ -103,7 +103,7 @@ def cached_llm_node(monkeypatch):
                     agent_name=agent_name,
                     working_dir="D:/repo",
                     max_context_tokens=50000,
-                    allowed_tool_names=["skill", "read_file"],
+                    allowed_tool_names=["skill", "read"],
                 )
             ),
         )
@@ -122,7 +122,7 @@ async def test_llm_node_sends_coding_receipt_without_ui_diff(cached_llm_node, le
                         display_content=None if legacy else summary + "\n" + diff,
                         data={"path": "source.txt", "additions": 1, "deletions": 0,
                               "version": "version-1", "diff": diff})
-    message = ToolMessage(content=result.content, name="write_file", tool_call_id="write-call",
+    message = ToolMessage(content=result.content, name="write", tool_call_id="write-call",
                           artifact=result.model_dump(exclude={"content"}))
     await cached_llm_node.run(messages=[HumanMessage(content="Write the file"), message])
     sent = cached_llm_node.captured["messages"][-1]

@@ -16,23 +16,10 @@ class ResultContent:
         """Render mutation receipts from metadata without including UI diffs."""
         if self.display_content is not None and self.output_truncated:
             return self.content
-        if tool_name in {"edit_file", "write_file"} and self.status == "success":
+        if tool_name in {"edit", "write"} and self.status == "success":
             if {"path", "additions", "deletions", "version"}.issubset(self.data):
                 return (f"Changed {self.data['path']}: +{self.data['additions']}/-{self.data['deletions']}; "
                         f"version={self.data['version']}")
-        if tool_name == "apply_patch" and isinstance(self.data.get("applied"), list):
-            applied = self.data["applied"]
-            if not all(isinstance(item, dict) and {"path", "additions", "deletions", "version"}.issubset(item)
-                       for item in applied):
-                return self.content
-            receipts = "\n".join(
-                f"{item.get('operation', 'change')}: {item['path']} (+{item['additions']}/-{item['deletions']}); version={item['version']}"
-                for item in applied
-            )
-            if self.status == "success":
-                return "Applied patch:\n" + receipts
-            error = f"{self.error.code}: {self.error.message}" if self.error else self.status
-            return f"[{self.status}] {error}\nApplied:\n{receipts}\nPending: {self.data.get('pending', [])}"
         return self.content
 
 

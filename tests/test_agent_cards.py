@@ -29,7 +29,7 @@ def _config(
         graph_type="react_agent",
         provider="default",
         model="",
-        tools=["read_file"],
+        tools=["read"],
         sub_agents=sub_agents,
         plan_approval_targets=plan_approval_targets or [],
         max_context_tokens=1000,

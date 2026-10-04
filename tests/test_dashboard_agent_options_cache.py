@@ -58,7 +58,7 @@ async def test_tools_and_mcp_payloads_reuse_agent_cards_cache(
 
         def list_agent_cards(self) -> list[AgentCard]:
             self.calls += 1
-            return [_card("default", tools=["read_file", "mcp__github__search"])]
+            return [_card("default", tools=["read", "mcp__github__search"])]
 
     catalog = FakeCatalog()
     monkeypatch.setattr(agent_helpers, "get_catalog_service", lambda: catalog)
@@ -81,6 +81,6 @@ async def test_tools_and_mcp_payloads_reuse_agent_cards_cache(
     tools = await agent_helpers.agent_tools_payload()
     mcp = await agent_helpers.agent_mcp_payload()
 
-    assert tools["tools"] == ["read_file"]
+    assert tools["tools"] == ["read"]
     assert mcp["mcp_server_options"] == ["github"]
     assert catalog.calls == 1

@@ -6,9 +6,9 @@ provider: "default"
 model: ""
 tools:
   - "list_dir"
-  - "read_file"
-  - "write_file"
-  - "edit_file"
+  - "read"
+  - "write"
+  - "edit"
 context_trim_threshold: 50000
 ---
 

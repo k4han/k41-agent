@@ -27,7 +27,7 @@ class CodingEngine:
                         continue
                     if resolved.is_relative_to(base if base.is_dir() else base.parent):
                         self.permissions.assert_allowed(context, "read", str(resolved))
-        elif name == "exec_command":
+        elif name == "bash":
             command = values["command"]
             blocked, reason = check_command_blocked(command)
             if blocked:
@@ -55,7 +55,7 @@ class CodingEngine:
             content = page.pop("content")
             page.pop("path")
             return ToolResult(data=page, content=content + f"\n[next_offset={page['next_offset']}]", output_refs=[values["output_ref"]])
-        if name == "exec_command":
+        if name == "bash":
             cwd = self.permissions.resolve_path(context, values.get("workdir") or ".", "shell", authorize=False)
             if not cwd.is_relative_to(Path(context.workspace).resolve()):
                 self.permissions.assert_allowed(context, "external_directory", str(cwd), allow_interrupt=False)

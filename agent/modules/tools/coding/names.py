@@ -1,12 +1,13 @@
 """Canonical coding tool names used by catalogs and agent allow lists."""
 
-FILE_TOOLS = frozenset({"read_file", "list_dir", "edit_file", "write_file", "glob", "grep", "apply_patch"})
-PROCESS_TOOLS = frozenset({"exec_command", "read_process_output", "write_process_input", "stop_process"})
+FILE_TOOLS = frozenset({"read", "list_dir", "edit", "write", "glob", "grep"})
+PROCESS_TOOLS = frozenset({"bash", "read_process_output", "write_process_input", "stop_process"})
 CODING_TOOLS = FILE_TOOLS | PROCESS_TOOLS | {"read_tool_output"}
-TOOL_ALIASES = {"run_bash": "exec_command", "bash": "exec_command",
+TOOL_ALIASES = {"read_file": "read", "write_file": "write", "edit_file": "edit",
+                "exec_command": "bash", "run_bash": "bash",
                 "bash_read_output": "read_process_output", "bash_send_input": "write_process_input",
                 "bash_interrupt": "stop_process", "bash_close": "stop_process"}
-REMOVED_TOOLS = frozenset({"bash_list_sessions"})
+REMOVED_TOOLS = frozenset({"bash_list_sessions", "apply_patch"})
 
 
 def canonical_tool_names(names):

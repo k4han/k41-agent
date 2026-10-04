@@ -45,7 +45,7 @@ class TestToolDescriptor:
     def test_has_capability_and_tag(self) -> None:
         desc = ToolDescriptor(
             id="builtin.file.read",
-            name="read_file",
+            name="read",
             description="read",
             source=ToolSource.BUILTIN,
             category=ToolCategory.FILE,

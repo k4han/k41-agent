@@ -115,7 +115,7 @@ class TestExtractServerName:
 class TestToolPolicy:
     def test_allow_all_default(self) -> None:
         policy = ToolPolicy.allow_all()
-        d_read = _builtin_descriptor("read_file", _t_read_stub)
+        d_read = _builtin_descriptor("read", _t_read_stub)
         d_call = _builtin_descriptor("call_agent", _t_call_agent_stub)
         assert policy.is_allowed(d_read)
         assert policy.is_allowed(d_call)
@@ -123,10 +123,10 @@ class TestToolPolicy:
     def test_explicit_allow_list_filters_builtins(self) -> None:
         policy = ToolPolicy(
             agent_name="x",
-            allowed_tool_names=frozenset({"read_file"}),
+            allowed_tool_names=frozenset({"read"}),
         )
-        assert policy.is_allowed(_builtin_descriptor("read_file", _t_read_stub))
-        assert not policy.is_allowed(_builtin_descriptor("write_file", _t_read_stub))
+        assert policy.is_allowed(_builtin_descriptor("read", _t_read_stub))
+        assert not policy.is_allowed(_builtin_descriptor("write", _t_read_stub))
 
     def test_disallow_call_agent_when_sub_agents_none(self) -> None:
         config = SimpleNamespace(
@@ -137,7 +137,7 @@ class TestToolPolicy:
         )
         policy = ToolPolicy.from_agent_config(config)
         assert not policy.is_allowed(_builtin_descriptor("call_agent", _t_call_agent_stub))
-        assert policy.is_allowed(_builtin_descriptor("read_file", _t_read_stub))
+        assert policy.is_allowed(_builtin_descriptor("read", _t_read_stub))
 
     def test_allow_call_agent_when_sub_agents_list(self) -> None:
         config = SimpleNamespace(
@@ -196,36 +196,59 @@ class TestToolPolicy:
     def test_deny_overrides_allow(self) -> None:
         policy = ToolPolicy(
             agent_name="x",
-            deny_tool_names=frozenset({"read_file"}),
+            deny_tool_names=frozenset({"read"}),
         )
-        assert not policy.is_allowed(_builtin_descriptor("read_file", _t_read_stub))
+        assert not policy.is_allowed(_builtin_descriptor("read", _t_read_stub))
 
     def test_filter_returns_subset(self) -> None:
         policy = ToolPolicy(
             agent_name="x",
-            allowed_tool_names=frozenset({"read_file"}),
+            allowed_tool_names=frozenset({"read"}),
         )
         descriptors = [
-            _builtin_descriptor("read_file", _t_read_stub),
-            _builtin_descriptor("write_file", _t_read_stub),
+            _builtin_descriptor("read", _t_read_stub),
+            _builtin_descriptor("write", _t_read_stub),
         ]
         filtered = policy.filter(descriptors)
-        assert [d.name for d in filtered] == ["read_file"]
+        assert [d.name for d in filtered] == ["read"]
 
 
 class TestToolResolver:
+    @pytest.mark.parametrize("names", [
+        ["read_file", "write_file", "edit_file", "exec_command", "run_bash"],
+        ["read", "write", "edit", "bash"],
+    ])
+    @pytest.mark.parametrize("override", [False, True])
+    def test_renamed_tools_resolve_from_saved_config_and_overrides(self, monkeypatch, names, override):
+        config = SimpleNamespace(name="restricted", tools=names, sub_agents=None)
+        monkeypatch.setattr(ToolResolver, "_load_agent_config", staticmethod(lambda name: config))
+        monkeypatch.setattr("agent.modules.mcp.list_agent_mcp_server_names", lambda name: [])
+        tools = ToolResolver(include_mcp=False).resolve_for_agent(
+            "restricted", override_tool_names=names if override else None,
+        )
+        assert {tool.name for tool in tools} == {"read", "write", "edit", "bash"}
+
+    @pytest.mark.parametrize("override", [False, True])
+    def test_retired_patch_allow_list_does_not_enable_other_tools(self, monkeypatch, override):
+        config = SimpleNamespace(name="restricted", tools=["apply_patch"], sub_agents=None)
+        monkeypatch.setattr(ToolResolver, "_load_agent_config", staticmethod(lambda name: config))
+        monkeypatch.setattr("agent.modules.mcp.list_agent_mcp_server_names", lambda name: [])
+        assert ToolResolver(include_mcp=False).resolve_for_agent(
+            "restricted", override_tool_names=["apply_patch"] if override else None,
+        ) == []
+
     def test_resolve_for_unknown_agent_returns_default_allow_all(self) -> None:
         tools = resolve_tools_for_agent("__no_such_agent__")
         names = {t.name for t in tools}
         # default policy = allow_all, so all builtin tools come back
-        assert "read_file" in names
+        assert "read" in names
         assert "echo" in names
 
     def test_resolve_for_default_agent(self) -> None:
         tools = resolve_tools_for_agent("default")
         names = {t.name for t in tools}
         # default agent in this project allows the full builtin set
-        assert "read_file" in names
+        assert "read" in names
 
     def test_resolver_uses_policy_for_filtering(self, monkeypatch) -> None:
         fake_config = SimpleNamespace(

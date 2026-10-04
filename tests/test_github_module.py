@@ -596,7 +596,7 @@ async def test_repository_optimization_settings_flow_to_background_task(
         model_name="fast-model",
         context_trim_threshold=24000,
         tool_policy_mode="custom",
-        allowed_tools_json='["read_file", "write_file"]',
+        allowed_tools_json='["read", "write"]',
         allowed_skills_json='["repo-skill"]',
         branch_prefix="repo-bot",
     )
@@ -614,7 +614,7 @@ async def test_repository_optimization_settings_flow_to_background_task(
     assert submission["provider"] == "main-provider"
     assert submission["model"] == "fast-model"
     assert submission["context_trim_threshold"] == 24000
-    assert submission["allowed_tool_names"] == ["read_file", "write_file"]
+    assert submission["allowed_tool_names"] == ["read", "write"]
     assert submission["allowed_skill_names"] == ["repo-skill"]
     assert submission["workspace"].metadata["branch"] == "repo-bot/default/issue-7-abcdef12"
 
@@ -655,7 +655,7 @@ async def test_submit_repository_task_uses_repository_settings(
         model_name="repo-model",
         context_trim_threshold=12000,
         tool_policy_mode="custom",
-        allowed_tools_json='["read_file"]',
+        allowed_tools_json='["read"]',
         allowed_skills_json='["repo-skill"]',
         notify_platform="telegram",
         notify_external_id="123",
@@ -676,7 +676,7 @@ async def test_submit_repository_task_uses_repository_settings(
     assert submission["provider"] == "repo-provider"
     assert submission["model"] == "repo-model"
     assert submission["context_trim_threshold"] == 12000
-    assert submission["allowed_tool_names"] == ["read_file"]
+    assert submission["allowed_tool_names"] == ["read"]
     assert submission["allowed_skill_names"] == ["repo-skill"]
     assert submission["notify_channel"].platform == "telegram"
     assert submission["workspace"].metadata["repository_full_name"] == "octo/example"

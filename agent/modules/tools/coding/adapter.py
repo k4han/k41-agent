@@ -10,29 +10,29 @@ from langgraph.prebuilt import ToolRuntime
 
 from agent.modules.tools.coding.models import InvocationContext, PermissionRule, ToolDefinition, ToolResult
 from agent.modules.tools.coding.schemas import (EditInput, ExecInput, GlobInput, GrepInput, ListInput,
-    OutputReadInput, PatchInput, ProcessInput, ProcessReadInput, ProcessWriteInput, ReadInput, WriteInput)
+    OutputReadInput, ProcessInput, ProcessReadInput, ProcessWriteInput, ReadInput, WriteInput)
+from agent.modules.tools.coding.names import TOOL_ALIASES
 from agent.modules.tools.coding.service import get_coding_service
 from agent.modules.tools.coding.storage import bounded_text
 from agent.modules.tools.runtime.context import get_context_value, get_thread_id
 
 
-SCHEMAS = {"exec_command": ExecInput, "read_process_output": ProcessReadInput,
+SCHEMAS = {"bash": ExecInput, "read_process_output": ProcessReadInput,
            "write_process_input": ProcessWriteInput, "stop_process": ProcessInput,
-           "read_file": ReadInput, "list_dir": ListInput, "edit_file": EditInput,
-           "write_file": WriteInput, "glob": GlobInput, "grep": GrepInput,
-           "apply_patch": PatchInput, "read_tool_output": OutputReadInput}
+           "read": ReadInput, "list_dir": ListInput, "edit": EditInput,
+           "write": WriteInput, "glob": GlobInput, "grep": GrepInput,
+           "read_tool_output": OutputReadInput}
 DESCRIPTIONS = {
-    "exec_command": "Run an isolated workspace shell command. Specify workdir explicitly; cwd and environment changes do not persist. Long commands return process_id; observe with read_process_output. timeout_seconds kills the process tree; yield_time_ms only limits the initial wait. Use dedicated file tools for reading/searching/editing.",
+    "bash": "Run an isolated workspace shell command. Specify workdir explicitly; cwd and environment changes do not persist. Long commands return process_id; observe with read_process_output. timeout_seconds kills the process tree; yield_time_ms only limits the initial wait. Use dedicated file tools for reading/searching/editing.",
     "read_process_output": "Observe a workspace process using its explicit byte cursor. Returns next cursor, state and exit code; no implicit output consumption.",
     "write_process_input": "Send exact stdin text to an owned workspace process. Include newline explicitly when required. Returns process state and new output.",
     "stop_process": "Stop an owned workspace process and its descendants; wait for bounded pipe cleanup.",
-    "read_file": "Read a bounded UTF-8 text page with line numbers, next_offset and content version, or view a supported image. Pass the returned version as expected_version when editing.",
+    "read": "Read a bounded UTF-8 text page with line numbers, next_offset and content version, or view a supported image. Pass the returned version as expected_version when editing.",
     "list_dir": "List a bounded page of workspace directory entries with next_offset.",
-    "edit_file": "Replace exact text in one file; ambiguous and empty matches are rejected. Use expected_version from read_file to detect stale content. Returns change counts and new version; diffs are displayed in the UI.",
-    "write_file": "Create or rewrite a text file, optionally append. Existing BOM, newline style and mode are preserved. Use expected_version to reject stale overwrites.",
+    "edit": "Replace exact text in an existing file. Read the file first and pass its version as expected_version. Copy old_string from the file without line-number prefixes; preserve whitespace and include enough context for a unique match. Set replace_all=True only to replace every exact occurrence. Empty matches and unchanged replacements are rejected. Returns change counts and a new version; diffs are displayed in the UI.",
+    "write": "Create or rewrite a text file, optionally append. Existing BOM, newline style and mode are preserved. Use expected_version to reject stale overwrites.",
     "glob": "Find workspace paths by glob pattern, including brace alternatives. Results are bounded; ignored directories and external symlinks are excluded.",
     "grep": "Search file contents using regex or fixed_strings. Invalid regex is an error. Returns bounded file/line matches and search-engine metadata.",
-    "apply_patch": "Apply *** Begin Patch / *** End Patch with Add File, Update File contextual @@ hunks, and Delete File. All targets are prepared before writes. Moves and duplicate targets are rejected. Writes are sequential; partial_failure reports applied and pending files and must not be retried blindly.",
     "read_tool_output": "Read a retained output reference in this workspace/thread by line page. Output references are opaque; filesystem paths are not accepted.",
 }
 
@@ -74,7 +74,8 @@ class CodingStructuredTool(StructuredTool):
 
 def coding_message_for_model(message: ToolMessage) -> ToolMessage:
     """Drop coding UI artifacts and normalize receipts from older checkpoints."""
-    if message.name not in SCHEMAS:
+    name = TOOL_ALIASES.get(message.name, message.name)
+    if name not in SCHEMAS:
         return message
     artifact = message.artifact
     content = message.content
@@ -94,7 +95,7 @@ def coding_message_for_model(message: ToolMessage) -> ToolMessage:
         result = ToolResult.model_validate({**artifact, "content": content})
     except ValueError:
         return message
-    content = result.model_content(message.name)
+    content = result.model_content(name)
     if isinstance(content, str):
         content, _ = bounded_text(content)
     return message.model_copy(update={"content": content, "artifact": None})

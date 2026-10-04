@@ -38,7 +38,7 @@ def test_build_llm_system_prompt_resolves_prompt_variables_before_runtime_placeh
         ),
         working_dir="D:/repo",
         agent_name="default",
-        tools=[SimpleNamespace(name="read_file")],
+        tools=[SimpleNamespace(name="read")],
         catalog=_FakeCatalog(),
         prompt_variables={"common_rules": "Use project conventions."},
     )
@@ -71,7 +71,7 @@ def test_build_llm_system_prompt_resolves_workspace_and_working_dir_independentl
         working_dir="/workspace/facebook/react",
         workspace="facebook/react",
         agent_name="default",
-        tools=[SimpleNamespace(name="read_file")],
+        tools=[SimpleNamespace(name="read")],
         catalog=_FakeCatalog(),
     )
 
@@ -175,7 +175,7 @@ def test_build_llm_system_prompt_skips_subagent_section_when_call_agent_tool_is_
         system_prompt_template="Base prompt",
         working_dir="",
         agent_name="writer",
-        tools=[SimpleNamespace(name="read_file")],
+        tools=[SimpleNamespace(name="read")],
         catalog=_FakeCatalog(
             callable_agents=["research"],
             configs={

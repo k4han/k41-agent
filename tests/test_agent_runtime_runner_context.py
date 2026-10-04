@@ -1228,7 +1228,7 @@ async def test_run_agent_stream_resume_payload_switches_agent(monkeypatch):
             return SimpleNamespace(
                 graph_type="react_agent",
                 max_context_tokens=1234,
-                tools=["read_file"],
+                tools=["read"],
             )
 
         def get_agent_card(self, name: str):
@@ -1314,7 +1314,7 @@ async def test_run_agent_stream_resume_payload_rejects_disallowed_plan_target(
             return SimpleNamespace(
                 graph_type="react_agent",
                 max_context_tokens=1234,
-                tools=["read_file"],
+                tools=["read"],
             )
 
         def get_agent_card(self, name: str):
@@ -1352,7 +1352,7 @@ def test_plan_resume_rejects_missing_source_agent_card():
                 return SimpleNamespace(
                     graph_type="react_agent",
                     max_context_tokens=1234,
-                    tools=["read_file"],
+                    tools=["read"],
                 )
             return None
 

@@ -291,8 +291,8 @@ class LocalWorkspaceBackend:
         values = {"command": command, "workdir": str(self.root),
                   "timeout_seconds": _clamp_timeout(timeout), "yield_time_ms": 30000}
         try:
-            await service.prepare("exec_command", values, context)
-            result = await service.execute("exec_command", values, context)
+            await service.prepare("bash", values, context)
+            result = await service.execute("bash", values, context)
             job = service.processes.get(context, result.data["process_id"])
             try:
                 await job.finished.wait()

@@ -231,7 +231,7 @@ async def test_tool_pre_filter_evaluator():
     evaluator = ToolPreFilterEvaluator(service=service)
     context = ToolFilterContext(
         user_query="Read content of config.yaml file",
-        available_tools=["read_file", "write_file", "web_search", "run_bash"],
+        available_tools=["read", "write", "web_search", "run_bash"],
     )
 
     decision = await evaluator.evaluate(context)

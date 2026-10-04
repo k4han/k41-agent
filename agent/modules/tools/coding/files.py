@@ -1,4 +1,4 @@
-"""Bounded reads, safe search, conditional mutations, and prepared patches."""
+"""Bounded reads, safe search, and conditional file mutations."""
 
 from __future__ import annotations
 
@@ -6,19 +6,17 @@ import asyncio
 import base64
 import difflib
 import hashlib
-import json
 import os
 import re
 import shutil
 import stat
 import subprocess
 import uuid
-from contextlib import ExitStack
 from pathlib import Path
 from threading import RLock
 from typing import Any
 
-from agent.modules.tools.coding.contracts import CodingError, InvocationContext, RuntimeError as ResultError, RuntimeResult as ToolResult
+from agent.modules.tools.coding.contracts import CodingError, InvocationContext, RuntimeResult as ToolResult
 from agent.modules.tools.coding.paths import PathPermissions
 from agent.modules.tools.coding.storage import MAX_MODEL_BYTES, MAX_MODEL_LINES
 from agent.modules.workspaces import IGNORED_DIR_NAMES, MAX_IMAGE_READ_BYTES
@@ -84,81 +82,6 @@ def read_page(path: Path, offset: int = 1, limit: int = MAX_MODEL_LINES) -> dict
             "next_offset": next_offset, "version": version, "line_truncated": line_truncated}
 
 
-def parse_patch(text: str) -> list[dict[str, Any]]:
-    lines = text.splitlines()
-    if not lines or lines[0] != "*** Begin Patch" or lines[-1] != "*** End Patch":
-        raise CodingError("invalid_input", "Patch must be enclosed in *** Begin Patch / *** End Patch.")
-    operations: list[dict[str, Any]] = []
-    index = 1
-    while index < len(lines) - 1:
-        header = re.fullmatch(r"\*\*\* (Add|Update|Delete) File: (.+)", lines[index])
-        if not header:
-            raise CodingError("invalid_input", f"Invalid patch header: {lines[index]}")
-        kind, path = header.groups()
-        index += 1
-        body: list[str] = []
-        while index < len(lines) - 1 and not re.match(r"\*\*\* (Add|Update|Delete) File:", lines[index]):
-            line = lines[index]
-            if line.startswith("*** Move to:"):
-                raise CodingError("invalid_input", "Patch moves are not supported.")
-            body.append(line)
-            index += 1
-        if kind == "Delete" and body:
-            raise CodingError("invalid_input", "Delete operations must not contain hunks.")
-        if kind == "Add" and any(not line.startswith("+") for line in body):
-            raise CodingError("invalid_input", "Added file lines must start with +.")
-        operations.append({"kind": kind.lower(), "path": path, "body": body})
-    if not operations:
-        raise CodingError("invalid_input", "Patch contains no operations.")
-    return operations
-
-
-def apply_hunks(original: str, body: list[str]) -> str:
-    lines = original.splitlines()
-    chunks: list[tuple[str | None, list[str], bool]] = []
-    anchor = None
-    current: list[str] = []
-    end_only = False
-    for line in body:
-        if line.startswith("@@"):
-            if current:
-                chunks.append((anchor, current, end_only))
-            anchor = line[2:].strip() or None
-            if anchor and re.match(r"[-+]\d", anchor):
-                raise CodingError("invalid_input", "Use contextual @@ hunks, not numbered unified-diff hunks.")
-            current = []
-            end_only = False
-        elif line == "*** End of File":
-            end_only = True
-        elif line and line[0] in " +-":
-            current.append(line)
-        else:
-            raise CodingError("invalid_input", f"Invalid patch hunk line: {line}")
-    if current:
-        chunks.append((anchor, current, end_only))
-    if not chunks:
-        raise CodingError("invalid_input", "Update operation has no hunks.")
-    cursor = 0
-    for anchor, chunk, end_only in chunks:
-        if anchor:
-            candidates = [i for i in range(cursor, len(lines)) if lines[i] == anchor]
-            if len(candidates) != 1:
-                raise CodingError("invalid_input", "Patch anchor is missing or ambiguous.")
-            cursor = candidates[0] + 1
-        before = [line[1:] for line in chunk if line[0] in " -"]
-        after = [line[1:] for line in chunk if line[0] in " +"]
-        if not before:
-            raise CodingError("invalid_input", "Update hunks require exact surrounding or removed lines.")
-        matches = [i for i in range(cursor, len(lines) - len(before) + 1)
-                   if lines[i:i + len(before)] == before and (not end_only or i + len(before) == len(lines))]
-        if len(matches) != 1:
-            raise CodingError("invalid_input", "Patch context is missing or ambiguous.")
-        at = matches[0]
-        lines[at:at + len(before)] = after
-        cursor = at + len(after)
-    return "\n".join(lines) + ("\n" if original.endswith("\n") else "")
-
-
 class FileService:
     def __init__(self, permissions: PathPermissions, *, on_change=None) -> None:
         self.on_change = on_change
@@ -169,26 +92,16 @@ class FileService:
         return self.locks.setdefault(os.path.normcase(str(path)), RLock())
 
     def prepare(self, name: str, values: dict[str, Any], context: InvocationContext) -> None:
-        if name == "apply_patch":
-            operations = parse_patch(values["patch_text"])
-            paths = [self.permissions.resolve_path(context, op["path"], "edit", authorize=False) for op in operations]
-            if len({os.path.normcase(str(path)) for path in paths}) != len(paths):
-                raise CodingError("invalid_input", "Patch targets must be unique, including resolved symlinks.")
-            for operation in operations:
-                self.permissions.resolve_path(context, operation["path"], "edit")
-        else:
-            value = values.get("file_path", values.get("path", ""))
-            self.permissions.resolve_path(context, value, "edit" if name in {"edit_file", "write_file"} else "read")
+        value = values.get("file_path", values.get("path", ""))
+        self.permissions.resolve_path(context, value, "edit" if name in {"edit", "write"} else "read")
 
     async def execute(self, name: str, values: dict[str, Any], context: InvocationContext) -> ToolResult:
         return await asyncio.to_thread(self._execute, name, values, context)
 
     def _execute(self, name: str, values: dict[str, Any], context: InvocationContext) -> ToolResult:
-        if name == "apply_patch":
-            return self.patch(values["patch_text"], context)
         path = self.permissions.resolve_path(context, values.get("file_path", values.get("path", "")),
-                    "edit" if name in {"edit_file", "write_file"} else "read", allow_interrupt=False)
-        if name == "read_file":
+                    "edit" if name in {"edit", "write"} else "read", allow_interrupt=False)
+        if name == "read":
             with path.open("rb") as handle:
                 magic = handle.read(16)
             mime = "image/png" if magic.startswith(b"\x89PNG\r\n\x1a\n") else "image/jpeg" if magic.startswith(b"\xff\xd8\xff") else "image/gif" if magic.startswith((b"GIF87a", b"GIF89a")) else "image/webp" if magic.startswith(b"RIFF") and magic[8:12] == b"WEBP" else None
@@ -222,7 +135,7 @@ class FileService:
             expected = values.get("expected_version")
             if expected and (original is None or hashlib.sha256(original).hexdigest() != expected):
                 raise CodingError("stale_content", "File version changed. Read it again before writing.")
-            if name == "edit_file":
+            if name == "edit":
                 if original is None:
                     raise CodingError("not_found", f"File does not exist: {path}")
                 text, bom, ending = self.decode_source(original)
@@ -311,52 +224,6 @@ class FileService:
         summary = f"Changed {path}: +{added}/-{deleted}; version={version}"
         return ToolResult(data={"path": str(path), "diff": diff, "additions": added, "deletions": deleted, "version": version},
                           content=summary, display_content=f"{summary}\n{diff}")
-
-    def patch(self, text: str, context: InvocationContext) -> ToolResult:
-        operations = parse_patch(text)
-        prepared: list[tuple[dict[str, Any], Path, bytes | None, bytes | None]] = []
-        paths = [self.permissions.resolve_path(context, operation["path"], "edit", allow_interrupt=False) for operation in operations]
-        with ExitStack() as stack:
-            for path in sorted(paths, key=lambda value: os.path.normcase(str(value))):
-                stack.enter_context(self.lock(path))
-            for operation, path in zip(operations, paths, strict=True):
-                before = self.read_mutation_source(path) if path.exists() else None
-                if operation["kind"] == "add":
-                    if before is not None:
-                        raise CodingError("invalid_input", "Add operation cannot overwrite an existing file.")
-                    content = "\n".join(line[1:] for line in operation["body"])
-                    after = (content + ("\n" if operation["body"] else "")).encode("utf-8")
-                else:
-                    if before is None:
-                        raise CodingError("not_found", f"Patch target does not exist: {path}")
-                    decoded, bom, ending = self.decode_source(before)
-                    after = None if operation["kind"] == "delete" else self.encode_source(apply_hunks(decoded, operation["body"]), bom, ending)
-                if after is not None and len(after) > MAX_EDIT_BYTES:
-                    raise CodingError("invalid_input", "Prepared patch exceeds the mutation limit.")
-                if after == before:
-                    raise CodingError("invalid_input", "Patch operation makes no changes.")
-                prepared.append((operation, path, before, after))
-            # Validate every expected version before the first write.
-            for _, path, before, _ in prepared:
-                if (self.read_mutation_source(path) if path.exists() else None) != before:
-                    raise CodingError("stale_content", "Patch target changed during preparation.")
-            applied: list[dict[str, Any]] = []
-            for index, (operation, path, before, after) in enumerate(prepared):
-                try:
-                    result = self.commit(path, before, after, context)
-                    applied.append({"operation": operation["kind"], **result.data})
-                except Exception as exc:
-                    summary = (f"Patch failed at {path}: {exc}. "
-                               f"Applied: {[item['path'] for item in applied]}. "
-                               f"Pending: {[str(item[1]) for item in prepared[index:]]}.")
-                    return ToolResult(status="partial_failure" if applied else "error",
-                                      data={"applied": applied, "pending": [str(item[1]) for item in prepared[index:]]},
-                                      content=summary,
-                                      display_content=summary + "\n" + "\n".join(item["diff"] for item in applied),
-                                      error=ResultError(code=getattr(exc, "code", "execution_error"), message=str(exc)))
-            return ToolResult(data={"applied": applied, "pending": []},
-                              content="Applied patch:\n" + "\n".join(f"{item['operation']}: {item['path']} (+{item['additions']}/-{item['deletions']}); version={item['version']}" for item in applied),
-                              display_content="Applied patch:\n" + "\n".join(f"{item['operation']}: {item['path']} (+{item['additions']}/-{item['deletions']})\n{item['diff']}" for item in applied))
 
     def search(self, name: str, base: Path, values: dict[str, Any], context: InvocationContext) -> ToolResult:
         pattern = values["pattern"]

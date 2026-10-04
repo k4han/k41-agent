@@ -14,7 +14,6 @@ from dataclasses import asdict
 from pathlib import Path
 
 from agent.modules.tools.coding.models import CodingError, ToolResult
-from agent.modules.tools.coding.names import FILE_TOOLS
 from agent.modules.tools.coding.remote_worker import permission_identity
 
 logger = logging.getLogger(__name__)
@@ -226,7 +225,7 @@ class RemoteCodingRuntime:
                 logger.warning("Failed to cancel sandbox coding invocation", exc_info=True)
             await asyncio.shield(self.stop_thread(context.thread_id))
             raise
-        if name in FILE_TOOLS and name in {"edit_file", "write_file", "apply_patch"}:
+        if name in {"edit", "write"}:
             from agent.modules.workspaces import invalidate_workspace_metadata_cache
             invalidate_workspace_metadata_cache(client.backend.ref, root=client.backend.root)
             from agent.modules.skills import invalidate_repository_skills_for_path

@@ -6,13 +6,12 @@ provider: "default"
 model: ""
 tools:
   - "list_dir"
-  - "read_file"
-  - "write_file"
-  - "edit_file"
+  - "read"
+  - "write"
+  - "edit"
   - "glob"
   - "grep"
-  - "apply_patch"
-  - "exec_command"
+  - "bash"
   - "read_process_output"
   - "write_process_input"
   - "stop_process"
@@ -34,8 +33,8 @@ Follow this structured approach to solve the assigned task:
 
 ### 1. Explore and Locate
 - Start by exploring the codebase to locate the relevant source files.
-- Use `list_dir`, `glob`, and `grep` to identify files related to the issue description or review location. Commands use `exec_command` on every workspace backend.
-- Do not make assumptions about the existing code. Read the file contents carefully using `read_file` to thoroughly understand the implementation details and dependencies before making any changes.
+- Use `list_dir`, `glob`, and `grep` to identify files related to the issue description or review location. Commands use `bash` on every workspace backend.
+- Do not make assumptions about the existing code. Read the file contents carefully using `read` to thoroughly understand the implementation details and dependencies before making any changes.
 
 ### 2. Plan and Design
 - Analyze the root cause of the issue or the requested change in the review feedback.
@@ -43,13 +42,13 @@ Follow this structured approach to solve the assigned task:
 - Keep comments and docstrings updated if they are affected by your changes. Preserve unrelated comments and code.
 
 ### 3. Implement Safely
-- Modify the necessary files using `edit_file` for targeted changes (preferred) or `write_file` for full rewrites.
+- Modify the necessary files using `edit` for targeted changes (preferred) or `write` for full rewrites.
 - Avoid broad, unselective modifications. Focus only on the changes required to solve the specific issue.
 - Ensure your changes do not introduce syntax errors, type mismatches, or security vulnerabilities.
 
 ### 4. Verify and Test
 - **CRITICAL**: Never consider a task done without verification.
-- Use the available shell tool to execute the project's test suite (e.g., `pytest`, `npm test`, `cargo test`, `go test`) or linter commands (e.g., `ruff`, `eslint`, `black`). Local `exec_command` calls have isolated state; pass `workdir` and observe running commands with `read_process_output`.
+- Use the available shell tool to execute the project's test suite (e.g., `pytest`, `npm test`, `cargo test`, `go test`) or linter commands (e.g., `ruff`, `eslint`, `black`). Local `bash` calls have isolated state; pass `workdir` and observe running commands with `read_process_output`.
 - If no existing tests cover your changes, write appropriate unit tests or run a temporary test script to manually verify that the bug is fixed and all edge cases are addressed.
 
 ### 5. Final Report

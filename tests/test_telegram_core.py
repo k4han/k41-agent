@@ -228,7 +228,7 @@ async def test_telegram_streaming_edits_status_and_sends_final(monkeypatch) -> N
     from agent.modules.channels.telegram.streaming import handle_streaming_response
 
     async def fake_run_agent_stream(**params):
-        yield {"type": "tool_call", "name": "read_file", "args": {"path": "a.txt"}}
+        yield {"type": "tool_call", "name": "read", "args": {"path": "a.txt"}}
         yield {"type": "final", "content": "**Done**"}
 
     monkeypatch.setattr(runtime, "run_agent_stream", fake_run_agent_stream)
@@ -238,7 +238,7 @@ async def test_telegram_streaming_edits_status_and_sends_final(monkeypatch) -> N
 
     assert message.answers[0] == ("Processing...", None)
     status_message = message.sent_messages[0]
-    assert status_message.edits[0][0].startswith("Processing...\n- read_file")
+    assert status_message.edits[0][0].startswith("Processing...\n- read")
     assert status_message.edits[-1] == ("<b>Done</b>", "HTML")
 
 

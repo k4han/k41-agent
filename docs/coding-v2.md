@@ -36,23 +36,24 @@ In the dashboard agent Tools tab, select these tools:
 
 ```yaml
 tools:
-  - read_file
+  - read
   - list_dir
   - glob
   - grep
-  - edit_file
-  - write_file
-  - apply_patch
-  - exec_command
+  - edit
+  - write
+  - bash
   - read_process_output
   - write_process_input
   - stop_process
   - read_tool_output
 ```
 
-Old `run_bash` and `bash` allow-list entries normalize to `exec_command` on
-every backend. Process-control entries normalize to the corresponding process
-tools; `bash_list_sessions` is retired. Names are deduplicated before policy
+Old `read_file`, `write_file`, `edit_file`, and `exec_command` allow-list
+entries normalize to `read`, `write`, `edit`, and `bash` on every backend.
+`run_bash` also normalizes to `bash`; `apply_patch` is retired without an
+automatic replacement. Process-control entries normalize to the corresponding
+process tools; `bash_list_sessions` is retired. Names are deduplicated before policy
 filtering. Persistent session arguments and cwd/environment state do not carry
 over. Existing agent files can still be parsed; saving writes canonical tool
 names and omits the retired profile field. Legacy tools are not registered in
@@ -130,7 +131,7 @@ artifacts so output expiration cannot re-enable an old mutation.
 
 ## Processes and output
 
-`exec_command(command, workdir, timeout_seconds=120, yield_time_ms=1000)` starts
+`bash(command, workdir, timeout_seconds=120, yield_time_ms=1000)` starts
 a fresh process in the selected workspace. Timeout is 1–600 seconds; initial yield is 0–30,000 ms.
 Windows uses PowerShell by default; Linux uses Bash/sh. Long commands use
 temporary scripts, cleaned after completion. A running call returns its
@@ -172,7 +173,7 @@ recovery after application restart.
 
 ## File operations
 
-`read_file` streams numbered pages and returns `next_offset` plus a SHA-256
+`read` streams numbered pages and returns `next_offset` plus a SHA-256
 content version. Pages reserve space for metadata inside 50 KiB/2,000 lines.
 Very long physical lines receive an explicit truncated preview. Version hashing
 is streamed but requires a full-file pass. Supported image signatures are
@@ -184,7 +185,7 @@ fallback when ripgrep is absent; its existing ignored directories are retained.
 Each resolved candidate receives a file permission check, including symlinks.
 Results identify engine, limit and result truncation.
 
-`edit_file` requires exact text; missing/ambiguous/no-op edits are rejected.
+`edit` requires exact text; missing/ambiguous/no-op edits are rejected.
 `expected_version` is optional on edit/write. Writes recheck current content
 immediately before replacement, preserve UTF-8 BOM, CRLF/LF and file mode,
 and atomically replace prepared files. Exclusive hard-link creation rejects
@@ -193,12 +194,8 @@ Text mutation inputs are capped at 10 MiB per file. External writers are not
 locked by the application; the final check/replacement gap is not a filesystem
 transaction against arbitrary outside processes.
 
-`apply_patch` accepts `*** Begin Patch` with Add File, Update File contextual
-`@@` hunks, Delete File, and `*** End Patch`. Moves, numbered unified-diff
-hunks and duplicate resolved paths are rejected. All targets are authorized,
-prepared, locked in stable order, and version-checked before the first write.
-Writes are sequential. A later write error returns `partial_failure` with
-applied/pending files; retrying the whole patch is unsafe. Mutations return
+Use `edit` for targeted replacements and `write` for creating files, full
+rewrites, or appending content. Mutations return
 added/deleted line counts and new versions to the model, and invalidate skill
 caches. Diffs are retained in UI artifacts instead of echoing submitted file
 content into the model context. UI text is bounded independently;
@@ -213,7 +210,7 @@ Run `uv run python -m pytest -q`, `pnpm dashboard:check`, and
 and compatibility contracts on Windows/Linux, plus dashboard validation.
 Tests cover real pipes, Unicode, stdin, nonzero exits, timeout, descendant
 cleanup, cursor boundaries, ownership, approvals/replay, large pages, images,
-BOM/CRLF, permissions, concurrent creation/edits, prepared/partial patches, and the shared sandbox engine and transport.
+BOM/CRLF, permissions, concurrent creation/edits, tool-name migration, and the shared sandbox engine and transport.
 Symlink tests skip when Windows symlink privileges are unavailable.
 
 Run `uv run python scripts/benchmark_coding_v2.py --baseline-ref <old-commit>

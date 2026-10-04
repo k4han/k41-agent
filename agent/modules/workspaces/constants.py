@@ -20,7 +20,7 @@ MAX_UNTRACKED_FILE_CHARS = 120_000
 # Cloud metadata cache
 METADATA_CACHE_TTL_SECONDS = 1.0
 
-# Image reading limits for multimodal tools (e.g. read_file auto-detect)
+# Image reading limits for multimodal tools (e.g. read auto-detect)
 MAX_IMAGE_READ_BYTES = 5 * 1024 * 1024
 SUPPORTED_IMAGE_EXTENSIONS: frozenset[str] = frozenset({
     ".png",

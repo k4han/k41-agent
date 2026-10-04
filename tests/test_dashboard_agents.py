@@ -48,7 +48,7 @@ def _payload(name: str) -> dict:
         "graph_type": "react_agent",
         "provider": "default",
         "model": "",
-        "tools": ["read_file"],
+        "tools": ["read"],
         "sub_agents": [],
         "plan_approval_targets": [],
         "max_context_tokens": 1000,

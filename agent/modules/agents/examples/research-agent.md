@@ -8,7 +8,7 @@ tools:
   - "websearch"
   - "webfetch"
   - "list_dir"
-  - "read_file"
+  - "read"
 context_trim_threshold: 50000
 ---
 

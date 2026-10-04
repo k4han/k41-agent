@@ -75,7 +75,7 @@ WORKSPACE_STORAGE_PROMPT = (
 )
 
 _WORKSPACE_STORAGE_TOOL_NAMES = frozenset(
-    {"list_dir", "read_file", "write_file", "edit_file", "glob", "grep", "generate_image"}
+    {"list_dir", "read", "write", "edit", "glob", "grep", "generate_image"}
 )
 
 
