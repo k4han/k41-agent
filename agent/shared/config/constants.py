@@ -129,6 +129,7 @@ def is_platform_managed_key(key: str) -> bool:
 # Runtime configuration key patterns
 # These patterns define which keys can be updated at runtime
 RUNTIME_KEY_PATTERNS = [
+    r"^tools\.(permissions|shell|storage_root)$",
     r"^(host|port|enable_web|enable_api|enable_dashboard|tray\.enabled|tray\.autostart)$",
     r"^chat\.stream_thinking$",
     r"^channels\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$",
@@ -159,6 +160,7 @@ RUNTIME_KEY_PATTERNS = [
 ]
 
 DATABASE_RUNTIME_KEY_PATTERNS = [
+    r"^tools\.(permissions|shell|storage_root)$",
     r"^chat\.stream_thinking$",
     r"^channels\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$",
     r"^channels\.telegram\.(enabled|bot_token|default_agent|code_agent|research_agent|update_mode|webhook_url|webhook_secret)$",
@@ -299,6 +301,7 @@ def _expand_runtime_keys() -> set[str]:
     keys.add(REPOSITORY_SKILLS_DIR_KEY)
     keys.add(DISPLAY_TIMEZONE_CONFIG_KEY)
     keys.add("recursion_limit")
+    keys.update({"tools.permissions", "tools.shell", "tools.storage_root"})
     keys.add("chat.stream_thinking")
     keys.add("google_calendar.enabled")
     keys.add("decision.router.mode")
@@ -317,6 +320,9 @@ KNOWN_RUNTIME_KEYS: set[str] = _expand_runtime_keys()
 
 # Default configuration values
 DEFAULT_CONFIG: dict[str, Any] = {
+    "tools.permissions": [],
+    "tools.shell": None,
+    "tools.storage_root": None,
     # Server configuration
     "host": "0.0.0.0",
     "port": 4141,
@@ -407,6 +413,21 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
 # Metadata for settings - used by dashboard to render appropriate input types
 SETTING_METADATA: dict[str, dict[str, Any]] = {
+    "tools.permissions": {
+        "type": "json", "category": "tools", "label": "Global tool permissions",
+        "description": "Ordered JSON rules with action, resource and effect (allow/ask/deny). Last match wins; agents may override this list.",
+        "default": [],
+    },
+    "tools.shell": {
+        "type": "text", "category": "tools", "label": "Local shell",
+        "description": "Shell executable or path. Empty uses the platform default.",
+        "restart_required": True,
+    },
+    "tools.storage_root": {
+        "type": "text", "category": "tools", "label": "Tool output storage root",
+        "description": "Directory for database-scoped coding artifacts. Empty uses ~/.k41-agent/coding-v2.",
+        "restart_required": True,
+    },
     # Bootstrap settings
     "host": {
         "type": "text",

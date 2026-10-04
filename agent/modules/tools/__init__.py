@@ -29,6 +29,7 @@ from agent.modules.tools.config import (
     ToolConfigService,
 )
 from agent.modules.tools.policy import ToolPolicy
+from agent.modules.tools.coding.names import canonical_tool_names
 from agent.modules.tools.sources.builtin import BuiltinToolSource
 from agent.modules.tools.registry_service import (
     ToolRegistryService,
@@ -142,7 +143,10 @@ def close_thread_shell_sessions(thread_id: str) -> int:
     )
     from agent.modules.tools.builtin.shell.session_manager import session_manager
 
-    return (
+    from agent.bootstrap.container import require_active_container
+    container = require_active_container()
+    coding_count = container._coding_service.processes.stop_thread_now(thread_id) if container._coding_service else 0
+    return coding_count + (
         session_manager.close_thread_sessions(thread_id)
         + daytona_session_manager.close_thread_sessions(thread_id)
         + modal_session_manager.close_thread_sessions(thread_id)
@@ -204,6 +208,15 @@ async def aresolve_tools_for_agent(agent_name: str) -> list[BaseTool]:
 
 __all__ = [
     "BuiltinToolSource",
+    "CodingError",
+    "PermissionResume",
+    "ToolResult",
+    "invocation_context",
+    "get_coding_service",
+    "pending_permission_requests",
+    "permission_request_event",
+    "bound_tool_text",
+    "coding_message_for_model",
     "ToolCapability",
     "ToolCategory",
     "ToolConfigField",
@@ -280,3 +293,9 @@ __all__ = [
     "virtual_generated_image_path",
     "workspace_storage_root",
 ]
+
+from agent.modules.tools.coding.models import CodingError, PermissionResume, ToolResult
+from agent.modules.tools.coding.adapter import coding_message_for_model, invocation_context
+from agent.modules.tools.coding.service import get_coding_service
+from agent.modules.tools.coding.permissions import pending_permission_requests, permission_request_event
+from agent.modules.tools.coding.storage import bounded_text as bound_tool_text

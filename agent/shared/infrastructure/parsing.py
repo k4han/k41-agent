@@ -83,6 +83,14 @@ def extract_final_text_content(value: object) -> str:
     return _normalize_text(value)
 
 
+def extract_tool_display_content(message: object) -> str:
+    """Extract UI text while keeping display artifacts out of model content."""
+    artifact = getattr(message, "artifact", None)
+    if isinstance(artifact, dict) and isinstance(artifact.get("display_content"), str):
+        return extract_final_text_content(artifact["display_content"])
+    return extract_final_text_content(getattr(message, "content", None))
+
+
 def parse_string_or_list(value: object, separator: str = ",") -> list[str]:
     """Parse a string (comma-separated) or list into a list of strings.
 
@@ -123,6 +131,7 @@ def safe_str_strip(value: object, default: str = "") -> str:
 
 __all__ = [
     "extract_final_text_content",
+    "extract_tool_display_content",
     "extract_thinking_content",
     "parse_string_or_list",
     "safe_str_strip",

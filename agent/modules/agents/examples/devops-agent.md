@@ -9,7 +9,12 @@ tools:
   - "read_file"
   - "write_file"
   - "edit_file"
-  - "run_command"
+  - "exec_command"
+  - "read_process_output"
+  - "write_process_input"
+  - "stop_process"
+  - "read_tool_output"
+  - "exec_command"
 context_trim_threshold: 50000
 ---
 

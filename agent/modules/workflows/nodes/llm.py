@@ -58,6 +58,7 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
         agent_name,
         override_tool_names=ctx_tool_names,
     )
+    tools = ToolResolver().for_workspace(tools, workspace, agent_name)
 
     thread_id = get_thread_id(config)
     cache_key = build_system_prompt_cache_key(

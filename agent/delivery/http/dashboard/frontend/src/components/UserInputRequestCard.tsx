@@ -69,7 +69,7 @@ export function UserInputRequestCard(props: {
 
   const questionAnswered = (question: UserQuestion) => {
     const hasSelection = selectedIds(question.id).length > 0;
-    const hasText = customText(question.id).trim().length > 0;
+    const hasText = question.free_text.enabled && customText(question.id).trim().length > 0;
     if (question.free_text?.required && !hasText) {
       return false;
     }

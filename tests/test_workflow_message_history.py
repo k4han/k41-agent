@@ -1,6 +1,70 @@
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+import pytest
 
 from agent.modules.workflows.message_history import normalize_messages_for_chat_model
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_coding_diff_is_removed_at_model_boundary_without_changing_ui_history(legacy):
+    from agent.modules.tools.coding.models import ToolResult
+    from agent.modules.conversations.compaction import _format_messages_for_summary
+    from agent.modules.conversations.history import _serialize_thread_messages
+
+    summary = "Changed source.txt: +1/-0; version=version-1"
+    diff = "--- source.txt\n+++ source.txt\n@@ -0,0 +1 @@\n+submitted-content\n"
+    display = summary + "\n" + diff
+    result = ToolResult(data={"path": "source.txt", "additions": 1, "deletions": 0,
+                             "version": "version-1", "diff": diff},
+                        content=display if legacy else summary,
+                        display_content=None if legacy else display)
+    message = ToolMessage(content=result.content, name="write_file", tool_call_id="coding-call",
+                          artifact=result.model_dump(exclude={"content"}), id="coding-result")
+    normalized = normalize_messages_for_chat_model([message])[0]
+    assert normalized.content == summary
+    assert normalized.artifact is None
+    assert normalized.tool_call_id == message.tool_call_id and normalized.id == message.id
+    assert "+submitted-content" in _serialize_thread_messages([message])[0]["content"]
+    assert "submitted-content" not in _format_messages_for_summary([message])
+    assert message.artifact["data"]["diff"] == diff
+
+
+def test_explicit_read_of_diff_is_preserved_at_model_boundary():
+    from agent.modules.tools.coding.models import ToolResult
+
+    content = "1: +submitted-content\n[next_offset=None]"
+    result = ToolResult(content=content)
+    message = ToolMessage(content=content, name="read_tool_output", tool_call_id="read-call",
+                          artifact=result.model_dump(exclude={"content"}))
+    normalized = normalize_messages_for_chat_model([message])[0]
+    assert normalized.content == content
+    assert normalized.artifact is None
+
+
+def test_serialized_coding_result_from_older_checkpoint_only_sends_receipt():
+    import json
+    from agent.modules.tools.coding.models import ToolResult
+    from agent.modules.conversations.compaction import _format_messages_for_summary
+
+    summary = "Changed source.txt: +1/-0; version=version-1"
+    result = ToolResult(content=summary + "\n+submitted-content",
+                        data={"path": "source.txt", "additions": 1, "deletions": 0,
+                              "version": "version-1", "diff": "+submitted-content"})
+    serialized = json.dumps(result.model_dump())
+    message = ToolMessage(content=serialized, name="write_file", tool_call_id="old-call")
+    normalized = normalize_messages_for_chat_model([message])[0]
+    assert normalized.content == summary and normalized.artifact is None
+    assert "submitted-content" not in _format_messages_for_summary([message])
+    assert message.content == serialized
+
+
+@pytest.mark.parametrize("content", [
+    "{invalid json",
+    '{"diff": "requested diff"}',
+    '{"status": "custom", "data": {}, "output_refs": [], "capture_truncated": false, "output_truncated": false}',
+])
+def test_plain_json_tool_output_is_not_treated_as_a_coding_result(content):
+    message = ToolMessage(content=content, name="exec_command", tool_call_id="plain-call")
+    assert normalize_messages_for_chat_model([message])[0].content == content
 
 
 def test_normalize_human_text_blocks_to_string_preserves_metadata():

@@ -278,69 +278,37 @@ class LocalWorkspaceBackend:
         timeout: int = 30,
         max_output_chars: int | None = None,
     ) -> CommandResult:
-        from agent.modules.agent_runtime import (
-            current_session_id_var,
-            get_active_session_registry,
-        )
-        from agent.modules.tools import check_command_blocked
+        from agent.modules.tools import CodingError, get_coding_service
+        from agent.modules.agent_runtime import current_thread_id_var
+        from agent.modules.tools import invocation_context
+        from types import SimpleNamespace
 
-        blocked, reason = check_command_blocked(command)
-        if blocked:
-            return CommandResult(
-                output=f"[error] Blocked dangerous command ({reason}): command rejected for local execution",
-                exit_code=1,
-                truncated=False,
-            )
-
-        timeout = _clamp_timeout(timeout)
-        max_output_chars = _clamp_max_output(max_output_chars)
-        session_id = current_session_id_var.get()
-        registry = get_active_session_registry()
-
-        p = subprocess.Popen(
-            command,
-            shell=True,
-            cwd=str(self.root),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env=build_safe_env(),
-            **hidden_subprocess_kwargs(),
-        )
-
-        if session_id:
-            registry.register_pid(session_id, p.pid)
-
+        service = get_coding_service()
+        context = invocation_context(SimpleNamespace(
+            context={"workspace": self.ref},
+            config={"configurable": {"thread_id": current_thread_id_var.get() or ""}},
+        ))
+        values = {"command": command, "workdir": str(self.root),
+                  "timeout_seconds": _clamp_timeout(timeout), "yield_time_ms": 30000}
         try:
-            output, error = p.communicate(timeout=timeout)
-            exit_code = p.returncode
-        except subprocess.TimeoutExpired:
-            p.kill()
-            output, error = p.communicate()
-            exit_code = -1
-            error = (error or "") + f"\n[stderr]: Command timed out after {timeout} seconds."
-        except Exception as exc:
-            p.kill()
-            output, error = p.communicate()
-            exit_code = -1
-            error = (error or "") + f"\n[stderr]: Command failed with exception: {exc}"
-        finally:
-            if session_id:
-                registry.unregister_pid(session_id, p.pid)
-
-        output_str = output or ""
-        error_str = error or ""
-        combined = output_str + (f"\n[stderr]: {error_str}" if error_str else "")
-        truncated = False
-        if max_output_chars is not None and len(combined) > max_output_chars:
-            combined, truncated = _truncate_tail(combined, max_output_chars)
-        return CommandResult(
-            output=combined,
-            exit_code=exit_code,
-            truncated=truncated,
-        )
+            await service.prepare("exec_command", values, context)
+            result = await service.execute("exec_command", values, context)
+            job = service.processes.get(context, result.data["process_id"])
+            try:
+                await job.finished.wait()
+            except BaseException:
+                await service.processes.stop(job)
+                raise
+            import asyncio
+            output = await asyncio.to_thread(job.retained_plain)
+            limit = _clamp_max_output(max_output_chars) or HARD_MAX_OUTPUT_CHARS
+            output, truncated = _truncate_tail(output, limit)
+            if job.status in {"timeout", "cancelled"}:
+                output += f"\n[error] Process {job.status}."
+            return CommandResult(output=output, exit_code=job.process.poll(),
+                                 truncated=truncated or job.capture_truncated)
+        except CodingError as exc:
+            return CommandResult(output=f"[error] {exc.code}: {exc}", exit_code=1)
 
     async def tree(self, path: str | None = None) -> dict[str, Any]:
         return list_workspace_tree(working_dir=str(self.root), path=path)

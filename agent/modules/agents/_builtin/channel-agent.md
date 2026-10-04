@@ -12,7 +12,11 @@ tools:
 - list_dir
 - list_scheduled_tasks
 - read_file
-- run_bash
+- exec_command
+- read_process_output
+- write_process_input
+- stop_process
+- read_tool_output
 - schedule_task
 - web_fetch
 - web_search

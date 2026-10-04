@@ -172,6 +172,7 @@ class AppContainer:
     _telegram_webhook_runtime: Any = field(default=None, repr=False)
     _zalo_webhook_runtime: Any = field(default=None, repr=False)
     _tool_registry_service: Any = field(default=None, repr=False)
+    _coding_service: Any = field(default=None, repr=False)
     _mcp_loaded: bool = field(default=False, repr=False)
     _mcp_service: Any = field(default=None, repr=False)
     _skill_repository: Any = field(default=None, repr=False)
@@ -638,6 +639,8 @@ class AppContainer:
         from agent.shared.config.service import detach_database_config_source
         from agent.shared.infrastructure.db.engine import close_async_engine
 
+        if self._coding_service is not None:
+            await self._coding_service.processes.close()
         await close_checkpointer(container=self)
         await close_async_engine(container=self)
         try:

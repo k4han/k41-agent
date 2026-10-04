@@ -202,6 +202,10 @@ def normalize_messages_for_chat_model(messages: list[BaseMessage]) -> list[BaseM
     normalized_messages: list[BaseMessage] = []
 
     for message in messages:
+        if isinstance(message, ToolMessage):
+            from agent.modules.tools import coding_message_for_model
+
+            message = coding_message_for_model(message)
         content = getattr(message, "content", None)
         if isinstance(message, HumanMessage) and isinstance(content, list):
             text_content, handled = _human_text_from_content_list(content)

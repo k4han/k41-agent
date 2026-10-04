@@ -1617,6 +1617,7 @@ async def test_daytona_sweeper_marks_not_found_as_destroyed(monkeypatch):
 def test_local_workspace_backend_execute_uses_safe_workspace(
     monkeypatch,
     tmp_path,
+    isolated_container,
 ):
     import asyncio
 
@@ -1624,31 +1625,30 @@ def test_local_workspace_backend_execute_uses_safe_workspace(
     backend = LocalWorkspaceBackend(workspace)
     captured = {}
 
-    class FakePopen:
-        pid = 12345
-        returncode = 0
-
-        def __init__(self, command, **kwargs):
-            captured["command"] = command
-            captured.update(kwargs)
-
-        def communicate(self, timeout=None):
-            captured["timeout"] = timeout
-            return "ok", ""
-
-        def kill(self):
-            return None
-
-    monkeypatch.setattr(local_backend_module.subprocess, "Popen", FakePopen)
+    from agent.modules.tools.coding.service import CodingService
+    from agent.modules.tools.coding import windows_job
+    service = CodingService(tmp_path / "outputs")
+    isolated_container._coding_service = service
+    original_popen = windows_job.subprocess.Popen
+    original_start = service.processes.start
+    def capture_spawn(command, **kwargs):
+        captured["command"] = command
+        captured.update(kwargs)
+        return original_popen(command, **kwargs)
+    async def capture_start(context, command, cwd, timeout_seconds, shell):
+        captured["timeout"] = timeout_seconds
+        return await original_start(context, command, cwd, timeout_seconds, shell)
+    monkeypatch.setattr(windows_job.subprocess, "Popen", capture_spawn)
+    monkeypatch.setattr(service.processes, "start", capture_start)
 
     async def _run():
         return await backend.execute("echo ok", timeout=12)
 
     result = asyncio.run(_run())
 
-    assert result.output == "ok"
+    assert result.output.strip() == "ok"
     assert result.exit_code == 0
-    assert captured["command"] == "echo ok"
+    assert "echo ok" in captured["command"][-1]
     assert captured["cwd"] == str(tmp_path.resolve())
     assert captured["timeout"] == 12
     if hasattr(local_backend_module.subprocess, "CREATE_NO_WINDOW"):

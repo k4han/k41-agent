@@ -323,6 +323,7 @@ def agent_config_from_body(body: "AgentCardBody") -> AgentConfig:
         provider=body.provider.strip(),
         model=body.model.strip(),
         tools=list(body.tools),
+        tool_permissions=getattr(body, "tool_permissions", None),
         tool_configs={
             name: dict(values)
             for name, values in body.tool_configs.items()

@@ -2,7 +2,7 @@
 
 from types import SimpleNamespace
 
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 import pytest
 
 import agent.modules.workflows.nodes.llm as llm_node_module
@@ -22,6 +22,7 @@ class _FakeChatModel:
 
     async def ainvoke(self, messages, config=None):
         self._captured.setdefault("system_prompts", []).append(messages[0].content)
+        self._captured["messages"] = messages
         return AIMessage(content="ok")
 
 
@@ -93,9 +94,9 @@ def cached_llm_node(monkeypatch):
         _fake_skills_catalog,
     )
 
-    async def _run(*, agent_name: str = "cache-agent", thread_id: str = "thread-1"):
+    async def _run(*, agent_name: str = "cache-agent", thread_id: str = "thread-1", messages=None):
         return await llm_node_module.llm_node(
-            {"messages": [HumanMessage(content="hi")]},
+            {"messages": messages if messages is not None else [HumanMessage(content="hi")]},
             {"configurable": {"thread_id": thread_id}},
             SimpleNamespace(
                 context=WorkflowContext(
@@ -108,6 +109,26 @@ def cached_llm_node(monkeypatch):
         )
 
     return SimpleNamespace(run=_run, calls=calls, captured=captured)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_llm_node_sends_coding_receipt_without_ui_diff(cached_llm_node, legacy):
+    from agent.modules.tools.coding.models import ToolResult
+
+    summary = "Changed source.txt: +1/-0; version=version-1"
+    diff = "+submitted-content\n"
+    result = ToolResult(content=summary + "\n" + diff if legacy else summary,
+                        display_content=None if legacy else summary + "\n" + diff,
+                        data={"path": "source.txt", "additions": 1, "deletions": 0,
+                              "version": "version-1", "diff": diff})
+    message = ToolMessage(content=result.content, name="write_file", tool_call_id="write-call",
+                          artifact=result.model_dump(exclude={"content"}))
+    await cached_llm_node.run(messages=[HumanMessage(content="Write the file"), message])
+    sent = cached_llm_node.captured["messages"][-1]
+    assert sent.content == summary and sent.artifact is None
+    assert "submitted-content" not in str(sent.model_dump())
+    assert message.artifact["data"]["diff"] == diff
 
 
 @pytest.mark.asyncio

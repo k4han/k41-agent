@@ -157,6 +157,7 @@ def make_config(
     return {
         "configurable": {
             "thread_id": thread_id,
+            "approval_supported": thread_id.startswith("api_"),
         },
         "recursion_limit": recursion_limit,
     }

@@ -6,6 +6,8 @@ import json
 import re
 import shlex
 
+from agent.shared.infrastructure.glob_utils import translate_path_glob
+
 from agent.modules.workspaces.constants import (
     IGNORED_DIR_NAMES,
     MAX_GLOB_RESULTS,
@@ -169,7 +171,7 @@ def compile_glob_pattern(pattern: str) -> re.Pattern[str]:
     # them with alternation instead of stripping internal wrappers. This
     # avoids depending on the exact wrapper format of glob.translate.
     translated = [
-        glob.translate(item, recursive=True, include_hidden=True)
+        translate_path_glob(item)
         for item in expand_brace_patterns(pattern)
     ]
     return re.compile("(?:%s)" % "|".join(translated))

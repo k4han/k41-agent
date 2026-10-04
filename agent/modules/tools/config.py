@@ -68,15 +68,30 @@ def coerce_tool_config_value(field: ToolConfigField, value: Any) -> ToolConfigVa
 
 
 def normalize_tool_setting_value(key: str, value: Any) -> Any:
-    """Validate and normalize a global ``tools.<tool>.<field>`` setting value.
+    """Validate global coding settings and per-tool configuration values.
 
-    Raises:
-        ValueError: When the tool or field is unknown, or the value is invalid
-            for the field's schema (bad select option, out-of-range number, ...).
-
-    Empty strings are normalized to ``None`` so callers can treat them as a
-    reset to the schema default (delete the override).
+    Unknown tool fields and invalid values raise ValueError. Empty strings
+    normalize to None so callers can reset the stored override.
     """
+    if key == "tools.permissions":
+        import json
+        from agent.modules.tools.coding.models import PermissionRule
+        if value is None or value == "":
+            return None
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except ValueError as exc:
+                raise ValueError("Permission rules must be a valid JSON array.") from exc
+        if not isinstance(value, list):
+            raise ValueError("Permission rules must be an array.")
+        return [PermissionRule.model_validate(rule).model_dump() for rule in value]
+    if key in {"tools.shell", "tools.storage_root"}:
+        if value is None or value == "":
+            return None
+        if not isinstance(value, str):
+            raise ValueError("Shell and storage root settings must be text.")
+        return value.strip() or None
     parts = key.split(".", 2)
     if len(parts) != 3 or parts[0] != "tools":
         return value

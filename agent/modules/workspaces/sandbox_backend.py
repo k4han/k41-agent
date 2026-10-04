@@ -66,6 +66,25 @@ class SandboxBackendBase(ABC):
         self._git_status_cache_ts: float = 0.0
         self._git_status_cache: dict[str, dict[str, Any]] | None = None
 
+    async def execute_coding_command(self, command: str, *, timeout: int = 30) -> CommandResult:
+        """Transport commands bypass agent tools to avoid recursive execution."""
+        import asyncio
+
+        if inspect.iscoroutinefunction(self._exec):
+            return await self._exec(command, cwd="/", timeout=timeout)
+        return await asyncio.to_thread(self._exec, command, cwd="/", timeout=timeout)
+
+    async def upload_coding_file(self, content: bytes, path: str) -> None:
+        import asyncio
+
+        await asyncio.to_thread(self._upload_file, content, path)
+
+    async def download_coding_file(self, path: str) -> bytes:
+        import asyncio
+
+        raw = await asyncio.to_thread(self._download_file, path)
+        return raw.encode("utf-8") if isinstance(raw, str) else bytes(raw)
+
     # ------------------------------------------------------------------ #
     #  Abstract primitives – subclasses must implement
     # ------------------------------------------------------------------ #

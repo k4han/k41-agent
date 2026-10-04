@@ -6,8 +6,6 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import ToolRuntime
 from pydantic import BaseModel, Field
 
-from agent.modules.tools.decorators import register_tool
-from agent.modules.tools.domain import ToolCapability, ToolCategory
 from agent.modules.tools.builtin.workspace import get_workspace
 from agent.modules.tools.runtime.context import ToolContext
 from agent.modules.tools.result import ToolError, ToolErrorCode
@@ -140,14 +138,6 @@ class BashCloseInput(BaseModel):
     )
 
 
-@register_tool(
-    category=ToolCategory.SHELL,
-    capabilities=[
-        ToolCapability.EXEC_SHELL,
-        ToolCapability.REQUIRES_WORKSPACE,
-    ],
-    tags=["shell"],
-)
 @tool(args_schema=BashInput)
 async def bash(
     command: str,
@@ -235,14 +225,6 @@ async def bash(
         raise ToolError(ToolErrorCode.INVALID_INPUT, str(exc)) from exc
 
 
-@register_tool(
-    category=ToolCategory.SHELL,
-    capabilities=[
-        ToolCapability.EXEC_SHELL,
-        ToolCapability.REQUIRES_WORKSPACE,
-    ],
-    tags=["shell"],
-)
 @tool(args_schema=BashReadOutputInput)
 def bash_read_output(
     session_id: str,
@@ -287,13 +269,6 @@ def bash_read_output(
     return result_str
 
 
-@register_tool(
-    category=ToolCategory.SHELL,
-    capabilities=[
-        ToolCapability.EXEC_SHELL,
-    ],
-    tags=["shell"],
-)
 @tool(args_schema=BashSendInputInput)
 def bash_send_input(
     session_id: str,
@@ -320,13 +295,6 @@ def bash_send_input(
     return f"Sent input to session '{session_id}': {text!r}"
 
 
-@register_tool(
-    category=ToolCategory.SHELL,
-    capabilities=[
-        ToolCapability.EXEC_SHELL,
-    ],
-    tags=["shell"],
-)
 @tool(args_schema=BashInterruptInput)
 def bash_interrupt(
     session_id: str,
@@ -364,13 +332,6 @@ def bash_interrupt(
     )
 
 
-@register_tool(
-    category=ToolCategory.SHELL,
-    capabilities=[
-        ToolCapability.EXEC_SHELL,
-    ],
-    tags=["shell"],
-)
 @tool
 def bash_list_sessions() -> str:
     """List all active interactive terminal sessions."""
@@ -390,13 +351,6 @@ def bash_list_sessions() -> str:
     return result
 
 
-@register_tool(
-    category=ToolCategory.SHELL,
-    capabilities=[
-        ToolCapability.EXEC_SHELL,
-    ],
-    tags=["shell"],
-)
 @tool(args_schema=BashCloseInput)
 def bash_close(
     session_ids: str | list[str] | None = None,
@@ -478,3 +432,9 @@ def bash_close(
     if not_found:
         result.append(f"Session IDs not found: {', '.join(not_found)}")
     return "\n".join(result) if result else "No sessions were closed."
+
+
+from agent.modules.tools.middleware import apply_default_middleware
+
+for session_tool in (bash, bash_read_output, bash_send_input, bash_interrupt, bash_list_sessions, bash_close):
+    apply_default_middleware(session_tool)

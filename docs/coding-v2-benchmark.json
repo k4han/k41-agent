@@ -1,0 +1,140 @@
+{
+  "baseline_revision": "9617362ac82ce3aa468ff5c68369196cddce5f12",
+  "platform": "Windows-10-10.0.19045-SP0",
+  "python": "3.13.15",
+  "measurements": [
+    {
+      "engine": "legacy",
+      "case": "shell",
+      "input_bytes": 1048576,
+      "duration_seconds": 0.2813,
+      "python_peak_bytes": 2142213,
+      "rss_peak_delta_bytes": 5296128,
+      "model_content_bytes": 1048605,
+      "capture_buffer_bytes": null,
+      "stored_output_bytes": null
+    },
+    {
+      "engine": "v2",
+      "case": "shell",
+      "input_bytes": 1048576,
+      "duration_seconds": 0.5085,
+      "python_peak_bytes": 2275630,
+      "rss_peak_delta_bytes": 5001216,
+      "model_content_bytes": 49470,
+      "capture_buffer_bytes": 1048576,
+      "stored_output_bytes": 1049920
+    },
+    {
+      "engine": "legacy",
+      "case": "shell",
+      "input_bytes": 8388608,
+      "duration_seconds": 0.3242,
+      "python_peak_bytes": 18882473,
+      "rss_peak_delta_bytes": 11624448,
+      "model_content_bytes": 1048663,
+      "capture_buffer_bytes": null,
+      "stored_output_bytes": null
+    },
+    {
+      "engine": "v2",
+      "case": "shell",
+      "input_bytes": 8388608,
+      "duration_seconds": 0.5769,
+      "python_peak_bytes": 2297726,
+      "rss_peak_delta_bytes": 4431872,
+      "model_content_bytes": 49470,
+      "capture_buffer_bytes": 1048576,
+      "stored_output_bytes": 8399360
+    },
+    {
+      "engine": "legacy",
+      "case": "shell",
+      "input_bytes": 33554432,
+      "duration_seconds": 0.4215,
+      "python_peak_bytes": 69214236,
+      "rss_peak_delta_bytes": 36941824,
+      "model_content_bytes": 1048663,
+      "capture_buffer_bytes": null,
+      "stored_output_bytes": null
+    },
+    {
+      "engine": "v2",
+      "case": "shell",
+      "input_bytes": 33554432,
+      "duration_seconds": 0.7647,
+      "python_peak_bytes": 2296790,
+      "rss_peak_delta_bytes": 4608000,
+      "model_content_bytes": 49542,
+      "capture_buffer_bytes": 1048576,
+      "stored_output_bytes": 10485760
+    },
+    {
+      "engine": "legacy",
+      "case": "read",
+      "input_bytes": 1048576,
+      "duration_seconds": 0.0193,
+      "python_peak_bytes": 2327721,
+      "rss_peak_delta_bytes": 3076096,
+      "model_content_bytes": 511999,
+      "capture_buffer_bytes": null,
+      "stored_output_bytes": null
+    },
+    {
+      "engine": "v2",
+      "case": "read",
+      "input_bytes": 1048576,
+      "duration_seconds": 0.0046,
+      "python_peak_bytes": 149403,
+      "rss_peak_delta_bytes": 167936,
+      "model_content_bytes": 50525,
+      "capture_buffer_bytes": null,
+      "stored_output_bytes": null
+    },
+    {
+      "engine": "legacy",
+      "case": "read",
+      "input_bytes": 8388608,
+      "duration_seconds": 0.1133,
+      "python_peak_bytes": 18399101,
+      "rss_peak_delta_bytes": 22732800,
+      "model_content_bytes": 511999,
+      "capture_buffer_bytes": null,
+      "stored_output_bytes": null
+    },
+    {
+      "engine": "v2",
+      "case": "read",
+      "input_bytes": 8388608,
+      "duration_seconds": 0.0135,
+      "python_peak_bytes": 149403,
+      "rss_peak_delta_bytes": 163840,
+      "model_content_bytes": 50525,
+      "capture_buffer_bytes": null,
+      "stored_output_bytes": null
+    },
+    {
+      "engine": "legacy",
+      "case": "read",
+      "input_bytes": 33554432,
+      "duration_seconds": 0.4809,
+      "python_peak_bytes": 73526141,
+      "rss_peak_delta_bytes": 90914816,
+      "model_content_bytes": 511999,
+      "capture_buffer_bytes": null,
+      "stored_output_bytes": null
+    },
+    {
+      "engine": "v2",
+      "case": "read",
+      "input_bytes": 33554432,
+      "duration_seconds": 0.0324,
+      "python_peak_bytes": 149551,
+      "rss_peak_delta_bytes": 200704,
+      "model_content_bytes": 50525,
+      "capture_buffer_bytes": null,
+      "stored_output_bytes": null
+    }
+  ],
+  "method": "Fresh workers; Python allocation peak and sampled RSS delta; one sample per case. Shell runs the exact legacy kernel; read compares legacy full read plus paging with versioned streaming paging."
+}

@@ -11,6 +11,7 @@ export type AgentForm = {
   provider: string;
   model: string;
   tools: string[];
+  tool_permissions: AgentCard["tool_permissions"];
   tool_configs: ToolConfigs;
   mcp_servers: string[];
   sub_agents: string[];
@@ -38,6 +39,7 @@ export function blankForm(workflow: string): AgentForm {
     provider: "default",
     model: "",
     tools: [],
+    tool_permissions: null,
     tool_configs: {},
     mcp_servers: [],
     sub_agents: [],
@@ -57,6 +59,7 @@ export function cardToForm(card: AgentCard): AgentForm {
     provider: card.provider || "default",
     model: card.model || "",
     tools: card.tools || [],
+    tool_permissions: card.tool_permissions ?? null,
     tool_configs: normalizeToolConfigs(card.tool_configs),
     mcp_servers: card.mcp_servers || [],
     sub_agents: card.sub_agents || [],

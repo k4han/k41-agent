@@ -13,7 +13,7 @@ Behavior:
 - Best-effort advisory warnings when command arguments reference absolute
   directories outside the working directory.
 - Combined stdout/stderr capture with a ``(no output)`` fallback and an
-  in-memory truncation notice.
+  bounded model preview and owner-scoped retained output.
 - Result footer: ``Command exited with code <exit>.`` or
   ``Command timed out before completion.`` prefixed by a ``Warnings:``
   block when advisory warnings exist.
@@ -21,6 +21,7 @@ Behavior:
 - Timeout enforcement kills the whole process tree and drains pipes with
   a bounded grace period, so orphaned grandchildren cannot hold the call
   past its timeout.
+- Local execution uses the shared coding process manager.
 - Dangerous commands are rejected via ``shell_guard``; the child process
   runs with the ``build_safe_env`` whitelist plus UTF-8 injection.
 """
@@ -31,24 +32,19 @@ import platform
 import re
 import shlex
 import shutil
-import signal
-import subprocess
 import tempfile
-from pathlib import Path, PureWindowsPath
+from pathlib import PureWindowsPath
 from typing import Annotated, Any
 
 from langchain_core.tools import InjectedToolArg, tool
 from langgraph.prebuilt import ToolRuntime
+from langgraph.errors import GraphInterrupt
 from pydantic import BaseModel, Field
 
 from agent.modules.tools.builtin.workspace import get_workspace
-from agent.modules.tools.decorators import register_tool
-from agent.modules.tools.domain import ToolCapability, ToolCategory
 from agent.modules.tools.result import ToolError, ToolErrorCode
 from agent.modules.tools.runtime.context import ToolContext
-from agent.modules.tools.runtime.sandbox import build_safe_env
 from agent.modules.tools.runtime.shell_guard import check_command_blocked
-from agent.shared.infrastructure.subprocess_utils import hidden_subprocess_kwargs
 
 # Safety limits. Timeout bounds are stored in milliseconds and exposed
 # to the model in seconds (default 120s, max 600s).
@@ -66,16 +62,7 @@ _TRAILING_CHAIN_RE = re.compile(r"[;,|&]+$")
 _UTF8_CONTINUATION_MASK = 0xC0
 _UTF8_CONTINUATION_SIG = 0x80
 
-# Threshold for switching from inline args to temp-file execution to avoid
-# OS ARG_MAX / CreateProcess limits (~32k on Windows). 8k is conservative
-# and keeps argv small while still covering typical model commands.
-_LONG_COMMAND_THRESHOLD = 8000
-
 _TRUNCATION_NOTICE = "[output capture truncated at the in-memory safety limit]"
-
-# Grace period to drain pipes after killing the tree. Must stay bounded:
-# an orphaned grandchild can hold the captured pipes open indefinitely.
-_POST_KILL_GRACE = 3.0
 
 
 def _strip_ansi(text: str) -> str:
@@ -262,104 +249,6 @@ def _coerce_stream(value: Any) -> str:
     return str(value)
 
 
-def _kill_process_tree(proc: subprocess.Popen) -> None:
-    """Best-effort kill of a spawned shell and all its descendants.
-
-    Fire-and-forget: never blocks. Timeout enforcement depends on this —
-    killing only the direct child leaves grandchildren (e.g. a
-    ``python app.py`` server) holding the captured pipes, which makes the
-    post-kill pipe drain block forever.
-    """
-    pid = getattr(proc, "pid", None)
-    if pid is None:
-        try:
-            proc.kill()
-        except Exception:
-            pass
-        return
-    if platform.system() == "Windows":
-        try:
-            subprocess.run(
-                ["taskkill", "/F", "/T", "/PID", str(pid)],
-                capture_output=True,
-                timeout=10,
-                stdin=subprocess.DEVNULL,
-                **hidden_subprocess_kwargs(),
-            )
-        except Exception:
-            pass
-        try:
-            if proc.poll() is None:
-                proc.kill()
-        except Exception:
-            pass
-        return
-    try:
-        os.killpg(os.getpgid(pid), signal.SIGKILL)
-        return
-    except Exception:
-        pass
-    try:
-        import psutil
-
-        try:
-            root = psutil.Process(pid)
-            for child in root.children(recursive=True):
-                try:
-                    child.kill()
-                except Exception:
-                    pass
-        except Exception:
-            pass
-    except ImportError:
-        pass
-    try:
-        if proc.poll() is None:
-            proc.kill()
-    except Exception:
-        pass
-
-
-def _close_pipes(proc: subprocess.Popen) -> None:
-    for stream in (getattr(proc, "stdout", None), getattr(proc, "stderr", None)):
-        try:
-            if stream is not None:
-                stream.close()
-        except Exception:
-            pass
-
-
-def _drain_after_kill(proc: subprocess.Popen, fallback_out: Any, fallback_err: Any) -> tuple[Any, Any]:
-    """Bounded pipe drain after a timeout kill.
-
-    Falls back to the partial output captured at timeout when orphaned
-    grandchildren keep the pipes open past the grace period.
-    """
-    try:
-        return proc.communicate(timeout=_POST_KILL_GRACE)
-    except subprocess.TimeoutExpired:
-        _close_pipes(proc)
-        return fallback_out, fallback_err
-    except Exception:
-        return fallback_out, fallback_err
-
-
-def _reap(proc: subprocess.Popen) -> None:
-    """Best-effort, bounded reap of the direct child (zombie prevention)."""
-    try:
-        if proc.poll() is None:
-            try:
-                proc.kill()
-            except Exception:
-                pass
-            try:
-                proc.wait(timeout=5)
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-
 class RunBashInput(BaseModel):
     """Input schema for stateless shell execution."""
 
@@ -378,8 +267,7 @@ class RunBashInput(BaseModel):
         description=(
             "Working directory. Defaults to the active workspace; relative paths "
             "resolve from that workspace. Use this instead of 'cd' commands. "
-            "Values outside the workspace (except the system temp dir) are allowed "
-            "but reported as advisory external-directory warnings."
+            "Local paths outside the workspace require permission approval."
         ),
     )
     timeout: float = Field(
@@ -393,14 +281,6 @@ class RunBashInput(BaseModel):
     )
 
 
-@register_tool(
-    category=ToolCategory.SHELL,
-    capabilities=[
-        ToolCapability.EXEC_SHELL,
-        ToolCapability.REQUIRES_WORKSPACE,
-    ],
-    tags=["shell", "stateless"],
-)
 @tool(args_schema=RunBashInput)
 async def run_bash(
     command: str,
@@ -413,15 +293,16 @@ async def run_bash(
     The active workspace is the default working directory. Relative workdir
     values resolve from that workspace. External workdir values and absolute
     command-argument paths outside the working directory produce advisory
-    warnings only. Timeout is in seconds (default 120, max 600). Uses
+    warnings. Local external workdirs require permission approval.
+    Timeout is in seconds (default 120, max 600). Uses
     K41_SHELL when set; otherwise uses pwsh/powershell/cmd on Windows and
     bash/sh on POSIX.
 
     Each invocation spawns a fresh subprocess and does not share state (cwd,
     env mutations, background jobs) with any other call. Use it for terminal
     operations like git, npm, docker — not for file reads/writes/searches.
-    Use the system temp directory for temporary work outside the workspace;
-    it is pre-approved for external directory access. Only commit, amend,
+    Use an approved directory for temporary work outside the workspace.
+    Only commit, amend,
     push, or create PRs when explicitly requested; inspect status/diff/log
     before committing and never commit secrets.
 
@@ -463,9 +344,9 @@ async def run_bash(
         blocked, reason = check_command_blocked(command)
         if blocked:
             raise ValueError(f"Blocked dangerous command ({reason}): command rejected for local execution")
-        return await _run_local(command, target, timeout_s, timeout_ms, warnings)
+        return await _run_local(command, target, timeout_s, timeout_ms, warnings, runtime)
 
-    except ToolError:
+    except (ToolError, GraphInterrupt):
         raise
     except ValueError as exc:
         raise ToolError(ToolErrorCode.INVALID_INPUT, str(exc)) from exc
@@ -479,170 +360,34 @@ async def _run_local(
     timeout_s: float,
     timeout_ms: int,
     warnings: list[str],
+    runtime: Any,
 ) -> str:
-    """Run command locally in a one-shot subprocess."""
+    """Compatibility adapter over the shared local process runtime."""
+    from agent.modules.tools.coding.adapter import invocation_context, make_coding_tool
+    from agent.modules.tools.coding.service import get_coding_service
 
-    def _execute() -> dict[str, Any]:
-        # Force UTF-8 for child processes to avoid charmap errors on Windows
-        # with non-ASCII output. PYTHONIOENCODING/PYTHONUTF8 are injected via
-        # extra_vars because they are not in the default whitelist.
-        safe_env = build_safe_env(
-            extra_vars={
-                "PYTHONIOENCODING": "utf-8",
-                "PYTHONUTF8": "1",
-                "PYTHONUNBUFFERED": "1",
-            }
-        )
-        shell_name = _resolve_shell()
-        shell_args: list[str] | None = None
-        use_shell_flag = False
-        system = platform.system()
-        temp_script: Path | None = None
-        is_long = len(command) > _LONG_COMMAND_THRESHOLD
-        lowered = shell_name.lower()
-        is_powershell = "pwsh" in lowered or "powershell" in lowered
-        base_name = os.path.basename(lowered).removesuffix(".exe")
-        is_cmd = base_name in {"cmd", "command"}
-
-        def _write_temp(suffix: str) -> Path:
-            fd, script_path = tempfile.mkstemp(suffix=suffix, text=True)
-            temp_path = Path(script_path)
-            with open(fd, "w", encoding="utf-8", newline="\n") as f:
-                f.write(command)
-            return temp_path
-
-        if system == "Windows":
-            if is_powershell:
-                exe = shell_name
-                if is_long:
-                    temp_script = _write_temp(".ps1")
-                    shell_args = [exe, "-NoLogo", "-NoProfile", "-File", str(temp_script)]
-                else:
-                    shell_args = [exe, "-NoLogo", "-NoProfile", "-Command", command]
-            elif is_cmd:
-                if is_long:
-                    temp_script = _write_temp(".bat")
-                    shell_args = ["cmd.exe", "/c", str(temp_script)]
-                else:
-                    # Run through the system shell (COMSPEC).
-                    use_shell_flag = True
-            elif shutil.which(shell_name):
-                if is_long:
-                    temp_script = _write_temp(".ps1" if shell_name.lower().endswith(".ps1") else ".sh")
-                    shell_args = [shell_name, str(temp_script)]
-                else:
-                    shell_args = [shell_name, "-c", command]
-            elif shutil.which("pwsh.exe") or shutil.which("pwsh"):
-                if is_long:
-                    temp_script = _write_temp(".ps1")
-                    shell_args = ["pwsh.exe", "-NoLogo", "-NoProfile", "-File", str(temp_script)]
-                else:
-                    shell_args = ["pwsh.exe", "-NoLogo", "-NoProfile", "-Command", command]
-            elif shutil.which("powershell.exe") or shutil.which("powershell"):
-                if is_long:
-                    temp_script = _write_temp(".ps1")
-                    shell_args = ["powershell.exe", "-NoLogo", "-NoProfile", "-File", str(temp_script)]
-                else:
-                    shell_args = ["powershell.exe", "-NoLogo", "-NoProfile", "-Command", command]
-            else:
-                use_shell_flag = True
-        else:
-            if shell_name in {"bash", "/bin/bash"} and shutil.which("bash"):
-                exe = "bash"
-            elif shutil.which(shell_name):
-                exe = shell_name
-            else:
-                exe = "bash" if shutil.which("bash") else "sh"
-            if is_long:
-                temp_script = _write_temp(".sh")
-                shell_args = [exe, str(temp_script)]
-            else:
-                shell_args = [exe, "-c", command]
-
-        creationflags = 0
-        start_new_session = False
-        if system == "Windows":
-            creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-        else:
-            # Detach into a new session so the shell and its children can be
-            # signalled as one group on timeout.
-            start_new_session = True
-
-        proc: subprocess.Popen | None = None
+    service = get_coding_service()
+    context = invocation_context(runtime)
+    definition = make_coding_tool("exec_command").coding_definition
+    result = await service.invoke(definition, {
+        "command": command, "workdir": working_dir,
+        "timeout_seconds": timeout_s, "yield_time_ms": 30000,
+    }, context)
+    if result.error:
+        return str(result.content)
+    process_id = result.data.get("process_id")
+    if process_id and result.status == "running":
+        job = service.processes.get(context, process_id)
         try:
-            popen_kwargs: dict[str, Any] = {
-                "stdout": subprocess.PIPE,
-                "stderr": subprocess.PIPE,
-                # No interactive input: detach stdin.
-                "stdin": subprocess.DEVNULL,
-                "text": True,
-                "encoding": "utf-8",
-                "errors": "replace",
-                "cwd": working_dir,
-                "env": safe_env,
-                **hidden_subprocess_kwargs(creationflags=creationflags),
-            }
-            if start_new_session:
-                popen_kwargs["start_new_session"] = True
-            if use_shell_flag:
-                proc = subprocess.Popen(command, shell=True, **popen_kwargs)
-            else:
-                assert shell_args is not None
-                proc = subprocess.Popen(shell_args, shell=False, **popen_kwargs)
-            try:
-                stdout, stderr = proc.communicate(timeout=timeout_s)
-            except subprocess.TimeoutExpired as exc:
-                # Kill the whole tree (shell plus grandchildren such as a
-                # server process), then drain pipes with a bounded grace
-                # period. Waiting unbounded here is the hang: a surviving
-                # grandchild holds the captured pipes open forever.
-                _kill_process_tree(proc)
-                stdout, stderr = _drain_after_kill(proc, exc.stdout, exc.stderr)
-                return {
-                    "stdout": _strip_ansi(_coerce_stream(stdout)),
-                    "stderr": _strip_ansi(_coerce_stream(stderr)),
-                    "exit_code": None,
-                    "timed_out": True,
-                }
-            return {
-                "stdout": _strip_ansi(_coerce_stream(stdout)),
-                "stderr": _strip_ansi(_coerce_stream(stderr)),
-                "exit_code": proc.returncode,
-            }
-        except FileNotFoundError as exc:
-            return {"error": f"Working directory is not a directory: {working_dir}: {exc}"}
-        except OSError as exc:
-            return {"error": str(exc)}
-        finally:
-            if proc is not None:
-                _close_pipes(proc)
-                _reap(proc)
-            if temp_script is not None:
-                try:
-                    temp_script.unlink(missing_ok=True)
-                except Exception:
-                    pass
-
-    raw: dict[str, Any] = await asyncio.to_thread(_execute)
-
-    if "error" in raw:
-        raise ToolError(ToolErrorCode.EXECUTION_ERROR, str(raw["error"]))
-
-    timed_out = bool(raw.get("timed_out"))
-    if timed_out:
-        body = _timeout_message(timeout_ms)
-        return f"{body}\n\n{_model_footer(None, True, warnings)}"
-
-    combined = _combine_streams(str(raw.get("stdout", "")), str(raw.get("stderr", "")))
-    body = combined.strip() or "(no output)"
-    # Bounded in-memory preview with accurate capture-loss reporting.
-    body, _truncated = _truncate_to_capture_limit(body)
-    exit_code = raw.get("exit_code")
-    try:
-        exit_code = None if exit_code is None else int(exit_code)
-    except (TypeError, ValueError):
-        exit_code = None
-    return f"{body}\n\n{_model_footer(exit_code, False, warnings)}"
+            await job.finished.wait()
+            result = await service.processes.observe(job)
+        except asyncio.CancelledError:
+            await service.processes.stop(job)
+            raise
+    body = str(result.content)
+    if result.output_refs:
+        body += f"\nOutput reference: {result.output_refs[0]} (read_tool_output)."
+    return f"{body}\n\n{_model_footer(result.data.get('exit_code'), result.data.get('state') == 'timeout', warnings)}"
 
 
 async def _run_remote(
@@ -701,3 +446,9 @@ async def _run_remote(
     body, _ = _truncate_to_capture_limit(body)
     _ = timeout_ms
     return f"{body}\n\n{_model_footer(exit_code, False, extra_warnings)}"
+
+
+# Keep direct internal callers compatible without catalog registration.
+from agent.modules.tools.middleware import apply_default_middleware
+
+apply_default_middleware(run_bash)

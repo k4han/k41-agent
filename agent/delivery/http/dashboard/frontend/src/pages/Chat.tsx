@@ -13,7 +13,7 @@ import { Dialog } from "@/components/Dialog";
 import { Markdown } from "@/components/Markdown";
 import { ChatThreadBadges } from "@/components/ChatThreadBadges";
 import { ChatTranscript } from "@/components/ChatTranscript";
-import { PLAN_MODE_TOOL_NAME, type TranscriptAttachment, type TranscriptRole, type TranscriptUserInputRequest } from "@/components/Transcript";
+import { PLAN_MODE_TOOL_NAME, createTranscriptUserInputRequest, type TranscriptAttachment, type TranscriptRole, type TranscriptUserInputRequest } from "@/components/Transcript";
 import type { UserInputRequestSubmitPayload } from "@/components/UserInputRequestCard";
 import type { WorkspaceSelectionDraft } from "@/components/WorkspaceSelector";
 import { DataGate } from "@/components/State";
@@ -81,7 +81,7 @@ import { useWorkspaceExplorer } from "@/lib/useWorkspaceExplorer";
 import { useChatAttachments } from "@/lib/useChatAttachments";
 import { useContextWindow } from "@/lib/useContextWindow";
 import { useBackgroundStream } from "@/lib/useBackgroundStream";
-import { ASK_USER_TOOL_NAME } from "@/lib/userInputRequest";
+import { ASK_USER_TOOL_NAME, normalizeUserInputRequest } from "@/lib/userInputRequest";
 import {
   INITIALIZING_ENVIRONMENT_TEXT,
   THINKING_TEXT,
@@ -564,7 +564,11 @@ export function ChatPage() {
     setWorkspace(workspaceExecution(payload.workspace) || null);
     if (!persistedStreams.has(payload.thread_id)) {
       setItems(
-        toThreadTranscript(payload.messages, payload.thread_id).map((item) => ({
+        [...toThreadTranscript(payload.messages, payload.thread_id), ...(payload.pending_requests || []).map((value) => {
+          const request = normalizeUserInputRequest(value);
+          return createTranscriptUserInputRequest({ toolCallId: request.tool_call_id, interruptId: request.interrupt_id,
+            title: request.title, questions: request.questions, submitLabel: request.submit_label });
+        })].map((item) => ({
           ...item,
           id: allocItemId(),
         })),
@@ -1376,6 +1380,12 @@ export function ChatPage() {
       showToast("The input request is no longer active.", "warning");
       return;
     }
+    const permission = request.questions.find((question) => question.id.startsWith("permission:"));
+    const decision = permission ? payload.answers.find((answer) => answer.question_id === permission.id)?.selected_option_ids[0] : undefined;
+    if (permission && decision !== "allow_once" && decision !== "allow_thread" && decision !== "deny") {
+      showToast("Choose a permission decision.", "warning");
+      return;
+    }
     updateUserInputRequest(payload.toolCallId, {
       status: "answered",
       answers: payload.answers,
@@ -1389,11 +1399,11 @@ export function ChatPage() {
       },
       "turn-start",
     );
-    void sendMessage(true, {
-      action: "answer",
-      answers: payload.answers,
-      summary: payload.summary,
-    });
+    if (permission && (decision === "allow_once" || decision === "allow_thread" || decision === "deny")) {
+      void sendMessage(true, { action: "permission", request_id: permission.id.slice("permission:".length), decision });
+    } else {
+      void sendMessage(true, { action: "answer", answers: payload.answers, summary: payload.summary });
+    }
   };
 
   const handleBranchSelect = (checkpointId: string) => {

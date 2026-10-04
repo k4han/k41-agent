@@ -132,6 +132,8 @@ def serialize_agent_config(config: AgentConfig) -> str:
     }
     if tool_configs:
         data["tool_configs"] = tool_configs
+    if config.tool_permissions is not None:
+        data["tool_permissions"] = config.tool_permissions
     if config.mcp_servers is not None:
         data["mcp_servers"] = list(config.mcp_servers)
     if config.sub_agents is not None:
@@ -235,6 +237,7 @@ def _build_agent_config(
             provider=provider,
             model=model,
             tools=tools,
+            tool_permissions=data.get("tool_permissions"),
             tool_configs=tool_configs,
             mcp_servers=mcp_servers,
             sub_agents=sub_agents,

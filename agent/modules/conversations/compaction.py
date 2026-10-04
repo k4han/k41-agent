@@ -111,6 +111,9 @@ def _format_messages_for_summary(messages: list[BaseMessage]) -> str:
                     tc_str = f" [Invoked tools: {', '.join(tc_names)}]"
             lines.append(f"Assistant: {content.strip()}{tc_str}")
         elif isinstance(msg, ToolMessage):
+            from agent.modules.tools import coding_message_for_model
+
+            msg = coding_message_for_model(msg)
             name = getattr(msg, "name", "tool")
             content = extract_final_text_content(getattr(msg, "content", None)) or ""
             if len(content) > 300:

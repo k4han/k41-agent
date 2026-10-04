@@ -10,6 +10,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, Too
 from langgraph.types import Command
 from agent.shared.infrastructure.parsing import (
     extract_final_text_content,
+    extract_tool_display_content,
     extract_thinking_content,
 )
 from agent.shared.infrastructure.thinking_parser import (
@@ -686,6 +687,9 @@ def _normalize_human_resume_payload(
     if resume_payload is None:
         return None
     action = str(resume_payload.get("action") or "").strip()
+    if action == "permission":
+        from agent.modules.tools import PermissionResume
+        return PermissionResume.model_validate(resume_payload)
     if action == "answer":
         return AskUserAnswerResumePayload.model_validate(resume_payload)
     return _normalize_plan_resume_payload(resume_payload)
@@ -747,7 +751,7 @@ def _validate_human_resume_payload(
 ) -> None:
     if resume_payload is None:
         return
-    if resume_payload.action == "answer":
+    if resume_payload.action in {"answer", "permission"}:
         return
     _validate_plan_resume_payload(resume_payload)
 
@@ -871,6 +875,10 @@ def _user_input_request_events_from_value_event(
     for interrupt_obj in raw_interrupts:
         value = _interrupt_value(interrupt_obj)
         if not isinstance(value, dict):
+            continue
+        if value.get("type") == "permission_request":
+            from agent.modules.tools import permission_request_event
+            out.append(permission_request_event(value, _interrupt_id(interrupt_obj)))
             continue
         if value.get("type") != ASK_USER_INTERRUPT_TYPE:
             continue
@@ -1080,6 +1088,7 @@ async def run_agent(
         build_usage_context(thread_id, usage_context),
     )
     config = _config_with_checkpoint(config, checkpoint_id)
+    config["configurable"]["approval_supported"] = str((usage_context or {}).get("platform", "")) == "api" or bool(config["configurable"].get("approval_supported"))
 
     context = make_run_context(
         workspace=workspace,
@@ -1226,6 +1235,7 @@ async def run_agent_stream(
         build_usage_context(thread_id, usage_context),
     )
     config = _config_with_checkpoint(config, checkpoint_id)
+    config["configurable"]["approval_supported"] = str((usage_context or {}).get("platform", "")) == "api" or bool(config["configurable"].get("approval_supported"))
 
     context = make_run_context(
         workspace=workspace,
@@ -1418,7 +1428,7 @@ async def run_agent_stream(
                             "type": "tool_result",
                             "tool_call_id": getattr(message, "tool_call_id", None),
                             "name": getattr(message, "name", None),
-                            "content": extract_final_text_content(getattr(message, "content", None)),
+                            "content": extract_tool_display_content(message),
                         }
 
             # The graph finished but the generated title may still be in
@@ -1640,7 +1650,7 @@ async def run_agent_edit_stream(
                         "type": "tool_result",
                         "tool_call_id": getattr(message, "tool_call_id", None),
                         "name": getattr(message, "name", None),
-                        "content": extract_final_text_content(getattr(message, "content", None)),
+                        "content": extract_tool_display_content(message),
                     }
 
 async def run_agent_full(

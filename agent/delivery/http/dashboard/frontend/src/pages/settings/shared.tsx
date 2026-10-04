@@ -241,6 +241,22 @@ export function SettingControl(props: {
   value: unknown;
   onChange: (value: unknown) => void;
 }) {
+  if (props.info.key === "tools.permissions") {
+    return <FormTextarea
+      value={typeof props.value === "string" ? props.value : JSON.stringify(props.value ?? [], null, 2)}
+      onChange={(value) => props.onChange(value)}
+      rows={6}
+      placeholder='[{"action":"shell","resource":"*","effect":"ask"}]'
+      validation={[{
+        validate: (value) => {
+          try { return Array.isArray(JSON.parse(String(value || "[]"))); }
+          catch { return false; }
+        },
+        message: "Enter a JSON array of permission rules.",
+      }]}
+      showValidationStatus={true}
+    />;
+  }
   const validationRules = createMemo<ValidationRule[]>(() => {
     const rules: ValidationRule[] = [];
 

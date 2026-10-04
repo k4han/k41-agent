@@ -206,9 +206,12 @@ async def get_chat_thread_messages(
     metadata = await get_conversation_thread(thread_id)
     parsed = metadata or _parse_thread_id_safe(thread_id)
     workspace = await workspace_ref_for_thread(thread_id, include_default=False)
+    from agent.modules.tools import pending_permission_requests
+    pending_requests = await pending_permission_requests(thread_id, checkpoint_id=active_checkpoint_id)
     return {
         "thread_id": thread_id,
         "active_checkpoint_id": active_checkpoint_id,
+        "pending_requests": pending_requests,
         "messages": messages,
         "workspace": workspace.model_dump() if workspace else None,
         **parsed,

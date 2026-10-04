@@ -8,6 +8,8 @@ import re
 # Each entry is (regex, reason) — kept deliberately narrow to avoid false positives
 # on legitimate file operations inside workspace.
 _BLOCKED_COMMAND_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"\b(?:Format-Volume|Clear-Disk|Initialize-Disk|Stop-Computer|Restart-Computer)\b", re.IGNORECASE), "destructive Windows system operation"),
+    (re.compile(r"\b(?:Remove-Item|rmdir|rd)\b[^\r\n;|]*\s[\"']?[A-Za-z]:[\\/](?:\*|[\"']|\s|$)", re.IGNORECASE), "removal targeting Windows filesystem root"),
     # rm -rf targeting root: block `rm -rf /` or `rm -rf /*` but NOT `rm -rf /tmp/foo`
     (re.compile(r"\brm\s+[^|;]*-rf\s+/\s*(?:$|[;|&\n\"'])", re.IGNORECASE), "rm -rf targeting filesystem root"),
     (re.compile(r"\brm\s+[^|;]*-rf\s+/\*\s*(?:$|[;|&\n\"'])", re.IGNORECASE), "rm -rf targeting filesystem root (wildcard)"),

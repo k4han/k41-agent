@@ -16,7 +16,7 @@ from agent.modules.conversations.service import (
     list_conversation_threads,
     parse_thread_metadata,
 )
-from agent.shared.infrastructure.parsing import extract_final_text_content
+from agent.shared.infrastructure.parsing import extract_final_text_content, extract_tool_display_content
 
 logger = logging.getLogger(__name__)
 CHECKPOINT_STATS_CONCURRENCY = 4
@@ -567,9 +567,7 @@ def _serialize_thread_messages(
             entry["role"] = "tool"
             entry["name"] = getattr(msg, "name", None)
             entry["tool_call_id"] = getattr(msg, "tool_call_id", None)
-            entry["content"] = extract_final_text_content(
-                getattr(msg, "content", None)
-            ) or ""
+            entry["content"] = extract_tool_display_content(msg) or ""
         else:
             entry["role"] = "system"
             entry["content"] = str(getattr(msg, "content", ""))

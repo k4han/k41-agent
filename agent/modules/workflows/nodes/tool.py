@@ -119,5 +119,37 @@ async def tool_node(
         agent_name,
         override_tool_names=allowed_tool_names,
     )
+    workspace = get_runtime_context_value(runtime.context, "workspace", None)
+    if workspace is None:
+        workspace = get_runtime_context_value(runtime.context, "working_dir", None)
+    if workspace is not None:
+        tools = ToolResolver().for_workspace(tools, workspace, agent_name)
     tools = _include_pending_control_tools(state, tools)
-    return await ToolNode(tools).ainvoke(state, config=config, runtime=runtime)
+    # Authorize the whole coding batch before any tool can mutate files or
+    # start a process. Completed settlements survive node replay.
+    from types import SimpleNamespace
+    from agent.modules.tools import invocation_context, CodingError, get_coding_service, bound_tool_text
+    from pydantic import ValidationError
+
+    calls = getattr(state.get("messages", [])[-1], "tool_calls", []) if state.get("messages") else []
+    by_name = {tool.name: tool for tool in tools}
+    next_config = {**config, "configurable": dict(config.get("configurable", {}))}
+    if calls and any(getattr(tool, "coding_definition", None) for tool in tools):
+        next_config["configurable"]["coding_message_id"] = str(getattr(state["messages"][-1], "id", "") or "")
+    for call in calls:
+        definition = getattr(by_name.get(call["name"]), "coding_definition", None)
+        if definition is None:
+            continue
+        try:
+            context = invocation_context(SimpleNamespace(context=runtime.context, config=next_config, tool_call_id=call["id"]))
+            service = get_coding_service()
+            if not service.storage.journal_path(context).exists():
+                parsed = definition.input_schema.model_validate(call["args"])
+                await service.prepare(definition.name, parsed.model_dump(), context)
+        except (CodingError, ValidationError, OSError, ValueError) as exc:
+            result = get_coding_service().failure(exc)
+            result.data["batch_stopped_before_execution"] = True
+            result.content, result.output_truncated = bound_tool_text(f"[error] Batch stopped before execution: {exc}")
+            return {"messages": [ToolMessage(content=result.content, artifact=result.model_dump(exclude={"content"}),
+                     name=item["name"], tool_call_id=item["id"], status="error") for item in calls]}
+    return await ToolNode(tools).ainvoke(state, config=next_config, runtime=runtime)

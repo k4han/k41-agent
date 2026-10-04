@@ -7,6 +7,7 @@ from langgraph.types import interrupt
 from pydantic import BaseModel, Field, model_validator
 
 from agent.modules.tools.builtin.utility.plan_resume import PlanResumePayload
+from agent.modules.tools.coding.models import PermissionResume
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCapability, ToolCategory
 
@@ -78,7 +79,7 @@ class AskUserAnswerResumePayload(BaseModel):
     summary: str = ""
 
 
-HumanResumePayload: TypeAlias = PlanResumePayload | AskUserAnswerResumePayload
+HumanResumePayload: TypeAlias = PlanResumePayload | AskUserAnswerResumePayload | PermissionResume
 
 
 ASK_USER_DESCRIPTION = (

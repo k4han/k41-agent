@@ -47,7 +47,7 @@ export type PlanResumePayload =
   | { action: "approve"; target_agent: string }
   | { action: "revise"; feedback: string };
 
-export type ChatResumePayload = PlanResumePayload | UserAnswerResumePayload;
+export type ChatResumePayload = PlanResumePayload | UserAnswerResumePayload | { action: "permission"; request_id: string; decision: "allow_once" | "allow_thread" | "deny" };
 
 // ── Scroll & streaming ──
 

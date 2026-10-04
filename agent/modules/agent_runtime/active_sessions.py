@@ -192,6 +192,12 @@ class ActiveSessionRegistry:
     def cancel_session(self, session_id: str) -> bool:
         """Cancel the asyncio task and kill all running subprocesses associated with this session."""
         pids_to_kill = set()
+        from agent.bootstrap.container import get_active_container
+        container = get_active_container()
+        with self._lock:
+            current = self._sessions.get(session_id)
+        if current and container and container._coding_service:
+            container._coding_service.processes.stop_thread_now(current.thread_id)
         with self._lock:
             session = self._sessions.get(session_id)
             if session:
@@ -217,6 +223,10 @@ class ActiveSessionRegistry:
     def cancel_by_thread(self, thread_id: str) -> bool:
         """Cancel all sessions/tasks and kill their subprocesses associated with a thread_id."""
         cancelled = False
+        from agent.bootstrap.container import get_active_container
+        container = get_active_container()
+        if container and container._coding_service:
+            cancelled = bool(container._coding_service.processes.stop_thread_now(thread_id))
         sessions_to_cancel = []
         with self._lock:
             for session_id, session in list(self._sessions.items()):

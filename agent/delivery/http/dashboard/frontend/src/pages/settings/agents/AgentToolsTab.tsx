@@ -63,6 +63,7 @@ function isImageOutputModel(model: { output_types?: string[] | null }) {
 
 export function AgentToolsTab(props: {
   form: AgentForm;
+  onUpdate: <K extends keyof AgentForm>(key: K, value: AgentForm[K]) => void;
   readOnly: boolean;
   toolGroups: AgentToolGroup[];
   totalBuiltInTools: number;
@@ -129,6 +130,27 @@ export function AgentToolsTab(props: {
 
   return (
     <div class="agent-config-tools">
+      <fieldset disabled={props.readOnly}>
+        <legend>Tool permissions</legend>
+        <p>Rules are evaluated in order; the last match wins. Inherit uses global rules. An empty override uses built-in defaults.</p>
+        <label><input type="checkbox" checked={props.form.tool_permissions !== null}
+          onChange={(event) => props.onUpdate("tool_permissions", event.currentTarget.checked ? [] : null)} /> Override global permissions</label>
+        <For each={props.form.tool_permissions || []}>{(rule, index) => {
+          const update = (key: string, value: string) => props.onUpdate("tool_permissions",
+            (props.form.tool_permissions || []).map((item, at) => at === index() ? { ...item, [key]: value } : item));
+          return <div class="stack" style="gap: 8px;">
+            <label>Action<input value={rule.action || "*"} onInput={(event) => update("action", event.currentTarget.value)} /></label>
+            <label>Resource pattern<input value={rule.resource || "*"} onInput={(event) => update("resource", event.currentTarget.value)} /></label>
+            <label>Decision<select value={rule.effect} onChange={(event) => update("effect", event.currentTarget.value)}>
+              <option value="allow">Allow</option><option value="ask">Ask</option><option value="deny">Deny</option>
+            </select></label>
+            <button type="button" class="btn btn-sm" onClick={() => props.onUpdate("tool_permissions", (props.form.tool_permissions || []).filter((_, at) => at !== index()))}>Remove rule</button>
+          </div>;
+        }}</For>
+        <Show when={props.form.tool_permissions !== null}>
+          <button type="button" class="btn btn-sm" onClick={() => props.onUpdate("tool_permissions", [...(props.form.tool_permissions || []), { action: "*", resource: "*", effect: "ask" }])}>Add permission rule</button>
+        </Show>
+      </fieldset>
       <div class="agent-config-summary">
         <div class="agent-config-stat">
           <span>Built-in tools</span>

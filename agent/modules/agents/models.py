@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 def _normalize_max_context_tokens(data: Any) -> Any:
@@ -26,6 +26,7 @@ class AgentConfig(BaseModel):
     provider: str
     model: str = ""
     tools: list[str] = Field(default_factory=list)
+    tool_permissions: list[dict[str, Any]] | None = None
     tool_configs: dict[str, dict[str, Any]] = Field(default_factory=dict)
     mcp_servers: Optional[list[str]] = None
     sub_agents: Optional[list[str]] = None  # None = leaf (no call_agent), list = allowed targets
@@ -38,10 +39,25 @@ class AgentConfig(BaseModel):
     max_context_tokens: Optional[int] = None
     system_prompt: str = ""  # Markdown body content (after frontmatter)
 
+    @field_validator("tool_permissions")
+    @classmethod
+    def _validate_tool_permissions(cls, rules):
+        if rules is not None:
+            for rule in rules:
+                if rule.get("effect") not in {"allow", "ask", "deny"}:
+                    raise ValueError("Permission effect must be allow, ask or deny.")
+                if not isinstance(rule.get("action", "*"), str) or not isinstance(rule.get("resource", "*"), str):
+                    raise ValueError("Permission action and resource must be strings.")
+        return rules
+
     @model_validator(mode="before")
     @classmethod
     def _normalize(cls, data: Any) -> Any:
-        return _normalize_max_context_tokens(data)
+        data = _normalize_max_context_tokens(data)
+        if isinstance(data, dict) and data.get("tools"):
+            from agent.modules.tools import canonical_tool_names
+            data = {**data, "tools": canonical_tool_names(data["tools"])}
+        return data
 
     @model_validator(mode="after")
     def _sync_max_context_tokens(self) -> "AgentConfig":
@@ -60,6 +76,7 @@ class AgentCard(BaseModel):
     provider: str = ""
     model: str = ""
     tools: list[str] = Field(default_factory=list)
+    tool_permissions: list[dict[str, Any]] | None = None
     tool_configs: dict[str, dict[str, Any]] = Field(default_factory=dict)
     mcp_servers: Optional[list[str]] = None
     sub_agents: Optional[list[str]] = None
@@ -79,7 +96,11 @@ class AgentCard(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _normalize(cls, data: Any) -> Any:
-        return _normalize_max_context_tokens(data)
+        data = _normalize_max_context_tokens(data)
+        if isinstance(data, dict) and data.get("tools"):
+            from agent.modules.tools import canonical_tool_names
+            data = {**data, "tools": canonical_tool_names(data["tools"])}
+        return data
 
     @model_validator(mode="after")
     def _sync_max_context_tokens(self) -> "AgentCard":
@@ -105,6 +126,7 @@ class AgentCard(BaseModel):
             provider=config.provider,
             model=config.model,
             tools=list(config.tools),
+            tool_permissions=config.tool_permissions,
             tool_configs={
                 name: dict(values)
                 for name, values in config.tool_configs.items()
@@ -156,6 +178,7 @@ class AgentCard(BaseModel):
             provider=self.provider,
             model=self.model,
             tools=list(self.tools),
+            tool_permissions=self.tool_permissions,
             tool_configs={
                 name: dict(values)
                 for name, values in self.tool_configs.items()

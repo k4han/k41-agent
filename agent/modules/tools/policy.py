@@ -37,6 +37,9 @@ class ToolPolicy:
     def from_agent_config(cls, config) -> "ToolPolicy":
         """Build a policy from an :class:`AgentConfig`-shaped object."""
         tools = getattr(config, "tools", None)
+        if tools:
+            from agent.modules.tools.coding.names import canonical_tool_names
+            tools = canonical_tool_names(tools)
         sub_agents = getattr(config, "sub_agents", None)
         name = getattr(config, "name", "default")
         mcp_servers: list[str] | None

@@ -751,7 +751,8 @@ async def test_run_agent_stream_skips_checkpoint_messages_before_current_user(mo
 
 
 @pytest.mark.asyncio
-async def test_run_agent_stream_emits_tool_call_and_result(monkeypatch):
+@pytest.mark.parametrize("display_content", [None, "Changed source.txt\n+submitted-content"])
+async def test_run_agent_stream_emits_tool_call_and_result(monkeypatch, display_content):
     class _FakeCatalog:
         def get_agent(self, name: str):
             return SimpleNamespace(
@@ -784,6 +785,7 @@ async def test_run_agent_stream_emits_tool_call_and_result(monkeypatch):
                         tool_call_id="call-1",
                         name="list_dir",
                         id="tool-result",
+                        artifact={"display_content": display_content},
                     )
                 ]
             }
@@ -821,7 +823,7 @@ async def test_run_agent_stream_emits_tool_call_and_result(monkeypatch):
             "type": "tool_result",
             "tool_call_id": "call-1",
             "name": "list_dir",
-            "content": "README.md\nagent/",
+            "content": display_content if display_content is not None else "README.md\nagent/",
         },
         {"type": "final", "content": "done"},
     ]

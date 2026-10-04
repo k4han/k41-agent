@@ -1,0 +1,45 @@
+name: Coding tools
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.12.13
+      - run: uv sync --group dev
+      - name: Verify coding and compatibility contracts
+        run: >-
+          uv run --no-sync python -m pytest -q
+          tests/test_coding_v2.py tests/test_coding_v2_approval.py tests/test_remote_coding.py
+          tests/test_workspace_backends.py tests/test_tools_policy_resolver.py
+          tests/test_tools_middleware.py tests/test_tools_registry.py
+          tests/test_workflow_runtime_tools.py tests/test_workflow_llm_node_prompt_cache.py
+          tests/test_workflow_llm_node_skills.py tests/test_module_public_import_boundaries.py
+          tests/test_agent_cards.py tests/test_dashboard_agents.py
+  dashboard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: corepack prepare pnpm@10.20.0 --activate
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm dashboard:check
+      - run: pnpm dashboard:build

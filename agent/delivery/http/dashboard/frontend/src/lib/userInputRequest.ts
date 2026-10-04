@@ -8,7 +8,7 @@ export type UserQuestionOption = {
 };
 
 export type UserQuestionFreeText = {
-  enabled: true;
+  enabled: boolean;
   label?: string;
   placeholder?: string;
   required?: boolean;
@@ -75,7 +75,7 @@ function normalizeQuestionOption(value: unknown): UserQuestionOption | null {
 function normalizeFreeText(value: unknown): UserQuestionFreeText {
   const record = asRecord(value);
   return {
-    enabled: true,
+    enabled: record?.enabled !== false,
     label: String(record?.label || ""),
     placeholder: String(record?.placeholder || ""),
     required: Boolean(record?.required),

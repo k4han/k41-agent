@@ -54,6 +54,15 @@ enable_dashboard: true
 #   redirect_uri: "http://localhost:4141/integrations/google/callback"
 
 # Tool credentials and per-tool defaults (database-owned).
+# Coding tools are shared across all workspace backends. Agent tool_permissions replace
+# tools.permissions; the last matching rule wins. Relative paths and symlinks
+# cannot escape a workspace. Explicit external paths default to ask.
+# tools:
+#   shell: null  # Auto-detect PowerShell on Windows, Bash/sh on Linux.
+#   storage_root: null  # Defaults outside repositories under ~/.k41-agent.
+#   permissions:
+#     - { action: edit, resource: "*/secrets/*", effect: deny }
+#     - { action: shell, resource: "*", effect: ask }
 # Existing tools.* keys in this file are copied into the database once when the
 # runtime database source attaches; manage them in the dashboard at
 # Settings > Tools. Sending a null value from the dashboard deletes the stored

@@ -3,17 +3,10 @@ from typing import Annotated, Any
 from langchain_core.tools import tool, InjectedToolArg
 from langgraph.prebuilt import ToolRuntime
 
-from agent.modules.tools.decorators import register_tool
-from agent.modules.tools.domain import ToolCapability, ToolCategory
 from agent.modules.tools.builtin.workspace import get_file_io
 from agent.modules.tools.result import ToolError, ToolErrorCode
 
 
-@register_tool(
-    category=ToolCategory.FILE,
-    capabilities=[ToolCapability.READ_FS, ToolCapability.REQUIRES_WORKSPACE],
-    tags=["fs", "search"],
-)
 @tool
 async def glob(
     pattern: str,
@@ -42,3 +35,9 @@ async def glob(
         )
     except ValueError as exc:
         raise ToolError(ToolErrorCode.INVALID_INPUT, str(exc)) from exc
+
+
+# Keep direct internal callers compatible without catalog registration.
+from agent.modules.tools.middleware import apply_default_middleware
+
+apply_default_middleware(glob)

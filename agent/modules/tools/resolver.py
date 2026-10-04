@@ -26,6 +26,21 @@ class ToolResolver:
     def __init__(self, *, include_mcp: bool = True) -> None:
         self._include_mcp = include_mcp
 
+    def for_workspace(self, tools: list[BaseTool], workspace, agent_name: str = "default") -> list[BaseTool]:
+        """Use the same coding definitions on every workspace backend."""
+        from agent.modules.tools.coding.adapter import make_coding_tool
+        from agent.modules.tools.coding.names import CODING_TOOLS, TOOL_ALIASES, REMOVED_TOOLS
+        from agent.modules.workspaces import normalize_workspace_ref
+        from agent.shared.config.constants import DEFAULT_WORKSPACE_ROOT
+        normalize_workspace_ref(workspace, default_locator=DEFAULT_WORKSPACE_ROOT)
+        result = []
+        for tool in tools:
+            if tool.name in REMOVED_TOOLS:
+                continue
+            name = TOOL_ALIASES.get(tool.name, tool.name)
+            result.append(make_coding_tool(name) if name in CODING_TOOLS else tool)
+        return list({tool.name: tool for tool in result}.values())
+
     async def aresolve_for_agent(
         self,
         agent_name: str,
@@ -76,7 +91,8 @@ class ToolResolver:
             else ToolPolicy.allow_all(agent_name=agent_name or "default")
         )
         if override_tool_names is not None:
-            override_set = frozenset(override_tool_names)
+            from agent.modules.tools.coding.names import canonical_tool_names
+            override_set = frozenset(canonical_tool_names(override_tool_names))
             policy = replace(
                 policy,
                 allowed_tool_names=override_set if override_set else None,

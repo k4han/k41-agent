@@ -73,6 +73,7 @@ export function AgentEditTabs(props: {
           <Show when={props.activeTab === "tools"}>
             <AgentToolsTab
               form={props.form}
+              onUpdate={props.onUpdate}
               readOnly={props.readOnly}
               toolGroups={props.toolGroups}
               totalBuiltInTools={props.totalBuiltInTools}

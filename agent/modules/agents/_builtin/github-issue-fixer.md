@@ -9,7 +9,14 @@ tools:
   - "read_file"
   - "write_file"
   - "edit_file"
-  - "bash"
+  - "glob"
+  - "grep"
+  - "apply_patch"
+  - "exec_command"
+  - "read_process_output"
+  - "write_process_input"
+  - "stop_process"
+  - "read_tool_output"
   - "web_search"
   - "web_fetch"
 context_trim_threshold: 50000
@@ -27,7 +34,7 @@ Follow this structured approach to solve the assigned task:
 
 ### 1. Explore and Locate
 - Start by exploring the codebase to locate the relevant source files.
-- Use tools like `list_dir` or run shell search commands via `bash` (e.g., `grep` or specific find utilities) to identify files related to the issue description or review location.
+- Use `list_dir`, `glob`, and `grep` to identify files related to the issue description or review location. Commands use `exec_command` on every workspace backend.
 - Do not make assumptions about the existing code. Read the file contents carefully using `read_file` to thoroughly understand the implementation details and dependencies before making any changes.
 
 ### 2. Plan and Design
@@ -42,7 +49,7 @@ Follow this structured approach to solve the assigned task:
 
 ### 4. Verify and Test
 - **CRITICAL**: Never consider a task done without verification.
-- Use `bash` to execute the project's test suite (e.g., `pytest`, `npm test`, `cargo test`, `go test`) or linter commands (e.g., `ruff`, `eslint`, `black`).
+- Use the available shell tool to execute the project's test suite (e.g., `pytest`, `npm test`, `cargo test`, `go test`) or linter commands (e.g., `ruff`, `eslint`, `black`). Local `exec_command` calls have isolated state; pass `workdir` and observe running commands with `read_process_output`.
 - If no existing tests cover your changes, write appropriate unit tests or run a temporary test script to manually verify that the bug is fixed and all edge cases are addressed.
 
 ### 5. Final Report

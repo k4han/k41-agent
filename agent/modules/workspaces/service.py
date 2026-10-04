@@ -131,6 +131,10 @@ async def _delete_temp_workspace_directory(locator: str) -> bool:
     if not target.exists():
         return False
     try:
+        from agent.bootstrap.container import require_active_container
+        container = require_active_container()
+        if container._coding_service:
+            await container._coding_service.processes.stop_workspace(str(target))
         await asyncio.to_thread(shutil.rmtree, target)
     except OSError as exc:
         logger.warning("Failed to remove temp workspace %s: %s", target, exc)
