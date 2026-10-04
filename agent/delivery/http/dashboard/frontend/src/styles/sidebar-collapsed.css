@@ -20,7 +20,8 @@
   padding: 0;
 }
 
-.sidebar-collapsed .nav-label {
+.sidebar-collapsed .nav-label,
+.sidebar-collapsed .settings-nav .nav-link .nav-label {
   display: none;
 }
 

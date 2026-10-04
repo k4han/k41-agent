@@ -281,10 +281,12 @@ export function SettingsLayout(props: {
             aria-label="Back to home"
           >
             <ArrowLeft size={15} />
-            <span class="nav-label">Back to home</span>
+            <Show when={!collapsed() || isMobileViewport()}>
+              <span class="nav-label">Back to home</span>
+            </Show>
           </A>
 
-          <Show when={!collapsed()}>
+          <Show when={!collapsed() || isMobileViewport()}>
             <div class="settings-nav-search">
               <Search size={13} class="settings-nav-search-icon" />
               <input
@@ -322,7 +324,7 @@ export function SettingsLayout(props: {
             <For each={filteredGroups()}>
               {(group) => (
                 <div class="settings-nav-group">
-                  <Show when={!collapsed()}>
+                  <Show when={!collapsed() || isMobileViewport()}>
                     <div class="settings-nav-group-title">{group.label}</div>
                   </Show>
                   <For each={group.items}>
@@ -333,9 +335,11 @@ export function SettingsLayout(props: {
                         title={item.description ? `${item.label} — ${item.description}` : item.label}
                       >
                         {item.icon()}
-                        <span class="nav-label">
-                          <span class="settings-nav-label-text">{item.label}</span>
-                        </span>
+                        <Show when={!collapsed() || isMobileViewport()}>
+                          <span class="nav-label">
+                            <span class="settings-nav-label-text">{item.label}</span>
+                          </span>
+                        </Show>
                       </A>
                     )}
                   </For>
@@ -352,7 +356,7 @@ export function SettingsLayout(props: {
             </div>
           </Show>
         </nav>
-        <Show when={!collapsed()}>
+        <Show when={!collapsed() || isMobileViewport()}>
           <div class="settings-sidebar-footer-hint">
             <span class="hint">Press <span class="kbd">/</span> to search</span>
           </div>

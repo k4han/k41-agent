@@ -29,26 +29,43 @@
   margin: 2px auto 8px;
   width: 36px;
   min-width: 36px;
+  height: 34px;
+  min-height: 34px;
   padding: 0;
   justify-content: center;
+  gap: 0;
 }
 
 .sidebar-collapsed .settings-sidebar .nav-link {
   width: 36px;
   min-width: 36px;
+  height: 34px;
+  min-height: 34px;
   padding: 0;
   justify-content: center;
   margin: 0 auto;
+  gap: 0;
 }
 
 .sidebar-collapsed .settings-sidebar .settings-nav-groups {
-  gap: 6px;
+  gap: 8px;
   align-items: center;
+  width: 100%;
+  padding: 0;
 }
 
 .sidebar-collapsed .settings-sidebar .settings-nav-group {
   align-items: center;
-  gap: 4px;
+  gap: 3px;
+  width: 100%;
+}
+
+.sidebar-collapsed:not(.app-layout--drawer-open) .settings-sidebar .nav-label,
+.sidebar-collapsed:not(.app-layout--drawer-open) .settings-nav .nav-link .nav-label,
+.sidebar-collapsed:not(.app-layout--drawer-open) .settings-sidebar .settings-nav-group-title,
+.sidebar-collapsed:not(.app-layout--drawer-open) .settings-sidebar .settings-nav-search,
+.sidebar-collapsed:not(.app-layout--drawer-open) .settings-sidebar .settings-sidebar-footer-hint {
+  display: none !important;
 }
 
 .settings-topbar {
