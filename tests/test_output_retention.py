@@ -1,8 +1,13 @@
 """Contracts for lazy storage, exact output recovery, and conversation cleanup."""
 
+import asyncio
+import base64
 import json
 import os
+import shutil
+import shlex
 import subprocess
+import sys
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -22,7 +27,7 @@ from agent.modules.tools.coding.models import InvocationContext, ToolDefinition,
 from agent.modules.tools.coding.remote_worker import SandboxWorker
 from agent.modules.tools.coding.service import CodingService
 from agent.modules.tools.coding.storage import (
-    MAX_MODEL_BYTES, RETENTION_SECONDS, OutputStore, conversation_key, digest, ensure_workspace_exclude,
+    MAX_MODEL_BYTES, MAX_MODEL_LINES, RETENTION_SECONDS, OutputStore, conversation_key, digest, ensure_workspace_exclude,
 )
 from agent.modules.tools.runtime import output_retention, thread_storage
 from agent.modules.workspaces import WorkspaceRef
@@ -60,8 +65,179 @@ async def invoke(service, context, name, **args):
     return await service.invoke(ToolDefinition(name, name, SCHEMAS[name], execute), args, context)
 
 
+def python_command(source):
+    payload = base64.b64encode(source.encode()).decode()
+    argument = f"import base64;exec(base64.b64decode('{payload}'))"
+    if os.name == "nt":
+        return f'& "{sys.executable}" -c "{argument}"'
+    return f"{shlex.quote(sys.executable)} -c {shlex.quote(argument)}"
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize("tool_name", ["web_fetch", "mcp__server__fetch"])
+@pytest.mark.parametrize("content", [
+    "short output",
+    "x" * MAX_MODEL_BYTES,
+    "line\n" * MAX_MODEL_LINES,
+    [{"type": "text", "text": "short output"}, {"type": "image", "base64": "aGVsbG8="}],
+], ids=["short", "byte-limit", "line-limit", "media"])
+async def test_generic_output_within_limits_is_returned_without_a_file(output_environment, content):
+    service, _, workspace, _ = output_environment
+    message = ToolMessage(content=content, name="mcp__server__fetch", tool_call_id="call")
+    retained = await output_retention.retain_message(message, SimpleNamespace(context={}, config={}))
+    assert retained is message
+    assert not (workspace / ".k41-agent" / "outputs").exists()
+    await service.processes.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source, expected", [
+    ("pass", "(no output)"),
+    ("print('short output')", "short output"),
+    ("import sys; sys.stderr.write('error: \\U0001f600'); sys.exit(7)", "error: \U0001f600"),
+], ids=["empty", "stdout", "stderr"])
+async def test_short_process_output_never_creates_a_file(output_environment, source, expected):
+    service, context, workspace, worker = output_environment
+    try:
+        initial = await invoke(service, context, "bash", command=python_command(source), yield_time_ms=0)
+        manager = worker.processes if worker else service.processes
+        job = manager.get(context, initial.data["process_id"])
+        await asyncio.wait_for(job.finished.wait(), 10)
+        result = await invoke(service, context, "read_process_output", process_id=job.id)
+        assert expected in result.content
+        assert not initial.output_paths and not initial.output_refs
+        assert not result.output_paths and not result.output_refs and not result.data["output_paths"]
+        assert not result.output_truncated and not result.capture_truncated
+        assert job.path is None and job.output_ref is None
+        assert not (workspace / ".k41-agent" / "outputs").exists()
+        plain = job.retained_plain()
+        assert plain == ("" if source == "pass" else expected if "stderr" in source else expected + os.linesep)
+        if "sys.exit" in source:
+            assert result.data["exit_code"] == 7
+        empty = await invoke(service, context, "read_process_output", process_id=job.id, cursor=result.data["cursor"])
+        assert "(no output)" in empty.content and not empty.output_paths
+    finally:
+        await service.processes.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unit, count", [("x", MAX_MODEL_BYTES + 1024), ("line\U0001f600\n", MAX_MODEL_LINES + 1)],
+                         ids=["bytes", "lines"])
+async def test_process_spills_only_after_output_grows_and_preserves_cursors(output_environment, unit, count):
+    service, context, workspace, worker = output_environment
+    payload = unit * count
+    source = f"import sys; print('ready', flush=True); sys.stdin.readline(); sys.stdout.write({unit!r} * {count})"
+    try:
+        initial = await invoke(service, context, "bash", command=python_command(source), yield_time_ms=0)
+        manager = worker.processes if worker else service.processes
+        job = manager.get(context, initial.data["process_id"])
+        for _ in range(100):
+            short = await manager.observe(job, yield_time_ms=100)
+            if "ready" in short.content:
+                break
+        assert "ready" in short.content
+        assert not short.output_paths and not short.output_refs
+        assert job.path is None and not (workspace / ".k41-agent" / "outputs").exists()
+        cursor = short.data["cursor"]
+        await invoke(service, context, "write_process_input", process_id=job.id, text="go\n", yield_time_ms=0)
+        await asyncio.wait_for(job.finished.wait(), 10)
+        result = await invoke(service, context, "read_process_output", process_id=job.id)
+        assert result.output_paths and result.output_truncated and not result.capture_truncated
+        path = workspace / result.output_paths[0]
+        assert path.is_file() and not job.buffer and path not in manager.storage.active_paths
+        assert job.retained_plain() == "ready" + os.linesep + payload.replace("\n", os.linesep)
+        pieces = []
+        while cursor < job.stored_bytes:
+            page = await manager.observe(job, cursor=cursor)
+            assert page.data["cursor"] > cursor and page.output_paths == result.output_paths
+            pieces.append(page.content.split("\n\nProcess ", 1)[0])
+            cursor = page.data["cursor"]
+        assert "".join(pieces).encode("utf-8") == path.read_bytes()[short.data["cursor"]:]
+        assert len(list(path.parent.glob("*.txt"))) == 1
+    finally:
+        await service.processes.close()
+
+
+@pytest.mark.asyncio
+async def test_process_spill_failure_keeps_output_without_a_broken_path(output_environment, monkeypatch):
+    service, context, workspace, worker = output_environment
+    store = worker.storage if worker else service.storage
+    monkeypatch.setattr(store, "create_output", lambda context: (_ for _ in ()).throw(OSError("disk unavailable")))
+    try:
+        initial = await invoke(service, context, "bash", command=python_command("print('x' * 100000)"), yield_time_ms=0)
+        manager = worker.processes if worker else service.processes
+        job = manager.get(context, initial.data["process_id"])
+        await asyncio.wait_for(job.finished.wait(), 10)
+        result = await invoke(service, context, "read_process_output", process_id=job.id)
+        assert result.capture_truncated and result.output_truncated
+        assert not result.output_paths and not result.output_refs
+        assert "some output was lost" in result.content and "file_path=" not in result.content
+        assert len(result.content.encode()) <= MAX_MODEL_BYTES
+        assert not (workspace / ".k41-agent" / "outputs").exists()
+    finally:
+        await service.processes.close()
+
+
+@pytest.mark.asyncio
+async def test_read_retains_complete_long_lines_at_the_shared_output_layer(output_environment):
+    service, context, workspace, _ = output_environment
+    line = "x" * (MAX_MODEL_BYTES + 1024) + "\U0001f600 end"
+    (workspace / "long.txt").write_bytes((line + "\nnext\n").encode("utf-8"))
+    try:
+        result = await invoke(service, context, "read", file_path="long.txt", limit=1)
+        assert result.output_truncated and not result.capture_truncated
+        assert result.data["next_offset"] == 2 and not result.data["line_truncated"]
+        assert len(result.content.encode("utf-8")) <= MAX_MODEL_BYTES
+        retained = (workspace / result.output_paths[0]).read_text(encoding="utf-8")
+        assert retained.startswith(f"1: {line}\n[version=")
+        assert "[line truncated]" not in retained
+        next_page = await invoke(service, context, "read", file_path="long.txt", offset=2)
+        assert next_page.content.startswith("2: next") and not next_page.output_paths
+    finally:
+        await service.processes.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("engine", ["python", "ripgrep"])
+async def test_grep_keeps_long_matching_lines_and_finds_matches_after_old_limits(output_environment, monkeypatch, engine):
+    from agent.modules.tools.coding.files import FileService
+    if engine == "ripgrep" and not shutil.which("rg"):
+        pytest.skip("ripgrep is unavailable.")
+    service, context, workspace, _ = output_environment
+    line = "x" * (MAX_MODEL_BYTES + 1024) + "needle \U0001f600"
+    path = workspace / "long.txt"
+    path.write_bytes((line + "\n").encode("utf-8"))
+    monkeypatch.setattr(FileService, "search_candidates", staticmethod(lambda base, include_dirs=False: ([path], engine)))
+    try:
+        result = await invoke(service, context, "grep", pattern="needle", fixed_strings=True)
+        assert result.status == "success" and result.output_truncated and not result.capture_truncated
+        assert result.data["engine"] == engine and result.data["matches"][0]["line"] == 1
+        assert result.data["matches"][0]["text_truncated"]
+        assert len(result.data["matches"][0]["text"].encode("utf-8")) <= MAX_MODEL_BYTES
+        assert len(result.content.encode("utf-8")) <= MAX_MODEL_BYTES
+        assert (workspace / result.output_paths[0]).read_text(encoding="utf-8") == f"long.txt:1: {line}"
+    finally:
+        await service.processes.close()
+
+
+@pytest.mark.asyncio
+async def test_grep_reports_incomplete_search_when_the_source_quota_is_exceeded(output_environment, monkeypatch):
+    from agent.modules.tools.coding.files import FileService
+    from agent.modules.tools.runtime import output_policy
+    service, context, workspace, _ = output_environment
+    path = workspace / "long.txt"
+    path.write_text("x" * 10 + "needle\n", encoding="utf-8")
+    monkeypatch.setattr(output_policy, "MAX_STORED_BYTES", 5)
+    monkeypatch.setattr(FileService, "search_candidates", staticmethod(lambda base, include_dirs=False: ([path], "python")))
+    try:
+        result = await invoke(service, context, "grep", pattern="needle", fixed_strings=True)
+        assert result.capture_truncated and result.warnings
+        assert not result.data["matches"] and "some output was lost" in result.content
+    finally:
+        await service.processes.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name", ["web_fetch", "mcp__server__fetch", "bash"])
 async def test_generic_output_preserves_media_errors_and_exact_long_lines(output_environment, tool_name):
     service, context, workspace, _ = output_environment
     text = json.dumps({"content": "emoji: \U0001f600, text\r\n" * 8000}, ensure_ascii=False)

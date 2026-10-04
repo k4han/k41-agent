@@ -15,7 +15,6 @@ from langgraph.types import Command
 
 from agent.modules.tools.coding.adapter import invocation_context
 from agent.modules.tools.coding.models import ToolResult
-from agent.modules.tools.coding.names import CODING_TOOLS
 from agent.modules.tools.coding.service import get_coding_service
 from agent.modules.tools.coding.storage import MAX_STORED_BYTES, RETENTION_SECONDS, bounded_text, output_relative_path
 
@@ -23,8 +22,6 @@ logger = logging.getLogger(__name__)
 
 
 async def retain_message(message: ToolMessage, runtime) -> ToolMessage:
-    if message.name in CODING_TOOLS:
-        return message
     artifact = message.artifact if isinstance(message.artifact, dict) else {}
     blocks = message.content if isinstance(message.content, list) else None
     text = message.content if blocks is None else "\n".join(

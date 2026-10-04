@@ -184,6 +184,19 @@ class TestGlobTool:
 
 class TestGrepTool:
     @pytest.mark.asyncio
+    async def test_grep_preserves_long_matching_lines_for_shared_retention(self, tmp_path):
+        line = "x" * 60_000 + "needle"
+        (tmp_path / "long.txt").write_text(line + "\n", encoding="utf-8")
+        result = await grep_module.grep.coroutine(pattern="needle", runtime=_runtime(str(tmp_path)))
+        assert f"long.txt:1: {line}" in result
+
+    def test_sandbox_grep_preserves_long_matching_lines_for_shared_retention(self):
+        from agent.modules.workspaces.search_utils import render_sandbox_grep_output
+        line = "x" * 60_000 + "needle"
+        result = render_sandbox_grep_output(f"./long.txt:1:{line}\n", max_results=100)
+        assert result == f"long.txt:1: {line}"
+
+    @pytest.mark.asyncio
     async def test_grep_finds_matching_lines(self, tmp_path):
         sandbox = tmp_path / "sandbox"
         sandbox.mkdir()

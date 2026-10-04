@@ -22,6 +22,7 @@ from agent.modules.tools.domain import (
     ToolConfigValue,
 )
 from agent.modules.tools.result import ToolError, ToolErrorCode
+from agent.modules.tools.runtime.output_policy import MAX_STORED_BYTES, capture_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ DEFAULT_HEADERS = {
         "Chrome/120.0.0.0 Safari/537.36"
     )
 }
-MAX_RESPONSE_BYTES = 1_000_000
+MAX_RESPONSE_BYTES = MAX_STORED_BYTES
 _NOISE_TAGS = ["script", "style", "nav", "footer", "header", "aside", "noscript"]
 
 FIRECRAWL_SCRAPE_URL = "https://api.firecrawl.dev/v2/scrape"
@@ -127,16 +128,7 @@ def _effective_credential(
     return os.environ.get(env_name, "").strip()
 
 
-def _truncate_text(text: str, max_length: int | None = None) -> str:
-    from agent.modules.tools.coding.storage import MAX_STORED_BYTES
-    raw = text.encode("utf-8")
-    maximum = max_length if max_length is not None else MAX_STORED_BYTES
-    if len(raw) <= maximum:
-        return text
-    return raw[:maximum].decode("utf-8", errors="ignore") + "\n\n[source capture limit reached; some content was lost]"
-
-
-def _html_to_markdown(html: str, max_length: int | None = None) -> str:
+def _html_to_markdown(html: str) -> str:
     soup = BeautifulSoup(
         html,
         "html.parser",
@@ -148,24 +140,11 @@ def _html_to_markdown(html: str, max_length: int | None = None) -> str:
 
     text = md(str(soup), heading_style="ATX", strip=["img"])
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
-    return _truncate_text(text, max_length)
+    return text
 
 
 def _read_limited_response(response: httpx.Response) -> bytes:
-    chunks: list[bytes] = []
-    bytes_read = 0
-
-    for chunk in response.iter_bytes():
-        remaining = MAX_RESPONSE_BYTES - bytes_read
-        if remaining <= 0:
-            break
-        if len(chunk) > remaining:
-            chunks.append(chunk[:remaining])
-            break
-        chunks.append(chunk)
-        bytes_read += len(chunk)
-
-    return b"".join(chunks)
+    return capture_bytes(response.iter_bytes(), MAX_RESPONSE_BYTES)[0]
 
 
 def _resolve_firecrawl_scrape_url(base_url: str = "") -> str:
@@ -187,15 +166,15 @@ def _local_fetch(url: str) -> str:
         ) as client:
             with client.stream("GET", url) as response:
                 response.raise_for_status()
-                content = _read_limited_response(response)
+                content, capture_truncated = capture_bytes(response.iter_bytes(), MAX_RESPONSE_BYTES)
 
             content_type = response.headers.get("content-type", "")
             text = content.decode(response.encoding or "utf-8", errors="replace")
-            notice = "\n\n[source download limit reached; some content may be missing]" if len(content) >= MAX_RESPONSE_BYTES else ""
+            notice = "\n\n[source download limit reached; some content may be missing]" if capture_truncated else ""
             if "text/html" in content_type:
                 return _html_to_markdown(text) + notice
             if "application/json" in content_type or "text/" in content_type:
-                return _truncate_text(text) + notice
+                return text + notice
             return f"[Info] Non-text content type: {content_type}. Response size: {len(content)} bytes."
     except httpx.TimeoutException as exc:
         raise ToolError(
@@ -265,7 +244,7 @@ def _firecrawl_fetch(
             markdown = data.get("markdown") or ""
 
         if markdown:
-            return _truncate_text(markdown.strip())
+            return markdown.strip()
         return "No content found."
 
     except httpx.TimeoutException as exc:
@@ -318,7 +297,7 @@ def _tavily_fetch(
             if isinstance(first, dict):
                 raw_content = first.get("raw_content") or ""
                 if raw_content:
-                    return _truncate_text(raw_content.strip())
+                    return raw_content.strip()
 
         failed = data.get("failed_results") or []
         if failed and isinstance(failed, list):

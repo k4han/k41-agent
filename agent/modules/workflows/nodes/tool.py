@@ -128,7 +128,7 @@ async def tool_node(
     # Authorize the whole coding batch before any tool can mutate files or
     # start a process. Completed settlements survive node replay.
     from types import SimpleNamespace
-    from agent.modules.tools import invocation_context, CodingError, get_coding_service, bound_tool_text
+    from agent.modules.tools import invocation_context, CodingError, get_coding_service
     from pydantic import ValidationError
 
     calls = getattr(state.get("messages", [])[-1], "tool_calls", []) if state.get("messages") else []
@@ -149,9 +149,13 @@ async def tool_node(
         except (CodingError, ValidationError, OSError, ValueError) as exc:
             result = get_coding_service().failure(exc)
             result.data["batch_stopped_before_execution"] = True
-            result.content, result.output_truncated = bound_tool_text(f"[error] Batch stopped before execution: {exc}")
-            return {"messages": [ToolMessage(content=result.content, artifact=result.model_dump(exclude={"content"}),
-                     name=item["name"], tool_call_id=item["id"], status="error") for item in calls]}
+            result.content = f"[error] Batch stopped before execution: {exc}"
+            from agent.modules.tools import retain_tool_messages
+            return await retain_tool_messages(
+                {"messages": [ToolMessage(content=result.content, artifact=result.model_dump(exclude={"content"}),
+                     name=item["name"], tool_call_id=item["id"], status="error") for item in calls]},
+                SimpleNamespace(context=runtime.context, config=next_config),
+            )
     result = await ToolNode(tools).ainvoke(state, config=next_config, runtime=runtime)
     from agent.modules.tools import retain_tool_messages
     return await retain_tool_messages(result, SimpleNamespace(context=runtime.context, config=next_config))

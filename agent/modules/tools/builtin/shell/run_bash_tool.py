@@ -45,12 +45,12 @@ from agent.modules.tools.builtin.workspace import get_workspace
 from agent.modules.tools.result import ToolError, ToolErrorCode
 from agent.modules.tools.runtime.context import ToolContext
 from agent.modules.tools.runtime.shell_guard import check_command_blocked
+from agent.modules.tools.runtime.output_policy import CAPTURE_NOTICE
 
 # Safety limits. Timeout bounds are stored in milliseconds and exposed
 # to the model in seconds (default 120s, max 600s).
 DEFAULT_TIMEOUT_MS = 2 * 60 * 1_000
 MAX_TIMEOUT_MS = 10 * 60 * 1_000
-MAX_CAPTURE_BYTES = 1024 * 1024
 
 DEFAULT_TIMEOUT = DEFAULT_TIMEOUT_MS / 1_000
 HARD_MAX_TIMEOUT = MAX_TIMEOUT_MS / 1_000
@@ -59,10 +59,6 @@ HARD_MIN_TIMEOUT = 1.0
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 _SHELL_TOKEN_RE = re.compile(r"(?:[^\s\"']+|\"[^\"]*\"|'[^']*')+")
 _TRAILING_CHAIN_RE = re.compile(r"[;,|&]+$")
-_UTF8_CONTINUATION_MASK = 0xC0
-_UTF8_CONTINUATION_SIG = 0x80
-
-_TRUNCATION_NOTICE = "[output capture truncated at the in-memory safety limit]"
 
 
 def _strip_ansi(text: str) -> str:
@@ -194,19 +190,6 @@ def _workdir_warning(target: str, workspace_locator: str) -> str | None:
         "run_bash runs with host-user filesystem, process, and network "
         "authority; this scan is advisory only."
     )
-
-
-def _truncate_to_capture_limit(text: str) -> tuple[str, bool]:
-    # Keep the tail within MAX_CAPTURE_BYTES (split-safe for utf-8) and
-    # report capture loss with a notice.
-    data = text.encode("utf-8", errors="replace")
-    if len(data) <= MAX_CAPTURE_BYTES:
-        return text, False
-    start = len(data) - MAX_CAPTURE_BYTES
-    while start < len(data) and (data[start] & _UTF8_CONTINUATION_MASK) == _UTF8_CONTINUATION_SIG:
-        start += 1
-    tail = data[start:].decode("utf-8", errors="replace")
-    return f"{tail}\n\n{_TRUNCATION_NOTICE}", True
 
 
 def _timeout_message(timeout_ms: int) -> str:
@@ -429,7 +412,6 @@ async def _run_remote(
     result = await executor.execute(
         effective_command,
         timeout=int(timeout_s),
-        max_output_chars=MAX_CAPTURE_BYTES,
     )
     output = _strip_ansi(getattr(result, "output", "") or "")
     exit_code = getattr(result, "exit_code", None)
@@ -440,10 +422,8 @@ async def _run_remote(
     truncated = bool(getattr(result, "truncated", False))
 
     body = output.strip() or "(no output)"
-    if truncated and _TRUNCATION_NOTICE not in body:
-        body = f"{body}\n\n{_TRUNCATION_NOTICE}"
-    # Keep remote output within the same capture bound as local.
-    body, _ = _truncate_to_capture_limit(body)
+    if truncated:
+        body = f"{body}\n\n{CAPTURE_NOTICE}"
     _ = timeout_ms
     return f"{body}\n\n{_model_footer(exit_code, False, extra_warnings)}"
 

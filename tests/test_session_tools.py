@@ -335,6 +335,30 @@ def _install_fake_session_factory(monkeypatch, manager):
     monkeypatch.setattr(manager, "create_session", fake_create_session)
 
 
+def test_legacy_session_keeps_stdout_and_stderr_above_the_old_trim_limit(tmp_path, monkeypatch):
+    manager = TerminalSessionManager()
+    _install_fake_session_factory(monkeypatch, manager)
+    manager.create_session(str(tmp_path), "default")
+    session = manager.sessions["default"]
+    original_write = session.process.stdin.write
+    stdout = "start\n" + "x" * 120_000 + "\nend"
+    stderr = "error start\n" + "e" * 120_000 + "\nerror end"
+
+    def emit_output(text):
+        for line in stdout.splitlines():
+            session.output_queue.put(line)
+        session.error_queue.put(stderr)
+        original_write(text)
+
+    monkeypatch.setattr(session.process.stdin, "write", emit_output)
+    result = manager.execute_command("default", "echo test", timeout=1)
+    assert result["output"] == stdout and result["stderr"] == stderr
+    session.output_queue.put(stdout)
+    session.error_queue.put(stderr)
+    observed = manager.get_session_output("default", timeout=0.1)
+    assert observed["output"] == stdout and observed["stderr"] == stderr
+
+
 def test_terminal_session_manager_scopes_same_session_id_by_thread(tmp_path, monkeypatch):
     manager = TerminalSessionManager()
     _install_fake_session_factory(monkeypatch, manager)

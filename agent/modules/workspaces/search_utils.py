@@ -11,7 +11,6 @@ from agent.shared.infrastructure.glob_utils import translate_path_glob
 from agent.modules.workspaces.constants import (
     IGNORED_DIR_NAMES,
     MAX_GLOB_RESULTS,
-    MAX_GREP_LINE_CHARS,
     MAX_GREP_RESULTS,
 )
 from agent.modules.workspaces.posix_utils import normalize_posix_path
@@ -275,6 +274,8 @@ def render_sandbox_glob_output(output: str) -> str:
 
 
 def render_sandbox_grep_output(output: str, *, max_results: int) -> str:
+    from agent.modules.tools.runtime.output_policy import TextCapture
+
     effective_max = clamp_grep_results(max_results)
     lines = [line for line in output.splitlines() if line.strip()]
     if lines == [DIRECTORY_NOT_FOUND_MESSAGE]:
@@ -283,15 +284,17 @@ def render_sandbox_grep_output(output: str, *, max_results: int) -> str:
         return NO_MATCHES_MESSAGE
 
     truncated = len(lines) > effective_max
-    rendered: list[str] = []
+    capture = TextCapture()
     for line in lines[:effective_max]:
         rewritten = rewrite_sandbox_grep_line(line)
         if rewritten:
-            rendered.append(rewritten)
-    if not rendered:
+            capture.append_line(rewritten)
+            if capture.truncated:
+                break
+    if not capture.has_lines:
         return NO_MATCHES_MESSAGE
 
-    output_text = "\n".join(rendered)
+    output_text = capture.content()
     if truncated:
         output_text += f"\n...[truncated at {effective_max} results]"
     return output_text
@@ -309,8 +312,6 @@ def rewrite_sandbox_grep_line(line: str) -> str | None:
         relative = relative[2:]
     if not relative:
         return None
-    if len(rest) > MAX_GREP_LINE_CHARS:
-        rest = rest[:MAX_GREP_LINE_CHARS] + "..."
     return f"{relative}:{line_no}: {rest.lstrip()}"
 
 

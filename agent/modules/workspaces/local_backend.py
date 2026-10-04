@@ -12,7 +12,6 @@ from agent.modules.workspaces.constants import (
     IGNORED_DIR_NAMES,
     MAX_FILE_BYTES,
     MAX_GLOB_RESULTS,
-    MAX_GREP_LINE_CHARS,
 )
 from agent.modules.workspaces.refs import WorkspaceRef
 from agent.modules.workspaces.search_utils import (
@@ -203,6 +202,8 @@ class LocalWorkspaceBackend:
         case_insensitive: bool = False,
         max_results: int = 100,
     ) -> str:
+        from agent.modules.tools.runtime.output_policy import TextCapture
+
         if not pattern:
             raise ValueError("Grep pattern must not be empty.")
         effective_max = clamp_grep_results(max_results)
@@ -216,7 +217,8 @@ class LocalWorkspaceBackend:
         if not os.path.isdir(base):
             return "(Directory not found)"
 
-        results: list[str] = []
+        capture = TextCapture()
+        result_count = 0
         truncated = False
         file_count = 0
 
@@ -249,24 +251,20 @@ class LocalWorkspaceBackend:
                     for line_no, raw_line in enumerate(file_handle, start=1):
                         line = raw_line.rstrip("\r\n")
                         if compiled.search(line):
-                            truncated_line = line
-                            if len(truncated_line) > MAX_GREP_LINE_CHARS:
-                                truncated_line = (
-                                    truncated_line[:MAX_GREP_LINE_CHARS] + "..."
-                                )
-                            results.append(f"{rel_path}:{line_no}: {truncated_line}")
-                            if len(results) >= effective_max:
-                                truncated = True
+                            capture.append_line(f"{rel_path}:{line_no}: {line}")
+                            result_count += 1
+                            if result_count >= effective_max or capture.truncated:
+                                truncated = result_count >= effective_max
                                 break
-                if truncated:
+                if truncated or capture.truncated:
                     break
-            if truncated:
+            if truncated or capture.truncated:
                 break
 
-        if not results:
+        if not result_count:
             return f"(No matches in {file_count} files)"
         header = f"[Matches in {file_count} file(s)]"
-        output = header + "\n" + "\n".join(results)
+        output = header + "\n" + capture.content()
         if truncated:
             output += f"\n...[truncated at {effective_max} results]"
         return output
@@ -301,8 +299,8 @@ class LocalWorkspaceBackend:
                 raise
             import asyncio
             output = await asyncio.to_thread(job.retained_plain)
-            limit = _clamp_max_output(max_output_chars) or HARD_MAX_OUTPUT_CHARS
-            output, truncated = _truncate_tail(output, limit)
+            limit = _clamp_max_output(max_output_chars)
+            output, truncated = _truncate_tail(output, limit) if limit is not None else (output, False)
             if job.status in {"timeout", "cancelled"}:
                 output += f"\n[error] Process {job.status}."
             return CommandResult(output=output, exit_code=job.process.poll(),

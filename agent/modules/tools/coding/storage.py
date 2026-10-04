@@ -14,12 +14,9 @@ from pathlib import Path
 from typing import Any
 
 from agent.modules.tools.coding.contracts import CodingError, InvocationContext, RuntimeResult as ToolResult
-
-MAX_MODEL_BYTES = 50 * 1024
-MAX_MODEL_LINES = 2000
-MAX_CAPTURE_BYTES = 1024 * 1024
-MAX_STORED_BYTES = 10 * 1024 * 1024
-RETENTION_SECONDS = 7 * 24 * 60 * 60
+from agent.modules.tools.runtime.output_policy import (
+    MAX_CAPTURE_BYTES, MAX_MODEL_BYTES, MAX_MODEL_LINES, MAX_STORED_BYTES, RETENTION_SECONDS, bounded_text,
+)
 
 
 def conversation_key(thread_id: str) -> str:
@@ -78,21 +75,6 @@ def atomic_json(path: Path, value: Any) -> None:
         sync_directory(path.parent)
     finally:
         temporary.unlink(missing_ok=True)
-
-
-def bounded_text(text: str, marker: str = "", *, tail: bool = False) -> tuple[str, bool]:
-    encoded = text.encode("utf-8")
-    if len(encoded) <= MAX_MODEL_BYTES and len(text.splitlines()) <= MAX_MODEL_LINES:
-        return text, False
-    marker = marker or "[output truncated]"
-    allowance = MAX_MODEL_BYTES - len(marker.encode("utf-8")) - 4
-    lines = text.splitlines(keepends=True)
-    if tail:
-        head = "".join(lines[:(MAX_MODEL_LINES - 4) // 2]).encode("utf-8")[:allowance // 2]
-        end = "".join(lines[-(MAX_MODEL_LINES - 4) // 2:]).encode("utf-8")[-allowance // 2:]
-        return f"{head.decode('utf-8', errors='ignore').rstrip(chr(10))}\n\n{marker}\n\n{end.decode('utf-8', errors='ignore').lstrip(chr(10))}", True
-    preview = "".join(lines[:MAX_MODEL_LINES - 2]).encode("utf-8")[:allowance]
-    return f"{preview.decode('utf-8', errors='ignore').rstrip(chr(10))}\n\n{marker}", True
 
 
 class OutputStore:
@@ -225,7 +207,7 @@ class OutputStore:
             block.get("text", "") for block in blocks if block.get("type") == "text"
         )
         _, truncated = bounded_text(text, tail=tail)
-        def bound_diffs(value: Any) -> None:
+        def bound_metadata(value: Any) -> None:
             if isinstance(value, dict):
                 if isinstance(value.get("diff"), str):
                     value["diff"], cut = bounded_text(value["diff"], tail=tail)
@@ -233,13 +215,20 @@ class OutputStore:
                         value["diff_truncated"] = True
                         value["diff_output_refs"] = list(result.output_refs)
                         value["diff_output_paths"] = list(result.output_paths)
+                if {"path", "line", "text"}.issubset(value) and isinstance(value["text"], str):
+                    marker = "[output truncated]"
+                    if result.output_paths:
+                        marker = f"[output truncated; read file_path={result.output_paths[0]} byte_offset=0]"
+                    value["text"], cut = bounded_text(value["text"], marker, tail=tail)
+                    if cut:
+                        value["text_truncated"] = True
                 for item in value.values():
-                    bound_diffs(item)
+                    bound_metadata(item)
             elif isinstance(value, list):
                 for item in value:
-                    bound_diffs(item)
+                    bound_metadata(item)
         if not truncated:
-            bound_diffs(result.data)
+            bound_metadata(result.data)
             return result
         path = None
         try:
@@ -268,7 +257,7 @@ class OutputStore:
             *(block for block in blocks if block.get("type") != "text"),
         ]
         result.output_truncated = True
-        bound_diffs(result.data)
+        bound_metadata(result.data)
         return result
 
     def cleanup(self) -> None:

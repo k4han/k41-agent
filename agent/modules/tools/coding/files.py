@@ -7,6 +7,7 @@ import codecs
 import base64
 import difflib
 import hashlib
+import io
 import os
 import re
 import shutil
@@ -20,6 +21,7 @@ from typing import Any
 from agent.modules.tools.coding.contracts import CodingError, InvocationContext, RuntimeResult as ToolResult
 from agent.modules.tools.coding.paths import PathPermissions
 from agent.modules.tools.coding.storage import MAX_MODEL_BYTES, MAX_MODEL_LINES, ensure_workspace_exclude
+from agent.modules.tools.runtime.output_policy import CAPTURE_NOTICE, TextCapture, captured_lines
 from agent.modules.workspaces import IGNORED_DIR_NAMES, MAX_IMAGE_READ_BYTES
 from agent.modules.workspaces import compile_glob_pattern, match_glob_path, match_include_pattern
 from agent.shared.infrastructure.subprocess_utils import hidden_subprocess_kwargs
@@ -40,47 +42,35 @@ def read_page(path: Path, offset: int = 1, limit: int = MAX_MODEL_LINES) -> dict
         raise CodingError("not_found", f"File does not exist: {path}")
     initial = path.stat()
     version = file_version(path)
-    selected: list[str] = []
-    used = 0
+    capture = TextCapture()
+    selected = 0
     line_number = 0
     next_offset = None
-    line_truncated = False
+    capture_truncated = False
     with path.open("r", encoding="utf-8-sig", errors="replace", newline=None) as handle:
-        while piece := handle.readline(MAX_MODEL_BYTES):
+        for piece, cut in captured_lines(handle):
             line_number += 1
-            has_newline = piece.endswith("\n")
-            if not has_newline:
-                remainder = handle.readline(MAX_MODEL_BYTES)
-                continued = bool(remainder)
-                while remainder and not remainder.endswith("\n"):
-                    remainder = handle.readline(MAX_MODEL_BYTES)
-                if continued:
-                    piece = piece[:2000] + "... [line truncated]\n"
-                    line_truncated = True
             if "\x00" in piece:
                 raise CodingError("invalid_input", "Binary files cannot be read as text.")
             if line_number < offset:
                 continue
-            rendered = f"{line_number}: {piece.rstrip(chr(10))}"
-            size = len(rendered.encode("utf-8")) + 1
-            if len(selected) >= limit or used + size > MAX_MODEL_BYTES - 512:
+            if selected >= limit:
                 next_offset = line_number
-                # A single very long line still needs a consumable preview.
-                if not selected:
-                    rendered = rendered.encode("utf-8")[:MAX_MODEL_BYTES - 1024].decode("utf-8", errors="ignore") + "... [line truncated]"
-                    selected.append(rendered)
-                    next_offset = line_number + 1
-                    line_truncated = True
                 break
-            selected.append(rendered)
-            used += size
+            capture.append_line(f"{line_number}: {piece.rstrip(chr(10))}")
+            selected += 1
+            capture_truncated |= cut or capture.truncated
+            if capture.truncated:
+                next_offset = line_number + 1
+                break
     current = path.stat()
     if (initial.st_mtime_ns, initial.st_size) != (current.st_mtime_ns, current.st_size):
         raise CodingError("stale_content", "File changed while it was being read. Read it again.")
     if not selected and offset > 1:
         raise CodingError("invalid_input", "Offset is beyond the end of the file.")
-    return {"path": str(path), "content": "\n".join(selected), "offset": offset,
-            "next_offset": next_offset, "version": version, "line_truncated": line_truncated}
+    return {"path": str(path), "content": capture.content(), "offset": offset,
+            "next_offset": next_offset, "version": version, "line_truncated": False,
+            "capture_truncated": capture_truncated}
 
 
 def read_byte_page(path: Path, byte_offset: int, limit: int = MAX_MODEL_LINES - 2) -> dict[str, Any]:
@@ -146,7 +136,7 @@ class FileService:
                     {"type": "text", "text": f"Image {path.name} ({mime})"},
                     {"type": "image", "base64": base64.b64encode(raw).decode("ascii"), "mime_type": mime},
                 ])
-            limit = min(values.get("limit") or MAX_MODEL_LINES, MAX_MODEL_LINES - 1)
+            limit = values.get("limit") or MAX_MODEL_LINES
             if values.get("byte_offset") is not None:
                 page = read_byte_page(path, values["byte_offset"], limit)
             else:
@@ -154,10 +144,10 @@ class FileService:
             content = page.pop("content")
             cursor_key = "next_byte_offset" if "next_byte_offset" in page else "next_offset"
             content += f"\n[version={page['version']}; {cursor_key}={page[cursor_key]}]"
-            if page["line_truncated"]:
-                content += "\n[Long line truncated; read with byte_offset=0 to recover exact text.]"
-            return ToolResult(data=page, content=content, output_truncated=page["line_truncated"],
-                              warnings=["Some physical lines exceed the page budget."] if page["line_truncated"] else [])
+            capture_truncated = page.get("capture_truncated", False)
+            return ToolResult(data=page, content=content, capture_truncated=capture_truncated,
+                              warnings=["Source capture quota exceeded; use byte_offset to continue reading the original file."]
+                              if capture_truncated else [])
         if name == "list_dir":
             entries = sorted(path.iterdir(), key=lambda item: item.name.casefold())
             offset, limit = values.get("offset", 1), values.get("limit", 500)
@@ -277,6 +267,8 @@ class FileService:
                 raise CodingError("invalid_input", f"Invalid regular expression: {exc}") from exc
         glob_regex = compile_glob_pattern(pattern) if name == "glob" else None
         results: list[Any] = []
+        capture_truncated = False
+        capture = TextCapture()
         candidates, engine = self.search_candidates(base, values.get("include_dirs", False))
         if name == "grep" and engine == "ripgrep":
             return self.ripgrep(base, candidates, values, context)
@@ -294,26 +286,28 @@ class FileService:
                     results.append(rel + ("/" if candidate.is_dir() else ""))
             elif candidate.is_file() and match_include_pattern(candidate.name, values.get("include")):
                 with resolved.open("r", encoding="utf-8", errors="replace") as handle:
-                    line_no = 0
-                    while piece := handle.readline(MAX_MODEL_BYTES):
-                        line_no += 1
-                        continuation = not piece.endswith("\n")
-                        while continuation:
-                            rest = handle.readline(MAX_MODEL_BYTES)
-                            continuation = bool(rest) and not rest.endswith("\n")
+                    for line_no, (piece, cut) in enumerate(captured_lines(handle), 1):
+                        capture_truncated |= cut
                         if "\0" in piece:
                             break
                         if regex.search(piece):
-                            results.append({"path": rel, "line": line_no, "text": piece.rstrip("\r\n")[:2000]})
-                            if len(results) > limit:
+                            results.append({"path": rel, "line": line_no, "text": piece.rstrip("\r\n")})
+                            if len(results) <= limit:
+                                capture.append_line(f"{rel}:{line_no}: {piece.rstrip(chr(13) + chr(10))}")
+                            if len(results) > limit or capture.truncated:
                                 break
-            if len(results) > limit:
+            if len(results) > limit or capture.truncated:
                 break
         truncated = len(results) > limit
         results = results[:limit]
-        text = "\n".join(results) if name == "glob" else "\n".join(f"{match['path']}:{match['line']}: {match['text']}" for match in results)
+        text = "\n".join(results) if name == "glob" else capture.content()
+        if capture_truncated and not results:
+            text = f"(no matches in captured content)\n{CAPTURE_NOTICE}"
         return ToolResult(data={"matches": results, "engine": engine, "limit": limit, "truncated": truncated},
-                          content=text or "(no matches)", output_truncated=truncated)
+                          content=text or "(no matches)", output_truncated=truncated,
+                          capture_truncated=capture_truncated or capture.truncated,
+                          warnings=["Search capture quota exceeded; some matches may be missing."]
+                          if capture_truncated or capture.truncated else [])
 
     @staticmethod
     def search_candidates(base: Path, include_dirs: bool = False) -> tuple[list[Path], str]:
@@ -349,6 +343,8 @@ class FileService:
 
     def ripgrep(self, base: Path, candidates: list[Path], values: dict[str, Any], context: InvocationContext) -> ToolResult:
         matches: list[dict[str, Any]] = []
+        capture = TextCapture()
+        capture_truncated = False
         limit = values.get("max_results", 100)
         files = [path for path in sorted(candidates) if path.is_file()
                  and path.resolve().is_relative_to(base if base.is_dir() else base.parent)
@@ -359,7 +355,7 @@ class FileService:
             for path in files[start:start + 32]:
                 self.permissions.assert_allowed(context, "read", str(path.resolve()), allow_interrupt=False)
             args = [shutil.which("rg"), "--line-number", "--with-filename", "--no-heading", "--color", "never",
-                    "--max-columns", "2000", "--max-columns-preview", "--max-count", str(limit + 1)]
+                    "--max-count", str(limit + 1)]
             if values.get("fixed_strings"):
                 args.append("--fixed-strings")
             if values.get("case_insensitive"):
@@ -368,14 +364,17 @@ class FileService:
             process = subprocess.Popen(args, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                        **hidden_subprocess_kwargs())
             try:
-                for raw in process.stdout:
-                    decoded = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+                for raw, cut in captured_lines(io.TextIOWrapper(process.stdout, encoding="utf-8", errors="replace")):
+                    capture_truncated |= cut
+                    decoded = raw.rstrip("\r\n")
                     parsed = re.match(r"^(.*?):(\d+):(.*)$", decoded)
                     if parsed:
                         path, line, text = parsed.groups()
                         matches.append({"path": os.path.relpath(path, context.workspace).replace(os.sep, "/"),
                                         "line": int(line), "text": text})
-                    if len(matches) > limit:
+                        if len(matches) <= limit:
+                            capture.append_line(f"{matches[-1]['path']}:{line}: {text}")
+                    if len(matches) > limit or capture.truncated:
                         process.terminate()
                         break
                 code = process.wait(timeout=30)
@@ -386,10 +385,15 @@ class FileService:
                     process.kill()
                     process.wait(timeout=3)
                 process.stdout.close()
-            if len(matches) > limit:
+            if len(matches) > limit or capture.truncated:
                 break
         truncated = len(matches) > limit
         matches = matches[:limit]
-        content = "\n".join(f"{match['path']}:{match['line']}: {match['text']}" for match in matches)
+        content = capture.content()
+        if capture_truncated and not matches:
+            content = f"(no matches in captured content)\n{CAPTURE_NOTICE}"
         return ToolResult(data={"matches": matches, "engine": "ripgrep", "limit": limit, "truncated": truncated},
-                          content=content or "(no matches)", output_truncated=truncated)
+                          content=content or "(no matches)", output_truncated=truncated,
+                          capture_truncated=capture_truncated or capture.truncated,
+                          warnings=["Search capture quota exceeded; some matches may be missing."]
+                          if capture_truncated or capture.truncated else [])

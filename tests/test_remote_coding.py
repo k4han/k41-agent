@@ -123,7 +123,7 @@ async def test_remote_skill_mutations_invalidate_discovery_only_after_commit(rem
 
 @pytest.mark.asyncio
 async def test_remote_process_stdin_cursor_output_ownership_and_cleanup(remote_coding):
-    service, context, _, worker = remote_coding
+    service, context, workspace, worker = remote_coding
     result = await invoke(service, context, "bash",
                           command=python_command("import sys,time; print('ready',flush=True); print(sys.stdin.readline(),flush=True); time.sleep(30)"),
                           yield_time_ms=0)
@@ -138,8 +138,8 @@ async def test_remote_process_stdin_cursor_output_ownership_and_cleanup(remote_c
     read = await invoke(service, context, "read_process_output", process_id=process_id)
     again = await invoke(service, context, "read_process_output", process_id=process_id)
     assert read.content == again.content and read.data["cursor"] == again.data["cursor"]
-    output = await invoke(service, context, "read", file_path=result.output_paths[0])
-    assert "hello" in output.content
+    assert not result.output_paths and not read.output_paths and not read.output_refs
+    assert not (workspace / ".k41-agent" / "outputs").exists()
     foreign = await invoke(service, replace(context, thread_id="another"), "read_process_output", process_id=process_id)
     assert foreign.error.code == "not_found"
     await service.remote.stop_thread(context.thread_id)
@@ -161,6 +161,7 @@ async def test_worker_rejects_resources_that_changed_after_authorization(remote_
 def test_bundle_contains_shared_engine_and_minimal_package_initializers():
     with zipfile.ZipFile(io.BytesIO(build_runtime_bundle())) as archive:
         assert "agent/modules/tools/coding/engine.py" in archive.namelist()
+        assert "agent/modules/tools/runtime/output_policy.py" in archive.namelist()
         assert "agent/bootstrap/container.py" not in archive.namelist()
         assert archive.read("agent/__init__.py") == b""
 

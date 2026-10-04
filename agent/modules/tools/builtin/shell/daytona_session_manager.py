@@ -12,6 +12,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from queue import Empty, Queue
 from typing import Any, Dict, List
+from agent.modules.tools.runtime.output_policy import TextCapture
 
 HARD_MAX_TIMEOUT = 300.0
 HARD_MIN_TIMEOUT = 1.0
@@ -26,7 +27,6 @@ def _clamp_timeout(value: float) -> float:
 
 from agent.modules.tools.builtin.shell.session_manager import (
     MAX_HISTORY_LINES,
-    MAX_OUTPUT_CHARS,
     _strip_ansi,
 )
 from agent.modules.workspaces import (
@@ -192,13 +192,6 @@ class DaytonaTerminalSessionManager:
         except Empty:
             pass
 
-    @staticmethod
-    def _truncate_output(text: str) -> str:
-        if len(text) <= MAX_OUTPUT_CHARS:
-            return text
-        truncated_chars = len(text) - MAX_OUTPUT_CHARS
-        return f"[...truncated {truncated_chars} characters...]\n{text[-MAX_OUTPUT_CHARS:]}"
-
     def execute_command(
         self,
         *,
@@ -278,37 +271,26 @@ class DaytonaTerminalSessionManager:
             sentinel_token = f"____CMD_DONE_{sentinel_id}____"
             self._send_input(session.pty_handle, f"{command}\necho {sentinel_token}\n")
 
-            output_lines: list[str] = []
-            error_lines: list[str] = []
-            total_output_chars = 0
+            output = TextCapture()
+            errors = TextCapture()
             start_time = time.time()
             while time.time() - start_time < timeout:
                 try:
                     line = session.output_queue.get(timeout=0.05)
                     if sentinel_token in line:
                         break
-                    line_len = len(line) + 1
-                    output_lines.append(line)
-                    total_output_chars += line_len
-                    while total_output_chars > MAX_OUTPUT_CHARS and len(output_lines) > 1:
-                        removed = output_lines.pop(0)
-                        total_output_chars -= len(removed) + 1
+                    output.append_line(line)
                 except Empty:
                     pass
 
                 try:
                     err = session.error_queue.get_nowait()
-                    error_lines.append(err)
-                    # keep stderr bounded tail-style
-                    err_text = "\n".join(error_lines)
-                    if len(err_text) > MAX_OUTPUT_CHARS:
-                        truncated = err_text[-MAX_OUTPUT_CHARS:]
-                        error_lines = truncated.splitlines()
+                    errors.append_line(err)
                 except Empty:
                     pass
 
-            output_text = self._truncate_output("\n".join(output_lines))
-            stderr_text = self._truncate_output("\n".join(error_lines)) if error_lines else ""
+            output_text = output.content()
+            stderr_text = errors.content()
             return {
                 "session_id": session_id,
                 "command": command,
@@ -335,7 +317,6 @@ class DaytonaTerminalSessionManager:
             return await executor.execute(
                 command,
                 timeout=max(1, int(timeout)),
-                max_output_chars=MAX_OUTPUT_CHARS,
             )
 
         try:
@@ -386,31 +367,25 @@ class DaytonaTerminalSessionManager:
             return {"error": f"Session {session_id} does not exist"}
 
         session.backend.touch()
-        output_lines: list[str] = []
-        error_lines: list[str] = []
-        total_chars = 0
+        output = TextCapture()
+        errors = TextCapture()
         start_time = time.time()
         while time.time() - start_time < timeout:
             try:
                 line = session.output_queue.get(timeout=0.1)
-                line_len = len(line) + 1
-                output_lines.append(line)
-                total_chars += line_len
-                while total_chars > MAX_OUTPUT_CHARS and len(output_lines) > 1:
-                    removed = output_lines.pop(0)
-                    total_chars -= len(removed) + 1
+                output.append_line(line)
             except Empty:
                 pass
 
             try:
-                error_lines.append(session.error_queue.get_nowait())
+                errors.append_line(session.error_queue.get_nowait())
             except Empty:
                 pass
 
-        stderr_text = self._truncate_output("\n".join(error_lines)) if error_lines else ""
+        stderr_text = errors.content()
         return {
             "session_id": session_id,
-            "output": self._truncate_output("\n".join(output_lines)),
+            "output": output.content(),
             "stderr": stderr_text,
             "is_running": self._session_is_running(session),
         }

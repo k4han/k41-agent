@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import codecs
+import io
 import os
 import platform
 import re
@@ -72,9 +73,11 @@ class ProcessJob:
     thread_id: str
     workspace: str
     process: subprocess.Popen[bytes]
-    output_ref: str
-    path: Path
+    output_ref: str | None
+    path: Path | None
     timeout_seconds: float
+    storage: OutputStore
+    context: InvocationContext
     registry: Any = None
     session_id: str | None = None
     started: float = field(default_factory=time.monotonic)
@@ -85,6 +88,7 @@ class ProcessJob:
     head: bytes = b""
     tail: bytes = b""
     storage_failed: bool = False
+    buffer: bytes = b""
     lock: threading.Lock = field(default_factory=threading.Lock)
     finished: asyncio.Event = field(default_factory=asyncio.Event)
     task: asyncio.Task[None] | None = None
@@ -110,21 +114,50 @@ class ProcessJob:
             self.received_bytes += len(raw)
             self.head = (self.head + raw)[:MAX_CAPTURE_BYTES // 2]
             self.tail = (self.tail + raw)[-MAX_CAPTURE_BYTES // 2:]
-            remaining = 0 if self.storage_failed else MAX_STORED_BYTES - self.stored_bytes
+            limit = MAX_STORED_BYTES if self.path is not None else min(MAX_CAPTURE_BYTES, MAX_STORED_BYTES)
+            remaining = limit - self.stored_bytes
             kept = raw[:remaining].decode("utf-8", errors="ignore").encode("utf-8")
             if kept:
-                try:
-                    with self.path.open("ab") as handle:
-                        handle.write(kept)
+                if self.path is None:
+                    self.buffer += kept
                     self.stored_bytes += len(kept)
-                except OSError:
-                    self.storage_failed = True
-                    self.capture_truncated = True
+                    if not self.storage_failed and (
+                        self.stored_bytes > MAX_MODEL_BYTES - 1024
+                        or len(self.buffer.decode("utf-8").splitlines()) > MAX_MODEL_LINES - 4
+                    ):
+                        self.retain()
+                elif not self.storage_failed:
+                    try:
+                        with self.path.open("ab") as handle:
+                            handle.write(kept)
+                        self.stored_bytes += len(kept)
+                    except OSError:
+                        self.storage_failed = True
+                        self.capture_truncated = True
             self.capture_truncated |= len(kept) < len(raw)
+
+    def retain(self) -> None:
+        """Spill buffered output under the caller's lock only when it needs paging."""
+        path = None
+        try:
+            reference, path = self.storage.create_output(self.context)
+            path.write_bytes(self.buffer)
+        except (CodingError, OSError, ValueError):
+            if path is not None:
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            self.storage_failed = self.capture_truncated = True
+            return
+        self.output_ref, self.path = reference, path
+        self.buffer = b""
+        if not self.finished.is_set():
+            self.storage.active_paths.add(path)
 
     def retained_plain(self) -> str:
         """Legacy consumers receive exact text without injected stream labels."""
-        with self.lock, self.path.open("rb") as handle:
+        with self.lock, (self.path.open("rb") if self.path is not None else io.BytesIO(self.buffer)) as handle:
             output = []
             while True:
                 header = bytearray()
@@ -165,8 +198,6 @@ class ProcessManager:
             script = self.storage.owner_dir(context) / f"{uuid.uuid4().hex}{suffix}"
             script.write_text(command, encoding="utf-8-sig" if suffix == ".ps1" else "utf-8")
             argv = [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(script)] if suffix == ".ps1" else [shell, "/D", "/C", str(script)] if suffix == ".cmd" else [shell, str(script)]
-        reference, path = self.storage.create_output(context)
-        self.storage.active_paths.add(path)
         environment = build_safe_env(extra_vars={"PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1", "PYTHONUNBUFFERED": "1"})
         options = hidden_subprocess_kwargs(creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0)
         spawn = asyncio.create_task(asyncio.to_thread(spawn_contained, argv, cwd=str(cwd), stdin=subprocess.PIPE,
@@ -186,10 +217,8 @@ class ProcessManager:
                     containment.close()
                 raise
         except BaseException:
-            self.storage.active_paths.discard(path)
             if script:
                 script.unlink(missing_ok=True)
-            path.unlink(missing_ok=True)
             raise
         registry = None
         session_id = None
@@ -200,7 +229,7 @@ class ProcessManager:
             if session_id:
                 registry.register_pid(session_id, process.pid)
         job = ProcessJob(uuid.uuid4().hex, context.owner, context.thread_id, context.workspace,
-                         process, reference, path, timeout_seconds, registry, session_id)
+                         process, None, None, timeout_seconds, self.storage, context, registry, session_id)
         self.jobs[job.id] = job
         job.task = asyncio.create_task(self._watch(job, script))
         return job
@@ -252,8 +281,10 @@ class ProcessManager:
                 job.registry.unregister_pid(job.session_id, job.process.pid)
             if script:
                 script.unlink(missing_ok=True)
-            job.finished.set()
-            self.storage.active_paths.discard(job.path)
+            with job.lock:
+                job.finished.set()
+                if job.path is not None:
+                    self.storage.active_paths.discard(job.path)
             self.retiring_jobs.pop(job.id, None)
 
     def get(self, context: InvocationContext, process_id: str) -> ProcessJob:
@@ -272,9 +303,13 @@ class ProcessManager:
         with job.lock:
             if cursor < 0 or cursor > job.stored_bytes:
                 raise CodingError("invalid_input", "Output cursor is outside the retained output.")
-            with job.path.open("rb") as handle:
-                handle.seek(cursor)
-                raw = handle.read(min(MAX_MODEL_BYTES - 1024, job.stored_bytes - cursor))
+            size = min(MAX_MODEL_BYTES - 1024, job.stored_bytes - cursor)
+            if job.path is None:
+                raw = job.buffer[cursor:cursor + size]
+            else:
+                with job.path.open("rb") as handle:
+                    handle.seek(cursor)
+                    raw = handle.read(size)
             if raw and (raw[0] & 0xC0) == 0x80:
                 raise CodingError("invalid_input", "Use a cursor returned by the previous observation, on a UTF-8 boundary.")
             output = raw.decode("utf-8", errors="ignore")
@@ -294,14 +329,18 @@ class ProcessManager:
                     "cursor": cursor + consumed, "received_bytes": job.received_bytes,
                     "stored_bytes": job.stored_bytes, "tail_preview": bool(tail_preview),
                     "elapsed_seconds": round(time.monotonic() - job.started, 3)}
+            relative = job.path.relative_to(Path(job.workspace)).as_posix() if job.path is not None else None
+            output_refs = [job.output_ref] if relative is not None else []
+            output_paths = [relative] if relative is not None else []
         footer = f"\n\nProcess {job.id}: {job.status}; exit_code={data['exit_code']}; next_cursor={data['cursor']}."
-        relative = job.path.relative_to(Path(job.workspace)).as_posix()
-        data["output_paths"] = [relative]
-        marker = f"\n[more output; read_process_output process_id={job.id} cursor={data['cursor']}; read file_path={relative} byte_offset=0]" if more else ""
+        data["output_paths"] = output_paths
+        marker = f"\n[more output; read_process_output process_id={job.id} cursor={data['cursor']}" if more else ""
+        if more:
+            marker += f"; read file_path={relative} byte_offset=0]" if relative is not None else "]"
         loss_marker = "\n[capture quota exceeded or pipe drain incomplete; some output was lost]" if job.capture_truncated else ""
         content, cut = bounded_text((output or "(no output)") + tail_preview + footer + marker + loss_marker)
         result = ToolResult(status="running" if not job.finished.is_set() else "success", data=data,
-                            content=content, output_refs=[job.output_ref], output_paths=[relative], capture_truncated=job.capture_truncated,
+                            content=content, output_refs=output_refs, output_paths=output_paths, capture_truncated=job.capture_truncated,
                             output_truncated=more or cut)
         if job.status in {"timeout", "cancelled"}:
             from agent.modules.tools.coding.contracts import RuntimeError as ResultError

@@ -1,3 +1,5 @@
+import pytest
+
 from agent.modules.tools.builtin.web import web_fetch as web_fetch_module
 from agent.modules.tools.builtin.web import web_search as web_search_module
 from agent.modules.tools.decorators import META_ATTR
@@ -33,6 +35,47 @@ def test_read_limited_response_reads_only_max_bytes(monkeypatch):
     response = _FakeResponse([b"ab", b"cdef", b"gh"])
 
     assert web_fetch_module._read_limited_response(response) == b"abcde"
+
+
+def test_local_fetch_preserves_content_above_the_old_download_limit(monkeypatch):
+    text = "start\n" + "x" * 1_100_000 + "\nend"
+    response = _FakeResponse([text.encode("utf-8")])
+    response.headers = {"content-type": "text/plain"}
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+        def stream(self, *args, **kwargs):
+            return response
+
+    monkeypatch.setattr(web_fetch_module.httpx, "Client", Client)
+    assert web_fetch_module._local_fetch("https://example.test") == text
+
+
+@pytest.mark.parametrize("provider", ["firecrawl", "tavily"])
+def test_web_providers_return_full_content_for_shared_retention(monkeypatch, provider):
+    from agent.modules.tools.runtime.output_policy import MAX_STORED_BYTES
+    text = "x" * (MAX_STORED_BYTES + 1) + " end"
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+        def post(self, url, **kwargs):
+            import httpx
+            payload = {"data": {"markdown": text}} if provider == "firecrawl" else {"results": [{"raw_content": text}]}
+            return httpx.Response(200, request=httpx.Request("POST", url), json=payload)
+
+    monkeypatch.setattr(web_fetch_module.httpx, "Client", Client)
+    fetch = web_fetch_module._firecrawl_fetch if provider == "firecrawl" else web_fetch_module._tavily_fetch
+    assert fetch("https://example.test", api_key="test-key") == text
 
 
 def test_duckduckgo_search_reads_stream_without_read_size(monkeypatch):

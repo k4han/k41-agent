@@ -19,16 +19,15 @@ from typing import Any, Dict, List, Optional
 
 from agent.modules.tools.runtime.sandbox import build_safe_env
 from agent.modules.tools.runtime.shell_guard import assert_command_allowed
+from agent.modules.tools.runtime.output_policy import TextCapture
 from agent.shared.infrastructure.subprocess_utils import hidden_subprocess_kwargs
 
 logger = logging.getLogger(__name__)
 
 # Limits
-MAX_OUTPUT_CHARS = 100_000  # ~100KB max output per command
 MAX_HISTORY_LINES = 500  # Keep last 500 lines of drained output
 HARD_MAX_TIMEOUT = 300.0
 HARD_MIN_TIMEOUT = 1.0
-HARD_MAX_OUTPUT_CHARS = 200_000
 
 
 def _clamp_timeout(value: float) -> float:
@@ -38,15 +37,6 @@ def _clamp_timeout(value: float) -> float:
         return 30.0
     return max(HARD_MIN_TIMEOUT, min(v, HARD_MAX_TIMEOUT))
 
-
-def _clamp_max_output(value: int | None) -> int | None:
-    if value is None:
-        return MAX_OUTPUT_CHARS
-    try:
-        v = int(value)
-    except Exception:
-        return MAX_OUTPUT_CHARS
-    return max(1024, min(v, HARD_MAX_OUTPUT_CHARS))
 
 # ANSI escape code pattern (colors, cursor movement, etc.)
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
@@ -220,14 +210,6 @@ class TerminalSessionManager:
         except Empty:
             pass
 
-    @staticmethod
-    def _truncate_output(text: str) -> str:
-        """Truncate output if it exceeds MAX_OUTPUT_CHARS, keeping the tail."""
-        if len(text) <= MAX_OUTPUT_CHARS:
-            return text
-        truncated_chars = len(text) - MAX_OUTPUT_CHARS
-        return f"[...truncated {truncated_chars} characters...]\n{text[-MAX_OUTPUT_CHARS:]}"
-
     def execute_command(
         self,
         session_id: str,
@@ -310,9 +292,8 @@ class TerminalSessionManager:
                     session.process.stdin.write(full_command)
                     session.process.stdin.flush()
 
-            output_lines: list[str] = []
-            error_lines: list[str] = []
-            total_output_chars = 0
+            output = TextCapture()
+            errors = TextCapture()
 
             start_time = time.time()
             last_output_time = start_time
@@ -335,13 +316,7 @@ class TerminalSessionManager:
                     if "Active code page:" in line:
                         continue
 
-                    # Keep tail when exceeding MAX_OUTPUT_CHARS: drop oldest lines
-                    line_len = len(line) + 1  # +1 for newline
-                    output_lines.append(line)
-                    total_output_chars += line_len
-                    while total_output_chars > MAX_OUTPUT_CHARS and len(output_lines) > 1:
-                        removed = output_lines.pop(0)
-                        total_output_chars -= len(removed) + 1
+                    output.append_line(line)
 
                     last_output_time = time.time()
                     got_output = True
@@ -352,15 +327,7 @@ class TerminalSessionManager:
                     err = session.error_queue.get_nowait()
                     # Filter out unnecessary PSReadline messages
                     if "PSReadline" not in err:
-                        # Apply same tail truncation to stderr
-                        error_lines.append(err)
-                        # Keep stderr also bounded (simple tail)
-                        err_text = "\n".join(error_lines)
-                        if len(err_text) > MAX_OUTPUT_CHARS:
-                            # Keep last lines that fit
-                            truncated = err_text[-MAX_OUTPUT_CHARS:]
-                            # Rebuild lines from truncated text
-                            error_lines = truncated.splitlines()
+                        errors.append_line(err)
                     last_output_time = time.time()
                     got_output = True
                 except Empty:
@@ -370,8 +337,8 @@ class TerminalSessionManager:
                 if not got_output and timeout >= idle_timeout and (time.time() - last_output_time) > idle_timeout:
                     break
 
-            output_text = self._truncate_output("\n".join(output_lines))
-            stderr_text = self._truncate_output("\n".join(error_lines)) if error_lines else ""
+            output_text = output.content()
+            stderr_text = errors.content()
 
             return {
                 "session_id": session_id,
@@ -401,27 +368,21 @@ class TerminalSessionManager:
         if session is None:
             return {"error": f"Session {session_id} does not exist"}
 
-        output_lines: list[str] = []
-        error_lines: list[str] = []
-        total_chars = 0
+        output = TextCapture()
+        errors = TextCapture()
 
         start_time = time.time()
         while time.time() - start_time < timeout:
             try:
                 line = session.output_queue.get(timeout=0.1)
-                line_len = len(line) + 1
-                output_lines.append(line)
-                total_chars += line_len
-                while total_chars > MAX_OUTPUT_CHARS and len(output_lines) > 1:
-                    removed = output_lines.pop(0)
-                    total_chars -= len(removed) + 1
+                output.append_line(line)
             except Empty:
                 pass
 
             try:
                 err = session.error_queue.get_nowait()
                 if "PSReadline" not in err:
-                    error_lines.append(err)
+                    errors.append_line(err)
             except Empty:
                 pass
 
@@ -432,8 +393,8 @@ class TerminalSessionManager:
             ):
                 break
 
-        output_text = self._truncate_output("\n".join(output_lines))
-        stderr_text = self._truncate_output("\n".join(error_lines)) if error_lines else ""
+        output_text = output.content()
+        stderr_text = errors.content()
 
         return {
             "session_id": session_id,
