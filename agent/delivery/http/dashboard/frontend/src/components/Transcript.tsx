@@ -40,6 +40,7 @@ import { StatusIndicator } from "@/components/StatusIndicator";
 import { useToast } from "@/components/Toast";
 import { isChatStatusText } from "@/lib/chatStatus";
 import { getSharedDarkMode } from "@/lib/theme";
+import { toolCallSummary } from "@/lib/toolCallSummary";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
 import {
   HTML_PREVIEW_TOOL_NAME,
@@ -866,6 +867,7 @@ export function ToolCallDetail(props: {
   itemId?: number;
   threadId?: string | null;
 }) {
+  const summary = createMemo(() => toolCallSummary(props.name, props.args));
   const generatedImage = () =>
     props.name === GENERATE_IMAGE_TOOL_NAME
       ? generatedImageFromToolResult(props.result, props.threadId)
@@ -903,8 +905,8 @@ export function ToolCallDetail(props: {
           data-transcript-item-id={props.itemId}
           onToggle={handleToggle}
         >
-          <summary>
-            <span class="mono">{props.name || "unknown"}</span>
+          <summary title={summary()}>
+            <span class="mono tool-call-summary">{summary()}</span>
           </summary>
           <div class="tool-call-body">
             <pre>{formatValue(props.args)}</pre>

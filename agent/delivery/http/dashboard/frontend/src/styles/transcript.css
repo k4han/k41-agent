@@ -139,6 +139,8 @@
 }
 
 .tool-call summary {
+  display: flex;
+  align-items: center;
   cursor: pointer;
   padding: 4px 0;
   color: var(--muted);
@@ -153,12 +155,20 @@
 .tool-call summary::before {
   content: "▸";
   display: inline-block;
+  flex-shrink: 0;
   margin-right: 6px;
   transition: transform 120ms ease;
 }
 
 .tool-call[open] summary::before {
   transform: rotate(90deg);
+}
+
+.tool-call-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tool-call-body {
