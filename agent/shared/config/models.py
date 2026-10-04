@@ -30,7 +30,7 @@ class SettingsValue:
     def to_dict(self) -> dict[str, object]:
         """Serialize to dashboard-friendly dict format."""
         return {
-            "value": self.value,
+            "value": bool(self.value) if self.key.startswith("web.connections.") and self.key.endswith(".api_key") else self.value,
             "source": self.source.value,
         }
 

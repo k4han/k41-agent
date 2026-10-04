@@ -1,5 +1,6 @@
-import { For, Show } from "solid-js";
+import { createSignal, For, Show } from "solid-js";
 import { RotateCcw } from "lucide-solid";
+import { useLocation, useNavigate } from "@solidjs/router";
 
 import { ModelPicker } from "@/components/ModelPicker";
 import { uniqueSorted } from "@/lib/utils";
@@ -54,7 +55,7 @@ function formatDefault(
   if (field.secret || field.input_type === "password") {
     return "Global (set)";
   }
-  return `Global: ${String(globalValue)}`;
+  return `Global: ${globalValue === "__default__" ? "shared default" : String(globalValue)}`;
 }
 
 function isImageOutputModel(model: { output_types?: string[] | null }) {
@@ -85,6 +86,44 @@ export function AgentToolsTab(props: {
   onUpdateToolConfig: (toolName: string, fieldName: string, value: ToolConfigValue) => void;
   onResetToolConfigField: (toolName: string, fieldName: string) => void;
 }) {
+  const [advancedTools, setAdvancedTools] = createSignal<Record<string, boolean>>({});
+  const location = useLocation();
+  const navigate = useNavigate();
+  const isWebCredential = (tool: string, field: ToolConfigField) =>
+    (tool === "web_search" || tool === "web_fetch") &&
+    !field.name.endsWith("_connection") && field.name !== "provider";
+  const currentProvider = (tool: string) => {
+    const overrideVal = props.form.tool_configs[tool]?.provider;
+    const globalVal = props.toolConfigEffective?.[tool]?.provider;
+    const defaultVal = props.toolConfigSchemas[tool]?.fields.find((f) => f.name === "provider")?.default;
+    const currentVal =
+      overrideVal !== undefined && overrideVal !== "" && overrideVal !== null
+        ? overrideVal
+        : globalVal !== undefined && globalVal !== "" && globalVal !== null
+          ? globalVal
+          : (defaultVal ?? "auto");
+    return String(currentVal).toLowerCase();
+  };
+  const connectionKindForTool = (tool: string) => {
+    const provider = currentProvider(tool);
+    if (tool === "web_search" && ["google", "tavily", "brave", "bing", "firecrawl"].includes(provider)) return provider;
+    if (tool === "web_fetch" && ["firecrawl", "tavily"].includes(provider)) return provider;
+    return tool === "web_fetch" ? "firecrawl" : "tavily";
+  };
+  const hasLegacyOverride = (tool: string) => {
+    const configs = props.form.tool_configs[tool] || {};
+    return Object.keys(configs).some((name) => name !== "provider" && !name.endsWith("_connection"));
+  };
+  const inheritedSource = (tool: string, field: ToolConfigField) => {
+    const kind = field.name.split("_")[0];
+    const reference = props.form.tool_configs[tool]?.[`${kind}_connection`];
+    if (!reference) return props.payload.tool_config_sources?.[tool]?.[field.name] || "default";
+    const name = reference === "__default__" ? props.payload.web_connections?.defaults[kind] : String(reference);
+    const connection = props.payload.web_connections?.connections.find((entry) => entry.name.toLowerCase() === name?.toLowerCase());
+    if (!connection) return "environment or service default";
+    const source = connection.sources[field.name.slice(kind.length + 1)];
+    return source === "connection" ? `connection:${connection.name}` : source;
+  };
   const activeMcpCount = () =>
     props.mcpInstalls.filter((install) => install.agent_enabled).length;
   const installForServer = (serverName: string) =>
@@ -242,12 +281,24 @@ export function AgentToolsTab(props: {
                                   <div class="hint">Tool-specific overrides</div>
                                 </div>
                               </div>
+                              <Show when={tool === "web_search" || tool === "web_fetch"}>
+                                <button class="btn btn-sm" type="button" onClick={() => navigate(`/settings/providers?tab=web&new=${connectionKindForTool(tool)}&returnTo=${encodeURIComponent(location.pathname)}`)}>
+                                  Create a separate connection
+                                </button>
+                                <button class="btn btn-sm" type="button" aria-expanded={Boolean(advancedTools()[tool] || hasLegacyOverride(tool))}
+                                  onClick={() => setAdvancedTools({ ...advancedTools(), [tool]: !advancedTools()[tool] })}>
+                                  Advanced credential overrides
+                                  <Show when={hasLegacyOverride(tool) && !advancedTools()[tool]}>
+                                    <span class="badge badge-info" title="This agent has legacy credential overrides that take precedence at runtime.">Override present</span>
+                                  </Show>
+                                </button>
+                              </Show>
                               <div class="agent-config-tool-config-grid">
                                 <For each={schema().fields}>
                                   {(field) => {
                                     const value = () => fieldValue(props.form, tool, field);
                                     return (
-                                      <Show when={isFieldVisible(tool, field)}>
+                                      <Show when={isFieldVisible(tool, field) && (!isWebCredential(tool, field) || advancedTools()[tool] || hasOverride(props.form, tool, field.name))}>
                                         <div class="agent-config-tool-field">
                                         <label class="agent-config-tool-field-label" for={`${tool}-${field.name}`}>
                                           <span>{field.label}</span>
@@ -311,7 +362,7 @@ export function AgentToolsTab(props: {
                                                 >
                                                   <option value="">{formatDefault(field, tool, props.toolConfigEffective)}</option>
                                                   <For each={field.options}>
-                                                    {(option) => <option value={option}>{option}</option>}
+                                                    {(option) => <option value={option}>{option === "__default__" ? "Use shared default" : option}</option>}
                                                   </For>
                                                 </select>
                                               </Show>
@@ -384,6 +435,9 @@ export function AgentToolsTab(props: {
                                         </Show>
                                         <Show when={field.description}>
                                           <div class="hint">{field.description}</div>
+                                        </Show>
+                                        <Show when={isWebCredential(tool, field) && !hasOverride(props.form, tool, field.name)}>
+                                          <div class="hint">Inherited source: {inheritedSource(tool, field)}</div>
                                         </Show>
                                       </div>
                                     </Show>

@@ -21,12 +21,14 @@ from agent.modules.tools.domain import (
 )
 from agent.modules.tools.builtin.web.web_fetch import (
     DEFAULT_HEADERS,
-    _effective_credential,
     _read_limited_response,
 )
 from agent.modules.tools.result import ToolError, ToolErrorCode
+from agent.shared.config.web_connections import ENV_FIELDS, with_web_connections
 
 logger = logging.getLogger(__name__)
+
+_ENV_TO_KIND_FIELD = {env: pair for pair, env in ENV_FIELDS.items()}
 
 GOOGLE_SEARCH_URL = "https://www.googleapis.com/customsearch/v1"
 TAVILY_SEARCH_URL = "https://api.tavily.com/search"
@@ -144,6 +146,8 @@ WEB_SEARCH_CONFIG_SCHEMA = ToolConfigSchema(
         ),
     )
 )
+
+WEB_SEARCH_CONFIG_SCHEMA = with_web_connections(WEB_SEARCH_CONFIG_SCHEMA, "web_search")
 
 
 class SearchResult(TypedDict):
@@ -494,13 +498,20 @@ def _build_web_search_tool(config: dict[str, ToolConfigValue]) -> StructuredTool
             f"Expected one of: {allowed}."
         )
 
-    configured_google_key = config.get("google_api_key")
-    configured_google_cse = config.get("google_cse_id")
-    configured_tavily_key = config.get("tavily_api_key")
-    configured_bing_key = config.get("bing_api_key")
-    configured_brave_key = config.get("brave_api_key")
-    configured_firecrawl_key = config.get("firecrawl_api_key")
-    configured_firecrawl_base_url = config.get("firecrawl_base_url")
+    def credential(env_name: str, _service: Any | None = None) -> str:
+        from agent.shared.config import get_config_service
+        from agent.shared.config.web_connections import resolve_web_field
+
+        kind, field = _ENV_TO_KIND_FIELD[env_name]
+        service = _service if _service is not None else get_config_service()
+        try:
+            return resolve_web_field(service, "web_search", kind, field, config)[0]
+        except ValueError as exc:
+            if provider == "auto":
+                logger.warning("Ignoring invalid web_search connection in auto mode: %s", exc)
+                return ""
+            raise ToolError(ToolErrorCode.INVALID_INPUT, f"Invalid web_search connection: {exc}.") from exc
+
 
     def _search_sync(query: str, num_results: int = 5) -> str:
         count = _clamp_num_results(num_results)
@@ -508,17 +519,12 @@ def _build_web_search_tool(config: dict[str, ToolConfigValue]) -> StructuredTool
             return _duckduckgo_search(query, count)
 
         if provider == "google":
-            api_key = _effective_credential(configured_google_key, "GOOGLE_API_KEY")
-            cse_id = _effective_credential(configured_google_cse, "GOOGLE_CSE_ID")
+            api_key = credential("GOOGLE_API_KEY")
+            cse_id = credential("GOOGLE_CSE_ID")
             if not (api_key and cse_id):
                 raise ToolError(
                     ToolErrorCode.INVALID_INPUT,
-                    (
-                        "Google search is not configured. Set the web_search "
-                        "google_api_key and google_cse_id in Dashboard > Settings "
-                        "> Tools > web_search (or the GOOGLE_API_KEY / "
-                        "GOOGLE_CSE_ID environment variables)."
-                    ),
+                    ("Google search is not configured. Configure a Google connection in Settings > Providers > Search & Web, or set GOOGLE_API_KEY and GOOGLE_CSE_ID."),
                 )
             result = _google_search(query, count, api_key=api_key, cse_id=cse_id)
             if result is not None:
@@ -526,20 +532,11 @@ def _build_web_search_tool(config: dict[str, ToolConfigValue]) -> StructuredTool
             return "No results found."
 
         if provider == "tavily":
-            api_key = _effective_credential(
-                configured_tavily_key,
-                "TAVILY_API_KEY",
-                fallback_setting_key="tools.web_fetch.tavily_api_key",
-            )
+            api_key = credential("TAVILY_API_KEY")
             if not api_key:
                 raise ToolError(
                     ToolErrorCode.INVALID_INPUT,
-                    (
-                        "Tavily search is not configured. Set the web_search "
-                        "tavily_api_key in Dashboard > Settings > Tools > web_search "
-                        "(or tools.web_fetch.tavily_api_key / the TAVILY_API_KEY "
-                        "environment variable)."
-                    ),
+                    ("Tavily search is not configured. Configure a Tavily connection in Settings > Providers > Search & Web, or set TAVILY_API_KEY."),
                 )
             result = _tavily_search(query, count, api_key=api_key)
             if result is not None:
@@ -547,15 +544,11 @@ def _build_web_search_tool(config: dict[str, ToolConfigValue]) -> StructuredTool
             return "No results found."
 
         if provider == "bing":
-            api_key = _effective_credential(configured_bing_key, "BING_API_KEY")
+            api_key = credential("BING_API_KEY")
             if not api_key:
                 raise ToolError(
                     ToolErrorCode.INVALID_INPUT,
-                    (
-                        "Bing search is not configured. Set the web_search "
-                        "bing_api_key in Dashboard > Settings > Tools > web_search "
-                        "(or the BING_API_KEY environment variable)."
-                    ),
+                    ("Bing search is not configured. Configure a Bing connection in Settings > Providers > Search & Web, or set BING_API_KEY."),
                 )
             result = _bing_search(query, count, api_key=api_key)
             if result is not None:
@@ -563,15 +556,11 @@ def _build_web_search_tool(config: dict[str, ToolConfigValue]) -> StructuredTool
             return "No results found."
 
         if provider == "brave":
-            api_key = _effective_credential(configured_brave_key, "BRAVE_API_KEY")
+            api_key = credential("BRAVE_API_KEY")
             if not api_key:
                 raise ToolError(
                     ToolErrorCode.INVALID_INPUT,
-                    (
-                        "Brave search is not configured. Set the web_search "
-                        "brave_api_key in Dashboard > Settings > Tools > web_search "
-                        "(or the BRAVE_API_KEY environment variable)."
-                    ),
+                    ("Brave search is not configured. Configure a Brave connection in Settings > Providers > Search & Web, or set BRAVE_API_KEY."),
                 )
             result = _brave_search(query, count, api_key=api_key)
             if result is not None:
@@ -579,26 +568,12 @@ def _build_web_search_tool(config: dict[str, ToolConfigValue]) -> StructuredTool
             return "No results found."
 
         if provider == "firecrawl":
-            api_key = _effective_credential(
-                configured_firecrawl_key,
-                "FIRECRAWL_API_KEY",
-                fallback_setting_key="tools.web_fetch.firecrawl_api_key",
-            )
-            base_url = _effective_credential(
-                configured_firecrawl_base_url,
-                "FIRECRAWL_BASE_URL",
-                fallback_setting_key="tools.web_fetch.firecrawl_base_url",
-            )
+            api_key = credential("FIRECRAWL_API_KEY")
+            base_url = credential("FIRECRAWL_BASE_URL")
             if not (api_key or base_url):
                 raise ToolError(
                     ToolErrorCode.INVALID_INPUT,
-                    (
-                        "Firecrawl search is not configured. Set the web_search "
-                        "firecrawl_api_key in Dashboard > Settings > Tools > web_search "
-                        "(or tools.web_fetch.firecrawl_api_key / the FIRECRAWL_API_KEY "
-                        "environment variable). A self-hosted FIRECRAWL_BASE_URL alone "
-                        "is also accepted."
-                    ),
+                    ("Firecrawl search is not configured. Configure a Firecrawl connection in Settings > Providers > Search & Web, or set FIRECRAWL_API_KEY or FIRECRAWL_BASE_URL."),
                 )
             result = _firecrawl_search(query, count, api_key=api_key, base_url=base_url)
             if result is not None:
@@ -606,8 +581,16 @@ def _build_web_search_tool(config: dict[str, ToolConfigValue]) -> StructuredTool
             return "No results found."
 
         # provider == "auto": cascade through configured providers, then DuckDuckGo
-        google_key = _effective_credential(configured_google_key, "GOOGLE_API_KEY")
-        google_cse = _effective_credential(configured_google_cse, "GOOGLE_CSE_ID")
+        # Resolve all credentials against a single config snapshot so one invocation
+        # does not rebuild the full config for every field.
+        from agent.shared.config import get_config_service as _get_service
+        _auto_service = _get_service()
+
+        def _auto_credential(env_name: str) -> str:
+            return credential(env_name, _auto_service)
+
+        google_key = _auto_credential("GOOGLE_API_KEY")
+        google_cse = _auto_credential("GOOGLE_CSE_ID")
         if google_key and google_cse:
             try:
                 res = _google_search(query, count, api_key=google_key, cse_id=google_cse)
@@ -619,11 +602,7 @@ def _build_web_search_tool(config: dict[str, ToolConfigValue]) -> StructuredTool
                     exc_info=True,
                 )
 
-        tavily_key = _effective_credential(
-            configured_tavily_key,
-            "TAVILY_API_KEY",
-            fallback_setting_key="tools.web_fetch.tavily_api_key",
-        )
+        tavily_key = _auto_credential("TAVILY_API_KEY")
         if tavily_key:
             try:
                 res = _tavily_search(query, count, api_key=tavily_key)
@@ -635,16 +614,8 @@ def _build_web_search_tool(config: dict[str, ToolConfigValue]) -> StructuredTool
                     exc_info=True,
                 )
 
-        firecrawl_key = _effective_credential(
-            configured_firecrawl_key,
-            "FIRECRAWL_API_KEY",
-            fallback_setting_key="tools.web_fetch.firecrawl_api_key",
-        )
-        firecrawl_base = _effective_credential(
-            configured_firecrawl_base_url,
-            "FIRECRAWL_BASE_URL",
-            fallback_setting_key="tools.web_fetch.firecrawl_base_url",
-        )
+        firecrawl_key = _auto_credential("FIRECRAWL_API_KEY")
+        firecrawl_base = _auto_credential("FIRECRAWL_BASE_URL")
         if firecrawl_key or firecrawl_base:
             try:
                 res = _firecrawl_search(
@@ -658,7 +629,7 @@ def _build_web_search_tool(config: dict[str, ToolConfigValue]) -> StructuredTool
                     exc_info=True,
                 )
 
-        brave_key = _effective_credential(configured_brave_key, "BRAVE_API_KEY")
+        brave_key = _auto_credential("BRAVE_API_KEY")
         if brave_key:
             try:
                 res = _brave_search(query, count, api_key=brave_key)
@@ -670,7 +641,7 @@ def _build_web_search_tool(config: dict[str, ToolConfigValue]) -> StructuredTool
                     exc_info=True,
                 )
 
-        bing_key = _effective_credential(configured_bing_key, "BING_API_KEY")
+        bing_key = _auto_credential("BING_API_KEY")
         if bing_key:
             try:
                 res = _bing_search(query, count, api_key=bing_key)

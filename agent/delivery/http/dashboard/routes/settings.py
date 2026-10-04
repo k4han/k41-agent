@@ -24,6 +24,9 @@ from agent.modules.tools import (
     seed_tool_runtime_defaults,
     serialize_tool_config_schemas,
 )
+from agent.shared.config.web_connections import (
+    connection_payload, is_legacy_web_key, translate_legacy_updates, validate_tool_references, web_tool_schemas, web_tool_sources,
+)
 
 
 router = APIRouter()
@@ -49,16 +52,27 @@ async def get_dashboard_tools_settings(request: Request) -> dict[str, Any]:
     service = get_request_config_service(request)
     seed_tool_runtime_defaults(service)
     settings_raw, settings_sources_raw = service.get_settings_overview_and_sources()
-    settings = {key: info for key, info in settings_raw.items() if key.startswith("tools.")}
+    settings = {key: info for key, info in settings_raw.items() if key.startswith("tools.") and not is_legacy_web_key(key)}
     settings_sources = {
-        key: info for key, info in settings_sources_raw.items() if key.startswith("tools.")
+        key: info for key, info in settings_sources_raw.items() if key.startswith("tools.") and not is_legacy_web_key(key)
     }
     descriptors = find_descriptors(source=ToolSource.BUILTIN)
+    schemas = web_tool_schemas(serialize_tool_config_schemas(descriptors), service, global_view=True)
+    connections = connection_payload(service)
+    for tool, schema in schemas.items():
+        for field in schema["fields"]:
+            key = f"tools.{tool}.{field['name']}"
+            if key in settings and field["name"].endswith("_connection"):
+                kind = field["name"].removesuffix("_connection")
+                settings[key] = {**settings[key], "input_type": "select", "options": field["options"],
+                                 "description": f"Shared default: {connections['defaults'].get(kind) or 'environment credentials'}. Select a named connection to use separate credentials."}
     return {
         "active_nav": "tools",
         "page_title": "Tool Configuration",
         "page_subtitle": "Manage global configuration and credentials for built-in tools.",
-        "tool_config_schemas": serialize_tool_config_schemas(descriptors),
+        "tool_config_schemas": schemas,
+        "web_connections": connections,
+        "tool_config_sources": web_tool_sources(service),
         "tool_config_effective": resolve_global_tool_config_schemas(service),
         "settings": settings,
         "by_category": group_settings_by_category(settings),
@@ -116,6 +130,18 @@ async def update_setting(
         value = normalize_setting_value(key, body.value)
 
     validate_default_model_update(service, {key: value})
+    if key.startswith("web."):
+        from fastapi import HTTPException
+        raise HTTPException(400, "Manage web connections through the web-connections API.")
+    if is_legacy_web_key(key):
+        update_config_settings(service, translate_legacy_updates(service, {key: value}), require_writable=True)
+        return {"status": "success", "key": key, "value": value}
+    if key.startswith("tools.") and key.endswith("_connection"):
+        try:
+            validate_tool_references(service, key.split(".")[1], {key.split(".")[2]: value})
+        except ValueError as exc:
+            from fastapi import HTTPException
+            raise HTTPException(400, str(exc)) from exc
     if key.startswith("tools.") and value is None:
         # Reset: remove the stored override so the schema default applies.
         delete_config_tree(service, key)
@@ -145,6 +171,17 @@ async def update_settings(body: UpdateSettingsBody, request: Request) -> dict[st
     values = normalize_setting_updates(raw_values)
     service = get_request_config_service(request)
     validate_default_model_update(service, values)
+    if any(key.startswith("web.") for key in values):
+        from fastapi import HTTPException
+        raise HTTPException(400, "Manage web connections through the web-connections API.")
+    for key, value in values.items():
+        if key.startswith("tools.") and key.endswith("_connection"):
+            try:
+                validate_tool_references(service, key.split(".")[1], {key.split(".")[2]: value})
+            except ValueError as exc:
+                from fastapi import HTTPException
+                raise HTTPException(400, str(exc)) from exc
+    values = translate_legacy_updates(service, values)
     reset_keys = {
         key for key, value in values.items() if key.startswith("tools.") and value is None
     }
@@ -154,4 +191,4 @@ async def update_settings(body: UpdateSettingsBody, request: Request) -> dict[st
     update_config_settings(service, update_values)
     invalidate_agent_provider_options_cache()
 
-    return {"status": "success", "updated": list(values.keys())}
+    return {"status": "success", "updated": list(raw_values.keys())}

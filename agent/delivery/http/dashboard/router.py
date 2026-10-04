@@ -24,6 +24,7 @@ from agent.delivery.http.dashboard.routes import (
     tasks as tasks_routes,
     usage as usage_routes,
     workspace as workspace_routes,
+    web_connections as web_connections_routes,
 )
 
 router = APIRouter(tags=["dashboard"], dependencies=[Depends(get_current_admin)])
@@ -34,6 +35,7 @@ for child_router in (
     generated_images_routes.router,
     dashboard_routes.router,
     providers_routes.router,
+    web_connections_routes.router,
     github_routes.router,
     google_calendar_routes.router,
     workspace_routes.router,

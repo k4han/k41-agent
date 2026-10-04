@@ -129,6 +129,8 @@ def is_platform_managed_key(key: str) -> bool:
 # Runtime configuration key patterns
 # These patterns define which keys can be updated at runtime
 RUNTIME_KEY_PATTERNS = [
+    r"^web\.connections\.[A-Za-z0-9_-]+\.(type|api_key|cse_id|base_url)$",
+    r"^web\.defaults\.(google|tavily|firecrawl|brave|bing)$",
     r"^tools\.(permissions|shell|storage_root)$",
     r"^(host|port|enable_web|enable_api|enable_dashboard|tray\.enabled|tray\.autostart)$",
     r"^chat\.stream_thinking$",
@@ -160,6 +162,9 @@ RUNTIME_KEY_PATTERNS = [
 ]
 
 DATABASE_RUNTIME_KEY_PATTERNS = [
+    r"^web\.migration_version$",
+    r"^web\.connections\.[A-Za-z0-9_-]+\.(type|api_key|cse_id|base_url)$",
+    r"^web\.defaults\.(google|tavily|firecrawl|brave|bing)$",
     r"^tools\.(permissions|shell|storage_root)$",
     r"^chat\.stream_thinking$",
     r"^channels\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$",
@@ -189,6 +194,7 @@ DATABASE_RUNTIME_KEY_PATTERNS = [
 ]
 
 SENSITIVE_RUNTIME_KEY_PATTERNS = [
+    r"^web\.connections\.[A-Za-z0-9_-]+\.api_key$",
     r"^channels\.[A-Za-z0-9_-]+\.(bot_token|token|api_token|api_key|secret|client_secret|webhook_secret|private_key)$",
     r"^channels\.telegram\.(bot_token|webhook_secret)$",
     r"^channels\.discord\.bot_token$",

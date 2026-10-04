@@ -201,7 +201,8 @@ class TestDashboardSettingsEndpoints:
         assert "web_search" in data["tool_config_effective"]
         assert all(key.startswith("tools.") for key in data["settings"])
         assert "tools.web_search.provider" in data["settings"]
-        assert "tools.web_search.google_api_key" in data["settings"]
+        assert "tools.web_search.google_api_key" not in data["settings"]
+        assert "tools.web_search.google_connection" in data["settings"]
         assert "tools" in data["by_category"]
         assert set(data["settings_sources"]) == set(data["settings"])
 
@@ -278,7 +279,9 @@ class TestDashboardSettingsEndpoints:
         assert resp.status_code == 200
         assert resp.json()["value"] is None
         flat = db_source.get_all()
-        assert "tools.web_search.google_api_key" not in flat
+        assert flat["tools.web_search.google_api_key"] == "key-123"
+        name = flat["tools.web_search.google_connection"]
+        assert flat[f"web.connections.{name}.api_key"] == ""
         assert flat["tools.web_search.provider"] == "google"
 
     def test_put_tool_setting_empty_string_normalizes_to_reset(
@@ -301,7 +304,10 @@ class TestDashboardSettingsEndpoints:
 
         assert resp.status_code == 200
         assert resp.json()["value"] is None
-        assert "tools.web_search.google_api_key" not in db_source.get_all()
+        flat = db_source.get_all()
+        assert flat["tools.web_search.google_api_key"] == "key-123"
+        name = flat["tools.web_search.google_connection"]
+        assert flat[f"web.connections.{name}.api_key"] == ""
 
     def test_put_settings_batch_tool_reset_deletes_overrides(
         self,
@@ -338,7 +344,10 @@ class TestDashboardSettingsEndpoints:
             "tools.generate_image.model",
         }
         flat = db_source.get_all()
-        assert "tools.web_search.google_api_key" not in flat
+        assert flat["tools.web_search.google_api_key"] == "key-123"
+        name = flat["tools.web_search.google_connection"]
+        assert flat[f"web.connections.{name}.api_key"] == ""
+        assert flat[f"web.connections.{name}.cse_id"] == "cse-1"
         assert "tools.generate_image.model" not in flat
         assert flat["tools.web_search.provider"] == "duckduckgo"
         assert flat["tools.web_search.google_cse_id"] == "cse-1"

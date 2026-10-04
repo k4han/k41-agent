@@ -15,7 +15,9 @@ import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { DataGate } from "@/components/State";
 import type { SettingInfo } from "@/types";
 
-import { SettingsLayout } from "./SettingsLayout";
+import { SettingsLayout as BaseSettingsLayout } from "./SettingsLayout";
+import { ProviderSettingsLayout } from "./ProviderSettingsLayout";
+import { useUnsavedChanges } from "@/lib/useUnsavedChanges";
 import {
   type PendingChange,
   SettingRow,
@@ -58,7 +60,8 @@ const DOMAIN_EVALUATORS = [
   },
 ];
 
-export function DecisionsPage() {
+export function DecisionsPage(props: { providerOnly?: boolean } = {}) {
+  const SettingsLayout = props.providerOnly ? ProviderSettingsLayout : BaseSettingsLayout;
   const {
     data,
     error,
@@ -79,12 +82,14 @@ export function DecisionsPage() {
     load();
   });
 
+  useUnsavedChanges(() => pendingChanges().length > 0, discardAll);
+
   const routingSettings = createMemo(() => {
     const payload = data();
     if (!payload?.settings) return [];
     const needle = search().trim().toLowerCase();
     return Object.entries(payload.settings).filter(([key, info]) => {
-      if (!key.startsWith("decision.router")) return false;
+      if (props.providerOnly || !key.startsWith("decision.router")) return false;
       const haystack = [key, info.label, info.description].join(" ").toLowerCase();
       return !needle || haystack.includes(needle);
     });
@@ -95,7 +100,7 @@ export function DecisionsPage() {
     if (!payload?.settings) return [];
     const needle = search().trim().toLowerCase();
     return Object.entries(payload.settings).filter(([key, info]) => {
-      if (key.startsWith("decision.router")) return false;
+      if (!props.providerOnly || key.startsWith("decision.router")) return false;
       const haystack = [key, info.label, info.description].join(" ").toLowerCase();
       return !needle || haystack.includes(needle);
     });
@@ -112,7 +117,7 @@ export function DecisionsPage() {
 
   return (
     <SettingsLayout
-      title="Decisions & Routing"
+      title={props.providerOnly ? "Decision Model Provider" : "Decisions & Routing"}
       breadcrumbLabel="Decisions"
       actions={
         <button
@@ -245,7 +250,7 @@ export function DecisionsPage() {
                 </Show>
 
                 {/* Section 3: Extensible Domain Evaluators */}
-                <SettingsSection
+                <Show when={!props.providerOnly}><SettingsSection
                   title="Multi-Domain Decision Evaluators"
                   description="Built-in domain evaluators ready for extensible decision-making across the platform."
                 >
@@ -308,7 +313,7 @@ export function DecisionsPage() {
                       }}
                     </For>
                   </div>
-                </SettingsSection>
+                </SettingsSection></Show>
               </div>
             </Show>
 

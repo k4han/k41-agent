@@ -14,7 +14,8 @@ import { getProviderTypes } from "@/lib/catalogStore";
 import { useCatalogAndLoad } from "@/lib/useCatalogAndLoad";
 import type { ModelCatalog, ProviderRow, ProviderTypeOption, SettingInfo } from "@/types";
 
-import { SettingsLayout } from "./SettingsLayout";
+import { ProviderSettingsLayout as SettingsLayout } from "./ProviderSettingsLayout";
+import { useUnsavedChanges } from "@/lib/useUnsavedChanges";
 import {
   ChangesPreview,
   type PendingChange,
@@ -185,7 +186,7 @@ function buildProviderView(
 }
 
 export function ProvidersPage() {
-  const { data, error, drafts, load, pendingChanges, setDraft, restoreDraft } =
+  const { data, error, drafts, load, pendingChanges, setDraft, restoreDraft, discardAll } =
     useSettingsData("/dashboard-api/providers");
 
   const params = useParams<{ providerName?: string }>();
@@ -415,7 +416,7 @@ export function ProvidersPage() {
       showToast("Provider created.");
       setAddOpen(false);
       await load();
-      navigate(`/settings/providers/${encodeURIComponent(form.name.trim())}`);
+      navigate(`/settings/providers/llm/${encodeURIComponent(form.name.trim())}`);
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to create provider", "error");
     } finally {
@@ -448,7 +449,7 @@ export function ProvidersPage() {
 
   const handleCardClick = (card: any) => {
     if (card.configured) {
-      navigate(`/settings/providers/${encodeURIComponent(card.configuredRow?.name ?? card.id)}`);
+      navigate(`/settings/providers/llm/${encodeURIComponent(card.configuredRow?.name ?? card.id)}`);
     } else {
       // Setup helper prefilled from catalog
       setAddForm({
@@ -487,6 +488,14 @@ export function ProvidersPage() {
     return (
       fallbackProvider().trim() !== serverProvider || fallbackModel().trim() !== serverModel
     );
+  });
+
+  useUnsavedChanges(() => pendingChanges().length > 0 || fallbackDirty() || (addOpen() && Boolean(addForm().api_key || addForm().name)), () => {
+    discardAll();
+    const settings = data() ? settingsFromPayload(data()!) : {};
+    setFallbackProvider(String(settings["llm.fallback.provider"]?.value || ""));
+    setFallbackModel(String(settings["llm.fallback.model"]?.value || ""));
+    setAddOpen(false);
   });
 
   const saveFallback = async () => {

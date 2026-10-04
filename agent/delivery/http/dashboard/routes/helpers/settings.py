@@ -85,6 +85,8 @@ def _filter_config_settings[T](settings: dict[str, T]) -> dict[str, T]:
             and not _is_skill_setting_key(key)
             and not _is_mcp_setting_key(key)
             and not _is_tool_setting_key(key)
+            and not key.startswith("web.")
+            and not key.startswith("decision.")
         )
     }
 

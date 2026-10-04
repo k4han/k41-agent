@@ -208,11 +208,15 @@ class ConfigService:
         return result
 
     def _list_runtime_keys(self) -> list[str]:
+        from agent.shared.config.web_connections import MIGRATION_KEY, is_legacy_web_key
+
         keys = set(KNOWN_RUNTIME_KEYS)
         for source in self._sources:
             for key in source.get_all().keys():
                 if isinstance(key, str) and is_runtime_key(key):
                     keys.add(key)
+        if self.get(MIGRATION_KEY):
+            keys = {key for key in keys if not is_legacy_web_key(key)}
         return sorted(keys)
 
     def list_all(self) -> dict[str, SettingsValue]:
@@ -350,7 +354,7 @@ def _database_owned_values_from_yaml_sources(service: ConfigService) -> dict[str
             {
                 key: value
                 for key, value in flat.items()
-                if isinstance(key, str) and is_database_runtime_key(key)
+                if isinstance(key, str) and is_database_runtime_key(key) and key != "web.migration_version"
             }
         )
     return values
@@ -381,6 +385,9 @@ def attach_database_config_source(database_url: str, service: ConfigService | No
                 "Seeded %s runtime setting(s) from legacy YAML config.",
                 len(seeded_keys),
             )
+    migrated_web_keys = source.migrate_web_connections()
+    if migrated_web_keys:
+        logger.info("Migrated %s web connection setting(s).", len(migrated_web_keys))
     migrate_legacy_workspace_roots = getattr(source, "migrate_legacy_workspace_roots", None)
     if callable(migrate_legacy_workspace_roots):
         migrated_keys = migrate_legacy_workspace_roots()

@@ -55,7 +55,6 @@ const settingsNavGroups: SettingsNavGroup[] = [
     id: "workspace",
     label: "Workspace",
     items: [
-      { href: "/settings/backends", label: "Backends", icon: () => <ServerCog size={15} />, description: "Local / Daytona / Modal", keywords: "workspace backend local daytona modal" },
       { href: "/settings/connections", label: "Connections", icon: () => <Link2 size={15} />, description: "Repos, MCP & Calendar", keywords: "repositories mcp connections github google calendar" },
       { href: "/settings/sandboxes", label: "Active Sandboxes", icon: () => <CloudCog size={15} />, description: "Live instances", keywords: "sandbox container live instances" },
     ],
@@ -64,7 +63,7 @@ const settingsNavGroups: SettingsNavGroup[] = [
     id: "intelligence",
     label: "Intelligence",
     items: [
-      { href: "/settings/providers", label: "Providers", icon: () => <Workflow size={15} />, description: "LLM providers & models", keywords: "llm provider model openai anthropic" },
+      { href: "/settings/providers", label: "Providers", icon: () => <Workflow size={15} />, description: "Models, web, environments & decisions", keywords: "llm provider model openai anthropic web search firecrawl tavily brave bing google daytona modal backend cloudflare" },
       { href: "/settings/decisions", label: "Decisions & Routing", icon: () => <Route size={15} />, description: "Clef-flash & routing", keywords: "decision routing clef cloudflare model strategy cascade" },
       { href: "/settings/tools", label: "Tools", icon: () => <Wrench size={15} />, description: "Global tool config", keywords: "tool api key search image web config" },
       { href: "/settings/agents", label: "Agents", icon: () => <Users size={15} />, description: "Agent profiles", keywords: "agent persona" },

@@ -203,6 +203,28 @@ class DatabaseConfigSource:
         self.update_settings(updates)
         return set(updates)
 
+    def migrate_web_connections(self) -> set[str]:
+        """Commit connections, references, and the version marker atomically."""
+        from agent.shared.config.web_connections import is_legacy_web_key, migration_updates
+
+        with self._session_maker.begin() as session:
+            rows = session.execute(select(RuntimeSetting)).scalars().all()
+            flat = {row.key: self._decode_value(row.value_json, encrypted=row.encrypted) for row in rows
+                    if row.key.startswith("web.") or is_legacy_web_key(row.key) or
+                    (row.key.startswith("tools.") and row.key.endswith("_connection"))}
+            updates = migration_updates(flat)
+            by_key = {row.key: row for row in rows}
+            for key, value in updates.items():
+                encrypted = is_sensitive_runtime_key(key)
+                encoded = self._encode_value(value, encrypted=encrypted)
+                if key in by_key:
+                    by_key[key].value_json = encoded
+                    by_key[key].encrypted = encrypted
+                else:
+                    session.add(RuntimeSetting(key=key, value_json=encoded, encrypted=encrypted))
+        self.reload()
+        return set(updates)
+
     def find_ignored_platform_keys(self) -> list[str]:
         """List platform-managed keys still stored in runtime_settings.
 

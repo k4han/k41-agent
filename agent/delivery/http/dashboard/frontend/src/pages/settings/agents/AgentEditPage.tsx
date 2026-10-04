@@ -24,6 +24,7 @@ import {
   isFormDirty,
 } from "./agentForm";
 import { buildToolGroups } from "./AgentToolsTab";
+import { keepSettingsDraft, takeSettingsDraft } from "@/lib/settingsDrafts";
 
 type Mode = "create" | "edit" | "view";
 
@@ -132,6 +133,8 @@ export function AgentEditPage(props: { agentName?: string }) {
 
       if (isCreate) {
         setPayload(data);
+        const saved = takeSettingsDraft<{ form: AgentForm; initial: AgentForm }>("agent:new");
+        if (saved) { setForm(saved.form); setInitialForm(saved.initial); setCreateInitialized(true); setActiveTab("tools"); }
         return;
       }
 
@@ -142,9 +145,11 @@ export function AgentEditPage(props: { agentName?: string }) {
         return;
       }
       const initial = cardToForm(target);
+      const saved = takeSettingsDraft<{ form: AgentForm; initial: AgentForm }>(`agent:${props.agentName}`);
       batch(() => {
-        setForm(initial);
-        setInitialForm(initial);
+        setForm(saved?.form || initial);
+        setInitialForm(saved?.initial || initial);
+        if (saved) setActiveTab("tools");
         setPayload(data);
         setMode(target.editable ? "edit" : "view");
       });
@@ -321,6 +326,10 @@ export function AgentEditPage(props: { agentName?: string }) {
 
   // In-app navigation guard (back button, sidebar link, etc.)
   useBeforeLeave((e) => {
+    if (typeof e.to === "string" && e.to.startsWith("/settings/providers?") && e.to.includes("tab=web") && e.to.includes("new=") && e.to.includes("returnTo=")) {
+      keepSettingsDraft(`agent:${props.agentName || "new"}`, { form: form(), initial: initialForm() });
+      return;
+    }
     if (savedRef() || !isDirty() || confirmDiscardOpen()) {
       return;
     }

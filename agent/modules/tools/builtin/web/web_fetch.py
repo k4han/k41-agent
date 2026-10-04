@@ -22,9 +22,12 @@ from agent.modules.tools.domain import (
     ToolConfigValue,
 )
 from agent.modules.tools.result import ToolError, ToolErrorCode
+from agent.shared.config.web_connections import ENV_FIELDS, with_web_connections
 from agent.modules.tools.runtime.output_policy import MAX_STORED_BYTES, capture_bytes
 
 logger = logging.getLogger(__name__)
+
+_ENV_TO_KIND_FIELD = {env: pair for pair, env in ENV_FIELDS.items()}
 
 DEFAULT_HEADERS = {
     "User-Agent": (
@@ -96,6 +99,8 @@ WEB_FETCH_CONFIG_SCHEMA = ToolConfigSchema(
         ),
     )
 )
+
+WEB_FETCH_CONFIG_SCHEMA = with_web_connections(WEB_FETCH_CONFIG_SCHEMA, "web_fetch")
 
 
 def _effective_credential(
@@ -333,35 +338,32 @@ def _build_web_fetch_tool(config: dict[str, ToolConfigValue]) -> StructuredTool:
             f"Expected one of: {allowed}."
         )
 
-    configured_firecrawl_key = config.get("firecrawl_api_key")
-    configured_firecrawl_base_url = config.get("firecrawl_base_url")
-    configured_tavily_key = config.get("tavily_api_key")
+    def credential(env_name: str, _service: Any | None = None) -> str:
+        from agent.shared.config import get_config_service
+        from agent.shared.config.web_connections import resolve_web_field
+
+        kind, field = _ENV_TO_KIND_FIELD[env_name]
+        service = _service if _service is not None else get_config_service()
+        try:
+            return resolve_web_field(service, "web_fetch", kind, field, config)[0]
+        except ValueError as exc:
+            if provider == "auto":
+                logger.warning("Ignoring invalid web_fetch connection in auto mode: %s", exc)
+                return ""
+            raise ToolError(ToolErrorCode.INVALID_INPUT, f"Invalid web_fetch connection: {exc}.") from exc
+
 
     def _fetch_sync(url: str) -> str:
         if provider == "local":
             return _local_fetch(url)
 
         if provider == "firecrawl":
-            api_key = _effective_credential(
-                configured_firecrawl_key,
-                "FIRECRAWL_API_KEY",
-                fallback_setting_key="tools.web_search.firecrawl_api_key",
-            )
-            base_url = _effective_credential(
-                configured_firecrawl_base_url,
-                "FIRECRAWL_BASE_URL",
-                fallback_setting_key="tools.web_search.firecrawl_base_url",
-            )
+            api_key = credential("FIRECRAWL_API_KEY")
+            base_url = credential("FIRECRAWL_BASE_URL")
             if not (api_key or base_url):
                 raise ToolError(
                     ToolErrorCode.INVALID_INPUT,
-                    (
-                        "Firecrawl fetch is not configured. Set the web_fetch "
-                        "firecrawl_api_key in Dashboard > Settings > Tools > web_fetch "
-                        "(or tools.web_search.firecrawl_api_key / the FIRECRAWL_API_KEY "
-                        "environment variable). A self-hosted FIRECRAWL_BASE_URL alone "
-                        "is also accepted."
-                    ),
+                    ("Firecrawl fetch is not configured. Configure a Firecrawl connection in Settings > Providers > Search & Web, or set FIRECRAWL_API_KEY or FIRECRAWL_BASE_URL."),
                 )
             result = _firecrawl_fetch(url, api_key=api_key, base_url=base_url)
             if result is not None:
@@ -369,20 +371,11 @@ def _build_web_fetch_tool(config: dict[str, ToolConfigValue]) -> StructuredTool:
             return "No content found."
 
         if provider == "tavily":
-            api_key = _effective_credential(
-                configured_tavily_key,
-                "TAVILY_API_KEY",
-                fallback_setting_key="tools.web_search.tavily_api_key",
-            )
+            api_key = credential("TAVILY_API_KEY")
             if not api_key:
                 raise ToolError(
                     ToolErrorCode.INVALID_INPUT,
-                    (
-                        "Tavily extract is not configured. Set the web_fetch "
-                        "tavily_api_key in Dashboard > Settings > Tools > web_fetch "
-                        "(or tools.web_search.tavily_api_key / the TAVILY_API_KEY "
-                        "environment variable)."
-                    ),
+                    ("Tavily extract is not configured. Configure a Tavily connection in Settings > Providers > Search & Web, or set TAVILY_API_KEY."),
                 )
             result = _tavily_fetch(url, api_key=api_key)
             if result is not None:
@@ -390,16 +383,14 @@ def _build_web_fetch_tool(config: dict[str, ToolConfigValue]) -> StructuredTool:
             return "No content found."
 
         # provider == "auto": cascade through configured providers, then local
-        firecrawl_key = _effective_credential(
-            configured_firecrawl_key,
-            "FIRECRAWL_API_KEY",
-            fallback_setting_key="tools.web_search.firecrawl_api_key",
-        )
-        firecrawl_base = _effective_credential(
-            configured_firecrawl_base_url,
-            "FIRECRAWL_BASE_URL",
-            fallback_setting_key="tools.web_search.firecrawl_base_url",
-        )
+        from agent.shared.config import get_config_service as _get_service
+        _auto_service = _get_service()
+
+        def _auto_credential(env_name: str) -> str:
+            return credential(env_name, _auto_service)
+
+        firecrawl_key = _auto_credential("FIRECRAWL_API_KEY")
+        firecrawl_base = _auto_credential("FIRECRAWL_BASE_URL")
         if firecrawl_key or firecrawl_base:
             try:
                 res = _firecrawl_fetch(url, api_key=firecrawl_key, base_url=firecrawl_base)
@@ -411,11 +402,7 @@ def _build_web_fetch_tool(config: dict[str, ToolConfigValue]) -> StructuredTool:
                     exc_info=True,
                 )
 
-        tavily_key = _effective_credential(
-            configured_tavily_key,
-            "TAVILY_API_KEY",
-            fallback_setting_key="tools.web_search.tavily_api_key",
-        )
+        tavily_key = _auto_credential("TAVILY_API_KEY")
         if tavily_key:
             try:
                 res = _tavily_fetch(url, api_key=tavily_key)

@@ -280,7 +280,7 @@ export function SettingControl(props: {
     }
     return opts.map((opt) => ({
       value: String(opt),
-      label: String(opt),
+      label: opt === "__default__" ? "Use shared default" : String(opt),
     }));
   });
 

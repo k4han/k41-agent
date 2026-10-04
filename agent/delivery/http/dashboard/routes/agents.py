@@ -22,6 +22,7 @@ from agent.modules.agents import get_catalog_service
 from agent.modules.prompt_variables import get_prompt_variable_service
 from agent.modules.tools import resolve_global_tool_config_schemas
 from agent.shared.config import get_config_service
+from agent.shared.config.web_connections import connection_payload, validate_tool_references, web_tool_schemas, web_tool_sources
 
 
 router = APIRouter()
@@ -64,7 +65,9 @@ async def list_dashboard_agent_tools(request: Request) -> dict[str, Any]:
     """List built-in tool options and config schemas for agent editing."""
     payload = await agent_tools_payload()
     service = getattr(request.app.state, "config_service", None) or get_config_service()
-    return {**payload, "tool_config_effective": resolve_global_tool_config_schemas(service)}
+    return {**payload, "tool_config_effective": resolve_global_tool_config_schemas(service),
+            "tool_config_schemas": web_tool_schemas(payload["tool_config_schemas"], service),
+            "web_connections": connection_payload(service), "tool_config_sources": web_tool_sources(service)}
 
 
 @router.get("/dashboard-api/agents/workflows")
@@ -86,10 +89,13 @@ async def list_dashboard_agent_provider_options() -> dict[str, Any]:
 
 
 @router.post("/agents/cards")
-async def create_agent_card(body: AgentCardBody) -> dict[str, Any]:
+async def create_agent_card(body: AgentCardBody, request: Request) -> dict[str, Any]:
     """Create a new agent card with the given configuration."""
     catalog = get_catalog_service()
     try:
+        service = getattr(request.app.state, "config_service", None) or get_config_service()
+        for tool, values in body.tool_configs.items():
+            validate_tool_references(service, tool, values)
         card = catalog.create_agent_card(agent_config_from_body(body))
     except Exception as exc:
         raise handle_agent_card_error(exc) from exc
@@ -98,10 +104,13 @@ async def create_agent_card(body: AgentCardBody) -> dict[str, Any]:
 
 
 @router.put("/agents/cards/{name}")
-async def update_agent_card(name: str, body: AgentCardBody) -> dict[str, Any]:
+async def update_agent_card(name: str, body: AgentCardBody, request: Request) -> dict[str, Any]:
     """Update an existing agent card configuration."""
     catalog = get_catalog_service()
     try:
+        service = getattr(request.app.state, "config_service", None) or get_config_service()
+        for tool, values in body.tool_configs.items():
+            validate_tool_references(service, tool, values)
         card = catalog.update_agent_card(name, agent_config_from_body(body))
     except Exception as exc:
         raise handle_agent_card_error(exc) from exc

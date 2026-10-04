@@ -493,7 +493,7 @@ export function SandboxesPage() {
                                 <>
                                   <div class="sandboxes-empty-title">No cloud sandbox backend is enabled</div>
                                   <div class="sandboxes-empty-hint">
-                                    Enable Daytona or Modal in <A href="/settings/backends">Backend settings</A>
+                                    Enable Daytona or Modal in <A href="/settings/providers?tab=workspace">Execution environment settings</A>
                                     {" "}to create and manage sandboxes.
                                   </div>
                                 </>

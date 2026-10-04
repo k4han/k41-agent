@@ -171,6 +171,23 @@ export type ToolConfigField = {
   show_when?: Record<string, string[]>;
 };
 
+export type WebConnection = {
+  name: string;
+  type: string;
+  fields: Record<string, string>;
+  has_api_key: boolean;
+  configured: boolean;
+  is_default: boolean;
+  capabilities: string[];
+  sources: Record<string, string>;
+};
+
+export type WebConnectionsPayload = {
+  connections: WebConnection[];
+  defaults: Record<string, string>;
+  services: Array<{ type: string; label: string; fields: string[]; capabilities: string[] }>;
+};
+
 export type ToolConfigSchema = {
   fields: ToolConfigField[];
   default_config: Record<string, unknown>;
@@ -202,6 +219,8 @@ export type AgentCardsPayload = {
 };
 
 export type AgentToolsPayload = {
+  web_connections?: WebConnectionsPayload;
+  tool_config_sources?: Record<string, Record<string, string>>;
   tools: string[];
   tool_groups?: ToolGroup[];
   tool_config_schemas?: Record<string, ToolConfigSchema>;
@@ -424,6 +443,8 @@ export type CatalogResponse = {
 };
 
 export type SettingsPayload = {
+  web_connections?: WebConnectionsPayload;
+  tool_config_sources?: Record<string, Record<string, string>>;
   active_nav: "config" | "providers" | "backends" | "tools";
   page_title: string;
   page_subtitle: string;

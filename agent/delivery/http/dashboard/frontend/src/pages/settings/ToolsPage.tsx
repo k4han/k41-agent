@@ -6,6 +6,9 @@ import { DataGate } from "@/components/State";
 import type { SettingInfo } from "@/types";
 
 import { SettingsLayout } from "./SettingsLayout";
+import { useNavigate } from "@solidjs/router";
+import { useUnsavedChanges } from "@/lib/useUnsavedChanges";
+import { keepSettingsDraft, takeSettingsDraft } from "@/lib/settingsDrafts";
 import {
   type PendingChange,
   SettingRow,
@@ -21,6 +24,8 @@ function toolNameFromKey(key: string): string {
 }
 
 export function ToolsPage() {
+  const navigate = useNavigate();
+  let preservingDraft = false;
   const {
     data,
     error,
@@ -37,9 +42,40 @@ export function ToolsPage() {
   const [confirmOpen, setConfirmOpen] = createSignal(false);
   const [saving, setSaving] = createSignal(false);
 
-  onMount(() => {
-    load();
-  });
+  const loadWithDraft = async () => {
+    await load();
+    if (!data()) return;
+    const saved = takeSettingsDraft<Record<string, unknown>>("tools");
+    if (saved) for (const [key, value] of Object.entries(saved)) setDraft(key, value);
+  };
+  onMount(() => { void loadWithDraft(); });
+  useUnsavedChanges(() => !preservingDraft && pendingChanges().length > 0, discardAll);
+  const connectionKindForTool = (
+    tool: string,
+    payload: NonNullable<ReturnType<typeof data>>,
+    currentDrafts: Record<string, unknown>,
+  ) => {
+    const depKey = `tools.${tool}.provider`;
+    const schema = payload.tool_config_schemas?.[tool];
+    const draftVal = currentDrafts[depKey];
+    const provider =
+      draftVal !== undefined && draftVal !== null && draftVal !== ""
+        ? String(draftVal)
+        : payload.settings[depKey]?.value ??
+          schema?.fields.find((f) => f.name === "provider")?.default ??
+          "auto";
+    const normalized = String(provider).toLowerCase();
+    if (tool === "web_search" && ["google", "tavily", "brave", "bing", "firecrawl"].includes(normalized)) return normalized;
+    if (tool === "web_fetch" && ["firecrawl", "tavily"].includes(normalized)) return normalized;
+    return tool === "web_fetch" ? "firecrawl" : "tavily";
+  };
+  const createConnection = (tool: string) => {
+    keepSettingsDraft("tools", drafts());
+    preservingDraft = true;
+    const payload = data();
+    const kind = payload ? connectionKindForTool(tool, payload, drafts()) : "tavily";
+    navigate(`/settings/providers?tab=web&new=${kind}&returnTo=%2Fsettings%2Ftools`);
+  };
 
   const isSettingVisible = (
     key: string,
@@ -134,7 +170,7 @@ export function ToolsPage() {
         </button>
       }
     >
-      <DataGate data={data()} error={error()} onRetry={load}>
+      <DataGate data={data()} error={error()} onRetry={loadWithDraft}>
         {(payload) => (
           <div class="stack settings-page-stack">
             <div class="settings-config-header">
@@ -209,7 +245,8 @@ export function ToolsPage() {
                       </Show>
                       <Show when={group.tool === "web_search" || group.tool === "web_fetch"}>
                         <div class="hint" style={{ padding: "6px 16px 12px", "font-size": "12px", opacity: 0.85 }}>
-                          💡 Firecrawl and Tavily credentials configured in either web_search or web_fetch are automatically shared if one is left empty.
+                          Credentials are managed in Providers → Search &amp; Web. Use a shared default or select a named connection.
+                          <button class="btn btn-sm" type="button" onClick={() => createConnection(group.tool)}>Create a separate connection</button>
                         </div>
                       </Show>
                     </SettingsSection>

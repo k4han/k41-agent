@@ -86,6 +86,51 @@ Các chat channel mới nên khai báo field qua `ChatChannelAdapter.settings_sc
 
 ### Optional: Tool Credentials (Settings > Tools)
 
+### Named web connections
+
+Manage web service credentials in `Settings > Providers > Search & Web`. The
+provider area also contains Models, Execution Environments, and Decision Model
+tabs. Routing strategy remains in Decisions & Routing; integrations and channels
+keep their existing pages.
+
+Google Search, Tavily, Firecrawl, Brave, and Bing support named connections. Create
+a connection with a unique name, then optionally set it as the shared default for
+that service. Tools can use the shared default or select a separate connection.
+Agents inherit the tool selection, can select a named connection or the shared
+default, and retain advanced credential overrides. DuckDuckGo and local fetching
+do not require a connection. Image generation continues using LLM providers.
+
+Connections are stored under `web.connections.<name>.*`, with shared defaults at
+`web.defaults.<type>`. Tool bindings such as
+`tools.web_search.tavily_connection` select a name; `__default__` selects the shared
+default. The API key is encrypted at rest and never returned by the connection
+API. Editing a connection without sending `api_key` preserves its key. Sending
+an empty string or `null` clears the stored key.
+
+Credentials resolve from nonempty agent overrides, then the selected connection,
+then the existing service environment variables. An empty field can therefore
+still use an environment credential. The dashboard shows whether configuration
+is complete and which fields use the environment; this does not verify remote
+connectivity. Invalid explicit connection names produce an error. Referenced
+connections cannot be deleted until defaults, tools, and agents are updated.
+
+On upgrade, after YAML settings have been seeded into the runtime database, web
+credentials are migrated atomically once. Equal effective configurations become
+a shared connection; different search/fetch configurations become separate named
+connections. Existing new connections and bindings are preserved. Environment
+secrets are never copied to the database. Original `tools.*` credential rows
+remain for recovery but are ignored after migration. Legacy settings API writes
+create or update a separate connection for that tool, preserving shared users.
+
+Back up the runtime database and `data/runtime_config.key` before upgrading. To
+roll back, stop the application, restore the pre-upgrade database and matching
+encryption key, then run the previous version. Retained legacy rows describe the
+pre-migration credentials and do not replace a complete pre-upgrade backup.
+
+The following description of per-tool credential storage applies to legacy
+configuration and compatibility input; new global credentials use named
+connections as described above.
+
 Cấu hình global cho built-in tool (ví dụ provider và credentials của `web_search`: Google Custom Search, Tavily, Firecrawl, Brave, Bing, DuckDuckGo; model mặc định của `generate_image`) nằm ở dashboard `Settings > Tools`.
 
 - Key dạng `tools.<tool>.<field>` được lưu trong database (DB-owned) và mã hóa khi là secret.

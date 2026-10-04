@@ -1,4 +1,4 @@
-import { Navigate, Route, Router } from "@solidjs/router";
+import { Navigate, Route, Router, useParams } from "@solidjs/router";
 import { lazy } from "solid-js";
 import { render } from "solid-js/web";
 
@@ -30,11 +30,6 @@ const AgentsPage = lazy(() =>
 const AppearancePage = lazy(() =>
   import("@/pages/settings/AppearancePage").then((module) => ({
     default: module.AppearancePage,
-  })),
-);
-const BackendsPage = lazy(() =>
-  import("@/pages/settings/BackendsPage").then((module) => ({
-    default: module.BackendsPage,
   })),
 );
 const SandboxesPage = lazy(() =>
@@ -71,11 +66,18 @@ const SkillsPage = lazy(() =>
     default: module.SkillsPage,
   })),
 );
-const ProvidersPage = lazy(() =>
-  import("@/pages/settings/ProvidersPage").then((module) => ({
-    default: module.ProvidersPage,
-  })),
+const ProviderHubPage = lazy(() =>
+  import("@/pages/settings/ProviderHubPage").then((module) => ({ default: module.ProviderHubPage })),
 );
+function LegacyProviderDetail() {
+  const params = useParams<{ providerName: string }>();
+  return <Navigate href={`/settings/providers/llm/${encodeURIComponent(params.providerName)}`} />;
+}
+function LegacyBackendDetail() {
+  const params = useParams<{ backendName: string }>();
+  return <Navigate href={`/settings/providers/workspace/${encodeURIComponent(params.backendName)}`} />;
+}
+
 const SecurityPage = lazy(() =>
   import("@/pages/settings/SecurityPage").then((module) => ({
     default: module.SecurityPage,
@@ -106,13 +108,16 @@ render(
         <Route path="/scheduler" component={SchedulerPage} />
         <Route path="/settings" component={() => <Navigate href="/settings/config" />} />
         <Route path="/settings/config" component={ConfigPage} />
-        <Route path="/settings/decisions" component={DecisionsPage} />
+        <Route path="/settings/decisions" component={() => <DecisionsPage />} />
         <Route path="/settings/tools" component={ToolsPage} />
-        <Route path="/settings/backends" component={BackendsPage} />
-        <Route path="/settings/backends/:backendName" component={BackendsPage} />
+        <Route path="/settings/backends" component={() => <Navigate href="/settings/providers?tab=workspace" />} />
+        <Route path="/settings/backends/:backendName" component={LegacyBackendDetail} />
         <Route path="/settings/sandboxes" component={SandboxesPage} />
-        <Route path="/settings/providers" component={ProvidersPage} />
-        <Route path="/settings/providers/:providerName" component={ProvidersPage} />
+        <Route path="/settings/providers" component={ProviderHubPage} />
+        <Route path="/settings/providers/llm/:providerName" component={ProviderHubPage} />
+        <Route path="/settings/providers/web/:connectionName" component={ProviderHubPage} />
+        <Route path="/settings/providers/workspace/:backendName" component={ProviderHubPage} />
+        <Route path="/settings/providers/:providerName" component={LegacyProviderDetail} />
         <Route path="/settings/connections" component={ConnectionsPage} />
         <Route path="/settings/connections/:subpage" component={ConnectionsPage} />
         <Route path="/settings/channels" component={ChannelsPage} />

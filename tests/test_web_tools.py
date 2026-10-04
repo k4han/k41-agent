@@ -123,6 +123,11 @@ def test_web_search_registers_config_schema_with_secret_key():
     assert set(fields) == {
         "provider",
         "google_api_key",
+        "google_connection",
+        "tavily_connection",
+        "firecrawl_connection",
+        "brave_connection",
+        "bing_connection",
         "google_cse_id",
         "tavily_api_key",
         "bing_api_key",
@@ -152,7 +157,7 @@ def test_web_search_google_mode_requires_credentials(monkeypatch):
         tool.func("example")
     except ToolError as exc:
         assert exc.code == ToolErrorCode.INVALID_INPUT
-        assert "web_search" in str(exc)
+        assert "Settings > Providers > Search & Web" in str(exc)
     else:
         raise AssertionError("expected ToolError for missing Google credentials")
 
@@ -555,6 +560,8 @@ def test_web_fetch_registers_config_schema():
     fields = meta.config_schema.field_map()
     assert set(fields) == {
         "provider",
+        "firecrawl_connection",
+        "tavily_connection",
         "firecrawl_api_key",
         "firecrawl_base_url",
         "tavily_api_key",

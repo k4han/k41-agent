@@ -21,7 +21,8 @@ import { getBackendIcon } from "@/lib/iconRegistry";
 import { useCatalogAndLoad } from "@/lib/useCatalogAndLoad";
 import type { BackendCatalogItem, SettingInfo, SettingsPayload } from "@/types";
 
-import { SettingsLayout } from "./SettingsLayout";
+import { ProviderSettingsLayout as SettingsLayout } from "./ProviderSettingsLayout";
+import { useUnsavedChanges } from "@/lib/useUnsavedChanges";
 import {
   type PendingChange,
   SettingRow,
@@ -316,6 +317,10 @@ export function BackendsPage() {
     );
   });
 
+  useUnsavedChanges(() => Object.values(pendingByBackend()).some((changes) => changes.length > 0), () => {
+    setDrafts(Object.fromEntries(Object.entries(data()?.settings || {}).map(([key, info]) => [key, info.value])));
+  });
+
   const setBusyState = (backend: string, action: string | null) => {
     setBusy((current) => {
       const next = { ...current };
@@ -408,7 +413,7 @@ export function BackendsPage() {
                             pendingCount={(pendingByBackend()[backend.name] || []).length}
                             busy={busy()[backend.name] || null}
                             onToggle={(value) => void toggleEnabled(backend, value)}
-                            onConfigure={() => navigate(`/settings/backends/${backend.name}`)}
+                            onConfigure={() => navigate(`/settings/providers/workspace/${backend.name}`)}
                           />
                         );
                       }}
@@ -435,7 +440,7 @@ export function BackendsPage() {
             title={def() ? `${def()!.title} Settings` : "Backend Settings"}
             description={def()?.summary}
             breadcrumbSegments={[
-              { label: "Backends", href: "/settings/backends" },
+              { label: "Backends", href: "/settings/providers?tab=workspace" },
               { label: def()?.title || name() },
             ]}
             contentWidth="wide"
@@ -444,7 +449,7 @@ export function BackendsPage() {
                 <button
                   class="btn btn-sm"
                   type="button"
-                  onClick={() => navigate("/settings/backends")}
+                  onClick={() => navigate("/settings/providers?tab=workspace")}
                 >
                   <ArrowLeft size={14} />
                   Back to Backends
@@ -474,7 +479,7 @@ export function BackendsPage() {
                         class="btn"
                         style={{ "margin-top": "12px" }}
                         type="button"
-                        onClick={() => navigate("/settings/backends")}
+                        onClick={() => navigate("/settings/providers?tab=workspace")}
                       >
                         <ArrowLeft size={14} />
                         Back to Backends
