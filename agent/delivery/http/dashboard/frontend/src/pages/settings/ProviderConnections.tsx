@@ -35,7 +35,7 @@ export function ProviderConnectionList(props: {
 }) {
   return (
     <section class="panel settings-section-card" data-provider-connections>
-      <div class="panel-header"><div class="panel-title">Saved configurations</div><span class="badge">{props.items.length}</span></div>
+      <div class="panel-header"><div class="panel-title">Saved configurations <span class="hint">({props.items.length})</span></div></div>
       <div class="panel-body provider-connection-list">
         <Show when={props.items.length} fallback={<p class="hint">{props.emptyMessage || "No saved configurations."}</p>}>
           <For each={props.items}>{(item) => (
@@ -46,16 +46,15 @@ export function ProviderConnectionList(props: {
                     <span class={`provider-connection-status ${item.configured ? "is-ready" : "is-incomplete"}`} role="img" aria-label={item.configured ? "Configuration complete" : "Configuration incomplete"} title={item.configured ? "Configuration complete" : "Configuration incomplete"} />
                     <strong title={item.name}>{item.name}</strong>
                   </div>
-                  <Show when={!item.configured}><span class="badge badge-warning">Incomplete</span></Show>
                   <Show when={item.enabled === false}><span class="badge">Disabled</span></Show>
-                  <Show when={item.isDefault}><span class="badge badge-info">Default</span></Show>
                   <Show when={props.testStates?.[item.name] && !props.testStates?.[item.name]?.loading}>
-                    <span
-                      class={`badge ${props.testStates?.[item.name]?.ok ? "badge-success" : "badge-danger"} connection-latency-badge`}
-                      title={props.testStates?.[item.name]?.message}
-                    >
-                      {props.testStates?.[item.name]?.ok ? `⚡ ${props.testStates?.[item.name]?.latency_ms ?? 0}ms` : "Error"}
-                    </span>
+                    <Show when={props.testStates?.[item.name]?.ok} fallback={
+                      <span class="badge badge-danger" title={props.testStates?.[item.name]?.message}>Error</span>
+                    }>
+                      <span class="hint" title={props.testStates?.[item.name]?.message}>
+                        ⚡ {props.testStates?.[item.name]?.latency_ms ?? 0}ms
+                      </span>
+                    </Show>
                   </Show>
                 </div>
                 <span class="hint provider-connection-detail" title={`${item.label}${item.model ? ` · ${item.model}` : ""}`}>{item.label}<Show when={item.model}> · {item.model}</Show></span>

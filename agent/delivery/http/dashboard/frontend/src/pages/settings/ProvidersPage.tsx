@@ -616,7 +616,6 @@ function ProviderDetailPage(props: {
   return (
     <SettingsLayout
       title={`Configure ${props.provider.name}`}
-      description={`Manage credentials, models, and settings for ${props.provider.name}`}
       breadcrumbSegments={[
         { label: "Providers", href: "/settings/providers?tab=llm" },
         { label: props.provider.name },
@@ -714,7 +713,6 @@ function ProviderDetailPage(props: {
               </div>
               <div>
                 <h2 class="provider-title">{props.provider.name}</h2>
-                <span class="chip">{props.provider.providerType}</span>
               </div>
             </div>
             <div class="row-wrap provider-badge-row">
@@ -724,19 +722,6 @@ function ProviderDetailPage(props: {
               <span class={props.provider.enabled ? "badge badge-success" : "badge badge-warning"}>
                 {props.provider.enabled ? "Enabled" : "Disabled"}
               </span>
-              <Show when={testResult()?.ok}>
-                <span class="badge badge-success connection-latency-badge" title={testResult()!.message}>
-                  ⚡ {testResult()!.latency_ms ?? 0}ms
-                </span>
-              </Show>
-              <Show when={testResult() && !testResult()!.ok}>
-                <span class="badge badge-danger" title={testResult()!.message}>
-                  {testResult()!.error_code || "Connection Error"}
-                </span>
-              </Show>
-              <Show when={props.provider.dirtyCount > 0}>
-                <span class="badge badge-warning">{props.provider.dirtyCount} unsaved</span>
-              </Show>
             </div>
           </div>
 
@@ -755,7 +740,7 @@ function ProviderDetailPage(props: {
             </div>
             <div>
               <span class="setting-detail-label">Status</span>
-              <span class={props.provider.enabled ? "badge badge-success" : "badge badge-warning"}>
+              <span class="provider-summary-value">
                 {props.provider.enabled ? "Active" : "Disabled"}
               </span>
             </div>
@@ -772,7 +757,6 @@ function ProviderDetailPage(props: {
                   info={entry.info}
                   draft={props.drafts[entry.key]}
                   dirty={props.dirtyKeys.has(entry.key)}
-                  showDescription={false}
                   trimProviderPrefix
                   actions={
                     entry.key.endsWith(".models") ? (
@@ -815,6 +799,14 @@ function ProviderDetailPage(props: {
                 {(model) => {
                   const isDefault = () => currentDefaultModel() === model.id;
                   const isConfigured = () => currentConfiguredModels().includes(model.id);
+                  const capabilities = () => [
+                    model.context_window
+                      ? `${model.context_window >= 1048576 ? `${(model.context_window / 1048576).toFixed(0)}M` : `${(model.context_window / 1024).toFixed(0)}k`} context`
+                      : "",
+                    model.reasoning ? "Reasoning" : "",
+                    model.tool_call ? "Tools" : "",
+                    ...(model.input_types || []),
+                  ].filter(Boolean).join(" · ");
 
                   return (
                     <div
@@ -844,28 +836,11 @@ function ProviderDetailPage(props: {
                         </CopyButton>
                       </div>
 
-                      <div class="model-spec-badges">
-                        <Show when={isDefault()}>
-                          <span class="badge badge-info spec-badge-status">Default</span>
-                        </Show>
-                        <Show when={isConfigured() && !isDefault()}>
-                          <span class="badge badge-success spec-badge-status">In Config</span>
-                        </Show>
-                        <Show when={model.context_window}>
-                          <span class="spec-badge spec-badge-context">
-                            🧠 {model.context_window >= 1048576 ? `${(model.context_window / 1048576).toFixed(0)}M` : `${(model.context_window / 1024).toFixed(0)}k`} context
-                          </span>
-                        </Show>
-                        <Show when={model.reasoning}>
-                          <span class="spec-badge spec-badge-reasoning">🧠 Reasoning</span>
-                        </Show>
-                        <Show when={model.tool_call}>
-                          <span class="spec-badge spec-badge-tools">🛠️ Tools</span>
-                        </Show>
-                        <For each={model.input_types}>
-                          {(mod) => <span class="spec-badge spec-badge-modality">{mod}</span>}
-                        </For>
-                      </div>
+                      <Show when={capabilities()}>
+                        <div class="model-spec-capabilities hint" title={capabilities()}>
+                          {capabilities()}
+                        </div>
+                      </Show>
 
                       <Show when={model.cost_input !== null && model.cost_input !== undefined}>
                         <div class="model-spec-cost">

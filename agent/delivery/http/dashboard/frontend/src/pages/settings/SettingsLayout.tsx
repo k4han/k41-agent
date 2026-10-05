@@ -104,7 +104,6 @@ const SETTINGS_AUTO_COLLAPSE_QUERY = `(max-width: ${SETTINGS_AUTO_COLLAPSE_BREAK
 
 export function SettingsLayout(props: {
   title: string;
-  description?: string | JSX.Element;
   actions?: JSX.Element;
   breadcrumbLabel?: string;
   breadcrumbSegments?: BreadcrumbSegment[];

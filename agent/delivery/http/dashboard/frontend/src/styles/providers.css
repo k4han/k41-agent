@@ -267,53 +267,11 @@
   white-space: nowrap;
 }
 
-.model-spec-badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.spec-badge {
-  font-size: 9px;
-  font-weight: 600;
-  padding: 1px 6px;
-  border-radius: var(--radius-sm);
-  text-transform: capitalize;
-}
-
-.spec-badge-context {
-  background: color-mix(in srgb, var(--info) 8%, transparent);
-  color: var(--info);
-  border: 1px solid color-mix(in srgb, var(--info) 25%, transparent);
-}
-
-.spec-badge-reasoning {
-  background: var(--primary-subtle);
-  color: var(--primary);
-  border: 1px solid color-mix(in srgb, var(--primary) 25%, transparent);
-}
-
-.dark .spec-badge-reasoning {
-  color: var(--primary-hover);
-}
-
-.spec-badge-tools {
-  background: color-mix(in srgb, var(--warning) 8%, transparent);
-  color: var(--warning);
-  border: 1px solid color-mix(in srgb, var(--warning) 25%, transparent);
-}
-
-.spec-badge-modality {
-  background: var(--surface-2);
-  color: var(--muted);
-  border: 1px solid var(--border);
-}
-
-.spec-badge-status {
-  font-size: 9.5px;
-  font-weight: 700;
-  padding: 1px 6px;
-  letter-spacing: 0.02em;
+.model-spec-capabilities {
+  overflow: hidden;
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .model-spec-cost {

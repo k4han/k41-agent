@@ -1,5 +1,5 @@
 import { createSignal, onCleanup, onMount, Show, For } from "solid-js";
-import { Check, Clock, Eye, MessageSquare, Monitor, Moon, Sliders, Sun } from "lucide-solid";
+import { Check, Clock, Eye, MessageSquare, Monitor, Moon, Sun } from "lucide-solid";
 
 import { useToast } from "@/components/Toast";
 import { apiFetch, putJson } from "@/lib/api";
@@ -9,13 +9,10 @@ import type { SettingsPayload } from "@/types";
 import { SettingsLayout } from "./SettingsLayout";
 
 type ThemeMode = "light" | "dark" | "system";
-type DensityMode = "compact" | "detailed";
-
 export function AppearancePage() {
   const [dark, setDark] = createSignal(false);
   const [mode, setMode] = createSignal<ThemeMode>("system");
   const [systemDark, setSystemDark] = createSignal(false);
-  const [density, setDensity] = createSignal<DensityMode>("compact");
 
   // Server settings for display & chat
   const [timezone, setTimezone] = createSignal("UTC");
@@ -37,11 +34,6 @@ export function AppearancePage() {
     } else {
       setMode(stored as ThemeMode);
       setDark(stored === THEME_OPTIONS.DARK);
-    }
-
-    const savedDensity = window.localStorage.getItem(STORAGE_KEYS.SETTINGS_DENSITY) as DensityMode | null;
-    if (savedDensity === "detailed" || savedDensity === "compact") {
-      setDensity(savedDensity);
     }
   };
 
@@ -106,12 +98,6 @@ export function AppearancePage() {
       document.documentElement.classList.toggle("dark", isDark);
       window.localStorage.setItem(STORAGE_KEYS.THEME, next);
     }
-  };
-
-  const handleDensityChange = (next: DensityMode) => {
-    setDensity(next);
-    window.localStorage.setItem(STORAGE_KEYS.SETTINGS_DENSITY, next);
-    showToast(`Interface density set to ${next}.`, "success");
   };
 
   const handleTimezoneChange = async (newTz: string) => {
@@ -300,7 +286,6 @@ export function AppearancePage() {
               <MessageSquare size={14} />
               Chat Preferences
             </div>
-            <span class="hint">Conversation & streaming behavior</span>
           </div>
           <div class="panel-body">
             <div class="stack" style={{ gap: "16px" }}>
@@ -308,7 +293,7 @@ export function AppearancePage() {
                 <div>
                   <div style={{ "font-weight": "550", "font-size": "13px" }}>Stream Thinking to UI</div>
                   <div class="hint" style={{ "font-size": "12px", "max-width": "380px" }}>
-                    Surface model reasoning deltas in the chat view in real-time. Reasoning blocks are separated from the final response.
+                    Show model reasoning while it streams.
                   </div>
                 </div>
                 <button
@@ -329,34 +314,6 @@ export function AppearancePage() {
           </div>
         </section>
 
-        {/* Interface Density */}
-        <section class="panel">
-          <div class="panel-header">
-            <div class="panel-title row">
-              <Sliders size={14} />
-              Interface Density
-            </div>
-            <span class="hint">Control spacing in settings tables</span>
-          </div>
-          <div class="panel-body">
-            <div class="row" style={{ gap: "10px" }}>
-              <button
-                class={`btn btn-sm ${density() === "compact" ? "btn-primary" : "btn-secondary"}`}
-                type="button"
-                onClick={() => handleDensityChange("compact")}
-              >
-                Compact
-              </button>
-              <button
-                class={`btn btn-sm ${density() === "detailed" ? "btn-primary" : "btn-secondary"}`}
-                type="button"
-                onClick={() => handleDensityChange("detailed")}
-              >
-                Detailed (Shows descriptions)
-              </button>
-            </div>
-          </div>
-        </section>
       </div>
     </SettingsLayout>
   );

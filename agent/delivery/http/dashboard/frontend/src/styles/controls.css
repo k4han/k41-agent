@@ -163,14 +163,6 @@
   gap: 6px;
 }
 
-.setting-description {
-  max-width: 720px;
-  margin-top: 1px;
-  color: var(--muted);
-  font-size: 11.5px;
-  line-height: 1.4;
-}
-
 .setting-control-panel {
   display: flex;
   align-items: center;

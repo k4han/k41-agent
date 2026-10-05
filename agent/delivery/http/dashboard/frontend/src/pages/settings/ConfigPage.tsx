@@ -1,10 +1,8 @@
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import {
-  AlignJustify,
   Code,
   RefreshCw,
   RotateCcw,
-  Rows3,
   Save,
   SearchX,
   Sparkles,
@@ -13,7 +11,6 @@ import {
 
 import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { DataGate } from "@/components/State";
-import { STORAGE_KEYS } from "@/lib/uiConstants";
 import { checkForUpdates, openUpdateDialog, versionInfo, versionLoading } from "@/lib/versionStore";
 import type { SettingInfo } from "@/types";
 
@@ -44,24 +41,13 @@ export function ConfigPage() {
 
   const [search, setSearch] = createSignal("");
   const [selectedCategory, setSelectedCategory] = createSignal("all");
-  const [density, setDensity] = createSignal<"compact" | "detailed">("compact");
   const [showKeys, setShowKeys] = createSignal(false);
   const [confirmOpen, setConfirmOpen] = createSignal(false);
   const [saving, setSaving] = createSignal(false);
 
   onMount(() => {
     load();
-    const savedDensity = window.localStorage.getItem(STORAGE_KEYS.SETTINGS_DENSITY);
-    if (savedDensity === "detailed" || savedDensity === "compact") {
-      setDensity(savedDensity);
-    }
   });
-
-  const toggleDensity = () => {
-    const next = density() === "compact" ? "detailed" : "compact";
-    setDensity(next);
-    window.localStorage.setItem(STORAGE_KEYS.SETTINGS_DENSITY, next);
-  };
 
   const categories = createMemo(() => {
     const payload = data();
@@ -137,10 +123,7 @@ export function ConfigPage() {
             {/* Version and System Update Card */}
             <section class="panel settings-section-card version-settings-card">
               <div class="panel-header split">
-                <div>
-                  <div class="panel-title">Agent Runtime Version</div>
-                  <div class="panel-subtitle">Release channel, current version, and system updates.</div>
-                </div>
+                <div class="panel-title">Agent Runtime Version</div>
                 <div class="row-wrap">
                   <button
                     type="button"
@@ -172,10 +155,10 @@ export function ConfigPage() {
                     <span class="version-settings-val">
                       v{versionInfo()?.latest_version || "..."}
                       <Show when={versionInfo()?.has_update}>
-                        <span class="badge badge-warning" style={{ "margin-left": "8px" }}>Update Available</span>
+                        <span class="hint" style={{ "margin-left": "8px" }}>Update available</span>
                       </Show>
                       <Show when={versionInfo() && !versionInfo()?.has_update}>
-                        <span class="badge badge-success" style={{ "margin-left": "8px" }}>Up to date</span>
+                        <span class="hint" style={{ "margin-left": "8px" }}>Up to date</span>
                       </Show>
                     </span>
                   </div>
@@ -194,7 +177,7 @@ export function ConfigPage() {
                 <div class="settings-toolbar-search-wrap">
                   <SettingsResourceToolbar
                     searchValue={search()}
-                    searchPlaceholder="Search settings by key, name, or description…"
+                    searchPlaceholder="Search settings…"
                     onSearchInput={setSearch}
                   />
                 </div>
@@ -207,21 +190,6 @@ export function ConfigPage() {
                   >
                     <Code size={13} />
                     <span>{showKeys() ? "Hide Keys" : "Show Keys"}</span>
-                  </button>
-                  <button
-                    type="button"
-                    class={`btn btn-sm ${density() === "compact" ? "btn-secondary" : "btn-ghost"} settings-toolbar-action-btn`}
-                    onClick={toggleDensity}
-                    title={
-                      density() === "compact"
-                        ? "Switch to detailed view (shows descriptions)"
-                        : "Switch to compact view"
-                    }
-                  >
-                    <Show when={density() === "compact"} fallback={<Rows3 size={13} />}>
-                      <AlignJustify size={13} />
-                    </Show>
-                    <span>{density() === "compact" ? "Compact" : "Detailed"}</span>
                   </button>
                 </div>
               </div>
@@ -304,7 +272,6 @@ export function ConfigPage() {
                               info={info}
                               draft={drafts()[key]}
                               dirty={pendingChanges().some((change: PendingChange) => change.key === key)}
-                              density={density()}
                               showKey={showKeys()}
                               onChange={(value) => setDraft(key, value)}
                               onRestore={() => restoreDraft(key)}

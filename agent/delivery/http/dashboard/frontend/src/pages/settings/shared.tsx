@@ -351,7 +351,6 @@ export function SettingControl(props: {
 export function SettingsSection(props: {
   title: string;
   count?: number;
-  description?: JSX.Element;
   actions?: JSX.Element;
   class?: string;
   collapsible?: boolean;
@@ -367,9 +366,6 @@ export function SettingsSection(props: {
           <div class="settings-section-title">
             {props.title}
           </div>
-          <Show when={props.description}>
-            <div class="hint settings-section-desc">{props.description}</div>
-          </Show>
         </div>
         <Show when={props.actions}>
           <div class="row-wrap settings-section-actions">{props.actions}</div>
@@ -385,12 +381,10 @@ export function SettingRow(props: {
   info: SettingInfo;
   draft: unknown;
   dirty: boolean;
-  showDescription?: boolean;
   trimProviderPrefix?: boolean;
   trimToolPrefix?: boolean;
   actions?: JSX.Element;
   control?: JSX.Element;
-  density?: "compact" | "detailed";
   showKey?: boolean;
   onChange: (value: unknown) => void;
   onRestore: () => void;
@@ -404,20 +398,14 @@ export function SettingRow(props: {
 
   const tooltip = createMemo(() => {
     if (props.info.description) {
-      return `${label()}: ${props.info.description} (${props.settingKey})`;
+      return props.info.description;
     }
     return props.settingKey;
   });
 
-  const shouldShowDescription = createMemo(() => {
-    if (props.showDescription === false) return false;
-    if (props.density === "detailed") return Boolean(props.info.description);
-    return false;
-  });
-
   return (
     <div
-      class={`setting-card setting-row ${props.dirty ? "setting-dirty" : ""} ${props.density === "detailed" ? "setting-row--detailed" : "setting-row--compact"}`}
+      class={`setting-card setting-row ${props.dirty ? "setting-dirty" : ""} setting-row--compact`}
     >
       <div class="setting-card-accent" aria-hidden="true" />
       <div class="setting-card-main setting-row-main">
@@ -435,21 +423,21 @@ export function SettingRow(props: {
               </span>
             </Show>
             <Show when={props.info.restart_required}>
-              <span class="badge badge-warning setting-restart-badge" title={RESTART_REQUIRED_NOTICE}>
-                Restart
+              <span
+                class="setting-restart-indicator"
+                title={RESTART_REQUIRED_NOTICE}
+                aria-label={RESTART_REQUIRED_NOTICE}
+              >
+                <TriangleAlert size={12} />
               </span>
             </Show>
             <Show when={props.dirty}>
               <span class="setting-dirty-dot" title="Unsaved changes" />
-              <span class="badge badge-warning">Unsaved</span>
             </Show>
             <Show when={props.actions}>
               <div class="setting-inline-actions">{props.actions}</div>
             </Show>
           </div>
-          <Show when={shouldShowDescription() && props.info.description}>
-            <div class="setting-description">{props.info.description}</div>
-          </Show>
         </div>
         <div class="setting-control-panel setting-row-controls">
           <div class="setting-control-wrapper">
@@ -493,9 +481,6 @@ export function ChangesPreview(props: {
               <div class="change-card-head">
                 <div class="change-card-title">
                   <span class="setting-title">{settingLabel(change.key, info())}</span>
-                  <Show when={isRestart()}>
-                    <span class="badge badge-warning">Restart</span>
-                  </Show>
                 </div>
                 <div class="mono hint change-card-key">{change.key}</div>
               </div>
@@ -588,12 +573,14 @@ export function SettingsPendingBar(props: {
     <Show when={props.count > 0}>
       <div class="settings-pending-bar" role="status" aria-live="polite">
         <div class="settings-pending-bar-left">
-          <span class="settings-pending-badge">{props.count}</span>
           <span class="settings-pending-text">
             {props.count} unsaved change{props.count === 1 ? "" : "s"}
           </span>
           <Show when={props.restartRequired}>
-            <span class="badge badge-warning">Restart required</span>
+            <span class="settings-pending-restart" title={RESTART_REQUIRED_NOTICE}>
+              <TriangleAlert size={13} />
+              Restart required
+            </span>
           </Show>
         </div>
         <div class="settings-pending-actions">

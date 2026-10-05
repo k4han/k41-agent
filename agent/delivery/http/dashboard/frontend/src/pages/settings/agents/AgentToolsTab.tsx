@@ -214,9 +214,7 @@ export function AgentToolsTab(props: {
           <div>
             <div class="agent-config-eyebrow">Capabilities</div>
             <h3>Built-in Tools</h3>
-            <p class="hint">Enable bundled tools by category for this agent card.</p>
           </div>
-          <span class="badge badge-info">{`${props.form.tools.length} selected`}</span>
         </div>
         <div class="agent-config-section-body">
           <For
@@ -246,7 +244,7 @@ export function AgentToolsTab(props: {
                       />
                       <span>{formatToolCategory(group.category)}</span>
                     </label>
-                    <span class="badge">{`${checkedCount()}/${group.tools.length}`}</span>
+                    <span class="hint">{`${checkedCount()}/${group.tools.length}`}</span>
                   </div>
                   <div class="agent-config-option-grid">
                     <For each={group.tools}>
@@ -288,25 +286,28 @@ export function AgentToolsTab(props: {
                                 <button class="btn btn-sm" type="button" aria-expanded={Boolean(advancedTools()[tool] || hasLegacyOverride(tool))}
                                   onClick={() => setAdvancedTools({ ...advancedTools(), [tool]: !advancedTools()[tool] })}>
                                   Advanced credential overrides
-                                  <Show when={hasLegacyOverride(tool) && !advancedTools()[tool]}>
-                                    <span class="badge badge-info" title="This agent has legacy credential overrides that take precedence at runtime.">Override present</span>
-                                  </Show>
                                 </button>
                               </Show>
                               <div class="agent-config-tool-config-grid">
                                 <For each={schema().fields}>
                                   {(field) => {
                                     const value = () => fieldValue(props.form, tool, field);
+                                    const fieldHelp = () => [
+                                      field.description,
+                                      isWebCredential(tool, field) && !hasOverride(props.form, tool, field.name)
+                                        ? `Inherited source: ${inheritedSource(tool, field)}`
+                                        : "",
+                                    ].filter(Boolean).join("\n") || undefined;
                                     return (
                                       <Show when={isFieldVisible(tool, field) && (!isWebCredential(tool, field) || advancedTools()[tool] || hasOverride(props.form, tool, field.name))}>
                                         <div class="agent-config-tool-field">
-                                        <label class="agent-config-tool-field-label" for={`${tool}-${field.name}`}>
+                                        <label class="agent-config-tool-field-label" for={`${tool}-${field.name}`} title={fieldHelp()}>
                                           <span>{field.label}</span>
                                           <Show when={field.required}>
-                                            <span class="badge">Required</span>
+                                            <span class="setting-required" title="Required">*</span>
                                           </Show>
                                           <Show when={hasOverride(props.form, tool, field.name)}>
-                                            <span class="badge badge-info" title="This agent overrides the global value.">Override</span>
+                                            <span class="hint" title="This agent overrides the global value.">Override</span>
                                           </Show>
                                         </label>
                                         <Show
@@ -433,12 +434,6 @@ export function AgentToolsTab(props: {
                                             </button>
                                           </div>
                                         </Show>
-                                        <Show when={field.description}>
-                                          <div class="hint">{field.description}</div>
-                                        </Show>
-                                        <Show when={isWebCredential(tool, field) && !hasOverride(props.form, tool, field.name)}>
-                                          <div class="hint">Inherited source: {inheritedSource(tool, field)}</div>
-                                        </Show>
                                       </div>
                                     </Show>
                                   );
@@ -469,9 +464,7 @@ export function AgentToolsTab(props: {
             <div>
               <div class="agent-config-eyebrow">External context</div>
               <h3>MCP Servers</h3>
-              <p class="hint">Connect this agent to installed MCP server toolsets.</p>
             </div>
-            <span class="badge badge-info">{`${activeMcpCount()} selected`}</span>
           </div>
           <div class="agent-config-section-body">
             <div class="agent-config-option-grid">
@@ -504,9 +497,7 @@ export function AgentToolsTab(props: {
           <div>
             <div class="agent-config-eyebrow">Delegation</div>
             <h3>Sub-agents</h3>
-            <p class="hint">Allow this agent to route work to other agent cards.</p>
           </div>
-          <span class="badge badge-info">{`${props.form.sub_agents.length} selected`}</span>
         </div>
         <div class="agent-config-section-body">
           <Show
@@ -542,9 +533,7 @@ export function AgentToolsTab(props: {
           <div>
             <div class="agent-config-eyebrow">Plan review</div>
             <h3>Approval Targets</h3>
-            <p class="hint">Limit which agent cards can receive approved plans from this agent.</p>
           </div>
-          <span class="badge badge-info">{`${props.form.plan_approval_targets.length} selected`}</span>
         </div>
         <div class="agent-config-section-body">
           <Show

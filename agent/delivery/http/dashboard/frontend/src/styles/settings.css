@@ -468,11 +468,6 @@
   line-height: 1;
 }
 
-.settings-section-desc {
-  font-size: 12px;
-  line-height: 1.45;
-}
-
 .settings-section-header-btn {
   display: flex;
   align-items: flex-start;
@@ -670,12 +665,6 @@
   line-height: 1;
 }
 
-.settings-section-desc {
-  font-size: 11.5px;
-  line-height: 1.4;
-  color: var(--muted-2);
-}
-
 .settings-section-header-btn {
   display: flex;
   align-items: center;
@@ -794,11 +783,6 @@
   padding: 7px 14px 7px 16px;
 }
 
-.setting-row--detailed .setting-row-main {
-  min-height: 48px;
-  padding: 8px 14px 9px 16px;
-}
-
 .setting-copy,
 .setting-row-copy {
   min-width: 0;
@@ -843,11 +827,11 @@
   margin-left: 2px;
 }
 
-.setting-restart-badge {
-  font-size: 9.5px;
-  min-height: 16px;
-  padding: 0 5px;
-  font-weight: 700;
+.setting-restart-indicator {
+  display: inline-flex;
+  align-items: center;
+  color: var(--warning);
+  line-height: 1;
 }
 
 .setting-dirty-dot {
@@ -863,14 +847,6 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-}
-
-.setting-description {
-  max-width: 720px;
-  color: var(--muted);
-  font-size: 11.5px;
-  line-height: 1.4;
-  margin-top: 1px;
 }
 
 .setting-control-panel,
@@ -991,25 +967,19 @@
   min-width: 0;
 }
 
-.settings-pending-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 22px;
-  height: 22px;
-  padding: 0 7px;
-  border-radius: 999px;
-  background: var(--warning);
-  color: white;
-  font-size: 12px;
-  font-weight: 750;
-  line-height: 1;
-}
-
 .settings-pending-text {
   font-size: 13px;
   font-weight: 650;
   color: var(--fg);
+  white-space: nowrap;
+}
+
+.settings-pending-restart {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--warning);
+  font-size: 12px;
   white-space: nowrap;
 }
 

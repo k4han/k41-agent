@@ -31,31 +31,26 @@ import {
 const DOMAIN_EVALUATORS = [
   {
     name: "Agent Routing",
-    description: "Fast-path selection of specialist sub-agents based on calibrated choice probabilities.",
     status: "Active (Production)",
     icon: Route,
   },
   {
     name: "Channel Inbound Triage",
-    description: "Evaluates inbound chat messages (Telegram, Discord, Zalo) for spam and intent classification.",
     status: "Ready",
     icon: Workflow,
   },
   {
     name: "Tool Pre-Filtering",
-    description: "Categorizes user requests to prune candidate tool schemas, reducing LLM token consumption.",
     status: "Ready",
     icon: Wrench,
   },
   {
     name: "Research Loop Termination",
-    description: "Determines whether research evidence is sufficient to terminate search iterations.",
     status: "Ready",
     icon: Layers,
   },
   {
     name: "Safety & Guardrails",
-    description: "Assesses risk levels and prompt injection likelihood for shell commands and destructive ops.",
     status: "Ready",
     icon: ShieldCheck,
   },
@@ -174,7 +169,7 @@ export function DecisionsPage() {
                 <div class="settings-toolbar-search-wrap">
                   <SettingsResourceToolbar
                     searchValue={search()}
-                    searchPlaceholder="Search decision settings by key, label, or description…"
+                    searchPlaceholder="Search decision settings…"
                     onSearchInput={setSearch}
                   />
                 </div>
@@ -201,7 +196,6 @@ export function DecisionsPage() {
                 <Show when={routingSettings().length > 0}>
                   <SettingsSection
                     title="Agent Routing Strategy"
-                    description="Configure how user requests are analyzed and routed to candidate agents."
                   >
                     <div class="settings-list settings-table">
                       <For each={routingSettings() as [string, SettingInfo][]}>
@@ -223,7 +217,6 @@ export function DecisionsPage() {
                 {/* Section 3: Extensible Domain Evaluators */}
                 <SettingsSection
                   title="Multi-Domain Decision Evaluators"
-                  description="Built-in domain evaluators ready for extensible decision-making across the platform."
                 >
                   <div
                     style={{
@@ -275,9 +268,6 @@ export function DecisionsPage() {
                                   {evaluator.status}
                                 </span>
                               </div>
-                              <span class="hint" style={{ "font-size": "11px", "line-height": "1.4" }}>
-                                {evaluator.description}
-                              </span>
                             </div>
                           </div>
                         );

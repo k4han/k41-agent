@@ -135,33 +135,6 @@
   }
 }
 
-.backend-card-body {
-  display: grid;
-  gap: 10px;
-}
-
-.backend-card-meta {
-  display: grid;
-  gap: 6px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.backend-card-meta-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
-.backend-card-meta-label {
-  color: var(--muted-2);
-  font-size: 11px;
-  font-weight: 650;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
 .backend-card-empty-hint {
   display: flex;
   align-items: flex-start;
@@ -231,11 +204,6 @@
   margin: 0;
 }
 
-.backend-config-subtitle {
-  margin: 3px 0 0;
-  font-size: 12.5px;
-}
-
 .backend-config-header-actions {
   display: flex;
   align-items: center;
@@ -276,11 +244,6 @@
   gap: 8px;
   font-size: 13.5px;
   font-weight: 700;
-}
-
-.backend-section-subtitle {
-  margin-top: 2px;
-  font-size: 11.5px;
 }
 
 .backend-section-body {

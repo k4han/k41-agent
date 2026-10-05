@@ -465,7 +465,6 @@ export function GitHubSettingsPage() {
   return (
     <SettingsLayout
       title="GitHub Settings"
-      description="GitHub App identity is managed by server environment (GITHUB_APP_*). Configure triggers here, connect repos via Install App."
       breadcrumbSegments={[
         { label: "Connections", href: "/settings/connections" },
         { label: "GitHub" },

@@ -99,7 +99,6 @@ type AgentCardsPayload = {
 type DrawerSection = {
   id: string;
   title: string;
-  subtitle?: string;
   icon?: () => JSX.Element;
   fields: string[];
   defaultCollapsed?: boolean;
@@ -114,8 +113,6 @@ type DrawerSection = {
 type ChannelDefinition = {
   name: string;
   title: string;
-  summary: string;
-  tagline: string;
   sections: DrawerSection[];
 };
 
@@ -123,25 +120,20 @@ const CHANNEL_DEFS: ChannelDefinition[] = [
   {
     name: "telegram",
     title: "Telegram",
-    summary: "Chat with your agents from Telegram private chats and groups.",
-    tagline: "Bot platform",
     sections: [
       {
         id: "authentication",
         title: "Authentication",
-        subtitle: "Bot credentials from @BotFather",
         fields: ["bot_token"],
       },
       {
         id: "agents",
         title: "Agents",
-        subtitle: "Default agent and command routing",
         fields: ["default_agent", "code_agent", "research_agent"],
       },
       {
         id: "webhook",
         title: "Update Mode",
-        subtitle: "Polling or webhook delivery",
         icon: () => <Webhook size={14} />,
         fields: ["update_mode", "webhook_url", "webhook_secret"],
         helper: (valueFor) => {
@@ -184,19 +176,15 @@ const CHANNEL_DEFS: ChannelDefinition[] = [
   {
     name: "discord",
     title: "Discord",
-    summary: "Run agents inside Discord servers and DMs.",
-    tagline: "Bot platform",
     sections: [
       {
         id: "authentication",
         title: "Authentication",
-        subtitle: "Bot token from Discord Developer Portal",
         fields: ["bot_token"],
       },
       {
         id: "agents",
         title: "Agents",
-        subtitle: "Default agent and command routing",
         fields: ["default_agent", "code_agent", "research_agent"],
       },
     ],
@@ -209,13 +197,12 @@ function channelDefinitionFromCatalog(channel: ChannelCatalogItem): ChannelDefin
   const settings = channel.settings ?? [];
   const sections = channel.sections?.length
     ? channel.sections
-    : [{ id: "general", title: "Settings", subtitle: "" }];
+    : [{ id: "general", title: "Settings" }];
 
   const drawerSections = sections
     .map((section): DrawerSection => ({
       id: section.id,
       title: section.title,
-      subtitle: section.subtitle,
       fields: settings
         .filter(
           (field) =>
@@ -247,8 +234,6 @@ function channelDefinitionFromCatalog(channel: ChannelCatalogItem): ChannelDefin
   return {
     name: channel.name,
     title: channel.title || titleOf(channel.name),
-    summary: channel.summary || `Configure ${channel.title || channel.name}.`,
-    tagline: channel.tagline || "Channel",
     sections: drawerSections,
   };
 }
@@ -627,7 +612,6 @@ export function ChannelsPage() {
                               runtime={runtimeFor(channel.name)}
                               enabled={Boolean(draftValueFor(channel.name, ENABLED_FIELD))}
                               configured={isChannelConfigured(channel.name)}
-                              pendingCount={(pendingByChannel()[channel.name] || []).length}
                               busy={busy()[channel.name] || null}
                               testResult={testResults()[channel.name] || null}
                               paired={countPairedFor(payload, channel.name)}
@@ -674,7 +658,6 @@ export function ChannelsPage() {
         return (
           <SettingsLayout
             title={def() ? `${def()!.title} Settings` : "Channel Settings"}
-            description={def()?.summary}
             breadcrumbSegments={[
               { label: "Channels", href: "/settings/channels" },
               { label: def()?.title || name() },
@@ -742,7 +725,6 @@ export function ChannelsPage() {
                           </div>
                           <div>
                             <h2 class="channel-config-title">{def()!.title}</h2>
-                            <p class="hint channel-config-subtitle">{def()!.tagline} &mdash; {def()!.summary}</p>
                           </div>
                         </div>
                         <div class="row-wrap channel-config-header-actions">
@@ -997,7 +979,6 @@ function ChannelCard(props: {
   runtime: ChannelRuntime;
   enabled: boolean;
   configured: boolean;
-  pendingCount: number;
   busy: string | null;
   testResult: TestOutcome | null;
   paired: number;
@@ -1063,12 +1044,6 @@ function ChannelCard(props: {
           <div class="channel-card-meta-row">
             <span class="channel-card-meta-label">Paired</span>
             <span class="mono">{props.paired}</span>
-            <span class="channel-card-meta-label" style={{ "margin-left": "auto" }}>
-              Pending
-            </span>
-            <span class={`mono ${props.pendingCount ? "" : "muted"}`}>
-              {props.pendingCount}
-            </span>
           </div>
         </div>
       </div>
@@ -1154,11 +1129,6 @@ function ChannelCard(props: {
           >
             <SettingsIcon size={13} />
             Configure
-            <Show when={props.pendingCount > 0}>
-              <span class="badge badge-warning" style={{ "margin-left": "4px" }}>
-                {props.pendingCount}
-              </span>
-            </Show>
           </button>
         </div>
       </footer>
@@ -1193,11 +1163,6 @@ function ChannelSectionGroup(props: {
       .filter((entry): entry is { key: string; info: SettingInfo; suffix: string } => entry !== null);
   });
 
-  const dirtyCount = createMemo(() => {
-    const keys = new Set(fieldEntries().map((entry) => entry.key));
-    return props.pending.filter((change) => keys.has(change.key)).length;
-  });
-
   return (
     <section class="channel-section-group">
       <div class="channel-section-header">
@@ -1206,13 +1171,7 @@ function ChannelSectionGroup(props: {
           <div>
             <div class="channel-section-title">
               {props.section.title}
-              <Show when={dirtyCount() > 0}>
-                <span class="badge badge-warning">{dirtyCount()}</span>
-              </Show>
             </div>
-            <Show when={props.section.subtitle}>
-              <div class="hint channel-section-subtitle">{props.section.subtitle}</div>
-            </Show>
           </div>
         </div>
       </div>

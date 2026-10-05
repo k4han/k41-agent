@@ -35,7 +35,6 @@ type BackendStatus = "enabled" | "disabled" | "always-on";
 type DrawerSection = {
   id: string;
   title: string;
-  subtitle?: string;
   fields: string[];
   defaultCollapsed?: boolean;
 };
@@ -43,8 +42,6 @@ type DrawerSection = {
 type BackendDefinition = {
   name: string;
   title: string;
-  summary: string;
-  tagline: string;
   sections: DrawerSection[];
   toggleable: boolean;
   configuredPredicate?: (
@@ -59,20 +56,16 @@ const BACKEND_DEFS_BY_NAME: Record<string, BackendDefinition> = {
   local: {
     name: "local",
     title: "Local",
-    summary: "Workspaces stored on the host machine under a configurable root.",
-    tagline: "Filesystem backend",
     toggleable: false,
     sections: [
       {
         id: "workspace",
         title: "Workspace Root",
-        subtitle: "Default directory used for local workspaces",
         fields: ["root"],
       },
       {
         id: "github",
         title: "GitHub Workspace Root",
-        subtitle: "Repository checkouts managed by GitHub automation",
         fields: ["github.root"],
       },
     ],
@@ -80,8 +73,6 @@ const BACKEND_DEFS_BY_NAME: Record<string, BackendDefinition> = {
   daytona: {
     name: "daytona",
     title: "Daytona",
-    summary: "Cloud sandbox workspaces powered by the Daytona platform.",
-    tagline: "Sandbox provider",
     toggleable: true,
     configuredPredicate: (settings, drafts) => {
       const key = "workspace.daytona.api_key";
@@ -92,20 +83,17 @@ const BACKEND_DEFS_BY_NAME: Record<string, BackendDefinition> = {
       {
         id: "authentication",
         title: "Authentication",
-        subtitle: "Daytona API credentials",
         fields: [ENABLED_SUFFIX, "api_key"],
       },
       {
         id: "defaults",
         title: "Defaults",
-        subtitle: "Sandbox defaults for new workspaces",
         fields: ["default_root"],
         defaultCollapsed: true,
       },
       {
         id: "sandbox",
         title: "Sandbox Config",
-        subtitle: "Resources, image, and runtime for new sandboxes",
         fields: [
           "target",
           "image",
@@ -122,7 +110,6 @@ const BACKEND_DEFS_BY_NAME: Record<string, BackendDefinition> = {
       {
         id: "lifecycle",
         title: "Lifecycle",
-        subtitle: "Auto-stop, archive, and timeout policy",
         fields: [
           "auto_stop_minutes",
           "auto_archive_days",
@@ -140,8 +127,6 @@ const BACKEND_DEFS_BY_NAME: Record<string, BackendDefinition> = {
   modal: {
     name: "modal",
     title: "Modal",
-    summary: "Serverless sandbox workspaces powered by Modal sandboxes.",
-    tagline: "Sandbox provider",
     toggleable: true,
     configuredPredicate: (settings, drafts) => {
       const id = drafts["workspace.modal.token_id"] ?? settings["workspace.modal.token_id"]?.value;
@@ -155,20 +140,17 @@ const BACKEND_DEFS_BY_NAME: Record<string, BackendDefinition> = {
       {
         id: "authentication",
         title: "Authentication",
-        subtitle: "Modal token credentials (leave empty to use SDK defaults)",
         fields: [ENABLED_SUFFIX, "token_id", "token_secret"],
       },
       {
         id: "defaults",
         title: "Defaults",
-        subtitle: "Sandbox defaults for new workspaces",
         fields: ["app_name", "default_root", "image"],
         defaultCollapsed: true,
       },
       {
         id: "lifecycle",
         title: "Lifecycle",
-        subtitle: "Sandbox and idle timeout policy",
         fields: ["sandbox_timeout_seconds", "idle_timeout_seconds"],
         defaultCollapsed: true,
       },
@@ -410,7 +392,6 @@ export function BackendsPage() {
                             backend={backend}
                             status={backendStatus(backend)}
                             configured={isBackendConfigured(backend)}
-                            pendingCount={(pendingByBackend()[backend.name] || []).length}
                             busy={busy()[backend.name] || null}
                             onToggle={(value) => void toggleEnabled(backend, value)}
                             onConfigure={() => navigate(`/settings/providers/workspace/${backend.name}`)}
@@ -438,7 +419,6 @@ export function BackendsPage() {
         return (
           <SettingsLayout
             title={def() ? `${def()!.title} Settings` : "Environment Settings"}
-            description={def()?.summary}
             breadcrumbSegments={[
               { label: "Providers", href: "/settings/providers?tab=workspace" },
               { label: def()?.title || name() },
@@ -501,16 +481,13 @@ export function BackendsPage() {
                           </div>
                           <div>
                             <h2 class="backend-config-title">{def()!.title}</h2>
-                            <p class="hint backend-config-subtitle">{def()!.tagline} &mdash; {def()!.summary}</p>
                           </div>
                         </div>
                         <div class="row-wrap backend-config-header-actions">
                           <Show
                             when={def()!.toggleable}
                             fallback={
-                              <span class="badge badge-success">
-                                Always available
-                              </span>
+                              <span class="hint">Always available</span>
                             }
                           >
                             <label class="backend-toggle-cell">
@@ -567,7 +544,6 @@ function BackendCard(props: {
   active?: boolean;
   status: BackendStatus;
   configured: boolean;
-  pendingCount: number;
   busy: string | null;
   onToggle: (value: boolean) => void;
   onConfigure: () => void;
@@ -581,13 +557,6 @@ function BackendCard(props: {
       case "always-on":
         return "Always on";
     }
-  };
-
-  const enableHint = () => {
-    if (props.backend.toggleable) {
-      return props.status === "enabled" ? "Enabled" : "Disabled";
-    }
-    return "Always available";
   };
 
   return (
@@ -617,41 +586,23 @@ function BackendCard(props: {
         </span>
       </header>
 
-      <div class="backend-card-body">
-        <Show
-          when={
-            !props.configured &&
-            props.backend.toggleable &&
-            props.status === "disabled"
-          }
-        >
-          <div class="backend-card-empty-hint">
-            <TriangleAlert size={14} />
-            <div>
-              Add credentials in <strong>Configure</strong> to enable this backend.
-            </div>
-          </div>
-        </Show>
-
-        <div class="backend-card-meta">
-          <div class="backend-card-meta-row">
-            <span class="backend-card-meta-label">Pending</span>
-            <span class={`mono ${props.pendingCount ? "" : "muted"}`}>
-              {props.pendingCount}
-            </span>
+      <Show
+        when={
+          !props.configured &&
+          props.backend.toggleable &&
+          props.status === "disabled"
+        }
+      >
+        <div class="backend-card-empty-hint">
+          <TriangleAlert size={14} />
+          <div>
+            Add credentials in <strong>Configure</strong> to enable this backend.
           </div>
         </div>
-      </div>
+      </Show>
 
       <footer class="backend-card-footer">
-        <Show
-          when={props.backend.toggleable}
-          fallback={
-            <span class="backend-toggle-cell">
-              <span>{enableHint()}</span>
-            </span>
-          }
-        >
+        <Show when={props.backend.toggleable}>
           <label class="backend-toggle-cell" onClick={(e) => e.stopPropagation()}>
             <button
               class={`toggle-control ${props.status === "enabled" ? "active" : ""}`}
@@ -666,7 +617,6 @@ function BackendCard(props: {
               </span>
               <span class="toggle-label">Enabled</span>
             </button>
-            <span>{enableHint()}</span>
           </label>
         </Show>
 
@@ -681,11 +631,6 @@ function BackendCard(props: {
           >
             <SettingsIcon size={13} />
             Configure
-            <Show when={props.pendingCount > 0}>
-              <span class="badge badge-warning" style={{ "margin-left": "4px" }}>
-                {props.pendingCount}
-              </span>
-            </Show>
           </button>
         </div>
       </footer>
@@ -712,24 +657,13 @@ function BackendSectionGroup(props: {
       .filter((entry): entry is { key: string; info: SettingInfo } => entry !== null);
   });
 
-  const dirtyCount = createMemo(() => {
-    const keys = new Set(fieldEntries().map((entry) => entry.key));
-    return props.pending.filter((change) => keys.has(change.key)).length;
-  });
-
   return (
     <section class="backend-section-group">
       <div class="backend-section-header">
         <div>
           <div class="backend-section-title">
             {props.section.title}
-            <Show when={dirtyCount() > 0}>
-              <span class="badge badge-warning">{dirtyCount()}</span>
-            </Show>
           </div>
-          <Show when={props.section.subtitle}>
-            <div class="hint backend-section-subtitle">{props.section.subtitle}</div>
-          </Show>
         </div>
       </div>
       <div class="backend-section-body">

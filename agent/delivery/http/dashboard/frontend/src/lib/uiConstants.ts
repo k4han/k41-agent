@@ -6,7 +6,6 @@ export const STORAGE_KEYS = {
   THEME: "k41-dashboard-theme",
   HOME_CACHE: "k41-dashboard-home-cache",
   ONBOARDING_COLLAPSED: "k41-dashboard-onboarding-collapsed",
-  SETTINGS_DENSITY: "k41-dashboard-settings-density",
 } as const;
 
 export const HOME_CACHE_MAX_AGE_MS = 10 * 60_000;
