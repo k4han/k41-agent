@@ -116,6 +116,8 @@ def _request_to_run_params(request: ChatRequest) -> dict[str, object]:
         "model": request.model,
         "resume": request.resume,
     }
+    if request.reasoning_effort is not None:
+        params["reasoning_effort"] = request.reasoning_effort
     if request.resume_payload is not None:
         params["resume_payload"] = request.resume_payload.model_dump(exclude_none=True)
     if request.checkpoint_id:
@@ -248,6 +250,7 @@ async def chat_events_edit(request: EditChatRequest):
         agent_name=request.agent_name or "default",
         provider=request.provider,
         model=request.model,
+        reasoning_effort=request.reasoning_effort,
     )
 
     params["message_index"] = request.message_index

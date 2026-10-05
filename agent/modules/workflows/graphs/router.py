@@ -728,6 +728,7 @@ def _build_target_context(runtime_context: WorkflowContext, target_agent: AgentC
         allowed_skill_names=runtime_context.get_allowed_skill_names(),
         provider=runtime_context.get_provider(),
         model=runtime_context.get_model(),
+        reasoning_effort=runtime_context.reasoning_effort,
     )
 
 

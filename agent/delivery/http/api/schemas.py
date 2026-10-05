@@ -30,6 +30,7 @@ class ChatRequest(BaseModel):
     agent_name: Optional[str] = Field(default=None, description="Agent card name to use. Defaults to 'default'.")
     provider: Optional[str] = Field(default=None, description="LLM provider name override.")
     model: Optional[str] = Field(default=None, description="LLM model name override.")
+    reasoning_effort: Literal["low", "medium", "high"] | None = Field(default=None, description="Reasoning effort override for supported models.")
     resume_payload: Optional[HumanResumePayload] = Field(default=None, description="Payload to resume after a human-in-the-loop pause.")
     attachments: list[ChatAttachment] = Field(default_factory=list, description="File or image attachments to include with the message.")
     resume: bool = Field(default=False, description="Whether this message is resuming a paused conversation.")
@@ -126,3 +127,4 @@ class EditChatRequest(BaseModel):
     agent_name: Optional[str] = Field(default=None, description="Agent card name. Defaults to 'default'.")
     provider: Optional[str] = Field(default=None, description="LLM provider name override.")
     model: Optional[str] = Field(default=None, description="LLM model name override.")
+    reasoning_effort: Literal["low", "medium", "high"] | None = Field(default=None, description="Reasoning effort override for supported models.")

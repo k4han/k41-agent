@@ -139,9 +139,11 @@ def isolated_registry(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("reasoning_effort", [None, "low", "medium", "high"])
 async def test_router_node_routes_to_selected_sub_agent(
     monkeypatch: pytest.MonkeyPatch,
     isolated_registry,
+    reasoning_effort,
 ):
     captured: dict = {}
     target_graph = _FakeGraph("planned-result")
@@ -202,6 +204,7 @@ async def test_router_node_routes_to_selected_sub_agent(
         context=_runtime_context(
             max_context_tokens=9999,
             allowed_tool_names=["call_agent"],
+            reasoning_effort=reasoning_effort,
         )
     )
 
@@ -221,6 +224,7 @@ async def test_router_node_routes_to_selected_sub_agent(
     assert target_context.allowed_tool_names == ["websearch", "webfetch"]
     assert target_context.provider is None
     assert target_context.model is None
+    assert target_context.reasoning_effort == reasoning_effort
     assert captured["provider"] == "router-provider"
     assert captured["model"] == "router-model"
 

@@ -8,6 +8,7 @@ from langchain_core.language_models import BaseChatModel
 from agent.modules.providers.anthropic.factory import AnthropicFactory
 from agent.modules.providers.google.factory import GoogleFactory
 from agent.modules.providers.models import ProviderModelCatalog, ResolvedChatModel
+from agent.modules.providers.models import get_reasoning_effort_kwargs
 from agent.modules.providers.openai_compatible.factory import OpenAICompatibleFactory
 from agent.modules.providers.provider import ProviderConfig, ProviderType
 from agent.modules.providers.repository import ConfigProviderRepository
@@ -135,6 +136,7 @@ __all__ = [
     "list_providers",
     "resolve_chat_model",
     "resolve_chat_model_info",
+    "get_reasoning_effort_kwargs",
     "resolve_suggested_default_model",
     "verify_provider_connection",
     "ensure_catalog_available",

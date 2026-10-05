@@ -72,6 +72,7 @@ def build_run_params(
     agent_name: str = "default",
     provider: str | None = None,
     model: str | None = None,
+    reasoning_effort: str | None = None,
     allowed_skill_names: list[str] | None = None,
     attachments: list[Any] | None = None,
     resume: bool = False,
@@ -118,6 +119,8 @@ def build_run_params(
             "channel_id": str(channel_id or ""),
         },
     }
+    if reasoning_effort is not None:
+        params["reasoning_effort"] = reasoning_effort
     if checkpoint_id:
         params["checkpoint_id"] = checkpoint_id
     if resume_payload is not None:
@@ -1020,6 +1023,7 @@ async def run_agent(
     allowed_skill_names: list[str] | None = None,
     provider: str | None = None,
     model: str | None = None,
+    reasoning_effort: str | None = None,
     attachments: list[Any] | None = None,
     usage_context: dict[str, Any] | None = None,
     resume: bool = False,
@@ -1100,6 +1104,7 @@ async def run_agent(
         allowed_skill_names=allowed_skill_names,
         provider=provider,
         model=model,
+        reasoning_effort=reasoning_effort,
     )
     if normalized_resume_payload is not None and normalized_resume_payload.action == "approve":
         await _update_thread_agent(thread_id, agent_name)
@@ -1160,6 +1165,7 @@ async def run_agent_stream(
     allowed_skill_names: list[str] | None = None,
     provider: str | None = None,
     model: str | None = None,
+    reasoning_effort: str | None = None,
     attachments: list[Any] | None = None,
     usage_context: dict[str, Any] | None = None,
     resume: bool = False,
@@ -1247,6 +1253,7 @@ async def run_agent_stream(
         allowed_skill_names=allowed_skill_names,
         provider=provider,
         model=model,
+        reasoning_effort=reasoning_effort,
     )
     conversation_title_task: asyncio.Task[dict[str, Any] | None] | None = None
     if normalized_resume_payload is not None and normalized_resume_payload.action == "approve":
@@ -1469,6 +1476,7 @@ async def run_agent_edit_stream(
     allowed_skill_names: list[str] | None = None,
     provider: str | None = None,
     model: str | None = None,
+    reasoning_effort: str | None = None,
     usage_context: dict[str, Any] | None = None,
     resume: bool = False,
     emit_thinking: bool = False,
@@ -1524,6 +1532,7 @@ async def run_agent_edit_stream(
         allowed_skill_names=allowed_skill_names,
         provider=provider,
         model=model,
+        reasoning_effort=reasoning_effort,
     )
 
     seen_ids: set[str] = set()
@@ -1667,6 +1676,7 @@ async def run_agent_full(
     allowed_skill_names: list[str] | None = None,
     provider: str | None = None,
     model: str | None = None,
+    reasoning_effort: str | None = None,
     attachments: list[Any] | None = None,
     usage_context: dict[str, Any] | None = None,
     resume: bool = False,
@@ -1707,6 +1717,7 @@ async def run_agent_full(
         allowed_skill_names=allowed_skill_names,
         provider=provider,
         model=model,
+        reasoning_effort=reasoning_effort,
         attachments=attachments,
         usage_context=usage_context,
         resume=resume,

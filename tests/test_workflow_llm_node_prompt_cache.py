@@ -17,7 +17,8 @@ class _FakeChatModel:
     def __init__(self, captured: dict):
         self._captured = captured
 
-    def bind_tools(self, tools):
+    def bind_tools(self, tools, **kwargs):
+        self._captured["model_kwargs"] = kwargs
         return self
 
     async def ainvoke(self, messages, config=None):
@@ -94,7 +95,7 @@ def cached_llm_node(monkeypatch):
         _fake_skills_catalog,
     )
 
-    async def _run(*, agent_name: str = "cache-agent", thread_id: str = "thread-1", messages=None):
+    async def _run(*, agent_name: str = "cache-agent", thread_id: str = "thread-1", messages=None, model=None, reasoning_effort=None):
         return await llm_node_module.llm_node(
             {"messages": messages if messages is not None else [HumanMessage(content="hi")]},
             {"configurable": {"thread_id": thread_id}},
@@ -104,11 +105,27 @@ def cached_llm_node(monkeypatch):
                     working_dir="D:/repo",
                     max_context_tokens=50000,
                     allowed_tool_names=["skill", "read"],
+                    model=model,
+                    reasoning_effort=reasoning_effort,
                 )
             ),
         )
 
     return SimpleNamespace(run=_run, calls=calls, captured=captured)
+
+
+@pytest.mark.asyncio
+async def test_effort_changes_apply_per_turn_without_leaking_to_other_models(cached_llm_node):
+    await cached_llm_node.run(model="gpt-5", reasoning_effort="low")
+    assert cached_llm_node.captured["model_kwargs"] == {"reasoning_effort": "low"}
+    await cached_llm_node.run(model="gpt-5", reasoning_effort="high")
+    assert cached_llm_node.captured["model_kwargs"] == {"reasoning_effort": "high"}
+    await cached_llm_node.run(model="gpt-6.1-sol", reasoning_effort="high")
+    assert cached_llm_node.captured["model_kwargs"] == {"reasoning": {"effort": "high"}}
+    await cached_llm_node.run(model="gpt-4.1", reasoning_effort="high")
+    assert cached_llm_node.captured["model_kwargs"] == {}
+    await cached_llm_node.run(model="gpt-5")
+    assert cached_llm_node.captured["model_kwargs"] == {}
 
 
 @pytest.mark.asyncio

@@ -2,6 +2,8 @@ import importlib
 import json
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.requests import Request
@@ -16,6 +18,18 @@ from agent.modules.tools.builtin.utility.plan_mode import PlanModeResumePayload
 
 
 router_module = importlib.import_module("agent.delivery.http.api.router")
+
+
+@pytest.mark.parametrize("effort", ["low", "medium", "high"])
+def test_chat_request_passes_reasoning_effort_to_run_params(effort):
+    request = ChatRequest(message="hi", reasoning_effort=effort)
+    params = router_module._request_to_run_params(request)
+    assert params["reasoning_effort"] == effort
+
+
+def test_chat_request_rejects_invalid_reasoning_effort():
+    with pytest.raises(ValidationError):
+        ChatRequest(message="hi", reasoning_effort="invalid")
 
 
 def _workspace_payload(path: str | Path) -> dict:

@@ -31,9 +31,11 @@
 .context-window-popover {
   position: absolute;
   bottom: calc(100% + 12px);
-  right: 50%;
-  transform: translateX(50%) translateY(8px);
+  /* Align with the 40px send button across the 8px toolbar gap. */
+  right: -48px;
+  transform: translateY(8px);
   width: 290px;
+  max-width: calc(100vw - 32px);
   background: var(--surface);
   color: var(--fg);
   border: 1px solid var(--border);
@@ -63,27 +65,12 @@
   opacity: 1;
   pointer-events: auto;
   visibility: visible;
-  transform: translateX(50%) translateY(0);
+  transform: translateY(0);
 }
 
 @media (max-width: 640px) {
   .context-window-popover {
-    left: -96px;
-    right: auto;
-    transform: translateY(8px);
-    max-width: calc(100vw - 32px);
     width: 280px;
-  }
-
-  .context-window-popover::after {
-    left: 110px;
-    right: auto;
-    transform: none;
-  }
-
-  .context-window-wrapper:hover .context-window-popover,
-  .context-window-wrapper.is-open .context-window-popover {
-    transform: translateY(0);
   }
 
   .cw-compact-btn {
@@ -99,8 +86,7 @@
   content: '';
   position: absolute;
   top: 100%;
-  right: 50%;
-  transform: translateX(50%);
+  right: 62px;
   border-width: 6px;
   border-style: solid;
   border-color: var(--surface) transparent transparent transparent;

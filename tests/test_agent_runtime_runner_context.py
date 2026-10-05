@@ -298,12 +298,14 @@ async def test_run_agent_passes_model_override_to_context(monkeypatch):
             agent_name="default",
             provider="openai-main",
             model="direct-model",
+            reasoning_effort="high",
         )
     ]
 
     assert chunks == ["done"]
     assert captured["kwargs"]["context"]["provider"] == "openai-main"
     assert captured["kwargs"]["context"]["model"] == "direct-model"
+    assert captured["kwargs"]["context"]["reasoning_effort"] == "high"
 
 
 @pytest.mark.asyncio

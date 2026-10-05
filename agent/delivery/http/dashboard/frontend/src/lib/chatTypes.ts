@@ -28,6 +28,8 @@ export type PendingAttachment = ChatAttachmentPayload & {
 
 // ── Chat payload ──
 
+export type ReasoningEffort = "low" | "medium" | "high";
+
 export type ChatPayload = {
   message: string;
   user_id: string;
@@ -35,6 +37,7 @@ export type ChatPayload = {
   workspace?: WorkspaceRef | WorkspaceBinding;
   provider?: string;
   model?: string;
+  reasoning_effort?: ReasoningEffort;
   thread_id?: string;
   new_thread?: boolean;
   checkpoint_id?: string;

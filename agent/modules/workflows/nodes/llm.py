@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from langchain_core.messages import BaseMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 
-from agent.modules.providers import get_resolved_chat_model
+from agent.modules.providers import get_reasoning_effort_kwargs, get_resolved_chat_model
 from agent.modules.usage import with_usage_tracking
 from agent.modules.prompt_variables import get_runtime_prompt_variable_values
 from agent.modules.workflows.message_history import normalize_messages_for_chat_model
@@ -102,7 +102,10 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
     messages: list[BaseMessage] = normalize_messages_for_chat_model([SystemMessage(content=system_prompt), *history])
 
     resolved = get_resolved_chat_model(provider_name=provider, model=model)
-    llm = resolved.model.bind_tools(tools)
+    model_kwargs = get_reasoning_effort_kwargs(
+        resolved.provider_type, resolved.model_name, ctx.reasoning_effort,
+    )
+    llm = resolved.model.bind_tools(tools, **model_kwargs)
     response = await llm.ainvoke(
         messages,
         config=with_usage_tracking(

@@ -67,6 +67,7 @@ import { GENERATE_IMAGE_TOOL_NAME } from "@/lib/generatedImages";
 import {
   type ChatAttachmentPayload,
   type ChatPayload,
+  type ReasoningEffort,
   type DefaultWorkspacePayload,
   type ChatResumePayload,
   type WorkspaceResolvePayload,
@@ -185,6 +186,7 @@ export function ChatPage() {
   const [agentName, setAgentName] = createSignal("");
   const [provider, setProvider] = createSignal("default");
   const [model, setModel] = createSignal("");
+  const [reasoningEffort, setReasoningEffort] = createSignal<ReasoningEffort>("medium");
   const [workingDir, setWorkingDir] = createSignal("");
   const [workspaceRef, setWorkspaceRef] = createSignal<WorkspaceRef | null>(null);
   const [workspaceSelection, setWorkspaceSelection] = createSignal<WorkspaceSelectionDraft | null>(null);
@@ -906,6 +908,7 @@ export function ChatPage() {
       message,
       user_id: "dashboard",
       agent_name: agentNameOverride || agentName(),
+      reasoning_effort: reasoningEffort(),
     };
     if (provider()) {
       payload.provider = provider();
@@ -1488,6 +1491,7 @@ export function ChatPage() {
           agent_name: agentName(),
           provider: provider(),
           model: model(),
+          reasoning_effort: reasoningEffort(),
           workspace: workspaceRef() || localWorkspaceRef(workingDir()),
         }),
         signal: abortController.signal,
@@ -1921,6 +1925,8 @@ export function ChatPage() {
                 onAgentChange={handleAgentChange}
                 provider={provider()}
                 model={model()}
+                reasoningEffort={reasoningEffort()}
+                onReasoningEffortChange={setReasoningEffort}
                 onProviderModelChange={(nextProvider, nextModel) => {
                   setProvider(nextProvider);
                   setModel(nextModel);

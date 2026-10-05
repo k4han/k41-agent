@@ -21,6 +21,7 @@ class WorkflowContext:
     allowed_skill_names: list[str] | None
     provider: str | None = None
     model: str | None = None
+    reasoning_effort: str | None = None
 
     def __init__(
         self,
@@ -34,6 +35,7 @@ class WorkflowContext:
         allowed_skill_names: list[str] | None = None,
         provider: str | None = None,
         model: str | None = None,
+        reasoning_effort: str | None = None,
     ) -> None:
         from agent.shared.config.service import get_config_service
         default_locator = str(
@@ -55,6 +57,7 @@ class WorkflowContext:
         )
         self.provider = provider
         self.model = model
+        self.reasoning_effort = reasoning_effort
 
     def get_agent_name(self) -> str:
         """Get agent name from context."""
@@ -118,6 +121,7 @@ def make_context(
     allowed_skill_names: list[str] | None = None,
     provider: str | None = None,
     model: str | None = None,
+    reasoning_effort: str | None = None,
 ) -> WorkflowContext:
     """Create a runtime context payload for a graph run."""
     from agent.modules.tools import get_default_tool_names
@@ -143,6 +147,7 @@ def make_context(
         allowed_skill_names=allowed_skill_names,
         provider=provider.strip() if provider else None,
         model=model.strip() if model else None,
+        reasoning_effort=reasoning_effort,
     )
 
 

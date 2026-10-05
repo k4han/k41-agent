@@ -1,7 +1,7 @@
 import {
   FileText,
   Image as ImageIcon,
-  MoreHorizontal,
+  Plus,
   Paperclip,
   Send,
   Square,
@@ -21,7 +21,7 @@ import {
   type UserInputRequestSubmitPayload,
 } from "@/components/UserInputRequestCard";
 import { formatBytes } from "@/lib/chatAttachments";
-import { PASTE_AS_ATTACHMENT_THRESHOLD, type PendingAttachment } from "@/lib/chatTypes";
+import { PASTE_AS_ATTACHMENT_THRESHOLD, type PendingAttachment, type ReasoningEffort } from "@/lib/chatTypes";
 import type { TranscriptUserInputRequest } from "@/components/Transcript";
 import type { AgentCard, AgentChatPayload } from "@/types";
 
@@ -47,6 +47,8 @@ export interface ChatComposerProps {
   provider: string;
   model: string;
   onProviderModelChange: (provider: string, model: string) => void;
+  reasoningEffort: ReasoningEffort;
+  onReasoningEffortChange: (effort: ReasoningEffort) => void;
   payload: AgentChatPayload;
   recursionLimitReached: boolean;
   currentTodos: Array<{ content: string; status: "pending" | "in_progress" | "completed" }> | null;
@@ -64,6 +66,13 @@ export interface ChatComposerProps {
 }
 
 export function ChatComposer(props: ChatComposerProps) {
+  const effortLevels: ReasoningEffort[] = ["low", "medium", "high"];
+  const effortLabel = () => props.reasoningEffort.charAt(0).toUpperCase() + props.reasoningEffort.slice(1);
+  const cycleEffort = () => {
+    const index = effortLevels.indexOf(props.reasoningEffort);
+    props.onReasoningEffortChange(effortLevels[(index + 1) % effortLevels.length]);
+  };
+
   let chatPromptRef: HTMLTextAreaElement | undefined;
   let fileInputRef: HTMLInputElement | undefined;
 
@@ -115,7 +124,8 @@ export function ChatComposer(props: ChatComposerProps) {
     const computed = window.getComputedStyle(chatPromptRef);
     const maxHeight = Number.parseFloat(computed.maxHeight) || 220;
     const nextHeight = Math.min(chatPromptRef.scrollHeight, maxHeight);
-    chatPromptRef.style.height = `${Math.max(nextHeight, 42)}px`;
+    const minHeight = Number.parseFloat(computed.minHeight) || 48;
+    chatPromptRef.style.height = `${Math.max(nextHeight, minHeight)}px`;
     chatPromptRef.style.overflowY = chatPromptRef.scrollHeight > maxHeight ? "auto" : "hidden";
   };
 
@@ -313,8 +323,8 @@ export function ChatComposer(props: ChatComposerProps) {
           props.backgroundTaskActive
             ? "Background task is running..."
             : props.currentThreadId
-              ? "Reply to this thread or drag files here..."
-              : "Ask Kai to build features, fix bugs, or work on your code"
+              ? "Reply or attach files..."
+              : "What would you like to work on?"
         }
         inputMode="text"
         enterkeyhint="send"
@@ -350,35 +360,21 @@ export function ChatComposer(props: ChatComposerProps) {
       />
       <div class="chat-composer-toolbar">
         <div class="chat-composer-tier chat-composer-tier-selectors">
-          <AgentModelPicker
-            agentName={props.agentName}
-            agents={props.agents}
-            onAgentChange={props.onAgentChange}
-            provider={props.provider}
-            model={props.model}
-            onProviderModelChange={props.onProviderModelChange}
-            catalogs={props.payload.model_catalogs}
-            providerNames={props.payload.provider_names}
-            defaultProvider={props.payload.default_provider}
-            defaultModel={props.payload.default_model}
-            disabled={props.composerDisabled}
-          />
-        </div>
-        <div class="chat-composer-tier chat-composer-tier-actions">
-          <div class="chat-composer-actions">
-            <div class="chat-composer-more-wrapper">
-              <button
-                ref={moreTriggerRef}
-                class={`chat-composer-icon ${showMoreMenu() ? "active" : ""}`}
-                type="button"
-                onClick={() => setShowMoreMenu(!showMoreMenu())}
-                title="More options"
-                aria-label="More options"
-              >
-                <MoreHorizontal size={17} />
-              </button>
-              <Show when={showMoreMenu()}>
-                <Portal>
+          <div class="chat-composer-more-wrapper">
+            <button
+              ref={moreTriggerRef}
+              class={`chat-composer-icon ${showMoreMenu() ? "active" : ""}`}
+              type="button"
+              onClick={() => setShowMoreMenu(!showMoreMenu())}
+              title="Add files and more"
+              aria-label="Add files and more"
+              aria-haspopup="menu"
+              aria-expanded={showMoreMenu()}
+            >
+              <Plus size={18} />
+            </button>
+            <Show when={showMoreMenu()}>
+              <Portal>
                 <div
                   ref={moreMenuRef}
                   class="chat-composer-more-menu chat-composer-more-menu--portal"
@@ -440,9 +436,42 @@ export function ChatComposer(props: ChatComposerProps) {
                     </div>
                   </div>
                 </div>
-                </Portal>
-              </Show>
-            </div>
+              </Portal>
+            </Show>
+          </div>
+          <AgentModelPicker
+            agentName={props.agentName}
+            agents={props.agents}
+            onAgentChange={props.onAgentChange}
+            provider={props.provider}
+            model={props.model}
+            onProviderModelChange={props.onProviderModelChange}
+            catalogs={props.payload.model_catalogs}
+            providerNames={props.payload.provider_names}
+            defaultProvider={props.payload.default_provider}
+            defaultModel={props.payload.default_model}
+            disabled={props.composerDisabled}
+          />
+          <button
+            class="chat-effort-button"
+            type="button"
+            onClick={cycleEffort}
+            disabled={props.composerDisabled}
+            title={`Reasoning effort: ${effortLabel()}. Click to cycle Low, Medium, High. Applies to supported reasoning models.`}
+            aria-label={`Reasoning effort: ${effortLabel()}. Click to increase; High cycles back to Low.`}
+          >
+            <span class="chat-effort-label">{effortLabel()}</span>
+            <span class="chat-effort-bars" aria-hidden="true">
+              <For each={effortLevels}>
+                {(_, index) => (
+                  <span classList={{ active: index() <= effortLevels.indexOf(props.reasoningEffort) }} />
+                )}
+              </For>
+            </span>
+          </button>
+        </div>
+        <div class="chat-composer-tier chat-composer-tier-actions">
+          <div class="chat-composer-actions">
             <Show when={props.currentThreadId}>
               <ContextWindowIndicator
                 data={props.contextWindowData}
@@ -452,11 +481,6 @@ export function ChatComposer(props: ChatComposerProps) {
             </Show>
           </div>
           <div class="chat-composer-right-group">
-            <div class="chat-composer-shortcut-hint" aria-hidden="true">
-              <span><kbd>↵</kbd> Send</span>
-              <span class="chat-composer-hint-sep">·</span>
-              <span><kbd>Shift ↵</kbd> Line</span>
-            </div>
             <div class="chat-composer-send-wrapper">
               <Show
                 when={props.stopActive}

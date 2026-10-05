@@ -625,9 +625,9 @@
     max-width: none;
   }
 
-  /* Chat composer should be roomy enough to type with thumbs. */
+  /* Keep prompt and toolbar flush inside the compact composer. */
   .chat-composer {
-    padding: 10px 12px calc(var(--safe-bottom) + 10px);
+    padding: 0;
   }
 
   /* Let the agent/model pickers shrink instead of overflowing the
