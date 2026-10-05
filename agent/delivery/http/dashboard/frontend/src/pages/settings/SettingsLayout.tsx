@@ -101,6 +101,7 @@ type BreadcrumbSegment = {
 
 const SETTINGS_AUTO_COLLAPSE_BREAKPOINT = 1280;
 const SETTINGS_AUTO_COLLAPSE_QUERY = `(max-width: ${SETTINGS_AUTO_COLLAPSE_BREAKPOINT}px)`;
+let settingsNavScrollTop = 0;
 
 export function SettingsLayout(props: {
   title: string;
@@ -125,6 +126,7 @@ export function SettingsLayout(props: {
   } = useMobileDrawer({ sidebarId: "settings-layout-sidebar" });
 
   let searchInputRef: HTMLInputElement | undefined;
+  let settingsNavElement: HTMLElement | undefined;
 
   const isActive = (href: string) => location.pathname === href || location.pathname.startsWith(href + "/");
 
@@ -136,6 +138,21 @@ export function SettingsLayout(props: {
   };
 
   onMount(() => {
+    if (settingsNavElement) {
+      settingsNavElement.scrollTop = settingsNavScrollTop;
+    }
+
+    const saveNavScrollPosition = () => {
+      if (settingsNavElement) {
+        settingsNavScrollTop = settingsNavElement.scrollTop;
+      }
+    };
+    settingsNavElement?.addEventListener("scroll", saveNavScrollPosition, { passive: true });
+    onCleanup(() => {
+      saveNavScrollPosition();
+      settingsNavElement?.removeEventListener("scroll", saveNavScrollPosition);
+    });
+
     const saved = window.localStorage.getItem(STORAGE_KEYS.SETTINGS_SIDEBAR_COLLAPSED);
     if (saved === "collapsed") {
       setCollapsed(true);
@@ -272,7 +289,7 @@ export function SettingsLayout(props: {
             </Show>
           </Show>
         </div>
-        <nav class="nav settings-nav" onClick={handleNavClick}>
+        <nav ref={settingsNavElement} class="nav settings-nav" onClick={handleNavClick}>
           <A
             href={homeHref}
             class="nav-link settings-back-home"
