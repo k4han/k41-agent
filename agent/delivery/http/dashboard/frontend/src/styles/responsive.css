@@ -2,8 +2,8 @@
    Responsive layout
    - Desktop (default): ≥1025px
    - Tablet:            981–1024px
-   - Compact:           ≤980px  (sidebar collapses to top bar)
-   - Mobile:            ≤640px   (sidebar becomes a drawer)
+   - Compact:           ≤980px  (sidebar becomes a drawer)
+   - Mobile:            ≤640px   (compact controls and bottom sheets)
    - Touch devices:     (hover: none) and (pointer: coarse)
    ============================================================ */
 
@@ -38,7 +38,7 @@
   }
 }
 
-/* --- Compact (≤980px) — sidebar collapses to top bar ----------------- */
+/* --- Compact (≤980px) ------------------------------------------------ */
 @media (max-width: 980px) {
   .app-layout {
     grid-template-columns: 1fr;
@@ -268,9 +268,11 @@
   }
 }
 
-/* --- Mobile (≤640px) — drawer + safe area + touch targets ------------ */
-@media (max-width: 640px) {
-  .app-layout {
+/* Keep navigation CSS aligned with DRAWER_MEDIA_QUERY, including saved
+   desktop collapse preferences. */
+@media (max-width: 980px) {
+  .app-layout,
+  .app-layout.sidebar-collapsed {
     grid-template-columns: 1fr;
   }
 
@@ -295,7 +297,8 @@
     will-change: transform, visibility;
   }
 
-  .app-layout--drawer-open .sidebar {
+  .app-layout.app-layout--drawer-open .sidebar,
+  .app-layout.sidebar-collapsed.app-layout--drawer-open .sidebar {
     transform: translate3d(0, 0, 0);
     visibility: visible;
   }
@@ -309,7 +312,13 @@
     display: flex;
   }
 
+  .app-layout .sidebar .brand {
+    justify-content: flex-start;
+    padding: 0 16px;
+  }
+
   .app-layout .sidebar .nav {
+    align-items: stretch;
     flex-direction: column;
     overflow-y: auto;
     overflow-x: hidden;
@@ -317,14 +326,40 @@
   }
 
   .app-layout .sidebar .nav-link,
+  .app-layout .sidebar.settings-sidebar .nav-link,
   .app-layout .sidebar .nav-history-link,
   .app-layout .sidebar .nav-history-workspace-toggle,
   .app-layout .sidebar .nav-history-item {
     min-height: 44px;
   }
 
-  .app-layout .sidebar .nav-label {
+  .app-layout .sidebar .nav-link,
+  .app-layout .sidebar.settings-sidebar .nav-link {
+    width: 100%;
+    height: auto;
+    justify-content: flex-start;
+    gap: 9px;
+    padding: 8px 10px;
+  }
+
+  .app-layout .sidebar .nav-link .nav-label {
     display: inline;
+  }
+
+  .app-layout .sidebar.settings-sidebar .settings-nav-groups,
+  .app-layout .sidebar.settings-sidebar .settings-nav-group {
+    align-items: stretch;
+  }
+
+  .app-layout .sidebar .nav-history-group,
+  .app-layout .sidebar .nav-history-group.open {
+    width: 100%;
+    flex: 1 1 auto;
+    flex-direction: column;
+  }
+
+  .app-layout .sidebar .sidebar-footer-row {
+    flex-direction: row;
   }
 
   .app-layout .sidebar .nav-section-title {
@@ -353,6 +388,7 @@
     background: rgba(0, 0, 0, 0.42);
     opacity: 0;
     visibility: hidden;
+    pointer-events: none;
     transition:
       opacity 180ms ease,
       visibility 180ms ease;
@@ -361,6 +397,7 @@
   .app-layout--drawer-open::before {
     opacity: 1;
     visibility: visible;
+    pointer-events: auto;
   }
 
   /* Topbar gets a hamburger button slot and safe area. */
@@ -433,6 +470,10 @@
     outline: 2px solid var(--accent);
     outline-offset: 2px;
   }
+}
+
+/* --- Mobile (≤640px) — safe area + touch targets --------------------- */
+@media (max-width: 640px) {
 
   .content {
     padding: 14px;
@@ -553,6 +594,7 @@
   }
 
   .dialog-footer {
+    flex-wrap: wrap;
     padding: 12px 18px max(14px, calc(10px + var(--safe-bottom)));
   }
 

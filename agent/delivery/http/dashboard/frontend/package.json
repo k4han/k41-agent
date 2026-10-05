@@ -9,7 +9,8 @@
     "check": "tsc --noEmit",
     "test": "node --test tests/chat-scroll.test.mjs tests/provider-connections.test.mjs && node scripts/verify-responsive.mjs --skip-build",
     "test:chat-scroll": "node --test tests/chat-scroll.test.mjs",
-    "test:providers-ui": "node scripts/verify-provider-connections.mjs"
+    "test:providers-ui": "node scripts/verify-provider-connections.mjs",
+    "test:mobile-ui": "node scripts/verify-mobile-layout.mjs"
   },
   "dependencies": {
     "@solidjs/router": "^0.15.3",

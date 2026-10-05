@@ -205,7 +205,7 @@ try {
   await js('document.querySelector("form").requestSubmit()');
   await until(() => js('!document.querySelector("form") && document.body.textContent.includes("review")'), 'saved connection');
   assert.equal(writes.find(write => write.path === '/dashboard-api/web-connections').body.name, 'review');
-  await js(`document.querySelector('[data-connection-name="review"] button').click()`);
+  await js(`document.querySelector('button[aria-label="Edit review"]').click()`);
   await until(() => js('document.querySelector("form input.input")?.value === "review"'), 'connection detail');
   assert.equal(await js('!!document.querySelector("form input[type=password]")'), false);
   await js('const input = document.querySelector("form input[type=checkbox]"); input.click();');
@@ -250,11 +250,11 @@ try {
   assert.equal(defaults.tavily, 'team');
   await navigate('/settings/providers?tab=decision');
   await until(() => js('!!document.querySelector("[data-connection-name=cloudflare]")'), 'decision default action');
-  await js('document.querySelectorAll("[data-connection-name=cloudflare] button")[1].click()');
+  await js(`document.querySelector('button[aria-label="Set cloudflare as default"]').click()`);
   await until(() => js('!!document.querySelector("[data-connection-name=cloudflare] .badge-info")'), 'decision selected default');
   assert.equal(decisionDefault, 'cloudflare');
-  assert.equal(await js('document.querySelectorAll("[data-connection-name=cloudflare] button")[2].disabled'), true);
-  await js('document.querySelector("[data-connection-name=cloudflare-2] button").click()');
+  assert.equal(await js(`document.querySelector('button[aria-label="Delete cloudflare"]').disabled`), true);
+  await js(`document.querySelector('button[aria-label="Edit cloudflare-2"]').click()`);
   await until(() => js('!!document.querySelector("form")'), 'decision edit');
   assert.equal(await js('document.querySelector("form input.input").disabled'), true);
   assert.equal(await js('!!document.querySelector("form input[type=password]")'), false);
@@ -264,7 +264,7 @@ try {
   assert.equal(writes.findLast(write => write.path.endsWith('/cloudflare-2')).body.fields.api_token, 'new-token');
   await navigate('/settings/providers?tab=llm');
   await until(() => js('!!document.querySelector("[data-connection-name=google-2]")'), 'AI edit action');
-  await js('document.querySelector("[data-connection-name=google-2] button").click()');
+  await js(`document.querySelector('button[aria-label="Edit google-2"]').click()`);
   await until(() => js('!!Array.from(document.querySelectorAll(".setting-row")).find(row => row.textContent.includes("Default Model"))'), 'AI model field');
   await js(`(() => { const input = Array.from(document.querySelectorAll('.setting-row')).find(row => row.textContent.includes('Default Model')).querySelector('input'); input.value = 'gemini-test'; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await js('Array.from(document.querySelectorAll("button")).find(button => button.textContent.includes("Save changes")).click()');
@@ -273,7 +273,7 @@ try {
   await until(() => js('!document.querySelector(".dialog-footer")'), 'AI settings saved');
   await navigate('/settings/providers?tab=llm');
   await until(() => js('!!document.querySelector("[data-connection-name=google-2]")'), 'AI list refreshed');
-  await js('document.querySelectorAll("[data-connection-name=google-2] button")[1].click()');
+  await js(`document.querySelector('button[aria-label="Set google-2 as default"]').click()`);
   await until(() => js('!!document.querySelector("[data-connection-name=google-2] .badge-info")'), 'AI default selected');
   assert.equal(aiDefault, 'google-2/gemini-test');
   await navigate('/settings/providers/web');

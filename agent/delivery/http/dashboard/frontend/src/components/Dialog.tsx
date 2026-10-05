@@ -7,6 +7,7 @@ import {
 } from "solid-js";
 import { Portal } from "solid-js/web";
 import { X } from "lucide-solid";
+import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
 
 export type DialogSize = "sm" | "md" | "lg" | "xl" | "full";
 export type DialogIconVariant = "danger" | "warning" | "primary" | "success" | "default";
@@ -31,27 +32,6 @@ export interface DialogProps {
   onClose: () => void;
 }
 
-// Track active dialogs count to properly manage body scroll locking with nested dialogs
-let activeDialogsCount = 0;
-let savedBodyOverflow = "";
-
-function acquireBodyScrollLock() {
-  if (typeof document === "undefined") return;
-  if (activeDialogsCount === 0) {
-    savedBodyOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-  }
-  activeDialogsCount++;
-}
-
-function releaseBodyScrollLock() {
-  if (typeof document === "undefined") return;
-  activeDialogsCount = Math.max(0, activeDialogsCount - 1);
-  if (activeDialogsCount === 0) {
-    document.body.style.overflow = savedBodyOverflow;
-  }
-}
-
 export function Dialog(props: DialogProps) {
   let dialogRef: HTMLElement | undefined;
   let previousFocusedElement: HTMLElement | null = null;
@@ -60,25 +40,19 @@ export function Dialog(props: DialogProps) {
   const titleId = createUniqueId();
   const descId = createUniqueId();
 
-  // Manage body scroll lock and previous focus restoration
+  useBodyScrollLock(() => props.open);
+
+  // Restore focus when the dialog closes.
   createEffect(() => {
     if (props.open) {
-      acquireBodyScrollLock();
       if (typeof document !== "undefined") {
         previousFocusedElement = document.activeElement as HTMLElement | null;
       }
     } else {
-      releaseBodyScrollLock();
       if (previousFocusedElement && typeof previousFocusedElement.focus === "function") {
         previousFocusedElement.focus();
         previousFocusedElement = null;
       }
-    }
-  });
-
-  onCleanup(() => {
-    if (props.open) {
-      releaseBodyScrollLock();
     }
   });
 
