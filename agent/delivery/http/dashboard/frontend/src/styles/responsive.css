@@ -692,7 +692,7 @@
 
   /* Task history sticky header and workspace filter on mobile */
   .task-history-header {
-    top: 48px;
+    top: calc(86px + var(--safe-top));
   }
 
   .task-workspace-filter {

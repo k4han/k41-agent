@@ -321,10 +321,6 @@
 }
 
 @media (max-width: 640px) {
-  .task-history-header {
-    top: 48px;
-  }
-
   .task-workspace-filter {
     width: 100%;
     max-width: 100%;
