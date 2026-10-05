@@ -31,6 +31,13 @@ export function sameValue(a: unknown, b: unknown): boolean {
   return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 }
 
+function booleanValue(value: unknown): boolean {
+  if (typeof value === "string") {
+    return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+  }
+  return Boolean(value);
+}
+
 function displayDraft(value: unknown): string {
   if (Array.isArray(value)) {
     return value.join("\n");
@@ -101,11 +108,11 @@ export function formatSettingValue(info: SettingInfo | undefined, value: unknown
 }
 
 export function typedValue(info: SettingInfo, raw: unknown): unknown {
-  if (raw === null) {
+  if (raw === null || raw === undefined) {
     return null;
   }
   if (info.input_type === "boolean") {
-    return Boolean(raw);
+    return booleanValue(raw);
   }
   const text = String(raw ?? "");
   if (info.key.endsWith(".models")) {
@@ -163,10 +170,16 @@ export function useSettingsData(endpoint: string) {
     }
     return Object.entries(settingsFromPayload(payload))
       .map(([key, info]) => {
-        const next = typedValue({ ...info, key }, drafts()[key]);
-        return { key, oldValue: info.value, newValue: next };
+        const settingInfo = { ...info, key };
+        const oldValue = typedValue(settingInfo, info.value);
+        const newValue = typedValue(settingInfo, drafts()[key]);
+        return {
+          change: { key, oldValue: info.value, newValue },
+          changed: !sameValue(oldValue, newValue),
+        };
       })
-      .filter((change) => !sameValue(change.oldValue, change.newValue));
+      .filter(({ changed }) => changed)
+      .map(({ change }) => change);
   });
 
   const setDraft = (key: string, value: unknown) => {
@@ -332,17 +345,17 @@ export function SettingControl(props: {
       }
     >
       <button
-        class={`toggle-control ${Boolean(props.value) ? "active" : ""}`}
+        class={`toggle-control ${booleanValue(props.value) ? "active" : ""}`}
         type="button"
         role="switch"
-        aria-checked={Boolean(props.value)}
+        aria-checked={booleanValue(props.value)}
         aria-label={props.info.label || props.info.key}
-        onClick={() => props.onChange(!Boolean(props.value))}
+        onClick={() => props.onChange(!booleanValue(props.value))}
       >
         <span class="toggle-track">
           <span class="toggle-thumb" />
         </span>
-        <span class="toggle-text">{Boolean(props.value) ? "Enabled" : "Disabled"}</span>
+        <span class="toggle-text">{booleanValue(props.value) ? "Enabled" : "Disabled"}</span>
       </button>
     </Show>
   );
