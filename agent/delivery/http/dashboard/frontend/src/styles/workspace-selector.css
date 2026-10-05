@@ -863,33 +863,43 @@
   .workspace-selector {
     padding: 12px;
     gap: 10px;
+    min-width: 0;
   }
 
   .workspace-selector.locked {
     padding: 10px 12px;
   }
 
+  .workspace-selector-body,
+  .workspace-tab-content {
+    min-width: 0;
+    max-width: 100%;
+  }
+
   .workspace-nav-bar {
-    flex-direction: row;
-    align-items: center;
-    flex-wrap: nowrap;
+    flex-direction: column;
+    align-items: stretch;
+    min-width: 0;
   }
 
   .workspace-backend-control {
-    width: auto;
-    flex-shrink: 0;
+    width: 100%;
+    min-width: 0;
+    justify-content: flex-end;
   }
 
   .workspace-backend-control .select-control {
-    flex: none;
-    min-width: 120px;
+    flex: 0 1 180px;
+    min-width: 0;
+    max-width: 100%;
   }
 
   .workspace-tabs-list {
-    display: inline-flex;
-    flex: 1 1 auto;
+    display: flex;
+    flex: 0 1 auto;
     min-width: 0;
-    width: auto;
+    width: 100%;
+    max-width: 100%;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     scroll-behavior: smooth;
