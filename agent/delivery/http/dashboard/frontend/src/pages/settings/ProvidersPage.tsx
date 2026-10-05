@@ -4,34 +4,26 @@ import { ArrowLeft, Check, Copy, Plus, RefreshCw, Save, Search, Star, Trash2, Sp
 
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { CopyButton } from "@/components/CopyButton";
-import { ModelPicker } from "@/components/ModelPicker";
 import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
 import { getProviderTypes } from "@/lib/catalogStore";
 import { useCatalogAndLoad } from "@/lib/useCatalogAndLoad";
-import type { ModelCatalog, ProviderRow, ProviderTypeOption, SettingInfo } from "@/types";
+import { parseModelList } from "@/lib/utils";
+import type { ProviderRow, ProviderTypeOption, SettingInfo } from "@/types";
 
 import { ProviderSettingsLayout as SettingsLayout } from "./ProviderSettingsLayout";
 import { ProviderConnectionList, ProviderPicker, ProviderFormPanel } from "./ProviderConnections";
 import { suggestProviderName } from "@/lib/providerConnections";
 import { useUnsavedChanges } from "@/lib/useUnsavedChanges";
 import {
-  ChangesPreview,
   type PendingChange,
   SettingRow,
   SettingsConfirmDialog,
   settingsFromPayload,
   useSettingsData,
 } from "./shared";
-
-// Import new form components
-import {
-  FormField,
-  FormSelect,
-  FormCard,
-} from "@/components/forms";
 
 const DEFAULT_PROVIDER_KEY = "llm.default_model";
 
@@ -201,10 +193,6 @@ export function ProvidersPage() {
   const [changesToConfirm, setChangesToConfirm] = createSignal<PendingChange[]>([]);
   const [deleteTarget, setDeleteTarget] = createSignal<ProviderView | null>(null);
   const [logoErrors, setLogoErrors] = createSignal<Record<string, boolean>>({});
-  const [fallbackProvider, setFallbackProvider] = createSignal("");
-  const [fallbackModel, setFallbackModel] = createSignal("");
-  const [fallbackInitialized, setFallbackInitialized] = createSignal(false);
-  const [savingFallback, setSavingFallback] = createSignal(false);
   const { showToast } = useToast();
 
   const searchNeedle = createMemo(() => search().trim().toLowerCase());
@@ -354,391 +342,12 @@ export function ProvidersPage() {
     }
   };
 
-  // Sync fallback values from server-side settings on the first data load.
-  createEffect(() => {
-    const payload = data();
-    if (!payload || fallbackInitialized()) {
-      return;
-    }
-    const settings = settingsFromPayload(payload);
-    const serverProvider = (settings["llm.fallback.provider"]?.value as string) ?? "";
-    const serverModel = (settings["llm.fallback.model"]?.value as string) ?? "";
-    setFallbackProvider(String(serverProvider));
-    setFallbackModel(String(serverModel));
-    setFallbackInitialized(true);
-  });
-
-  const fallbackDirty = createMemo(() => {
-    const payload = data();
-    if (!payload) {
-      return false;
-    }
-    const settings = settingsFromPayload(payload);
-    const serverProvider = String(settings["llm.fallback.provider"]?.value ?? "").trim();
-    const serverModel = String(settings["llm.fallback.model"]?.value ?? "").trim();
-    return (
-      fallbackProvider().trim() !== serverProvider || fallbackModel().trim() !== serverModel
-    );
-  });
-
-  useUnsavedChanges(() => pendingChanges().length > 0 || fallbackDirty(), () => {
-    discardAll();
-    const settings = data() ? settingsFromPayload(data()!) : {};
-    setFallbackProvider(String(settings["llm.fallback.provider"]?.value || ""));
-    setFallbackModel(String(settings["llm.fallback.model"]?.value || ""));
-  });
-
-  const saveFallback = async () => {
-    setSavingFallback(true);
-    try {
-      await putJson("/settings", {
-        values: {
-          "llm.fallback.provider": fallbackProvider().trim(),
-          "llm.fallback.model": fallbackModel().trim(),
-        },
-      });
-      showToast("Fallback model updated.");
-      await load();
-    } catch (err) {
-      showToast(
-        err instanceof Error ? err.message : "Failed to save fallback",
-        "error",
-      );
-    } finally {
-      setSavingFallback(false);
-    }
-  };
-
-  const clearFallback = () => {
-    setFallbackProvider("");
-    setFallbackModel("");
-  };
+  useUnsavedChanges(() => pendingChanges().length > 0, discardAll);
 
   useCatalogAndLoad(load);
 
   return (
-    <>
-      <style>{`
-        .providers-grid {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 20px;
-          margin-top: 15px;
-          margin-bottom: 30px;
-        }
-        @media (max-width: 1200px) {
-          .providers-grid {
-            grid-template-columns: repeat(3, 1fr);
-          }
-        }
-        @media (max-width: 900px) {
-          .providers-grid {
-            grid-template-columns: repeat(2, 1fr);
-          }
-        }
-        @media (max-width: 600px) {
-          .providers-grid {
-            grid-template-columns: repeat(1, 1fr);
-          }
-        }
-        .provider-section-title {
-          font-size: 13px;
-          font-weight: 700;
-          color: var(--muted);
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-          margin: 25px 0 15px 0;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-        .provider-section-title::before {
-          content: "";
-          display: inline-block;
-          width: 6px;
-          height: 6px;
-          border-radius: 50%;
-          background: var(--accent, #6366f1);
-        }
-        .provider-card {
-          background: rgba(30, 41, 59, 0.45);
-          backdrop-filter: blur(10px);
-          -webkit-backdrop-filter: blur(10px);
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          border-radius: 12px;
-          padding: 12px 16px;
-          display: flex;
-          flex-direction: row;
-          align-items: center;
-          gap: 12px;
-          min-height: 64px;
-          transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-          cursor: pointer;
-          position: relative;
-          overflow: hidden;
-        }
-        .provider-card:hover {
-          transform: translateY(-2px);
-          border-color: var(--accent, #6366f1);
-          background: rgba(30, 41, 59, 0.65);
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2), 0 0 10px rgba(99, 102, 241, 0.1);
-        }
-        .provider-card.card-configured {
-          border-color: rgba(99, 102, 241, 0.35);
-          background: rgba(99, 102, 241, 0.03);
-        }
-        .provider-card.card-configured:hover {
-          border-color: var(--accent, #6366f1);
-          background: rgba(99, 102, 241, 0.06);
-        }
-        .provider-card.card-enabled {
-          border-color: rgba(16, 185, 129, 0.35);
-          background: rgba(16, 185, 129, 0.03);
-        }
-        .provider-card.card-enabled:hover {
-          border-color: #10b981;
-          background: rgba(16, 185, 129, 0.06);
-        }
-        .logo-wrap {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          width: 40px;
-          height: 40px;
-          border-radius: 8px;
-          background: rgba(255, 255, 255, 0.03);
-          border: 1px solid rgba(255, 255, 255, 0.06);
-          overflow: hidden;
-          padding: 3px;
-          flex-shrink: 0;
-        }
-        .dark .logo-wrap {
-          background: rgba(250, 250, 250, 0.9);
-          border-color: rgba(255, 255, 255, 0.22);
-        }
-        .logo-img {
-          width: 100%;
-          height: 100%;
-          object-fit: contain;
-        }
-        .logo-fallback {
-          font-weight: 700;
-          font-size: 16px;
-          color: var(--accent, #6366f1);
-          background: rgba(99, 102, 241, 0.1);
-          width: 100%;
-          height: 100%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          border-radius: 6px;
-        }
-        .dark .logo-fallback {
-          color: #111827;
-          background: rgba(99, 102, 241, 0.14);
-        }
-        .card-right {
-          display: flex;
-          flex-direction: column;
-          gap: 2px;
-          min-width: 0;
-          flex: 1;
-        }
-        .card-title {
-          font-size: 13.5px;
-          font-weight: 600;
-          color: var(--fg);
-          line-height: 1.2;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-        .card-status-row {
-          display: flex;
-          align-items: center;
-        }
-        .status-no-connection {
-          font-size: 11px;
-          font-weight: 500;
-          color: #8a8a8a;
-        }
-        .status-pill {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          padding: 2px 8px;
-          border-radius: 9999px;
-          font-size: 10.5px;
-          font-weight: 600;
-        }
-        .status-dot {
-          display: inline-block;
-          width: 5px;
-          height: 5px;
-          border-radius: 50%;
-        }
-        .status-active {
-          background: rgba(16, 185, 129, 0.15);
-          color: #10b981;
-        }
-        .status-active .status-dot {
-          background: #10b981;
-        }
-        .model-spec-section {
-          margin-top: 24px;
-          border-top: 1px solid rgba(255, 255, 255, 0.08);
-          padding-top: 18px;
-        }
-        .model-spec-toolbar {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 12px;
-          margin-bottom: 12px;
-        }
-        .model-spec-title {
-          font-size: 13px;
-          font-weight: 700;
-          color: var(--fg);
-          display: flex;
-          align-items: center;
-          gap: 6px;
-        }
-        .model-spec-search {
-          position: relative;
-          display: flex;
-          align-items: center;
-          width: min(100%, 280px);
-        }
-        .model-spec-search svg {
-          position: absolute;
-          left: 10px;
-          color: var(--muted);
-          pointer-events: none;
-        }
-        .model-spec-search .input {
-          width: 100%;
-          padding-left: 32px;
-        }
-        .model-spec-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-          gap: 12px;
-          max-height: 260px;
-          overflow-y: auto;
-          padding-right: 4px;
-        }
-        .model-spec-card {
-          background: rgba(255, 255, 255, 0.02);
-          border: 1px solid rgba(255, 255, 255, 0.04);
-          border-radius: 8px;
-          padding: 12px;
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-        }
-        .model-spec-button {
-          color: inherit;
-          cursor: pointer;
-          font: inherit;
-          text-align: left;
-        }
-        .model-spec-button:hover {
-          border-color: rgba(99, 102, 241, 0.35);
-          background: rgba(99, 102, 241, 0.05);
-        }
-        .model-spec-button:focus-visible {
-          outline: 2px solid var(--border-strong);
-          outline-offset: 2px;
-        }
-        .model-spec-header {
-          display: grid;
-          grid-template-columns: minmax(0, 1fr) auto;
-          gap: 2px 8px;
-        }
-        .model-spec-copy {
-          grid-row: 1 / span 2;
-          grid-column: 2;
-          align-self: center;
-          color: var(--muted);
-        }
-        .model-spec-name {
-          font-size: 13px;
-          font-weight: 600;
-          color: var(--fg);
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-        .model-spec-id {
-          font-size: 10px;
-          color: var(--muted);
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-        .model-spec-badges {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 4px;
-        }
-        .spec-badge {
-          font-size: 9px;
-          font-weight: 600;
-          padding: 1px 6px;
-          border-radius: 4px;
-          text-transform: capitalize;
-        }
-        .spec-badge-context {
-          background: rgba(59, 130, 246, 0.1);
-          color: #60a5fa;
-          border: 1px solid rgba(59, 130, 246, 0.15);
-        }
-        .spec-badge-reasoning {
-          background: rgba(168, 85, 247, 0.1);
-          color: #c084fc;
-          border: 1px solid rgba(168, 85, 247, 0.15);
-        }
-        .spec-badge-tools {
-          background: rgba(234, 179, 8, 0.1);
-          color: #facc15;
-          border: 1px solid rgba(234, 179, 8, 0.15);
-        }
-        .spec-badge-modality {
-          background: rgba(255, 255, 255, 0.04);
-          color: var(--muted);
-          border: 1px solid rgba(255, 255, 255, 0.06);
-        }
-        .model-spec-cost {
-          font-size: 10.5px;
-          color: var(--muted);
-          margin-top: auto;
-          border-top: 1px dashed rgba(255, 255, 255, 0.04);
-          padding-top: 6px;
-        }
-        .cost-number {
-          font-weight: 600;
-          color: var(--fg);
-        }
-        .model-spec-empty {
-          grid-column: 1 / -1;
-          padding: 24px 12px;
-          color: var(--muted);
-          font-size: 12px;
-          text-align: center;
-        }
-        @media (max-width: 640px) {
-          .model-spec-toolbar {
-            align-items: stretch;
-            flex-direction: column;
-          }
-          .model-spec-search {
-            width: 100%;
-          }
-        }
-      `}</style>
-
-      <DataGate data={data()} error={error()} onRetry={load}>
+    <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => (
           <>
             <Show when={query.new} fallback={
@@ -746,7 +355,7 @@ export function ProvidersPage() {
               when={params.providerName}
               fallback={
                 <SettingsLayout
-                  title="Provider Configuration"
+                  title="AI Model Providers"
                   breadcrumbLabel="Providers"
                   contentWidth="wide"
                   actions={
@@ -783,23 +392,6 @@ export function ProvidersPage() {
                     />
                     <ProviderPicker items={pickerItems()} onSelect={(id) => navigate(`/settings/providers?tab=llm&new=${encodeURIComponent(id)}`)} />
 
-                    <FallbackModelSection
-                      catalogs={payload.model_catalogs || []}
-                      providerNames={payload.provider_name_options || payload.provider_names || []}
-                      defaultProvider={payload.default_provider || ""}
-                      defaultModel={payload.default_model || ""}
-                      provider={fallbackProvider()}
-                      model={fallbackModel()}
-                      dirty={fallbackDirty()}
-                      saving={savingFallback()}
-                      onProviderModelChange={(nextProvider, nextModel) => {
-                        setFallbackProvider(nextProvider);
-                        setFallbackModel(nextModel);
-                      }}
-                      onSave={saveFallback}
-                      onClear={clearFallback}
-                    />
-
                   </div>
                 </SettingsLayout>
               }
@@ -810,17 +402,17 @@ export function ProvidersPage() {
                   <SettingsLayout
                     title="Provider Not Found"
                     breadcrumbSegments={[
-                      { label: "Providers", href: "/settings/providers" },
+                      { label: "Providers", href: "/settings/providers?tab=llm" },
                       { label: currentProviderName() || "Unknown" },
                     ]}
                     actions={
-                      <button class="btn" type="button" onClick={() => navigate("/settings/providers")}>
+                      <button class="btn" type="button" onClick={() => navigate("/settings/providers?tab=llm")}>
                         <ArrowLeft size={14} />
                         Back to Providers
                       </button>
                     }
                   >
-                    <div class="panel empty" style={{ padding: "40px 20px", "text-align": "center" }}>
+                    <div class="panel empty provider-empty-panel">
                       <h3>Provider not found</h3>
                       <p class="hint">The provider "{currentProviderName()}" could not be found or has been removed.</p>
                     </div>
@@ -837,7 +429,7 @@ export function ProvidersPage() {
                     catalog={providersCatalog()}
                     logoErrors={logoErrors()}
                     onLogoError={(id) => setLogoErrors((curr) => ({ ...curr, [id]: true }))}
-                    onBack={() => navigate("/settings/providers")}
+                    onBack={() => navigate("/settings/providers?tab=llm")}
                     onSetDefault={() => setDefaultProvider(provider())}
                     onLoadModels={() => loadProviderModels(provider().name)}
                     onSave={() => saveProviderChanges(provider().name)}
@@ -875,7 +467,6 @@ export function ProvidersPage() {
           </>
         )}
       </DataGate>
-    </>
   );
 }
 
@@ -923,21 +514,152 @@ function ProviderDetailPage(props: {
     });
   });
 
+  const { showToast } = useToast();
+
+  const defaultModelKey = () =>
+    props.provider.fieldMap.default_model?.key || `llm.providers.${props.provider.name}.default_model`;
+
+  const modelsKey = () =>
+    props.provider.fieldMap.models?.key || `llm.providers.${props.provider.name}.models`;
+
+  const currentDefaultModel = createMemo(() => {
+    const key = defaultModelKey();
+    if (hasDraftValue(props.drafts, key)) {
+      return textValue(props.drafts[key]);
+    }
+    return textValue(props.provider.fieldMap.default_model?.info.value) || props.provider.defaultModel || "";
+  });
+
+  const currentConfiguredModels = createMemo<string[]>(() => {
+    const key = modelsKey();
+    const raw = hasDraftValue(props.drafts, key)
+      ? props.drafts[key]
+      : props.provider.fieldMap.models?.info.value;
+    if (Array.isArray(raw)) {
+      return raw.map((item) => String(item).trim()).filter(Boolean);
+    }
+    if (typeof raw === "string") {
+      return parseModelList(raw);
+    }
+    return [];
+  });
+
+  const handleSetDefaultModel = (modelId: string, modelName?: string) => {
+    props.onChange(defaultModelKey(), modelId);
+    const models = currentConfiguredModels();
+    if (!models.includes(modelId)) {
+      props.onChange(modelsKey(), [...models, modelId].join("\n"));
+    }
+    showToast(`Set "${modelName || modelId}" as default model.`);
+  };
+
+  const handleAddModel = (modelId: string, modelName?: string) => {
+    const models = currentConfiguredModels();
+    if (!models.includes(modelId)) {
+      props.onChange(modelsKey(), [...models, modelId].join("\n"));
+      showToast(`Added "${modelName || modelId}" to configured models.`);
+    }
+  };
+
+  const [testingConnection, setTestingConnection] = createSignal(false);
+  const [testResult, setTestResult] = createSignal<{
+    ok: boolean;
+    latency_ms?: number | null;
+    message: string;
+    error_code?: string | null;
+  } | null>(null);
+
+  const handleTestConnection = async () => {
+    if (testingConnection()) return;
+    setTestingConnection(true);
+    setTestResult(null);
+    try {
+      const typeEntry = props.provider.fieldMap.type || props.provider.fieldMap.provider;
+      const apiKeyEntry = props.provider.fieldMap.api_key;
+      const baseUrlEntry = props.provider.fieldMap.base_url;
+      const catalogEntry = props.provider.fieldMap.catalog_id;
+      const payload: Record<string, unknown> = {
+        name: props.provider.name,
+        type: textValue(draftValue(props.drafts, typeEntry)) || props.provider.providerType,
+      };
+      if (apiKeyEntry && hasDraftValue(props.drafts, apiKeyEntry.key)) {
+        payload.api_key = textValue(props.drafts[apiKeyEntry.key]);
+      }
+      if (baseUrlEntry && hasDraftValue(props.drafts, baseUrlEntry.key)) {
+        payload.base_url = textValue(props.drafts[baseUrlEntry.key]);
+      }
+      if (catalogEntry && hasDraftValue(props.drafts, catalogEntry.key)) {
+        payload.catalog_id = textValue(props.drafts[catalogEntry.key]);
+      }
+      const result = await postJson<{
+        ok: boolean;
+        message: string;
+        latency_ms?: number | null;
+        models?: string[];
+        error_code?: string | null;
+      }>("/dashboard-api/providers/verify", payload);
+      setTestResult(result);
+      if (result.ok) {
+        showToast(result.message || `Connection OK (⚡ ${result.latency_ms ?? 0}ms)`);
+      } else {
+        showToast(result.message || "Connection test failed", "error");
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Connection test failed";
+      setTestResult({ ok: false, message: msg, error_code: "REQUEST_FAILED" });
+      showToast(msg, "error");
+    } finally {
+      setTestingConnection(false);
+    }
+  };
+
   return (
     <SettingsLayout
       title={`Configure ${props.provider.name}`}
       description={`Manage credentials, models, and settings for ${props.provider.name}`}
       breadcrumbSegments={[
-        { label: "Providers", href: "/settings/providers" },
+        { label: "Providers", href: "/settings/providers?tab=llm" },
         { label: props.provider.name },
       ]}
       contentWidth="wide"
       actions={
-        <div class="row-wrap">
+        <div class="row-wrap items-center">
           <button class="btn" type="button" onClick={props.onBack}>
             <ArrowLeft size={14} />
             Back to Providers
           </button>
+          <button
+            class="btn"
+            type="button"
+            disabled={testingConnection()}
+            onClick={handleTestConnection}
+            title="Test connection to provider"
+          >
+            <Show when={testingConnection()} fallback={<Sparkles size={13} />}>
+              <RefreshCw size={13} class="spin" />
+            </Show>
+            {testingConnection() ? "Testing..." : "Test Connection"}
+          </button>
+          <Show when={testResult()}>
+            <Show
+              when={testResult()!.ok}
+              fallback={
+                <span
+                  class="badge badge-danger test-result-badge"
+                  title={testResult()!.message}
+                >
+                  {testResult()!.error_code || "Failed"}
+                </span>
+              }
+            >
+              <span
+                class="badge badge-success test-result-badge"
+                title={testResult()!.message}
+              >
+                ⚡ {testResult()!.latency_ms ?? 0}ms
+              </span>
+            </Show>
+          </Show>
           <Show when={props.provider.canDelete}>
             <button class="btn btn-danger" type="button" onClick={props.onDelete}>
               <Trash2 size={13} />
@@ -966,15 +688,15 @@ function ProviderDetailPage(props: {
         </div>
       }
     >
-      <div class="stack" style={{ gap: "20px" }}>
-        <div class="panel" style={{ padding: "20px" }}>
-          <div class="row-wrap" style={{ "justify-content": "space-between", "align-items": "center" }}>
-            <div class="row-wrap" style={{ gap: "12px", "align-items": "center" }}>
-              <div class="logo-wrap" style={{ width: "44px", height: "44px" }}>
+      <div class="stack provider-detail-stack">
+        <div class="panel provider-detail-panel">
+          <div class="row-wrap provider-header-row">
+            <div class="row-wrap provider-identity-row">
+              <div class="logo-wrap">
                 <Show
                   when={catalogEntry() && !props.logoErrors[props.provider.name.toLowerCase()]}
                   fallback={
-                    <div class="logo-fallback" style={{ "font-size": "18px" }}>
+                    <div class="logo-fallback">
                       {props.provider.name.charAt(0).toUpperCase()}
                     </div>
                   }
@@ -991,24 +713,34 @@ function ProviderDetailPage(props: {
                 </Show>
               </div>
               <div>
-                <h2 style={{ margin: "0", "font-size": "18px", "font-weight": "700" }}>{props.provider.name}</h2>
+                <h2 class="provider-title">{props.provider.name}</h2>
                 <span class="chip">{props.provider.providerType}</span>
               </div>
             </div>
-            <div class="row-wrap" style={{ gap: "8px" }}>
+            <div class="row-wrap provider-badge-row">
               <Show when={props.provider.isDefault}>
                 <span class="badge badge-info">Default Provider</span>
               </Show>
               <span class={props.provider.enabled ? "badge badge-success" : "badge badge-warning"}>
                 {props.provider.enabled ? "Enabled" : "Disabled"}
               </span>
+              <Show when={testResult()?.ok}>
+                <span class="badge badge-success connection-latency-badge" title={testResult()!.message}>
+                  ⚡ {testResult()!.latency_ms ?? 0}ms
+                </span>
+              </Show>
+              <Show when={testResult() && !testResult()!.ok}>
+                <span class="badge badge-danger" title={testResult()!.message}>
+                  {testResult()!.error_code || "Connection Error"}
+                </span>
+              </Show>
               <Show when={props.provider.dirtyCount > 0}>
                 <span class="badge badge-warning">{props.provider.dirtyCount} unsaved</span>
               </Show>
             </div>
           </div>
 
-          <div class="provider-summary-grid" style={{ "margin-top": "16px" }}>
+          <div class="provider-summary-grid">
             <div>
               <span class="setting-detail-label">Type</span>
               <span class="chip">{props.provider.providerType}</span>
@@ -1030,8 +762,8 @@ function ProviderDetailPage(props: {
           </div>
         </div>
 
-        <div class="panel" style={{ padding: "20px" }}>
-          <h3 style={{ "margin-top": "0", "margin-bottom": "16px", "font-size": "15px" }}>Provider Settings</h3>
+        <div class="panel provider-detail-panel">
+          <h3 class="provider-section-heading">Provider Settings</h3>
           <div class="settings-list">
             <For each={props.provider.detailFields} fallback={<div class="empty">No settings found.</div>}>
               {(entry) => (
@@ -1060,10 +792,10 @@ function ProviderDetailPage(props: {
 
         {/* Detailed Model Metadata Section from models.dev */}
         <Show when={catalogEntry()?.models?.length > 0}>
-          <div class="panel" style={{ padding: "20px" }}>
+          <div class="panel provider-detail-panel">
             <div class="model-spec-toolbar">
               <div class="model-spec-title">
-                <Sparkles size={14} style={{ color: "var(--accent, #6366f1)" }} />
+                <Sparkles size={14} class="model-spec-sparkles" />
                 Model Specifications & Capabilities
               </div>
               <label class="model-spec-search">
@@ -1080,49 +812,96 @@ function ProviderDetailPage(props: {
             </div>
             <div class="model-spec-grid">
               <For each={filteredModels()} fallback={<div class="model-spec-empty">No models match your search.</div>}>
-                {(model) => (
-                  <CopyButton
-                    value={String(model.id || model.name || "")}
-                    class="model-spec-card model-spec-button"
-                    ariaLabel={`Copy model ID ${model.id || model.name}`}
-                    title={`Copy ${model.id || model.name}`}
-                    successMessage="Model ID copied."
-                    failureMessage="Could not copy model ID."
-                  >
-                    {(state) => (
-                      <>
-                        <div class="model-spec-header">
-                          <span class="model-spec-name">{model.name}</span>
-                          <span class="model-spec-id mono">{model.id}</span>
-                          <Show when={state.copied()} fallback={<Copy size={13} class="model-spec-copy" aria-hidden="true" />}>
-                            <Check size={13} class="model-spec-copy" aria-hidden="true" />
-                          </Show>
+                {(model) => {
+                  const isDefault = () => currentDefaultModel() === model.id;
+                  const isConfigured = () => currentConfiguredModels().includes(model.id);
+
+                  return (
+                    <div
+                      class="model-spec-card"
+                      classList={{
+                        "is-default": isDefault(),
+                        "is-configured": isConfigured(),
+                      }}
+                    >
+                      <div class="model-spec-header">
+                        <div class="model-spec-title-wrap">
+                          <span class="model-spec-name" title={model.name}>{model.name}</span>
+                          <span class="model-spec-id mono" title={model.id}>{model.id}</span>
                         </div>
-                        <div class="model-spec-badges">
-                          <Show when={model.context_window}>
-                            <span class="spec-badge spec-badge-context">
-                              🧠 {model.context_window >= 1048576 ? `${(model.context_window / 1048576).toFixed(0)}M` : `${(model.context_window / 1024).toFixed(0)}k`} context
-                            </span>
-                          </Show>
-                          <Show when={model.reasoning}>
-                            <span class="spec-badge spec-badge-reasoning">🧠 Reasoning</span>
-                          </Show>
-                          <Show when={model.tool_call}>
-                            <span class="spec-badge spec-badge-tools">🛠️ Tools</span>
-                          </Show>
-                          <For each={model.input_types}>
-                            {(mod) => <span class="spec-badge spec-badge-modality">{mod}</span>}
-                          </For>
-                        </div>
-                        <Show when={model.cost_input !== null && model.cost_input !== undefined}>
-                          <div class="model-spec-cost">
-                            Cost/1M tokens: <span class="cost-number">${model.cost_input}</span> In / <span class="cost-number">${model.cost_output}</span> Out
-                          </div>
+                        <CopyButton
+                          value={String(model.id || model.name || "")}
+                          class="btn btn-icon btn-sm model-spec-copy-btn"
+                          ariaLabel={`Copy model ID ${model.id || model.name}`}
+                          title={`Copy ${model.id || model.name}`}
+                          successMessage="Model ID copied."
+                        >
+                          {(state) => (
+                            <Show when={state.copied()} fallback={<Copy size={13} aria-hidden="true" />}>
+                              <Check size={13} aria-hidden="true" />
+                            </Show>
+                          )}
+                        </CopyButton>
+                      </div>
+
+                      <div class="model-spec-badges">
+                        <Show when={isDefault()}>
+                          <span class="badge badge-info spec-badge-status">Default</span>
                         </Show>
-                      </>
-                    )}
-                  </CopyButton>
-                )}
+                        <Show when={isConfigured() && !isDefault()}>
+                          <span class="badge badge-success spec-badge-status">In Config</span>
+                        </Show>
+                        <Show when={model.context_window}>
+                          <span class="spec-badge spec-badge-context">
+                            🧠 {model.context_window >= 1048576 ? `${(model.context_window / 1048576).toFixed(0)}M` : `${(model.context_window / 1024).toFixed(0)}k`} context
+                          </span>
+                        </Show>
+                        <Show when={model.reasoning}>
+                          <span class="spec-badge spec-badge-reasoning">🧠 Reasoning</span>
+                        </Show>
+                        <Show when={model.tool_call}>
+                          <span class="spec-badge spec-badge-tools">🛠️ Tools</span>
+                        </Show>
+                        <For each={model.input_types}>
+                          {(mod) => <span class="spec-badge spec-badge-modality">{mod}</span>}
+                        </For>
+                      </div>
+
+                      <Show when={model.cost_input !== null && model.cost_input !== undefined}>
+                        <div class="model-spec-cost">
+                          Cost/1M tokens: <span class="cost-number">${model.cost_input}</span> In / <span class="cost-number">${model.cost_output}</span> Out
+                        </div>
+                      </Show>
+
+                      <div class="model-spec-actions">
+                        <button
+                          class="btn btn-sm"
+                          classList={{ "btn-primary": !isDefault() }}
+                          type="button"
+                          disabled={isDefault()}
+                          title={isDefault() ? "Current default model" : "Set as provider default model"}
+                          onClick={() => handleSetDefaultModel(model.id, model.name)}
+                        >
+                          <Star size={12} fill={isDefault() ? "currentColor" : "none"} />
+                          {isDefault() ? "Default" : "Set Default"}
+                        </button>
+
+                        <button
+                          class="btn btn-sm"
+                          type="button"
+                          disabled={isConfigured()}
+                          title={isConfigured() ? "Model already in configured list" : "Add model to configured list"}
+                          onClick={() => handleAddModel(model.id, model.name)}
+                        >
+                          <Show when={isConfigured()} fallback={<Plus size={12} />}>
+                            <Check size={12} />
+                          </Show>
+                          {isConfigured() ? "Added" : "Add to Models"}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }}
               </For>
             </div>
           </div>
@@ -1143,22 +922,103 @@ function AIProviderCreatePage(props: {
   const [form, setForm] = createSignal<ProviderCreateForm>({ name: "", type: "google", api_key: "", base_url: "" });
   const [initial, setInitial] = createSignal(form());
   const [busy, setBusy] = createSignal(false);
+  const [verifying, setVerifying] = createSignal(false);
+  const [verificationResult, setVerificationResult] = createSignal<{
+    ok: boolean;
+    message: string;
+    latency_ms?: number | null;
+    models?: string[];
+    suggested_default_model?: string;
+    error_code?: string | null;
+    details?: any;
+  } | null>(null);
+  const [discoveredModels, setDiscoveredModels] = createSignal<string[]>([]);
+  const [selectedDefaultModel, setSelectedDefaultModel] = createSignal("");
+
   createEffect(() => {
     const item = entry();
     const next = { name: suggestProviderName(isCustom() ? "custom" : props.providerId, props.names, true),
       type: item?.provider_type || "google", api_key: "", base_url: item?.base_url || "",
       catalog_id: item?.id, isCustom: isCustom() };
     setForm(next); setInitial(next);
+    setVerificationResult(null);
+    setDiscoveredModels([]);
+    setSelectedDefaultModel("");
   });
+
   const patch = (values: Partial<ProviderCreateForm>) => setForm((current) => ({ ...current, ...values }));
-  useUnsavedChanges(() => JSON.stringify(form()) !== JSON.stringify(initial()), () => setForm(initial()));
+  useUnsavedChanges(
+    () => JSON.stringify(form()) !== JSON.stringify(initial()),
+    () => { setForm(initial()); setVerificationResult(null); setDiscoveredModels([]); setSelectedDefaultModel(""); }
+  );
+
+  const verifyConnection = async () => {
+    if (verifying() || busy()) return;
+    const { type, api_key, base_url, catalog_id } = form();
+    if (!api_key.trim()) {
+      showToast("Please enter an API key before verifying connection.", "error");
+      return;
+    }
+    setVerifying(true);
+    setVerificationResult(null);
+    try {
+      const result = await postJson<{
+        ok: boolean;
+        message: string;
+        latency_ms?: number | null;
+        models?: string[];
+        suggested_default_model?: string;
+        error_code?: string | null;
+        details?: any;
+      }>("/dashboard-api/providers/verify", {
+        type,
+        api_key: api_key.trim(),
+        base_url: base_url.trim(),
+        catalog_id,
+      });
+      setVerificationResult(result);
+      if (result.ok) {
+        const models = result.models || [];
+        setDiscoveredModels(models);
+        const suggested = result.suggested_default_model || (models.length > 0 ? models[0] : "");
+        setSelectedDefaultModel(suggested);
+        showToast(result.message || `Connected successfully (⚡ ${result.latency_ms ?? 0}ms)`);
+      } else {
+        showToast(result.message || "Connection verification failed.", "error");
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Verification request failed.";
+      setVerificationResult({
+        ok: false,
+        message: msg,
+        error_code: "REQUEST_FAILED",
+      });
+      showToast(msg, "error");
+    } finally {
+      setVerifying(false);
+    }
+  };
+
   const save = async (event: SubmitEvent) => {
     event.preventDefault();
     if (busy()) return;
+    // Verification is optional: allow offline save or custom endpoints
+    // that cannot list models. Backend does not require verify.
+    if (!selectedDefaultModel() && discoveredModels().length === 0) {
+      showToast("Saving without verified models. You can set the default model manually.", "warning");
+    }
     setBusy(true);
     try {
       const { name, type, api_key, base_url, catalog_id } = form();
-      await postJson("/dashboard-api/providers", { name, type, api_key, base_url, catalog_id });
+      await postJson("/dashboard-api/providers", {
+        name,
+        type,
+        api_key,
+        base_url,
+        catalog_id,
+        default_model: selectedDefaultModel(),
+        models: discoveredModels(),
+      });
       setInitial(form());
       await props.onCreated();
       showToast("Provider configuration saved.");
@@ -1167,8 +1027,15 @@ function AIProviderCreatePage(props: {
     finally { setBusy(false); }
   };
   return (
-    <SettingsLayout title="Add AI Provider" breadcrumbLabel="Providers">
-      <Show when={isCustom() || entry()} fallback={<div class="panel panel-body stack"><h3>Provider not found</h3><button class="btn" onClick={() => navigate("/settings/providers?tab=llm")}>Back to Providers</button></div>}>
+    <SettingsLayout
+      title={`Add ${entry()?.name || "AI Provider"}`}
+      breadcrumbSegments={[
+        { label: "Providers", href: "/settings/providers?tab=llm" },
+        { label: "Add Provider" },
+      ]}
+      contentWidth="wide"
+    >
+      <Show when={isCustom() || entry()} fallback={<div class="panel panel-body stack"><h3>Provider not found</h3><button class="btn" type="button" onClick={() => navigate("/settings/providers?tab=llm")}>Back to Providers</button></div>}>
         <ProviderFormPanel title={`Add ${entry()?.name || "Custom Provider"}`} busy={busy()} onSubmit={save} onBack={() => navigate("/settings/providers?tab=llm")}>
           <label class="stack">Configuration name<input class="input" required pattern="[A-Za-z0-9_-]+" value={form().name} onInput={(event) => patch({ name: event.currentTarget.value })} /></label>
           <Show when={isCustom()}>
@@ -1178,100 +1045,86 @@ function AIProviderCreatePage(props: {
           <Show when={form().type === "openai_compatible" || form().base_url}>
             <label class="stack">Base URL<input class="input" type="url" required={form().type === "openai_compatible"} value={form().base_url} onInput={(event) => patch({ base_url: event.currentTarget.value })} /></label>
           </Show>
-          <p class="hint">This saves a separate configuration. Edit it to select a model before setting it as default.</p>
+          <div class="connection-verify-bar">
+            <button
+              class="btn btn-secondary"
+              type="button"
+              disabled={verifying() || !form().api_key.trim()}
+              onClick={verifyConnection}
+            >
+              <Show when={verifying()} fallback={<Sparkles size={14} />}>
+                <RefreshCw size={14} class="spin" />
+              </Show>
+              {verifying() ? "Testing & Discovering..." : "Test Connection & Discover Models"}
+            </button>
+            <Show when={verificationResult()?.ok}>
+              <span class="badge badge-success connection-latency-badge">
+                ⚡ {verificationResult()?.latency_ms ?? 0}ms
+              </span>
+            </Show>
+          </div>
+          <Show when={verificationResult() && !verificationResult()!.ok}>
+            <div class="connection-error-alert" role="alert">
+              <div class="row-wrap items-center gap-2">
+                <span class="badge badge-danger">
+                  {verificationResult()!.error_code || "FAILED"}
+                </span>
+                <span class="connection-error-msg">{verificationResult()!.message}</span>
+              </div>
+            </div>
+          </Show>
+          <Show when={verificationResult()?.ok}>
+            <div class="connection-success-panel">
+              <div class="row-wrap items-center gap-2">
+                <span class="badge badge-success">Connection Established</span>
+                <span class="hint">Discovered {discoveredModels().length} model{discoveredModels().length === 1 ? "" : "s"}</span>
+              </div>
+              <Show when={discoveredModels().length > 0}>
+                <label class="stack">
+                  <span>Default Model</span>
+                  <select
+                    class="input model-discovery-dropdown"
+                    value={selectedDefaultModel()}
+                    onChange={(event) => setSelectedDefaultModel(event.currentTarget.value)}
+                  >
+                    <For each={discoveredModels()}>
+                      {(modelId) => <option value={modelId}>{modelId}</option>}
+                    </For>
+                  </select>
+                  <span class="hint">Recommended default model automatically pre-selected.</span>
+                </label>
+              </Show>
+              <Show when={discoveredModels().length === 0}>
+                <label class="stack">
+                  <span>Default Model (manual)</span>
+                  <input
+                    class="input mono"
+                    placeholder="e.g. gpt-4o-mini"
+                    value={selectedDefaultModel()}
+                    onInput={(event) => setSelectedDefaultModel(event.currentTarget.value)}
+                  />
+                  <span class="hint">No models discovered. Enter the default model manually (optional).</span>
+                </label>
+              </Show>
+            </div>
+          </Show>
+          <Show when={!verificationResult()?.ok}>
+            <p class="hint">Test connection above to verify credentials and discover available models automatically.</p>
+            <label class="stack">
+              <span>Default Model (manual, optional)</span>
+              <input
+                class="input mono"
+                placeholder="e.g. gpt-4o-mini — leave empty to save without a default model"
+                value={selectedDefaultModel()}
+                onInput={(event) => setSelectedDefaultModel(event.currentTarget.value)}
+              />
+              <span class="hint">You can save without verification (offline or custom endpoint). Set the model manually if known.</span>
+            </label>
+          </Show>
         </ProviderFormPanel>
       </Show>
     </SettingsLayout>
   );
 }
 
-function FallbackModelSection(props: {
-  catalogs: ModelCatalog[];
-  providerNames: string[];
-  defaultProvider: string;
-  defaultModel: string;
-  provider: string;
-  model: string;
-  dirty: boolean;
-  saving: boolean;
-  onProviderModelChange: (provider: string, model: string) => void;
-  onSave: () => void;
-  onClear: () => void;
-}) {
-  const providerOptions = () => {
-    const opts = props.providerNames.map((name) => ({
-      value: name,
-      label: name,
-    }));
-    if (props.provider && !opts.some((o) => o.value === props.provider)) {
-      opts.push({ value: props.provider, label: props.provider });
-    }
-    return opts;
-  };
 
-  const currentCatalog = () => {
-    const resolvedProvider = props.provider || props.defaultProvider;
-    return props.catalogs.find((c) => c.provider === resolvedProvider);
-  };
-
-  const modelOptions = () => {
-    const catalog = currentCatalog();
-    if (!catalog) return [];
-
-    const opts = catalog.models.map((m) => ({
-      value: m.id,
-      label: (m as any).display_name || m.id,
-    }));
-
-    if (props.model && !opts.some((o) => o.value === props.model)) {
-      opts.push({ value: props.model, label: props.model });
-    }
-
-    return opts;
-  };
-
-  return (
-    <FormCard
-      title="Fallback Model"
-      variant="default"
-    >
-      <div class="settings-section-header">
-        <div class="row-wrap">
-          <Show when={props.dirty}>
-            <button class="btn btn-sm" type="button" onClick={props.onClear} disabled={props.saving}>
-              Reset
-            </button>
-            <button class="btn btn-primary btn-sm" type="button" onClick={props.onSave} disabled={props.saving}>
-              <Save size={13} />
-              {props.saving ? "Saving..." : "Save Fallback"}
-            </button>
-          </Show>
-        </div>
-      </div>
-
-      <FormField
-        label="Provider"
-      >
-        <FormSelect
-          value={props.provider}
-          onChange={(value) => props.onProviderModelChange(value, props.model)}
-          options={providerOptions()}
-          placeholder="Select a provider"
-        />
-      </FormField>
-
-      <Show when={props.provider}>
-        <FormField
-          label="Model"
-        >
-          <FormSelect
-            value={props.model}
-            onChange={(value) => props.onProviderModelChange(props.provider, value)}
-            options={modelOptions()}
-            placeholder="Select a model"
-          />
-        </FormField>
-      </Show>
-    </FormCard>
-  );
-}

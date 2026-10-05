@@ -497,6 +497,38 @@ class TestDashboardSettingsEndpoints:
         else:
             assert f"{provider_key}.base_url" not in flat
 
+    def test_create_provider_with_configured_default_model_and_models(
+        self,
+        make_dashboard_client,
+    ) -> None:
+        service, db_source = _db_config_service(
+            """
+            llm:
+              default_model: ""
+              providers: {}
+            """
+        )
+        client = make_dashboard_client(service)
+
+        response = client.post(
+            "/dashboard-api/providers",
+            json={
+                "name": "google-streamlined",
+                "type": "google",
+                "api_key": "ai-key-123",
+                "default_model": "gemini-2.5-flash",
+                "models": ["gemini-2.5-flash", "gemini-2.5-pro"],
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == "created"
+
+        flat = db_source.get_all()
+        provider_key = "llm.providers.google-streamlined"
+        assert flat[f"{provider_key}.default_model"] == "gemini-2.5-flash"
+        assert flat[f"{provider_key}.models"] == ["gemini-2.5-flash", "gemini-2.5-pro"]
+        assert flat[f"{provider_key}.enabled"] is True
+
     def test_create_provider_rejects_duplicate_name(
         self,
         make_dashboard_client,
@@ -872,3 +904,618 @@ class TestDashboardSettingsEndpoints:
             "key": "llm.providers.openai-main.models",
             "value": ["model-one", "model-two", "model-three"],
         }
+
+    def test_verify_provider_endpoint_openai_compatible_success(
+        self,
+        dashboard_client,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import httpx
+
+        fake_resp = httpx.Response(
+            200,
+            json={"data": [{"id": "gpt-4o"}, {"id": "gpt-4o-mini"}]},
+            request=httpx.Request("GET", "https://api.openai.com/v1/models"),
+        )
+
+        class MockAsyncClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def get(self, url, headers=None):
+                return fake_resp
+
+        monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+
+        resp = dashboard_client.post(
+            "/dashboard-api/providers/verify",
+            json={
+                "type": "openai_compatible",
+                "api_key": "test-key",
+                "base_url": "https://api.openai.com/v1",
+            },
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["error_code"] is None
+        assert "gpt-4o-mini" in data["models"]
+        assert data["suggested_default_model"] == "gpt-4o-mini"
+        assert data["latency_ms"] is not None and data["latency_ms"] >= 0
+
+    def test_verify_provider_endpoint_saved_provider(
+        self,
+        make_dashboard_client,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import httpx
+
+        service, _ = _db_config_service(
+            """
+            llm:
+              providers:
+                custom_openai:
+                  type: "openai_compatible"
+                  api_key: "saved-key"
+                  base_url: "https://api.example.com/v1"
+            """
+        )
+        client = make_dashboard_client(service)
+
+        fake_resp = httpx.Response(
+            200,
+            json={"data": [{"id": "meta-llama/llama-3.3-70b-instruct"}]},
+            request=httpx.Request("GET", "https://api.example.com/v1/models"),
+        )
+
+        class MockAsyncClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def get(self, url, headers=None):
+                return fake_resp
+
+        monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+
+        resp = client.post(
+            "/dashboard-api/providers/verify",
+            json={"name": "custom_openai"},
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["models"] == ["meta-llama/llama-3.3-70b-instruct"]
+        assert data["suggested_default_model"] == "meta-llama/llama-3.3-70b-instruct"
+
+    def test_verify_provider_endpoint_not_found(self, dashboard_client) -> None:
+        resp = dashboard_client.post(
+            "/dashboard-api/providers/verify",
+            json={"name": "missing_provider"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is False
+        assert data["error_code"] == "INVALID_CONFIG"
+        assert "not found" in data["message"].lower()
+
+    def test_verify_provider_endpoint_auth_failed(
+        self,
+        dashboard_client,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import httpx
+
+        fake_resp = httpx.Response(
+            401,
+            text="Invalid key",
+            request=httpx.Request("GET", "https://api.openai.com/v1/models"),
+        )
+
+        class MockAsyncClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def get(self, url, headers=None):
+                raise httpx.HTTPStatusError("Unauthorized", request=fake_resp.request, response=fake_resp)
+
+        monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+
+        resp = dashboard_client.post(
+            "/dashboard-api/providers/verify",
+            json={
+                "type": "openai_compatible",
+                "api_key": "invalid-key",
+                "base_url": "https://api.openai.com/v1",
+            },
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is False
+        assert data["error_code"] == "AUTH_FAILED"
+        assert "authentication" in data["message"].lower()
+
+    def test_verify_provider_endpoint_timeout(
+        self,
+        dashboard_client,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import httpx
+
+        class MockAsyncClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def get(self, url, headers=None):
+                raise httpx.ReadTimeout("Timed out")
+
+        monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+
+        resp = dashboard_client.post(
+            "/dashboard-api/providers/verify",
+            json={
+                "type": "openai_compatible",
+                "api_key": "timeout-key",
+                "base_url": "https://api.openai.com/v1",
+            },
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is False
+        assert data["error_code"] == "TIMEOUT"
+
+    def test_verify_provider_endpoint_connection_error(
+        self,
+        dashboard_client,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import httpx
+
+        class MockAsyncClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def get(self, url, headers=None):
+                raise httpx.ConnectError("Could not resolve host")
+
+        monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+
+        resp = dashboard_client.post(
+            "/dashboard-api/providers/verify",
+            json={
+                "type": "openai_compatible",
+                "api_key": "any-key",
+                "base_url": "https://unreachable.example.com",
+            },
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is False
+        assert data["error_code"] == "CONNECTION_ERROR"
+
+    def test_verify_provider_endpoint_invalid_config(self, dashboard_client) -> None:
+        # Missing type
+        resp = dashboard_client.post("/dashboard-api/providers/verify", json={"api_key": "key"})
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is False
+        assert resp.json()["error_code"] == "INVALID_CONFIG"
+
+        # Missing base_url for openai_compatible
+        resp2 = dashboard_client.post(
+            "/dashboard-api/providers/verify",
+            json={"type": "openai_compatible", "api_key": "key", "base_url": ""},
+        )
+        assert resp2.status_code == 200
+        assert resp2.json()["ok"] is False
+        assert resp2.json()["error_code"] == "INVALID_CONFIG"
+
+    def test_verify_web_connection_endpoint_success(
+        self,
+        dashboard_client,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import httpx
+
+        fake_resp = httpx.Response(
+            200,
+            json={"results": [{"title": "Ping", "url": "https://example.com"}]},
+            request=httpx.Request("POST", "https://api.tavily.com/search"),
+        )
+
+        class MockAsyncClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def post(self, url, **kwargs):
+                return fake_resp
+
+        monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+
+        resp = dashboard_client.post(
+            "/dashboard-api/web-connections/verify",
+            json={"type": "tavily", "api_key": "tvly-test-key"},
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["error_code"] is None
+        assert "Tavily" in data["message"]
+        assert data["latency_ms"] >= 0
+
+    def test_verify_web_connection_endpoint_saved_connection(
+        self,
+        make_dashboard_client,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import httpx
+
+        service, _ = _db_config_service(
+            """
+            web:
+              connections:
+                my_tavily:
+                  type: "tavily"
+                  api_key: "saved-tvly-key"
+            """
+        )
+        client = make_dashboard_client(service)
+
+        fake_resp = httpx.Response(
+            200,
+            json={"results": []},
+            request=httpx.Request("POST", "https://api.tavily.com/search"),
+        )
+
+        class MockAsyncClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def post(self, url, **kwargs):
+                return fake_resp
+
+        monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+
+        resp = client.post(
+            "/dashboard-api/web-connections/verify",
+            json={"name": "my_tavily"},
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["error_code"] is None
+
+    def test_verify_web_connection_endpoint_auth_failed(
+        self,
+        dashboard_client,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import httpx
+
+        fake_resp = httpx.Response(
+            401,
+            text="Unauthorized key",
+            request=httpx.Request("POST", "https://api.tavily.com/search"),
+        )
+
+        class MockAsyncClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def post(self, url, **kwargs):
+                raise httpx.HTTPStatusError("Unauthorized", request=fake_resp.request, response=fake_resp)
+
+        monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+
+        resp = dashboard_client.post(
+            "/dashboard-api/web-connections/verify",
+            json={"type": "tavily", "api_key": "bad-key"},
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is False
+        assert data["error_code"] == "AUTH_FAILED"
+
+    def test_verify_web_connection_endpoint_timeout(
+        self,
+        dashboard_client,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import httpx
+
+        class MockAsyncClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def post(self, url, **kwargs):
+                raise httpx.ReadTimeout("Timeout")
+
+        monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+
+        resp = dashboard_client.post(
+            "/dashboard-api/web-connections/verify",
+            json={"type": "tavily", "api_key": "slow-key"},
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is False
+        assert data["error_code"] == "TIMEOUT"
+
+    def test_verify_web_connection_endpoint_invalid_config(self, dashboard_client) -> None:
+        # Unknown type
+        resp = dashboard_client.post(
+            "/dashboard-api/web-connections/verify",
+            json={"type": "unknown_web", "api_key": "k"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is False
+        assert resp.json()["error_code"] == "INVALID_CONFIG"
+
+        # Missing api_key
+        resp2 = dashboard_client.post(
+            "/dashboard-api/web-connections/verify",
+            json={"type": "tavily", "api_key": ""},
+        )
+        assert resp2.status_code == 200
+        assert resp2.json()["ok"] is False
+        assert resp2.json()["error_code"] == "INVALID_CONFIG"
+
+    def test_verify_decision_provider_endpoint_success(
+        self,
+        dashboard_client,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import httpx
+
+        fake_resp = httpx.Response(
+            200,
+            json={"success": True, "result": {"answers": {"ping": {"noul": 0.0}}}},
+            request=httpx.Request("POST", "https://api.cloudflare.com/client/v4/accounts/cf-account-id/ai/run/@cf/cloudflare/clef-flash"),
+        )
+
+        class MockAsyncClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def post(self, url, json=None, headers=None, **kwargs):
+                assert "ai/run/" in str(url)
+                return fake_resp
+
+        monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+
+        resp = dashboard_client.post(
+            "/dashboard-api/decision-providers/verify",
+            json={
+                "type": "cloudflare",
+                "fields": {
+                    "account_id": "cf-account-id",
+                    "api_token": "cf-api-token",
+                },
+            },
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["error_code"] is None
+        assert "Cloudflare" in data["message"]
+        assert data["latency_ms"] >= 0
+
+    def test_verify_decision_provider_endpoint_saved_provider(
+        self,
+        make_dashboard_client,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import httpx
+
+        service, _ = _db_config_service(
+            """
+            decision:
+              providers:
+                my_cf:
+                  type: "cloudflare"
+                  account_id: "stored-acc"
+                  api_token: "stored-token"
+            """
+        )
+        client = make_dashboard_client(service)
+
+        fake_resp = httpx.Response(
+            200,
+            json={"success": True, "result": {"answers": {"ping": {"noul": 0.0}}}},
+            request=httpx.Request("POST", "https://api.cloudflare.com/client/v4/accounts/stored-acc/ai/run/@cf/cloudflare/clef-flash"),
+        )
+
+        class MockAsyncClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def post(self, url, json=None, headers=None, **kwargs):
+                assert "ai/run/" in str(url)
+                return fake_resp
+
+        monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+
+        resp = client.post(
+            "/dashboard-api/decision-providers/verify",
+            json={"name": "my_cf"},
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+
+    def test_verify_decision_provider_endpoint_auth_failed(
+        self,
+        dashboard_client,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import httpx
+
+        fake_resp = httpx.Response(
+            401,
+            json={"errors": [{"message": "Invalid token"}]},
+            request=httpx.Request("POST", "https://api.cloudflare.com/client/v4/accounts/acc/ai/run/@cf/cloudflare/clef-flash"),
+        )
+
+        class MockAsyncClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def post(self, url, json=None, headers=None, **kwargs):
+                raise httpx.HTTPStatusError("Unauthorized", request=fake_resp.request, response=fake_resp)
+
+        monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+
+        resp = dashboard_client.post(
+            "/dashboard-api/decision-providers/verify",
+            json={
+                "type": "cloudflare",
+                "fields": {
+                    "account_id": "acc",
+                    "api_token": "bad-token",
+                },
+            },
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is False
+        assert data["error_code"] == "AUTH_FAILED"
+
+    def test_verify_decision_provider_endpoint_timeout(
+        self,
+        dashboard_client,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import httpx
+
+        class MockAsyncClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def post(self, url, json=None, headers=None, **kwargs):
+                raise httpx.ReadTimeout("Timeout")
+
+        monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+
+        resp = dashboard_client.post(
+            "/dashboard-api/decision-providers/verify",
+            json={
+                "type": "cloudflare",
+                "fields": {
+                    "account_id": "acc",
+                    "api_token": "token",
+                },
+            },
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is False
+        assert data["error_code"] == "TIMEOUT"
+
+    def test_verify_decision_provider_endpoint_invalid_config(self, dashboard_client) -> None:
+        # Missing account_id
+        resp = dashboard_client.post(
+            "/dashboard-api/decision-providers/verify",
+            json={"type": "cloudflare", "fields": {"api_token": "token"}},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is False
+        assert resp.json()["error_code"] == "INVALID_CONFIG"
+
+        # Missing api_token
+        resp2 = dashboard_client.post(
+            "/dashboard-api/decision-providers/verify",
+            json={"type": "cloudflare", "fields": {"account_id": "acc"}},
+        )
+        assert resp2.status_code == 200
+        assert resp2.json()["ok"] is False
+        assert resp2.json()["error_code"] == "INVALID_CONFIG"
+

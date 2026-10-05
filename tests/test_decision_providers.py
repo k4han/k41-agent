@@ -314,3 +314,65 @@ def test_database_attachment_migrates_yaml_credentials_once(tmp_path, monkeypatc
         assert len(provider_entries(service.get_all())) == 1
     finally:
         service._sources[-1].close()
+
+
+def test_verify_decision_provider_routes(make_dashboard_client, monkeypatch):
+    import httpx
+
+    service, source = _db_config_service("{}")
+    client = make_dashboard_client(service)
+
+    fake_resp = httpx.Response(
+        200,
+        json={"success": True, "result": {"answers": {"ping": {"noul": 0.0}}}},
+        request=httpx.Request("POST", "https://api.cloudflare.com/client/v4/accounts/acc-1/ai/run/@cf/cloudflare/clef-flash"),
+    )
+
+    class MockAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def post(self, url, json=None, headers=None, **kwargs):
+            assert "ai/run/" in str(url)
+            assert json is not None and "questions" in json and "state" in json
+            return fake_resp
+
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+
+    # 1. Direct candidate verification
+    resp = client.post(
+        f"{API}/verify",
+        json={
+            "type": "cloudflare",
+            "fields": {"account_id": "acc-1", "api_token": "tok-1"},
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    assert resp.json()["latency_ms"] >= 0
+
+    # 2. Saved decision provider verification
+    source.update_settings({
+        "decision.providers.cf-saved.type": "cloudflare",
+        "decision.providers.cf-saved.account_id": "acc-saved",
+        "decision.providers.cf-saved.api_token": "tok-saved",
+    })
+    resp_saved = client.post(f"{API}/verify", json={"name": "cf-saved"})
+    assert resp_saved.status_code == 200
+    assert resp_saved.json()["ok"] is True
+
+    # 3. Missing account_id
+    resp_bad = client.post(
+        f"{API}/verify",
+        json={"type": "cloudflare", "fields": {"api_token": "tok-only"}},
+    )
+    assert resp_bad.status_code == 200
+    assert resp_bad.json()["ok"] is False
+    assert resp_bad.json()["error_code"] == "INVALID_CONFIG"
+

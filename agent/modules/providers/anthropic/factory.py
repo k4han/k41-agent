@@ -24,14 +24,17 @@ class AnthropicFactory:
         self,
         provider_config: ProviderConfig,
         api_key: str,
+        timeout: float = 10.0,
     ) -> list[str]:
         try:
             import anthropic
-        except ImportError:
-            return []
+        except ImportError as exc:
+            raise RuntimeError(
+                "anthropic package is not installed. Install it to enable Anthropic model discovery."
+            ) from exc
 
         _ = provider_config
-        client = anthropic.AsyncAnthropic(api_key=api_key)
+        client = anthropic.AsyncAnthropic(api_key=api_key, timeout=timeout)
         model_names: list[str] = []
         try:
             async for model in client.models.list(limit=100):

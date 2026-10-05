@@ -1,10 +1,16 @@
 """Provider service — manages provider configurations and factory registry."""
 
+from __future__ import annotations
+
 import inspect
+from typing import TYPE_CHECKING
 
 from agent.modules.providers.models import ModelOption, ProviderModelCatalog
 from agent.modules.providers.ports import ChatModelFactory, ProviderRepository
 from agent.modules.providers.provider import ProviderConfig, ProviderType
+
+if TYPE_CHECKING:
+    from agent.modules.providers.verification import ProviderVerificationResult
 
 
 class ProviderService:
@@ -38,12 +44,44 @@ class ProviderService:
     ) -> ChatModelFactory:
         from agent.modules.providers.catalog import normalize_provider_key
 
-        for name in (provider_name, catalog_id):
-            if name:
-                named = self._named_factories.get(normalize_provider_key(name))
-                if named is not None:
-                    return named
-        factory = self._factories.get(provider_type)
+        def _norm_type(value: object) -> str:
+            raw = str(value.value if isinstance(value, ProviderType) else value)
+            norm = raw.strip().lower().replace("-", "_")
+            if norm == "openai":
+                norm = "openai_compatible"
+            return norm
+
+        requested = _norm_type(provider_type)
+        # Only reuse a named factory when it matches the requested type.
+        # Provider names are user-chosen and may collide across types,
+        # so a blind name lookup can return a factory for the wrong driver.
+        if provider_name:
+            named = self._named_factories.get(normalize_provider_key(provider_name))
+            if named is not None:
+                try:
+                    stored = self._repository.get_provider(provider_name)
+                    if _norm_type(stored.provider_type) == requested:
+                        return named
+                except Exception:
+                    # Provider not in repository (new candidate) -> do not reuse.
+                    pass
+        if catalog_id:
+            named = self._named_factories.get(normalize_provider_key(catalog_id))
+            if named is not None:
+                try:
+                    from agent.modules.providers.catalog import get_provider_catalog_entry
+
+                    entry = get_provider_catalog_entry(catalog_id)
+                    if entry is not None and _norm_type(entry.provider_type) == requested:
+                        return named
+                except Exception:
+                    pass
+        lookup_type = provider_type
+        if requested == "openai_compatible" and provider_type == ProviderType.OPENAI:
+            lookup_type = ProviderType.OPENAI_COMPATIBLE
+        factory = self._factories.get(lookup_type)
+        if factory is None and lookup_type != provider_type:
+            factory = self._factories.get(provider_type)
         if factory is None:
             raise RuntimeError(
                 f"No factory registered for provider type: {provider_type}"
@@ -122,6 +160,53 @@ class ProviderService:
 
     def reload(self) -> None:
         self._repository.reload()
+
+    async def verify_provider(
+        self,
+        provider_type: ProviderType | str,
+        api_key: str,
+        base_url: str = "",
+        *,
+        catalog_id: str = "",
+        provider_name: str = "",
+        timeout: float = 10.0,
+    ) -> ProviderVerificationResult:
+        from agent.modules.providers.verification import (
+            ProviderVerificationResult,
+            verify_provider_connection,
+        )
+
+        norm_type = str(provider_type).strip().lower().replace("-", "_")
+        if norm_type == "openai":
+            norm_type = "openai_compatible"
+            if not str(base_url or "").strip():
+                base_url = "https://api.openai.com/v1"
+        try:
+            provider_enum = ProviderType(norm_type)
+        except ValueError:
+            return ProviderVerificationResult(
+                ok=False,
+                message=f"Unsupported provider type: {provider_type}.",
+                error_code="INVALID_CONFIG",
+                latency_ms=0,
+            )
+        try:
+            factory: ChatModelFactory | None = self.get_factory(
+                provider_enum,
+                provider_name=provider_name,
+                catalog_id=catalog_id,
+            )
+        except Exception:
+            factory = None
+        return await verify_provider_connection(
+            provider_type=norm_type,
+            api_key=api_key,
+            base_url=base_url,
+            catalog_id=catalog_id,
+            provider_name=provider_name,
+            factory=factory,
+            timeout=timeout,
+        )
 
 
 def _merge_model_options(

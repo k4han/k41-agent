@@ -387,8 +387,8 @@ export function BackendsPage() {
       when={params.backendName}
       fallback={
         <SettingsLayout
-          title="Workspace Backends"
-          breadcrumbLabel="Backends"
+          title="Execution Environments"
+          breadcrumbLabel="Providers"
           contentWidth="wide"
         >
           <DataGate data={data()} error={error()} onRetry={load}>
@@ -437,10 +437,10 @@ export function BackendsPage() {
 
         return (
           <SettingsLayout
-            title={def() ? `${def()!.title} Settings` : "Backend Settings"}
+            title={def() ? `${def()!.title} Settings` : "Environment Settings"}
             description={def()?.summary}
             breadcrumbSegments={[
-              { label: "Backends", href: "/settings/providers?tab=workspace" },
+              { label: "Providers", href: "/settings/providers?tab=workspace" },
               { label: def()?.title || name() },
             ]}
             contentWidth="wide"
@@ -452,7 +452,7 @@ export function BackendsPage() {
                   onClick={() => navigate("/settings/providers?tab=workspace")}
                 >
                   <ArrowLeft size={14} />
-                  Back to Backends
+                  Back to Providers
                 </button>
                 <button
                   class="btn btn-sm btn-primary"

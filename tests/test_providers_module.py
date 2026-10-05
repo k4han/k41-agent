@@ -898,10 +898,10 @@ def test_resolve_chat_model_uses_provider_specific_temperature(
     _get_cached_model.cache_clear()
 
 
-# --- Application: resolve_chat_model fallback ---
+# --- Application: resolve_chat_model error handling ---
 
 
-def test_resolve_chat_model_falls_back_when_provider_missing(
+def test_resolve_chat_model_raises_when_provider_missing(
     monkeypatch: MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -913,9 +913,6 @@ def test_resolve_chat_model_falls_back_when_provider_missing(
         """
         llm:
             default_model: "openai-main/openai-model"
-            fallback:
-                provider: "google-main"
-                model: "google-fallback-model"
             providers:
                 openai-main:
                     type: "openai_compatible"
@@ -925,7 +922,7 @@ def test_resolve_chat_model_falls_back_when_provider_missing(
                 google-main:
                     type: "google"
                     api_key: "google-key"
-                    default_model: "google-fallback-model"
+                    default_model: "google-model"
         """,
     )
     _set_config_path(monkeypatch, config_path)
@@ -935,77 +932,20 @@ def test_resolve_chat_model_falls_back_when_provider_missing(
 
     openai_factory = MagicMock()
     google_factory = MagicMock()
-    fallback_model = MagicMock(name="fallback_model")
-    google_factory.create.return_value = fallback_model
 
     service.register_factory(ProviderType.OPENAI_COMPATIBLE, openai_factory)
     service.register_factory(ProviderType.GOOGLE, google_factory)
 
-    result = resolve_chat_model(service, provider_name="missing-provider")
+    with pytest.raises(KeyError, match="Provider not found"):
+        resolve_chat_model(service, provider_name="missing-provider")
 
-    assert result is fallback_model
     openai_factory.create.assert_not_called()
-    google_factory.create.assert_called_once()
-    call_args = google_factory.create.call_args.args
-    assert call_args[0].provider_type == ProviderType.GOOGLE
-    assert call_args[1].model_name == "google-fallback-model"
-    assert call_args[2] == "google-key"
+    google_factory.create.assert_not_called()
 
     _get_cached_model.cache_clear()
 
 
-def test_resolve_chat_model_falls_back_when_model_missing(
-    monkeypatch: MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _get_cached_model.cache_clear()
-
-    config_path = tmp_path / "config.yaml"
-    _write_yaml(
-        config_path,
-        """
-        llm:
-            default_model: ""
-            fallback:
-                provider: "google-main"
-            providers:
-                openai-main:
-                    type: "openai_compatible"
-                    api_key: "openai-key"
-                    base_url: "https://openai.example/v1"
-                    default_model: ""
-                google-main:
-                    type: "google"
-                    api_key: "google-key"
-                    default_model: "google-fallback-model"
-        """,
-    )
-    _set_config_path(monkeypatch, config_path)
-
-    repo = ConfigProviderRepository()
-    service = ProviderService(repository=repo)
-
-    openai_factory = MagicMock()
-    google_factory = MagicMock()
-    fallback_model = MagicMock(name="fallback_model")
-    google_factory.create.return_value = fallback_model
-
-    service.register_factory(ProviderType.OPENAI_COMPATIBLE, openai_factory)
-    service.register_factory(ProviderType.GOOGLE, google_factory)
-
-    result = resolve_chat_model(service)
-
-    assert result is fallback_model
-    openai_factory.create.assert_not_called()
-    google_factory.create.assert_called_once()
-    call_args = google_factory.create.call_args.args
-    assert call_args[0].provider_type == ProviderType.GOOGLE
-    assert call_args[1].model_name == "google-fallback-model"
-
-    _get_cached_model.cache_clear()
-
-
-def test_resolve_chat_model_no_fallback_raises_original_error(
+def test_resolve_chat_model_raises_when_model_missing(
     monkeypatch: MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -1041,45 +981,7 @@ def test_resolve_chat_model_no_fallback_raises_original_error(
     _get_cached_model.cache_clear()
 
 
-def test_resolve_chat_model_fallback_also_failing_raises_original_error(
-    monkeypatch: MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _get_cached_model.cache_clear()
-
-    config_path = tmp_path / "config.yaml"
-    _write_yaml(
-        config_path,
-        """
-        llm:
-            default_model: ""
-            fallback:
-                provider: "missing-fallback-provider"
-            providers:
-                openai-main:
-                    type: "openai_compatible"
-                    api_key: "openai-key"
-                    base_url: "https://openai.example/v1"
-                    default_model: ""
-        """,
-    )
-    _set_config_path(monkeypatch, config_path)
-
-    repo = ConfigProviderRepository()
-    service = ProviderService(repository=repo)
-
-    openai_factory = MagicMock()
-    service.register_factory(ProviderType.OPENAI_COMPATIBLE, openai_factory)
-
-    with pytest.raises(RuntimeError, match="Model not configured"):
-        resolve_chat_model(service)
-
-    openai_factory.create.assert_not_called()
-
-    _get_cached_model.cache_clear()
-
-
-def test_resolve_chat_model_does_not_use_fallback_when_primary_succeeds(
+def test_resolve_chat_model_resolves_primary_when_configured(
     monkeypatch: MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -1091,9 +993,6 @@ def test_resolve_chat_model_does_not_use_fallback_when_primary_succeeds(
         """
         llm:
             default_model: "openai-main/openai-model"
-            fallback:
-                provider: "google-main"
-                model: "google-fallback-model"
             providers:
                 openai-main:
                     type: "openai_compatible"
@@ -1103,7 +1002,7 @@ def test_resolve_chat_model_does_not_use_fallback_when_primary_succeeds(
                 google-main:
                     type: "google"
                     api_key: "google-key"
-                    default_model: "google-fallback-model"
+                    default_model: "google-model"
         """,
     )
     _set_config_path(monkeypatch, config_path)
@@ -1125,42 +1024,6 @@ def test_resolve_chat_model_does_not_use_fallback_when_primary_succeeds(
     assert result is openai_model
     openai_factory.create.assert_called_once()
     google_factory.create.assert_not_called()
-
-    _get_cached_model.cache_clear()
-
-
-def test_resolve_chat_model_fallback_disabled_when_keys_empty(
-    monkeypatch: MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _get_cached_model.cache_clear()
-
-    config_path = tmp_path / "config.yaml"
-    _write_yaml(
-        config_path,
-        """
-        llm:
-            default_model: ""
-            providers:
-                openai-main:
-                    type: "openai_compatible"
-                    api_key: "openai-key"
-                    base_url: "https://openai.example/v1"
-                    default_model: ""
-        """,
-    )
-    _set_config_path(monkeypatch, config_path)
-
-    repo = ConfigProviderRepository()
-    service = ProviderService(repository=repo)
-
-    openai_factory = MagicMock()
-    service.register_factory(ProviderType.OPENAI_COMPATIBLE, openai_factory)
-
-    with pytest.raises(RuntimeError, match="Model not configured"):
-        resolve_chat_model(service)
-
-    openai_factory.create.assert_not_called()
 
     _get_cached_model.cache_clear()
 
@@ -1595,3 +1458,233 @@ def test_factory_merges_fallback_with_user_extra_body() -> None:
         "thinking": {"type": "enabled"},
         "reasoning_split": True,
     }
+
+
+# --- Provider Connection Verification & Model Discovery Tests ---
+
+def test_resolve_suggested_default_model_empty_and_fallback() -> None:
+    from agent.modules.providers import resolve_suggested_default_model
+
+    assert resolve_suggested_default_model([]) == ""
+    assert resolve_suggested_default_model(["custom-model-alpha", "custom-model-beta"]) == "custom-model-alpha"
+
+
+def test_resolve_suggested_default_model_catalog_priority() -> None:
+    from agent.modules.providers import resolve_suggested_default_model
+
+    models = ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-1.5-pro"]
+    assert resolve_suggested_default_model(models, catalog_default="gemini-2.5-pro") == "gemini-2.5-pro"
+    assert resolve_suggested_default_model(models, catalog_default="google/gemini-2.5-flash") == "gemini-2.5-flash"
+
+
+def test_resolve_suggested_default_model_keyword_priority() -> None:
+    from agent.modules.providers import resolve_suggested_default_model
+
+    # flash has highest keyword priority
+    assert resolve_suggested_default_model(["gpt-4o-mini", "gemini-2.5-flash", "claude-3-5-sonnet"]) == "gemini-2.5-flash"
+    # mini has priority over sonnet
+    assert resolve_suggested_default_model(["claude-3-5-sonnet", "gpt-4o-mini"]) == "gpt-4o-mini"
+    # sonnet has priority over generic
+    assert resolve_suggested_default_model(["deepseek-chat", "claude-3-5-sonnet"]) == "claude-3-5-sonnet"
+
+
+@pytest.mark.asyncio
+async def test_verify_provider_connection_openai_compatible_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent.modules.providers import verify_provider_connection
+    import httpx
+
+    fake_response = httpx.Response(
+        200,
+        json={"data": [{"id": "gpt-4o"}, {"id": "gpt-4o-mini"}]},
+        request=httpx.Request("GET", "https://api.openai.com/v1/models"),
+    )
+
+    class MockAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url, headers=None):
+            return fake_response
+
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+
+    result = await verify_provider_connection(
+        provider_type="openai_compatible",
+        api_key="sk-valid-key",
+        base_url="https://api.openai.com/v1",
+    )
+
+    assert result.ok is True
+    assert result.error_code is None
+    assert "gpt-4o-mini" in result.models
+    assert "gpt-4o" in result.models
+    assert result.suggested_default_model == "gpt-4o-mini"
+    assert result.latency_ms is not None and result.latency_ms >= 0
+
+
+@pytest.mark.asyncio
+async def test_verify_provider_connection_invalid_config() -> None:
+    from agent.modules.providers import verify_provider_connection
+
+    # Missing API key
+    res1 = await verify_provider_connection("google", "")
+    assert res1.ok is False
+    assert res1.error_code == "INVALID_CONFIG"
+
+    # Missing Base URL for OpenAI-compatible
+    res2 = await verify_provider_connection("openai_compatible", "key", base_url="")
+    assert res2.ok is False
+    assert res2.error_code == "INVALID_CONFIG"
+
+    # Unknown provider type
+    res3 = await verify_provider_connection("unknown_provider", "key")
+    assert res3.ok is False
+    assert res3.error_code == "INVALID_CONFIG"
+
+
+@pytest.mark.asyncio
+async def test_verify_provider_connection_auth_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent.modules.providers import verify_provider_connection
+    import httpx
+
+    fake_response = httpx.Response(
+        401,
+        text="Invalid API key",
+        request=httpx.Request("GET", "https://api.openai.com/v1/models"),
+    )
+
+    class MockAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url, headers=None):
+            raise httpx.HTTPStatusError("Unauthorized", request=fake_response.request, response=fake_response)
+
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+
+    result = await verify_provider_connection(
+        provider_type="openai_compatible",
+        api_key="sk-bad-key",
+        base_url="https://api.openai.com/v1",
+    )
+
+    assert result.ok is False
+    assert result.error_code == "AUTH_FAILED"
+    assert "Authentication failed" in result.message
+    assert result.latency_ms is not None
+
+
+@pytest.mark.asyncio
+async def test_verify_provider_connection_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent.modules.providers import verify_provider_connection
+    import httpx
+
+    class MockAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url, headers=None):
+            raise httpx.ReadTimeout("Timed out waiting for response")
+
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+
+    result = await verify_provider_connection(
+        provider_type="openai_compatible",
+        api_key="sk-test-key",
+        base_url="https://api.openai.com/v1",
+    )
+
+    assert result.ok is False
+    assert result.error_code == "TIMEOUT"
+    assert "timed out" in result.message.lower()
+
+
+@pytest.mark.asyncio
+async def test_verify_provider_connection_network_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent.modules.providers import verify_provider_connection
+    import httpx
+
+    class MockAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url, headers=None):
+            raise httpx.ConnectError("Connection refused")
+
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+
+    result = await verify_provider_connection(
+        provider_type="openai_compatible",
+        api_key="sk-test-key",
+        base_url="https://api.openai.com/v1",
+    )
+
+    assert result.ok is False
+    assert result.error_code == "CONNECTION_ERROR"
+    assert "connect" in result.message.lower()
+
+
+@pytest.mark.asyncio
+async def test_verify_provider_connection_with_mock_factory() -> None:
+    from agent.modules.providers import verify_provider_connection
+    from unittest.mock import AsyncMock
+
+    mock_factory = MagicMock()
+    mock_factory.list_models = AsyncMock(return_value=["model-a", "model-flash-2"])
+
+    result = await verify_provider_connection(
+        provider_type="google",
+        api_key="dummy-key",
+        factory=mock_factory,
+    )
+
+    assert result.ok is True
+    assert result.models == ["model-a", "model-flash-2"]
+    assert result.suggested_default_model == "model-flash-2"
+
+
+@pytest.mark.asyncio
+async def test_provider_service_verify_provider_method() -> None:
+    from agent.modules.providers.service import ProviderService
+    from unittest.mock import AsyncMock
+
+    mock_repo = MagicMock()
+    service = ProviderService(mock_repo)
+
+    mock_factory = MagicMock()
+    mock_factory.list_models = AsyncMock(return_value=["test-model", "test-mini"])
+    service.register_factory(ProviderType.OPENAI_COMPATIBLE, mock_factory)
+
+    result = await service.verify_provider(
+        provider_type="openai_compatible",
+        api_key="some-key",
+        base_url="https://api.example.com/v1",
+    )
+
+    assert result.ok is True
+    assert result.suggested_default_model == "test-mini"
+

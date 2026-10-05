@@ -112,6 +112,12 @@ from agent.modules.providers.catalog import (
     update_catalog_from_url,
 )
 
+from agent.modules.providers.verification import (
+    ProviderVerificationResult,
+    resolve_suggested_default_model,
+    verify_provider_connection,
+)
+
 __all__ = [
     "AnthropicFactory",
     "ConfigProviderRepository",
@@ -119,6 +125,7 @@ __all__ = [
     "OpenAICompatibleFactory",
     "ProviderService",
     "ProviderType",
+    "ProviderVerificationResult",
     "ResolvedChatModel",
     "get_chat_model",
     "get_default_llm_settings",
@@ -128,6 +135,8 @@ __all__ = [
     "list_providers",
     "resolve_chat_model",
     "resolve_chat_model_info",
+    "resolve_suggested_default_model",
+    "verify_provider_connection",
     "ensure_catalog_available",
     "load_providers_catalog",
     "load_internal_providers",

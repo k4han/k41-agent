@@ -63,9 +63,10 @@ class OpenAICompatibleFactory:
         self,
         provider_config: ProviderConfig,
         api_key: str,
+        timeout: float = 10.0,
     ) -> list[str]:
         base_url = provider_config.base_url.rstrip("/") or "https://api.openai.com/v1"
-        async with httpx.AsyncClient(timeout=8.0) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.get(
                 f"{base_url}/models",
                 headers={"Authorization": f"Bearer {api_key}"},
@@ -73,7 +74,12 @@ class OpenAICompatibleFactory:
             response.raise_for_status()
             data = response.json()
 
-        raw_models = data.get("data", data if isinstance(data, list) else [])
+        if isinstance(data, dict):
+            raw_models = data.get("data", [])
+        elif isinstance(data, list):
+            raw_models = data
+        else:
+            raw_models = []
         model_ids = []
         for item in raw_models:
             if isinstance(item, dict):

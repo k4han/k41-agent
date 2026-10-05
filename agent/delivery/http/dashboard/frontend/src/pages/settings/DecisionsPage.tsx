@@ -1,5 +1,7 @@
+import { A } from "@solidjs/router";
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import {
+  ArrowRight,
   BrainCircuit,
   Layers,
   RotateCcw,
@@ -159,6 +161,11 @@ export function DecisionsPage() {
                     Clef-flash evaluates system state against typed schemas (choice, noul, score) returning calibrated
                     probabilities. In <strong>Cascade mode</strong>, queries with confidence above threshold are routed
                     immediately with ultra-low latency and minimal cost ($0.09/M tokens), cascading to standard LLM only when ambiguous.
+                    <div class="mt-2">
+                      <A href="/settings/providers?tab=decision" class="text-primary hover:underline text-xs inline-flex items-center gap-1 font-semibold">
+                        Configure Cloudflare Credentials in Decision Model Providers <ArrowRight size={12} />
+                      </A>
+                    </div>
                   </div>
                 </div>
               </div>

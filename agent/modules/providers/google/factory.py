@@ -1,5 +1,7 @@
 """Factory for creating ChatGoogleGenerativeAI instances."""
 
+import asyncio
+
 from langchain_core.language_models import BaseChatModel
 from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -24,20 +26,34 @@ class GoogleFactory:
         self,
         provider_config: ProviderConfig,
         api_key: str,
+        timeout: float = 10.0,
     ) -> list[str]:
         try:
             import google.genai as genai
-        except ImportError:
-            return []
+        except ImportError as exc:
+            raise RuntimeError(
+                "google-genai package is not installed. Install it to enable Google model discovery."
+            ) from exc
+
+        timeout_ms = max(1000, int(timeout * 1000))
+
+        def _list_sync() -> list[str]:
+            client = genai.Client(api_key=api_key, http_options={"timeout": timeout_ms})
+            try:
+                models = client.models.list()
+                model_names: list[str] = []
+                for model in models:
+                    name = str(getattr(model, "name", "")).strip()
+                    if name.startswith("models/"):
+                        name = name.removeprefix("models/")
+                    if name:
+                        model_names.append(name)
+                return sorted(set(model_names))
+            finally:
+                try:
+                    client.close()
+                except Exception:
+                    pass
 
         _ = provider_config
-        client = genai.Client(api_key=api_key)
-        models = client.models.list()
-        model_names: list[str] = []
-        for model in models:
-            name = str(getattr(model, "name", "")).strip()
-            if name.startswith("models/"):
-                name = name.removeprefix("models/")
-            if name:
-                model_names.append(name)
-        return sorted(set(model_names))
+        return await asyncio.to_thread(_list_sync)

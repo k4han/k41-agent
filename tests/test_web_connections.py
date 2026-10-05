@@ -235,3 +235,53 @@ def test_agent_api_rejects_missing_wrong_type_and_unsupported_connections(make_d
         response = client.post("/agents/cards", json={"name": "research", "tools": ["web_fetch"],
                                                       "tool_configs": {"web_fetch": values}})
         assert response.status_code == 400
+
+
+def test_verify_web_connection_routes(make_dashboard_client, monkeypatch):
+    import httpx
+
+    service, source = _db_config_service("{}")
+    client = make_dashboard_client(service)
+
+    fake_resp = httpx.Response(
+        200,
+        json={"results": [{"title": "Ping", "url": "https://example.com"}]},
+        request=httpx.Request("POST", "https://api.tavily.com/search"),
+    )
+
+    class MockAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def post(self, url, **kwargs):
+            return fake_resp
+
+        async def get(self, url, **kwargs):
+            return fake_resp
+
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+
+    # 1. Direct candidate verification
+    resp = client.post("/dashboard-api/web-connections/verify", json={"type": "tavily", "api_key": "tav-key"})
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    assert resp.json()["latency_ms"] >= 0
+
+    # 2. Saved connection verification
+    source.update_settings({"web.connections.tav-saved.type": "tavily", "web.connections.tav-saved.api_key": "saved-k"})
+    resp_saved = client.post("/dashboard-api/web-connections/verify", json={"name": "tav-saved"})
+    assert resp_saved.status_code == 200
+    assert resp_saved.json()["ok"] is True
+
+    # 3. Google CSE requires cse_id
+    resp_google_fail = client.post("/dashboard-api/web-connections/verify", json={"type": "google", "api_key": "g-key"})
+    assert resp_google_fail.status_code == 200
+    assert resp_google_fail.json()["ok"] is False
+    assert resp_google_fail.json()["error_code"] == "INVALID_CONFIG"
+
