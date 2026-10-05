@@ -366,16 +366,6 @@ export function ChatComposer(props: ChatComposerProps) {
         </div>
         <div class="chat-composer-tier chat-composer-tier-actions">
           <div class="chat-composer-actions">
-            <button
-              class="chat-composer-icon"
-              type="button"
-              onClick={() => fileInputRef?.click()}
-              disabled={props.composerDisabled}
-              title="Attach files or images"
-              aria-label="Attach files or images"
-            >
-              <Paperclip size={17} />
-            </button>
             <div class="chat-composer-more-wrapper">
               <button
                 ref={moreTriggerRef}

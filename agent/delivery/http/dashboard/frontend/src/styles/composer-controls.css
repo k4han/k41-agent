@@ -969,27 +969,32 @@
   }
 
   .chat-composer-toolbar {
-    flex-direction: column;
-    align-items: stretch;
+    flex-direction: row;
+    align-items: center;
     gap: 8px;
     width: 100%;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
   }
 
   .chat-composer-tier-selectors {
     display: flex;
     align-items: center;
     gap: 8px;
-    width: 100%;
+    order: 2;
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
   }
 
   .agent-model-picker-wrapper {
     width: 100%;
+    min-width: 0;
   }
 
   .agent-model-badge {
     max-width: 100%;
     width: 100%;
+    min-width: 0;
     justify-content: space-between;
     min-height: 40px;
     height: 40px;
@@ -1050,20 +1055,19 @@
   }
 
   .chat-composer-tier-actions {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    width: 100%;
-    gap: 8px;
+    display: contents;
   }
 
   .chat-composer-actions {
     display: flex;
     align-items: center;
     gap: 6px;
+    order: 1;
+    flex: 0 0 auto;
   }
 
   .chat-composer-right-group {
+    order: 3;
     margin-left: 0;
   }
 
