@@ -325,6 +325,7 @@ export function ChatHistoryListPage() {
                       </div>
                     </div>
                     <DashboardTable
+                      tableClass="history-table"
                       columns={[
                         {
                           class: "history-select-cell",

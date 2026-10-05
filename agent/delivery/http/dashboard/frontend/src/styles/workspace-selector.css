@@ -860,6 +860,15 @@
 }
 
 @media (max-width: 640px) {
+  .workspace-selector {
+    padding: 12px;
+    gap: 10px;
+  }
+
+  .workspace-selector.locked {
+    padding: 10px 12px;
+  }
+
   .workspace-nav-bar {
     flex-direction: row;
     align-items: center;
@@ -883,6 +892,7 @@
     width: auto;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
     scrollbar-width: none;
   }
 
@@ -897,6 +907,13 @@
   .workspace-path-input-container {
     width: 100%;
     flex: 1 1 100%;
+  }
+
+  .workspace-browse-btn,
+  .workspace-apply-btn {
+    flex: 1 1 0;
+    justify-content: center;
+    min-width: 0;
   }
 
   .workspace-temp-card {

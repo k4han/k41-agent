@@ -784,6 +784,7 @@ export function SchedulerPage() {
                   <div class="panel-title">All Scheduled Jobs</div>
                 </div>
                 <DashboardTable
+                  tableClass="scheduler-jobs-table"
                   columns={[
                     { header: "Job" },
                     { header: "Target" },

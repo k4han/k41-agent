@@ -610,6 +610,29 @@
 }
 
 @media (max-width: 640px) {
+  .chat-header {
+    padding-inline: 8px;
+  }
+
+  .chat-header-right {
+    margin-left: 4px;
+  }
+
+  .chat-header-title-wrap {
+    gap: 6px;
+  }
+
+  .chat-header-title-wrap > .row-wrap {
+    flex: 0 1 auto;
+    max-width: min(42vw, 180px);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .chat-header-title-wrap > .row-wrap::-webkit-scrollbar {
+    display: none;
+  }
+
   .content-no-header .chat-panel {
     padding-bottom: 0;
   }

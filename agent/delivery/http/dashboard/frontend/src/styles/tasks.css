@@ -321,6 +321,41 @@
 }
 
 @media (max-width: 640px) {
+  .task-agent-picker {
+    width: 100% !important;
+  }
+
+  .task-history-header {
+    align-items: flex-start;
+  }
+
+  .task-history-controls {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .task-history-controls > .hint {
+    flex: 1 1 auto;
+  }
+
+  .task-live-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .task-live-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .task-history-list > .panel .row-wrap {
+    gap: 6px;
+  }
+
+  .task-history-list > .panel .row-wrap .btn {
+    min-height: 42px;
+  }
+
   .task-workspace-filter {
     width: 100%;
     max-width: 100%;

@@ -402,7 +402,21 @@
 
 @media (max-width: 640px) {
   .grid-metrics {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .metric-card {
+    min-width: 0;
+    padding: 12px;
+  }
+
+  .metric-value {
+    font-size: 24px;
+  }
+
+  .metric-label {
+    line-height: 1.35;
   }
 }
 
@@ -513,14 +527,68 @@
 /* --- Mobile responsive home layout (≤640px) --------------------------- */
 @media (max-width: 640px) {
   .onboarding-item {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 10px;
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr);
+    align-items: start;
+    gap: 8px 10px;
+  }
+
+  .onboarding-body {
+    grid-column: 2;
   }
 
   .onboarding-item .btn-sm {
+    grid-column: 2;
+    justify-self: start;
+    width: auto;
+    max-width: 100%;
+    padding-inline: 12px;
+  }
+
+  .panel-header.split > a.btn {
+    align-self: flex-start;
+    width: auto;
+    max-width: 100%;
+  }
+
+  .panel-header-actions {
     width: 100%;
-    justify-content: center;
+  }
+
+  .panel-header-actions > .btn {
+    flex: 1 1 110px;
+  }
+
+  .session-item,
+  .provider-row {
+    padding-inline: 12px;
+  }
+
+  .session-item-name {
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 8px;
+  }
+
+  .session-item-meta {
+    gap: 4px;
+  }
+
+  .compact-list-item {
+    gap: 8px;
+    padding-inline: 12px;
+  }
+
+  .provider-row-name {
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 8px;
+  }
+}
+
+@media (max-width: 340px) {
+  .grid-metrics {
+    grid-template-columns: 1fr;
   }
 }
 

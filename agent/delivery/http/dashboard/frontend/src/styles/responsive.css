@@ -287,6 +287,7 @@
     width: min(300px, 86vw);
     height: 100vh;
     height: 100dvh;
+    padding: var(--safe-top) 0 var(--safe-bottom) var(--safe-left);
     border-right: 1px solid var(--border);
     box-shadow: var(--shadow);
     transform: translateX(-100%);
@@ -405,7 +406,10 @@
     height: auto;
     min-height: 56px;
     align-items: center;
-    padding: calc(var(--safe-top) + 8px) 14px 8px;
+    padding: calc(var(--safe-top) + 8px)
+      max(14px, calc(14px + var(--safe-right)))
+      8px
+      max(14px, calc(14px + var(--safe-left)));
     gap: 10px;
     flex-wrap: wrap;
   }

@@ -449,6 +449,11 @@
 }
 
 @media (max-width: 640px) {
+  .composer.chat-composer {
+    padding: 10px 10px calc(var(--safe-bottom) + 10px);
+    border-radius: 14px;
+  }
+
   .chat-recursion-warning {
     flex-wrap: wrap;
     gap: 8px;

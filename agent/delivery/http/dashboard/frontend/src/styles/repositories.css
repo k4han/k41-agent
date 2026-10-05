@@ -205,4 +205,72 @@
   .repository-toolbar-select {
     width: 100%;
   }
+
+  .repository-row {
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .repository-row-meta {
+    justify-content: flex-start;
+  }
+
+  .repository-detail-banner {
+    padding: 12px;
+  }
+
+  .repository-detail-identity {
+    align-items: flex-start;
+    width: 100%;
+  }
+
+  .repository-detail-identity > div:last-child {
+    min-width: 0;
+  }
+
+  .repository-detail-identity .chips {
+    flex-wrap: wrap;
+  }
+
+  .repository-detail-banner > .row-wrap {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .repository-detail .tab-bar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    padding-bottom: 6px;
+  }
+
+  .repository-detail .tab-bar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .repository-detail .tab-bar .btn {
+    flex: 0 0 auto;
+    min-height: 42px;
+    white-space: nowrap;
+  }
+
+  .repository-summary-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .repository-summary-row .mono {
+    width: 100%;
+    text-align: left;
+  }
+
+  .repository-task-actions {
+    gap: 6px;
+  }
+
+  .repository-task-actions .btn {
+    min-height: 40px;
+  }
 }
