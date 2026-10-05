@@ -1284,6 +1284,26 @@
     padding: 2px;
   }
 
+  .setting-row-main:has(.setting-row-controls .toggle-control) {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .setting-row-controls:has(.toggle-control) {
+    flex-direction: row;
+    justify-content: flex-end;
+  }
+
+  .setting-row-controls:has(.toggle-control) .setting-control-wrapper {
+    flex: 0 0 auto;
+  }
+
+  .setting-row-controls:has(.toggle-control) .setting-control-wrapper > .toggle-control {
+    width: fit-content;
+    max-width: none;
+  }
+
   .settings-topbar {
     flex-wrap: wrap;
     height: auto;
