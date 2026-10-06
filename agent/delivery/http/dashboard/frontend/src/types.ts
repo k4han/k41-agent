@@ -97,6 +97,8 @@ export type ModelOption = {
   context_window?: number;
   input_types?: string[] | null;
   output_types?: string[] | null;
+  reasoning_effort_levels?: string[] | null;
+  reasoning_effort_default?: string | null;
 };
 
 export type ModelCatalog = {

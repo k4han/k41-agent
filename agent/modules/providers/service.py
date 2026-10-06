@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from agent.modules.providers.models import ModelOption, ProviderModelCatalog
 from agent.modules.providers.ports import ChatModelFactory, ProviderRepository
 from agent.modules.providers.provider import ProviderConfig, ProviderType
+from agent.modules.providers.profiles import get_model_profile, reasoning_metadata
 
 if TYPE_CHECKING:
     from agent.modules.providers.verification import ProviderVerificationResult
@@ -139,6 +140,8 @@ class ProviderService:
                 remote_models=remote_models,
                 configured_models=list(provider.models),
                 default_model=provider.default_model,
+                provider_type=str(provider.provider_type),
+                model_profiles=provider.model_profiles,
             ),
             error=error,
         )
@@ -215,6 +218,8 @@ def _merge_model_options(
     remote_models: list[str],
     configured_models: list[str],
     default_model: str,
+    provider_type: str = "openai_compatible",
+    model_profiles: dict | None = None,
 ) -> tuple[ModelOption, ...]:
     from agent.modules.providers.catalog import get_provider_catalog_entry
 
@@ -230,6 +235,7 @@ def _merge_model_options(
             context_window = entry.context_window if entry else None
             input_types = entry.input_types if entry else None
             output_types = entry.output_types if entry else None
+            levels, default = reasoning_metadata(get_model_profile(provider_type, normalized, model_profiles))
             options[normalized] = ModelOption(
                 id=normalized,
                 label=normalized,
@@ -237,11 +243,15 @@ def _merge_model_options(
                 context_window=context_window,
                 input_types=input_types,
                 output_types=output_types,
+                reasoning_effort_levels=levels,
+                reasoning_effort_default=default,
             )
 
     for model_id in remote_models:
         add(model_id, "live")
     for model_id in configured_models:
+        add(model_id, "config")
+    for model_id in model_profiles or {}:
         add(model_id, "config")
     add(default_model, "default")
 

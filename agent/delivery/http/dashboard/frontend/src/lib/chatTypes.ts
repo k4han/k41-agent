@@ -28,7 +28,7 @@ export type PendingAttachment = ChatAttachmentPayload & {
 
 // ── Chat payload ──
 
-export type ReasoningEffort = "low" | "medium" | "high";
+export type ReasoningEffort = string;
 
 export type ChatPayload = {
   message: string;

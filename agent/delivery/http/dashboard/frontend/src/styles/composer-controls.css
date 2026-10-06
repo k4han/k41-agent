@@ -186,7 +186,9 @@
   gap: 8px;
   flex: 0 0 auto;
   min-height: 40px;
-  width: 96px;
+  width: auto;
+  min-width: 96px;
+  max-width: 160px;
   padding: 0 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -213,6 +215,11 @@
 .chat-effort-button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+.chat-effort-button option {
+  background: var(--surface-3);
+  color: var(--fg);
 }
 
 .chat-effort-bars {
@@ -1153,7 +1160,8 @@
 
 @media (max-width: 480px) {
   .chat-effort-button {
-    width: 82px;
+    min-width: 80px;
+    max-width: 120px;
     gap: 5px;
     padding-inline: 6px;
     font-size: 12px;
@@ -1177,12 +1185,9 @@
 
 @media (max-width: 360px) {
   .chat-effort-button {
-    width: 40px;
-    padding: 0;
-  }
-
-  .chat-effort-label {
-    display: none;
+    min-width: 76px;
+    max-width: 100px;
+    padding-inline: 4px;
   }
 }
 

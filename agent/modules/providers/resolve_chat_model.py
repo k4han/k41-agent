@@ -1,5 +1,6 @@
 """Resolve a chat model instance from provider config + model overrides."""
 
+from dataclasses import replace
 from functools import lru_cache
 from typing import Any
 
@@ -7,6 +8,7 @@ from langchain_core.language_models import BaseChatModel
 
 from agent.modules.providers.service import ProviderService
 from agent.modules.providers.models import ModelConfig, ResolvedChatModel
+from agent.modules.providers.profiles import get_model_profile
 from agent.shared.config import get_config_service
 
 
@@ -83,7 +85,8 @@ def _resolve_chat_model_info_impl(
 
     target_model = model
     if not target_model or target_model.strip().lower() == "default":
-        target_model = default_model_name
+        uses_default_provider = not provider_name or provider_name.strip().lower() == "default"
+        target_model = default_model_name if uses_default_provider else provider_config.default_model
 
     resolved_model = (target_model or provider_config.default_model).strip()
     provider_temperature_key = f"llm.providers.{provider_config.name}.temperature"
@@ -111,6 +114,7 @@ def _resolve_chat_model_info_impl(
     model_config = ModelConfig(
         model_name=resolved_model,
         temperature=resolved_temperature,
+        profile=get_model_profile(str(provider_config.provider_type), resolved_model, provider_config.model_profiles),
     )
 
     factory = provider_service.get_factory(
@@ -128,12 +132,14 @@ def _resolve_chat_model_info_impl(
         model_name=model_config.model_name,
         temperature=model_config.temperature,
         extra_body_json=_extra_body_to_cache_key(provider_config.extra_body),
+        profile_json=_extra_body_to_cache_key(model_config.profile),
     )
     return ResolvedChatModel(
         model=chat_model,
         provider_name=provider_config.name,
         provider_type=str(provider_config.provider_type),
         model_name=model_config.model_name,
+        profile=model_config.profile,
     )
 
 
@@ -171,13 +177,14 @@ def resolve_chat_model_info(
             raise
 
         try:
-            return _resolve_chat_model_info_impl(
+            fallback = _resolve_chat_model_info_impl(
                 provider_service,
                 provider_name=fallback_provider or provider_name,
                 model=fallback_model or model,
                 temperature=temperature,
                 api_key=None,
             )
+            return replace(fallback, used_fallback=True)
         except (RuntimeError, KeyError, ValueError):
             raise primary_error from None
 
@@ -193,6 +200,7 @@ def _get_cached_model(
     temperature: float,
     extra_body_json: str = "",
     provider_name: str = "",
+    profile_json: str = "",
 ) -> BaseChatModel:
     """Cache model instances by their full config fingerprint."""
     import json as _json
@@ -216,7 +224,10 @@ def _get_cached_model(
         models=(),
         extra_body=extra_body,
     )
-    model_config = ModelConfig(model_name=model_name, temperature=temperature)
+    model_config = ModelConfig(
+        model_name=model_name, temperature=temperature,
+        profile=_json.loads(profile_json) if profile_json else None,
+    )
 
     # factory is a ChatModelFactory protocol
     return factory.create(provider_config, model_config, api_key)  # type: ignore[arg-type,union-attr]

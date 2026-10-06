@@ -34,6 +34,7 @@ def _fake_chat_model_factory(captured: dict):
             provider_name=provider_name or "default",
             provider_type="openai_compatible",
             model_name=model or "default-model",
+            profile={"reasoning_effort_levels": ["low", "medium", "high"]} if model == "gpt-6.1-sol" else None,
         )
 
     return _factory
@@ -126,6 +127,71 @@ async def test_effort_changes_apply_per_turn_without_leaking_to_other_models(cac
     assert cached_llm_node.captured["model_kwargs"] == {}
     await cached_llm_node.run(model="gpt-5")
     assert cached_llm_node.captured["model_kwargs"] == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("api_key,effort,expected", [
+    ("", "medium", "high"),
+    ("test-key", "medium", "medium"),
+    ("test-key", "max", None),
+])
+async def test_fallback_resets_effort_without_relaxing_primary_validation(
+    cached_llm_node, monkeypatch, api_key, effort, expected,
+):
+    from importlib import import_module
+    from agent.modules.providers.provider import ProviderConfig, ProviderType
+    from agent.modules.providers.service import ProviderService
+
+    resolver = import_module("agent.modules.providers.resolve_chat_model")
+    providers = {
+        "primary": ProviderConfig(
+            name="primary", provider_type=ProviderType.OPENAI_COMPATIBLE,
+            base_url="", api_key=api_key, default_model="gpt-5",
+        ),
+        "backup": ProviderConfig(
+            name="backup", provider_type=ProviderType.GOOGLE,
+            base_url="", api_key="test-key", default_model="gemini-3-pro-preview",
+        ),
+    }
+    settings = {
+        "llm.fallback.provider": "backup",
+        "llm.fallback.model": "gemini-3-pro-preview",
+    }
+    monkeypatch.setattr(resolver, "get_default_llm_settings", lambda: ("primary", "gpt-5"))
+    monkeypatch.setattr(resolver, "get_config_service", lambda: SimpleNamespace(
+        get=lambda key: None,
+        get_str=lambda key, default="": settings.get(key, default),
+    ))
+    service = ProviderService(SimpleNamespace(
+        get_provider=lambda name: providers["primary" if name == "default" else name],
+        get_default_provider=lambda: providers["primary"],
+    ))
+
+    class Factory:
+        def create(self, provider_config, model_config, key):
+            cached_llm_node.captured["resolved_model"] = model_config.model_name
+            return _FakeChatModel(cached_llm_node.captured)
+
+    factory = Factory()
+    service.register_factory(ProviderType.OPENAI_COMPATIBLE, factory)
+    service.register_factory(ProviderType.GOOGLE, factory)
+    monkeypatch.setattr(llm_node_module, "get_resolved_chat_model", lambda **kwargs:
+        resolver.resolve_chat_model_info(service, **kwargs))
+    resolver._get_cached_model.cache_clear()
+    try:
+        if expected is None:
+            with pytest.raises(ValueError, match="Unsupported reasoning effort"):
+                await cached_llm_node.run(model="gpt-5", reasoning_effort=effort)
+            assert "model_kwargs" not in cached_llm_node.captured
+        else:
+            result = await cached_llm_node.run(model="gpt-5", reasoning_effort=effort)
+            assert result["messages"][0].content == "ok"
+            assert cached_llm_node.captured["model_kwargs"] == {"reasoning_effort": expected}
+            assert cached_llm_node.captured["resolved_model"] == (
+                "gpt-5" if api_key else "gemini-3-pro-preview"
+            )
+    finally:
+        resolver._get_cached_model.cache_clear()
 
 
 @pytest.mark.asyncio

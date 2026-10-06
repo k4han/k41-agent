@@ -49,6 +49,11 @@ class OpenAICompatibleFactory:
         }
         if provider_config.base_url:
             kwargs["base_url"] = provider_config.base_url
+        if model_config.profile:
+            kwargs["profile"] = model_config.profile
+        if model_config.model_name.rsplit("/", 1)[-1].lower().startswith("gpt-6"):
+            # Tool calls require Responses even when effort metadata is unavailable.
+            kwargs["use_responses_api"] = True
 
         # Merge user-configured extra_body with the hardcoded fallback.
         # User config takes precedence, allowing overrides like disabling thinking.

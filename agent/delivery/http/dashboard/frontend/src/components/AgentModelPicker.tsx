@@ -97,18 +97,12 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
   );
 
   const resolvedSelection = createMemo(() => {
-    let prov = props.provider;
-    let mod = props.model;
-    if (!prov || prov === "default") {
-      prov = props.defaultProvider || selectedAgent()?.provider || "";
-    }
-    if (!mod || mod === "provider default") {
-      if (selectedAgent()?.model) {
-        mod = selectedAgent()!.model;
-      } else {
-        const catalog = props.catalogs.find((c) => c.provider === prov);
-        mod = catalog?.default_model || props.defaultModel || "";
-      }
+    const activeProvider = props.provider || selectedAgent()?.provider || "default";
+    const prov = activeProvider === "default" ? props.defaultProvider : activeProvider;
+    let mod = props.model || selectedAgent()?.model || "";
+    if (!mod || mod === "default" || mod === "provider default") {
+      const catalog = props.catalogs.find((c) => c.provider === prov);
+      mod = activeProvider === "default" ? props.defaultModel : (catalog?.default_model || "");
     }
     return { provider: prov, model: mod };
   });

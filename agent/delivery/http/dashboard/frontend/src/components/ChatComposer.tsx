@@ -48,6 +48,8 @@ export interface ChatComposerProps {
   model: string;
   onProviderModelChange: (provider: string, model: string) => void;
   reasoningEffort: ReasoningEffort;
+  reasoningEffortLevels: ReasoningEffort[];
+  reasoningEffortDefault?: string | null;
   onReasoningEffortChange: (effort: ReasoningEffort) => void;
   payload: AgentChatPayload;
   recursionLimitReached: boolean;
@@ -66,12 +68,7 @@ export interface ChatComposerProps {
 }
 
 export function ChatComposer(props: ChatComposerProps) {
-  const effortLevels: ReasoningEffort[] = ["low", "medium", "high"];
-  const effortLabel = () => props.reasoningEffort.charAt(0).toUpperCase() + props.reasoningEffort.slice(1);
-  const cycleEffort = () => {
-    const index = effortLevels.indexOf(props.reasoningEffort);
-    props.onReasoningEffortChange(effortLevels[(index + 1) % effortLevels.length]);
-  };
+  const effortLabel = (effort: string) => effort.charAt(0).toUpperCase() + effort.slice(1);
 
   let chatPromptRef: HTMLTextAreaElement | undefined;
   let fileInputRef: HTMLInputElement | undefined;
@@ -452,23 +449,21 @@ export function ChatComposer(props: ChatComposerProps) {
             defaultModel={props.payload.default_model}
             disabled={props.composerDisabled}
           />
-          <button
+          <select
             class="chat-effort-button"
-            type="button"
-            onClick={cycleEffort}
-            disabled={props.composerDisabled}
-            title={`Reasoning effort: ${effortLabel()}. Click to cycle Low, Medium, High. Applies to supported reasoning models.`}
-            aria-label={`Reasoning effort: ${effortLabel()}. Click to increase; High cycles back to Low.`}
+            value={props.reasoningEffort}
+            onChange={(event) => props.onReasoningEffortChange(event.currentTarget.value)}
+            disabled={props.composerDisabled || props.reasoningEffortLevels.length === 0}
+            title={props.reasoningEffortLevels.length
+              ? "Reasoning effort for the selected model"
+              : "No configurable effort levels available. Missing metadata can be supplied in provider settings."}
+            aria-label="Reasoning effort"
           >
-            <span class="chat-effort-label">{effortLabel()}</span>
-            <span class="chat-effort-bars" aria-hidden="true">
-              <For each={effortLevels}>
-                {(_, index) => (
-                  <span classList={{ active: index() <= effortLevels.indexOf(props.reasoningEffort) }} />
-                )}
-              </For>
-            </span>
-          </button>
+            <option value="" selected={props.reasoningEffort === ""}>Auto{props.reasoningEffortDefault ? ` (${effortLabel(props.reasoningEffortDefault)})` : ""}</option>
+            <For each={props.reasoningEffortLevels}>
+              {(level) => <option value={level} selected={props.reasoningEffort === level}>{effortLabel(level)}</option>}
+            </For>
+          </select>
         </div>
         <div class="chat-composer-tier chat-composer-tier-actions">
           <div class="chat-composer-actions">

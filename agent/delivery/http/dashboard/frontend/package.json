@@ -7,9 +7,10 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "check": "tsc --noEmit",
-    "test": "node --test tests/chat-scroll.test.mjs tests/provider-connections.test.mjs && node scripts/verify-responsive.mjs --skip-build",
+    "test": "node --test tests/chat-scroll.test.mjs tests/provider-connections.test.mjs tests/reasoning-effort.test.mjs && node scripts/verify-responsive.mjs --skip-build",
     "test:chat-scroll": "node --test tests/chat-scroll.test.mjs",
     "test:providers-ui": "node scripts/verify-provider-connections.mjs",
+    "test:effort-ui": "node scripts/verify-reasoning-effort.mjs",
     "test:mobile-ui": "node scripts/verify-mobile-layout.mjs"
   },
   "dependencies": {

@@ -142,7 +142,7 @@ RUNTIME_KEY_PATTERNS = [
     r"^llm\.default_model$",
     rf"^{re.escape(LLM_FALLBACK_PROVIDER_KEY)}$",
     rf"^{re.escape(LLM_FALLBACK_MODEL_KEY)}$",
-    r"^llm\.providers\.[A-Za-z0-9_-]+\.(provider|type|catalog_id|api_key|base_url|default_model|models|temperature|enabled|extra_body)$",
+    r"^llm\.providers\.[A-Za-z0-9_-]+\.(provider|type|catalog_id|api_key|base_url|default_model|models|temperature|enabled|extra_body|model_profiles)$",
     r"^tools\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.(transport|command|args|url|enabled)$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.env\.[A-Za-z0-9_-]+$",
@@ -176,7 +176,7 @@ DATABASE_RUNTIME_KEY_PATTERNS = [
     r"^llm\.default_model$",
     rf"^{re.escape(LLM_FALLBACK_PROVIDER_KEY)}$",
     rf"^{re.escape(LLM_FALLBACK_MODEL_KEY)}$",
-    r"^llm\.providers\.[A-Za-z0-9_-]+\.(provider|type|catalog_id|api_key|base_url|default_model|models|temperature|enabled|extra_body)$",
+    r"^llm\.providers\.[A-Za-z0-9_-]+\.(provider|type|catalog_id|api_key|base_url|default_model|models|temperature|enabled|extra_body|model_profiles)$",
     r"^tools\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.(transport|command|args|url|enabled)$",
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.env\.[A-Za-z0-9_-]+$",
@@ -1057,6 +1057,11 @@ _PROVIDER_SETTING_FIELD_META: dict[str, dict[str, Any]] = {
         "type": "text",
         "description": "Extra JSON body parameters sent with every request (e.g. {\"thinking\":{\"type\":\"enabled\"}})",
         "label": "Extra Body (JSON)",
+    },
+    "model_profiles": {
+        "type": "text",
+        "description": "Per-model JSON overrides for missing effort metadata. Example: {\"custom-model\":{\"reasoning_effort_levels\":[\"low\",\"medium\",\"high\"],\"reasoning_effort_default\":\"high\"}}. An empty levels array disables effort selection.",
+        "label": "Model Reasoning Profiles (JSON)",
     },
 }
 

@@ -67,7 +67,6 @@ import { GENERATE_IMAGE_TOOL_NAME } from "@/lib/generatedImages";
 import {
   type ChatAttachmentPayload,
   type ChatPayload,
-  type ReasoningEffort,
   type DefaultWorkspacePayload,
   type ChatResumePayload,
   type WorkspaceResolvePayload,
@@ -82,6 +81,7 @@ import { useWorkspaceExplorer } from "@/lib/useWorkspaceExplorer";
 import { useChatAttachments } from "@/lib/useChatAttachments";
 import { useContextWindow } from "@/lib/useContextWindow";
 import { useBackgroundStream } from "@/lib/useBackgroundStream";
+import { useReasoningEffort } from "@/lib/useReasoningEffort";
 import { ASK_USER_TOOL_NAME, normalizeUserInputRequest } from "@/lib/userInputRequest";
 import {
   INITIALIZING_ENVIRONMENT_TEXT,
@@ -186,7 +186,6 @@ export function ChatPage() {
   const [agentName, setAgentName] = createSignal("");
   const [provider, setProvider] = createSignal("default");
   const [model, setModel] = createSignal("");
-  const [reasoningEffort, setReasoningEffort] = createSignal<ReasoningEffort>("medium");
   const [workingDir, setWorkingDir] = createSignal("");
   const [workspaceRef, setWorkspaceRef] = createSignal<WorkspaceRef | null>(null);
   const [workspaceSelection, setWorkspaceSelection] = createSignal<WorkspaceSelectionDraft | null>(null);
@@ -282,7 +281,7 @@ export function ChatPage() {
     return { provider: "default", model: "" };
   };
 
-  const selectedModelOption = createMemo<ModelOption | undefined>(() => {
+  const selectedModelSelection = createMemo(() => {
     const payload = data();
     if (!payload) return undefined;
     const card = selectedCard();
@@ -290,11 +289,19 @@ export function ChatPage() {
     const activeModel = model() || card?.model || "";
     const resolvedProv = activeProvider === "default" ? payload.default_provider : activeProvider;
     const catalog = payload.model_catalogs?.find((c) => c.provider === resolvedProv);
-    const resolvedMod = (activeModel === "" || activeModel === "provider default")
+    const resolvedMod = (activeModel === "" || activeModel === "default" || activeModel === "provider default")
       ? (activeProvider === "default" ? payload.default_model : (catalog?.default_model || "default"))
       : activeModel;
-    return catalog?.models?.find((m) => m.id === resolvedMod);
+    return { provider: resolvedProv, model: resolvedMod };
   });
+
+  const selectedModelOption = createMemo<ModelOption | undefined>(() => {
+    const selected = selectedModelSelection();
+    return data()?.model_catalogs?.find((c) => c.provider === selected?.provider)?.models
+      .find((m) => m.id === selected?.model);
+  });
+  const { levels: effortLevels, effort: reasoningEffort, setEffort: setReasoningEffort, requestEffort } =
+    useReasoningEffort(() => JSON.stringify(selectedModelSelection()) || "", selectedModelOption);
 
   const modelSupportsImage = createMemo(() => {
     const option = selectedModelOption();
@@ -908,7 +915,7 @@ export function ChatPage() {
       message,
       user_id: "dashboard",
       agent_name: agentNameOverride || agentName(),
-      reasoning_effort: reasoningEffort(),
+      reasoning_effort: requestEffort(),
     };
     if (provider()) {
       payload.provider = provider();
@@ -1491,7 +1498,7 @@ export function ChatPage() {
           agent_name: agentName(),
           provider: provider(),
           model: model(),
-          reasoning_effort: reasoningEffort(),
+          reasoning_effort: requestEffort(),
           workspace: workspaceRef() || localWorkspaceRef(workingDir()),
         }),
         signal: abortController.signal,
@@ -1926,6 +1933,8 @@ export function ChatPage() {
                 provider={provider()}
                 model={model()}
                 reasoningEffort={reasoningEffort()}
+                reasoningEffortLevels={effortLevels()}
+                reasoningEffortDefault={selectedModelOption()?.reasoning_effort_default}
                 onReasoningEffortChange={setReasoningEffort}
                 onProviderModelChange={(nextProvider, nextModel) => {
                   setProvider(nextProvider);

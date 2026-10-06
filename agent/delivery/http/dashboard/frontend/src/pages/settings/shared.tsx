@@ -108,6 +108,11 @@ export function formatSettingValue(info: SettingInfo | undefined, value: unknown
 }
 
 export function typedValue(info: SettingInfo, raw: unknown): unknown {
+  if (info.key.startsWith("llm.providers.") && info.key.endsWith(".model_profiles")) {
+    if (raw === null || raw === undefined || raw === "") return {};
+    if (typeof raw === "object") return raw;
+    try { return JSON.parse(String(raw)); } catch { return raw; }
+  }
   if (raw === null || raw === undefined) {
     return null;
   }
@@ -254,6 +259,24 @@ export function SettingControl(props: {
   value: unknown;
   onChange: (value: unknown) => void;
 }) {
+  if (props.info.key.startsWith("llm.providers.") && props.info.key.endsWith(".model_profiles")) {
+    return <FormTextarea
+      value={typeof props.value === "string" ? props.value : JSON.stringify(props.value ?? {}, null, 2)}
+      onChange={(value) => props.onChange(value)}
+      rows={8}
+      placeholder='{"custom-model":{"reasoning_effort_levels":["low","medium","high"],"reasoning_effort_default":"high"}}'
+      validation={[{
+        validate: (value) => {
+          try {
+            const parsed = JSON.parse(String(value || "{}"));
+            return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed);
+          } catch { return false; }
+        },
+        message: "Enter a JSON object keyed by model ID.",
+      }]}
+      showValidationStatus={true}
+    />;
+  }
   if (props.info.key === "tools.permissions") {
     return <FormTextarea
       value={typeof props.value === "string" ? props.value : JSON.stringify(props.value ?? [], null, 2)}

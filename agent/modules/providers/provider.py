@@ -29,3 +29,4 @@ class ProviderConfig:
     enabled: bool = True
     extra_body: dict[str, Any] | None = field(default=None)
     catalog_id: str = ""
+    model_profiles: dict[str, dict[str, Any]] = field(default_factory=dict)

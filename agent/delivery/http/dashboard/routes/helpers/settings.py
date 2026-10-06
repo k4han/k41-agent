@@ -269,6 +269,13 @@ def _normalize_bootstrap_port(value: Any | None) -> int:
 
 
 def normalize_setting_value(key: str, value: Any | None) -> Any | None:
+    if key.startswith("llm.providers.") and key.endswith(".model_profiles"):
+        from agent.modules.providers.profiles import parse_model_profiles
+
+        try:
+            return parse_model_profiles(value)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     if key == "skills.repository_dir":
         from agent.modules.skills import normalize_repository_skill_dir
 

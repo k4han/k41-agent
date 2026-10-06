@@ -20,16 +20,17 @@ from agent.modules.tools.builtin.utility.plan_mode import PlanModeResumePayload
 router_module = importlib.import_module("agent.delivery.http.api.router")
 
 
-@pytest.mark.parametrize("effort", ["low", "medium", "high"])
+@pytest.mark.parametrize("effort", ["none", "minimal", "low", "medium", "high", "xhigh", "max", "custom_level"])
 def test_chat_request_passes_reasoning_effort_to_run_params(effort):
     request = ChatRequest(message="hi", reasoning_effort=effort)
     params = router_module._request_to_run_params(request)
     assert params["reasoning_effort"] == effort
 
 
-def test_chat_request_rejects_invalid_reasoning_effort():
+@pytest.mark.parametrize("effort", ["", "High", "invalid effort", "x" * 65])
+def test_chat_request_rejects_invalid_reasoning_effort(effort):
     with pytest.raises(ValidationError):
-        ChatRequest(message="hi", reasoning_effort="invalid")
+        ChatRequest(message="hi", reasoning_effort=effort)
 
 
 def _workspace_payload(path: str | Path) -> dict:
@@ -744,7 +745,7 @@ def test_provider_models_endpoint_refreshes_and_serializes_catalog(monkeypatch):
             default_model="openai-default",
             can_list_models=True,
             models=(
-                ModelOption(id="openai-live", label="openai-live", source="live"),
+                ModelOption(id="openai-live", label="openai-live", source="live", reasoning_effort_levels=("low", "high"), reasoning_effort_default="high"),
                 ModelOption(id="openai-config", label="openai-config", source="config"),
             ),
         )
@@ -772,6 +773,8 @@ def test_provider_models_endpoint_refreshes_and_serializes_catalog(monkeypatch):
                 "context_window": None,
                 "input_types": None,
                 "output_types": None,
+                "reasoning_effort_levels": ["low", "high"],
+                "reasoning_effort_default": "high",
             },
             {
                 "id": "openai-config",
@@ -780,6 +783,8 @@ def test_provider_models_endpoint_refreshes_and_serializes_catalog(monkeypatch):
                 "context_window": None,
                 "input_types": None,
                 "output_types": None,
+                "reasoning_effort_levels": None,
+                "reasoning_effort_default": None,
             },
         ],
         "error": None,

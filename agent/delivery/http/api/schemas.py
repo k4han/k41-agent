@@ -1,9 +1,13 @@
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
+
+from agent.modules.providers.profiles import EFFORT_PATTERN
 
 from agent.modules.tools import HumanResumePayload, PlanResumePayload
 from agent.modules.workspaces import WorkspaceBinding, WorkspaceRef
+
+ReasoningEffort = Annotated[str, StringConstraints(pattern=EFFORT_PATTERN)]
 
 
 class ChatAttachment(BaseModel):
@@ -30,7 +34,7 @@ class ChatRequest(BaseModel):
     agent_name: Optional[str] = Field(default=None, description="Agent card name to use. Defaults to 'default'.")
     provider: Optional[str] = Field(default=None, description="LLM provider name override.")
     model: Optional[str] = Field(default=None, description="LLM model name override.")
-    reasoning_effort: Literal["low", "medium", "high"] | None = Field(default=None, description="Reasoning effort override for supported models.")
+    reasoning_effort: ReasoningEffort | None = Field(default=None, description="Model-specific reasoning effort override; omit to use the model default.")
     resume_payload: Optional[HumanResumePayload] = Field(default=None, description="Payload to resume after a human-in-the-loop pause.")
     attachments: list[ChatAttachment] = Field(default_factory=list, description="File or image attachments to include with the message.")
     resume: bool = Field(default=False, description="Whether this message is resuming a paused conversation.")
@@ -75,6 +79,8 @@ class ModelOption(BaseModel):
     context_window: int | None = Field(default=None, description="Context window size in tokens.")
     input_types: list[str] | None = Field(default=None, description="Supported input types (e.g. 'text', 'image').")
     output_types: list[str] | None = Field(default=None, description="Supported output types (e.g. 'text', 'image').")
+    reasoning_effort_levels: list[str] | None = Field(default=None, description="Supported effort levels; null means unknown, empty means unavailable.")
+    reasoning_effort_default: str | None = Field(default=None, description="Documented model default, if known.")
 
 
 class ModelCatalog(BaseModel):
@@ -127,4 +133,4 @@ class EditChatRequest(BaseModel):
     agent_name: Optional[str] = Field(default=None, description="Agent card name. Defaults to 'default'.")
     provider: Optional[str] = Field(default=None, description="LLM provider name override.")
     model: Optional[str] = Field(default=None, description="LLM model name override.")
-    reasoning_effort: Literal["low", "medium", "high"] | None = Field(default=None, description="Reasoning effort override for supported models.")
+    reasoning_effort: ReasoningEffort | None = Field(default=None, description="Model-specific reasoning effort override; omit to use the model default.")

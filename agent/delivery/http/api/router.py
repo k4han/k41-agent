@@ -333,6 +333,8 @@ def _model_catalog(catalog) -> ModelCatalog:
                 id=option.id,
                 label=option.label,
                 source=option.source,
+                reasoning_effort_levels=list(option.reasoning_effort_levels) if option.reasoning_effort_levels is not None else None,
+                reasoning_effort_default=option.reasoning_effort_default,
                 context_window=option.context_window,
                 input_types=list(option.input_types)
                 if option.input_types is not None

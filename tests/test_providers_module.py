@@ -1210,6 +1210,24 @@ def test_get_chat_model_import() -> None:
 # --- extra_body config ---
 
 
+def test_repo_model_profiles_json_and_runtime_updates(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    _write_config(config_path)
+    _set_config_path(monkeypatch, config_path)
+    from agent.shared.config import get_config_service
+
+    config = get_config_service()
+    key = "llm.providers.openai-main.model_profiles"
+    profiles = {"test-model": {"reasoning_effort_levels": ["low", "high"], "reasoning_effort_default": "high"}}
+    config.update_setting(key, json.dumps(profiles))
+    repo = ConfigProviderRepository()
+    assert repo.get_provider("openai-main").model_profiles == profiles
+    config.update_setting(key, {"test-model": {"reasoning_effort_levels": ["low"]}})
+    assert repo.get_provider("openai-main").model_profiles["test-model"]["reasoning_effort_levels"] == ["low"]
+    config.update_setting(key, "")
+    assert repo.get_provider("openai-main").model_profiles == {}
+
+
 def test_provider_config_extra_body_default() -> None:
     config = ProviderConfig(
         name="test",

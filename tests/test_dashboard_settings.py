@@ -123,6 +123,22 @@ def dashboard_client(make_dashboard_client):
     return make_dashboard_client()
 
 
+def test_model_profile_settings_save_validate_and_clear(make_dashboard_client) -> None:
+    service, db_source = _db_config_service("llm: {default_model: ''}")
+    client = make_dashboard_client(service)
+    key = "llm.providers.custom.model_profiles"
+    profiles = {"custom-model": {"reasoning_effort_levels": ["low", "high"], "reasoning_effort_default": "high"}}
+    response = client.put("/settings", json={"values": {key: profiles}})
+    assert response.status_code == 200
+    assert db_source.get(key) == profiles
+    response = client.put(f"/settings/{key}", json={"value": {"custom-model": {"reasoning_effort_levels": ["low"], "reasoning_effort_default": "high"}}})
+    assert response.status_code == 400
+    assert db_source.get(key) == profiles
+    response = client.put(f"/settings/{key}", json={"value": ""})
+    assert response.status_code == 200
+    assert db_source.get(key) == {}
+
+
 class TestDashboardSettingsEndpoints:
     def test_get_config_api_includes_bootstrap_and_excludes_dedicated_settings(self, dashboard_client) -> None:
         resp = dashboard_client.get("/dashboard-api/config")

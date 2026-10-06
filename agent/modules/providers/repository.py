@@ -9,6 +9,7 @@ import json
 from typing import Any
 
 from agent.modules.providers.provider import ProviderConfig, ProviderType
+from agent.modules.providers.profiles import parse_model_profiles
 from agent.shared.config import get_config_service, parse_provider_key
 from agent.shared.infrastructure.config_file import coerce_bool
 from agent.shared.infrastructure.parsing import parse_string_or_list
@@ -192,6 +193,7 @@ def _build_provider_config(
         enabled=enabled,
         extra_body=_resolve_extra_body(provider_values),
         catalog_id=catalog_id,
+        model_profiles=parse_model_profiles(provider_values.get("model_profiles")),
     )
 
 

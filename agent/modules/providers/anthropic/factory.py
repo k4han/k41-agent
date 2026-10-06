@@ -18,6 +18,7 @@ class AnthropicFactory:
             model_name=model_config.model_name,
             api_key=api_key,
             temperature=model_config.temperature,
+            profile=model_config.profile,
         )
 
     async def list_models(
