@@ -25,6 +25,7 @@ import {
   updateState,
   versionInfo,
   versionLoading,
+  versionCheckError,
 } from "@/lib/versionStore";
 
 export function UpdateDialog() {
@@ -89,7 +90,7 @@ export function UpdateDialog() {
                   type="button"
                   class="btn btn-primary btn-sm"
                   onClick={handleStartUpdate}
-                  disabled={updating() || loading()}
+                  disabled={updating() || loading() || Boolean(versionCheckError())}
                 >
                   <Download size={13} />
                   <span>Update to v{info()?.latest_version}</span>
@@ -117,7 +118,7 @@ export function UpdateDialog() {
             </p>
             <div class="update-dialog-progress-warning">
               <Info size={14} />
-              <span>Please do not close this browser window. This usually takes 15–30 seconds.</span>
+              <span>Please keep this window open. Downloading and installing dependencies may take several minutes.</span>
             </div>
           </div>
         </Show>
@@ -130,7 +131,7 @@ export function UpdateDialog() {
             </div>
             <h3 class="update-dialog-progress-title">Update Completed!</h3>
             <p class="update-dialog-progress-desc">
-              Kai Agent has been successfully updated to v{info()?.latest_version}. Reloading now...
+              Kai Agent is running v{info()?.current_version}. Reloading now...
             </p>
           </div>
         </Show>
@@ -144,13 +145,22 @@ export function UpdateDialog() {
             <h3 class="update-dialog-progress-title">Update Failed</h3>
             <p class="update-dialog-progress-desc text-danger">{error()}</p>
             <p class="update-dialog-progress-subdesc">
-              The previous installation was preserved. Check server.log or ~/.k41-agent/update.log for details.
+              Check server.log or ~/.k41-agent/update.log for the installation and recovery status.
             </p>
           </div>
         </Show>
 
         {/* Normal / Idle View */}
         <Show when={state() === "idle"}>
+          <Show when={versionCheckError()}>
+            <div class="update-dev-notice" role="alert">
+              <div class="update-dev-notice-header">
+                <AlertCircle size={16} class="text-danger" />
+                <strong>Could not check for updates</strong>
+              </div>
+              <p class="update-dev-notice-text">{versionCheckError()}</p>
+            </div>
+          </Show>
           {/* Version comparison card */}
           <div class="update-version-card">
             <div class="update-version-col">
@@ -167,7 +177,7 @@ export function UpdateDialog() {
                 <Show when={info()?.has_update}>
                   <span class="update-badge-pill update-badge-new">New</span>
                 </Show>
-                <Show when={info() && !info()?.has_update}>
+                <Show when={info() && !info()?.has_update && !versionCheckError()}>
                   <span class="update-badge-pill update-badge-current">Latest</span>
                 </Show>
               </div>
@@ -229,7 +239,7 @@ export function UpdateDialog() {
             </div>
           </Show>
 
-          <Show when={info() && !info()?.has_update}>
+          <Show when={info() && !info()?.has_update && !versionCheckError()}>
             <div class="update-up-to-date-box">
               <CheckCircle2 size={24} class="text-success" />
               <div>

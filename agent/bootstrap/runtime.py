@@ -17,6 +17,24 @@ from agent.modules.channels import (
 
 logger = logging.getLogger(__name__)
 
+
+def _cleanup_update_state() -> None:
+    from agent.bootstrap.update import UpdateError, resolve_managed_install
+    from agent.bootstrap.update_state import UpdateBusyError, update_lock
+
+    try:
+        install = resolve_managed_install()
+    except UpdateError:
+        return
+    try:
+        # Lock acquisition cleans abandoned files without touching an active writer.
+        with update_lock(install.agent_home):
+            pass
+    except UpdateBusyError:
+        pass
+    except OSError as exc:
+        logger.warning("Could not clean up update state: %s", exc)
+
 __all__ = [
     "AppRuntime",
     "BUILTIN_CHANNEL_DESCRIPTORS",
@@ -99,6 +117,7 @@ class AppRuntime:
         self._previous_active = set_active_container(self.container)
         self._activated = True
         try:
+            _cleanup_update_state()
             if not self.container._persistence_ready:
                 logger.info("Initializing persistence...")
                 await self.container.initialize_persistence()

@@ -171,3 +171,11 @@ def test_update_command_passes_options_to_updater(monkeypatch):
     assert options.check_only is True
     assert options.force is True
     assert options.yes is True
+
+
+def test_update_command_passes_dashboard_job_id(monkeypatch):
+    captured = {}
+    monkeypatch.setattr("agent.bootstrap.update.run_update", lambda options, **kwargs: captured.setdefault("options", options))
+    result = runner.invoke(cli_module.app, ["update", "--yes", "--update-id", "web-job"])
+    assert result.exit_code == 0
+    assert captured["options"].update_id == "web-job"

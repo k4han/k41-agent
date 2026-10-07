@@ -12,10 +12,18 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
+from uuid import uuid4
 
 import httpx
 
 from agent.bootstrap.version import APP_VERSION, PACKAGE_NAME
+from agent.bootstrap.update_state import (
+    UpdateBusyError,
+    get_process_start_time,
+    read_update_status,
+    update_lock,
+    write_update_status,
+)
 
 DEFAULT_OWNER = "k4han"
 DEFAULT_REPO = "k41-agent"
@@ -67,6 +75,7 @@ class UpdateOptions:
     current_version: str | None = None
     module_file: Path | None = None
     executable: str | None = None
+    update_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -88,13 +97,75 @@ def run_update(
     echo: Echo | None = None,
     confirm: Confirm | None = None,
 ) -> UpdateResult:
+    if options.check_only:
+        return _run_update(options, echo=echo, confirm=confirm)
+    try:
+        install = resolve_managed_install(
+            module_file=options.module_file, executable=options.executable,
+        )
+    except UpdateError as exc:
+        if options.update_id is not None:
+            try:
+                agent_home = detect_agent_home(executable=options.executable)
+                with update_lock(agent_home):
+                    previous = read_update_status(agent_home)
+                    if previous and previous.get("update_id") == options.update_id and previous.get("status") == "queued":
+                        write_update_status(agent_home, {**previous, "status": "failed", "error": str(exc)})
+            except (UpdateError, UpdateBusyError, OSError) as status_exc:
+                if echo is not None:
+                    echo(f"Warning: Could not record update failure: {status_exc}")
+        raise
+    try:
+        with update_lock(install.agent_home):
+            previous = read_update_status(install.agent_home)
+            if options.update_id is not None:
+                if previous is None or previous.get("update_id") != options.update_id or previous.get("status") != "queued":
+                    raise UpdateError("The queued update is no longer available. Please try again.")
+            elif previous and previous.get("status") in {"queued", "running"}:
+                raise UpdateBusyError("Another update is already in progress.")
+            status = {
+                "update_id": options.update_id or uuid4().hex,
+                "status": "running",
+                "pid": os.getpid(),
+                "process_started_at": get_process_start_time(os.getpid()),
+                "error": None,
+            }
+            previous_cwd = Path.cwd()
+            try:
+                status["current_version"] = options.current_version or read_project_version(install.app_dir)
+                write_update_status(install.agent_home, status)
+                # Windows keeps a handle to the working directory; leave app before deleting it.
+                os.chdir(install.agent_home)
+                result = _run_update(options, echo=echo, confirm=confirm, install=install)
+                write_update_status(install.agent_home, {
+                    **status, "status": result.status, "latest_version": result.latest_version,
+                    "restarted": result.restarted,
+                })
+                return result
+            except Exception as exc:
+                write_update_status(install.agent_home, {**status, "status": "failed", "error": str(exc)})
+                if isinstance(exc, UpdateError):
+                    raise
+                raise UpdateError(f"Update failed: {exc}") from exc
+            finally:
+                os.chdir(previous_cwd if previous_cwd.is_dir() else install.agent_home)
+    except UpdateBusyError as exc:
+        raise UpdateError(str(exc)) from exc
+
+
+def _run_update(
+    options: UpdateOptions,
+    *,
+    echo: Echo | None = None,
+    confirm: Confirm | None = None,
+    install: ManagedInstall | None = None,
+) -> UpdateResult:
     echo = echo or (lambda message: None)
     confirm = confirm or (lambda message: True)
 
-    install: ManagedInstall | None = None
     current_version = options.current_version or APP_VERSION
     if not options.check_only:
-        install = resolve_managed_install(
+        install = install or resolve_managed_install(
             module_file=options.module_file,
             executable=options.executable,
         )
@@ -136,6 +207,11 @@ def run_update(
     download_release_artifact(release.asset_url, artifact_path)
     echo("Verifying release artifact")
     source_root = extract_release_artifact(artifact_path, extract_dir)
+    artifact_version = read_project_version(source_root)
+    if normalize_version(artifact_version) != normalize_version(release.version):
+        raise UpdateError(
+            f"Release artifact version {artifact_version} does not match release {release.version}."
+        )
 
     running_pid = get_running_server_pid()
     running_tray_pid = get_running_tray_pid()
@@ -143,79 +219,61 @@ def run_update(
     should_restart_systemd = systemd_active
     should_restart = running_pid is not None and not systemd_active
     should_restart_tray = running_tray_pid is not None
-    if systemd_active:
-        echo("Stopping systemd service k41-agent.service")
-        if running_pid is not None:
-            try:
-                SHUTDOWN_SIGNAL.parent.mkdir(parents=True, exist_ok=True)
-                SHUTDOWN_SIGNAL.write_text(str(running_pid), encoding="utf-8")
-            except OSError:
-                pass
-        stop_systemd_service()
-        # Re-read PIDs after systemd stop; the server may have exited already.
-        time.sleep(0.5)
-        running_pid = get_running_server_pid()
-        # If systemd stop did not fully exit the server, fall through to
-        # the regular shutdown-signal path below.
-    if running_tray_pid is not None:
-        echo(f"Stopping running tray (PID {running_tray_pid})")
-        tray_stopped = False
-        try:
-            tray_stopped = stop_running_tray(running_tray_pid)
-        except Exception as exc:
-            echo(f"Warning: Could not stop tray: {exc}")
-        if not tray_stopped and is_process_alive(running_tray_pid):
-            echo(
-                "Warning: Tray process still alive after stop attempt; "
-                "keeping pid file to avoid duplicate spawn. "
-                "On Windows, file handles may prevent source replacement."
-            )
-        else:
-            # Give OS a moment to release file handles before replacing source
-            for _ in range(5):
-                if not is_process_alive(running_tray_pid):
-                    break
-                time.sleep(0.2)
-    if running_pid is not None:
-        echo(f"Stopping running server (PID {running_pid})")
-        stop_running_server(running_pid)
-
+    systemd_stopped = False
     backup_path: Path | None = None
     try:
+        if systemd_active:
+            echo("Stopping systemd service k41-agent.service")
+            if not stop_systemd_service():
+                raise UpdateError("Could not stop systemd service; the installation was not changed.")
+            systemd_stopped = True
+            SHUTDOWN_SIGNAL.unlink(missing_ok=True)
+            running_pid = get_running_server_pid()
+        if running_tray_pid is not None:
+            echo(f"Stopping running tray (PID {running_tray_pid})")
+            if not stop_running_tray(running_tray_pid) and is_process_alive(running_tray_pid):
+                raise UpdateError("Could not stop the tray; the installation was not changed.")
+        if running_pid is not None:
+            echo(f"Stopping running server (PID {running_pid})")
+            stop_running_server(running_pid)
         backup_path = backup_app_source(install, current_version)
-        prune_backups(install.backup_dir, keep=backup_path)
         echo(f"Backup created at {backup_path}")
 
         replace_app_source(install, source_root)
         sync_app(install)
         initialize_app(install)
     except Exception as exc:
+        rollback_error: Exception | None = None
         if backup_path is not None:
             echo("Update failed. Restoring previous source from backup.")
-            restore_app_source(install, backup_path)
             try:
+                restore_app_source(install, backup_path)
                 sync_app(install)
             except Exception as rollback_exc:
-                raise UpdateError(
-                    "Update failed and rollback dependency sync failed: "
-                    f"{rollback_exc}"
-                ) from exc
-        if should_restart_systemd:
+                rollback_error = rollback_exc
+            try:
+                prune_backups(install.backup_dir, keep=backup_path)
+            except (OSError, UpdateError) as cleanup_exc:
+                echo(f"Warning: Could not prune update backups: {cleanup_exc}")
+        if systemd_stopped:
             try:
                 if not refresh_systemd_unit(install):
                     echo("Warning: Could not refresh systemd unit file")
-            except Exception as exc:
-                echo(f"Warning: Could not refresh systemd unit file: {exc}")
+            except Exception as refresh_exc:
+                echo(f"Warning: Could not refresh systemd unit file: {refresh_exc}")
             if not restart_systemd_service():
-                echo("Warning: Could not restart systemd service")
-        elif should_restart:
+                echo("Warning: Could not restart systemd service; starting server directly")
+                start_server(install)
+        elif should_restart and get_running_server_pid() is None:
             start_server(install)
         if should_restart_tray:
             if get_running_tray_pid() is None:
                 try:
                     start_tray(install)
-                except Exception as exc:
-                    echo(f"Warning: Could not restart tray: {exc}")
+                except Exception as tray_exc:
+                    echo(f"Warning: Could not restart tray: {tray_exc}")
+        if rollback_error is not None:
+            raise UpdateError(f"Update failed: {exc}. Rollback failed: {rollback_error}") from exc
         if isinstance(exc, UpdateError):
             raise
         raise UpdateError(f"Update failed: {exc}") from exc
@@ -260,7 +318,11 @@ def run_update(
                 except Exception as exc:
                     echo(f"Warning: Could not restart tray: {exc}")
 
-    cleanup_downloads(install)
+    try:
+        prune_backups(install.backup_dir, keep=backup_path)
+        cleanup_downloads(install)
+    except (OSError, UpdateError) as exc:
+        echo(f"Warning: Could not clean up update files: {exc}")
     echo(f"Updated K41 Agent to {release.version}.")
     return UpdateResult(
         "updated",
@@ -529,7 +591,7 @@ def assert_dashboard_build(root: Path) -> None:
 
 def backup_app_source(install: ManagedInstall, current_version: str) -> Path:
     install.backup_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
     backup_path = install.backup_dir / f"{BACKUP_PREFIX}{current_version}-{timestamp}"
     copy_tree(install.app_dir, backup_path)
     return backup_path

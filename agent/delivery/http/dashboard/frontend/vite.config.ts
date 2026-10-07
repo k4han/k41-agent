@@ -42,6 +42,7 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      "/health": fastApiTarget,
       "/api": fastApiTarget,
       "/dashboard-api": fastApiTarget,
       "/services": fastApiTarget,

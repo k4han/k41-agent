@@ -1259,6 +1259,7 @@ def update_app(
         "--delay",
         help="Seconds to wait before starting update.",
     ),
+    update_id: str | None = typer.Option(None, "--update-id", hidden=True),
 ) -> None:
     """Update K41 Agent from the latest GitHub release."""
     from agent.bootstrap.update import UpdateError, UpdateOptions, run_update
@@ -1268,7 +1269,7 @@ def update_app(
 
     try:
         run_update(
-            UpdateOptions(check_only=check, force=force, yes=yes),
+            UpdateOptions(check_only=check, force=force, yes=yes, update_id=update_id),
             echo=_echo_info,
             confirm=lambda message: typer.confirm(message, abort=False),
         )
