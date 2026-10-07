@@ -69,9 +69,11 @@ class InvocationContext:
 
     @property
     def owner(self) -> str:
+        from agent.shared.thread_ids import storage_thread_id
+
         scope = self.workspace if self.backend == "local" else json.dumps(
             [self.backend, self.locator, self.workspace], separators=(",", ":"), ensure_ascii=True)
-        return f"{scope}\0{self.thread_id}"
+        return f"{scope}\0{storage_thread_id(self.thread_id)}"
 
 
 

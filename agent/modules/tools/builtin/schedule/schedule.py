@@ -6,6 +6,7 @@ from langgraph.prebuilt import ToolRuntime
 from pydantic import BaseModel, Field
 
 from agent.modules.agent_runtime import SessionManager
+from agent.modules.usage import usage_context_from_config
 from agent.modules.scheduler import (
     TriggerType,
     execute_scheduled_task,
@@ -32,6 +33,10 @@ def _parse_runtime_thread_id(runtime: ToolRuntime[Any, Any]) -> tuple[str, str]:
             ToolErrorCode.INVALID_INPUT,
             "Could not determine user session from thread_id.",
         )
+
+    identity = usage_context_from_config(runtime.config)
+    if identity.platform != "unknown" and identity.user_id != "unknown":
+        return identity.platform, identity.user_id
 
     try:
         platform, user_id, _ = SessionManager.parse_thread_id(thread_id)

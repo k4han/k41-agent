@@ -5,6 +5,8 @@ import logging
 import time
 from typing import Any
 
+from agent.shared.thread_ids import resolve_thread_id
+
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -192,6 +194,7 @@ async def get_chat_thread_messages(
     checkpoint_id: str | None = Query(default=None, min_length=1, description="Specific checkpoint ID to load."),
 ) -> dict[str, Any]:
     """Get all messages and metadata for a specific conversation thread."""
+    thread_id = resolve_thread_id(thread_id)
     try:
         messages, active_checkpoint_id = await get_thread_messages_payload(
             thread_id,
@@ -224,6 +227,7 @@ async def rename_chat_thread(
     body: RenameThreadBody,
 ) -> dict[str, Any]:
     """Rename a conversation thread."""
+    thread_id = resolve_thread_id(thread_id)
     title = body.title.strip()
     if not title:
         raise HTTPException(status_code=400, detail="Thread title cannot be empty.")
@@ -241,6 +245,7 @@ async def rename_chat_thread(
 @router.delete("/dashboard-api/chat-history/{thread_id:path}")
 async def delete_chat_thread(thread_id: str) -> dict[str, str]:
     """Delete a conversation thread and all its checkpoints."""
+    thread_id = resolve_thread_id(thread_id)
     close_thread_shell_sessions(thread_id)
     await delete_thread_workspace(thread_id)
     await mark_conversation_thread_deleted(thread_id)
@@ -254,6 +259,7 @@ async def compact_chat_thread(
     body: CompactThreadBody = CompactThreadBody(),
 ) -> dict[str, Any]:
     """Compact older messages in a conversation thread into a summary."""
+    thread_id = resolve_thread_id(thread_id)
     if active_session_for_thread(thread_id) is not None:
         raise HTTPException(status_code=409, detail="Cannot compact while agent is running.")
     try:
@@ -331,6 +337,7 @@ async def list_background_task_threads(
 @router.get("/dashboard-api/background-tasks/{thread_id:path}")
 async def get_background_task_messages(thread_id: str) -> dict[str, Any]:
     """Get all messages for a specific background task thread."""
+    thread_id = resolve_thread_id(thread_id)
     try:
         messages = await get_thread_messages(thread_id)
     except ConversationHistoryUnavailableError:
@@ -350,6 +357,7 @@ async def get_background_task_messages(thread_id: str) -> dict[str, Any]:
 async def _get_background_task_stream_metadata(
     thread_id: str,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    thread_id = resolve_thread_id(thread_id)
     manager = get_background_task_manager()
     task = manager.get_by_thread_id(thread_id)
     metadata = await get_conversation_thread(thread_id)
@@ -364,6 +372,7 @@ async def _get_background_task_stream_metadata(
 
 
 async def _get_thread_messages_for_stream(thread_id: str) -> list[dict[str, Any]]:
+    thread_id = resolve_thread_id(thread_id)
     try:
         return await get_thread_messages(thread_id)
     except ConversationHistoryUnavailableError:
@@ -376,6 +385,7 @@ async def _background_task_snapshot(
     task: dict[str, Any] | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    thread_id = resolve_thread_id(thread_id)
     manager = get_background_task_manager()
     current_task = task if task is not None else manager.get_by_thread_id(thread_id)
     parsed = metadata or _parse_thread_id_safe(thread_id)
@@ -398,6 +408,7 @@ async def stream_background_task_events(
     thread_id: str = Query(..., min_length=1, description="Background task thread ID to stream events for."),
 ) -> StreamingResponse:
     """Stream real-time events (messages, status updates) for a background task via SSE."""
+    thread_id = resolve_thread_id(thread_id)
     manager = get_background_task_manager()
     task, metadata = await _get_background_task_stream_metadata(thread_id)
     queue = manager.subscribe(thread_id)
@@ -457,6 +468,7 @@ async def stream_background_task_events(
 @router.delete("/dashboard-api/background-tasks/{thread_id:path}")
 async def delete_background_task_thread(thread_id: str) -> dict[str, str]:
     """Delete a background task thread and its associated resources."""
+    thread_id = resolve_thread_id(thread_id)
     close_thread_shell_sessions(thread_id)
     await delete_thread_workspace(thread_id)
     await get_background_task_repository().mark_deleted_by_thread_id(thread_id)

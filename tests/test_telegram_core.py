@@ -213,13 +213,15 @@ async def test_telegram_auth_middleware_ignores_non_private_chat(monkeypatch) ->
 
 def test_telegram_run_params_use_private_chat_context() -> None:
     from agent.modules.channels.telegram.commands import _build_telegram_run_params
+    from agent.modules.agent_runtime import SessionManager
 
     message = DummyMessage("hello")
     params = _build_telegram_run_params(message, "default")
 
     assert params["user_input"] == "hello"
     assert params["agent_name"] == "default"
-    assert params["thread_id"] == "telegram_123_456"
+    assert params["thread_id"] == SessionManager.make_thread_id("telegram", "123", "456")
+    assert params["usage_context"] == {"platform": "telegram", "user_id": "123", "channel_id": "456"}
 
 
 @pytest.mark.asyncio

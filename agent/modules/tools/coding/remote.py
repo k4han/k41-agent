@@ -15,6 +15,7 @@ from pathlib import Path
 
 from agent.modules.tools.coding.models import CodingError, ToolResult
 from agent.modules.tools.coding.remote_worker import permission_identity
+from agent.shared.thread_ids import resolve_thread_id, thread_storage_aliases
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +83,7 @@ def build_runtime_bundle() -> bytes:
     paths = [f"agent/modules/{name}" for name in RUNTIME_MODULES]
     paths.append("agent/shared/infrastructure/subprocess_utils.py")
     paths.append("agent/shared/infrastructure/glob_utils.py")
+    paths.append("agent/shared/thread_ids.py")
     packages = {"agent", "agent/modules", "agent/shared", "agent/shared/infrastructure"}
     for name in paths:
         parent = Path(name).parent
@@ -193,7 +195,8 @@ class RemoteCodingRuntime:
         fields["permission_rules"] = []
         if workspace is not None:
             fields["workspace"] = workspace
-        return {"operation": operation, "name": name, "values": values, "context": fields}
+        return {"operation": operation, "name": name, "values": values, "context": fields,
+                "thread_aliases": thread_storage_aliases(context.thread_id)}
 
     async def authorize(self, client, name, values, context, *, allow_interrupt):
         await client.ensure_started()
@@ -252,21 +255,25 @@ class RemoteCodingRuntime:
         return (await client.call(request))["output_paths"]
 
     async def stop_thread(self, thread_id):
+        thread_id = resolve_thread_id(thread_id)
+
         async def stop(client):
             try:
-                await client.call({"operation": "stop_thread", "thread_id": thread_id})
+                await client.call({"operation": "stop_thread", "thread_id": thread_id,
+                                   "thread_aliases": thread_storage_aliases(thread_id)})
             except Exception:
                 logger.warning("Failed to stop sandbox coding jobs for thread %s", thread_id, exc_info=True)
         await asyncio.gather(*(stop(client) for client in self.clients.values() if client.endpoint))
 
     async def clear_scratchpads(self, thread_id):
+        thread_id = resolve_thread_id(thread_id)
         # Recover sandbox connections from durable ownership records after restart.
         for directory in self.service.storage.root.iterdir():
             try:
                 if directory.is_symlink():
                     continue
                 record = json.loads((directory / "owner.json").read_text(encoding="utf-8"))
-                owner_thread = record["thread_id"]
+                owner_thread = resolve_thread_id(record["thread_id"])
                 if (record.get("backend", "local") != "local"
                         and (owner_thread == thread_id or owner_thread.startswith(f"{thread_id}:sub:"))):
                     from agent.modules.tools.coding.models import InvocationContext
@@ -278,7 +285,8 @@ class RemoteCodingRuntime:
                 logger.warning("Could not reconnect sandbox for scratchpad cleanup", exc_info=True)
         for client in self.clients.values():
             if client.endpoint:
-                await client.call({"operation": "clear_scratchpads", "thread_id": thread_id})
+                await client.call({"operation": "clear_scratchpads", "thread_id": thread_id,
+                                   "thread_aliases": thread_storage_aliases(thread_id)})
 
     def stop_thread_now(self, thread_id):
         if not self.clients:

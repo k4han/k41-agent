@@ -1,3 +1,4 @@
+from agent.modules.agent_runtime.session import SessionManager
 import asyncio
 import importlib
 import time
@@ -167,7 +168,7 @@ async def test_background_task_usage_context_uses_task_thread_when_notify_channe
     )
     task = await _wait_for_task_status(manager, task_id, "completed")
 
-    assert task["thread_id"] == f"task_dashboard_{task_id}"
+    assert task["thread_id"] == SessionManager.make_thread_id("task", "dashboard", task_id)
     assert captured["usage_context"] == {
         "platform": "task",
         "user_id": "dashboard",
@@ -514,7 +515,7 @@ async def test_background_task_injects_telegram_state_without_conversation_or_wo
 
     await BackgroundTaskManager()._inject_into_user_thread(task)
 
-    assert captured["config"] == {"thread_id": "telegram_123_456"}
+    assert captured["config"] == {"thread_id": SessionManager.make_thread_id("telegram", "123", "456")}
     assert captured["as_node"] == "llm"
     messages = captured["values"]["messages"]
     assert messages[0].content == "[Background Task]\nfix issue"

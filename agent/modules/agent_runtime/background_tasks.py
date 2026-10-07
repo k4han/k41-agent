@@ -173,7 +173,7 @@ def _truncate_stored_text(text: str) -> str:
 def _task_usage_context(task: BackgroundTask) -> dict[str, str]:
     if task.thread_id:
         try:
-            from agent.modules.agent_runtime.session import SessionManager
+            from agent.shared.thread_ids import SessionManager
 
             platform, user_id, channel_id = SessionManager.parse_thread_id(task.thread_id)
             return {
@@ -347,9 +347,9 @@ class BackgroundTaskManager:
             task_timeout=task_timeout,
             max_retries=max(0, max_retries),
         )
-        task.thread_id = (
-            f"{BACKGROUND_THREAD_PREFIX}_dashboard_{task.task_id}"
-        )
+        from agent.shared.thread_ids import SessionManager
+
+        task.thread_id = SessionManager.make_thread_id(BACKGROUND_THREAD_PREFIX, "dashboard", task.task_id)
 
         from agent.modules.conversations import (
             THREAD_KIND_BACKGROUND,
@@ -374,6 +374,7 @@ class BackgroundTaskManager:
             model=task.model,
             title=task.request,
             kind=THREAD_KIND_BACKGROUND,
+            **_task_usage_context(task),
         )
         schedule_conversation_title_generation(
             thread_id=task.thread_id,
@@ -416,7 +417,7 @@ class BackgroundTaskManager:
         # Track one active session for the whole task lifecycle so the
         # dashboard running state stays stable through the agent run, the
         # completion hook (e.g. GitHub push/PR publishing), and cleanup.
-        with track_active_session(task.thread_id, task.agent_name):
+        with track_active_session(task.thread_id, task.agent_name, usage_context=_task_usage_context(task)):
             try:
                 if task.task_timeout and task.task_timeout > 0:
                     result = await asyncio.wait_for(
@@ -627,7 +628,7 @@ class BackgroundTaskManager:
         This allows the user to continue chatting from the task context
         on their preferred channel (Telegram, Discord, etc.).
         """
-        from agent.modules.agent_runtime.session import SessionManager
+        from agent.shared.thread_ids import SessionManager
         from agent.modules.conversations import inject_agent_message_pair
 
         channel = task.notify_channel

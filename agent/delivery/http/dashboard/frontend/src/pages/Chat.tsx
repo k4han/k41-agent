@@ -23,6 +23,7 @@ import type { TodoProgress } from "@/components/ChatTodos";
 import { apiFetch, fetchWithCsrf, postJson, readError } from "@/lib/api";
 import { fetchAgentChatOptions } from "@/lib/agents";
 import {
+  chatThreadHref,
   threadApiPath,
   toThreadTranscript,
 } from "@/lib/chatThreads";
@@ -728,6 +729,13 @@ export function ChatPage() {
         return;
       }
       applyThreadPayload(payload);
+      if (payload.thread_id !== threadId && routeThreadId() === threadId) {
+        loadedThreadId = payload.thread_id;
+        const checkpointQuery = checkpointId
+          ? `?checkpoint_id=${encodeURIComponent(checkpointId)}`
+          : "";
+        navigate(`${chatThreadHref(payload.thread_id)}${checkpointQuery}`, { replace: true });
+      }
       if (payload.kind === "background") {
         openBackgroundStream(payload.thread_id);
       } else {

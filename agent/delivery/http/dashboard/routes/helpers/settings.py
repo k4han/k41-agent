@@ -270,7 +270,7 @@ def _normalize_bootstrap_port(value: Any | None) -> int:
 
 def normalize_setting_value(key: str, value: Any | None) -> Any | None:
     if key.startswith("llm.providers.") and key.endswith(".model_profiles"):
-        from agent.modules.providers.profiles import parse_model_profiles
+        from agent.modules.providers import parse_model_profiles
 
         try:
             return parse_model_profiles(value)

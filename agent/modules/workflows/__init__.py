@@ -1,4 +1,5 @@
 import logging
+from agent.shared.thread_ids import resolve_thread_id
 from typing import Any
 
 from agent.modules.workflows.run_config import (
@@ -58,6 +59,7 @@ def get_checkpointer():
 
 
 async def delete_workflow_thread(thread_id: str) -> None:
+    thread_id = resolve_thread_id(thread_id)
     from agent.modules.workflows.checkpoint.store import get_checkpointer
 
     checkpointer = get_checkpointer()
@@ -78,6 +80,7 @@ def _checkpoint_tuple_thread_id(checkpoint_tuple: object) -> str:
 
 
 async def _list_workflow_child_thread_ids(checkpointer: object, thread_id: str) -> set[str]:
+    thread_id = resolve_thread_id(thread_id)
     child_prefix = f"{thread_id}:sub:"
     child_thread_ids: set[str] = set()
     alist = getattr(checkpointer, "alist", None)
@@ -94,6 +97,7 @@ async def _list_workflow_child_thread_ids(checkpointer: object, thread_id: str) 
 
 
 async def delete_workflow_thread_tree(thread_id: str) -> None:
+    thread_id = resolve_thread_id(thread_id)
     from agent.modules.tools import clear_conversation_storage
     from agent.modules.workflows.checkpoint.store import get_checkpointer
 

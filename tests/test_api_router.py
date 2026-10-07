@@ -396,7 +396,7 @@ def test_chat_events_can_create_new_thread(monkeypatch, tmp_path):
     remembered: list[tuple[str, dict]] = []
     built_params = {
         "user_input": "Start",
-        "thread_id": "api_dashboard_generated",
+        "thread_id": "91c23fc6b24a48ef9b804405e1809bde",
         "agent_name": "default",
         "workflow": None,
         "workspace": requested_workspace,
@@ -409,7 +409,7 @@ def test_chat_events_can_create_new_thread(monkeypatch, tmp_path):
     monkeypatch.setattr(
         router_module,
         "create_thread_id",
-        lambda **kwargs: "api_dashboard_generated",
+        lambda **kwargs: "91c23fc6b24a48ef9b804405e1809bde",
     )
 
     def fake_build_run_params(**params):
@@ -423,7 +423,7 @@ def test_chat_events_can_create_new_thread(monkeypatch, tmp_path):
             "agent_name": "default",
             "provider": None,
             "model": None,
-            "thread_id": "api_dashboard_generated",
+            "thread_id": "91c23fc6b24a48ef9b804405e1809bde",
             "resume": False,
         }
         return dict(built_params)
@@ -453,24 +453,24 @@ def test_chat_events_can_create_new_thread(monkeypatch, tmp_path):
 
     assert response.status_code == 200
     assert response.text == (
-        '{"type": "thread_created", "thread_id": "api_dashboard_generated"}\n'
+        '{"type": "thread_created", "thread_id": "91c23fc6b24a48ef9b804405e1809bde"}\n'
         '{"type": "final", "content": "started"}\n'
     )
-    assert remembered == [("api_dashboard_generated", resolved_workspace.model_dump())]
+    assert remembered == [("91c23fc6b24a48ef9b804405e1809bde", resolved_workspace.model_dump())]
 
 
 def test_chat_events_creates_temp_workspace_for_dashboard_new_thread_without_workspace(monkeypatch):
     temp_workspace = router_module.resolve_workspace_ref(
         {
             "backend": "local",
-            "locator": "D:/workspace/.temp/thread-api_dashboard_generated",
+            "locator": "D:/workspace/.temp/thread-91c23fc6b24a48ef9b804405e1809bde",
             "label": "Temp workspace",
             "metadata": {"temp": True},
         }
     )
     built_params = {
         "user_input": "Start",
-        "thread_id": "api_dashboard_generated",
+        "thread_id": "91c23fc6b24a48ef9b804405e1809bde",
         "agent_name": "default",
         "workflow": None,
         "workspace": temp_workspace,
@@ -483,11 +483,11 @@ def test_chat_events_creates_temp_workspace_for_dashboard_new_thread_without_wor
     monkeypatch.setattr(
         router_module,
         "create_thread_id",
-        lambda **kwargs: "api_dashboard_generated",
+        lambda **kwargs: "91c23fc6b24a48ef9b804405e1809bde",
     )
 
     async def fake_create_temp_workspace(thread_id: str | None, *, label: str | None = None):
-        assert thread_id == "api_dashboard_generated"
+        assert thread_id == "91c23fc6b24a48ef9b804405e1809bde"
         return temp_workspace
 
     def fake_build_run_params(**params):
@@ -514,7 +514,7 @@ def test_chat_events_creates_temp_workspace_for_dashboard_new_thread_without_wor
 
     assert response.status_code == 200
     assert response.text == (
-        '{"type": "thread_created", "thread_id": "api_dashboard_generated"}\n'
+        '{"type": "thread_created", "thread_id": "91c23fc6b24a48ef9b804405e1809bde"}\n'
         '{"type": "final", "content": "started"}\n'
     )
 

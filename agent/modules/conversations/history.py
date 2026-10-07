@@ -17,6 +17,7 @@ from agent.modules.conversations.service import (
     parse_thread_metadata,
 )
 from agent.shared.infrastructure.parsing import extract_final_text_content, extract_tool_display_content
+from agent.shared.thread_ids import resolve_thread_id
 
 logger = logging.getLogger(__name__)
 CHECKPOINT_STATS_CONCURRENCY = 4
@@ -41,6 +42,7 @@ def get_history_checkpointer():
 
 async def get_checkpoint_stats(thread_id: str) -> dict[str, Any]:
     """Read lightweight checkpoint stats via the checkpointer API."""
+    thread_id = resolve_thread_id(thread_id)
     try:
         checkpointer = get_history_checkpointer()
     except ConversationHistoryUnavailableError:
@@ -381,6 +383,7 @@ def _message_prefix_key(messages: list[Any], end_index: int) -> tuple[tuple[str,
 
 
 async def _list_checkpoint_tuples(thread_id: str) -> list[Any]:
+    thread_id = resolve_thread_id(thread_id)
     checkpointer = get_history_checkpointer()
     config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
     tuples: list[Any] = []
@@ -587,6 +590,7 @@ async def get_thread_messages_payload(
 
     Raises CheckpointNotFoundError when an explicit checkpoint_id cannot be loaded.
     """
+    thread_id = resolve_thread_id(thread_id)
     checkpointer = get_history_checkpointer()
     config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
     if checkpoint_id:
@@ -639,5 +643,6 @@ async def get_thread_messages_payload(
 
 async def get_thread_messages(thread_id: str) -> list[dict[str, Any]]:
     """Get messages from a thread via the checkpointer."""
+    thread_id = resolve_thread_id(thread_id)
     messages, _ = await get_thread_messages_payload(thread_id)
     return messages

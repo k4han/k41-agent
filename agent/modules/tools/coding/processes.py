@@ -371,8 +371,13 @@ class ProcessManager:
             await job.finished.wait()
 
     def stop_thread_now(self, thread_id: str) -> int:
+        from agent.shared.thread_ids import resolve_thread_id
+
+        thread_id = resolve_thread_id(thread_id)
         self.storage.clear_thread_grants(thread_id)
-        jobs = [job for job in self.jobs.values() if job.thread_id == thread_id or job.thread_id.startswith(f"{thread_id}:sub:")]
+        jobs = [job for job in self.jobs.values()
+                if resolve_thread_id(job.thread_id) == thread_id
+                or resolve_thread_id(job.thread_id).startswith(f"{thread_id}:sub:")]
         for job in jobs:
             self.jobs.pop(job.id, None)
             if not job.finished.is_set():
@@ -382,9 +387,13 @@ class ProcessManager:
         return len(jobs) + (self.remote.stop_thread_now(thread_id) if self.remote else 0)
 
     async def stop_thread(self, thread_id: str) -> None:
+        from agent.shared.thread_ids import resolve_thread_id
+
+        thread_id = resolve_thread_id(thread_id)
         jobs = {**self.jobs, **self.retiring_jobs}
         owned = [job for job in jobs.values()
-                 if job.thread_id == thread_id or job.thread_id.startswith(f"{thread_id}:sub:")]
+                 if resolve_thread_id(job.thread_id) == thread_id
+                 or resolve_thread_id(job.thread_id).startswith(f"{thread_id}:sub:")]
         await asyncio.gather(*(self.stop(job) for job in owned))
         self.stop_thread_now(thread_id)
 

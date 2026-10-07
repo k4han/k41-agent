@@ -91,6 +91,7 @@ async def _stream_agent_response(session: CLISession, user_input: str) -> None:
         async for event in run_agent_stream(
             user_input=user_input,
             thread_id=session.thread_id,
+            usage_context={"platform": "cli", "user_id": "local", "channel_id": session.channel_id},
             agent_name=session.agent_name,
         ):
             event_type = event.get("type")

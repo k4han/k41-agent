@@ -29,13 +29,14 @@ from agent.modules.agent_runtime.active_sessions import (
     current_session_id_var,
     current_thread_id_var,
 )
-from agent.modules.agent_runtime.session import SessionManager
+from agent.shared.thread_ids import SessionManager, resolve_thread_id
 from agent.modules.workflows import (
     get_workflow_graph,
     make_run_config,
     make_run_context,
 )
 from agent.modules.usage import attach_usage_context, build_usage_context
+from agent.modules.usage import load_usage_context
 from agent.modules.tools import (
     ASK_USER_INTERRUPT_TYPE,
     ASK_USER_TOOL_NAME,
@@ -103,7 +104,7 @@ def build_run_params(
         resume = True
     params: dict[str, Any] = {
         "user_input": user_input,
-        "thread_id": thread_id or SessionManager.make_thread_id(platform, user_id, channel_id),
+        "thread_id": resolve_thread_id(thread_id) if thread_id else SessionManager.make_thread_id(platform, user_id, channel_id),
         "agent_name": agent_name,
         "workflow": workflow,
         "workspace": workspace if workspace is not None else working_dir,
@@ -466,6 +467,7 @@ async def _record_conversation_thread(
     model: str | None = None,
     title: str = "",
     attachments: list[Any] | None = None,
+    usage_context: dict[str, Any] | None = None,
 ) -> asyncio.Task[dict[str, Any] | None] | None:
     """Persist thread metadata and schedule title generation.
 
@@ -482,17 +484,21 @@ async def _record_conversation_thread(
             upsert_conversation_thread,
         )
 
-        kind = infer_thread_kind(thread_id)
+        existing = await get_conversation_thread(thread_id)
+        kind = str((existing or {}).get("kind") or infer_thread_kind(thread_id))
         resolved_title = title
         should_generate_title = False
         if kind == THREAD_KIND_USER:
-            existing = await get_conversation_thread(thread_id)
             existing_title = str((existing or {}).get("title") or "").strip()
             if existing_title and existing_title != thread_id:
                 resolved_title = ""
             else:
                 should_generate_title = True
 
+        identity = {
+            key: value for key, value in (usage_context or {}).items()
+            if key in {"platform", "user_id", "channel_id"}
+        }
         await upsert_conversation_thread(
             thread_id=thread_id,
             agent_name=agent_name,
@@ -500,6 +506,7 @@ async def _record_conversation_thread(
             model=model,
             title=resolved_title,
             kind=kind,
+            **identity,
         )
         if should_generate_title:
             return schedule_conversation_title_generation(
@@ -968,7 +975,9 @@ async def _find_message_source_state(
 
 
 @contextmanager
-def track_active_session(thread_id: str, agent_name: str) -> Iterator[str]:
+def track_active_session(
+    thread_id: str, agent_name: str, *, usage_context: dict[str, Any] | None = None,
+) -> Iterator[str]:
     """Track an active agent session for a thread.
 
     Sessions are reference-counted per thread: nested or overlapping runs on
@@ -979,15 +988,12 @@ def track_active_session(thread_id: str, agent_name: str) -> Iterator[str]:
     """
     import asyncio
     registry = get_active_session_registry()
-    try:
-        platform, user_id, channel_id = SessionManager.parse_thread_id(thread_id)
-    except ValueError:
-        platform, user_id, channel_id = "unknown", thread_id, ""
+    identity = build_usage_context(thread_id, usage_context)
     session = ActiveSession(
         thread_id=thread_id,
-        platform=platform,
-        user_id=user_id,
-        channel_id=channel_id,
+        platform=identity.platform,
+        user_id=identity.user_id,
+        channel_id=identity.channel_id,
         agent_name=agent_name,
     )
 
@@ -1086,13 +1092,16 @@ async def run_agent(
     )
     resolved_tools = allowed_tool_names if allowed_tool_names is not None else agent_config.tools
 
+    thread_id = resolve_thread_id(thread_id)
+    approval_supported = str((usage_context or {}).get("platform", "")) == "api"
+    usage_context = (await load_usage_context(thread_id, usage_context)).to_dict()
     graph = get_workflow_graph(resolved_workflow)
     config = attach_usage_context(
         make_run_config(thread_id=thread_id),
         build_usage_context(thread_id, usage_context),
     )
     config = _config_with_checkpoint(config, checkpoint_id)
-    config["configurable"]["approval_supported"] = str((usage_context or {}).get("platform", "")) == "api" or bool(config["configurable"].get("approval_supported"))
+    config["configurable"]["approval_supported"] = approval_supported or usage_context["platform"] == "api" or bool(config["configurable"].get("approval_supported"))
 
     context = make_run_context(
         workspace=workspace,
@@ -1116,6 +1125,7 @@ async def run_agent(
             model=model,
             title=user_input,
             attachments=attachments,
+            usage_context=usage_context,
         )
 
     stream_kwargs: dict[str, Any] = {
@@ -1136,7 +1146,7 @@ async def run_agent(
     else:
         input_data = {"messages": [_make_user_message(user_input, attachments, workspace=workspace)]}
 
-    with track_active_session(thread_id, agent_name) as session_id:
+    with track_active_session(thread_id, agent_name, usage_context=usage_context) as session_id:
         async for event in graph.astream(
             input_data,
             **stream_kwargs,
@@ -1235,13 +1245,16 @@ async def run_agent_stream(
     )
     resolved_tools = allowed_tool_names if allowed_tool_names is not None else agent_config.tools
 
+    thread_id = resolve_thread_id(thread_id)
+    approval_supported = str((usage_context or {}).get("platform", "")) == "api"
+    usage_context = (await load_usage_context(thread_id, usage_context)).to_dict()
     graph = get_workflow_graph(resolved_workflow)
     config = attach_usage_context(
         make_run_config(thread_id=thread_id),
         build_usage_context(thread_id, usage_context),
     )
     config = _config_with_checkpoint(config, checkpoint_id)
-    config["configurable"]["approval_supported"] = str((usage_context or {}).get("platform", "")) == "api" or bool(config["configurable"].get("approval_supported"))
+    config["configurable"]["approval_supported"] = approval_supported or usage_context["platform"] == "api" or bool(config["configurable"].get("approval_supported"))
 
     context = make_run_context(
         workspace=workspace,
@@ -1266,6 +1279,7 @@ async def run_agent_stream(
             model=model,
             title=user_input,
             attachments=attachments,
+            usage_context=usage_context,
         )
 
     seen_ids: set[str] = set()
@@ -1332,7 +1346,7 @@ async def run_agent_stream(
 
     title_watcher = asyncio.create_task(_publish_generated_title())
     try:
-        with track_active_session(thread_id, agent_name) as session_id:
+        with track_active_session(thread_id, agent_name, usage_context=usage_context) as session_id:
             chunk_extractor = _StreamingChunkExtractor()
             async for event in graph.astream(
                 input_data,
@@ -1504,11 +1518,16 @@ async def run_agent_edit_stream(
     )
     resolved_tools = allowed_tool_names if allowed_tool_names is not None else agent_config.tools
 
+    thread_id = resolve_thread_id(thread_id)
+    approval_supported = str((usage_context or {}).get("platform", "")) == "api"
+    usage_context = (await load_usage_context(thread_id, usage_context)).to_dict()
     graph = get_workflow_graph(resolved_workflow)
     base_config = attach_usage_context(
         make_run_config(thread_id=thread_id),
         build_usage_context(thread_id, usage_context),
     )
+
+    base_config["configurable"]["approval_supported"] = approval_supported or usage_context["platform"] == "api" or bool(base_config["configurable"].get("approval_supported"))
 
     source_state, original_message = await _find_message_source_state(
         graph,
@@ -1559,7 +1578,7 @@ async def run_agent_edit_stream(
     user_message_id = _message_id(edited_message)
     current_user_seen = False
 
-    with track_active_session(thread_id, agent_name) as session_id:
+    with track_active_session(thread_id, agent_name, usage_context=usage_context) as session_id:
         chunk_extractor = _StreamingChunkExtractor()
         async for event in graph.astream(
             {"messages": [edited_message]},

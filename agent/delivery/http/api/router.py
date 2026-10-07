@@ -29,6 +29,7 @@ from agent.modules.agent_runtime import (
     get_chat_stream_manager,
 )
 from agent.modules.conversations import create_thread_id
+from agent.shared.thread_ids import resolve_thread_id
 from agent.modules.providers import (
     list_provider_model_catalog,
     list_provider_model_catalogs,
@@ -98,7 +99,7 @@ router.include_router(mcp_router)
 
 
 def _request_to_run_params(request: ChatRequest) -> dict[str, object]:
-    thread_id = request.thread_id
+    thread_id = resolve_thread_id(request.thread_id) if request.thread_id else None
     if request.new_thread and not thread_id:
         thread_id = create_thread_id(
             platform=Platform.API,
@@ -178,6 +179,8 @@ async def _apply_workspace_to_run_params(
 
 
 async def prepare_run_params(request: ChatRequest) -> dict[str, object]:
+    if request.thread_id:
+        request = request.model_copy(update={"thread_id": resolve_thread_id(request.thread_id)})
     params = _request_to_run_params(request)
     await _apply_workspace_to_run_params(request, params)
     return params
@@ -240,6 +243,7 @@ async def chat_events_edit(request: EditChatRequest):
     if not request.message.strip():
         raise HTTPException(status_code=400, detail="Edited message cannot be empty.")
 
+    request = request.model_copy(update={"thread_id": resolve_thread_id(request.thread_id)})
     params = build_run_params(
         platform=Platform.API,
         user_id=request.user_id,
@@ -279,7 +283,7 @@ async def chat_events_edit(request: EditChatRequest):
 @router.post("/chat/events/reconnect")
 async def chat_events_reconnect(request: ReconnectRequest):
     """Reconnect to an active chat stream and continue receiving UI events."""
-    thread_id = request.thread_id
+    thread_id = resolve_thread_id(request.thread_id) if request.thread_id else None
     manager = get_chat_stream_manager()
     session = await manager.get_session(thread_id)
 

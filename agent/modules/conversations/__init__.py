@@ -1,5 +1,5 @@
 from agent.modules.conversations.models import ConversationThread
-from agent.modules.conversations.migrations import migrate_conversation_tables
+from agent.modules.conversations.migrations import migrate_conversation_ids, migrate_conversation_tables
 from agent.modules.conversations.history import (
     CheckpointNotFoundError,
     ConversationHistoryUnavailableError,
@@ -76,6 +76,7 @@ __all__ = [
     "infer_thread_kind",
     "inject_agent_message_pair",
     "migrate_conversation_tables",
+    "migrate_conversation_ids",
     "list_active_thread_ids",
     "list_background_threads_with_stats",
     "list_conversation_threads",

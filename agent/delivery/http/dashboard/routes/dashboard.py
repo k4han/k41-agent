@@ -492,6 +492,10 @@ async def stop_dashboard_session(payload: dict[str, Any]) -> dict[str, Any]:
     """Stop an active session by session ID or thread ID."""
     session_id = payload.get("session_id")
     thread_id = payload.get("thread_id")
+    if thread_id:
+        from agent.shared.thread_ids import resolve_thread_id
+
+        thread_id = resolve_thread_id(str(thread_id))
     registry = get_active_session_registry()
 
     success = False

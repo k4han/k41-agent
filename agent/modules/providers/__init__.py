@@ -11,6 +11,7 @@ from agent.modules.providers.models import ProviderModelCatalog, ResolvedChatMod
 from agent.modules.providers.models import get_reasoning_effort_kwargs
 from agent.modules.providers.openai_compatible.factory import OpenAICompatibleFactory
 from agent.modules.providers.provider import ProviderConfig, ProviderType
+from agent.modules.providers.profiles import EFFORT_PATTERN, parse_model_profiles
 from agent.modules.providers.repository import ConfigProviderRepository
 from agent.modules.providers.service import ProviderService
 from agent.modules.providers.internal_loader import load_internal_providers
@@ -120,6 +121,8 @@ from agent.modules.providers.verification import (
 )
 
 __all__ = [
+    "EFFORT_PATTERN",
+    "parse_model_profiles",
     "AnthropicFactory",
     "ConfigProviderRepository",
     "GoogleFactory",

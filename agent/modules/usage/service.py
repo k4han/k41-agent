@@ -45,7 +45,9 @@ class UsageContext:
 
 
 def root_thread_id(thread_id: str) -> str:
-    return str(thread_id or "").split(":sub:", 1)[0].strip()
+    from agent.shared.thread_ids import resolve_thread_id
+
+    return resolve_thread_id(str(thread_id or "")).split(":sub:", 1)[0].strip()
 
 
 def build_usage_context(
@@ -53,10 +55,12 @@ def build_usage_context(
     explicit: dict[str, Any] | None = None,
 ) -> UsageContext:
     explicit = explicit or {}
-    normalized_thread_id = str(explicit.get("thread_id") or thread_id or "").strip()
-    normalized_root = str(
+    from agent.shared.thread_ids import resolve_thread_id
+
+    normalized_thread_id = resolve_thread_id(str(explicit.get("thread_id") or thread_id or "").strip())
+    normalized_root = resolve_thread_id(str(
         explicit.get("root_thread_id") or root_thread_id(normalized_thread_id)
-    ).strip()
+    ).strip())
 
     platform = str(explicit.get("platform") or "").strip()
     user_id = str(explicit.get("user_id") or "").strip()
@@ -80,6 +84,26 @@ def build_usage_context(
         user_id=user_id or "unknown",
         channel_id=channel_id,
     )
+
+
+async def load_usage_context(thread_id: str, explicit: dict[str, Any] | None = None) -> UsageContext:
+    """Recover identity metadata for opaque IDs and inherit it for sub-agents."""
+    from agent.modules.conversations import get_conversation_thread
+
+    identity = dict(explicit or {})
+    root = root_thread_id(thread_id)
+    try:
+        stored = await get_conversation_thread(root)
+        if stored:
+            for key in ("platform", "user_id", "channel_id"):
+                value = stored.get(key)
+                if value and value != "unknown":
+                    identity[key] = value
+    except Exception as exc:
+        logger.debug("Could not load conversation identity for %s: %s", root, exc)
+    identity["thread_id"] = thread_id
+    identity["root_thread_id"] = root
+    return build_usage_context(thread_id, identity)
 
 
 def attach_usage_context(config: dict[str, Any], context: UsageContext) -> dict[str, Any]:
@@ -137,10 +161,12 @@ def normalize_usage_query(
 
 
 def _parse_thread_id(thread_id: str) -> tuple[str, str, str] | None:
-    parts = str(thread_id or "").split("_", 2)
-    if len(parts) < 2:
+    from agent.shared.thread_ids import SessionManager
+
+    try:
+        return SessionManager.parse_thread_id(thread_id)
+    except ValueError:
         return None
-    return parts[0], parts[1], parts[2] if len(parts) == 3 else ""
 
 
 def _localize_last_used(rows: list[dict[str, Any]], tz: Any) -> None:
@@ -212,6 +238,9 @@ class UsageService:
             return 0
 
     async def get_thread_usage(self, thread_id: str) -> dict[str, Any]:
+        from agent.shared.thread_ids import resolve_thread_id
+
+        thread_id = resolve_thread_id(thread_id)
         payload = await self._repository.aggregate_by_thread(thread_id)
         try:
             from agent.modules.conversations import (

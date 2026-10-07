@@ -18,10 +18,11 @@ from agent.modules.conversations.repository import (
 from agent.modules.providers import get_resolved_chat_model
 from agent.modules.usage import (
     attach_usage_context,
-    build_usage_context,
+    load_usage_context,
     with_usage_tracking,
 )
 from agent.shared.infrastructure.parsing import extract_final_text_content
+from agent.shared.thread_ids import resolve_thread_id
 
 _INJECTION_GRAPH_NAME = "react_agent"
 _INJECTION_AS_NODE = "llm"
@@ -135,7 +136,7 @@ async def generate_conversation_title(
         ]
         config = attach_usage_context(
             {"configurable": {"thread_id": thread_id}},
-            build_usage_context(thread_id),
+            await load_usage_context(thread_id),
         )
         response = await asyncio.wait_for(
             llm.ainvoke(
@@ -202,6 +203,7 @@ def schedule_conversation_title_generation(
     title: str,
     attachments: list[Any] | None = None,
 ) -> asyncio.Task[dict[str, Any] | None]:
+    thread_id = resolve_thread_id(thread_id)
     return asyncio.create_task(
         _generate_and_update_conversation_title(
             thread_id=thread_id,
@@ -218,15 +220,15 @@ def create_thread_id(
     channel_id: str | None = None,
 ) -> str:
     platform_value = getattr(platform, "value", platform)
-    resolved_channel_id = channel_id or uuid.uuid4().hex[:12]
-    return SessionManager.make_thread_id(
-        str(platform_value),
-        user_id,
-        resolved_channel_id,
-    )
+    if channel_id:
+        return SessionManager.make_thread_id(str(platform_value), user_id, channel_id)
+    return uuid.uuid4().hex
 
 
 def infer_thread_kind(thread_id: str) -> str:
+    from agent.shared.thread_ids import storage_thread_id
+
+    thread_id = storage_thread_id(thread_id)
     if ":sub:" in thread_id:
         return THREAD_KIND_SUB_AGENT
     if thread_id.startswith("task_"):
@@ -240,7 +242,7 @@ def parse_thread_metadata(thread_id: str) -> dict[str, str]:
     try:
         platform, user_id, channel_id = SessionManager.parse_thread_id(thread_id)
     except ValueError:
-        return {"platform": "unknown", "user_id": thread_id, "channel_id": ""}
+        return {"platform": "unknown", "user_id": "", "channel_id": ""}
     return {"platform": platform, "user_id": user_id, "channel_id": channel_id}
 
 
@@ -257,8 +259,12 @@ async def upsert_conversation_thread(
     channel_id: str | None = None,
     repository: ConversationThreadRepository | None = None,
 ) -> dict[str, Any]:
+    thread_id = resolve_thread_id(thread_id)
     parsed = parse_thread_metadata(thread_id)
     repo = repository or get_conversation_thread_repository()
+    existing = await repo.get(thread_id)
+    if existing:
+        parsed = {**parsed, **existing}
     return await repo.upsert(
         thread_id=thread_id,
         platform=platform or parsed["platform"],
@@ -268,7 +274,7 @@ async def upsert_conversation_thread(
         provider=provider,
         model=model,
         title=title or thread_id,
-        kind=kind or infer_thread_kind(thread_id),
+        kind=kind or parsed.get("kind") or infer_thread_kind(thread_id),
     )
 
 

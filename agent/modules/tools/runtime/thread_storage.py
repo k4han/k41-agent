@@ -57,7 +57,9 @@ def root_thread_id(thread_id: str | None) -> str | None:
 
 
 def sanitize_thread_id(thread_id: str) -> str:
-    normalized = str(thread_id or "").strip()
+    from agent.shared.thread_ids import storage_thread_id
+
+    normalized = storage_thread_id(str(thread_id or "").strip())
     return sanitize_workspace_key(normalized or "thread")
 
 

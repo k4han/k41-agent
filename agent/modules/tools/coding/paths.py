@@ -29,6 +29,7 @@ class PathPermissions:
             relative = target.relative_to(base).parts
             if len(relative) >= 3 and relative[:2] == (".k41-agent", "outputs"):
                 from agent.modules.tools.coding.storage import digest
-                if relative[2] != digest(context.thread_id)[:24]:
+                from agent.shared.thread_ids import storage_thread_id
+                if relative[2] != digest(storage_thread_id(context.thread_id))[:24]:
                     raise CodingError("not_found", "Output file does not exist in this workspace/thread.")
         return target

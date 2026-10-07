@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+from agent.shared.thread_ids import resolve_thread_id
+
 from sqlalchemy import func, select, update
 
 from agent.modules.conversations.models import ConversationThread
@@ -65,7 +67,7 @@ class ConversationThreadRepository:
         kind: str = "user",
     ) -> dict[str, Any]:
         now = utcnow()
-        normalized_thread_id = _trim(thread_id, 512)
+        normalized_thread_id = _trim(resolve_thread_id(thread_id), 512)
         normalized_platform = _trim(platform or "unknown", 50) or "unknown"
         normalized_user_id = _trim(user_id, 255)
         normalized_channel_id = _trim(channel_id, 255)
@@ -124,7 +126,7 @@ class ConversationThreadRepository:
         async with session:
             result = await session.execute(
                 select(ConversationThread).where(
-                    ConversationThread.thread_id == thread_id,
+                    ConversationThread.thread_id == resolve_thread_id(thread_id),
                     ConversationThread.deleted_at.is_(None),
                 )
             )
@@ -199,7 +201,7 @@ class ConversationThreadRepository:
         async with session:
             result = await session.execute(
                 select(ConversationThread).where(
-                    ConversationThread.thread_id == thread_id,
+                    ConversationThread.thread_id == resolve_thread_id(thread_id),
                     ConversationThread.deleted_at.is_(None),
                 )
             )
@@ -238,7 +240,7 @@ class ConversationThreadRepository:
             result = await session.execute(
                 update(ConversationThread)
                 .where(
-                    ConversationThread.thread_id == thread_id,
+                    ConversationThread.thread_id == resolve_thread_id(thread_id),
                     ConversationThread.deleted_at.is_(None),
                     ConversationThread.title.in_(normalized_current_titles),
                 )
@@ -251,7 +253,7 @@ class ConversationThreadRepository:
             await session.commit()
             refreshed = await session.execute(
                 select(ConversationThread).where(
-                    ConversationThread.thread_id == thread_id,
+                    ConversationThread.thread_id == resolve_thread_id(thread_id),
                     ConversationThread.deleted_at.is_(None),
                 )
             )
@@ -269,7 +271,7 @@ class ConversationThreadRepository:
         """
         normalized = list(
             dict.fromkeys(
-                _trim(thread_id, 512)
+                _trim(resolve_thread_id(thread_id), 512)
                 for thread_id in thread_ids
                 if thread_id
             )
@@ -293,7 +295,7 @@ class ConversationThreadRepository:
         async with session:
             result = await session.execute(
                 select(ConversationThread).where(
-                    ConversationThread.thread_id == thread_id
+                    ConversationThread.thread_id == resolve_thread_id(thread_id)
                 )
             )
             thread = result.scalar_one_or_none()

@@ -29,10 +29,12 @@ logger = logging.getLogger(__name__)
 
 
 def thread_root_id(thread_id: str | None) -> str | None:
+    from agent.shared.thread_ids import resolve_thread_id
+
     normalized = str(thread_id or "").strip()
     if not normalized:
         return None
-    return normalized.split(":sub:", 1)[0]
+    return resolve_thread_id(normalized).split(":sub:", 1)[0]
 
 
 def _normalize_status(value: Any) -> str:
@@ -366,6 +368,10 @@ async def list_sandboxes(
         alive_ids = set(thread_ids)
     for entry in sandboxes:
         root_id = thread_root_id(entry.get("thread_id"))
+        if entry.get("thread_id"):
+            from agent.shared.thread_ids import resolve_thread_id
+
+            entry["thread_id"] = resolve_thread_id(str(entry["thread_id"]))
         entry["thread_alive"] = bool(root_id) and root_id in alive_ids
     return {
         "backend": normalized,

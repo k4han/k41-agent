@@ -83,7 +83,11 @@ class TerminalSessionManager:
     def _is_thread_tree_scope(scope_id: str | None, thread_id: str) -> bool:
         if not scope_id:
             return False
-        return scope_id == thread_id or scope_id.startswith(f"{thread_id}:sub:")
+        from agent.shared.thread_ids import resolve_thread_id
+
+        resolved_scope = resolve_thread_id(str(scope_id))
+        resolved_thread = resolve_thread_id(str(thread_id))
+        return resolved_scope == resolved_thread or resolved_scope.startswith(f"{resolved_thread}:sub:")
 
     def create_session(
         self,

@@ -23,6 +23,7 @@ from agent.modules.tools.coding.names import PROCESS_TOOLS
 from agent.modules.tools.coding.paths import PathPermissions
 from agent.modules.tools.coding.processes import ProcessManager, resolve_shell
 from agent.modules.tools.coding.storage import OutputStore, atomic_json, digest
+from agent.shared.thread_ids import resolve_thread_id, thread_id_aliases_var
 
 MAX_REQUEST_BYTES = 64 * 1024 * 1024
 
@@ -67,6 +68,13 @@ class SandboxWorker:
         self.active_calls = {}
 
     async def dispatch(self, request):
+        token = thread_id_aliases_var.set(request.get("thread_aliases", {}))
+        try:
+            return await self._dispatch_with_identity(request)
+        finally:
+            thread_id_aliases_var.reset(token)
+
+    async def _dispatch_with_identity(self, request):
         request_id = request.get("request_id")
         if request["operation"] == "cancel_call":
             self.cancelled_calls.add(request_id)
@@ -88,9 +96,10 @@ class SandboxWorker:
     async def _dispatch(self, request):
         operation = request["operation"]
         if operation == "stop_thread":
-            thread_id = request["thread_id"]
+            thread_id = resolve_thread_id(request["thread_id"])
             jobs = [job for job in self.processes.jobs.values()
-                    if job.thread_id == thread_id or job.thread_id.startswith(f"{thread_id}:sub:")]
+                    if resolve_thread_id(job.thread_id) == thread_id
+                    or resolve_thread_id(job.thread_id).startswith(f"{thread_id}:sub:")]
             await asyncio.gather(*(self.processes.stop(job) for job in jobs))
             self.processes.stop_thread_now(thread_id)
             return {"stopped": len(jobs)}
@@ -98,7 +107,7 @@ class SandboxWorker:
             await self.processes.close()
             return {"closed": True}
         if operation == "clear_scratchpads":
-            self.storage.clear_scratchpads(request["thread_id"])
+            self.storage.clear_scratchpads(resolve_thread_id(request["thread_id"]))
             return {"cleared": True}
         name, values = request["name"], request["values"]
         context = InvocationContext(**request["context"])

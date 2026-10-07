@@ -230,7 +230,12 @@ async def cleanup_orphaned_temp_workspaces() -> dict[str, int]:
             from agent.modules.conversations import list_active_thread_ids
 
             alive_roots = await list_active_thread_ids(candidate_roots)
-            alive_orphan_names = {f"thread-{root_id}" for root_id in alive_roots}
+            from agent.shared.thread_ids import resolve_thread_id
+
+            alive_orphan_names = {
+                name for name in orphan_names
+                if resolve_thread_id(name[len("thread-"):]) in alive_roots
+            }
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "Failed to resolve alive thread ids for orphaned temp dirs: %s",

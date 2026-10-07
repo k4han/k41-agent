@@ -9,6 +9,7 @@ from langgraph.types import Command
 
 import agent.modules.conversations as conversations_module
 from agent.modules.agent_runtime import runner as runner_module
+from agent.modules.agent_runtime.session import SessionManager
 from agent.modules.tools.builtin.utility.ask_user import (
     ASK_USER_INTERRUPT_TYPE,
     ASK_USER_TOOL_NAME,
@@ -59,10 +60,11 @@ async def test_clear_agent_session_closes_shell_sessions_and_deletes_thread_tree
         channel_id="thread-1",
     )
 
+    thread_id = SessionManager.make_thread_id("api", "dashboard", "thread-1")
     assert calls == [
-        ("close_shell", "api_dashboard_thread-1"),
-        ("delete_workspace", "api_dashboard_thread-1"),
-        ("delete_tree", "api_dashboard_thread-1"),
+        ("close_shell", thread_id),
+        ("delete_workspace", thread_id),
+        ("delete_tree", thread_id),
     ]
 
 
@@ -203,7 +205,7 @@ async def test_record_conversation_thread_skips_generation_for_background_thread
         title="Run background task",
     )
 
-    assert calls["get"] == 0
+    assert calls["get"] == 1
     assert calls["schedule_title"] == 0
     assert calls["upsert"] == {
         "thread_id": "task_dashboard_123",

@@ -159,10 +159,13 @@ def make_config(
     if recursion_limit is None:
         from agent.shared.config.service import get_config_service
         recursion_limit = get_config_service().get_int("recursion_limit", 100)
+    from agent.shared.thread_ids import resolve_thread_id, storage_thread_id
+
+    thread_id = resolve_thread_id(thread_id)
     return {
         "configurable": {
             "thread_id": thread_id,
-            "approval_supported": thread_id.startswith("api_"),
+            "approval_supported": storage_thread_id(thread_id).startswith("api_"),
         },
         "recursion_limit": recursion_limit,
     }

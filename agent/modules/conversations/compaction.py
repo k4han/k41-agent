@@ -31,12 +31,13 @@ from agent.modules.conversations.service import (
 from agent.modules.providers import get_resolved_chat_model
 from agent.modules.usage import (
     attach_usage_context,
-    build_usage_context,
+    load_usage_context,
     with_usage_tracking,
 )
 from agent.modules.workflows import get_workflow_graph, make_run_config
 from agent.shared.config import get_config_service
 from agent.shared.infrastructure.parsing import extract_final_text_content
+from agent.shared.thread_ids import resolve_thread_id
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +160,7 @@ async def _generate_context_summary(
 
     config = attach_usage_context(
         {"configurable": {"thread_id": thread_id}},
-        build_usage_context(thread_id),
+        await load_usage_context(thread_id),
     )
     try:
         response = await asyncio.wait_for(
@@ -284,6 +285,7 @@ async def has_pending_interrupt(thread_id: str) -> bool:
     not get blocked by observability errors; callers should treat True as
     authoritative and False as best-effort.
     """
+    thread_id = resolve_thread_id(thread_id)
     try:
         graph = get_workflow_graph(_INJECTION_GRAPH_NAME)
         config = make_run_config(thread_id=thread_id)
@@ -319,6 +321,7 @@ async def compact_conversation_thread(
     recent messages without cutting in the middle of tool-call/result chains, then replaces
     earlier messages in the LangGraph checkpoint state.
     """
+    thread_id = resolve_thread_id(thread_id)
     if not thread_id:
         raise ValueError("thread_id is required.")
 
@@ -343,6 +346,7 @@ async def _compact_conversation_thread_locked(
     model_name: str | None = None,
 ) -> dict[str, Any]:
     """Inner compaction implementation, called with per-thread lock held."""
+    thread_id = resolve_thread_id(thread_id)
     target_keep = (
         keep_recent_messages
         if keep_recent_messages is not None and keep_recent_messages >= 2
@@ -474,12 +478,13 @@ async def _compact_conversation_thread_locked(
     try:
         from agent.modules.usage import UsageEventInput, get_usage_service
 
+        identity = await load_usage_context(thread_id)
         usage_event = UsageEventInput(
             thread_id=thread_id,
             root_thread_id=thread_id,
-            platform="dashboard",
-            user_id="",
-            channel_id="",
+            platform=identity.platform,
+            user_id=identity.user_id,
+            channel_id=identity.channel_id,
             agent_name="conversation-compactor",
             provider_name=provider_name or "",
             model_name=model_name or "",

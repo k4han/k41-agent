@@ -180,11 +180,14 @@ async def test_execute_scheduled_task_uses_scheduled_thread_for_usage(monkeypatc
         "daily summary",
     )
 
+    from agent.modules.agent_runtime.session import SessionManager
+
     run = captured["run"]
-    assert run["thread_id"].startswith("bg_telegram_6197833678_daily summary_")
-    assert "usage_context" not in run
+    assert len(run["thread_id"]) == 32
+    assert run["usage_context"]["platform"] == "bg"
+    assert run["usage_context"]["user_id"] == "6197833678"
     assert captured["state_config"] == {
-        "configurable": {"thread_id": "telegram_6197833678_6197833678"}
+        "configurable": {"thread_id": SessionManager.make_thread_id("telegram", "6197833678", "6197833678")}
     }
     assert captured["state_node"] == "llm"
     messages = captured["state_values"]["messages"]

@@ -4,6 +4,8 @@ import json
 import threading
 from typing import Any
 
+from agent.shared.thread_ids import resolve_thread_id
+
 from sqlalchemy import Engine, create_engine, select
 
 from agent.modules.workspaces.models import ThreadWorkspace
@@ -64,7 +66,7 @@ class ThreadWorkspaceRepository:
         workspace: WorkspaceRef | dict[str, Any] | str,
     ) -> dict[str, Any]:
         now = utcnow()
-        normalized_thread_id = _trim(thread_id, 512)
+        normalized_thread_id = _trim(resolve_thread_id(thread_id), 512)
         from agent.shared.config.service import get_config_service
 
         default_locator = str(
@@ -125,7 +127,7 @@ class ThreadWorkspaceRepository:
             return serialize_thread_workspace(record)
 
     async def get(self, thread_id: str) -> dict[str, Any] | None:
-        normalized_thread_id = _trim(thread_id, 512)
+        normalized_thread_id = _trim(resolve_thread_id(thread_id), 512)
         if not normalized_thread_id:
             return None
 
@@ -140,7 +142,7 @@ class ThreadWorkspaceRepository:
             return serialize_thread_workspace(record) if record else None
 
     async def delete(self, thread_id: str) -> bool:
-        normalized_thread_id = _trim(thread_id, 512)
+        normalized_thread_id = _trim(resolve_thread_id(thread_id), 512)
         if not normalized_thread_id:
             return False
 
@@ -166,7 +168,7 @@ class ThreadWorkspaceRepository:
         normalized_thread_ids = list(
             dict.fromkeys(
                 thread_id
-                for thread_id in (_trim(thread_id, 512) for thread_id in thread_ids)
+                for thread_id in (_trim(resolve_thread_id(thread_id), 512) for thread_id in thread_ids)
                 if thread_id
             )
         )
@@ -209,7 +211,7 @@ class ThreadWorkspaceRepository:
         metadata: dict[str, Any],
         expected_backend: str | None = None,
     ) -> WorkspaceRef | None:
-        normalized_thread_id = _trim(thread_id, 512)
+        normalized_thread_id = _trim(resolve_thread_id(thread_id), 512)
         if not normalized_thread_id:
             return None
 
@@ -303,7 +305,7 @@ def update_thread_workspace_metadata_sync(
     metadata: dict[str, Any],
     expected_backend: str | None = None,
 ) -> WorkspaceRef | None:
-    normalized_thread_id = _trim(thread_id, 512)
+    normalized_thread_id = _trim(resolve_thread_id(thread_id), 512)
     if not normalized_thread_id:
         return None
 

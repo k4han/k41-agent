@@ -108,6 +108,29 @@ async def test_remote_permissions_are_checked_before_mutation(remote_coding):
 
 
 @pytest.mark.asyncio
+async def test_migrated_remote_conversation_keeps_existing_outputs(remote_coding, isolated_container):
+    from agent.shared.thread_ids import canonical_thread_id, thread_id_aliases_var
+    from agent.modules.tools.coding.storage import output_relative_path
+
+    service, context, _, worker = remote_coding
+    old = "api_dashboard_saved"
+    new = canonical_thread_id(old)
+    legacy_context = replace(context, thread_id=old)
+    reference, path = worker.storage.create_output(legacy_context)
+    path.write_text("Saved output", encoding="utf-8")
+    isolated_container._conversation_thread_aliases = {old: new}
+    isolated_container._conversation_thread_storage_ids = {new: old}
+    migrated = replace(context, thread_id=new)
+    request = service.remote.request("prepare", "read", {"file_path": output_relative_path(legacy_context, reference)}, migrated)
+    assert request["context"]["thread_id"] == new
+    assert request["thread_aliases"] == {old: new}
+    result = await invoke(service, migrated, "read", file_path=output_relative_path(legacy_context, reference))
+    assert result.status == "success"
+    assert "Saved output" in result.content
+    assert thread_id_aliases_var.get() is None
+
+
+@pytest.mark.asyncio
 async def test_remote_skill_mutations_invalidate_discovery_only_after_commit(remote_coding):
     from agent.shared.infrastructure.revisions import SKILLS_REVISION, get_revision
     service, context, _, _ = remote_coding

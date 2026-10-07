@@ -203,6 +203,8 @@ class AppContainer:
     _provider_service: Any = field(default=None, repr=False)
     _decision_service: Any = field(default=None, repr=False)
     _persistence_ready: bool = field(default=False, repr=False)
+    _conversation_thread_aliases: dict[str, str] = field(default_factory=dict, repr=False)
+    _conversation_thread_storage_ids: dict[str, str] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
         self._lazy_lock = threading.RLock()
@@ -623,6 +625,12 @@ class AppContainer:
             migrate_google_calendar_tables(database_url)
             await prune_usage_events()
             await self.initialize_checkpointer()
+            from agent.modules.conversations import migrate_conversation_ids
+
+            self._conversation_thread_aliases = migrate_conversation_ids(database_url)
+            self._conversation_thread_storage_ids = {
+                new: old for old, new in self._conversation_thread_aliases.items()
+            }
             from agent.modules.tools import get_coding_service
             get_coding_service(self)
         finally:

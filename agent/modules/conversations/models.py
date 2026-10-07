@@ -30,4 +30,11 @@ class ConversationThread(BaseModel):
     )
 
 
-__all__ = ["ConversationThread"]
+class ConversationThreadAlias(BaseModel):
+    __tablename__ = "conversation_thread_aliases"
+
+    legacy_id = Column(String(512), nullable=False, unique=True)
+    canonical_id = Column(String(512), nullable=False, unique=True)
+
+
+__all__ = ["ConversationThread", "ConversationThreadAlias"]

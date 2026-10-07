@@ -14,17 +14,18 @@ from pathlib import Path
 from typing import Any
 
 from agent.modules.tools.coding.contracts import CodingError, InvocationContext, RuntimeResult as ToolResult
+from agent.shared.thread_ids import resolve_thread_id, storage_thread_id
 from agent.modules.tools.runtime.output_policy import (
     MAX_CAPTURE_BYTES, MAX_MODEL_BYTES, MAX_MODEL_LINES, MAX_STORED_BYTES, RETENTION_SECONDS, bounded_text,
 )
 
 
 def conversation_key(thread_id: str) -> str:
-    return digest(thread_id.split(":sub:", 1)[0])[:24]
+    return digest(storage_thread_id(thread_id).split(":sub:", 1)[0])[:24]
 
 
 def output_relative_path(context: InvocationContext, reference: str) -> str:
-    return f".k41-agent/outputs/{digest(context.thread_id)[:24]}/{reference}.txt"
+    return f".k41-agent/outputs/{digest(storage_thread_id(context.thread_id))[:24]}/{reference}.txt"
 
 
 def ensure_workspace_exclude(workspace: Path) -> None:
@@ -158,6 +159,7 @@ class OutputStore:
         return path
 
     def clear_thread_grants(self, thread_id: str) -> None:
+        thread_id = resolve_thread_id(thread_id)
         for directory in self.root.iterdir():
             owner = directory / "owner.json"
             if directory.is_symlink() or not owner.is_file():
@@ -166,7 +168,7 @@ class OutputStore:
                 record = json.loads(owner.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 continue
-            owner_thread = record.get("thread_id", "")
+            owner_thread = resolve_thread_id(record.get("thread_id", ""))
             if owner_thread == thread_id or owner_thread.startswith(f"{thread_id}:sub:"):
                 for grant in directory.glob("*.grant"):
                     grant.unlink(missing_ok=True)

@@ -28,7 +28,7 @@ from agent.modules.agent_runtime.repository import (
     BackgroundTaskRepository,
     get_background_task_repository,
 )
-from agent.modules.agent_runtime.session import SessionManager
+from agent.shared.thread_ids import SessionManager
 from agent.modules.agent_runtime.chat_stream_manager import (
     ChatStreamManager,
     ChatStreamSession,

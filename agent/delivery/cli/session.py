@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import secrets
+import re
 from dataclasses import dataclass, field
 
 from agent.modules.agent_runtime import SessionManager
@@ -24,6 +25,8 @@ class CLISession:
 
     @property
     def thread_id(self) -> str:
+        if re.fullmatch(r"[a-f0-9]{32}", self.channel_id):
+            return self.channel_id
         return SessionManager.make_thread_id(
             CLI_PLATFORM,
             CLI_USER_ID,

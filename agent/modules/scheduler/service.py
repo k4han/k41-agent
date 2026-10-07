@@ -32,23 +32,39 @@ logger = logging.getLogger(__name__)
 async def execute_scheduled_task(platform: str, user_id: str, task: str):
     """Execute a scheduled task: run the agent, inject results into user thread, and notify."""
     job_id = str(uuid.uuid4())
-    background_thread_id = f"{BACKGROUND_THREAD_PREFIX}_{platform}_{user_id}_{task[:TASK_DESCRIPTION_MAX_LEN]}_{job_id}"
+    background_thread_id = SessionManager.make_thread_id(BACKGROUND_THREAD_PREFIX, user_id, job_id)
     user_thread_id = SessionManager.make_thread_id(platform, user_id, user_id)
 
     logger.info(f"Executing scheduled task for {user_thread_id}: {task}")
 
     try:
+        from agent.modules.conversations import (
+            THREAD_KIND_SCHEDULED, inject_agent_message_pair, upsert_conversation_thread,
+        )
+
+        await upsert_conversation_thread(
+            thread_id=background_thread_id,
+            agent_name=AGENT_NAME,
+            kind=THREAD_KIND_SCHEDULED,
+            platform=BACKGROUND_THREAD_PREFIX,
+            user_id=user_id,
+            channel_id=job_id,
+            title=task,
+        )
         response_text = await run_agent_full(
             user_input=task,
             thread_id=background_thread_id,
             agent_name=AGENT_NAME,
+            usage_context={"platform": BACKGROUND_THREAD_PREFIX, "user_id": user_id, "channel_id": job_id},
         )
-        from agent.modules.conversations import inject_agent_message_pair, upsert_conversation_thread
 
         await upsert_conversation_thread(
             thread_id=user_thread_id,
             agent_name=AGENT_NAME,
             title=task,
+            platform=platform,
+            user_id=user_id,
+            channel_id=user_id,
         )
 
         await inject_agent_message_pair(

@@ -2,7 +2,7 @@ from typing import Annotated, Literal, Optional
 
 from pydantic import BaseModel, Field, StringConstraints
 
-from agent.modules.providers.profiles import EFFORT_PATTERN
+from agent.modules.providers import EFFORT_PATTERN
 
 from agent.modules.tools import HumanResumePayload, PlanResumePayload
 from agent.modules.workspaces import WorkspaceBinding, WorkspaceRef
