@@ -512,7 +512,18 @@ async def test_process_tree_cleanup_including_exited_parent(coding, orphan):
             await service.processes.stop(job)
         await asyncio.wait_for(job.finished.wait(), 10)
         assert time.monotonic() - started < 10
-        assert not psutil.pid_exists(pid) or psutil.Process(pid).status() == psutil.STATUS_ZOMBIE
+        def is_dead(proc_pid: int) -> bool:
+            try:
+                proc = psutil.Process(proc_pid)
+                return not proc.is_running() or proc.status() == psutil.STATUS_ZOMBIE
+            except (psutil.NoSuchProcess, psutil.ZombieProcess):
+                return True
+
+        for _ in range(50):
+            if is_dead(pid):
+                break
+            await asyncio.sleep(0.05)
+        assert is_dead(pid)
     finally:
         await service.processes.stop(job)
 

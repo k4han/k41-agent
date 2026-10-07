@@ -224,9 +224,10 @@ class LLMUsageRepository:
             user_rows = (
                 await session.execute(
                     select(
-                        distinct(LLMUsageEvent.platform),
+                        LLMUsageEvent.platform,
                         LLMUsageEvent.user_id,
                     )
+                    .distinct()
                     .where(*clauses, LLMUsageEvent.user_id != "")
                     .order_by(LLMUsageEvent.platform.asc(), LLMUsageEvent.user_id.asc())
                 )
@@ -234,10 +235,11 @@ class LLMUsageRepository:
             channel_rows = (
                 await session.execute(
                     select(
-                        distinct(LLMUsageEvent.platform),
+                        LLMUsageEvent.platform,
                         LLMUsageEvent.user_id,
                         LLMUsageEvent.channel_id,
                     )
+                    .distinct()
                     .where(*clauses, LLMUsageEvent.channel_id != "")
                     .order_by(
                         LLMUsageEvent.platform.asc(),
@@ -666,7 +668,8 @@ def _where_clauses(query: UsageQuery) -> list[Any]:
 
 async def _distinct_strings(session: Any, column: Any, clauses: list[Any]) -> list[str]:
     result = await session.execute(
-        select(distinct(column))
+        select(column)
+        .distinct()
         .where(*clauses, column != "")
         .order_by(column.asc())
     )
