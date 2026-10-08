@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from agent.modules.agents.models import AgentConfig
-from agent.modules.agents.parser import parse_agent_file
+from agent.modules.agents.models import AgentCard, AgentConfig
+from agent.modules.agents.parser import AgentMarkdownError, parse_agent_file, parse_agent_markdown_content, serialize_agent_config
 from agent.modules.agents.repository import FilesystemAgentRepository
 from agent.modules.agents.service import AgentCatalogService
 
@@ -35,6 +35,95 @@ def _config(
         max_context_tokens=1000,
         system_prompt="You are a sample agent.",
     )
+
+
+@pytest.mark.parametrize("model", [
+    "claude-opus-5-5",
+    {"id": "claude-opus-5-5"},
+    {"id": "claude-opus-5-5", "effort": "low"},
+])
+def test_agent_model_settings_round_trip(model) -> None:
+    import yaml
+
+    content = "---\n" + yaml.safe_dump({"name": "sample", "provider": "default", "model": model}) + "---\nPrompt\n"
+    config = parse_agent_markdown_content(content)
+    assert config.model == "claude-opus-5-5"
+    assert config.reasoning_effort == (model.get("effort") if isinstance(model, dict) else None)
+    card = AgentCard.from_config(config, source="user", path="sample.md", editable=True)
+    assert card.to_agent_config() == config
+    serialized = serialize_agent_config(card.to_agent_config())
+    assert parse_agent_markdown_content(serialized) == config
+    saved_model = yaml.safe_load(serialized.split("---")[1])["model"]
+    assert saved_model == (model if config.reasoning_effort else "claude-opus-5-5")
+
+
+@pytest.mark.parametrize("model", [
+    {"effort": "low"},
+    {"id": 123, "effort": "low"},
+    {"id": "claude-opus-5-5", "effort": "High"},
+    {"id": "claude-opus-5-5", "effort": ""},
+    {"id": "claude-opus-5-5", "effort": 123},
+    {"id": "claude-opus-5-5", "efort": "low"},
+])
+def test_agent_model_settings_reject_invalid_values(model) -> None:
+    import yaml
+
+    content = "---\n" + yaml.safe_dump({"name": "sample", "provider": "default", "model": model}) + "---\nPrompt\n"
+    with pytest.raises(AgentMarkdownError):
+        parse_agent_markdown_content(content)
+
+
+def test_agent_card_crud_preserves_model_effort(tmp_path: Path) -> None:
+    service, _ = _make_service(tmp_path / "agents")
+    config = _config("sample")
+    config.model = "claude-opus-5-5"
+    config.reasoning_effort = "low"
+    created = service.create_agent_card(config)
+    assert created.reasoning_effort == "low"
+    service.reload_agents()
+    assert service.get_agent("sample").reasoning_effort == "low"
+    updated = created.to_agent_config()
+    updated.reasoning_effort = "high"
+    card = service.update_agent_card("sample", updated)
+    assert parse_agent_file(card.path).reasoning_effort == "high"
+    updated.reasoning_effort = None
+    card = service.update_agent_card("sample", updated)
+    assert parse_agent_file(card.path).reasoning_effort is None
+
+
+@pytest.mark.parametrize("nested, flat", [("low", "high"), ("low", None), (None, "low")])
+def test_agent_model_rejects_conflicting_effort(nested, flat):
+    import yaml
+    from pydantic import ValidationError
+    from agent.delivery.http.dashboard.routes.agents import AgentCardBody
+
+    data = {
+        "name": "sample", "graph_type": "react_agent", "provider": "default",
+        "model": {"id": "claude-opus-5-5", "effort": nested}, "reasoning_effort": flat,
+    }
+    for cls in (AgentConfig, AgentCardBody):
+        with pytest.raises(ValidationError, match="Conflicting"):
+            cls.model_validate(data)
+    with pytest.raises(ValidationError, match="Conflicting"):
+        AgentCard.model_validate({**data, "source": "user", "path": "sample.md"})
+    content = "---\n" + yaml.safe_dump(data) + "---\nPrompt\n"
+    with pytest.raises(AgentMarkdownError, match="Conflicting"):
+        parse_agent_markdown_content(content)
+
+
+@pytest.mark.parametrize("effort", ["low", None])
+def test_agent_model_accepts_matching_effort(effort):
+    import yaml
+    from agent.delivery.http.dashboard.routes.agents import AgentCardBody
+
+    data = {
+        "name": "sample", "graph_type": "react_agent", "provider": "default",
+        "model": {"id": "claude-opus-5-5", "effort": effort}, "reasoning_effort": effort,
+    }
+    assert AgentConfig.model_validate(data).reasoning_effort == effort
+    assert AgentCardBody.model_validate(data).reasoning_effort == effort
+    content = "---\n" + yaml.safe_dump(data) + "---\nPrompt\n"
+    assert parse_agent_markdown_content(content).reasoning_effort == effort
 
 
 def test_agent_cards_include_source_metadata_and_user_override(tmp_path: Path) -> None:

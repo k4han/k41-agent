@@ -2,8 +2,9 @@
 
 The chat dashboard reads supported effort levels and documented defaults from
 the installed LangChain partner packages. Selecting a different model resets
-effort to that model's default. If its default is unknown, Auto leaves the
-choice to the provider. Auto can also be selected manually.
+effort to that model's default, or the agent card's effort for its configured
+model. Selecting Auto bypasses the agent card default and uses the model's
+default. If its default is unknown, Auto leaves the choice to the provider.
 If model resolution uses the configured fallback, the fallback model's default
 replaces the requested model's effort override. Invalid effort overrides for
 the directly requested model are still rejected.
@@ -14,6 +15,36 @@ empty array means configurable effort is unavailable. The dashboard disables
 the control in either case. Reasoning support alone does not establish which
 effort levels are accepted. Gemini 2.5 uses a token budget instead of effort
 levels and is not offered a categorical effort selector.
+
+## Agent card defaults
+
+Agent Markdown frontmatter accepts a model ID string or structured model settings:
+
+```yaml
+provider: anthropic
+model:
+  id: claude-opus-5-5
+  effort: low
+```
+
+The parser keeps the model ID in `model` and exposes the optional effort as
+`reasoning_effort` in agent configuration and dashboard responses. Saving a card
+with an effort writes the structured YAML form; existing string model settings
+remain supported. The agent editor preserves and can edit this default.
+If both `model.effort` and the flat `reasoning_effort` field are supplied, their
+values must match; conflicting values are rejected.
+
+An explicit per-run `reasoning_effort` takes precedence over the card default.
+The value `auto` explicitly selects the model default; omitting the field
+inherits the applicable agent card default. `auto` is not sent to the provider
+as an effort level.
+The card default applies only to its configured model and provider. Choosing a
+different model or resolving a fallback uses that model's default instead.
+Empty or `default` providers and empty, `default`, or legacy `provider default`
+models are resolved to their configured identities before matching the card.
+The chat effort selector starts with the selected agent's default when available.
+Effort validation and missing metadata follow the same provider rules described
+below.
 
 ## Supplementing missing metadata
 

@@ -22,6 +22,7 @@ const profiles = {
   'no-default': { reasoning_effort_levels: ['minimal', 'low', 'high'], reasoning_effort_default: null },
   'unknown-model': { reasoning_effort_levels: null, reasoning_effort_default: null },
   'fixed-model': { reasoning_effort_levels: [], reasoning_effort_default: null },
+  'claude-opus-5-5': { reasoning_effort_levels: ['low', 'medium', 'high', 'xhigh', 'max'], reasoning_effort_default: 'medium' },
 };
 const fieldLabels = { type: 'Provider Type', api_key: 'API Key', default_model: 'Default Model', model_profiles: 'Model Reasoning Profiles (JSON)' };
 const settingsPayload = () => ({ settings: {}, by_category: {}, settings_sources: {},
@@ -37,12 +38,43 @@ const fixtures = {
   '/dashboard-api/sessions': { sessions: [] },
   '/dashboard-api/chat-history': { threads: [], has_more: false },
   '/dashboard-api/workspace/default': { workspace: null },
+  '/dashboard-api/agents/workflows': { workflows: ['react_agent'] },
+  '/dashboard-api/agents/tools': { tools: [], tool_groups: [] },
+  '/dashboard-api/agents/mcp': { mcp_server_options: [], mcp_installs: {} },
+  '/dashboard-api/prompt-variables': { variables: [] },
 };
+const effortAgent = {
+  name: 'effort-agent', display_name: 'Effort Agent', description: '', graph_type: 'react_agent',
+  provider: 'test', model: 'claude-opus-5-5', reasoning_effort: 'low',
+  tools: [], mcp_servers: [], sub_agents: null, plan_approval_targets: [],
+  context_trim_threshold: 50000, system_prompt: '', hidden: false,
+  source: 'user', path: 'effort-agent.md', editable: true, valid: true,
+};
+fixtures['/dashboard-api/agents/cards'].cards.push(effortAgent);
+fixtures['/dashboard-api/agents/cards'].cards.push({
+  ...effortAgent, name: 'legacy-agent', display_name: 'Legacy Agent', provider: '', model: 'provider default',
+});
+let savedAgent;
+let sentChat;
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
-  if (url.pathname.startsWith('/dashboard-api') || url.pathname === '/settings') {
+  if (url.pathname === '/api/chat/events' && req.method === 'POST') {
+    let body = '';
+    for await (const chunk of req) body += chunk;
+    sentChat = JSON.parse(body);
+    res.setHeader('Content-Type', 'application/x-ndjson');
+    res.end(); return;
+  }
+  if (url.pathname.startsWith('/dashboard-api') || url.pathname === '/settings' || url.pathname === '/agents/cards/effort-agent') {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('X-CSRF-Token', 'test-csrf');
+    if (url.pathname === '/agents/cards/effort-agent' && req.method === 'PUT') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      savedAgent = JSON.parse(body);
+      Object.assign(effortAgent, savedAgent);
+      res.end(JSON.stringify({ status: 'updated', card: effortAgent })); return;
+    }
     if (url.pathname === '/settings' && req.method === 'PUT') {
       let body = '';
       for await (const chunk of req) body += chunk;
@@ -171,8 +203,44 @@ try {
     assert.equal(await js('document.documentElement.scrollWidth <= innerWidth'), true);
     assert.equal(await js(`document.querySelector('${select}').getBoundingClientRect().width >= 76`), true);
   }
+  await js('document.querySelector(".agent-model-badge").click()');
+  await until(() => js('!!document.querySelector(".agent-card-item")'), 'agent menu');
+  await js('Array.from(document.querySelectorAll(".agent-card-item")).find(item => item.querySelector(".agent-card-item-name").textContent.trim() === "Legacy Agent").click()');
+  assert.equal(await js(`document.querySelector('${select}').value`), 'low');
+  await js('document.querySelector(".agent-model-popover-close").click()');
+  await js(`(() => { const el = document.querySelector('${select}'); el.value = ''; el.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  await js('(() => { const input = document.querySelector(".chat-prompt-input"); input.value = "Test automatic effort"; input.dispatchEvent(new Event("input", { bubbles: true })); })()');
+  await js(`document.querySelector('button[aria-label="Send message"]').click()`);
+  await until(() => sentChat !== undefined, 'explicit Auto chat request');
+  assert.equal(sentChat.reasoning_effort, 'auto');
+  assert.equal(sentChat.agent_name, 'legacy-agent');
+  await until(() => js(`!!document.querySelector('button[aria-label="Send message"]')`), 'mock chat completed');
+  await selectModel('custom-model');
+  assert.equal(await js(`document.querySelector('${select}').value`), 'max');
+  await navigate('/settings/agents/effort-agent');
+  const agentEffort = 'button[aria-label="Agent reasoning effort"]';
+  await until(() => js(`!!document.querySelector('${agentEffort}')`), 'agent card effort editor');
+  assert.equal(await js(`document.querySelector('${agentEffort}').disabled`), false);
+  assert.equal(await js(`document.querySelector('${agentEffort}').textContent.trim()`), 'low');
+  await js(`document.querySelector('${agentEffort}').click()`);
+  const effortMenu = '[role="listbox"][aria-label="Agent reasoning effort"]';
+  assert.deepEqual(await js(`Array.from(document.querySelectorAll('${effortMenu} [role="option"]')).map(option => option.textContent.trim())`),
+    ['Auto (medium)', 'low', 'medium', 'high', 'xhigh', 'max']);
+  await js(`Array.from(document.querySelectorAll('${effortMenu} [role="option"]')).find(option => option.textContent.trim() === 'high').click()`);
+  assert.equal(await js(`document.querySelector('${agentEffort}').textContent.trim()`), 'high');
+  const agentSave = `Array.from(document.querySelectorAll('button')).find(button => button.textContent.trim() === 'Save')`;
+  await js(`${agentSave}.click()`);
+  await until(() => savedAgent?.reasoning_effort === 'high', 'agent effort saved');
+  await until(() => js('location.pathname === "/settings/agents"'), 'saved agent navigation');
+  await navigate('/settings/agents/effort-agent');
+  await until(() => js(`!!document.querySelector('${agentEffort}')`), 'agent effort reopened');
+  assert.equal(await js(`document.querySelector('${agentEffort}').textContent.trim()`), 'high');
+  await js(`document.querySelector('${agentEffort}').click()`);
+  await js(`document.querySelector('${effortMenu} [role="option"]').click()`);
+  await js(`${agentSave}.click()`);
+  await until(() => savedAgent?.reasoning_effort === null, 'agent effort reset to Auto');
   assert.deepEqual(exceptions, []);
-  console.log('PASS: saved model profiles, clean reload, model-specific levels and defaults, Auto, missing metadata, mobile widths.');
+  console.log('PASS: model profiles, chat effort, explicit Auto request, mobile widths, agent card effort choices, save, reload, and Auto reset.');
 } finally {
   await Promise.race([call?.('Browser.close').catch(() => {}), delay(2000)]);
   ws?.close(); browser.kill();

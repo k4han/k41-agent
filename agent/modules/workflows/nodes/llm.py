@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING
 from langchain_core.messages import BaseMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 
-from agent.modules.providers import get_reasoning_effort_kwargs, get_resolved_chat_model
+from agent.modules.providers import get_resolved_chat_model
+from agent.modules.workflows.model_effort import get_workflow_reasoning_effort_kwargs
 from agent.modules.usage import with_usage_tracking
 from agent.modules.prompt_variables import get_runtime_prompt_variable_values
 from agent.modules.workflows.message_history import normalize_messages_for_chat_model
@@ -102,12 +103,7 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
     messages: list[BaseMessage] = normalize_messages_for_chat_model([SystemMessage(content=system_prompt), *history])
 
     resolved = get_resolved_chat_model(provider_name=provider, model=model)
-    # Effort overrides belong to the requested model, not the configured fallback.
-    reasoning_effort = None if getattr(resolved, "used_fallback", False) else ctx.reasoning_effort
-    model_kwargs = get_reasoning_effort_kwargs(
-        resolved.provider_type, resolved.model_name, reasoning_effort,
-        profile=getattr(resolved, "profile", None),
-    )
+    model_kwargs = get_workflow_reasoning_effort_kwargs(ctx, agent_config, resolved)
     llm = resolved.model.bind_tools(tools, **model_kwargs)
     response = await llm.ainvoke(
         messages,

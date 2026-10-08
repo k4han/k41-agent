@@ -9,6 +9,7 @@ from langchain_core.language_models import BaseChatModel
 from agent.modules.providers.service import ProviderService
 from agent.modules.providers.models import ModelConfig, ResolvedChatModel
 from agent.modules.providers.profiles import get_model_profile
+from agent.modules.providers.provider import ProviderConfig
 from agent.shared.config import get_config_service
 
 
@@ -62,6 +63,33 @@ def resolve_chat_model(
     ).model
 
 
+def resolve_chat_model_selection(
+    provider_service: ProviderService,
+    *,
+    provider_name: str | None = None,
+    model: str | None = None,
+) -> tuple[ProviderConfig, str]:
+    """Resolve configured provider/model defaults without constructing a client or falling back."""
+    default_provider_name, default_model_name = get_default_llm_settings()
+
+    target_provider = (provider_name or "").strip()
+    uses_default_provider = not target_provider or target_provider.lower() == "default"
+    if uses_default_provider:
+        target_provider = default_provider_name
+
+    if target_provider:
+        provider_config = provider_service.get_provider(target_provider)
+    else:
+        provider_config = provider_service.get_default_provider()
+
+    target_model = (model or "").strip()
+    if target_model.lower() in {"", "default", "provider default"}:
+        target_model = default_model_name if uses_default_provider else provider_config.default_model
+
+    resolved_model = (target_model or provider_config.default_model).strip()
+    return provider_config, resolved_model
+
+
 def _resolve_chat_model_info_impl(
     provider_service: ProviderService,
     *,
@@ -71,24 +99,9 @@ def _resolve_chat_model_info_impl(
     api_key: str | None = None,
 ) -> ResolvedChatModel:
     config = get_config_service()
-
-    default_provider_name, default_model_name = get_default_llm_settings()
-
-    target_provider = provider_name
-    if not target_provider or target_provider.strip().lower() == "default":
-        target_provider = default_provider_name
-
-    if target_provider:
-        provider_config = provider_service.get_provider(target_provider)
-    else:
-        provider_config = provider_service.get_default_provider()
-
-    target_model = model
-    if not target_model or target_model.strip().lower() == "default":
-        uses_default_provider = not provider_name or provider_name.strip().lower() == "default"
-        target_model = default_model_name if uses_default_provider else provider_config.default_model
-
-    resolved_model = (target_model or provider_config.default_model).strip()
+    provider_config, resolved_model = resolve_chat_model_selection(
+        provider_service, provider_name=provider_name, model=model,
+    )
     provider_temperature_key = f"llm.providers.{provider_config.name}.temperature"
     configured_temperature = config.get(provider_temperature_key)
     resolved_temperature = _parse_temperature(

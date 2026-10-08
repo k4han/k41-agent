@@ -19,6 +19,7 @@ from agent.modules.providers.resolve_chat_model import (
     get_default_llm_settings,
     resolve_chat_model,
     resolve_chat_model_info,
+    resolve_chat_model_selection,
 )
 
 
@@ -78,6 +79,14 @@ def get_resolved_chat_model(
     )
 
 
+def get_chat_model_selection(*, provider_name: str | None = None, model: str | None = None) -> tuple[str, str]:
+    """Return the configured provider/model identity without API clients or fallback."""
+    provider, model_name = resolve_chat_model_selection(
+        _get_provider_service(), provider_name=provider_name, model=model,
+    )
+    return provider.name, model_name
+
+
 def list_providers() -> list[ProviderConfig]:
     service = _get_provider_service()
     return service.list_providers()
@@ -132,6 +141,7 @@ __all__ = [
     "ProviderVerificationResult",
     "ResolvedChatModel",
     "get_chat_model",
+    "get_chat_model_selection",
     "get_default_llm_settings",
     "get_resolved_chat_model",
     "list_provider_model_catalog",

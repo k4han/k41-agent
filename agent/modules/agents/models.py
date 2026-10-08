@@ -6,6 +6,24 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from agent.modules.providers.profiles import EFFORT_PATTERN
+
+
+def normalize_agent_model(data: Any) -> Any:
+    """Accept structured model settings while retaining the flat runtime fields."""
+    if isinstance(data, dict) and isinstance(data.get("model"), dict):
+        model = data["model"]
+        if "id" not in model or not isinstance(model["id"], str):
+            raise ValueError("Structured model settings require a string 'id'.")
+        if set(model) - {"id", "effort"}:
+            raise ValueError("Structured model settings only support 'id' and 'effort'.")
+        if "effort" in model and "reasoning_effort" in data and model["effort"] != data["reasoning_effort"]:
+            raise ValueError("Conflicting 'model.effort' and 'reasoning_effort' values.")
+        data = {**data, "model": model["id"].strip()}
+        if "effort" in model:
+            data["reasoning_effort"] = model["effort"]
+    return data
+
 
 def _normalize_max_context_tokens(data: Any) -> Any:
     """Mirror ``max_context_tokens`` into ``context_trim_threshold`` for legacy inputs."""
@@ -25,6 +43,7 @@ class AgentConfig(BaseModel):
     graph_type: str  # Registered workflow name
     provider: str
     model: str = ""
+    reasoning_effort: str | None = Field(default=None, pattern=EFFORT_PATTERN)
     tools: list[str] = Field(default_factory=list)
     tool_permissions: list[dict[str, Any]] | None = None
     tool_configs: dict[str, dict[str, Any]] = Field(default_factory=dict)
@@ -53,7 +72,7 @@ class AgentConfig(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _normalize(cls, data: Any) -> Any:
-        data = _normalize_max_context_tokens(data)
+        data = normalize_agent_model(_normalize_max_context_tokens(data))
         if isinstance(data, dict) and data.get("tools"):
             from agent.modules.tools import canonical_tool_names
             data = {**data, "tools": canonical_tool_names(data["tools"])}
@@ -75,6 +94,7 @@ class AgentCard(BaseModel):
     graph_type: str = ""
     provider: str = ""
     model: str = ""
+    reasoning_effort: str | None = Field(default=None, pattern=EFFORT_PATTERN)
     tools: list[str] = Field(default_factory=list)
     tool_permissions: list[dict[str, Any]] | None = None
     tool_configs: dict[str, dict[str, Any]] = Field(default_factory=dict)
@@ -96,7 +116,7 @@ class AgentCard(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _normalize(cls, data: Any) -> Any:
-        data = _normalize_max_context_tokens(data)
+        data = normalize_agent_model(_normalize_max_context_tokens(data))
         if isinstance(data, dict) and data.get("tools"):
             from agent.modules.tools import canonical_tool_names
             data = {**data, "tools": canonical_tool_names(data["tools"])}
@@ -125,6 +145,7 @@ class AgentCard(BaseModel):
             graph_type=config.graph_type,
             provider=config.provider,
             model=config.model,
+            reasoning_effort=config.reasoning_effort,
             tools=list(config.tools),
             tool_permissions=config.tool_permissions,
             tool_configs={
@@ -177,6 +198,7 @@ class AgentCard(BaseModel):
             graph_type=self.graph_type,
             provider=self.provider,
             model=self.model,
+            reasoning_effort=self.reasoning_effort,
             tools=list(self.tools),
             tool_permissions=self.tool_permissions,
             tool_configs={

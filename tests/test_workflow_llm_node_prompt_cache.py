@@ -130,6 +130,26 @@ async def test_effort_changes_apply_per_turn_without_leaking_to_other_models(cac
 
 
 @pytest.mark.asyncio
+async def test_llm_node_sends_agent_card_effort(cached_llm_node, monkeypatch):
+    from agent.modules.agents.models import AgentConfig
+
+    agent = AgentConfig(
+        name="cache-agent", graph_type="react_agent", provider="default",
+        model={"id": "gpt-5", "effort": "low"},
+    )
+    monkeypatch.setattr("agent.modules.agents.get_catalog_service", lambda: SimpleNamespace(get_agent=lambda name: agent))
+    monkeypatch.setattr("agent.modules.workflows.model_effort.get_chat_model_selection", lambda **kwargs: ("default", "gpt-5"))
+    await cached_llm_node.run()
+    assert cached_llm_node.captured["model_kwargs"] == {"reasoning_effort": "low"}
+    await cached_llm_node.run(reasoning_effort="high")
+    assert cached_llm_node.captured["model_kwargs"] == {"reasoning_effort": "high"}
+    await cached_llm_node.run(reasoning_effort="auto")
+    assert cached_llm_node.captured["model_kwargs"] == {}
+    await cached_llm_node.run(model="gpt-4.1")
+    assert cached_llm_node.captured["model_kwargs"] == {}
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("api_key,effort,expected", [
     ("", "medium", "high"),
     ("test-key", "medium", "medium"),

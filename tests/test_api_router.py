@@ -20,7 +20,7 @@ from agent.modules.tools.builtin.utility.plan_mode import PlanModeResumePayload
 router_module = importlib.import_module("agent.delivery.http.api.router")
 
 
-@pytest.mark.parametrize("effort", ["none", "minimal", "low", "medium", "high", "xhigh", "max", "custom_level"])
+@pytest.mark.parametrize("effort", ["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max", "custom_level"])
 def test_chat_request_passes_reasoning_effort_to_run_params(effort):
     request = ChatRequest(message="hi", reasoning_effort=effort)
     params = router_module._request_to_run_params(request)

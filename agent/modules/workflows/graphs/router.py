@@ -40,6 +40,7 @@ from agent.modules.workflows.constants import (
     STRIP_QUOTES,
 )
 from agent.modules.providers import get_resolved_chat_model
+from agent.modules.workflows.model_effort import get_workflow_reasoning_effort_kwargs
 from agent.modules.usage import with_usage_tracking
 from agent.modules.prompt_variables import get_runtime_prompt_variable_values
 from agent.modules.workflows.prompt_builders import (
@@ -178,9 +179,15 @@ async def _route_agent_name(
     model: str | None = None,
     prompt_variables: dict[str, str] | None = None,
     config: RunnableConfig | None = None,
+    context: WorkflowContext | None = None,
+    agent_config: AgentConfig | None = None,
 ) -> str:
     resolved = get_resolved_chat_model(provider_name=provider, model=model)
     llm = resolved.model
+    model_kwargs = (
+        get_workflow_reasoning_effort_kwargs(context, agent_config, resolved)
+        if agent_config is not None else {}
+    )
     router_system = _build_router_system(
         user_input=user_input,
         candidates=candidates,
@@ -205,11 +212,12 @@ async def _route_agent_name(
         decision = await llm.with_structured_output(_RouteDecision).ainvoke(
             messages,
             config=usage_config,
+            **model_kwargs,
         )
         return _normalize_agent_name(decision.selected_agent)
     except Exception as exc:
         logger.warning("Structured output failed, falling back to text parsing: %s", exc)
-        response = await llm.ainvoke(messages, config=usage_config)
+        response = await llm.ainvoke(messages, config=usage_config, **model_kwargs)
         content = getattr(response, "content", "")
         return _normalize_agent_name(content if content else "")
 
@@ -408,6 +416,8 @@ async def _route_agent_decision(
     mode: str = "cascade",
     confidence_threshold: float = 0.75,
     decision_client: DecisionClient | None = None,
+    context: WorkflowContext | None = None,
+    agent_config: AgentConfig | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Dispatch routing decision according to configured mode (llm_only, clef_only, shadow, cascade)."""
     normalized_mode = str(mode).strip().lower() if isinstance(mode, str) else "cascade"
@@ -428,6 +438,8 @@ async def _route_agent_decision(
             model=model,
             prompt_variables=prompt_variables,
             config=config,
+            context=context,
+            agent_config=agent_config,
         )
         latency = (time.perf_counter() - t0) * 1000.0
         telemetry = {
@@ -544,6 +556,8 @@ async def _route_agent_decision(
                     model=model,
                     prompt_variables=prompt_variables,
                     config=config,
+                    context=context,
+                    agent_config=agent_config,
                 )
                 return res, (time.perf_counter() - t) * 1000.0, None
             except Exception as e:
@@ -662,6 +676,8 @@ async def _route_agent_decision(
         model=model,
         prompt_variables=prompt_variables,
         config=config,
+        context=context,
+        agent_config=agent_config,
     )
     llm_latency = (time.perf_counter() - t_llm) * 1000.0
 
@@ -776,6 +792,8 @@ async def llm_call_router(
             model=model,
             prompt_variables=prompt_variables,
             config=config,
+            context=ctx,
+            agent_config=caller_agent,
             mode=mode,
             confidence_threshold=threshold,
         )

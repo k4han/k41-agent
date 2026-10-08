@@ -121,7 +121,10 @@ def serialize_agent_config(config: AgentConfig) -> str:
         "description": config.description,
         "graph_type": config.graph_type,
         "provider": config.provider,
-        "model": config.model,
+        "model": (
+            {"id": config.model, "effort": config.reasoning_effort}
+            if config.reasoning_effort is not None else config.model
+        ),
         "tools": list(config.tools),
         "context_trim_threshold": config.context_trim_threshold,
     }
@@ -181,7 +184,8 @@ def _build_agent_config(
     # Optional fields with defaults
     display_name = str(data.get("display_name", ""))
     description = str(data.get("description", ""))
-    model = str(data.get("model", "")).strip()
+    raw_model = data.get("model", "")
+    model = raw_model if isinstance(raw_model, dict) else str(raw_model).strip()
 
     raw_threshold = data.get("context_trim_threshold")
     if raw_threshold is None:
@@ -236,6 +240,7 @@ def _build_agent_config(
             graph_type=graph_type,
             provider=provider,
             model=model,
+            **({"reasoning_effort": data["reasoning_effort"]} if "reasoning_effort" in data else {}),
             tools=tools,
             tool_permissions=data.get("tool_permissions"),
             tool_configs=tool_configs,

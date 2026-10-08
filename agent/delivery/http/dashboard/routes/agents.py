@@ -3,7 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from agent.modules.agents.models import normalize_agent_model
+from agent.modules.providers.profiles import EFFORT_PATTERN
 
 from agent.modules.workflows import REACT_AGENT_GRAPH_TYPE
 from agent.delivery.http.dashboard.routes.helpers.agents import (
@@ -37,6 +40,7 @@ class AgentCardBody(BaseModel):
     graph_type: str = Field(default=REACT_AGENT_GRAPH_TYPE, description="Workflow graph type (e.g. 'react_agent').")
     provider: str = Field(default="default", description="LLM provider name.")
     model: str = Field(default="", description="LLM model name override.")
+    reasoning_effort: str | None = Field(default=None, pattern=EFFORT_PATTERN)
     tools: list[str] = Field(default_factory=list, description="List of tool names available to this agent.")
     tool_permissions: list[dict[str, Any]] | None = None
     tool_configs: dict[str, dict[str, Any]] = Field(default_factory=dict, description="Per-tool config overrides keyed by tool name.")
@@ -46,6 +50,11 @@ class AgentCardBody(BaseModel):
     hidden: bool = Field(default=False, description="Whether to hide this agent from the UI.")
     max_context_tokens: int = Field(default=50_000, description="Maximum context window size in tokens.")
     system_prompt: str = Field(default="", description="Custom system prompt for this agent.")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_model(cls, data: Any) -> Any:
+        return normalize_agent_model(data)
 
 
 @router.get("/agents/cards")

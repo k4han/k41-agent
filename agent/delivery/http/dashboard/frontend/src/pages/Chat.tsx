@@ -22,6 +22,7 @@ import { WorkspaceExplorer } from "@/components/WorkspaceExplorer";
 import type { TodoProgress } from "@/components/ChatTodos";
 import { apiFetch, fetchWithCsrf, postJson, readError } from "@/lib/api";
 import { fetchAgentChatOptions } from "@/lib/agents";
+import { resolveModelAndProvider } from "@/lib/modelSelection";
 import {
   chatThreadHref,
   threadApiPath,
@@ -288,12 +289,9 @@ export function ChatPage() {
     const card = selectedCard();
     const activeProvider = provider() || card?.provider || "default";
     const activeModel = model() || card?.model || "";
-    const resolvedProv = activeProvider === "default" ? payload.default_provider : activeProvider;
-    const catalog = payload.model_catalogs?.find((c) => c.provider === resolvedProv);
-    const resolvedMod = (activeModel === "" || activeModel === "default" || activeModel === "provider default")
-      ? (activeProvider === "default" ? payload.default_model : (catalog?.default_model || "default"))
-      : activeModel;
-    return { provider: resolvedProv, model: resolvedMod };
+    return resolveModelAndProvider(
+      activeProvider, activeModel, payload.default_provider, payload.default_model, payload.model_catalogs || [],
+    );
   });
 
   const selectedModelOption = createMemo<ModelOption | undefined>(() => {
@@ -302,7 +300,21 @@ export function ChatPage() {
       .find((m) => m.id === selected?.model);
   });
   const { levels: effortLevels, effort: reasoningEffort, setEffort: setReasoningEffort, requestEffort } =
-    useReasoningEffort(() => JSON.stringify(selectedModelSelection()) || "", selectedModelOption);
+    useReasoningEffort(
+      () => JSON.stringify([agentName(), selectedModelSelection()]),
+      selectedModelOption,
+      () => {
+        const card = selectedCard();
+        const selected = selectedModelSelection();
+        const payload = data();
+        if (!card || !selected || !payload) return undefined;
+        const cardSelection = resolveModelAndProvider(
+          card.provider, card.model, payload.default_provider, payload.default_model, payload.model_catalogs || [],
+        );
+        return cardSelection.provider === selected.provider && cardSelection.model === selected.model
+          ? card.reasoning_effort : undefined;
+      },
+    );
 
   const modelSupportsImage = createMemo(() => {
     const option = selectedModelOption();

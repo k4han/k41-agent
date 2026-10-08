@@ -165,6 +165,7 @@ async def test_catalog_and_runtime_share_profiles_and_refresh_overrides(monkeypa
 @pytest.mark.parametrize("provider_type,model_name,effort", [
     (ProviderType.OPENAI_COMPATIBLE, "gpt-5", "minimal"),
     (ProviderType.ANTHROPIC, "claude-opus-4-6", "max"),
+    (ProviderType.ANTHROPIC, "claude-opus-5-5", "low"),
     (ProviderType.GOOGLE, "gemini-3-flash-preview", "minimal"),
 ])
 def test_real_factories_bind_effort_into_native_request(provider_type, model_name, effort):

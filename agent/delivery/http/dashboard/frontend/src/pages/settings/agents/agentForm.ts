@@ -10,6 +10,7 @@ export type AgentForm = {
   graph_type: string;
   provider: string;
   model: string;
+  reasoning_effort: string | null;
   tools: string[];
   tool_permissions: AgentCard["tool_permissions"];
   tool_configs: ToolConfigs;
@@ -38,6 +39,7 @@ export function blankForm(workflow: string): AgentForm {
     graph_type: workflow,
     provider: "default",
     model: "",
+    reasoning_effort: null,
     tools: [],
     tool_permissions: null,
     tool_configs: {},
@@ -58,6 +60,7 @@ export function cardToForm(card: AgentCard): AgentForm {
     graph_type: card.graph_type || "react_agent",
     provider: card.provider || "default",
     model: card.model || "",
+    reasoning_effort: card.reasoning_effort ?? null,
     tools: card.tools || [],
     tool_permissions: card.tool_permissions ?? null,
     tool_configs: normalizeToolConfigs(card.tool_configs),

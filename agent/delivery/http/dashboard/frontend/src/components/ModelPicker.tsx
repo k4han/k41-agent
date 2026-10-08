@@ -4,6 +4,7 @@ import { Portal } from "solid-js/web";
 
 import { computeFloatingPosition } from "@/lib/floating";
 import { classNames } from "@/lib/utils";
+import { resolveModelAndProvider } from "@/lib/modelSelection";
 import type { ModelCatalog, ModelOption } from "@/types";
 
 const favoritesStorageKey = "k41.dashboard.modelFavorites";
@@ -58,31 +59,6 @@ function selectionLabel(provider: string, model: string, resolveDefault?: boolea
     return `${provider}/${defaultModel || "default model"}`;
   }
   return `${provider || "default"}/${modelLabel(model)}`;
-}
-
-function resolveModelAndProvider(
-  provider: string,
-  model: string,
-  defaultProvider: string,
-  defaultModel: string,
-  catalogs: ModelCatalog[]
-): { provider: string; model: string } {
-  let resolvedProvider = provider;
-  if (!provider || provider === "default") {
-    resolvedProvider = defaultProvider || "";
-  }
-
-  let resolvedModel = model;
-  if (!model || model === "provider default") {
-    if (!provider || provider === "default") {
-      resolvedModel = defaultModel || "";
-    } else {
-      const catalog = catalogs.find((item) => item.provider === resolvedProvider);
-      resolvedModel = catalog?.default_model || "";
-    }
-  }
-
-  return { provider: resolvedProvider, model: resolvedModel };
 }
 
 function readFavorites(): string[] {

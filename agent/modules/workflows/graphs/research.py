@@ -17,6 +17,7 @@ from agent.modules.workflows.state.extensions import (
     ResearchState,
 )
 from agent.modules.providers import get_resolved_chat_model
+from agent.modules.workflows.model_effort import get_workflow_reasoning_effort_kwargs
 from agent.modules.usage import with_usage_tracking
 from agent.shared.infrastructure.parsing import extract_final_text_content
 
@@ -31,12 +32,14 @@ def _resolve_runtime_model(runtime):
         raise RuntimeError(f"Agent '{ctx.get_agent_name()}' not found in catalog.")
     provider = ctx.get_provider() or agent_config.provider
     model = ctx.get_model() or agent_config.model or None
-    return get_resolved_chat_model(provider_name=provider, model=model)
+    resolved = get_resolved_chat_model(provider_name=provider, model=model)
+    model_kwargs = get_workflow_reasoning_effort_kwargs(ctx, agent_config, resolved)
+    return resolved, model_kwargs
 
 
 async def _research_node(state: ResearchState, config: RunnableConfig, runtime):
     """Collect research directions for the request."""
-    resolved = _resolve_runtime_model(runtime)
+    resolved, model_kwargs = _resolve_runtime_model(runtime)
     llm = resolved.model
     system = SystemMessage(content=(
         "You are a research assistant. "
@@ -52,13 +55,14 @@ async def _research_node(state: ResearchState, config: RunnableConfig, runtime):
             model_name=resolved.model_name,
             call_kind="research",
         ),
+        **model_kwargs,
     )
     return {"messages": [response]}
 
 
 async def _summarize_node(state: ResearchState, config: RunnableConfig, runtime):
     """Summarize the collected research context."""
-    resolved = _resolve_runtime_model(runtime)
+    resolved, model_kwargs = _resolve_runtime_model(runtime)
     llm = resolved.model
     system = SystemMessage(content=(
         "Based on the collected information, write a concise report with "
@@ -74,6 +78,7 @@ async def _summarize_node(state: ResearchState, config: RunnableConfig, runtime)
             model_name=resolved.model_name,
             call_kind="research_summary",
         ),
+        **model_kwargs,
     )
     return {
         "messages": [response],

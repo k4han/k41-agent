@@ -131,6 +131,30 @@ def test_agent_card_crud_endpoints(dashboard_agent_client) -> None:
     assert not (repo.user_dir / "sample.md").exists()
 
 
+def test_agent_card_api_preserves_structured_model_effort(dashboard_agent_client) -> None:
+    from agent.modules.agents.parser import parse_agent_file
+
+    client, repo = dashboard_agent_client
+    payload = {**_payload("effort-agent"), "model": {"id": "claude-opus-5-5", "effort": "low"}}
+    response = client.post("/agents/cards", json=payload)
+    assert response.status_code == 200
+    card = response.json()["card"]
+    assert card["model"] == "claude-opus-5-5"
+    assert card["reasoning_effort"] == "low"
+    payload = {**payload, "model": card["model"], "reasoning_effort": card["reasoning_effort"], "description": "Edited"}
+    response = client.put("/agents/cards/effort-agent", json=payload)
+    assert response.status_code == 200
+    assert parse_agent_file(repo.user_dir / "effort-agent.md").reasoning_effort == "low"
+    payload["reasoning_effort"] = "High"
+    assert client.put("/agents/cards/effort-agent", json=payload).status_code == 422
+    payload["model"] = {"id": "claude-opus-5-5", "effort": "low"}
+    payload["reasoning_effort"] = "high"
+    conflict = client.put("/agents/cards/effort-agent", json=payload)
+    assert conflict.status_code == 422
+    assert "Conflicting" in conflict.text
+    assert parse_agent_file(repo.user_dir / "effort-agent.md").reasoning_effort == "low"
+
+
 def test_agent_card_crud_preserves_tool_configs(dashboard_agent_client) -> None:
     client, repo = dashboard_agent_client
     payload = _payload("image-agent")

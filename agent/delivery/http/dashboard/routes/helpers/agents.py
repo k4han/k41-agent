@@ -322,6 +322,7 @@ def agent_config_from_body(body: "AgentCardBody") -> AgentConfig:
         graph_type=body.graph_type.strip() or REACT_AGENT_GRAPH_TYPE,
         provider=body.provider.strip(),
         model=body.model.strip(),
+        reasoning_effort=body.reasoning_effort,
         tools=list(body.tools),
         tool_permissions=getattr(body, "tool_permissions", None),
         tool_configs={

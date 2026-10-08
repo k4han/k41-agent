@@ -117,6 +117,7 @@ export type AgentCard = {
   graph_type: string;
   provider: string;
   model: string;
+  reasoning_effort?: string | null;
   tool_permissions?: { action?: string; resource?: string; effect: "allow" | "ask" | "deny" }[] | null;
   tools: string[];
   tool_configs?: Record<string, Record<string, unknown>>;
@@ -142,6 +143,7 @@ export type AgentConfig = {
   graph_type: string;
   provider: string;
   model: string;
+  reasoning_effort?: string | null;
   tools: string[];
   tool_configs?: Record<string, Record<string, unknown>>;
   mcp_servers?: string[];
