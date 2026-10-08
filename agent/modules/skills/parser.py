@@ -11,7 +11,7 @@ import re
 from collections.abc import Sequence
 from pathlib import Path
 
-from agent.modules.skills.models import Skill
+from agent.modules.skills.models import Skill, SkillDiagnostic
 from agent.shared.infrastructure.parsing import parse_string_or_list
 
 logger = logging.getLogger(__name__)
@@ -22,17 +22,13 @@ _FRONTMATTER_RE = re.compile(
     re.DOTALL,
 )
 
-# Allowed name characters: lowercase a-z, digits 0-9, hyphens.
-_NAME_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
-
-
 def _validate_name(name: str) -> bool:
     """Check name follows agentskills.io rules (warn but don't reject)."""
     if not name or len(name) > 64:
         return False
-    if "--" in name:
+    if "--" in name or name.startswith("-") or name.endswith("-"):
         return False
-    return bool(_NAME_RE.match(name))
+    return all(character == "-" or character.isalnum() and character == character.lower() for character in name)
 
 
 def parse_skill_md(
@@ -83,6 +79,36 @@ def parse_skill_md(
         logger.warning("SKILL.md in %s frontmatter is not a mapping — skipping.", skill_dir)
         return None
 
+    diagnostics: list[SkillDiagnostic] = []
+    limits = {"description": 1024, "compatibility": 500}
+    for key, maximum in limits.items():
+        value = data.get(key)
+        if value is not None and (not isinstance(value, str) or len(value) > maximum):
+            message = f"'{key}' must be a string with at most {maximum} characters."
+            if strict:
+                raise ValueError(message)
+            diagnostics.append(SkillDiagnostic("invalid_field", message, key))
+    for key in ("name", "license"):
+        if key in data and data[key] is not None and not isinstance(data[key], str):
+            if strict:
+                raise ValueError(f"'{key}' must be a string.")
+            diagnostics.append(SkillDiagnostic("invalid_field", f"'{key}' is not a string.", key))
+    if data.get("metadata") is not None and not isinstance(data["metadata"], dict):
+        if strict:
+            raise ValueError("'metadata' must be a mapping.")
+        diagnostics.append(SkillDiagnostic("invalid_metadata", "Metadata must be a mapping.", "metadata"))
+    known = {"name", "description", "license", "compatibility", "metadata", "allowed-tools"}
+    diagnostics.extend(SkillDiagnostic("unsupported_field", f"Preserved unsupported field '{key}'.", str(key))
+                       for key in data if key not in known)
+    if not data.get("name"):
+        diagnostics.append(SkillDiagnostic("missing_name", "Using the directory name as the skill name.", "name"))
+    if isinstance(data.get("metadata"), dict) and any(
+        not isinstance(key, str) or not isinstance(value, str) for key, value in data["metadata"].items()
+    ):
+        if strict:
+            raise ValueError("'metadata' must map string keys to string values.")
+        diagnostics.append(SkillDiagnostic("invalid_metadata", "Metadata values are not all strings.", "metadata"))
+
     # --- required fields ---
     name = data.get("name")
     description = data.get("description")
@@ -116,6 +142,7 @@ def parse_skill_md(
         if strict:
             raise ValueError(msg)
         logger.warning("%s — loading anyway.", msg)
+        diagnostics.append(SkillDiagnostic("invalid_name", msg, "name"))
 
     if strict and expected_name is not None and name != expected_name:
         raise ValueError("SKILL.md frontmatter name must match the skill name.")
@@ -128,6 +155,7 @@ def parse_skill_md(
         if strict and expected_name is None:
             raise ValueError(msg)
         logger.warning("%s — loading anyway.", msg)
+        diagnostics.append(SkillDiagnostic("name_mismatch", msg, "name"))
 
     # --- optional fields ---
     license_val = data.get("license")
@@ -156,6 +184,8 @@ def parse_skill_md(
         metadata=metadata,
         allowed_tools=allowed_tools,
         resources=list(resources),
+        frontmatter=data,
+        diagnostics=tuple(diagnostics),
     )
 
 

@@ -152,7 +152,7 @@ RUNTIME_KEY_PATTERNS = [
     r"^workspace\.daytona\.(enabled|api_key|default_root|target|image|cpu|memory|disk|language|auto_stop_minutes|auto_archive_days|sweeper_interval_seconds|start_timeout_seconds|stop_timeout_seconds|sandbox_auto_stop_minutes|sandbox_auto_archive_minutes|sandbox_auto_delete_minutes|ephemeral|network_block_all|network_allow_list)$",
     r"^workspace\.modal\.(enabled|token_id|token_secret|app_name|default_root|image|sandbox_timeout_seconds|idle_timeout_seconds)$",
     r"^google_calendar\.enabled$",
-    rf"^{re.escape(REPOSITORY_SKILLS_DIR_KEY)}$",
+    r"^skills\.(repository_dir|additional_roots|disabled_ids|max_files|max_bytes|max_file_bytes|local_execution_mode|cache_root)$",
     r"^database\.url$",
     rf"^{re.escape(DISPLAY_TIMEZONE_CONFIG_KEY)}$",
     r"^recursion_limit$",
@@ -186,7 +186,7 @@ DATABASE_RUNTIME_KEY_PATTERNS = [
     r"^workspace\.daytona\.(enabled|api_key|default_root|target|image|cpu|memory|disk|language|auto_stop_minutes|auto_archive_days|sweeper_interval_seconds|start_timeout_seconds|stop_timeout_seconds|sandbox_auto_stop_minutes|sandbox_auto_archive_minutes|sandbox_auto_delete_minutes|ephemeral|network_block_all|network_allow_list)$",
     r"^workspace\.modal\.(enabled|token_id|token_secret|app_name|default_root|image|sandbox_timeout_seconds|idle_timeout_seconds)$",
     r"^google_calendar\.enabled$",
-    rf"^{re.escape(REPOSITORY_SKILLS_DIR_KEY)}$",
+    r"^skills\.(repository_dir|additional_roots|disabled_ids|max_files|max_bytes|max_file_bytes|local_execution_mode|cache_root)$",
     rf"^{re.escape(DISPLAY_TIMEZONE_CONFIG_KEY)}$",
     r"^recursion_limit$",
     r"^decision\.(model|timeout|max_retries|default_provider|migration_version)$",
@@ -317,6 +317,8 @@ def _expand_runtime_keys() -> set[str]:
     keys.add("workspace.modal.sandbox_timeout_seconds")
     keys.add("workspace.modal.idle_timeout_seconds")
     keys.add(REPOSITORY_SKILLS_DIR_KEY)
+    keys.update({"skills.additional_roots", "skills.disabled_ids", "skills.max_files", "skills.max_bytes", "skills.max_file_bytes",
+                 "skills.local_execution_mode", "skills.cache_root"})
     keys.add(DISPLAY_TIMEZONE_CONFIG_KEY)
     keys.add("recursion_limit")
     keys.update({"tools.permissions", "tools.shell", "tools.storage_root"})
@@ -413,6 +415,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "workspace.modal.sandbox_timeout_seconds": 3600,
     "workspace.modal.idle_timeout_seconds": 900,
     REPOSITORY_SKILLS_DIR_KEY: ".agent/skills",
+    "skills.additional_roots": [],
+    "skills.disabled_ids": [],
+    "skills.max_files": 10_000,
+    "skills.max_bytes": 128 * 1024 * 1024,
+    "skills.max_file_bytes": 64 * 1024 * 1024,
+    "skills.local_execution_mode": "snapshot",
+    "skills.cache_root": "",
     DISPLAY_TIMEZONE_CONFIG_KEY: DEFAULT_DISPLAY_TIMEZONE,
     "google_calendar.enabled": True,
     "security.jwt_secret": "",
@@ -735,6 +744,14 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "description": "Repository-relative directory for repo-local skills.",
         "category": "skills",
         "label": "Repository Skills Directory",
+    },
+    "skills.local_execution_mode": {
+        "type": "select", "options": ["snapshot", "source"], "category": "skills",
+        "label": "Local Skill Execution", "description": "Use shared pinned snapshots or live local sources without in-package dependency installation.",
+    },
+    "skills.cache_root": {
+        "type": "text", "category": "skills", "label": "Local Skill Cache Directory",
+        "description": "Optional short absolute path for shared execution copies; empty uses the managed user directory.",
     },
     # Channel settings
     "channels.telegram.enabled": {

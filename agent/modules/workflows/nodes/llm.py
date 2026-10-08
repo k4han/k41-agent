@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from langchain_core.messages import BaseMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 
 from agent.modules.providers import get_resolved_chat_model
@@ -85,6 +85,7 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
         repository_skill_dir=repository_skill_dir,
     )
     system_prompt = get_cached_system_prompt(cache_key)
+    catalog_has_skills = None
 
     if system_prompt is None:
         prompt_variables = await get_runtime_prompt_variable_values()
@@ -98,6 +99,7 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
                 repository_dir=repository_skill_dir,
                 thread_id=thread_id,
             )
+            catalog_has_skills = skills_catalog_xml != "<available_skills/>"
         system_prompt = build_llm_system_prompt(
             system_prompt_template=system_prompt_template,
             working_dir=working_dir,
@@ -114,8 +116,28 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
     from types import SimpleNamespace
     from agent.modules.tools import migrate_history_outputs
     history = await migrate_history_outputs(state["messages"], SimpleNamespace(context=ctx, config=config))
+    from agent.modules.skills import active_context, model_skill_history, skill_commands
+    skill_context, active_skills = ("", state.get("active_skills", {}))
+    processed_skill_messages = state.get("processed_skill_messages", [])
+    try:
+        if state.get("active_skills") or skill_commands(state["messages"])[0]:
+            skill_context, active_skills, processed_skill_messages = await active_context(state, workspace=workspace, thread_id=thread_id or "",
+                agent_name=agent_name, names=ctx.get_allowed_skill_names(), tools=tools)
+    except (PermissionError, FileNotFoundError, ValueError) as exc:
+        return {
+            "messages": [AIMessage(content=f"Unable to use the requested skill: {exc}")],
+            "active_skills": active_skills if any(tool.name == "skill" for tool in tools) else {},
+        }
     resolved = get_resolved_chat_model(provider_name=provider, model=model)
-    system = SystemMessage(content=system_prompt)
+    system = SystemMessage(content=system_prompt + skill_context)
+    if not skill_context and (catalog_has_skills is False or (catalog_has_skills is None and "<available_skills>" not in system_prompt)):
+        tools = [tool for tool in tools if tool.name != "skill"]
+    if skill_context:
+        from langchain_core.messages.utils import count_tokens_approximately
+        from agent.modules.providers import DEFAULT_CONTEXT_WINDOW
+        if count_tokens_approximately([system], tools=tools) >= getattr(resolved, "context_window", DEFAULT_CONTEXT_WINDOW) * 3 // 4:
+            raise ValueError("Active skill instructions exceed the context budget. Unload a skill or select a larger context model.")
+    history = model_skill_history(history)
     history, history_updates = await prepare_model_context(
         history, system=system, tools=tools, context=ctx,
         agent_config=agent_config, resolved=resolved, config=config,
@@ -133,4 +155,7 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
             call_kind="agent",
         ),
     )
-    return {"messages": [*history_updates, response]}
+    updates = {"messages": [*history_updates, response]}
+    if active_skills or state.get("active_skills") or processed_skill_messages:
+        updates.update(active_skills=active_skills, processed_skill_messages=processed_skill_messages)
+    return updates

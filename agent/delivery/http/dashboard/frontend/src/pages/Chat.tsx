@@ -1930,6 +1930,7 @@ export function ChatPage() {
                 onMessageClick={setViewingMessage}
               />
               <ChatComposer
+                workspace={workspaceRef() || localWorkspaceRef(workingDir())}
                 setChatPromptRef={(el) => (chatPromptRef = el)}
                 chatPromptRef={(el) => (chatPromptRef = el)}
                 prompt={prompt()}

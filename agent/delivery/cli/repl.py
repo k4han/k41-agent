@@ -160,6 +160,9 @@ async def _chat_loop(session: CLISession) -> None:
         parsed = parse_slash_command(line)
         if parsed is not None:
             name, args = parsed
+            if name == "skill":
+                await _stream_agent_response(session, line)
+                continue
             should_continue = await dispatch_slash_command(session, name, args)
             if not should_continue:
                 return

@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 from typing import Any
 
 from agent.modules.tools.coding.contracts import CodingError, InvocationContext, RuntimeResult as ToolResult
 from agent.modules.tools.coding.names import FILE_TOOLS
+from agent.modules.tools.coding.paths import comparable_path
 from agent.modules.tools.coding.storage import digest
 from agent.modules.tools.runtime.shell_guard import check_command_blocked
 
@@ -32,7 +32,7 @@ class CodingEngine:
             if blocked:
                 raise CodingError("permission_denied", f"Blocked dangerous command: {reason}")
             cwd = self.permissions.resolve_path(context, values.get("workdir") or ".", "shell", authorize=False)
-            if not cwd.is_relative_to(Path(context.workspace).resolve()):
+            if not comparable_path(cwd).is_relative_to(comparable_path(context.workspace)) and not self.permissions.is_skill_path(context, cwd):
                 self.permissions.assert_allowed(context, "external_directory", str(cwd))
             self.permissions.assert_allowed(context, "shell", command, shell=self.shell, workdir=str(cwd))
             if not cwd.is_dir():
@@ -47,7 +47,7 @@ class CodingEngine:
             return await self.files.execute(name, values, context)
         if name == "bash":
             cwd = self.permissions.resolve_path(context, values.get("workdir") or ".", "shell", authorize=False)
-            if not cwd.is_relative_to(Path(context.workspace).resolve()):
+            if not comparable_path(cwd).is_relative_to(comparable_path(context.workspace)) and not self.permissions.is_skill_path(context, cwd):
                 self.permissions.assert_allowed(context, "external_directory", str(cwd), allow_interrupt=False)
             self.permissions.assert_allowed(context, "shell", values["command"], shell=self.shell,
                                             workdir=str(cwd), allow_interrupt=False)

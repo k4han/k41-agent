@@ -922,7 +922,7 @@ export function ToolCallDetail(props: {
                 </a>
               )}
             </Show>
-            <pre>{props.result === null ? "Waiting for tool result..." : formatValue(props.result)}</pre>
+            <pre>{props.result === null ? (props.name === "skill" ? "Preparing skill resources and runtimes in the workspace..." : "Waiting for tool result...") : formatValue(props.result)}</pre>
           </div>
         </details>
       }

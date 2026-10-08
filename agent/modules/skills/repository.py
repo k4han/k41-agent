@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import copy
 import logging
-import re
 import shutil
 import tempfile
 import threading
@@ -18,7 +17,7 @@ from typing import Any
 from weakref import WeakValueDictionary
 
 from agent.modules.skills.models import Skill, SkillSummary
-from agent.modules.skills.parser import parse_skill_md
+from agent.modules.skills.parser import parse_skill_md, _validate_name
 from agent.modules.skills.resources import list_local_resources
 from agent.shared.infrastructure.revisions import SKILLS_REVISION, bump_revision, get_revision
 
@@ -29,7 +28,6 @@ DEFAULT_SKILLS_ROOT = Path.home() / ".k41-agent" / "skills"
 # Directories to skip during scanning
 _SKIP_DIRS = frozenset({".git", "node_modules", "__pycache__", ".venv", "venv"})
 
-_SKILL_NAME_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
 _root_locks: WeakValueDictionary[str, Any] = WeakValueDictionary()
 _root_locks_guard = threading.Lock()
 
@@ -41,7 +39,7 @@ def normalize_skill_name(value: str) -> str:
         raise ValueError("Skill name is required.")
     if len(name) > 64:
         raise ValueError("Skill name must be 64 characters or fewer.")
-    if "--" in name or not _SKILL_NAME_RE.match(name):
+    if not _validate_name(name):
         raise ValueError(
             "Skill name must use lowercase letters, numbers, and single hyphens."
         )

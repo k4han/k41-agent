@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import codecs
 import io
+import logging
 import os
 import platform
 import re
@@ -24,12 +25,15 @@ from typing import Any
 
 from agent.modules.tools.coding.contracts import CodingError, InvocationContext, RuntimeResult as ToolResult
 from agent.modules.tools.coding.storage import MAX_CAPTURE_BYTES, MAX_MODEL_BYTES, MAX_MODEL_LINES, MAX_STORED_BYTES, OutputStore, bounded_text
+from agent.modules.tools.coding.paths import comparable_path
 if os.name == "nt":
     from agent.modules.tools.coding.windows_job import cancel_pipe_read, spawn_contained
 else:
     spawn_contained = subprocess.Popen
 from agent.modules.tools.runtime.sandbox import build_safe_env
 from agent.shared.infrastructure.subprocess_utils import hidden_subprocess_kwargs
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_shell(configured: str | None = None) -> str:
@@ -92,6 +96,8 @@ class ProcessJob:
     lock: threading.Lock = field(default_factory=threading.Lock)
     finished: asyncio.Event = field(default_factory=asyncio.Event)
     task: asyncio.Task[None] | None = None
+    skill_lease: Path | None = None
+    skill_leases: tuple[Path, ...] = ()
 
     def capture(self, stream: Any, label: str) -> None:
         decoder = codecs.getincrementaldecoder("utf-8")("replace")
@@ -198,7 +204,37 @@ class ProcessManager:
             script = self.storage.owner_dir(context) / f"{uuid.uuid4().hex}{suffix}"
             script.write_text(command, encoding="utf-8-sig" if suffix == ".ps1" else "utf-8")
             argv = [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(script)] if suffix == ".ps1" else [shell, "/D", "/C", str(script)] if suffix == ".cmd" else [shell, str(script)]
-        environment = build_safe_env(extra_vars={"PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1", "PYTHONUNBUFFERED": "1"})
+        environment = build_safe_env(extra_vars={"PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1", "PYTHONUNBUFFERED": "1",
+                                               "PYTHONDONTWRITEBYTECODE": "1", "K41_WORKSPACE_ROOT": context.workspace,
+                                               **dict(context.skill_environment)})
+        from agent.modules.tools.coding.storage import conversation_key
+        lease_root = Path(context.workspace) / ".k41-agent" / "skills" / conversation_key(context.thread_id)
+        if os.name == "nt" and not str(lease_root).startswith("\\\\?\\"):
+            lease_root = Path("\\\\?\\" + str(lease_root.resolve()))
+        skill_lease = None
+        if lease_root.is_dir():
+            skill_lease = lease_root / (".skill-lease-" + uuid.uuid4().hex)
+            try:
+                skill_lease.write_text(str(os.getpid()))
+            except OSError as exc:
+                logger.debug("Failed to create skill process lease %s: %s", skill_lease, exc)
+                skill_lease = None
+        skill_leases = []
+        for root in context.skill_roots:
+            path = Path(root).resolve()
+            if os.name == "nt" and not str(path).startswith("\\\\?\\"):
+                raw = str(path)
+                path = Path("\\\\?\\UNC\\" + raw[2:] if raw.startswith("\\\\") else "\\\\?\\" + raw)
+            if context.skill_cache_root and comparable_path(path).is_relative_to(comparable_path(context.skill_cache_root)) or (
+                comparable_path(path).is_relative_to(comparable_path(context.workspace) / ".k41-agent" / "s")
+            ):
+                lease = path / (".skill-lease-" + uuid.uuid4().hex)
+                try:
+                    lease.write_text(str(os.getpid()))
+                except OSError as exc:
+                    logger.debug("Failed to create skill process lease %s: %s", lease, exc)
+                    continue
+                skill_leases.append(lease)
         options = hidden_subprocess_kwargs(creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0)
         spawn = asyncio.create_task(asyncio.to_thread(spawn_contained, argv, cwd=str(cwd), stdin=subprocess.PIPE,
                                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment,
@@ -219,6 +255,12 @@ class ProcessManager:
         except BaseException:
             if script:
                 script.unlink(missing_ok=True)
+            for lease in (skill_lease, *skill_leases):
+                if lease:
+                    try:
+                        lease.unlink(missing_ok=True)
+                    except OSError as exc:
+                        logger.debug("Failed to remove skill process lease %s: %s", lease, exc)
             raise
         registry = None
         session_id = None
@@ -230,6 +272,8 @@ class ProcessManager:
                 registry.register_pid(session_id, process.pid)
         job = ProcessJob(uuid.uuid4().hex, context.owner, context.thread_id, context.workspace,
                          process, None, None, timeout_seconds, self.storage, context, registry, session_id)
+        job.skill_lease = skill_lease
+        job.skill_leases = tuple(skill_leases)
         self.jobs[job.id] = job
         job.task = asyncio.create_task(self._watch(job, script))
         return job
@@ -281,6 +325,12 @@ class ProcessManager:
                 job.registry.unregister_pid(job.session_id, job.process.pid)
             if script:
                 script.unlink(missing_ok=True)
+            for lease in (job.skill_lease, *job.skill_leases):
+                if lease:
+                    try:
+                        lease.unlink(missing_ok=True)
+                    except OSError as exc:
+                        logger.debug("Failed to remove skill process lease %s: %s", lease, exc)
             with job.lock:
                 job.finished.set()
                 if job.path is not None:

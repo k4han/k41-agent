@@ -4,10 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test:skills-ui": "node scripts/verify-skills.mjs",
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "check": "tsc --noEmit",
-    "test": "node --test tests/chat-scroll.test.mjs tests/provider-connections.test.mjs tests/reasoning-effort.test.mjs tests/system-update.test.mjs && node scripts/verify-responsive.mjs --skip-build",
+    "test": "node --test tests/chat-scroll.test.mjs tests/provider-connections.test.mjs tests/reasoning-effort.test.mjs tests/system-update.test.mjs tests/skill-suggestions.test.mjs && node scripts/verify-responsive.mjs --skip-build",
     "test:system-update": "node --test tests/system-update.test.mjs",
     "test:system-update-ui": "node scripts/verify-system-update.mjs",
     "test:chat-scroll": "node --test tests/chat-scroll.test.mjs",

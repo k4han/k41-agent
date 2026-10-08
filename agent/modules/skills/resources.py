@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path, PurePosixPath
 from typing import Any
+
+from agent.modules.workspaces import IGNORED_DIR_NAMES
 
 RESOURCE_DIRECTORIES = ("scripts", "references", "assets")
 MAX_RESOURCE_DIRECTORIES = 256
@@ -15,11 +18,13 @@ def list_local_resources(skill_dir: Path) -> list[str]:
     """List bundled files without following resources outside the skill."""
     root = skill_dir.resolve()
     resources: list[str] = []
-    for name in RESOURCE_DIRECTORIES:
-        directory = skill_dir / name
-        if not directory.is_dir() or not directory.resolve().is_relative_to(root):
-            continue
-        for file in directory.rglob("*"):
+    for current, directories, files in os.walk(skill_dir, followlinks=False):
+        directories[:] = [name for name in directories if name not in IGNORED_DIR_NAMES
+                          and (Path(current) / name).resolve().is_relative_to(root)]
+        for name in files:
+            file = Path(current) / name
+            if file == skill_dir / "SKILL.md" or name.startswith(".skill-"):
+                continue
             if file.is_file() and file.resolve().is_relative_to(root):
                 resources.append(file.relative_to(skill_dir).as_posix())
     return sorted(resources)
@@ -27,14 +32,7 @@ def list_local_resources(skill_dir: Path) -> list[str]:
 
 async def list_workspace_resources(browser: Any, skill_dir: str) -> list[str]:
     """Walk resource directories through the workspace's browser backend."""
-    tree = await browser.tree(skill_dir)
-    pending = [
-        str(entry.get("name"))
-        for entry in tree.get("entries", [])
-        if isinstance(entry, dict)
-        and entry.get("kind") == "directory"
-        and entry.get("name") in RESOURCE_DIRECTORIES
-    ]
+    pending = [""]
     resources: set[str] = set()
     visited: set[str] = set()
     while pending and len(visited) < MAX_RESOURCE_DIRECTORIES:
@@ -43,14 +41,30 @@ async def list_workspace_resources(browser: Any, skill_dir: str) -> list[str]:
             continue
         visited.add(relative)
         try:
-            tree = await browser.tree(f"{skill_dir}/{relative}")
+            path = f"{skill_dir}/{relative}".rstrip("/")
+            entries = []
+            offset = 0
+            while True:
+                pager = getattr(browser, "tree_page", None)
+                tree = await pager(path, offset=offset) if callable(pager) else await browser.tree(path)
+                entries.extend(tree.get("entries", []))
+                next_offset = tree.get("next_offset")
+                if next_offset is None:
+                    if tree.get("truncated"):
+                        raise ValueError("Resource listing is incomplete.")
+                    break
+                if next_offset <= offset:
+                    raise ValueError("Resource pagination did not advance.")
+                offset = next_offset
         except FileNotFoundError:
             continue
-        for entry in tree.get("entries", []):
+        for entry in entries:
             if not isinstance(entry, dict):
                 continue
             name = str(entry.get("name") or "")
             if not name or name in {".", ".."} or "/" in name or "\\" in name:
+                continue
+            if name in IGNORED_DIR_NAMES or name.startswith(".skill-") or (not relative and name == "SKILL.md"):
                 continue
             path = str(PurePosixPath(relative) / name)
             if entry.get("kind") == "directory":

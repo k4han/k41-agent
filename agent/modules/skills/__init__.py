@@ -154,9 +154,11 @@ def is_repository_skill_path(
         for part in raw.replace("\\", "/").split("/")
         if part not in ("", ".")
     ]
-    expected = skill_dir.split("/")
+    from agent.modules.skills.sources import repository_roots
     return any(
         parts[index : index + len(expected)] == expected
+        for directory in repository_roots(skill_dir)
+        for expected in [directory.split("/")]
         for index in range(len(parts) - len(expected) + 1)
     )
 
@@ -228,7 +230,30 @@ def reload_skills() -> None:
     logger.info("Skills reloaded.")
 
 
+def get_skill_packages():
+    """Resolve the container-owned package lifecycle service."""
+    from agent.modules.skills.packages import get_skill_packages as resolve
+    return resolve()
+
+
+def validate_skill_document(content: str, *, name: str | None = None, strict: bool = False):
+    from agent.modules.skills.packages import validate_document
+    return validate_document(content, name=name, strict=strict)
+
+
 def __getattr__(name: str):
+    if name == "SkillPackages":
+        from agent.modules.skills.packages import SkillPackages
+        return SkillPackages
+    if name == "WorkspacePackageIO":
+        from agent.modules.skills.package_io import WorkspacePackageIO
+        return WorkspacePackageIO
+    if name in {"activation_key", "active_context", "model_skill_history", "skill_commands", "skill_events"}:
+        from agent.modules.skills import context
+        return getattr(context, name)
+    if name in {"SkillSource", "SkillPackageSummary", "SkillResource", "SkillDiagnostic", "ActivatedSkill"}:
+        from agent.modules.skills import models
+        return getattr(models, name)
     if name == "Skill":
         from agent.modules.skills.models import Skill
         return Skill
@@ -239,6 +264,9 @@ def __getattr__(name: str):
 
 
 __all__ = [
+    "SkillPackages", "WorkspacePackageIO", "activation_key", "active_context", "model_skill_history", "skill_commands", "skill_events",
+    "SkillSource", "SkillPackageSummary", "SkillResource", "SkillDiagnostic", "ActivatedSkill",
+    "get_skill_packages", "validate_skill_document",
     "Skill",
     "SkillSummary",
     "DEFAULT_SKILLS_ROOT",

@@ -491,6 +491,34 @@ async def test_workspace_cache_separates_roots_and_backends(fake_workspaces, bac
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("scan", [False, True])
+async def test_repository_discovery_validates_directories_in_both_branches(fake_workspaces, monkeypatch, scan):
+    from agent.modules.skills.package_io import WorkspacePackageIO
+
+    ref = WorkspaceRef(backend="modal", locator="sandbox", metadata={"root": "/repo"})
+    files = {f".agent/skills/{directory}/SKILL.md": _content(name=name)
+             for directory, name in [("demo", "demo"), ("Demo", "uppercase-dir"), ("my_skill", "underscore-dir")]}
+    fake_workspaces.files[fake_workspaces.key(ref)] = files
+    if scan:
+        original = workspaces.get_workspace_browser
+
+        async def browser(workspace, **kwargs):
+            result = await original(workspace, **kwargs)
+            result.tree_page = lambda *args, **kwargs: None
+            return result
+
+        async def operation(self, op, path):
+            assert op == "scan" and path == ".agent/skills"
+            return {"skills": [{"directory": str(Path(file).parent).replace("\\", "/"), "content": content}
+                               for file, content in files.items()]}
+
+        monkeypatch.setattr(workspaces, "get_workspace_browser", browser)
+        monkeypatch.setattr(WorkspacePackageIO, "operation", operation)
+    skills = await discovery.discover_repository_skills(workspace=ref, repository_dir=".agent/skills")
+    assert list(skills) == ["demo"]
+
+
+@pytest.mark.asyncio
 async def test_workspace_resources_use_backend_and_are_loaded_only_for_content(tmp_path, monkeypatch, fake_workspaces):
     monkeypatch.chdir(tmp_path)
     host = _create(tmp_path / ".agent" / "skills")
@@ -506,7 +534,7 @@ async def test_workspace_resources_use_backend_and_are_loaded_only_for_content(t
     kwargs = {"names": [], "workspace": ref, "repository_dir": ".agent/skills", "thread_id": "t1"}
     catalog = await service.catalog_xml(**kwargs)
     assert "<name>demo</name>" in catalog
-    assert [path for _, path in fake_workspaces.trees] == [".agent/skills"]
+    assert [path for _, path in fake_workspaces.trees] == [".agents/skills", ".agent/skills"]
     xml = await service.content_xml("demo", **kwargs)
     assert "Remote." in xml
     assert "scripts/nested/remote.py" in xml
@@ -545,7 +573,7 @@ async def test_recursive_workspace_resource_aliases_have_a_scan_limit(monkeypatc
             return {"entries": [{"kind": "directory", "name": name}]}
 
     assert await list_workspace_resources(Browser(), ".agent/skills/demo") == []
-    assert len(paths) == 5
+    assert len(paths) == 4
 
 
 @pytest.mark.asyncio

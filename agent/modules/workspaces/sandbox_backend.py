@@ -176,6 +176,29 @@ class SandboxBackendBase(ABC):
         remote_path = resolve_remote_path(self.root, file_path)
         return await self._write_text_impl(remote_path, content, append=append)
 
+    async def write_bytes(self, file_path: str, content: bytes) -> str:
+        import asyncio
+        import uuid
+        from agent.modules.workspaces.posix_utils import resolve_remote_path
+
+        remote_path = resolve_remote_path(self.root, file_path)
+        parent = remote_path.rsplit("/", 1)[0] or "/"
+        made = self._make_directory(parent)
+        if inspect.isawaitable(made):
+            await made
+        temporary = remote_path + "." + uuid.uuid4().hex + ".tmp"
+        await self.upload_coding_file(content, temporary)
+        result = await self.execute_coding_command("mv -f -- " + shlex.quote(temporary) + " " + shlex.quote(remote_path))
+        if result.exit_code not in (0, None):
+            raise OSError(f"Binary write failed: {result.output}")
+        self._invalidate_workspace_caches()
+        return f"[OK] Wrote file: {file_path}"
+
+    async def tree_page(self, path: str, *, offset: int = 0, limit: int = 500) -> dict[str, Any]:
+        from agent.modules.skills import WorkspacePackageIO
+
+        return await WorkspacePackageIO(self.ref).operation("tree", path, offset=offset, limit=limit)
+
     async def _write_text_impl(self, remote_path: str, content: str, *, append: bool) -> str:
         """Write *content* to *remote_path*, creating parent dirs as needed.
 

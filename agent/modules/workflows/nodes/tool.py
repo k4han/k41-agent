@@ -141,7 +141,7 @@ async def tool_node(
         if definition is None:
             continue
         try:
-            context = invocation_context(SimpleNamespace(context=runtime.context, config=next_config, tool_call_id=call["id"]))
+            context = invocation_context(SimpleNamespace(context=runtime.context, state=state, config=next_config, tool_call_id=call["id"]))
             service = get_coding_service()
             if not service.storage.journal_path(context).exists():
                 parsed = definition.input_schema.model_validate(call["args"])
@@ -157,5 +157,23 @@ async def tool_node(
                 SimpleNamespace(context=runtime.context, config=next_config),
             )
     result = await ToolNode(tools).ainvoke(state, config=next_config, runtime=runtime)
+    from agent.modules.skills import skill_events
+    from langgraph.types import Command
+
+    def messages_in(value):
+        if isinstance(value, Command):
+            return messages_in(value.update)
+        if isinstance(value, dict):
+            return value.get("messages", [])
+        if isinstance(value, list):
+            return [message for item in value for message in messages_in(item)]
+        return []
+
+    active = skill_events(messages_in(result), state.get("active_skills", {}))
+    if active != state.get("active_skills", {}):
+        if isinstance(result, dict):
+            result["active_skills"] = active
+        elif isinstance(result, list):
+            result.append(Command(update={"active_skills": active}))
     from agent.modules.tools import retain_tool_messages
     return await retain_tool_messages(result, SimpleNamespace(context=runtime.context, config=next_config))

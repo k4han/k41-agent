@@ -1,299 +1,365 @@
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
-import { Edit3, Eye, Plus, RefreshCw, Save, Trash2, X } from "lucide-solid";
-
-import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { DashboardTable } from "@/components/DashboardTable";
+import { Download, Folder, Plus, RefreshCw, Save, Upload } from "lucide-solid";
 import { Dialog } from "@/components/Dialog";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Markdown } from "@/components/Markdown";
-import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
-import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
-import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
 import {
-  parseSkillMarkdown,
-  serializeSkillMarkdown,
-  type ParsedSkill,
-  type SkillFrontmatter,
-} from "@/lib/skillMarkdown";
-import { truncateText } from "@/lib/utils";
-import type { SkillInfo, SkillsPayload } from "@/types";
-
+  WorkspaceSelector,
+  type WorkspaceSelectionDraft,
+} from "@/components/WorkspaceSelector";
+import {
+  apiFetch,
+  postJson,
+  putJson,
+  fetchWithCsrf,
+  readError,
+} from "@/lib/api";
+import type { WorkspaceRef } from "@/types";
 import { SettingsLayout } from "./SettingsLayout";
 
-type MetadataEntry = { key: string; value: string };
-
-type SkillForm = {
+type Diagnostic = { code?: string; message: string; severity: string };
+type Package = {
+  id: string;
   name: string;
   description: string;
-  license: string;
-  compatibility: string;
+  enabled: boolean;
+  shadowed: boolean;
+  source: { scope: string; root: string; directory: string };
+  diagnostics: Diagnostic[];
+};
+type Detail = Package & {
+  valid: boolean;
+  content: string;
+  file_version: string;
+  frontmatter: Record<string, unknown>;
   body: string;
-  allowedTools: string[];
-  metadata: MetadataEntry[];
-  resources: string[];
 };
-
-const repositoryDirKey = "skills.repository_dir";
-
-const blankForm = (): SkillForm => ({
-  name: "",
-  description: "",
-  license: "",
-  compatibility: "",
-  body: "",
-  allowedTools: [],
-  metadata: [],
-  resources: [],
-});
-
-const normalizeMetadata = (
-  raw: Record<string, string> | null | undefined,
-): MetadataEntry[] =>
-  Object.entries(raw ?? {})
-    .map(([key, value]) => ({ key, value: value ?? "" }))
-    .sort((a, b) => a.key.localeCompare(b.key));
-
-const parsedToForm = (parsed: ParsedSkill, resources: string[]): SkillForm => ({
-  name: parsed.frontmatter.name,
-  description: parsed.frontmatter.description,
-  license: parsed.frontmatter.license ?? "",
-  compatibility: parsed.frontmatter.compatibility ?? "",
-  body: parsed.body,
-  allowedTools: [...(parsed.frontmatter.allowed_tools ?? [])],
-  metadata: normalizeMetadata(parsed.frontmatter.metadata),
-  resources,
-});
-
-const formToFrontmatter = (form: SkillForm): SkillFrontmatter => {
-  const frontmatter: SkillFrontmatter = {
-    name: form.name,
-    description: form.description,
-  };
-  if (form.license.trim()) {
-    frontmatter.license = form.license;
-  }
-  if (form.compatibility.trim()) {
-    frontmatter.compatibility = form.compatibility;
-  }
-  const allowedTools = form.allowedTools.map((tool) => tool.trim()).filter(Boolean);
-  if (allowedTools.length > 0) {
-    frontmatter.allowed_tools = allowedTools;
-  }
-  const metadataEntries = form.metadata
-    .map((entry) => ({ key: entry.key.trim(), value: entry.value }))
-    .filter((entry) => entry.key.length > 0);
-  if (metadataEntries.length > 0) {
-    frontmatter.metadata = Object.fromEntries(
-      metadataEntries.map((entry) => [entry.key, entry.value]),
-    );
-  }
-  return frontmatter;
+type Entry = { path: string; name: string; kind: string; size: number };
+type FileDetail = {
+  path: string;
+  content: string | null;
+  version: string;
+  mime_type: string;
+  size: number;
 };
+type Preview = {
+  preview_id: string;
+  commit: string | null;
+  skills: {
+    name: string;
+    description: string;
+    conflict: boolean;
+    diagnostics: Diagnostic[];
+  }[];
+};
+const base = "/dashboard-api/skill-packages";
 
 export function SkillsPage() {
-  const [data, setData] = createSignal<SkillsPayload>();
-  const [error, setError] = createSignal("");
-  const [query, setQuery] = createSignal("");
-  const [modalMode, setModalMode] = createSignal<"create" | "edit" | "view" | null>(null);
-  const [currentName, setCurrentName] = createSignal("");
-  const [form, setForm] = createSignal<SkillForm>(blankForm());
-  const [allowedToolDraft, setAllowedToolDraft] = createSignal("");
-  const [deleteTargetName, setDeleteTargetName] = createSignal<string | null>(null);
-  const [repositoryDirDraft, setRepositoryDirDraft] = createSignal(".agent/skills");
-  const [busy, setBusy] = createSignal("");
   const { showToast } = useToast();
-
-  const load = async () => {
+  const [packages, setPackages] = createSignal<Package[]>([]);
+  const [scope, setScope] = createSignal("global");
+  const [workspace, setWorkspace] = createSignal<WorkspaceRef | null>(null);
+  const [defaultDirectory, setDefaultDirectory] = createSignal("");
+  const [search, setSearch] = createSignal("");
+  const [busy, setBusy] = createSignal(false);
+  const [error, setError] = createSignal("");
+  const [detail, setDetail] = createSignal<Detail | null>(null);
+  const [mode, setMode] = createSignal("form");
+  const [raw, setRaw] = createSignal("");
+  const [body, setBody] = createSignal("");
+  const [description, setDescription] = createSignal("");
+  const [compatibility, setCompatibility] = createSignal("");
+  const [metadata, setMetadata] = createSignal("{}");
+  const [diagnostics, setDiagnostics] = createSignal<Diagnostic[]>([]);
+  const [directory, setDirectory] = createSignal("");
+  const [entries, setEntries] = createSignal<Entry[]>([]);
+  const [nextOffset, setNextOffset] = createSignal<number | null>(null);
+  const [file, setFile] = createSignal<FileDetail | null>(null);
+  const [fileText, setFileText] = createSignal("");
+  const [entryPath, setEntryPath] = createSignal("");
+  const [renamePath, setRenamePath] = createSignal("");
+  const [packageName, setPackageName] = createSignal("");
+  const [deleteTarget, setDeleteTarget] = createSignal<Package | null>(null);
+  const [entryDeleteTarget, setEntryDeleteTarget] =
+    createSignal<FileDetail | null>(null);
+  const [createOpen, setCreateOpen] = createSignal(false);
+  const [newName, setNewName] = createSignal("my-skill");
+  const [newDocument, setNewDocument] = createSignal(
+    "---\nname: my-skill\ndescription: Describe when to use this skill.\n---\n# Instructions\n",
+  );
+  const [importOpen, setImportOpen] = createSignal(false);
+  const [importKind, setImportKind] = createSignal("zip");
+  const [importPath, setImportPath] = createSignal("");
+  const [importRef, setImportRef] = createSignal("HEAD");
+  const [subdirectory, setSubdirectory] = createSignal("");
+  const [installationId, setInstallationId] = createSignal("");
+  const [zipFile, setZipFile] = createSignal<File | null>(null);
+  const [preview, setPreview] = createSignal<Preview | null>(null);
+  const [overwrite, setOverwrite] = createSignal(false);
+  const [repositoryDirectory, setRepositoryDirectory] =
+    createSignal(".agent/skills");
+  const [additionalRoots, setAdditionalRoots] = createSignal("");
+  const [localExecutionMode, setLocalExecutionMode] = createSignal("snapshot");
+  const [cacheRoot, setCacheRoot] = createSignal("");
+  const query = () =>
+    workspace()
+      ? `workspace=${encodeURIComponent(JSON.stringify(workspace()))}`
+      : "";
+  const url = (path: string, extra = "") =>
+    `${base}${path}?${[query(), extra].filter(Boolean).join("&")}`;
+  const fileUrl = (path: string, download = false) =>
+    url(
+      `/${detail()!.id}/files/${path.split("/").map(encodeURIComponent).join("/")}`,
+      download ? "download=true" : "",
+    );
+  const shown = createMemo(() =>
+    packages().filter((item) =>
+      `${item.name} ${item.description} ${item.source.directory}`
+        .toLowerCase()
+        .includes(search().toLowerCase()),
+    ),
+  );
+  const execute = async (operation: () => Promise<void>) => {
+    setBusy(true);
     setError("");
     try {
-      const payload = await apiFetch<SkillsPayload>("/dashboard-api/skills");
-      setData(payload);
-      setRepositoryDirDraft(String(payload.settings[repositoryDirKey]?.value || ".agent/skills"));
+      await operation();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load skills");
-    }
-  };
-
-  const reload = async () => {
-    setBusy("reload");
-    try {
-      const payload = await postJson<SkillsPayload & { status: string }>("/dashboard-api/skills/reload");
-      setData(payload);
-      setRepositoryDirDraft(String(payload.settings[repositoryDirKey]?.value || ".agent/skills"));
-      showToast("Skills reloaded.");
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to reload skills", "error");
+      const message =
+        err instanceof Error ? err.message : "Skill operation failed";
+      setError(message);
+      showToast(message, "error");
     } finally {
-      setBusy("");
+      setBusy(false);
     }
   };
-
-  const filteredSkills = createMemo(() => {
-    const payload = data();
-    if (!payload) {
-      return [];
-    }
-    const needle = query().trim().toLowerCase();
-    if (!needle) {
-      return payload.skills;
-    }
-    return payload.skills.filter((skill) =>
-      [skill.name, skill.description, skill.path, ...(skill.resources || [])]
-        .join(" ")
-        .toLowerCase()
-        .includes(needle),
-    );
-  });
-
-  const updateForm = <K extends keyof SkillForm>(key: K, value: SkillForm[K]) => {
-    setForm((current) => ({ ...current, [key]: value }));
-  };
-
-  const openCreate = () => {
-    setCurrentName("");
-    setForm(blankForm());
-    setAllowedToolDraft("");
-    setModalMode("create");
-  };
-
-  const openSkill = async (skill: SkillInfo, mode: "edit" | "view") => {
-    try {
-      const detail = await apiFetch<{ skill: SkillInfo }>(
-        `/dashboard-api/skills/${encodeURIComponent(skill.name)}`,
-      );
-      const content = detail.skill.content || "";
-      const parsed = parseSkillMarkdown(content);
-      setCurrentName(detail.skill.name);
-      setForm(parsedToForm(parsed, detail.skill.resources || []));
-      setAllowedToolDraft("");
-      setModalMode(mode);
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to load skill", "error");
-    }
-  };
-
-  const closeModal = () => {
-    setModalMode(null);
-    setAllowedToolDraft("");
-  };
-
-  const addAllowedTool = () => {
-    const raw = allowedToolDraft().trim();
-    if (!raw) {
-      return;
-    }
-    const current = form().allowedTools;
-    if (current.includes(raw)) {
-      setAllowedToolDraft("");
-      return;
-    }
-    updateForm("allowedTools", [...current, raw]);
-    setAllowedToolDraft("");
-  };
-
-  const removeAllowedTool = (tool: string) => {
-    updateForm(
-      "allowedTools",
-      form().allowedTools.filter((entry) => entry !== tool),
+  const load = async () => {
+    setPackages(
+      (await apiFetch<{ packages: Package[] }>(url("", `scope=${scope()}`)))
+        .packages,
     );
   };
-
-  const addMetadataEntry = () => {
-    updateForm("metadata", [...form().metadata, { key: "", value: "" }]);
-  };
-
-  const updateMetadataEntry = (index: number, patch: Partial<MetadataEntry>) => {
-    updateForm(
-      "metadata",
-      form().metadata.map((entry, idx) => (idx === index ? { ...entry, ...patch } : entry)),
-    );
-  };
-
-  const removeMetadataEntry = (index: number) => {
-    updateForm(
-      "metadata",
-      form().metadata.filter((_, idx) => idx !== index),
-    );
-  };
-
-  const saveSkill = async () => {
-    const current = form();
-    if (!current.name.trim()) {
-      showToast("Skill name is required.", "error");
-      return;
-    }
-    if (!current.description.trim()) {
-      showToast("Description is required.", "error");
-      return;
-    }
-    if (!current.body.trim()) {
-      showToast("Instructions (body) are required.", "error");
-      return;
-    }
-
-    const frontmatter = formToFrontmatter(current);
-    const content = serializeSkillMarkdown(frontmatter, current.body);
-    const payload = {
-      name: current.name.trim(),
-      content,
-    };
-
-    setBusy("skill");
-    try {
-      if (modalMode() === "create") {
-        await postJson("/dashboard-api/skills", payload);
-        showToast("Skill created.");
-      } else {
-        await putJson(`/dashboard-api/skills/${encodeURIComponent(currentName())}`, payload);
-        showToast("Skill updated.");
-      }
-      closeModal();
-      await load();
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to save skill", "error");
-    } finally {
-      setBusy("");
-    }
-  };
-
-  const saveRepositoryDir = async () => {
-    setBusy("setting");
-    try {
-      await putJson("/settings", {
-        values: {
-          [repositoryDirKey]: repositoryDirDraft(),
-        },
+  const selectWorkspace = async (draft: WorkspaceSelectionDraft) =>
+    execute(async () => {
+      const response = await postJson<{
+        workspace: { execution: WorkspaceRef };
+      }>("/dashboard-api/workspace/resolve", {
+        kind: draft.source === "github" ? "github" : draft.backend,
+        backend: draft.backend,
+        locator: draft.source === "sandbox" ? draft.sandboxId : draft.localPath,
+        repository_id: draft.repositoryId,
       });
-      showToast("Repository skill directory saved.");
+      setWorkspace(response.workspace.execution);
       await load();
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to save setting", "error");
-    } finally {
-      setBusy("");
-    }
+    });
+  const browse = async (path: string, offset = 0) => {
+    const response = await apiFetch<{
+      entries: Entry[];
+      next_offset: number | null;
+    }>(
+      url(
+        `/${detail()!.id}/files`,
+        `path=${encodeURIComponent(path)}&offset=${offset}`,
+      ),
+    );
+    setDirectory(path);
+    setEntries(offset ? [...entries(), ...response.entries] : response.entries);
+    setNextOffset(response.next_offset);
   };
-
-  const confirmDeleteSkill = async () => {
-    const name = deleteTargetName();
-    if (!name) {
-      return;
-    }
-    setBusy("delete");
-    try {
-      await deleteJson(`/dashboard-api/skills/${encodeURIComponent(name)}`);
-      showToast("Skill deleted.");
+  const open = async (item: Package) =>
+    execute(async () => {
+      const current = (await apiFetch<{ package: Detail }>(url(`/${item.id}`)))
+        .package;
+      setDetail(current);
+      setMode(current.valid === false ? "raw" : "form");
+      setRaw(current.content);
+      setBody(current.body);
+      setDescription(String(current.frontmatter.description || ""));
+      setCompatibility(String(current.frontmatter.compatibility || ""));
+      setMetadata(JSON.stringify(current.frontmatter.metadata || {}, null, 2));
+      setDiagnostics(current.diagnostics);
+      setPackageName(item.name);
+      setFile(null);
+      await browse("");
+    });
+  const openFile = async (entry: Entry) =>
+    execute(async () => {
+      if (entry.kind === "directory") {
+        await browse(entry.path);
+        setFile(null);
+        return;
+      }
+      const current = await apiFetch<FileDetail>(fileUrl(entry.path));
+      setFile(current);
+      setFileText(current.content || "");
+      setRenamePath(entry.path);
+    });
+  const writeFile = async (path: string, data: BodyInit, version?: string) => {
+    const response = await fetchWithCsrf(fileUrl(path), {
+      method: "PUT",
+      headers: version ? { "If-Match": version } : {},
+      body: data,
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    await browse(directory());
+  };
+  const mutateFile = async (
+    action: string,
+    path: string,
+    destination = "",
+    version?: string,
+  ) => {
+    await postJson(url(`/${detail()!.id}/files`), {
+      action,
+      path,
+      destination,
+      expected_version: version,
+    });
+    await browse(directory());
+  };
+  const saveDocument = async () =>
+    execute(async () => {
+      const current = detail()!;
+      if (mode() === "raw") {
+        const validation = await postJson<{
+          valid: boolean;
+          diagnostics: Diagnostic[];
+        }>(`${base}/validate`, {
+          content: raw(),
+          name: current.diagnostics.some(
+            (item) =>
+              item.code === "invalid_name" || item.code === "invalid_document",
+          )
+            ? undefined
+            : current.name,
+          strict: true,
+        });
+        setDiagnostics(validation.diagnostics);
+        if (!validation.valid)
+          throw new Error(
+            validation.diagnostics[0]?.message || "Invalid document",
+          );
+        await writeFile("SKILL.md", raw(), current.file_version);
+      } else
+        await putJson(url(`/${current.id}/document`), {
+          expected_version: current.file_version,
+          frontmatter: {
+            ...current.frontmatter,
+            description: description(),
+            compatibility: compatibility(),
+            metadata: JSON.parse(metadata()),
+          },
+          body: body(),
+        });
+      const updated = (
+        await apiFetch<{ package: Detail }>(url(`/${current.id}`))
+      ).package;
+      setDetail(updated);
+      setRaw(updated.content);
+      setDiagnostics(updated.diagnostics);
       await load();
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to delete skill", "error");
-    } finally {
-      setBusy("");
-      setDeleteTargetName(null);
-    }
-  };
-
-  onMount(load);
-
-  const isReadOnly = () => modalMode() === "view";
+      showToast("Skill document saved.");
+    });
+  const switchMode = async (next: string) =>
+    execute(async () => {
+      if (mode() === "form") {
+        const rendered = await postJson<{ content: string }>(`${base}/render`, {
+          content: raw(),
+          frontmatter: {
+            description: description(),
+            compatibility: compatibility(),
+            metadata: JSON.parse(metadata()),
+          },
+          body: body(),
+        });
+        setRaw(rendered.content);
+      } else if (mode() === "raw") {
+        const parsed = await postJson<{
+          valid: boolean;
+          frontmatter: Record<string, unknown>;
+          body: string;
+          diagnostics: Diagnostic[];
+        }>(`${base}/validate`, { content: raw(), name: detail()!.name });
+        setDiagnostics(parsed.diagnostics);
+        if (!parsed.valid)
+          throw new Error(parsed.diagnostics[0]?.message || "Invalid document");
+        setDescription(String(parsed.frontmatter.description || ""));
+        setCompatibility(String(parsed.frontmatter.compatibility || ""));
+        setMetadata(JSON.stringify(parsed.frontmatter.metadata || {}, null, 2));
+        setBody(parsed.body);
+        setDetail({
+          ...detail()!,
+          content: raw(),
+          frontmatter: parsed.frontmatter,
+          body: parsed.body,
+        });
+      }
+      setMode(next);
+    });
+  const previewImport = async () =>
+    execute(async () => {
+      const options = {
+        kind: importKind(),
+        path: importPath(),
+        url: importPath(),
+        ref: importRef(),
+        subdirectory: subdirectory(),
+        installation_id: installationId() ? Number(installationId()) : null,
+        scope: scope(),
+        workspace: workspace(),
+      };
+      if (importKind() === "zip") {
+        if (!zipFile()) throw new Error("Choose a ZIP file.");
+        const form = new FormData();
+        form.set("file", zipFile()!);
+        form.set("options", JSON.stringify(options));
+        setPreview(
+          await apiFetch<Preview>(`${base}/imports/preview`, {
+            method: "POST",
+            body: form,
+          }),
+        );
+      } else
+        setPreview(await postJson<Preview>(`${base}/imports/preview`, options));
+    });
+  onMount(
+    () =>
+      void execute(async () => {
+        const defaults = await apiFetch<{
+          workspace: { execution: WorkspaceRef } | null;
+        }>("/dashboard-api/workspace/default");
+        if (defaults.workspace?.execution) {
+          setWorkspace(defaults.workspace.execution);
+          setDefaultDirectory(defaults.workspace.execution.locator);
+        }
+        const settings = await apiFetch<{
+          settings: Record<string, { value: unknown }>;
+        }>("/dashboard-api/skills");
+        setRepositoryDirectory(
+          String(
+            settings.settings["skills.repository_dir"]?.value ||
+              ".agent/skills",
+          ),
+        );
+        setAdditionalRoots(
+          (
+            (settings.settings["skills.additional_roots"]?.value ||
+              []) as string[]
+          ).join("\n"),
+        );
+        setLocalExecutionMode(
+          String(
+            settings.settings["skills.local_execution_mode"]?.value ||
+              "snapshot",
+          ),
+        );
+        setCacheRoot(
+          String(settings.settings["skills.cache_root"]?.value || ""),
+        );
+        await load();
+      }),
+  );
 
   return (
     <SettingsLayout
@@ -301,389 +367,827 @@ export function SkillsPage() {
       breadcrumbLabel="Skills"
       contentWidth="wide"
       actions={
-        <button class="btn" type="button" disabled={busy() === "reload"} onClick={reload}>
-          <RefreshCw size={14} />
-          {busy() === "reload" ? "Reloading..." : "Reload"}
+        <button
+          class="btn"
+          disabled={busy()}
+          onClick={() => void execute(load)}
+        >
+          <RefreshCw size={14} /> Reload
         </button>
       }
     >
-      <DataGate data={data()} error={error()} onRetry={load}>
-        {(payload) => (
-          <div class="stack">
-            <section class="panel">
-              <div class="panel-header">
-                <div class="panel-title">Repository-local skills</div>
-              </div>
-              <div class="panel-body">
-                <div class="field">
-                  <label>Repository skills directory</label>
-                  <input
-                    class="input mono"
-                    value={repositoryDirDraft()}
-                    onInput={(event) => setRepositoryDirDraft(event.currentTarget.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        void saveRepositoryDir();
-                      }
-                    }}
-                  />
-                  <span class="hint">Relative path inside each repository. Repo-local skills override global skills with the same name.</span>
-                  <div class="row" style={{ "justify-content": "flex-end", "margin-top": "4px" }}>
+      <div class="stack">
+        <Show when={error()}>
+          <div class="panel" role="alert">
+            {error()}
+          </div>
+        </Show>
+        <section class="panel">
+          <div class="panel-body stack">
+            <div class="row-wrap">
+              <select
+                aria-label="Skill scope"
+                value={scope()}
+                disabled={busy()}
+                onChange={(event) => {
+                  setScope(event.currentTarget.value);
+                  void execute(load);
+                }}
+              >
+                <option value="global">Shared skills</option>
+                <option value="project">Workspace skills</option>
+              </select>
+              <Show when={scope() === "project"}>
+                <WorkspaceSelector
+                  workingDir={workspace()?.locator || ""}
+                  defaultWorkingDir={defaultDirectory()}
+                  workspace={workspace()}
+                  locked={false}
+                  disabled={busy()}
+                  onSelectionChange={(draft) => void selectWorkspace(draft)}
+                />
+              </Show>
+              <input
+                aria-label="Search skills"
+                placeholder="Search skills"
+                value={search()}
+                onInput={(event) => setSearch(event.currentTarget.value)}
+              />
+              <button
+                class="btn primary"
+                disabled={busy()}
+                onClick={() => setCreateOpen(true)}
+              >
+                <Plus size={14} /> New skill
+              </button>
+              <button
+                class="btn"
+                disabled={busy()}
+                onClick={() => {
+                  setPreview(null);
+                  setOverwrite(false);
+                  setImportOpen(true);
+                }}
+              >
+                <Upload size={14} /> Import
+              </button>
+            </div>
+            <span class="hint">
+              Workspace skills take precedence. Activate skills from chat or
+              with /skill name.
+            </span>
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-body stack">
+            <div class="field">
+              <label>Repository skills directory</label>
+              <input
+                value={repositoryDirectory()}
+                disabled={busy()}
+                onInput={(event) =>
+                  setRepositoryDirectory(event.currentTarget.value)
+                }
+              />
+            </div>
+            <div class="field">
+              <label>Additional shared skill directories</label>
+              <textarea
+                rows={2}
+                disabled={busy()}
+                value={additionalRoots()}
+                onInput={(event) =>
+                  setAdditionalRoots(event.currentTarget.value)
+                }
+                placeholder="One directory per line"
+              />
+            </div>
+            <div class="field">
+              <label for="local-skill-execution">Local execution</label>
+              <select
+                id="local-skill-execution"
+                disabled={busy()}
+                value={localExecutionMode()}
+                onChange={(event) =>
+                  setLocalExecutionMode(event.currentTarget.value)
+                }
+              >
+                <option value="snapshot">
+                  Shared snapshot (pinned version)
+                </option>
+                <option value="source">Source (live local files)</option>
+              </select>
+              <span class="hint">
+                Source mode avoids a copy. Packages with Python or Node project
+                manifests still use a snapshot for dependency installation.
+                Refresh a source skill after changing its files.
+              </span>
+            </div>
+            <div class="field">
+              <label for="skill-cache-root">
+                Local execution cache directory
+              </label>
+              <input
+                id="skill-cache-root"
+                disabled={busy()}
+                value={cacheRoot()}
+                onInput={(event) => setCacheRoot(event.currentTarget.value)}
+                placeholder="Automatic short directory in the managed user folder"
+              />
+            </div>
+            <button
+              class="btn"
+              disabled={busy()}
+              onClick={() =>
+                void execute(async () => {
+                  await putJson("/settings", {
+                    values: {
+                      "skills.repository_dir": repositoryDirectory(),
+                      "skills.local_execution_mode": localExecutionMode(),
+                      "skills.cache_root": cacheRoot(),
+                      "skills.additional_roots": additionalRoots()
+                        .split("\n")
+                        .map((value) => value.trim())
+                        .filter(Boolean),
+                    },
+                  });
+                  await load();
+                  showToast("Sources saved.");
+                })
+              }
+            >
+              Save sources
+            </button>
+          </div>
+        </section>
+        <Show
+          when={shown().length}
+          fallback={
+            <div class="panel">
+              <div class="panel-body">No skills found in this scope.</div>
+            </div>
+          }
+        >
+          <For each={shown()}>
+            {(item) => (
+              <section class="panel">
+                <div class="panel-body stack">
+                  <div class="row-wrap">
+                    <strong>{item.name}</strong>
+                    <span class="badge">{item.source.scope}</span>
+                    <Show when={item.shadowed}>
+                      <span class="badge">Shadowed</span>
+                    </Show>
+                    <Show when={!item.enabled}>
+                      <span class="badge">Disabled or invalid</span>
+                    </Show>
+                  </div>
+                  <p>{item.description}</p>
+                  <span class="hint mono">
+                    {item.source.root}/{item.source.directory}
+                  </span>
+                  <For each={item.diagnostics}>
+                    {(diagnostic) => (
+                      <span class="hint">{diagnostic.message}</span>
+                    )}
+                  </For>
+                  <div class="row-wrap">
                     <button
-                      class="btn btn-primary"
-                      type="button"
-                      disabled={busy() === "setting"}
-                      onClick={() => void saveRepositoryDir()}
+                      class="btn"
+                      disabled={busy()}
+                      onClick={() => void open(item)}
                     >
-                      <Save size={14} />
-                      {busy() === "setting" ? "Saving..." : "Save"}
+                      Open package
+                    </button>
+                    <button
+                      class="btn"
+                      disabled={busy()}
+                      onClick={() =>
+                        void execute(async () => {
+                          await apiFetch(url(`/${item.id}`), {
+                            method: "PATCH",
+                            json: { enabled: !item.enabled },
+                          });
+                          await load();
+                        })
+                      }
+                    >
+                      {item.enabled ? "Disable" : "Enable"}
+                    </button>
+                    <a class="btn" href={url(`/${item.id}/export`)}>
+                      <Download size={14} /> Export ZIP
+                    </a>
+                    <button
+                      class="btn danger"
+                      disabled={busy()}
+                      onClick={() => setDeleteTarget(item)}
+                    >
+                      Delete package
                     </button>
                   </div>
                 </div>
-              </div>
-            </section>
-
-            <SettingsResourceToolbar
-              searchValue={query()}
-              searchPlaceholder="Search skills..."
-              onSearchInput={setQuery}
-              actions={
-                <button class="btn btn-primary" type="button" onClick={openCreate}>
-                  <Plus size={14} />
-                  New Skill
+              </section>
+            )}
+          </For>
+        </Show>
+      </div>
+      <Dialog
+        open={detail() !== null}
+        title={detail()?.name || "Skill package"}
+        size="xl"
+        onClose={() => setDetail(null)}
+      >
+        <Show when={detail()}>
+          {(current) => (
+            <div class="stack">
+              <div class="row-wrap">
+                <input
+                  aria-label="Package name"
+                  value={packageName()}
+                  onInput={(event) => setPackageName(event.currentTarget.value)}
+                />
+                <button
+                  class="btn"
+                  disabled={busy() || packageName() === current().name}
+                  onClick={() =>
+                    void execute(async () => {
+                      await apiFetch(url(`/${current().id}`), {
+                        method: "PATCH",
+                        json: {
+                          name: packageName(),
+                          expected_version: current().file_version,
+                        },
+                      });
+                      setDetail(null);
+                      await load();
+                    })
+                  }
+                >
+                  Rename package
                 </button>
-              }
-            />
-
-            <section class="panel">
-              <DashboardTable
-                columns={[
-                  { header: "Skill" },
-                  { header: "Description" },
-                  { header: "Resources" },
-                  { header: "Actions" },
-                ]}
-                rows={filteredSkills()}
-                emptyMessage="No skills found."
+              </div>
+              <div class="row-wrap">
+                <button
+                  class="btn"
+                  disabled={busy()}
+                  onClick={() => void switchMode("form")}
+                >
+                  Form
+                </button>
+                <button
+                  class="btn"
+                  disabled={busy()}
+                  onClick={() => void switchMode("raw")}
+                >
+                  SKILL.md source
+                </button>
+                <button
+                  class="btn"
+                  disabled={busy()}
+                  onClick={() => void switchMode("preview")}
+                >
+                  Preview
+                </button>
+              </div>
+              <Show when={mode() === "form"}>
+                <div class="stack">
+                  <div class="field">
+                    <label>Description</label>
+                    <textarea
+                      rows={2}
+                      value={description()}
+                      onInput={(event) =>
+                        setDescription(event.currentTarget.value)
+                      }
+                    />
+                  </div>
+                  <div class="field">
+                    <label>Compatibility</label>
+                    <input
+                      value={compatibility()}
+                      onInput={(event) =>
+                        setCompatibility(event.currentTarget.value)
+                      }
+                    />
+                  </div>
+                  <div class="field">
+                    <label>Metadata (JSON)</label>
+                    <textarea
+                      class="mono"
+                      rows={3}
+                      value={metadata()}
+                      onInput={(event) =>
+                        setMetadata(event.currentTarget.value)
+                      }
+                    />
+                  </div>
+                  <div class="field">
+                    <label>Instructions</label>
+                    <textarea
+                      class="mono"
+                      rows={10}
+                      value={body()}
+                      onInput={(event) => setBody(event.currentTarget.value)}
+                    />
+                  </div>
+                  <span class="hint">
+                    Other fields are preserved. Edit source to change license,
+                    allowed-tools or custom fields.
+                  </span>
+                </div>
+              </Show>
+              <Show when={mode() === "raw"}>
+                <textarea
+                  aria-label="SKILL.md source"
+                  class="mono"
+                  rows={16}
+                  value={raw()}
+                  onInput={(event) => setRaw(event.currentTarget.value)}
+                />
+              </Show>
+              <Show when={mode() === "preview"}>
+                <Markdown text={body()} />
+              </Show>
+              <For each={diagnostics()}>
+                {(diagnostic) => <span class="hint">{diagnostic.message}</span>}
+              </For>
+              <button
+                class="btn primary"
+                disabled={busy() || mode() === "preview"}
+                onClick={() => void saveDocument()}
               >
-                {(skill) => (
-                  <tr>
-                    <td>
-                      <div class="mono">{skill.name}</div>
-                      <div class="hint">{skill.path}</div>
-                    </td>
-                    <td>
-                      <Show
-                        when={skill.description}
-                        fallback={<span class="hint">-</span>}
-                      >
-                        {(description) => (
-                          <div class="hint">{truncateText(description(), 180)}</div>
-                        )}
+                <Save size={14} /> Save SKILL.md
+              </button>
+              <hr />
+              <div class="row-wrap">
+                <strong>Package files</strong>
+                <span class="mono">/{directory()}</span>
+                <button
+                  class="btn"
+                  disabled={busy() || !directory()}
+                  onClick={() =>
+                    void execute(() =>
+                      browse(directory().split("/").slice(0, -1).join("/")),
+                    )
+                  }
+                >
+                  Parent directory
+                </button>
+              </div>
+              <For each={entries()}>
+                {(entry) => (
+                  <div class="row-wrap">
+                    <button class="btn" onClick={() => void openFile(entry)}>
+                      <Show when={entry.kind === "directory"}>
+                        <Folder size={14} />
                       </Show>
-                    </td>
-                    <td>
-                      <span class="badge">{skill.resources?.length || 0} files</span>
-                    </td>
-                    <td>
-                      <div class="row-wrap">
-                        <button class="btn btn-sm" type="button" onClick={() => void openSkill(skill, "view")}>
-                          <Eye size={13} />
-                          View
+                      {entry.name}
+                    </button>
+                    <span class="hint">
+                      {entry.kind === "file"
+                        ? `${entry.size} bytes`
+                        : "Directory"}
+                    </span>
+                    <Show when={entry.kind === "directory"}>
+                      <button
+                        class="btn"
+                        disabled={busy()}
+                        onClick={() => {
+                          setFile({
+                            path: entry.path,
+                            content: null,
+                            version: "",
+                            mime_type: "directory",
+                            size: 0,
+                          });
+                          setRenamePath(entry.path);
+                        }}
+                      >
+                        Manage
+                      </button>
+                    </Show>
+                  </div>
+                )}
+              </For>
+              <Show when={nextOffset() !== null}>
+                <button
+                  class="btn"
+                  disabled={busy()}
+                  onClick={() =>
+                    void execute(() => browse(directory(), nextOffset()!))
+                  }
+                >
+                  Load more files
+                </button>
+              </Show>
+              <div class="row-wrap">
+                <input
+                  aria-label="New file or directory path"
+                  placeholder="Relative file or directory path"
+                  value={entryPath()}
+                  onInput={(event) => setEntryPath(event.currentTarget.value)}
+                />
+                <button
+                  class="btn"
+                  disabled={busy() || !entryPath()}
+                  onClick={() =>
+                    void execute(() => mutateFile("mkdir", entryPath()))
+                  }
+                >
+                  Create directory
+                </button>
+                <button
+                  class="btn"
+                  disabled={busy() || !entryPath()}
+                  onClick={() =>
+                    void execute(async () => {
+                      await writeFile(entryPath(), "");
+                      setEntryPath("");
+                    })
+                  }
+                >
+                  Create text file
+                </button>
+                <label class="btn">
+                  Upload file
+                  <input
+                    type="file"
+                    hidden
+                    disabled={busy()}
+                    onChange={(event) => {
+                      const upload = event.currentTarget.files?.[0];
+                      if (upload)
+                        void execute(async () => {
+                          const path = [directory(), upload.name]
+                            .filter(Boolean)
+                            .join("/");
+                          if (entries().some((entry) => entry.path === path))
+                            throw new Error(
+                              "Open the existing file to replace it with a version check.",
+                            );
+                          await writeFile(path, upload);
+                        });
+                      event.currentTarget.value = "";
+                    }}
+                  />
+                </label>
+              </div>
+              <Show when={file()}>
+                {(selected) => (
+                  <div class="panel">
+                    <div class="panel-body stack">
+                      <strong class="mono">{selected().path}</strong>
+                      <Show when={selected().content !== null}>
+                        <textarea
+                          aria-label="Resource content"
+                          class="mono"
+                          rows={10}
+                          value={fileText()}
+                          onInput={(event) =>
+                            setFileText(event.currentTarget.value)
+                          }
+                        />
+                        <button
+                          class="btn"
+                          disabled={busy()}
+                          onClick={() =>
+                            void execute(async () => {
+                              await writeFile(
+                                selected().path,
+                                fileText(),
+                                selected().version,
+                              );
+                              setFile(
+                                await apiFetch<FileDetail>(
+                                  fileUrl(selected().path),
+                                ),
+                              );
+                              showToast("File saved.");
+                            })
+                          }
+                        >
+                          Save file
                         </button>
-                        <button class="btn btn-sm" type="button" onClick={() => void openSkill(skill, "edit")}>
-                          <Edit3 size={13} />
-                          Edit
+                      </Show>
+                      <Show when={selected().mime_type.startsWith("image/")}>
+                        <img
+                          alt={selected().path}
+                          src={fileUrl(selected().path, true)}
+                          style={{
+                            "max-width": "100%",
+                            "max-height": "360px",
+                            "object-fit": "contain",
+                          }}
+                        />
+                      </Show>
+                      <Show
+                        when={
+                          selected().content === null &&
+                          selected().mime_type !== "directory"
+                        }
+                      >
+                        <span class="hint">
+                          Binary or large resource. Download it or process it
+                          using the skill scripts.
+                        </span>
+                      </Show>
+                      <Show when={selected().mime_type !== "directory"}>
+                        <a class="btn" href={fileUrl(selected().path, true)}>
+                          Download file
+                        </a>
+                        <label class="btn">
+                          Replace file
+                          <input
+                            type="file"
+                            hidden
+                            disabled={busy()}
+                            onChange={(event) => {
+                              const upload = event.currentTarget.files?.[0];
+                              if (upload)
+                                void execute(async () => {
+                                  await writeFile(
+                                    selected().path,
+                                    upload,
+                                    selected().version,
+                                  );
+                                  const updated = await apiFetch<FileDetail>(
+                                    fileUrl(selected().path),
+                                  );
+                                  setFile(updated);
+                                  setFileText(updated.content || "");
+                                });
+                            }}
+                          />
+                        </label>
+                      </Show>
+                      <div class="row-wrap">
+                        <input
+                          aria-label="Rename resource path"
+                          value={renamePath()}
+                          onInput={(event) =>
+                            setRenamePath(event.currentTarget.value)
+                          }
+                        />
+                        <button
+                          class="btn"
+                          disabled={busy() || renamePath() === selected().path}
+                          onClick={() =>
+                            void execute(async () => {
+                              await mutateFile(
+                                "rename",
+                                selected().path,
+                                renamePath(),
+                                selected().version || undefined,
+                              );
+                              setFile(null);
+                            })
+                          }
+                        >
+                          Rename
                         </button>
                         <button
-                          class="btn btn-sm btn-danger"
-                          type="button"
-                          onClick={() => setDeleteTargetName(skill.name)}
+                          class="btn danger"
+                          disabled={busy()}
+                          onClick={() => setEntryDeleteTarget(selected())}
                         >
-                          <Trash2 size={13} />
                           Delete
                         </button>
                       </div>
-                    </td>
-                  </tr>
-                )}
-              </DashboardTable>
-            </section>
-
-            <Dialog
-              open={modalMode() !== null}
-              title={
-                modalMode() === "create"
-                  ? "New Skill"
-                  : modalMode() === "edit"
-                    ? `Edit ${currentName()}`
-                    : `View ${currentName()}`
-              }
-              wide
-              onClose={closeModal}
-              footer={
-                <>
-                  <button class="btn" type="button" onClick={closeModal}>
-                    Close
-                  </button>
-                  <Show when={!isReadOnly()}>
-                    <button
-                      class="btn btn-primary"
-                      type="button"
-                      disabled={busy() === "skill"}
-                      onClick={saveSkill}
-                    >
-                      {busy() === "skill" ? "Saving..." : "Save"}
-                    </button>
-                  </Show>
-                </>
-              }
-            >
-              <div class="stack">
-                <div class="grid-2">
-                  <div class="field">
-                    <label>Name</label>
-                    <input
-                      class="input mono"
-                      value={form().name}
-                      disabled={isReadOnly()}
-                      placeholder="my-skill"
-                      onInput={(event) => updateForm("name", event.currentTarget.value)}
-                    />
-                    <span class="hint">Lowercase letters, numbers, and single hyphens (1-64 chars).</span>
-                  </div>
-                  <div class="field">
-                    <label>Description</label>
-                    <input
-                      class="input"
-                      value={form().description}
-                      disabled={isReadOnly()}
-                      placeholder="Describe when this skill should be used."
-                      onInput={(event) => updateForm("description", event.currentTarget.value)}
-                    />
-                    <span class="hint">Shown in the skill catalog so the LLM can decide when to load it.</span>
-                  </div>
-                </div>
-
-                <div class="grid-2">
-                  <div class="field">
-                    <label>License <span class="hint">(optional)</span></label>
-                    <input
-                      class="input"
-                      value={form().license}
-                      disabled={isReadOnly()}
-                      placeholder="MIT"
-                      onInput={(event) => updateForm("license", event.currentTarget.value)}
-                    />
-                  </div>
-                  <div class="field">
-                    <label>Compatibility <span class="hint">(optional)</span></label>
-                    <input
-                      class="input"
-                      value={form().compatibility}
-                      disabled={isReadOnly()}
-                      placeholder=">=1.0"
-                      onInput={(event) => updateForm("compatibility", event.currentTarget.value)}
-                    />
-                  </div>
-                </div>
-
-                <div class="field">
-                  <label>Allowed tools <span class="hint">(optional)</span></label>
-                  <Show
-                    when={!isReadOnly()}
-                    fallback={
-                      <Show
-                        when={form().allowedTools.length > 0}
-                        fallback={<span class="hint">No tools declared.</span>}
-                      >
-                        <div class="chips">
-                          <For each={form().allowedTools}>
-                            {(tool) => <span class="chip">{tool}</span>}
-                          </For>
-                        </div>
-                      </Show>
-                    }
-                  >
-                    <div class="row-wrap">
-                      <Show when={form().allowedTools.length > 0}>
-                        <div class="chips">
-                          <For each={form().allowedTools}>
-                            {(tool) => (
-                              <span class="chip" style={{ display: "inline-flex", gap: "4px", "align-items": "center" }}>
-                                {tool}
-                                <button
-                                  class="btn btn-icon btn-sm"
-                                  type="button"
-                                  style={{ "min-height": "18px", height: "18px", width: "18px", padding: "0", border: "0", background: "transparent", color: "var(--muted)" }}
-                                  aria-label={`Remove ${tool}`}
-                                  onClick={() => removeAllowedTool(tool)}
-                                >
-                                  <X size={11} />
-                                </button>
-                              </span>
-                            )}
-                          </For>
-                        </div>
-                      </Show>
-                      <input
-                        class="input mono"
-                        style={{ "max-width": "260px" }}
-                        placeholder="Type a tool name and press Enter"
-                        value={allowedToolDraft()}
-                        onInput={(event) => setAllowedToolDraft(event.currentTarget.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === ",") {
-                            event.preventDefault();
-                            addAllowedTool();
-                          } else if (event.key === "Backspace" && allowedToolDraft() === "" && form().allowedTools.length > 0) {
-                            const next = [...form().allowedTools];
-                            next.pop();
-                            updateForm("allowedTools", next);
-                          }
-                        }}
-                      />
-                      <button
-                        class="btn btn-sm"
-                        type="button"
-                        disabled={!allowedToolDraft().trim()}
-                        onClick={addAllowedTool}
-                      >
-                        <Plus size={12} />
-                        Add
-                      </button>
                     </div>
-                    <span class="hint">Tools the skill may invoke. Press Enter or comma to add.</span>
-                  </Show>
-                </div>
-
-                <div class="field">
-                  <label>Metadata <span class="hint">(optional)</span></label>
-                  <Show
-                    when={!isReadOnly()}
-                    fallback={
-                      <Show
-                        when={form().metadata.length > 0}
-                        fallback={<span class="hint">No metadata.</span>}
-                      >
-                        <div class="stack" style={{ gap: "6px" }}>
-                          <For each={form().metadata}>
-                            {(entry) => (
-                              <div class="row" style={{ gap: "8px" }}>
-                                <span class="mono" style={{ "min-width": "120px" }}>{entry.key}</span>
-                                <span class="hint">{entry.value || "(empty)"}</span>
-                              </div>
-                            )}
-                          </For>
-                        </div>
-                      </Show>
-                    }
-                  >
-                    <Show
-                      when={form().metadata.length > 0}
-                      fallback={<div class="hint" style={{ "margin-bottom": "6px" }}>No metadata entries yet.</div>}
-                    >
-                      <div class="stack" style={{ gap: "6px" }}>
-                        <For each={form().metadata}>
-                          {(entry, index) => (
-                            <div class="row" style={{ gap: "6px" }}>
-                              <input
-                                class="input mono"
-                                style={{ "max-width": "220px" }}
-                                placeholder="key"
-                                value={entry.key}
-                                onInput={(event) =>
-                                  updateMetadataEntry(index(), { key: event.currentTarget.value })
-                                }
-                              />
-                              <input
-                                class="input"
-                                placeholder="value"
-                                value={entry.value}
-                                onInput={(event) =>
-                                  updateMetadataEntry(index(), { value: event.currentTarget.value })
-                                }
-                              />
-                              <button
-                                class="btn btn-icon btn-sm"
-                                type="button"
-                                aria-label="Remove entry"
-                                onClick={() => removeMetadataEntry(index())}
-                              >
-                                <Trash2 size={12} />
-                              </button>
-                            </div>
+                  </div>
+                )}
+              </Show>
+            </div>
+          )}
+        </Show>
+      </Dialog>
+      <Dialog
+        open={createOpen()}
+        title="Create skill package"
+        size="lg"
+        onClose={() => setCreateOpen(false)}
+      >
+        <div class="stack">
+          <div class="field">
+            <label>Skill name</label>
+            <input
+              value={newName()}
+              onInput={(event) => setNewName(event.currentTarget.value)}
+            />
+          </div>
+          <textarea
+            aria-label="New skill document"
+            class="mono"
+            rows={14}
+            value={newDocument()}
+            onInput={(event) => setNewDocument(event.currentTarget.value)}
+          />
+          <button
+            class="btn primary"
+            disabled={busy() || !newName()}
+            onClick={() =>
+              void execute(async () => {
+                await postJson(base, {
+                  name: newName(),
+                  content: newDocument(),
+                  scope: scope(),
+                  workspace: workspace(),
+                });
+                setCreateOpen(false);
+                await load();
+              })
+            }
+          >
+            Create package
+          </button>
+        </div>
+      </Dialog>
+      <Dialog
+        open={importOpen()}
+        title="Import skill packages"
+        size="lg"
+        onClose={() => setImportOpen(false)}
+      >
+        <div class="stack">
+          <select
+            aria-label="Import source"
+            value={importKind()}
+            onChange={(event) => {
+              setImportKind(event.currentTarget.value);
+              setPreview(null);
+            }}
+          >
+            <option value="zip">ZIP upload</option>
+            <option value="directory">Local directory</option>
+            <option value="git">Git repository</option>
+          </select>
+          <Show when={importKind() === "zip"}>
+            <input
+              aria-label="Skill ZIP"
+              type="file"
+              accept=".zip"
+              onChange={(event) => {
+                setZipFile(event.currentTarget.files?.[0] || null);
+                setPreview(null);
+              }}
+            />
+          </Show>
+          <Show when={importKind() !== "zip"}>
+            <input
+              aria-label="Import location"
+              placeholder={
+                importKind() === "git"
+                  ? "HTTPS repository URL"
+                  : "Directory on the backend host"
+              }
+              value={importPath()}
+              onInput={(event) => {
+                setImportPath(event.currentTarget.value);
+                setPreview(null);
+              }}
+            />
+          </Show>
+          <Show when={importKind() === "git"}>
+            <input
+              aria-label="Git ref"
+              placeholder="Branch, tag or commit"
+              value={importRef()}
+              onInput={(event) => {
+                setImportRef(event.currentTarget.value);
+                setPreview(null);
+              }}
+            />
+            <input
+              aria-label="Git skill directory"
+              placeholder="Directory within repository"
+              value={subdirectory()}
+              onInput={(event) => {
+                setSubdirectory(event.currentTarget.value);
+                setPreview(null);
+              }}
+            />
+            <input
+              aria-label="GitHub installation ID"
+              placeholder="Connected GitHub installation ID (private repository)"
+              value={installationId()}
+              onInput={(event) => setInstallationId(event.currentTarget.value)}
+            />
+          </Show>
+          <button
+            class="btn"
+            disabled={busy()}
+            onClick={() => void previewImport()}
+          >
+            {busy() ? "Preparing preview..." : "Preview import"}
+          </button>
+          <Show when={preview()}>
+            {(result) => (
+              <div class="stack">
+                <Show when={result().commit}>
+                  <span class="hint mono">Commit: {result().commit}</span>
+                </Show>
+                <For each={result().skills}>
+                  {(item) => (
+                    <div class="panel">
+                      <div class="panel-body">
+                        <strong>{item.name}</strong>
+                        <p>{item.description}</p>
+                        <Show when={item.conflict}>
+                          <span class="badge">Existing package conflict</span>
+                        </Show>
+                        <For each={item.diagnostics}>
+                          {(diagnostic) => (
+                            <p class="hint">{diagnostic.message}</p>
                           )}
                         </For>
                       </div>
-                    </Show>
-                    <button
-                      class="btn btn-sm"
-                      type="button"
-                      style={{ "margin-top": "8px" }}
-                      onClick={addMetadataEntry}
-                    >
-                      <Plus size={12} />
-                      Add entry
-                    </button>
-                  </Show>
-                </div>
-
-                <div class="field">
-                  <label>Instructions (markdown body)</label>
-                  <Show
-                    when={isReadOnly()}
-                    fallback={
-                      <textarea
-                        class="textarea mono"
-                        rows={14}
-                        value={form().body}
-                        placeholder="Add the skill instructions here. Markdown is supported."
-                        onInput={(event) => updateForm("body", event.currentTarget.value)}
-                      />
-                    }
-                  >
-                    <Show
-                      when={form().body.trim()}
-                      fallback={<div class="hint">No instructions.</div>}
-                    >
-                      <div
-                        class="panel"
-                        style={{ padding: "12px", background: "var(--surface-2)", "border-radius": "8px" }}
-                      >
-                        <Markdown text={form().body} />
-                      </div>
-                    </Show>
-                  </Show>
-                </div>
-
-                <Show when={form().resources.length > 0}>
-                  <div class="field">
-                    <label>Resources</label>
-                    <div class="row-wrap">
-                      <For each={form().resources}>
-                        {(resource) => <span class="badge mono">{resource}</span>}
-                      </For>
                     </div>
-                    <span class="hint">Resource files are read-only from this screen.</span>
-                  </div>
-                </Show>
+                  )}
+                </For>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={overwrite()}
+                    onChange={(event) =>
+                      setOverwrite(event.currentTarget.checked)
+                    }
+                  />{" "}
+                  Replace existing destination packages
+                </label>
+                <button
+                  class="btn primary"
+                  disabled={
+                    busy() ||
+                    (result().skills.some((item) => item.conflict) &&
+                      !overwrite())
+                  }
+                  onClick={() =>
+                    void execute(async () => {
+                      await postJson(`${base}/imports`, {
+                        preview_id: result().preview_id,
+                        scope: scope(),
+                        workspace: workspace(),
+                        overwrite: overwrite(),
+                      });
+                      setImportOpen(false);
+                      await load();
+                      showToast("Skill packages imported.");
+                    })
+                  }
+                >
+                  Import {result().skills.length} packages
+                </button>
               </div>
-            </Dialog>
-
-            <ConfirmDialog
-              open={deleteTargetName() !== null}
-              title="Delete Skill"
-              message={<p>Are you sure you want to delete skill <span class="mono">{deleteTargetName()}</span>?</p>}
-              confirmLabel="Delete"
-              confirmVariant="danger"
-              onClose={() => setDeleteTargetName(null)}
-              onConfirm={() => void confirmDeleteSkill()}
-            />
-          </div>
-        )}
-      </DataGate>
+            )}
+          </Show>
+        </div>
+      </Dialog>
+      <ConfirmDialog
+        open={entryDeleteTarget() !== null}
+        title="Delete package entry"
+        message={
+          <p>
+            Delete {entryDeleteTarget()?.path}
+            {entryDeleteTarget()?.mime_type === "directory"
+              ? " and all its files"
+              : ""}
+            ?
+          </p>
+        }
+        confirmLabel="Delete entry"
+        confirmVariant="danger"
+        onClose={() => setEntryDeleteTarget(null)}
+        onConfirm={() =>
+          void execute(async () => {
+            const target = entryDeleteTarget()!;
+            await mutateFile(
+              "delete",
+              target.path,
+              "",
+              target.version || undefined,
+            );
+            setEntryDeleteTarget(null);
+            setFile(null);
+          })
+        }
+      />
+      <ConfirmDialog
+        open={deleteTarget() !== null}
+        title="Delete skill package"
+        message={
+          <p>Delete {deleteTarget()?.name} and all files in this package?</p>
+        }
+        confirmLabel="Delete package"
+        confirmVariant="danger"
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() =>
+          void execute(async () => {
+            await apiFetch(url(`/${deleteTarget()!.id}`), { method: "DELETE" });
+            setDeleteTarget(null);
+            await load();
+          })
+        }
+      />
     </SettingsLayout>
   );
 }

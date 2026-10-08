@@ -225,6 +225,14 @@ async def cmd_agents(message: InboundMessage, parsed: ParsedCommand) -> None:
     await _reply(message, "\n".join(lines), mode="plain")
 
 
+async def cmd_skill(message: InboundMessage, parsed: ParsedCommand) -> None:
+    if not parsed.args:
+        await _reply(message, "Usage: /skill <name> [task] or /skill [refresh|unload] <name>")
+        return
+    params = build_channel_run_params(message, None, user_input="/skill " + parsed.raw_args)
+    await stream_agent_response(message, params)
+
+
 def build_default_command_registry() -> CommandRegistry:
     registry = CommandRegistry()
     registry.register(
@@ -251,6 +259,7 @@ def build_default_command_registry() -> CommandRegistry:
     registry.register(
         CommandSpec("agents", "List available agents", "/agents", cmd_agents)
     )
+    registry.register(CommandSpec("skill", "Activate, refresh or unload a skill", "/skill [refresh|unload] <name> [task]", cmd_skill))
     return registry
 
 

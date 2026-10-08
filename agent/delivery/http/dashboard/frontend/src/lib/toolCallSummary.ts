@@ -26,6 +26,10 @@ export function toolCallSummary(name: string | null | undefined, args: unknown):
     return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
   };
 
+  if (toolName === "skill") {
+    return [text("action") === "unload" ? "Unload skill" : "Prepare skill", text("name")].filter(Boolean).join(" ");
+  }
+
   if (toolName === "grep" || toolName === "glob") {
     const detail = [text("pattern"), text("path")].filter(Boolean).join(" ");
     return detail ? `${label} ${detail}` : label;

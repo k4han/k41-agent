@@ -37,6 +37,123 @@ def _fake_chat_model_factory(captured: dict):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("command,tool_names,error", [
+    ("/skill demo", [], "does not have the skill tool enabled"),
+    ("/SKILL demo", [], "does not have the skill tool enabled"),
+    ("/skill load", ["skill"], "Use /skill load NAME"),
+    ("/skill unload", ["skill"], "Use /skill unload NAME"),
+    ("/skill refresh", ["skill"], "Use /skill refresh NAME"),
+])
+async def test_llm_node_returns_skill_command_errors_without_calling_model(monkeypatch, tmp_path, command, tool_names, error):
+    from agent.modules.tools.builtin.skill.skill import skill
+
+    class Catalog:
+        def get_agent(self, name):
+            return SimpleNamespace(provider="default", model="model-x", system_prompt="Help the user.", tools=tool_names)
+
+    async def resolve(self, agent_name, *, override_tool_names=None):
+        return [skill] if "skill" in tool_names else []
+
+    async def catalog(**kwargs):
+        return "<available_skills/>"
+
+    def unexpected_model(**kwargs):
+        pytest.fail("Invalid or denied skill commands must not call the model")
+
+    monkeypatch.setattr("agent.modules.agents.get_catalog_service", lambda: Catalog())
+    monkeypatch.setattr("agent.modules.skills.get_effective_skills_catalog_xml", catalog)
+    monkeypatch.setattr(llm_node_module.ToolResolver, "aresolve_for_agent", resolve)
+    monkeypatch.setattr(llm_node_module, "get_resolved_chat_model", unexpected_model)
+    result = await llm_node_module.llm_node(
+        {"messages": [HumanMessage(content=command)]},
+        {"configurable": {"thread_id": "denied-skill-thread"}},
+        SimpleNamespace(context=WorkflowContext(workspace=str(tmp_path), allowed_tool_names=tool_names)),
+    )
+    assert isinstance(result["messages"][0], AIMessage)
+    assert error in result["messages"][0].content
+    assert result["active_skills"] == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_attachment", [False, True])
+async def test_llm_node_activates_explicit_skill_before_model_call(
+    monkeypatch, tmp_path, isolated_container, with_attachment,
+):
+    from agent.modules.agent_runtime.runner import _make_user_message
+    from agent.modules.skills.repository import FilesystemSkillRepository
+    from agent.modules.tools.builtin.skill.skill import skill
+
+    captured: dict = {}
+    source = tmp_path / "skills" / "demo"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text(
+        "---\nname: demo\ndescription: A demo skill.\n---\nFollow these durable instructions.\n",
+        encoding="utf-8",
+    )
+    isolated_container._skill_repository = FilesystemSkillRepository(source.parent)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    class _FakeCatalog:
+        def get_agent(self, name: str):
+            return SimpleNamespace(provider="default", model="model-x", system_prompt="Help the user.", tools=["skill"])
+
+    async def _fake_resolve(self, agent_name, *, override_tool_names=None):
+        return [skill]
+
+    monkeypatch.setattr(llm_node_module, "get_resolved_chat_model", _fake_chat_model_factory(captured))
+    monkeypatch.setattr(llm_node_module.ToolResolver, "aresolve_for_agent", _fake_resolve)
+    monkeypatch.setattr("agent.modules.agents.get_catalog_service", lambda: _FakeCatalog())
+    message = _make_user_message(
+        "/skill demo\nProcess the input.",
+        [{"kind": "text", "name": "input.txt", "content": "Attached input."}] if with_attachment else None,
+    )
+    result = await llm_node_module.llm_node(
+        {"messages": [message]},
+        {"configurable": {"thread_id": "skill-command-thread"}},
+        SimpleNamespace(context=WorkflowContext(workspace=str(workspace), allowed_tool_names=["skill"])),
+    )
+
+    assert "<active_skills>" in captured["messages"][0].content
+    assert "Follow these durable instructions." in captured["messages"][0].content
+    assert [entry["name"] for entry in result["active_skills"].values()] == ["demo"]
+    assert result["processed_skill_messages"] == [message.id]
+
+
+@pytest.mark.asyncio
+async def test_llm_node_keeps_skill_tool_for_nested_global_package(monkeypatch, tmp_path, isolated_container):
+    from agent.modules.skills.repository import FilesystemSkillRepository
+    from agent.modules.tools.builtin.skill.skill import skill
+
+    captured = {}
+    root = tmp_path / "skills"
+    source = root / "group" / "demo"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text("---\nname: demo\ndescription: Nested global package.\n---\nInstructions.\n")
+    isolated_container._skill_repository = FilesystemSkillRepository(root)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    class Catalog:
+        def get_agent(self, name):
+            return SimpleNamespace(provider="default", model="model-x", system_prompt="Help the user.", tools=["skill"])
+
+    async def resolve(self, agent_name, *, override_tool_names=None):
+        return [skill]
+
+    monkeypatch.setattr(llm_node_module, "get_resolved_chat_model", _fake_chat_model_factory(captured))
+    monkeypatch.setattr(llm_node_module.ToolResolver, "aresolve_for_agent", resolve)
+    monkeypatch.setattr("agent.modules.agents.get_catalog_service", lambda: Catalog())
+    await llm_node_module.llm_node(
+        {"messages": [HumanMessage(content="Help me with this task.")]},
+        {"configurable": {"thread_id": "nested-skill-thread"}},
+        SimpleNamespace(context=WorkflowContext(workspace=str(workspace), allowed_tool_names=["skill"])),
+    )
+    assert "<name>demo</name>" in captured["messages"][0].content
+    assert "skill" in [tool.name for tool in captured["tools"]]
+
+
+@pytest.mark.asyncio
 async def test_llm_node_uses_prompt_builder_output_for_system_message(monkeypatch):
     captured: dict = {}
     builder_calls: dict = {}
@@ -109,7 +226,7 @@ async def test_llm_node_uses_prompt_builder_output_for_system_message(monkeypatc
     assert system_message.content == "Prompt built elsewhere"
     assert captured["model"] == "model-x"
     assert captured["provider"] == "provider-x"
-    assert [tool.name for tool in captured["tools"]] == ["skill", "read"]
+    assert [tool.name for tool in captured["tools"]] == ["read"]
     assert builder_calls["system_prompt_template"] == "Agent prompt: {working_dir}"
     assert builder_calls["working_dir"] == str(Path("D:/repo").resolve())
     assert builder_calls["agent_name"] == "builder-agent"
@@ -208,6 +325,11 @@ async def test_llm_node_prefers_runtime_allowed_tool_names_before_building_promp
     captured: dict = {}
     builder_calls: dict = {}
 
+    async def empty_skill_catalog(**kwargs):
+        return "<available_skills/>"
+
+    monkeypatch.setattr("agent.modules.skills.get_effective_skills_catalog_xml", empty_skill_catalog)
+
     class _FakeCatalog:
         def get_agent(self, name: str):
             assert name == "override-agent"
@@ -259,7 +381,7 @@ async def test_llm_node_prefers_runtime_allowed_tool_names_before_building_promp
         ),
     )
 
-    assert [tool.name for tool in captured["tools"]] == ["call_agent", "skill", "read"]
+    assert [tool.name for tool in captured["tools"]] == ["call_agent", "read"]
     assert [tool.name for tool in builder_calls["tools"]] == ["call_agent", "skill", "read"]
     assert "retained tool output" in captured["tools"][-1].description
 

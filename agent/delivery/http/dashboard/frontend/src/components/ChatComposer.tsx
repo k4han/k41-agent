@@ -21,11 +21,13 @@ import {
   type UserInputRequestSubmitPayload,
 } from "@/components/UserInputRequestCard";
 import { formatBytes } from "@/lib/chatAttachments";
+import { useSkillSuggestions } from "@/lib/useSkillSuggestions";
 import { PASTE_AS_ATTACHMENT_THRESHOLD, type PendingAttachment, type ReasoningEffort } from "@/lib/chatTypes";
 import type { TranscriptUserInputRequest } from "@/components/Transcript";
-import type { AgentCard, AgentChatPayload } from "@/types";
+import type { AgentCard, AgentChatPayload, WorkspaceRef } from "@/types";
 
 export interface ChatComposerProps {
+  workspace?: WorkspaceRef | null;
   prompt: string;
   onPromptChange: (value: string) => void;
   onSend: () => void;
@@ -72,6 +74,7 @@ export function ChatComposer(props: ChatComposerProps) {
 
   let chatPromptRef: HTMLTextAreaElement | undefined;
   let fileInputRef: HTMLInputElement | undefined;
+  const skillSuggestions = useSkillSuggestions(props, () => chatPromptRef);
 
   const [previewAttachment, setPreviewAttachment] = createSignal<PendingAttachment | null>(null);
   const [isDragging, setIsDragging] = createSignal(false);
@@ -306,55 +309,109 @@ export function ChatComposer(props: ChatComposerProps) {
           </For>
         </div>
       </Show>
-      <textarea
-        ref={(el) => {
-          chatPromptRef = el;
-          props.setChatPromptRef?.(el);
-          props.chatPromptRef?.(el);
-        }}
-        class="chat-prompt-input"
-        rows={1}
-        value={props.prompt}
-        disabled={props.inputDisabled}
-        placeholder={
-          props.backgroundTaskActive
-            ? "Background task is running..."
-            : props.currentThreadId
-              ? "Reply or attach files..."
-              : "What would you like to work on?"
-        }
-        inputMode="text"
-        enterkeyhint="send"
-        onInput={(event) => {
-          props.onPromptChange(event.currentTarget.value);
-          resizeChatPromptInput();
-        }}
-        onPaste={(event) => {
-          const clipboardFiles = event.clipboardData?.files;
-          if (clipboardFiles && clipboardFiles.length > 0) {
-            event.preventDefault();
-            void props.onAddFiles(clipboardFiles);
-            return;
+      <div class="chat-prompt-wrapper">
+        <Show when={skillSuggestions.open()}>
+          <div class="chat-skill-suggestions">
+            <div class="chat-skill-suggestions-header">
+              <span>Skills</span>
+              <span>↑ ↓ to navigate · Enter or Tab to select · Esc to dismiss</span>
+            </div>
+            <Show when={skillSuggestions.loading()}>
+              <div class="chat-skill-suggestions-status" role="status">Loading available skills...</div>
+            </Show>
+            <Show when={skillSuggestions.error()}>
+              <div class="chat-skill-suggestions-status" role="alert">{skillSuggestions.error()}</div>
+            </Show>
+            <Show when={!skillSuggestions.loading() && !skillSuggestions.error() && !skillSuggestions.matches().length}>
+              <div class="chat-skill-suggestions-status" role="status">No matching skills available for this workspace.</div>
+            </Show>
+            <div id="chat-skill-suggestions" class="chat-skill-suggestions-list" role="listbox" aria-label="Skill suggestions" aria-busy={skillSuggestions.loading()}>
+              <For each={skillSuggestions.matches()}>
+                {(item, index) => (
+                  <button
+                    id={`chat-skill-option-${index()}`}
+                    class="chat-skill-suggestion"
+                    classList={{ active: skillSuggestions.activeIndex() === index() }}
+                    type="button"
+                    role="option"
+                    tabIndex={-1}
+                    aria-selected={skillSuggestions.activeIndex() === index()}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onMouseEnter={() => skillSuggestions.setActiveIndex(index())}
+                    onClick={() => skillSuggestions.select(item)}
+                  >
+                    <strong>{item.name}</strong>
+                    <span>{item.description}</span>
+                  </button>
+                )}
+              </For>
+            </div>
+          </div>
+        </Show>
+        <textarea
+          ref={(el) => {
+            chatPromptRef = el;
+            props.setChatPromptRef?.(el);
+            props.chatPromptRef?.(el);
+          }}
+          class="chat-prompt-input"
+          rows={1}
+          value={props.prompt}
+          disabled={props.inputDisabled}
+          placeholder={
+            props.backgroundTaskActive
+              ? "Background task is running..."
+              : props.currentThreadId
+                ? "Reply or attach files..."
+                : "What would you like to work on?"
           }
-
-          const pastedText = event.clipboardData?.getData("text/plain") || "";
-          if (pastedText.length > PASTE_AS_ATTACHMENT_THRESHOLD) {
-            event.preventDefault();
-            props.onPasteAsAttachment(pastedText);
-          }
-        }}
-        onKeyDown={(event) => {
-          if (event.isComposing || event.keyCode === 229) {
-            return;
-          }
-          if ((event.key === "Enter" && !event.shiftKey) || (event.key === "Enter" && (event.ctrlKey || event.metaKey))) {
-            event.preventDefault();
-            if (!props.composerDisabled) {
-              props.onSend();
+          inputMode="text"
+          enterkeyhint="send"
+          aria-label="Chat message"
+          aria-autocomplete="list"
+          aria-controls={skillSuggestions.open() ? "chat-skill-suggestions" : undefined}
+          aria-activedescendant={skillSuggestions.open() && skillSuggestions.matches().length ? `chat-skill-option-${skillSuggestions.activeIndex()}` : undefined}
+          onFocus={() => {
+            skillSuggestions.setFocused(true);
+            skillSuggestions.syncSelection(true);
+          }}
+          onBlur={() => skillSuggestions.setFocused(false)}
+          onClick={() => skillSuggestions.syncSelection(true)}
+          onSelect={() => skillSuggestions.syncSelection()}
+          onKeyUp={() => skillSuggestions.syncSelection()}
+          onInput={(event) => {
+            props.onPromptChange(event.currentTarget.value);
+            skillSuggestions.syncSelection(true);
+            resizeChatPromptInput();
+          }}
+          onPaste={(event) => {
+            const clipboardFiles = event.clipboardData?.files;
+            if (clipboardFiles && clipboardFiles.length > 0) {
+              event.preventDefault();
+              void props.onAddFiles(clipboardFiles);
+              return;
             }
-          }
-        }}
-      />
+
+            const pastedText = event.clipboardData?.getData("text/plain") || "";
+            if (pastedText.length > PASTE_AS_ATTACHMENT_THRESHOLD) {
+              event.preventDefault();
+              props.onPasteAsAttachment(pastedText);
+            }
+          }}
+          onKeyDown={(event) => {
+            if (event.isComposing || event.keyCode === 229) {
+              return;
+            }
+            if (skillSuggestions.handleKeyDown(event)) return;
+            if ((event.key === "Enter" && !event.shiftKey) || (event.key === "Enter" && (event.ctrlKey || event.metaKey))) {
+              event.preventDefault();
+              if (!props.composerDisabled) {
+                props.onSend();
+              }
+            }
+          }}
+        />
+      </div>
       <div class="chat-composer-toolbar">
         <div class="chat-composer-tier chat-composer-tier-selectors">
           <div class="chat-composer-more-wrapper">

@@ -139,6 +139,23 @@ def test_model_profile_settings_save_validate_and_clear(make_dashboard_client) -
     assert db_source.get(key) == {}
 
 
+def test_skill_sources_save_all_fields_to_database(make_dashboard_client, tmp_path) -> None:
+    service, db_source = _db_config_service("llm: {default_model: ''}")
+    client = make_dashboard_client(service)
+    values = {
+        "skills.repository_dir": ".agents/skills",
+        "skills.local_execution_mode": "source",
+        "skills.cache_root": str(tmp_path / "skill-cache"),
+        "skills.additional_roots": [str(tmp_path / "shared-skills")],
+    }
+    response = client.put("/settings", json={"values": values})
+    assert response.status_code == 200, response.text
+    service.reload()
+    for key, value in values.items():
+        assert db_source.get(key) == value
+        assert service.get(key) == value
+
+
 @pytest.mark.parametrize("channel", ["telegram", "discord", "zalo"])
 @pytest.mark.parametrize("batch", [False, True])
 def test_channel_trim_setting_saves_and_resets_default(make_dashboard_client, channel, batch) -> None:

@@ -141,6 +141,27 @@ class LocalWorkspaceBackend:
                 os.remove(tmp_path)
         return f"[OK] Wrote file: {file_path}"
 
+    async def write_bytes(self, file_path: str, content: bytes) -> str:
+        from pathlib import Path
+        import uuid
+
+        target = Path(resolve_safe_path(str(self.root), file_path))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.parent / (".skill-write-" + uuid.uuid4().hex)
+        try:
+            temporary.write_bytes(content)
+            if target.exists():
+                os.chmod(temporary, target.stat().st_mode & 0o777)
+            temporary.replace(target)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return f"[OK] Wrote file: {file_path}"
+
+    async def tree_page(self, path: str, *, offset: int = 0, limit: int = 500) -> dict[str, Any]:
+        from agent.modules.skills import WorkspacePackageIO
+
+        return await WorkspacePackageIO(self.ref).operation("tree", path, offset=offset, limit=limit)
+
     async def glob(
         self,
         pattern: str,

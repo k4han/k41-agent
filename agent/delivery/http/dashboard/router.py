@@ -20,6 +20,7 @@ from agent.delivery.http.dashboard.routes import (
     scheduler as scheduler_routes,
     settings as settings_routes,
     skills as skills_routes,
+    skill_packages as skill_packages_routes,
     spa as spa_routes,
     system as system_routes,
     tasks as tasks_routes,
@@ -52,6 +53,7 @@ for child_router in (
     mcp_routes.router,
     sandboxes_routes.router,
     skills_routes.router,
+    skill_packages_routes.router,
 ):
     router.include_router(child_router)
 

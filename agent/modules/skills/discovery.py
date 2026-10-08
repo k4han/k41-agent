@@ -72,6 +72,7 @@ async def discover_repository_skills(
             if cached is not None:
                 if now < cached[0]:
                     _entries.move_to_end(cache_key)
+                    logger.debug("Skill discovery cache hit backend=%s directory=%s", ref.backend, skill_dir)
                     return copy.deepcopy(cached[1])
                 del _entries[cache_key]
 
@@ -84,6 +85,11 @@ async def discover_repository_skills(
             return {}
 
         skills: dict[str, Skill] = {}
+        if callable(getattr(browser, "tree_page", None)):
+            from agent.modules.skills.package_io import WorkspacePackageIO
+            result = await WorkspacePackageIO(ref, thread_id=thread_id).operation("scan", skill_dir)
+            tree = {"entries": [{"kind": "directory", "name": str(Path(entry["directory"]).relative_to(skill_dir)),
+                                 "content": entry["content"]} for entry in result["skills"]]}
         for entry in tree.get("entries", []):
             if not isinstance(entry, dict) or entry.get("kind") != "directory":
                 continue
@@ -92,7 +98,7 @@ async def discover_repository_skills(
             except ValueError:
                 continue
             try:
-                content = await file_io.read_text(f"{skill_dir}/{dir_name}/SKILL.md")
+                content = entry["content"] if "content" in entry else await file_io.read_text(f"{skill_dir}/{dir_name}/SKILL.md")
                 skill = parse_skill_md(content, Path(skill_dir) / dir_name)
             except Exception as exc:
                 logger.debug("Failed to load repository-local skill '%s': %s", dir_name, exc)

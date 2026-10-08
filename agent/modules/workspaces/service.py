@@ -689,6 +689,12 @@ class _RecoveringModalWorkspaceBackend:
     async def write_text(self, file_path: str, content: str, *, append: bool = False) -> str:
         return await self._run(lambda backend: backend.write_text(file_path, content, append=append))
 
+    async def write_bytes(self, file_path: str, content: bytes) -> str:
+        return await self._run(lambda backend: backend.write_bytes(file_path, content))
+
+    async def tree_page(self, path: str, *, offset: int = 0, limit: int = 500) -> dict[str, Any]:
+        return await self._run(lambda backend: backend.tree_page(path, offset=offset, limit=limit))
+
     async def execute(
         self,
         command: str,
@@ -844,6 +850,7 @@ def _merge_ready_workspace_metadata(
     replacement: WorkspaceRef,
 ) -> WorkspaceRef:
     metadata = dict(replacement.metadata or {})
+    metadata["skill_workspace_id"] = source.metadata.get("skill_workspace_id", source.locator)
     for key, value in dict(source.metadata or {}).items():
         if value in (None, "", []):
             continue
@@ -1165,9 +1172,25 @@ async def _temp_workspace_owner_is_gone(thread_id: str) -> bool:
 
 
 async def delete_thread_workspace(thread_id: str) -> WorkspaceRef | None:
+    from agent.modules.skills import get_skill_packages
+    from agent.modules.tools import conversation_key
+    owner_is_gone = await _temp_workspace_owner_is_gone(thread_id)
+    if owner_is_gone:
+        await asyncio.to_thread(get_skill_packages().snapshots.release, conversation_key(thread_id))
     workspace = await get_thread_workspace_ref(thread_id)
     if workspace is None:
         return None
+
+    try:
+        from agent.modules.skills import WorkspacePackageIO
+        if owner_is_gone:
+            await WorkspacePackageIO(workspace, thread_id=thread_id).operation("cleanup", ".k41-agent/skills", all=True,
+                conversation=conversation_key(thread_id))
+            packages = get_skill_packages()
+            transport = packages.execution_transport(workspace, thread_id)
+            await transport.operation("cleanup", "" if workspace.backend == LOCAL_BACKEND else ".k41-agent/s", cache_only=True)
+    except (OSError, ValueError, RuntimeError, IntegrationUnavailableError):
+        logger.warning("Failed to remove skill snapshots for deleted thread %s", thread_id)
 
     if (
         workspace.backend == LOCAL_BACKEND

@@ -66,6 +66,9 @@ class InvocationContext:
     permission_rules: tuple[Any, ...] = ()
     backend: str = "local"
     locator: str = ""
+    skill_roots: tuple[str, ...] = ()
+    skill_environment: tuple[tuple[str, str], ...] = ()
+    skill_cache_root: str = ""
 
     @property
     def owner(self) -> str:

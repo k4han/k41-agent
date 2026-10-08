@@ -176,6 +176,7 @@ class AppContainer:
     _mcp_loaded: bool = field(default=False, repr=False)
     _mcp_service: Any = field(default=None, repr=False)
     _skill_repository: Any = field(default=None, repr=False)
+    _skill_packages: Any = field(default=None, repr=False)
     _agent_catalog_service: Any = field(default=None, repr=False)
     _agent_repository: Any = field(default=None, repr=False)
     _conversation_repository: Any = field(default=None, repr=False)
@@ -314,6 +315,14 @@ class AppContainer:
 
             self._skill_repository = FilesystemSkillRepository()
         return self._skill_repository
+
+    @property
+    @_locked_lazy
+    def skill_packages(self) -> Any:
+        if self._skill_packages is None:
+            from agent.modules.skills import SkillPackages
+            self._skill_packages = SkillPackages(self.skill_repository)
+        return self._skill_packages
 
     @property
     @_locked_lazy

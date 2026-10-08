@@ -62,6 +62,9 @@ class WorkspaceFileIO(Protocol):
     async def write_text(self, file_path: str, content: str, *, append: bool = False) -> str:
         ...
 
+    async def write_bytes(self, file_path: str, content: bytes) -> str:
+        ...
+
     async def glob(
         self,
         pattern: str,
@@ -100,6 +103,9 @@ class WorkspaceBrowser(Protocol):
     ref: WorkspaceRef
 
     async def tree(self, path: str | None = None) -> dict[str, Any]:
+        ...
+
+    async def tree_page(self, path: str, *, offset: int = 0, limit: int = 500) -> dict[str, Any]:
         ...
 
     async def file(self, path: str) -> dict[str, Any]:

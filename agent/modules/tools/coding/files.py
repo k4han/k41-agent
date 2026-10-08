@@ -270,14 +270,25 @@ class FileService:
         capture_truncated = False
         capture = TextCapture()
         candidates, engine = self.search_candidates(base, values.get("include_dirs", False))
-        if name == "grep" and engine == "ripgrep":
-            return self.ripgrep(base, candidates, values, context)
-        for candidate in sorted(candidates):
+        visible = []
+        for candidate in candidates:
             resolved = candidate.resolve()
             if not resolved.is_relative_to(base if base.is_dir() else base.parent):
                 continue
             if resolved.is_relative_to(self.permissions.storage.root.resolve()):
                 continue
+            try:
+                self.permissions.resolve_path(context, str(resolved), "read", authorize=False)
+            except CodingError as exc:
+                if exc.code == "not_found":
+                    continue
+                raise
+            visible.append(candidate)
+        candidates = visible
+        if name == "grep" and engine == "ripgrep":
+            return self.ripgrep(base, candidates, values, context)
+        for candidate in sorted(candidates):
+            resolved = candidate.resolve()
             self.permissions.assert_allowed(context, "read", str(resolved), allow_interrupt=False)
             rel = os.path.relpath(candidate, context.workspace).replace(os.sep, "/")
             if name == "glob":

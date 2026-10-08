@@ -250,6 +250,7 @@ async def cmd_scheduler(session: CLISession, args: list[str]) -> bool:
 
 
 COMMANDS_ORDER: tuple[CommandSpec, ...] = (
+    CommandSpec("skill", "Activate, refresh or unload a skill (/skill [refresh|unload] <name> [task])", cmd_help),
     CommandSpec("help", "Show this help", cmd_help),
     CommandSpec("new", "Start a new conversation thread", cmd_new),
     CommandSpec("resume", "Resume a previous thread by id", cmd_resume),

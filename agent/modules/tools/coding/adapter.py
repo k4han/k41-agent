@@ -22,7 +22,7 @@ SCHEMAS = {"bash": ExecInput, "read_process_output": ProcessReadInput,
            "read": ReadInput, "list_dir": ListInput, "edit": EditInput,
            "write": WriteInput, "glob": GlobInput, "grep": GrepInput}
 DESCRIPTIONS = {
-    "bash": "Run an isolated workspace shell command. Specify workdir explicitly; cwd and environment changes do not persist. Long commands return process_id; observe with read_process_output. timeout_seconds kills the process tree; yield_time_ms only limits the initial wait. Use dedicated file tools for reading/searching/editing.",
+    "bash": "Run an isolated workspace shell command using the configured shell. Despite the tool name, Windows normally uses PowerShell: use the shell syntax reported in context, and do not assume POSIX commands such as head exist. Specify workdir explicitly; cwd and environment changes do not persist. Activated skills provide K41_SKILL_* environment variables and K41_WORKSPACE_ROOT. Long commands return process_id; observe with read_process_output. timeout_seconds kills the process tree; yield_time_ms only limits the initial wait. Use dedicated file tools for reading/searching/editing.",
     "read_process_output": "Observe a workspace process using its explicit byte cursor. Returns next cursor, state and exit code; no implicit output consumption.",
     "write_process_input": "Send exact stdin text to an owned workspace process. Include newline explicitly when required. Returns process state and new output.",
     "stop_process": "Stop an owned workspace process and its descendants; wait for bounded pipe cleanup.",
@@ -49,13 +49,25 @@ def invocation_context(runtime: Any) -> InvocationContext:
         rules = agent.tool_permissions
     configurable = (getattr(runtime, "config", None) or {}).get("configurable", {})
     root = os.path.realpath(workspace.locator) if workspace.backend == "local" else str(workspace.metadata.get("root") or "")
+    from agent.modules.skills import get_skill_packages
+    packages = get_skill_packages()
+    state = getattr(runtime, "state", None) or {}
+    active = [item for item in state.get("active_skills", {}).values()
+              if packages.authorize_active(item, workspace=workspace, agent_name=agent_name,
+                                           allowed_names=get_context_value(raw, "allowed_skill_names", None))]
+    skill_roots = tuple(item["skill_root"] for item in active)
+    skill_environment = tuple((item["environment_variable"], item["skill_root"]) for item in active if item.get("environment_variable"))
+    if len(active) == 1:
+        skill_environment += (("K41_SKILL_ROOT", active[0]["skill_root"]),)
     return InvocationContext(agent_name=agent_name, workspace=root,
         backend=workspace.backend, locator=workspace.locator,
         thread_id=get_thread_id(getattr(runtime, "config", None)) or "",
         message_id=str(configurable.get("coding_message_id", "")),
         tool_call_id=str(getattr(runtime, "tool_call_id", "") or ""),
         approval_supported=bool(get_context_value(raw, "approval_supported", configurable.get("approval_supported", False))),
-        permission_rules=tuple(PermissionRule.model_validate(rule) for rule in rules))
+        permission_rules=tuple(PermissionRule.model_validate(rule) for rule in rules),
+        skill_roots=skill_roots, skill_environment=skill_environment,
+        skill_cache_root=str(packages.cache_root) if workspace.backend == "local" else "")
 
 
 class CodingStructuredTool(StructuredTool):

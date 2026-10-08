@@ -273,6 +273,26 @@ def is_channel_context_trim_setting(key: str) -> bool:
 
 
 def normalize_setting_value(key: str, value: Any | None) -> Any | None:
+    if key == "skills.local_execution_mode":
+        if not isinstance(value, str) or value not in {"snapshot", "source"}:
+            raise HTTPException(400, "Local skill execution must be snapshot or source.")
+        return value
+    if key == "skills.cache_root":
+        from pathlib import Path
+        if not isinstance(value, str):
+            raise HTTPException(400, "Skill cache directory must be a path string.")
+        value = value.strip()
+        if value and (not Path(value).expanduser().is_absolute() or Path(value).expanduser().parent == Path(value).expanduser()):
+            raise HTTPException(400, "Skill cache directory must be an absolute directory below a filesystem root.")
+        return value.strip()
+    if key in {"skills.additional_roots", "skills.disabled_ids"}:
+        if not isinstance(value, list) or any(not isinstance(item, str) or not item.strip() for item in value):
+            raise HTTPException(400, "Skill settings must be a list of non-empty strings.")
+        return list(dict.fromkeys(item.strip() for item in value))
+    if key in {"skills.max_files", "skills.max_bytes", "skills.max_file_bytes"}:
+        if type(value) is not int or value < 1:
+            raise HTTPException(400, "Skill limits must be positive integers.")
+        return value
     if is_channel_context_trim_setting(key):
         if value is None:
             return None

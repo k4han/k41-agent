@@ -108,6 +108,27 @@ async def test_remote_permissions_are_checked_before_mutation(remote_coding):
 
 
 @pytest.mark.asyncio
+async def test_remote_parent_search_excludes_inactive_skill_snapshots(remote_coding):
+    service, context, workspace, _ = remote_coding
+    cache = workspace / ".k41-agent" / "s"
+    active = cache / "sk-active"
+    inactive = cache / "sk-inactive"
+    active.mkdir(parents=True)
+    inactive.mkdir()
+    (active / "guide.md").write_text("VISIBLE active instructions", encoding="utf-8")
+    (inactive / "private.md").write_text("SECRET inactive instructions", encoding="utf-8")
+    context = replace(context, skill_roots=(str(active),))
+    direct = await invoke(service, context, "read", file_path=".k41-agent/s/sk-inactive/private.md")
+    assert direct.error.code == "not_found"
+    for name, pattern in (("glob", "**/*.md"), ("grep", "VISIBLE|SECRET")):
+        result = await invoke(service, context, name, path=".k41-agent", pattern=pattern)
+        assert result.status == "success", result.content
+        assert "guide.md" in result.content
+        assert "private.md" not in result.content
+        assert "SECRET" not in result.content
+
+
+@pytest.mark.asyncio
 async def test_migrated_remote_conversation_keeps_existing_outputs(remote_coding, isolated_container):
     from agent.shared.thread_ids import canonical_thread_id, thread_id_aliases_var
     from agent.modules.tools.coding.storage import output_relative_path

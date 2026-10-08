@@ -39,4 +39,21 @@ class SkillInstaller(Protocol):
         ...
 
 
-__all__ = ["SkillInstaller", "SkillRepository"]
+class SkillPackageIO(Protocol):
+    async def operation(self, op: str, path: str = "", **kwargs) -> dict:
+        ...
+
+    async def archive(self, path: str) -> tuple[bytes, str]:
+        ...
+
+    async def read(self, path: str) -> tuple[bytes, dict]:
+        ...
+
+    async def write(self, path: str, data: bytes, *, expected_version: str | None = None, mode: int = 0o644) -> dict:
+        ...
+
+    async def install(self, packages: list[tuple[str, bytes]], *, overwrite=False, reuse=False, expected_versions=None, manifest=None) -> dict:
+        ...
+
+
+__all__ = ["SkillInstaller", "SkillRepository", "SkillPackageIO"]
