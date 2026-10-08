@@ -311,6 +311,72 @@ def test_dashboard_api_skills_crud_and_reload(
     assert [skill["name"] for skill in reloaded.json()["skills"]] == ["reload-skill"]
 
 
+def test_dashboard_api_imported_skill_rejects_an_unstable_identity(tmp_path: Path) -> None:
+    from agent.modules.skills.repository import FilesystemSkillRepository
+    from agent.bootstrap.container import AppContainer, set_active_container
+
+    repo = FilesystemSkillRepository(skills_root=tmp_path)
+    container = AppContainer()
+    container._skill_repository = repo
+    set_active_container(container)
+    client = _create_dashboard_client(ChannelManager())
+    directory = tmp_path / "imported-folder"
+    directory.mkdir()
+    content = "---\nname: demo\ndescription: Test skill.\n---\nOriginal body.\n"
+    skill_md = directory / "SKILL.md"
+    skill_md.write_text(content, encoding="utf-8")
+
+    rejected = client.put(
+        "/dashboard-api/skills/demo",
+        json={"name": "demo", "content": content.replace("name: demo\n", "")},
+    )
+    assert rejected.status_code == 400
+    assert skill_md.read_text(encoding="utf-8") == content
+
+    updated = client.put(
+        "/dashboard-api/skills/demo",
+        json={"name": "demo", "content": content.replace("Original", "Updated")},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["skill"]["name"] == "demo"
+    detail = client.get("/dashboard-api/skills/demo")
+    assert detail.status_code == 200
+    assert "Updated body." in detail.json()["skill"]["content"]
+
+
+@pytest.mark.parametrize("invalid_content", [
+    "---\nname: demo\n---\nMissing description.\n",
+    "---\nname: demo\ndescription: [\n---\nMalformed YAML.\n",
+])
+def test_dashboard_api_repairs_and_deletes_invalid_skills(tmp_path: Path, invalid_content: str) -> None:
+    from agent.modules.skills.repository import FilesystemSkillRepository
+    from agent.bootstrap.container import AppContainer, set_active_container
+
+    repo = FilesystemSkillRepository(skills_root=tmp_path)
+    container = AppContainer()
+    container._skill_repository = repo
+    set_active_container(container)
+    client = _create_dashboard_client(ChannelManager())
+    content = "---\nname: demo\ndescription: Test skill.\n---\nRepaired body.\n"
+    created = client.post("/dashboard-api/skills", json={"name": "demo", "content": content})
+    assert created.status_code == 200
+    skill_md = tmp_path / "demo" / "SKILL.md"
+    skill_md.write_text(invalid_content, encoding="utf-8")
+
+    updated = client.put(
+        "/dashboard-api/skills/demo",
+        json={"name": "demo", "content": content},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["skill"]["name"] == "demo"
+    assert skill_md.read_text(encoding="utf-8") == content
+
+    skill_md.write_text(invalid_content, encoding="utf-8")
+    deleted = client.delete("/dashboard-api/skills/demo")
+    assert deleted.status_code == 200
+    assert not skill_md.exists()
+
+
 def test_dashboard_workspace_default_returns_absolute_path() -> None:
     client = _create_dashboard_client(ChannelManager())
 

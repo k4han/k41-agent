@@ -71,15 +71,24 @@ def test_invalidate_bumps_the_revision_only_for_skill_paths() -> None:
     assert get_revision(SKILLS_REVISION) == before + 1
 
 
-def test_invalidate_clears_the_discovery_cache() -> None:
-    skills_module._repository_discovery_cache[("workspace", ".agent/skills", "")] = (
-        0.0,
-        {},
-    )
+@pytest.mark.asyncio
+async def test_invalidate_clears_the_discovery_cache(tmp_path) -> None:
+    from agent.modules.skills.discovery import discover_repository_skills
+
+    directory = tmp_path / ".agent" / "skills" / "demo"
+    directory.mkdir(parents=True)
+    file = directory / "SKILL.md"
+    file.write_text(SKILL_MD, encoding="utf-8")
+    kwargs = {"workspace": str(tmp_path), "repository_dir": ".agent/skills"}
+    initial = await discover_repository_skills(**kwargs)
+    file.write_text(SKILL_MD.replace("Body.", "Updated body."), encoding="utf-8")
+    cached = await discover_repository_skills(**kwargs)
+    assert cached["demo"].body == initial["demo"].body
 
     skills_module.invalidate_repository_skills_for_path(".agent/skills/demo/SKILL.md")
 
-    assert skills_module._repository_discovery_cache == {}
+    refreshed = await discover_repository_skills(**kwargs)
+    assert "Updated body." in refreshed["demo"].body
 
 
 @pytest.mark.asyncio

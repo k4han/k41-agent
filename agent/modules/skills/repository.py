@@ -6,14 +6,21 @@ files and caches the results.
 
 from __future__ import annotations
 
+import copy
 import logging
 import re
 import shutil
+import tempfile
+import threading
+from dataclasses import replace
 from pathlib import Path, PureWindowsPath
+from typing import Any
+from weakref import WeakValueDictionary
 
 from agent.modules.skills.models import Skill, SkillSummary
 from agent.modules.skills.parser import parse_skill_md
-from agent.shared.infrastructure.revisions import SKILLS_REVISION, bump_revision
+from agent.modules.skills.resources import list_local_resources
+from agent.shared.infrastructure.revisions import SKILLS_REVISION, bump_revision, get_revision
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +29,9 @@ DEFAULT_SKILLS_ROOT = Path.home() / ".k41-agent" / "skills"
 # Directories to skip during scanning
 _SKIP_DIRS = frozenset({".git", "node_modules", "__pycache__", ".venv", "venv"})
 
-# Max scan depth to prevent runaway recursion
-_MAX_DEPTH = 1  # Skills are expected at <root>/<skill-name>/SKILL.md
 _SKILL_NAME_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
+_root_locks: WeakValueDictionary[str, Any] = WeakValueDictionary()
+_root_locks_guard = threading.Lock()
 
 
 def normalize_skill_name(value: str) -> str:
@@ -64,8 +71,17 @@ class FilesystemSkillRepository:
     """Discover and load skills from the local filesystem."""
 
     def __init__(self, skills_root: Path | None = None) -> None:
-        self._root = skills_root or DEFAULT_SKILLS_ROOT
+        self._root = (skills_root or DEFAULT_SKILLS_ROOT).expanduser().resolve()
         self._cache: dict[str, Skill] | None = None
+        self._fingerprint: tuple | None = None
+        self._revision = -1
+        with _root_locks_guard:
+            key = str(self._root)
+            lock = _root_locks.get(key)
+            if lock is None:
+                lock = threading.RLock()
+                _root_locks[key] = lock
+            self._lock = lock
 
     @property
     def root(self) -> Path:
@@ -83,23 +99,45 @@ class FilesystemSkillRepository:
         root = self._resolved_root()
         normalized_name = normalize_skill_name(name)
         target = (root / normalized_name).resolve()
-        if target != root and not target.is_relative_to(root):
+        if target == root or not target.is_relative_to(root):
             raise ValueError("Skill path escapes the managed skills root.")
         return target
 
     def _validate_skill_content(self, name: str, content: str, skill_dir: Path) -> Skill:
-        skill = parse_skill_md(content, skill_dir, strict=True)
-        if skill.name != name:
-            raise ValueError("SKILL.md frontmatter name must match the skill name.")
+        # Imported skills may have a directory name different from their identifier.
+        skill = parse_skill_md(content, skill_dir, strict=True, expected_name=name)
+        assert skill is not None
         return skill
+
+    def _source_fingerprint(self) -> tuple:
+        """Observe changes made by other repositories, workers, or editors."""
+        entries = []
+        for directory in sorted(self._root.iterdir()):
+            if directory.name.startswith(".") or directory.name in _SKIP_DIRS:
+                continue
+            if not directory.is_dir():
+                continue
+            if not directory.resolve().is_relative_to(self._root):
+                continue
+            skill_md = directory / "SKILL.md"
+            try:
+                if not skill_md.resolve().is_relative_to(self._root):
+                    continue
+                stat = skill_md.stat()
+            except FileNotFoundError:
+                continue
+            entries.append((directory.name, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size, stat.st_ino))
+        return tuple(entries)
 
     def _scan(self) -> dict[str, Skill]:
         """Walk the skills root and parse all valid SKILL.md files."""
-        if self._cache is not None:
-            return self._cache
-
         self._ensure_root()
+        fingerprint = self._source_fingerprint()
+        revision = get_revision(SKILLS_REVISION)
+        if self._cache is not None and self._fingerprint == fingerprint and self._revision == revision:
+            return self._cache
         skills: dict[str, Skill] = {}
+        failed = False
 
         if not self._root.is_dir():
             self._cache = skills
@@ -110,10 +148,14 @@ class FilesystemSkillRepository:
                 continue
             if entry.name in _SKIP_DIRS or entry.name.startswith("."):
                 continue
+            if not entry.resolve().is_relative_to(self._root):
+                continue
 
             skill_md = entry / "SKILL.md"
             if not skill_md.is_file():
                 logger.debug("Skipping '%s' — no SKILL.md found.", entry.name)
+                continue
+            if not skill_md.resolve().is_relative_to(self._root):
                 continue
 
             try:
@@ -124,84 +166,140 @@ class FilesystemSkillRepository:
                     # canonical identifier) so the LLM catalog and the
                     # `load_skill(name)` lookup agree even when the
                     # directory name differs from the frontmatter name.
+                    if skill.name in skills:
+                        logger.warning("Duplicate skill '%s' at %s — skipping.", skill.name, entry)
+                        continue
                     skills[skill.name] = skill
                     logger.info("Discovered skill: '%s' at %s", skill.name, entry)
             except Exception:
+                failed = True
                 logger.exception("Failed to read skill at %s — skipping.", entry)
 
-        self._cache = skills
+        # Transient read failures must not hide a restored skill indefinitely.
+        self._cache = None if failed else skills
+        self._fingerprint = fingerprint
+        self._revision = revision
         logger.info("Skills discovery complete: %d skill(s) found.", len(skills))
-        return self._cache
+        return skills
 
     # --- SkillRepository protocol ---
 
     def discover_all(self) -> list[Skill]:
-        return list(self._scan().values())
+        with self._lock:
+            return [self._with_resources(skill) for skill in self._scan().values()]
 
     def load_skill(self, name: str) -> Skill | None:
-        return self._scan().get(name)
+        with self._lock:
+            skill = self._scan().get(name)
+            return self._with_resources(skill) if skill is not None else None
+
+    def _with_resources(self, skill: Skill) -> Skill:
+        return replace(copy.deepcopy(skill), resources=list_local_resources(skill.path))
 
     def list_summaries(self) -> list[SkillSummary]:
-        return [skill.to_summary() for skill in self._scan().values()]
+        with self._lock:
+            return [skill.to_summary() for skill in self._scan().values()]
 
     def reload(self) -> None:
         """Invalidate cache so the next access re-scans the filesystem."""
-        self._cache = None
-        bump_revision(SKILLS_REVISION)
+        with self._lock:
+            self._cache = None
+            self._fingerprint = None
+            bump_revision(SKILLS_REVISION)
         logger.info("Skills cache invalidated — will re-scan on next access.")
 
     # --- Managed SKILL.md CRUD helpers ---
 
-    def read_skill_content(self, name: str) -> str:
-        skill_md = self._skill_dir(name) / "SKILL.md"
+    def _managed_skill_dir(self, name: str) -> Path:
+        normalized_name = str(name or "").strip()
+        skill = self._scan().get(normalized_name)
+        directory = skill.path.resolve() if skill is not None else self._skill_dir(normalized_name)
+        if directory == self._root or not directory.is_relative_to(self._root):
+            raise ValueError("Skill path escapes the managed skills root.")
+        skill_md = directory / "SKILL.md"
+        if not skill_md.resolve().is_relative_to(self._root):
+            raise ValueError("Skill file escapes the managed skills root.")
         if not skill_md.is_file():
             raise FileNotFoundError(f"Skill '{name}' was not found.")
-        return skill_md.read_text(encoding="utf-8")
+        if skill is None:
+            # Allow repairing invalid files by directory name without taking over
+            # a valid skill whose frontmatter declares a different identifier.
+            existing = parse_skill_md(skill_md.read_text(encoding="utf-8"), directory)
+            if existing is not None:
+                raise FileNotFoundError(f"Skill '{name}' was not found.")
+        return directory
+
+    def _atomic_write(self, directory: Path, content: str) -> None:
+        """Replace SKILL.md only after the complete new file has been written."""
+        temporary: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=directory,
+                prefix=".SKILL-", suffix=".tmp", delete=False,
+            ) as file:
+                temporary = Path(file.name)
+                file.write(content)
+            temporary.replace(directory / "SKILL.md")
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+
+    def read_skill_content(self, name: str) -> str:
+        with self._lock:
+            return (self._managed_skill_dir(name) / "SKILL.md").read_text(encoding="utf-8")
 
     def create_skill(self, name: str, content: str) -> Skill:
-        normalized_name = normalize_skill_name(name)
-        skill_dir = self._skill_dir(normalized_name)
-        if skill_dir.exists():
-            raise FileExistsError(f"Skill '{normalized_name}' already exists.")
-        clean_content = str(content or "").strip() + "\n"
-        skill = self._validate_skill_content(normalized_name, clean_content, skill_dir)
-        skill_dir.mkdir(parents=True, exist_ok=False)
-        (skill_dir / "SKILL.md").write_text(clean_content, encoding="utf-8")
-        self.reload()
-        return skill
+        with self._lock:
+            normalized_name = normalize_skill_name(name)
+            skill_dir = self._skill_dir(normalized_name)
+            if skill_dir.exists() or normalized_name in self._scan():
+                raise FileExistsError(f"Skill '{normalized_name}' already exists.")
+            clean_content = str(content or "").strip() + "\n"
+            skill = self._validate_skill_content(normalized_name, clean_content, skill_dir)
+            skill_dir.mkdir(parents=True, exist_ok=False)
+            try:
+                self._atomic_write(skill_dir, clean_content)
+            except Exception:
+                skill_dir.rmdir()
+                raise
+            self.reload()
+            return skill
 
     def update_skill(self, current_name: str, name: str, content: str) -> Skill:
-        current_normalized = normalize_skill_name(current_name)
-        next_normalized = normalize_skill_name(name)
-        current_dir = self._skill_dir(current_normalized)
-        if not (current_dir / "SKILL.md").is_file():
-            raise FileNotFoundError(f"Skill '{current_normalized}' was not found.")
+        with self._lock:
+            current_normalized = str(current_name or "").strip()
+            next_normalized = normalize_skill_name(name)
+            current_dir = self._managed_skill_dir(current_normalized)
+            next_dir = current_dir if next_normalized == current_normalized else self._skill_dir(next_normalized)
+            if next_normalized != current_normalized and (
+                (next_dir != current_dir and next_dir.exists())
+                or next_normalized in self._scan()
+            ):
+                raise FileExistsError(f"Skill '{next_normalized}' already exists.")
 
-        next_dir = self._skill_dir(next_normalized)
-        if next_normalized != current_normalized and next_dir.exists():
-            raise FileExistsError(f"Skill '{next_normalized}' already exists.")
-
-        clean_content = str(content or "").strip() + "\n"
-        skill = self._validate_skill_content(next_normalized, clean_content, next_dir)
-
-        if next_normalized != current_normalized:
-            shutil.move(str(current_dir), str(next_dir))
-
-        (next_dir / "SKILL.md").write_text(clean_content, encoding="utf-8")
-        self.reload()
-        return skill
+            clean_content = str(content or "").strip() + "\n"
+            skill = self._validate_skill_content(next_normalized, clean_content, next_dir)
+            renamed = next_dir != current_dir
+            if renamed:
+                current_dir.rename(next_dir)
+            try:
+                self._atomic_write(next_dir, clean_content)
+            except Exception:
+                if renamed:
+                    next_dir.rename(current_dir)
+                raise
+            self.reload()
+            return self._with_resources(skill)
 
     def delete_skill(self, name: str) -> None:
-        skill_dir = self._skill_dir(name)
-        skill_md = skill_dir / "SKILL.md"
-        if not skill_md.is_file():
-            raise FileNotFoundError(f"Skill '{name}' was not found.")
-        skill_md.unlink()
-        try:
-            skill_dir.rmdir()
-        except OSError:
-            pass
-        self.reload()
+        with self._lock:
+            skill_dir = self._managed_skill_dir(name)
+            (skill_dir / "SKILL.md").unlink()
+            try:
+                skill_dir.rmdir()
+            except OSError:
+                pass
+            self.reload()
 
     # --- SkillInstaller protocol ---
 
@@ -210,39 +308,60 @@ class FilesystemSkillRepository:
 
         Raises ``ValueError`` if source doesn't contain a valid SKILL.md.
         """
-        self._ensure_root()
+        with self._lock:
+            source = source.expanduser().resolve()
+            skill_md = source / "SKILL.md"
+            if not skill_md.is_file():
+                raise ValueError(f"Source directory '{source}' does not contain a SKILL.md file.")
+            skill = parse_skill_md(skill_md.read_text(encoding="utf-8"), source)
+            if skill is None:
+                raise ValueError(f"SKILL.md in '{source}' is invalid — cannot install.")
+            name = normalize_skill_name(skill.name)
+            dest = self._skill_dir(name)
+            existing = self._scan().get(name)
+            if existing is not None:
+                dest = self._managed_skill_dir(name)
+            if source == dest or source.is_relative_to(dest) or dest.is_relative_to(source):
+                raise ValueError("Source and installed skill directories must not overlap.")
+            if existing is None and dest.exists():
+                raise FileExistsError(
+                    f"Cannot install skill '{name}': destination '{dest}' already exists."
+                )
 
-        skill_md = source / "SKILL.md"
-        if not skill_md.is_file():
-            msg = f"Source directory '{source}' does not contain a SKILL.md file."
-            raise ValueError(msg)
-
-        content = skill_md.read_text(encoding="utf-8")
-        skill = parse_skill_md(content, source)
-        if skill is None:
-            msg = f"SKILL.md in '{source}' is invalid — cannot install."
-            raise ValueError(msg)
-
-        dest = self._root / source.name
-        if dest.exists():
-            logger.info("Replacing existing skill at %s", dest)
-            shutil.rmtree(dest)
-
-        shutil.copytree(source, dest)
-        logger.info("Installed skill '%s' to %s", skill.name, dest)
-
-        # Invalidate cache so next access picks up the new skill
-        self.reload()
-
-        # Re-parse from installed location
-        installed = parse_skill_md(
-            (dest / "SKILL.md").read_text(encoding="utf-8"), dest
-        )
-        if installed is None:
-            msg = f"Skill installed but re-parse failed at '{dest}'."
-            raise RuntimeError(msg)
-
-        return installed
+            temporary = Path(tempfile.mkdtemp(prefix=".install-", dir=self._root)).resolve()
+            if not temporary.is_relative_to(self._root):
+                raise ValueError("Installation staging directory escapes the skills root.")
+            staged = temporary / "payload"
+            backup = temporary / "backup"
+            keep_backup = False
+            try:
+                shutil.copytree(source, staged)
+                installed = self._validate_skill_content(
+                    name, (staged / "SKILL.md").read_text(encoding="utf-8"), dest,
+                )
+                installed = replace(installed, resources=list_local_resources(staged))
+                if dest.exists():
+                    dest.rename(backup)
+                try:
+                    staged.rename(dest)
+                except Exception:
+                    if backup.exists():
+                        try:
+                            backup.rename(dest)
+                        except Exception:
+                            keep_backup = True
+                            logger.exception("Failed to restore skill; backup preserved at %s", backup)
+                    raise
+                self.reload()
+                logger.info("Installed skill '%s' to %s", installed.name, dest)
+                return installed
+            finally:
+                if not keep_backup:
+                    # Staging and backup paths were resolved under the managed root.
+                    try:
+                        shutil.rmtree(temporary)
+                    except OSError:
+                        logger.warning("Failed to remove installation staging at %s", temporary, exc_info=True)
 
 
 __all__ = [

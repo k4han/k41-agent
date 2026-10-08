@@ -9,6 +9,7 @@ import pytest
 
 from agent.modules.skills.models import Skill, SkillSummary
 from agent.modules.skills.parser import parse_skill_md
+from agent.modules.skills.resources import list_local_resources
 from agent.modules.skills.repository import (
     FilesystemSkillRepository,
     normalize_repository_skill_dir,
@@ -143,7 +144,7 @@ class TestParseSkillMd:
             tmp_path, "res-skill", create_resources=True
         )
         content = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
-        skill = parse_skill_md(content, skill_dir)
+        skill = parse_skill_md(content, skill_dir, resources=list_local_resources(skill_dir))
 
         assert skill is not None
         assert "scripts/run.py" in skill.resources
@@ -218,16 +219,12 @@ class TestFilesystemSkillRepository:
         assert summaries[0].name == "sum-skill"
         assert summaries[0].description == "Summary test."
 
-    def test_reload_refreshes_cache(self, tmp_path: Path) -> None:
+    def test_discovery_detects_new_skills_without_reload(self, tmp_path: Path) -> None:
         repo = FilesystemSkillRepository(skills_root=tmp_path)
         assert repo.discover_all() == []
 
         # Add a skill after initial scan
         _create_skill_dir(tmp_path, "late-skill", description="Added later.")
-        # Still cached
-        assert repo.discover_all() == []
-
-        repo.reload()
         skills = repo.discover_all()
         assert len(skills) == 1
         assert skills[0].name == "late-skill"

@@ -71,12 +71,23 @@ def test_tool_name_order_does_not_change_the_key() -> None:
         {"allowed_skill_names": []},
         {"allowed_skill_names": ["repo-docs"]},
         {"thread_id": "thread-2"},
+        {"repository_skill_dir": "custom/skills"},
     ],
 )
 def test_changed_inputs_miss_the_cache(overrides) -> None:
     system_prompt_cache.store_system_prompt(_key(), "Prompt A")
 
     assert system_prompt_cache.get_cached_system_prompt(_key(**overrides)) is None
+
+
+def test_workspace_identity_separates_sandboxes_with_the_same_display_label() -> None:
+    from agent.modules.workspaces import WorkspaceRef
+
+    first = WorkspaceRef(backend="modal", locator="sandbox-a", metadata={"root": "/repo"})
+    second = WorkspaceRef(backend="modal", locator="sandbox-b", metadata={"root": "/repo"})
+    system_prompt_cache.store_system_prompt(_key(workspace=first), "First workspace")
+
+    assert system_prompt_cache.get_cached_system_prompt(_key(workspace=second)) is None
 
 
 @pytest.mark.parametrize(

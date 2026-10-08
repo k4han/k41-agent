@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from langchain_core.messages import BaseMessage, SystemMessage
@@ -28,6 +29,8 @@ if TYPE_CHECKING:
     from agent.modules.workflows.run_config import (
         WorkflowContext,
     )
+
+logger = logging.getLogger(__name__)
 
 
 async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowContext]):
@@ -64,6 +67,13 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
 
     thread_id = get_thread_id(config)
     from agent.modules.tools import conversation_key
+    from agent.modules.skills import get_repository_skill_dir
+
+    try:
+        repository_skill_dir = get_repository_skill_dir()
+    except ValueError as exc:
+        logger.debug("Invalid repository skill dir: %s", exc)
+        repository_skill_dir = ""
     cache_key = build_system_prompt_cache_key(
         agent_name=agent_name,
         working_dir=working_dir,
@@ -71,6 +81,8 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
         tool_names=[getattr(tool, "name", "") for tool in tools],
         allowed_skill_names=ctx.get_allowed_skill_names(),
         thread_id=thread_id,
+        workspace=workspace,
+        repository_skill_dir=repository_skill_dir,
     )
     system_prompt = get_cached_system_prompt(cache_key)
 
@@ -83,6 +95,7 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
             skills_catalog_xml = await get_effective_skills_catalog_xml(
                 allowed_names=ctx.get_allowed_skill_names(),
                 workspace=workspace,
+                repository_dir=repository_skill_dir,
                 thread_id=thread_id,
             )
         system_prompt = build_llm_system_prompt(

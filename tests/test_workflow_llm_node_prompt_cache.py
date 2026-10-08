@@ -6,6 +6,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 import pytest
 
 import agent.modules.workflows.nodes.llm as llm_node_module
+from agent.modules.skills import get_effective_skills_catalog_xml as real_skills_catalog_xml
 from agent.modules.workflows.run_config import WorkflowContext
 from agent.shared.infrastructure.revisions import (
     PROMPT_VARIABLES_REVISION,
@@ -57,6 +58,7 @@ def cached_llm_node(monkeypatch):
 
     def _fake_builder(**kwargs):
         calls["builder"] += 1
+        captured["skills_catalog_xml"] = kwargs["skills_catalog_xml"]
         return f"Prompt build #{calls['builder']}"
 
     async def _fake_prompt_variables():
@@ -96,16 +98,20 @@ def cached_llm_node(monkeypatch):
         _fake_skills_catalog,
     )
 
-    async def _run(*, agent_name: str = "cache-agent", thread_id: str = "thread-1", messages=None, model=None, reasoning_effort=None):
+    async def _run(
+        *, agent_name: str = "cache-agent", thread_id: str = "thread-1",
+        messages=None, model=None, reasoning_effort=None,
+        allowed_tool_names=None, working_dir="D:/repo",
+    ):
         return await llm_node_module.llm_node(
             {"messages": messages if messages is not None else [HumanMessage(content="hi")]},
             {"configurable": {"thread_id": thread_id}},
             SimpleNamespace(
                 context=WorkflowContext(
                     agent_name=agent_name,
-                    working_dir="D:/repo",
+                    working_dir=working_dir,
                     context_compact_threshold=75,
-                    allowed_tool_names=["skill", "read"],
+                    allowed_tool_names=["skill", "read"] if allowed_tool_names is None else allowed_tool_names,
                     model=model,
                     reasoning_effort=reasoning_effort,
                 )
@@ -113,6 +119,57 @@ def cached_llm_node(monkeypatch):
         )
 
     return SimpleNamespace(run=_run, calls=calls, captured=captured)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_names", [["skill", "read"], ["read"]])
+async def test_invalid_skill_directory_does_not_block_llm_turns(
+    cached_llm_node, isolated_container, tmp_path, monkeypatch, tool_names,
+):
+    from agent.modules.skills.repository import FilesystemSkillRepository
+
+    repository = FilesystemSkillRepository(tmp_path / "global")
+    repository.create_skill(
+        "global-skill",
+        "---\nname: global-skill\ndescription: Global.\n---\nGlobal instructions.\n",
+    )
+    workspace = tmp_path / "workspace"
+    local_directory = workspace / "custom" / "skills" / "local-skill"
+    local_directory.mkdir(parents=True)
+    (local_directory / "SKILL.md").write_text(
+        "---\nname: local-skill\ndescription: Local.\n---\nLocal instructions.\n",
+        encoding="utf-8",
+    )
+    configured_directory = ["custom\\skills"]
+    config_service = isolated_container.config_service
+    original_get_str = config_service.get_str
+
+    def get_str(key, default=""):
+        if key == "skills.repository_dir":
+            return configured_directory[0]
+        return original_get_str(key, default)
+
+    monkeypatch.setattr(config_service, "get_str", get_str)
+    monkeypatch.setattr("agent.modules.skills._get_repository", lambda: repository)
+    monkeypatch.setattr("agent.modules.skills.get_effective_skills_catalog_xml", real_skills_catalog_xml)
+    kwargs = {"allowed_tool_names": tool_names, "working_dir": str(workspace)}
+
+    result = await cached_llm_node.run(**kwargs)
+    assert result["messages"][0].content == "ok"
+    if "skill" in tool_names:
+        assert "<name>global-skill</name>" in cached_llm_node.captured["skills_catalog_xml"]
+        assert "local-skill" not in cached_llm_node.captured["skills_catalog_xml"]
+    else:
+        assert cached_llm_node.captured["skills_catalog_xml"] is None
+    await cached_llm_node.run(**kwargs)
+    assert cached_llm_node.calls["builder"] == 1
+
+    configured_directory[0] = "custom/skills"
+    await cached_llm_node.run(**kwargs)
+    assert cached_llm_node.calls["builder"] == 2
+    if "skill" in tool_names:
+        assert "<name>global-skill</name>" in cached_llm_node.captured["skills_catalog_xml"]
+        assert "<name>local-skill</name>" in cached_llm_node.captured["skills_catalog_xml"]
 
 
 @pytest.mark.asyncio

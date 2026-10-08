@@ -15,11 +15,13 @@ above the typical gap between two LLM turns rather than as long as possible.
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
 from collections import OrderedDict
 from collections.abc import Sequence
+from typing import Any
 
 from agent.shared.infrastructure.revisions import (
     AGENTS_REVISION,
@@ -62,6 +64,8 @@ def build_system_prompt_cache_key(
     tool_names: Sequence[str],
     allowed_skill_names: Sequence[str] | None,
     thread_id: str | None,
+    workspace: Any = None,
+    repository_skill_dir: str = "",
 ) -> SystemPromptCacheKey:
     """Build a cache key covering every input that shapes the system prompt.
 
@@ -78,6 +82,12 @@ def build_system_prompt_cache_key(
         if allowed_skill_names is None
         else tuple(sorted(str(name or "") for name in allowed_skill_names)),
         str(thread_id or ""),
+        None if workspace is None else (
+            str(workspace.backend),
+            str(workspace.locator),
+            json.dumps(workspace.metadata, sort_keys=True, default=str),
+        ),
+        str(repository_skill_dir),
         get_revision(AGENTS_REVISION),
         get_revision(SKILLS_REVISION),
         get_revision(PROMPT_VARIABLES_REVISION),

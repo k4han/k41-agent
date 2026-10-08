@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Sequence
 from pathlib import Path
 
 from agent.modules.skills.models import Skill
@@ -34,26 +35,13 @@ def _validate_name(name: str) -> bool:
     return bool(_NAME_RE.match(name))
 
 
-def _list_resources(skill_dir: Path) -> list[str]:
-    """List bundled resource files (scripts/, references/, assets/).
-
-    Always uses forward slashes for cross-platform consistency.
-    """
-    resources: list[str] = []
-    for sub in ("scripts", "references", "assets"):
-        sub_dir = skill_dir / sub
-        if sub_dir.is_dir():
-            for file in sub_dir.rglob("*"):
-                if file.is_file():
-                    resources.append(file.relative_to(skill_dir).as_posix())
-    return sorted(resources)
-
-
 def parse_skill_md(
     content: str,
     skill_dir: Path,
     *,
     strict: bool = False,
+    expected_name: str | None = None,
+    resources: Sequence[str] = (),
 ) -> Skill | None:
     """Parse a SKILL.md file and return a ``Skill``, or ``None`` on failure.
 
@@ -66,6 +54,8 @@ def parse_skill_md(
     When ``strict=True`` (used by dashboard CRUD), the same conditions
     raise ``ValueError`` instead so that explicit write operations
     reject malformed content rather than silently accepting it.
+    ``expected_name`` lets strict writes validate an imported identifier
+    instead of the directory name; missing names still use the actual directory.
     """
     match = _FRONTMATTER_RE.match(content)
     if not match:
@@ -127,12 +117,15 @@ def parse_skill_md(
             raise ValueError(msg)
         logger.warning("%s — loading anyway.", msg)
 
-    # Reject when name doesn't match directory when strict
+    if strict and expected_name is not None and name != expected_name:
+        raise ValueError("SKILL.md frontmatter name must match the skill name.")
+
+    # Imported skills may have an explicitly expected identifier.
     if name != skill_dir.name:
         msg = (
             f"Skill name '{name}' doesn't match directory '{skill_dir.name}'."
         )
-        if strict:
+        if strict and expected_name is None:
             raise ValueError(msg)
         logger.warning("%s — loading anyway.", msg)
 
@@ -153,8 +146,6 @@ def parse_skill_md(
     allowed_tools_raw = data.get("allowed-tools", "")
     allowed_tools = parse_string_or_list(allowed_tools_raw, separator=" ")
 
-    resources = _list_resources(skill_dir)
-
     return Skill(
         name=name,
         description=description,
@@ -164,7 +155,7 @@ def parse_skill_md(
         compatibility=compatibility,
         metadata=metadata,
         allowed_tools=allowed_tools,
-        resources=resources,
+        resources=list(resources),
     )
 
 

@@ -6,28 +6,20 @@ Other modules should import from here, not from internal packages.
 from __future__ import annotations
 
 import logging
-import threading
-import time
 from pathlib import Path
 from collections.abc import Sequence
 from typing import Any
-from xml.sax.saxutils import escape as xml_escape
 
-logger = logging.getLogger(__name__)
-
-from agent.modules.skills.repository import (  # noqa: E402
+from agent.modules.skills.discovery import clear_discovery_cache
+from agent.modules.skills.rendering import skill_catalog_xml, skill_content_xml
+from agent.modules.skills.service import SkillsService, allowed_names as normalize_allowed_names
+from agent.modules.skills.repository import (
     DEFAULT_SKILLS_ROOT,
     FilesystemSkillRepository,
     normalize_repository_skill_dir,
 )
 
-# TTL cache for repository-local skill discovery. The same workspace
-# is hit many times per agent run (once for the catalog at llm_node,
-# then once per ``skill`` tool invocation); caching avoids an N+1
-# round-trip to the workspace backend.
-_REPOSITORY_DISCOVERY_TTL_SECONDS = 5.0
-_repository_discovery_cache: dict[tuple, tuple[float, dict[str, Any]]] = {}
-_repository_discovery_lock = threading.Lock()
+logger = logging.getLogger(__name__)
 
 
 def _get_repository(container=None):
@@ -49,45 +41,6 @@ def get_skill(name: str):
     return load_skill(_get_repository(), name)
 
 
-def _allowed_names(allowed_names: Sequence[str] | None) -> set[str] | None:
-    if allowed_names is None:
-        return None
-    return {str(name).strip() for name in allowed_names if str(name).strip()}
-
-
-def _skill_catalog_xml(skills: Sequence[Any]) -> str:
-    if not skills:
-        return "<available_skills/>"
-
-    lines = ["<available_skills>"]
-    for skill in skills:
-        skill_md_path = skill.path / "SKILL.md"
-        lines.append("  <skill>")
-        lines.append(f"    <name>{xml_escape(skill.name)}</name>")
-        lines.append(f"    <description>{xml_escape(skill.description)}</description>")
-        lines.append(f"    <location>{xml_escape(str(skill_md_path))}</location>")
-        lines.append("  </skill>")
-    lines.append("</available_skills>")
-    return "\n".join(lines)
-
-
-def _skill_content_xml(skill: Any) -> str:
-    lines = [f'<skill_content name="{xml_escape(skill.name)}">']
-    lines.append(skill.body)
-    lines.append("")
-    lines.append(f"Skill directory: {skill.path}")
-    lines.append("Relative paths in this skill are relative to the skill directory.")
-
-    if skill.resources:
-        lines.append("<skill_resources>")
-        for res in skill.resources:
-            lines.append(f"  <file>{xml_escape(res)}</file>")
-        lines.append("</skill_resources>")
-
-    lines.append("</skill_content>")
-    return "\n".join(lines)
-
-
 def get_skills_catalog_xml(allowed_names: Sequence[str] | None = None) -> str:
     """Build an XML catalog of available skills for LLM prompt injection.
 
@@ -103,13 +56,13 @@ def get_skills_catalog_xml(allowed_names: Sequence[str] | None = None) -> str:
 
     Returns an empty ``<available_skills/>`` element if no skills exist.
     """
-    allowed = _allowed_names(allowed_names)
+    allowed = normalize_allowed_names(allowed_names)
     summaries = [
         summary
         for summary in list_available_skills()
         if allowed is None or summary.name in allowed
     ]
-    return _skill_catalog_xml(summaries)
+    return skill_catalog_xml(summaries)
 
 
 def get_skill_content_xml(name: str) -> str | None:
@@ -131,7 +84,7 @@ def get_skill_content_xml(name: str) -> str | None:
     if skill is None:
         return None
 
-    return _skill_content_xml(skill)
+    return skill_content_xml(skill)
 
 
 def read_skill_content(name: str) -> str:
@@ -154,96 +107,22 @@ def delete_skill(name: str) -> None:
     _get_repository().delete_skill(name)
 
 
-def get_repository_skill_dir() -> str:
-    """Return the configured repository-relative skill directory."""
-    from agent.modules.skills.repository import normalize_repository_skill_dir
+def _configured_repository_skill_dir() -> str:
     from agent.shared.config.service import get_config_service
 
-    return normalize_repository_skill_dir(
-        get_config_service().get_str("skills.repository_dir", ".agent/skills")
-    )
+    return get_config_service().get_str("skills.repository_dir", ".agent/skills")
 
 
-async def _discover_repository_skills(
-    *,
-    workspace: Any,
-    repository_dir: str | None = None,
-    thread_id: str | None = None,
-) -> dict[str, Any]:
-    """Discover repo-local skills, cached per (workspace, repo dir, thread)."""
-    if workspace is None:
-        return {}
-
-    try:
-        from agent.modules.skills.repository import normalize_repository_skill_dir
-        skill_dir = normalize_repository_skill_dir(
-            repository_dir or get_repository_skill_dir()
-        )
-    except ValueError as exc:
-        logger.debug("Invalid repository skill dir: %s", exc)
-        return {}
-
-    workspace_key = (
-        getattr(workspace, "locator", None) or str(workspace) or id(workspace)
-    )
-    cache_key = (str(workspace_key), skill_dir, str(thread_id or ""))
-    now = time.monotonic()
-
-    with _repository_discovery_lock:
-        cached = _repository_discovery_cache.get(cache_key)
-        if cached is not None and (now - cached[0]) < _REPOSITORY_DISCOVERY_TTL_SECONDS:
-            return dict(cached[1])
-
-    from agent.modules.skills.parser import parse_skill_md
-    from agent.modules.skills.repository import normalize_skill_name
-    from agent.modules.workspaces import get_workspace_browser, get_workspace_file_io
-
-    try:
-        browser = await get_workspace_browser(workspace, thread_id=thread_id)
-        tree = await browser.tree(skill_dir)
-        file_io = await get_workspace_file_io(workspace, thread_id=thread_id)
-    except Exception as exc:
-        logger.debug("Failed to inspect repository-local skills: %s", exc)
-        return {}
-
-    skills: dict[str, Any] = {}
-    for entry in tree.get("entries", []):
-        if not isinstance(entry, dict) or entry.get("kind") != "directory":
-            continue
-        try:
-            dir_name = normalize_skill_name(str(entry.get("name") or ""))
-        except ValueError:
-            continue
-
-        relative_skill_path = f"{skill_dir}/{dir_name}/SKILL.md"
-        try:
-            content = await file_io.read_text(relative_skill_path)
-            skill = parse_skill_md(content, Path(skill_dir) / dir_name)
-        except Exception as exc:
-            logger.debug(
-                "Failed to load repository-local skill '%s': %s",
-                dir_name,
-                exc,
-            )
-            continue
-        if skill is not None:
-            skills[skill.name] = skill
-
-    with _repository_discovery_lock:
-        _repository_discovery_cache[cache_key] = (now, dict(skills))
-    return skills
-
-
-def _clear_repository_discovery_cache() -> None:
-    with _repository_discovery_lock:
-        _repository_discovery_cache.clear()
+def get_repository_skill_dir() -> str:
+    """Return the configured repository-relative skill directory."""
+    return normalize_repository_skill_dir(_configured_repository_skill_dir())
 
 
 def reload_repository_skills() -> None:
     """Invalidate the repository-local skills discovery cache."""
     from agent.shared.infrastructure.revisions import SKILLS_REVISION, bump_revision
 
-    _clear_repository_discovery_cache()
+    clear_discovery_cache()
     bump_revision(SKILLS_REVISION)
 
 
@@ -307,21 +186,11 @@ async def get_effective_skills_catalog_xml(
     thread_id: str | None = None,
 ) -> str:
     """Build a skill catalog from allowed globals plus repo-local overrides."""
-    allowed = _allowed_names(allowed_names)
-    skills_by_name: dict[str, Any] = {
-        skill.name: skill
-        for skill in list_available_skills()
-        if allowed is None or skill.name in allowed
-    }
-    skills_by_name.update(
-        await _discover_repository_skills(
-            workspace=workspace,
-            repository_dir=repository_dir,
-            thread_id=thread_id,
-        )
-    )
-    return _skill_catalog_xml(
-        [skills_by_name[name] for name in sorted(skills_by_name)]
+    return await SkillsService(_get_repository()).catalog_xml(
+        names=allowed_names,
+        workspace=workspace,
+        repository_dir=repository_dir or _configured_repository_skill_dir(),
+        thread_id=thread_id,
     )
 
 
@@ -334,23 +203,13 @@ async def get_effective_skill_content_xml(
     thread_id: str | None = None,
 ) -> str | None:
     """Load a skill from repo-local skills first, then allowed global skills."""
-    normalized_name = str(name or "").strip()
-    if not normalized_name:
-        return None
-
-    repository_skills = await _discover_repository_skills(
+    return await SkillsService(_get_repository()).content_xml(
+        name,
+        names=allowed_names,
         workspace=workspace,
-        repository_dir=repository_dir,
+        repository_dir=repository_dir or _configured_repository_skill_dir(),
         thread_id=thread_id,
     )
-    local_skill = repository_skills.get(normalized_name)
-    if local_skill is not None:
-        return _skill_content_xml(local_skill)
-
-    allowed = _allowed_names(allowed_names)
-    if allowed is not None and normalized_name not in allowed:
-        return None
-    return get_skill_content_xml(normalized_name)
 
 
 def install_skill(source: Path):
@@ -365,7 +224,7 @@ def reload_skills() -> None:
     # FilesystemSkillRepository.reload() already bumps SKILLS_REVISION, so the
     # discovery cache is cleared directly to avoid a redundant second bump.
     _get_repository().reload()
-    _clear_repository_discovery_cache()
+    clear_discovery_cache()
     logger.info("Skills reloaded.")
 
 
