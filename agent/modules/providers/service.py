@@ -232,10 +232,13 @@ def _merge_model_options(
         normalized = model_id.strip()
         if normalized and normalized not in options:
             entry = model_entries.get(normalized)
-            context_window = entry.context_window if entry else None
+            from agent.modules.providers.context_window import resolve_context_window
+
+            profile = get_model_profile(provider_type, normalized, model_profiles)
+            context_window = resolve_context_window(provider_name, normalized, profile)
             input_types = entry.input_types if entry else None
             output_types = entry.output_types if entry else None
-            levels, default = reasoning_metadata(get_model_profile(provider_type, normalized, model_profiles))
+            levels, default = reasoning_metadata(profile)
             options[normalized] = ModelOption(
                 id=normalized,
                 label=normalized,

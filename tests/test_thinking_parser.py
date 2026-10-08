@@ -356,7 +356,7 @@ async def test_run_agent_stream_strips_inline_thinking_from_message_chunks(
 
             return SimpleNamespace(
                 graph_type="react_agent",
-                max_context_tokens=1234,
+                context_compact_threshold=75,
                 tools=[],
             )
 
@@ -433,7 +433,7 @@ async def test_run_agent_stream_emits_thinking_events_when_enabled(
 
             return SimpleNamespace(
                 graph_type="react_agent",
-                max_context_tokens=1234,
+                context_compact_threshold=75,
                 tools=[],
             )
 

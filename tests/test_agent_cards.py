@@ -32,7 +32,7 @@ def _config(
         tools=["read"],
         sub_agents=sub_agents,
         plan_approval_targets=plan_approval_targets or [],
-        max_context_tokens=1000,
+        context_compact_threshold=75,
         system_prompt="You are a sample agent.",
     )
 
@@ -135,7 +135,7 @@ name: default
 graph_type: react_agent
 provider: default
 tools: []
-max_context_tokens: 1000
+context_compact_threshold: 75
 ---
 User default prompt.
 """,
@@ -278,14 +278,14 @@ def test_clone_builtin_router_agent_preserves_router_contract(tmp_path: Path) ->
     [
         (_config("../bad"), "Agent name can only contain"),
         (
-            AgentConfig(
+            AgentConfig.model_construct(
                 name="bad-tokens",
                 graph_type="react_agent",
                 provider="default",
-                context_trim_threshold=0,
+                context_compact_threshold=0,
                 system_prompt="Prompt",
             ),
-            "context_trim_threshold",
+            "context_compact_threshold",
         ),
         (
             AgentConfig(

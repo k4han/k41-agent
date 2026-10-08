@@ -10,7 +10,7 @@ sub_agents:
 - default
 - channel-agent
 - github-issue-fixer
-context_trim_threshold: 50000
+context_compact_threshold: 75
 mcp_servers: []
 ---
 

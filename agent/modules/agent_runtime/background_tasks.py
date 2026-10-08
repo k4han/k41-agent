@@ -81,7 +81,7 @@ class BackgroundTask:
     request: str = ""
     agent_name: str = "default"
     workspace: WorkspaceRef | None = None
-    context_trim_threshold: int | None = None
+    context_compact_threshold: int | None = None
     allowed_tool_names: list[str] | None = None
     allowed_skill_names: list[str] | None = None
     provider: str | None = None
@@ -312,7 +312,7 @@ class BackgroundTaskManager:
         notify_channel: NotifyChannel | None = None,
         completion_hook: Callable[[BackgroundTask], Awaitable[None]] | None = None,
         cleanup_hook: Callable[[BackgroundTask], Awaitable[None]] | None = None,
-        context_trim_threshold: int | None = None,
+        context_compact_threshold: int | None = None,
         allowed_tool_names: list[str] | None = None,
         allowed_skill_names: list[str] | None = None,
         provider: str | None = None,
@@ -334,7 +334,7 @@ class BackgroundTaskManager:
                 if workspace is not None or working_dir
                 else None
             ),
-            context_trim_threshold=context_trim_threshold if context_trim_threshold and context_trim_threshold > 0 else None,
+            context_compact_threshold=context_compact_threshold,
             allowed_tool_names=list(allowed_tool_names) if allowed_tool_names else None,
             allowed_skill_names=(
                 list(allowed_skill_names) if allowed_skill_names is not None else None
@@ -564,7 +564,7 @@ class BackgroundTaskManager:
             thread_id=task.thread_id,
             agent_name=task.agent_name,
             workspace=task.workspace,
-            context_trim_threshold=task.context_trim_threshold,
+            context_compact_threshold=task.context_compact_threshold,
             allowed_tool_names=task.allowed_tool_names,
             allowed_skill_names=task.allowed_skill_names,
             provider=task.provider,

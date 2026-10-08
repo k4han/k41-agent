@@ -9,7 +9,7 @@ tools:
   - "webfetch"
   - "list_dir"
   - "read"
-context_trim_threshold: 50000
+context_compact_threshold: 75
 ---
 
 # System Prompt

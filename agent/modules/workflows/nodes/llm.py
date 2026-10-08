@@ -12,6 +12,7 @@ from agent.modules.workflows.model_effort import get_workflow_reasoning_effort_k
 from agent.modules.usage import with_usage_tracking
 from agent.modules.prompt_variables import get_runtime_prompt_variable_values
 from agent.modules.workflows.message_history import normalize_messages_for_chat_model
+from agent.modules.workflows.model_context import prepare_model_context
 from agent.modules.workflows.prompt_builders import (
     build_llm_system_prompt,
 )
@@ -100,9 +101,13 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
     from types import SimpleNamespace
     from agent.modules.tools import migrate_history_outputs
     history = await migrate_history_outputs(state["messages"], SimpleNamespace(context=ctx, config=config))
-    messages: list[BaseMessage] = normalize_messages_for_chat_model([SystemMessage(content=system_prompt), *history])
-
     resolved = get_resolved_chat_model(provider_name=provider, model=model)
+    system = SystemMessage(content=system_prompt)
+    history, history_updates = await prepare_model_context(
+        history, system=system, tools=tools, context=ctx,
+        agent_config=agent_config, resolved=resolved, config=config,
+    )
+    messages: list[BaseMessage] = normalize_messages_for_chat_model([system, *history])
     model_kwargs = get_workflow_reasoning_effort_kwargs(ctx, agent_config, resolved)
     llm = resolved.model.bind_tools(tools, **model_kwargs)
     response = await llm.ainvoke(
@@ -115,4 +120,4 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
             call_kind="agent",
         ),
     )
-    return {"messages": [response]}
+    return {"messages": [*history_updates, response]}

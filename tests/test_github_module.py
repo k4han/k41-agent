@@ -363,6 +363,90 @@ async def test_comment_trigger_does_not_consume_issue_task_claim(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("threshold", "expected"),
+    [
+        (50000, None),
+        (-1, None),
+        (0, None),
+        (101, None),
+        ("invalid", None),
+        (None, None),
+        (1, 1),
+        (75, 75),
+        (100, 100),
+    ],
+)
+async def test_repository_binding_reads_normalize_compact_threshold(
+    github_store_db,
+    threshold,
+    expected,
+) -> None:
+    from agent.modules.github.models import GitHubRepositoryBinding
+    from agent.modules.github.repository import GitHubRepositoryStore
+    from agent.shared.infrastructure.db.session import get_async_session
+
+    session = await get_async_session()
+    async with session:
+        session.add(
+            GitHubRepositoryBinding(
+                repository_id=100,
+                installation_id=10,
+                full_name="octo/example",
+                context_compact_threshold=threshold,
+            )
+        )
+        await session.commit()
+
+    store = GitHubRepositoryStore()
+    listed = await store.list_bindings()
+    by_name = await store.get_binding_by_full_name("octo/example")
+    by_id = await store.get_serialized_binding_by_repository_id(100)
+
+    assert listed[0]["context_compact_threshold"] == expected
+    assert by_name["context_compact_threshold"] == expected
+    assert by_id["context_compact_threshold"] == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("threshold", [-1, 0, 101, 50000, True, False, 75.5, "75"])
+async def test_repository_binding_writes_reject_invalid_compact_threshold(
+    github_store_db,
+    threshold,
+) -> None:
+    from agent.modules.github.models import GitHubRepositoryBinding
+    from agent.modules.github.repository import GitHubRepositoryStore
+    from agent.shared.infrastructure.db.session import get_async_session
+
+    session = await get_async_session()
+    async with session:
+        session.add(
+            GitHubRepositoryBinding(
+                repository_id=100,
+                installation_id=10,
+                full_name="octo/example",
+                context_compact_threshold=75,
+            )
+        )
+        await session.commit()
+
+    store = GitHubRepositoryStore()
+    with pytest.raises(ValueError, match="integer between 1 and 100"):
+        await store.update_binding(
+            100,
+            enabled=True,
+            agent_name="default",
+            trigger_label="k41-agent",
+            mention_triggers=["@k41-agent"],
+            context_compact_threshold=threshold,
+        )
+
+    persisted = await store.get_serialized_binding_by_repository_id(100)
+    assert persisted["context_compact_threshold"] == 75
+    assert persisted["enabled"] is False
+
+
+@pytest.mark.asyncio
 async def test_try_claim_issue_task_dedupes_within_ttl(github_store_db) -> None:
     from agent.modules.github.repository import GitHubRepositoryStore
 
@@ -594,7 +678,7 @@ async def test_repository_optimization_settings_flow_to_background_task(
         repository_instructions="Always run uv tests.",
         provider_name="main-provider",
         model_name="fast-model",
-        context_trim_threshold=24000,
+        context_compact_threshold=75,
         tool_policy_mode="custom",
         allowed_tools_json='["read", "write"]',
         allowed_skills_json='["repo-skill"]',
@@ -613,7 +697,7 @@ async def test_repository_optimization_settings_flow_to_background_task(
     assert "Always run uv tests." in submission["request"]
     assert submission["provider"] == "main-provider"
     assert submission["model"] == "fast-model"
-    assert submission["context_trim_threshold"] == 24000
+    assert submission["context_compact_threshold"] == 75
     assert submission["allowed_tool_names"] == ["read", "write"]
     assert submission["allowed_skill_names"] == ["repo-skill"]
     assert submission["workspace"].metadata["branch"] == "repo-bot/default/issue-7-abcdef12"
@@ -653,7 +737,7 @@ async def test_submit_repository_task_uses_repository_settings(
         repository_instructions="Prefer small focused changes.",
         provider_name="repo-provider",
         model_name="repo-model",
-        context_trim_threshold=12000,
+        context_compact_threshold=75,
         tool_policy_mode="custom",
         allowed_tools_json='["read"]',
         allowed_skills_json='["repo-skill"]',
@@ -675,7 +759,7 @@ async def test_submit_repository_task_uses_repository_settings(
     assert submission["agent_name"] == "default"
     assert submission["provider"] == "repo-provider"
     assert submission["model"] == "repo-model"
-    assert submission["context_trim_threshold"] == 12000
+    assert submission["context_compact_threshold"] == 75
     assert submission["allowed_tool_names"] == ["read"]
     assert submission["allowed_skill_names"] == ["repo-skill"]
     assert submission["notify_channel"].platform == "telegram"

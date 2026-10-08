@@ -67,7 +67,7 @@ async def test_llm_node_uses_prompt_builder_output_for_system_message(monkeypatc
     )
     async def _fake_resolve(self, agent_name, *, override_tool_names=None):
         names = list(override_tool_names) if override_tool_names else []
-        return [SimpleNamespace(name=name) for name in names]
+        return [SimpleNamespace(name=name, description="Test tool", tool_call_schema={"type": "object", "properties": {}}) for name in names]
 
     monkeypatch.setattr(
         llm_node_module.ToolResolver,
@@ -96,7 +96,7 @@ async def test_llm_node_uses_prompt_builder_output_for_system_message(monkeypatc
             context=WorkflowContext(
                 agent_name="builder-agent",
                 working_dir="D:/repo",
-                max_context_tokens=50000,
+                context_compact_threshold=75,
                 allowed_tool_names=["skill", "read"],
                 allowed_skill_names=["repo-docs"],
             )
@@ -193,7 +193,7 @@ async def test_llm_node_keeps_friendly_workspace_label_and_exposes_actual_sandbo
             context=WorkflowContext(
                 agent_name="sandbox-agent",
                 workspace=sandbox_workspace,
-                max_context_tokens=50000,
+                context_compact_threshold=75,
                 allowed_tool_names=[],
             )
         ),
@@ -234,7 +234,7 @@ async def test_llm_node_prefers_runtime_allowed_tool_names_before_building_promp
     )
     async def _fake_resolve(self, agent_name, *, override_tool_names=None):
         names = list(override_tool_names) if override_tool_names else []
-        return [SimpleNamespace(name=name) for name in names]
+        return [SimpleNamespace(name=name, description="Test tool", tool_call_schema={"type": "object", "properties": {}}) for name in names]
 
     monkeypatch.setattr(
         llm_node_module.ToolResolver,
@@ -253,7 +253,7 @@ async def test_llm_node_prefers_runtime_allowed_tool_names_before_building_promp
             context=WorkflowContext(
                 agent_name="override-agent",
                 working_dir="D:/repo",
-                max_context_tokens=50000,
+                context_compact_threshold=75,
                 allowed_tool_names=["call_agent", "skill"],
             )
         ),
@@ -310,7 +310,7 @@ async def test_llm_node_normalizes_assistant_string_list_history(monkeypatch):
             context=WorkflowContext(
                 agent_name="history-agent",
                 working_dir="D:/repo",
-                max_context_tokens=50000,
+                context_compact_threshold=75,
                 allowed_tool_names=[],
             )
         ),
@@ -362,7 +362,7 @@ async def test_llm_node_prefers_runtime_model_over_agent_card_model(monkeypatch)
             context=WorkflowContext(
                 agent_name="override-agent",
                 working_dir="D:/repo",
-                max_context_tokens=50000,
+                context_compact_threshold=75,
                 allowed_tool_names=[],
                 model="runtime-model",
             )

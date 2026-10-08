@@ -1194,6 +1194,16 @@ function ChannelSectionGroup(props: {
                 info={entry.info}
                 draft={props.drafts[entry.key]}
                 dirty={dirty()}
+                actions={entry.suffix === "context_trim_threshold" ? (
+                  <button
+                    class="btn btn-ghost btn-sm"
+                    type="button"
+                    title="Reset to default (50,000 tokens)"
+                    onClick={() => props.onChange(entry.key, null)}
+                  >
+                    Reset default
+                  </button>
+                ) : undefined}
                 control={
                   isAgent ? (
                     <AgentNameSelect

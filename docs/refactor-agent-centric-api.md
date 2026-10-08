@@ -39,7 +39,7 @@ async def run_agent(
     workflow: str | None = None,
     service_type: str | None = None,
     working_dir: str | None = None,
-    max_context_tokens: int | None = None,
+    context_compact_threshold: int | None = None,
     allowed_tool_names: list[str] | None = None,
 ) -> AsyncGenerator[str, None]:
     # Load toàn bộ config từ agent_name
@@ -59,7 +59,7 @@ async def run_agent(
 
 **Signature mới:**
 - `user_input`, `thread_id`, `agent_name` là positional/required
-- `workflow`, `service_type`, `working_dir`, `max_context_tokens`, `allowed_tool_names` là keyword-only và optional
+- `workflow`, `service_type`, `working_dir`, `context_compact_threshold`, `allowed_tool_names` là keyword-only và optional
 - Tất cả optional params đều có giá trị `None`, được resolve từ agent config
 
 **Resolution logic:**
@@ -70,14 +70,14 @@ agent_config = catalog.get_agent(agent_name)
 # Explicit params > agent config
 resolved_workflow = workflow or agent_config.graph_type
 resolved_service_type = service_type or agent_config.service_type
-resolved_max_tokens = max_context_tokens or agent_config.max_context_tokens
+resolved_compact_percent = context_compact_threshold if context_compact_threshold is not None else agent_config.context_compact_threshold
 resolved_tools = allowed_tool_names if allowed_tool_names is not None else agent_config.tools
 ```
 
 ### 2. `build_run_params`
 
 **Thay đổi:**
-- Không còn resolve workflow/service_type/max_context_tokens
+- Không còn resolve workflow/service_type/context_compact_threshold
 - Chỉ build dict params để truyền vào `run_agent*` functions
 - Resolution logic được chuyển vào các `run_agent*` functions
 

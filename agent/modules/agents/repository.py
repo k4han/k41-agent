@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 from agent.modules.agents.models import AgentCard, AgentConfig
-from agent.modules.agents.parser import parse_agent_file_with_error, serialize_agent_config
+from agent.modules.agents.parser import agent_markdown_name, parse_agent_file_with_error, serialize_agent_config
 from agent.shared.infrastructure.revisions import AGENTS_REVISION, bump_revision
 
 logger = logging.getLogger(__name__)
@@ -120,9 +120,16 @@ class FilesystemAgentRepository:
                     continue
                 config, error = parse_agent_file_with_error(md_path)
                 if config is None:
+                    invalid_name = md_path.stem
+                    if "Unsupported agent card settings:" in error:
+                        invalid_name = agent_markdown_name(md_path.read_text(encoding="utf-8")) or invalid_name
+                        # A legacy user override must be repaired rather than
+                        # silently falling back to a builtin with the same name.
+                        agents.pop(invalid_name, None)
+                        cards_by_name.pop(invalid_name, None)
                     invalid_cards.append(
                         AgentCard.invalid(
-                            name=md_path.stem,
+                            name=invalid_name,
                             source="user",
                             path=str(md_path),
                             editable=True,

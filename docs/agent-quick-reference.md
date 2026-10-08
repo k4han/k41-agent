@@ -45,7 +45,7 @@ model: "devstral-2512"
 tools:
   - "list_dir"
   - "read"
-max_context_tokens: 50000
+context_compact_threshold: 75
 ---
 
 # System Prompt

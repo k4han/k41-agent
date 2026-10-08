@@ -45,7 +45,7 @@ async def test_runtime_injected_tool_validation_does_not_warn(tmp_path) -> None:
         state={},
         context=make_context(
             working_dir=str(tmp_path),
-            max_context_tokens=100,
+            context_compact_threshold=75,
             agent_name="default",
             allowed_tool_names=[],
         ),

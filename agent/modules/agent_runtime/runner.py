@@ -67,8 +67,8 @@ def build_run_params(
     workflow: str | None = None,
     workspace: WorkspaceRef | dict[str, Any] | str | None = None,
     working_dir: str | None = None,
-    context_trim_threshold: int | None = None,
-    max_context_tokens: int | None = None,  # Backward compatibility
+    context_compact_threshold: int | None = None,
+    channel_context_trim_threshold: int | None = None,
     channel_id: str = "",
     agent_name: str = "default",
     provider: str | None = None,
@@ -91,8 +91,8 @@ def build_run_params(
         thread_id: Existing session thread ID to resume
         workflow: Override agent's graph_type if needed
         workspace: Workspace reference for tools
-        context_trim_threshold: Override agent's context_trim_threshold if needed
-        max_context_tokens: Override agent's context_trim_threshold if needed (legacy)
+        context_compact_threshold: Override agent's context_compact_threshold if needed
+        channel_context_trim_threshold: Optional channel conversation token budget
         channel_id: Channel identifier (for multi-channel platforms)
         agent_name: Agent to use (loads config from catalog)
         provider: Override agent card provider for this run if needed
@@ -102,14 +102,20 @@ def build_run_params(
     """
     if resume_payload is not None:
         resume = True
+    platform_name = str(getattr(platform, "value", platform) or "")
+    if channel_context_trim_threshold is None and platform_name in {"telegram", "discord", "zalo"}:
+        from agent.shared.config import get_config_service
+        channel_context_trim_threshold = get_config_service().get_int(
+            f"channels.{platform_name}.context_trim_threshold", 50_000,
+        )
     params: dict[str, Any] = {
         "user_input": user_input,
         "thread_id": resolve_thread_id(thread_id) if thread_id else SessionManager.make_thread_id(platform, user_id, channel_id),
         "agent_name": agent_name,
         "workflow": workflow,
         "workspace": workspace if workspace is not None else working_dir,
-        "context_trim_threshold": context_trim_threshold,
-        "max_context_tokens": max_context_tokens,
+        "context_compact_threshold": context_compact_threshold,
+        "channel_context_trim_threshold": channel_context_trim_threshold,
         "provider": provider,
         "model": model,
         "allowed_skill_names": allowed_skill_names,
@@ -548,6 +554,11 @@ class _StreamingChunkExtractor:
         self._tag_parser = ThinkingTagStreamParser()
 
     def extract(self, event: Any) -> ContentWithThinking:
+        metadata = event[1] if isinstance(event, tuple) and len(event) > 1 else {}
+        if isinstance(metadata, dict) and (
+            metadata.get("context_compaction") or "context_compaction" in metadata.get("tags", [])
+        ):
+            return ContentWithThinking(text="", thinking="")
         chunk = event[0] if isinstance(event, tuple) and event else event
         if not isinstance(chunk, AIMessageChunk):
             return ContentWithThinking(text="", thinking="")
@@ -1023,8 +1034,8 @@ async def run_agent(
     workflow: str | None = None,
     workspace: WorkspaceRef | dict[str, Any] | str | None = None,
     working_dir: str | None = None,
-    context_trim_threshold: int | None = None,
-    max_context_tokens: int | None = None,  # Backward compatibility
+    context_compact_threshold: int | None = None,
+    channel_context_trim_threshold: int | None = None,
     allowed_tool_names: list[str] | None = None,
     allowed_skill_names: list[str] | None = None,
     provider: str | None = None,
@@ -1046,8 +1057,8 @@ async def run_agent(
         agent_name: Agent to use (loads config from catalog)
         workflow: Override agent's graph_type if needed
         workspace: Workspace reference for tools
-        context_trim_threshold: Override agent's context_trim_threshold if needed
-        max_context_tokens: Override agent's context_trim_threshold if needed (legacy)
+        context_compact_threshold: Override agent's context_compact_threshold if needed
+        channel_context_trim_threshold: Optional channel conversation token budget
         allowed_tool_names: Override agent's tools if needed
         provider: Override agent card provider for this run if needed
         model: Override agent card model for this run if needed
@@ -1082,14 +1093,6 @@ async def run_agent(
 
     # Resolve: explicit params > agent config
     resolved_workflow = workflow or agent_config.graph_type
-    config_threshold = getattr(
-        agent_config, "context_trim_threshold", None
-    ) or getattr(agent_config, "max_context_tokens", None)
-    resolved_threshold = (
-        context_trim_threshold
-        if context_trim_threshold is not None
-        else (max_context_tokens or config_threshold)
-    )
     resolved_tools = allowed_tool_names if allowed_tool_names is not None else agent_config.tools
 
     thread_id = resolve_thread_id(thread_id)
@@ -1106,8 +1109,8 @@ async def run_agent(
     context = make_run_context(
         workspace=workspace,
         working_dir=working_dir,
-        context_trim_threshold=resolved_threshold,
-        max_context_tokens=resolved_threshold,
+        context_compact_threshold=context_compact_threshold,
+        channel_context_trim_threshold=channel_context_trim_threshold,
         agent_name=agent_name,
         allowed_tool_names=resolved_tools or None,
         allowed_skill_names=allowed_skill_names,
@@ -1154,7 +1157,7 @@ async def run_agent(
             messages = event.get("messages", [])
             if messages:
                 last = messages[-1]
-                if isinstance(last, AIMessage):
+                if isinstance(last, AIMessage) and not last.additional_kwargs.get("is_compact_summary"):
                     content = extract_final_text_content(getattr(last, "content", None))
                     if content:
                         registry.update_step(session_id, SESSION_STEP_RESPONDING)
@@ -1169,8 +1172,8 @@ async def run_agent_stream(
     workflow: str | None = None,
     workspace: WorkspaceRef | dict[str, Any] | str | None = None,
     working_dir: str | None = None,
-    context_trim_threshold: int | None = None,
-    max_context_tokens: int | None = None,  # Backward compatibility
+    context_compact_threshold: int | None = None,
+    channel_context_trim_threshold: int | None = None,
     allowed_tool_names: list[str] | None = None,
     allowed_skill_names: list[str] | None = None,
     provider: str | None = None,
@@ -1193,8 +1196,8 @@ async def run_agent_stream(
         agent_name: Agent to use (loads config from catalog)
         workflow: Override agent's graph_type if needed
         workspace: Workspace reference for tools
-        context_trim_threshold: Override agent's context_trim_threshold if needed
-        max_context_tokens: Override agent's context_trim_threshold if needed (legacy)
+        context_compact_threshold: Override agent's context_compact_threshold if needed
+        channel_context_trim_threshold: Optional channel conversation token budget
         allowed_tool_names: Override agent's tools if needed
         provider: Override agent card provider for this run if needed
         model: Override agent card model for this run if needed
@@ -1235,14 +1238,6 @@ async def run_agent_stream(
 
     # Resolve: explicit params > agent config
     resolved_workflow = workflow or agent_config.graph_type
-    config_threshold = getattr(
-        agent_config, "context_trim_threshold", None
-    ) or getattr(agent_config, "max_context_tokens", None)
-    resolved_threshold = (
-        context_trim_threshold
-        if context_trim_threshold is not None
-        else (max_context_tokens or config_threshold)
-    )
     resolved_tools = allowed_tool_names if allowed_tool_names is not None else agent_config.tools
 
     thread_id = resolve_thread_id(thread_id)
@@ -1259,8 +1254,8 @@ async def run_agent_stream(
     context = make_run_context(
         workspace=workspace,
         working_dir=working_dir,
-        context_trim_threshold=resolved_threshold,
-        max_context_tokens=resolved_threshold,
+        context_compact_threshold=context_compact_threshold,
+        channel_context_trim_threshold=channel_context_trim_threshold,
         agent_name=agent_name,
         allowed_tool_names=resolved_tools or None,
         allowed_skill_names=allowed_skill_names,
@@ -1413,6 +1408,8 @@ async def run_agent_stream(
                             continue
                         seen_ids.add(message_id)
 
+                    if getattr(message, "additional_kwargs", {}).get("is_compact_summary"):
+                        continue
                     if isinstance(message, AIMessage):
                         tool_calls = getattr(message, "tool_calls", None)
                         content = extract_final_text_content(getattr(message, "content", None))
@@ -1484,8 +1481,8 @@ async def run_agent_edit_stream(
     workflow: str | None = None,
     workspace: WorkspaceRef | dict[str, Any] | str | None = None,
     working_dir: str | None = None,
-    context_trim_threshold: int | None = None,
-    max_context_tokens: int | None = None,
+    context_compact_threshold: int | None = None,
+    channel_context_trim_threshold: int | None = None,
     allowed_tool_names: list[str] | None = None,
     allowed_skill_names: list[str] | None = None,
     provider: str | None = None,
@@ -1508,14 +1505,6 @@ async def run_agent_edit_stream(
         raise ValueError(f"Agent '{agent_name}' not found in catalog")
 
     resolved_workflow = workflow or agent_config.graph_type
-    config_threshold = getattr(
-        agent_config, "context_trim_threshold", None
-    ) or getattr(agent_config, "max_context_tokens", None)
-    resolved_threshold = (
-        context_trim_threshold
-        if context_trim_threshold is not None
-        else (max_context_tokens or config_threshold)
-    )
     resolved_tools = allowed_tool_names if allowed_tool_names is not None else agent_config.tools
 
     thread_id = resolve_thread_id(thread_id)
@@ -1544,8 +1533,8 @@ async def run_agent_edit_stream(
     context = make_run_context(
         workspace=workspace,
         working_dir=working_dir,
-        context_trim_threshold=resolved_threshold,
-        max_context_tokens=resolved_threshold,
+        context_compact_threshold=context_compact_threshold,
+        channel_context_trim_threshold=channel_context_trim_threshold,
         agent_name=agent_name,
         allowed_tool_names=resolved_tools or None,
         allowed_skill_names=allowed_skill_names,
@@ -1642,6 +1631,8 @@ async def run_agent_edit_stream(
                         continue
                     seen_ids.add(message_id)
 
+                if getattr(message, "additional_kwargs", {}).get("is_compact_summary"):
+                    continue
                 if isinstance(message, AIMessage):
                     tool_calls = getattr(message, "tool_calls", None)
                     content = extract_final_text_content(getattr(message, "content", None))
@@ -1689,8 +1680,8 @@ async def run_agent_full(
     workflow: str | None = None,
     workspace: WorkspaceRef | dict[str, Any] | str | None = None,
     working_dir: str | None = None,
-    context_trim_threshold: int | None = None,
-    max_context_tokens: int | None = None,  # Backward compatibility
+    context_compact_threshold: int | None = None,
+    channel_context_trim_threshold: int | None = None,
     allowed_tool_names: list[str] | None = None,
     allowed_skill_names: list[str] | None = None,
     provider: str | None = None,
@@ -1715,8 +1706,8 @@ async def run_agent_full(
         agent_name: Agent to use (loads config from catalog)
         workflow: Override agent's graph_type if needed
         workspace: Workspace reference for tools
-        context_trim_threshold: Override agent's context_trim_threshold if needed
-        max_context_tokens: Override agent's context_trim_threshold if needed (legacy)
+        context_compact_threshold: Override agent's context_compact_threshold if needed
+        channel_context_trim_threshold: Optional channel conversation token budget
         allowed_tool_names: Override agent's tools if needed
         provider: Override agent card provider for this run if needed
         model: Override agent card model for this run if needed
@@ -1730,8 +1721,8 @@ async def run_agent_full(
         workflow=workflow,
         workspace=workspace,
         working_dir=working_dir,
-        context_trim_threshold=context_trim_threshold,
-        max_context_tokens=max_context_tokens,
+        context_compact_threshold=context_compact_threshold,
+        channel_context_trim_threshold=channel_context_trim_threshold,
         allowed_tool_names=allowed_tool_names,
         allowed_skill_names=allowed_skill_names,
         provider=provider,

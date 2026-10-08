@@ -235,7 +235,7 @@ class GitHubAutomationService:
         repository_instructions: str = "",
         provider_name: str = "",
         model_name: str = "",
-        context_trim_threshold: int | None = None,
+        context_compact_threshold: int | None = None,
         tool_policy_mode: str = "inherit",
         allowed_tools: list[str] | None = None,
         allowed_skills: list[str] | None = None,
@@ -259,7 +259,7 @@ class GitHubAutomationService:
             repository_instructions=repository_instructions,
             provider_name=provider_name,
             model_name=model_name,
-            context_trim_threshold=context_trim_threshold,
+            context_compact_threshold=context_compact_threshold,
             tool_policy_mode=tool_policy_mode,
             allowed_tools=allowed_tools or [],
             allowed_skills=normalized_allowed_skills,
@@ -305,7 +305,7 @@ class GitHubAutomationService:
                 notify_external_id or getattr(binding, "notify_external_id", ""),
                 notify_channel_id or getattr(binding, "notify_channel_id", ""),
             ),
-            context_trim_threshold=_context_trim_threshold(binding),
+            context_compact_threshold=_context_compact_threshold(binding),
             allowed_tool_names=_allowed_tools_for_binding(binding),
             allowed_skill_names=_allowed_skills_for_binding(binding),
             provider=_provider_name(binding),
@@ -576,7 +576,7 @@ class GitHubAutomationService:
                 notify_channel=self._notify_channel_for_binding(binding),
                 completion_hook=lambda task: self.publish_task_result(task, context, workspace_backend=workspace_backend),
                 cleanup_hook=self._workspace_cleanup_hook(context, workspace_backend),
-                context_trim_threshold=_context_trim_threshold(binding),
+                context_compact_threshold=_context_compact_threshold(binding),
                 allowed_tool_names=_allowed_tools_for_binding(binding),
                 allowed_skill_names=_allowed_skills_for_binding(binding),
                 provider=_provider_name(binding),
@@ -664,7 +664,7 @@ class GitHubAutomationService:
                 notify_channel=self._notify_channel_for_binding(binding),
                 completion_hook=lambda task: self.publish_task_result(task, context, workspace_backend=workspace_backend),
                 cleanup_hook=self._workspace_cleanup_hook(context, workspace_backend),
-                context_trim_threshold=_context_trim_threshold(binding),
+                context_compact_threshold=_context_compact_threshold(binding),
                 allowed_tool_names=_allowed_tools_for_binding(binding),
                 allowed_skill_names=_allowed_skills_for_binding(binding),
                 provider=_provider_name(binding),
@@ -1083,15 +1083,15 @@ def _model_name(binding: Any) -> str | None:
     return value or None
 
 
-def _context_trim_threshold(binding: Any) -> int | None:
-    raw = getattr(binding, "context_trim_threshold", None)
+def _context_compact_threshold(binding: Any) -> int | None:
+    raw = getattr(binding, "context_compact_threshold", None)
     if raw in (None, ""):
         return None
     try:
         value = int(raw)
     except (TypeError, ValueError):
         return None
-    return value if value > 0 else None
+    return value if 1 <= value <= 100 else None
 
 
 def _allowed_tools_for_binding(binding: Any) -> list[str] | None:

@@ -6,7 +6,7 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from agent.modules.providers.profiles import EFFORT_PATTERN
+from agent.modules.providers import EFFORT_PATTERN
 
 
 def normalize_agent_model(data: Any) -> Any:
@@ -25,12 +25,16 @@ def normalize_agent_model(data: Any) -> Any:
     return data
 
 
-def _normalize_max_context_tokens(data: Any) -> Any:
-    """Mirror ``max_context_tokens`` into ``context_trim_threshold`` for legacy inputs."""
-    if not isinstance(data, dict):
-        return data
-    if "max_context_tokens" in data and "context_trim_threshold" not in data:
-        return {**data, "context_trim_threshold": data["max_context_tokens"]}
+def reject_legacy_context_settings(data: Any) -> Any:
+    """Reject token budgets on agent cards instead of interpreting them as percentages."""
+    if isinstance(data, dict):
+        legacy = sorted(set(data) & {"context_trim_threshold", "max_context_tokens"})
+        if legacy:
+            raise ValueError(
+                f"Unsupported agent card settings: {', '.join(legacy)}. "
+                "Replace them with context_compact_threshold (1-100 percent, default 75). "
+                "Configure channel trimming in dashboard channel settings."
+            )
     return data
 
 
@@ -51,11 +55,7 @@ class AgentConfig(BaseModel):
     sub_agents: Optional[list[str]] = None  # None = leaf (no call_agent), list = allowed targets
     plan_approval_targets: list[str] = Field(default_factory=list)
     hidden: bool = False
-    context_trim_threshold: int = 50_000
-    # Backward-compat alias for ``context_trim_threshold``. Always mirrors the trim
-    # threshold after normalization; kept as a field so it round-trips through JSON
-    # for older dashboards and parsers that still read/write the legacy key.
-    max_context_tokens: Optional[int] = None
+    context_compact_threshold: int = Field(default=75, ge=1, le=100, strict=True)
     system_prompt: str = ""  # Markdown body content (after frontmatter)
 
     @field_validator("tool_permissions")
@@ -72,18 +72,11 @@ class AgentConfig(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _normalize(cls, data: Any) -> Any:
-        data = normalize_agent_model(_normalize_max_context_tokens(data))
+        data = normalize_agent_model(reject_legacy_context_settings(data))
         if isinstance(data, dict) and data.get("tools"):
             from agent.modules.tools import canonical_tool_names
             data = {**data, "tools": canonical_tool_names(data["tools"])}
         return data
-
-    @model_validator(mode="after")
-    def _sync_max_context_tokens(self) -> "AgentConfig":
-        # Keep the legacy field consistent with the canonical threshold.
-        object.__setattr__(self, "max_context_tokens", self.context_trim_threshold)
-        return self
-
 
 class AgentCard(BaseModel):
     """Dashboard-facing view of an agent card file."""
@@ -102,9 +95,7 @@ class AgentCard(BaseModel):
     sub_agents: Optional[list[str]] = None
     plan_approval_targets: list[str] = Field(default_factory=list)
     hidden: bool = False
-    context_trim_threshold: int = 50_000
-    # See ``AgentConfig.max_context_tokens``: legacy alias mirrored at validation.
-    max_context_tokens: Optional[int] = None
+    context_compact_threshold: int = Field(default=75, ge=1, le=100, strict=True)
     system_prompt: str = ""
     source: Literal["builtin", "user"]
     path: str
@@ -116,16 +107,11 @@ class AgentCard(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _normalize(cls, data: Any) -> Any:
-        data = normalize_agent_model(_normalize_max_context_tokens(data))
+        data = normalize_agent_model(reject_legacy_context_settings(data))
         if isinstance(data, dict) and data.get("tools"):
             from agent.modules.tools import canonical_tool_names
             data = {**data, "tools": canonical_tool_names(data["tools"])}
         return data
-
-    @model_validator(mode="after")
-    def _sync_max_context_tokens(self) -> "AgentCard":
-        object.__setattr__(self, "max_context_tokens", self.context_trim_threshold)
-        return self
 
     @classmethod
     def from_config(
@@ -156,8 +142,7 @@ class AgentCard(BaseModel):
             sub_agents=list(config.sub_agents) if config.sub_agents is not None else None,
             plan_approval_targets=list(config.plan_approval_targets),
             hidden=config.hidden,
-            context_trim_threshold=config.context_trim_threshold,
-            max_context_tokens=config.max_context_tokens,
+            context_compact_threshold=config.context_compact_threshold,
             system_prompt=config.system_prompt,
             source=source,
             path=path,
@@ -209,7 +194,6 @@ class AgentCard(BaseModel):
             sub_agents=list(self.sub_agents) if self.sub_agents is not None else None,
             plan_approval_targets=list(self.plan_approval_targets),
             hidden=self.hidden,
-            context_trim_threshold=self.context_trim_threshold,
-            max_context_tokens=self.max_context_tokens,
+            context_compact_threshold=self.context_compact_threshold,
             system_prompt=self.system_prompt,
         )

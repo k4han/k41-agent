@@ -49,7 +49,7 @@ type RepositoryDraft = {
   repository_instructions: string;
   provider_name: string;
   model_name: string;
-  context_trim_threshold_text: string;
+  context_compact_threshold_text: string;
   tool_policy_mode: "inherit" | "custom";
   allowed_tools: string[];
   allowed_skills: string[];
@@ -78,8 +78,8 @@ function toDraft(repo: GitHubRepositoryBinding): RepositoryDraft {
     repository_instructions: repo.repository_instructions || "",
     provider_name: repo.provider_name || "",
     model_name: repo.model_name || "",
-    context_trim_threshold_text: repo.context_trim_threshold
-      ? String(repo.context_trim_threshold)
+    context_compact_threshold_text: repo.context_compact_threshold
+      ? String(repo.context_compact_threshold)
       : "",
     tool_policy_mode: repo.tool_policy_mode === "custom" ? "custom" : "inherit",
     allowed_tools: repo.allowed_tools || [],
@@ -114,10 +114,13 @@ function parseNotify(value: string): {
 }
 
 function bindingPayload(draft: RepositoryDraft) {
-  const threshold = Number(draft.context_trim_threshold_text);
-  const contextTrimThreshold = Number.isFinite(threshold) && threshold > 0
-    ? Math.trunc(threshold)
-    : null;
+  const threshold = Number(draft.context_compact_threshold_text);
+  const contextCompactThreshold = draft.context_compact_threshold_text.trim() ? threshold : null;
+  if (contextCompactThreshold !== null && (
+    !Number.isInteger(contextCompactThreshold) || contextCompactThreshold < 1 || contextCompactThreshold > 100
+  )) {
+    throw new Error("Context compact threshold must be an integer between 1 and 100 percent.");
+  }
   const customTools = draft.tool_policy_mode === "custom"
     ? Array.from(new Set(draft.allowed_tools)).sort()
     : [];
@@ -133,7 +136,7 @@ function bindingPayload(draft: RepositoryDraft) {
     repository_instructions: draft.repository_instructions,
     provider_name: draft.provider_name,
     model_name: draft.model_name,
-    context_trim_threshold: contextTrimThreshold,
+    context_compact_threshold: contextCompactThreshold,
     tool_policy_mode: customTools.length ? "custom" : "inherit",
     allowed_tools: customTools,
     allowed_skills: Array.from(new Set(draft.allowed_skills)).sort(),
@@ -743,8 +746,8 @@ function RepositoryOverview(props: {
             </span>
           </div>
           <div class="repository-summary-row">
-            <span class="hint">Context trim</span>
-            <span class="mono">{props.draft.context_trim_threshold_text || "agent default"}</span>
+            <span class="hint">Context compact</span>
+            <span class="mono">{props.draft.context_compact_threshold_text ? `${props.draft.context_compact_threshold_text}%` : "agent default"}</span>
           </div>
           <div class="repository-summary-row">
             <span class="hint">Tool policy</span>
@@ -952,14 +955,16 @@ function RepositoryOptimization(props: {
             </Show>
           </div>
           <div class="field">
-            <label>Context trim threshold</label>
+            <label>Context compact threshold (%)</label>
             <input
               class="input"
               type="number"
               min="1"
-              value={props.draft.context_trim_threshold_text}
-              placeholder="Agent default"
-              onInput={(event) => props.onChange("context_trim_threshold_text", event.currentTarget.value)}
+              max="100"
+              step="1"
+              value={props.draft.context_compact_threshold_text}
+              placeholder="Agent default (75%)"
+              onInput={(event) => props.onChange("context_compact_threshold_text", event.currentTarget.value)}
             />
           </div>
         </div>

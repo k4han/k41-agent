@@ -51,7 +51,7 @@ def _payload(name: str) -> dict:
         "tools": ["read"],
         "sub_agents": [],
         "plan_approval_targets": [],
-        "max_context_tokens": 1000,
+        "context_compact_threshold": 75,
         "system_prompt": "You are a sample dashboard agent.",
     }
 

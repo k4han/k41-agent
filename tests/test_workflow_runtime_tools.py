@@ -46,7 +46,7 @@ async def test_call_agent_inherits_parent_runtime_context(monkeypatch):
             return SimpleNamespace(
                 graph_type="react_agent",
                 service_type="backend",
-                max_context_tokens=1234,
+                context_compact_threshold=75,
                 tools=["echo"],
             )
 
@@ -110,7 +110,7 @@ async def test_call_agent_passes_none_workspace_when_unset(monkeypatch):
             return SimpleNamespace(
                 graph_type="react_agent",
                 service_type="backend",
-                max_context_tokens=1234,
+                context_compact_threshold=75,
                 tools=["echo"],
             )
 
@@ -160,7 +160,7 @@ async def test_call_agent_returns_empty_response_placeholder(monkeypatch):
             return SimpleNamespace(
                 graph_type="react_agent",
                 service_type="backend",
-                max_context_tokens=1234,
+                context_compact_threshold=75,
                 tools=["echo"],
             )
 
@@ -200,7 +200,7 @@ async def test_call_agent_blocks_when_validate_call_fails(monkeypatch):
             return SimpleNamespace(
                 graph_type="react_agent",
                 service_type="backend",
-                max_context_tokens=1234,
+                context_compact_threshold=75,
                 tools=["echo"],
             )
 
@@ -245,7 +245,7 @@ async def test_call_agent_reports_runner_failure(monkeypatch):
             return SimpleNamespace(
                 graph_type="react_agent",
                 service_type="backend",
-                max_context_tokens=1234,
+                context_compact_threshold=75,
                 tools=["echo"],
             )
 

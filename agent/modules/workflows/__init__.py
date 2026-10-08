@@ -1,4 +1,5 @@
 import logging
+from agent.modules.workflows.message_history import normalize_messages_for_chat_model
 from agent.shared.thread_ids import resolve_thread_id
 from typing import Any
 
@@ -131,6 +132,7 @@ async def delete_workflow_thread_tree(thread_id: str) -> None:
 
 
 __all__ = [
+    "normalize_messages_for_chat_model",
     "DEFAULT_WORKING_DIR",
     "delete_workflow_thread",
     "delete_workflow_thread_tree",

@@ -56,7 +56,7 @@ async def test_dashboard_runs_keep_stored_identity_and_approval_support(isolated
             captured.update(kwargs["config"])
             yield {"messages": [AIMessage(content="Done")]}
 
-    card = SimpleNamespace(graph_type="react_agent", tools=[], max_context_tokens=1000)
+    card = SimpleNamespace(graph_type="react_agent", tools=[], context_compact_threshold=75)
     monkeypatch.setattr("agent.modules.agents.get_catalog_service", lambda: SimpleNamespace(get_agent=lambda name: card))
     monkeypatch.setattr(runner, "get_workflow_graph", lambda name: FakeGraph())
     monkeypatch.setattr(runner, "make_run_context", lambda **kwargs: kwargs)

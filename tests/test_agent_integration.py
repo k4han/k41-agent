@@ -24,7 +24,7 @@ provider: "default"
 model: ""
 tools:
   - "list_dir"
-max_context_tokens: 10000
+context_compact_threshold: 75
 ---
 
 # System Prompt
@@ -60,13 +60,13 @@ async def test_agent_workflow_integration(test_agent_dir):
     # 3. Build context with agent_name
     context = make_run_context(
         working_dir=".",
-        max_context_tokens=config.max_context_tokens,
+        context_compact_threshold=config.context_compact_threshold,
         agent_name=config.name,
         allowed_tool_names=config.tools,
     )
 
     assert context.agent_name == "test-agent"
-    assert context.max_context_tokens == 10000
+    assert context.context_compact_threshold == 75
     assert context.allowed_tool_names == ["list_dir"]
 
     # Verify config resolution chain is complete

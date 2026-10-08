@@ -35,7 +35,7 @@ tools:
 sub_agents:  # Optional: list of agents this agent can call
   - "sub-agent-1"
   - "sub-agent-2"
-max_context_tokens: 50000
+context_compact_threshold: 75
 ---
 
 # System Prompt
@@ -56,8 +56,27 @@ Can use {working_dir} placeholder.
   - `null` (không có field): leaf agent, không thể call sub-agents
   - `[]` (empty list): có thể call sub-agents nhưng chưa config
   - `["agent1", "agent2"]`: chỉ có thể call các agents trong list
-- **max_context_tokens**: Token budget cho context trimming
+- **context_compact_threshold**: Integer percentage (1-100) of the model context window that triggers automatic compaction before each model call; default 75.
 - **system_prompt**: Nội dung sau frontmatter, là system prompt của agent
+
+## Context settings migration
+
+Agent cards containing `context_trim_threshold` or `max_context_tokens` are rejected.
+Remove those token settings and use `context_compact_threshold: 75` (or another integer
+from 1 to 100). Cards without a threshold default to 75 percent.
+
+Channel trimming is configured independently in dashboard channel settings:
+`channels.telegram.context_trim_threshold`, `channels.discord.context_trim_threshold`,
+and `channels.zalo.context_trim_threshold` each default to 50,000 tokens. At the start
+of a channel turn, compaction runs before trimming. Sub-agent threads and background
+tasks compact independently and do not inherit channel trimming.
+
+GitHub repository bindings use an optional `context_compact_threshold` percentage;
+null inherits the executing agent card. Existing token values are not converted.
+
+Context limits come from the provider/model catalog, then model metadata, with a
+128,000-token fallback. Input estimates include the rendered prompt and tool schemas.
+Failed compaction preserves history and allows execution to continue.
 
 ## Agent Discovery
 

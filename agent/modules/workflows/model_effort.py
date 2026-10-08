@@ -5,8 +5,8 @@ from typing import TYPE_CHECKING, Any
 from agent.modules.providers import get_chat_model_selection, get_reasoning_effort_kwargs
 
 if TYPE_CHECKING:
-    from agent.modules.agents.models import AgentConfig
-    from agent.modules.providers.models import ResolvedChatModel
+    from agent.modules.agents import AgentConfig
+    from agent.modules.providers import ResolvedChatModel
     from agent.modules.workflows.run_config import WorkflowContext
 
 

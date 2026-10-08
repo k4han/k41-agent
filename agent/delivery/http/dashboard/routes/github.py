@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from agent.modules.agents import get_catalog_service
 from agent.modules.agent_runtime import get_background_task_manager
 from agent.delivery.http.dashboard.routes.helpers.agents import (
@@ -135,13 +135,19 @@ class GitHubRepositoryBindingBody(BaseModel):
     repository_instructions: str = Field(default="", description="Custom instructions appended to agent prompts for this repo.")
     provider_name: str = Field(default="", description="LLM provider name override.")
     model_name: str = Field(default="", description="LLM model name override.")
-    context_trim_threshold: int | None = Field(default=None, description="Token threshold for context trimming.")
+    context_compact_threshold: int | None = Field(default=None, ge=1, le=100, strict=True, description="Context compaction percentage; null inherits the agent card.")
     tool_policy_mode: str = Field(default="inherit", description="Tool policy mode ('inherit' or 'custom').")
     allowed_tools: list[str] = Field(default_factory=list, description="Allowed tools when tool_policy_mode is 'custom'.")
     allowed_skills: list[str] = Field(default_factory=list, description="Allowed skills for this repository.")
     branch_prefix: str = Field(default="k41", description="Branch name prefix for agent-created branches.")
     workspace_backend: str = Field(default="local", description="Workspace backend ('local', 'daytona', or 'modal').")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_legacy_context_setting(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "context_trim_threshold" in data:
+            raise ValueError("Replace context_trim_threshold with context_compact_threshold (1-100 percent).")
+        return data
 
 class SubmitGitHubRepositoryTaskBody(BaseModel):
     """Request body for submitting a manual task to a GitHub repository."""
@@ -211,7 +217,7 @@ async def update_dashboard_github_repository_binding(
             repository_instructions=body.repository_instructions,
             provider_name=body.provider_name,
             model_name=body.model_name,
-            context_trim_threshold=body.context_trim_threshold,
+            context_compact_threshold=body.context_compact_threshold,
             tool_policy_mode=body.tool_policy_mode,
             allowed_tools=body.allowed_tools,
             allowed_skills=body.allowed_skills,

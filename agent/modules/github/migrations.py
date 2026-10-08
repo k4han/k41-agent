@@ -12,7 +12,7 @@ GITHUB_REPOSITORY_BINDING_COLUMNS: dict[str, str] = {
     "repository_instructions": "TEXT NOT NULL DEFAULT ''",
     "provider_name": "VARCHAR(255) NOT NULL DEFAULT ''",
     "model_name": "VARCHAR(255) NOT NULL DEFAULT ''",
-    "context_trim_threshold": "INTEGER",
+    "context_compact_threshold": "INTEGER",
     "tool_policy_mode": "VARCHAR(50) NOT NULL DEFAULT 'inherit'",
     "allowed_tools_json": "TEXT NOT NULL DEFAULT '[]'",
     "allowed_skills_json": "TEXT NOT NULL DEFAULT '[]'",

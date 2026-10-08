@@ -131,18 +131,20 @@ export function AgentGeneralTab(props: {
         </div>
       </div>
       <div class="field">
-        <label>Context Trim Threshold</label>
+        <label>Context Compact Threshold (%)</label>
         <input
           class="input"
           type="number"
           min="1"
-          value={props.form.context_trim_threshold}
+          max="100"
+          step="1"
+          value={props.form.context_compact_threshold}
           disabled={props.readOnly}
           onInput={(event) =>
-            props.onUpdate("context_trim_threshold", Number(event.currentTarget.value))
+            props.onUpdate("context_compact_threshold", Number(event.currentTarget.value))
           }
         />
-        <p class="hint">Approximate token count before older messages are trimmed from the context window.</p>
+        <p class="hint">Automatically summarize older context before each model call when this percentage of the model context window is reached. Default: 75%.</p>
       </div>
       <div class="field">
         <label class="checkbox-row">

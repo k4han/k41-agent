@@ -253,6 +253,7 @@ def _expand_runtime_keys() -> set[str]:
         "webhook_secret",
     ):
         keys.add(f"channels.telegram.{prop}")
+    keys.add("channels.telegram.context_trim_threshold")
     for prop in (
         "enabled",
         "bot_token",
@@ -261,6 +262,7 @@ def _expand_runtime_keys() -> set[str]:
         "research_agent",
     ):
         keys.add(f"channels.discord.{prop}")
+    keys.add("channels.discord.context_trim_threshold")
     for prop in (
         "enabled",
         "bot_token",
@@ -272,6 +274,7 @@ def _expand_runtime_keys() -> set[str]:
         "webhook_secret",
     ):
         keys.add(f"channels.zalo.{prop}")
+    keys.add("channels.zalo.context_trim_threshold")
     for prop in (
         "enabled",
         "default_agent",
@@ -349,6 +352,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # LLM provider configuration
     "llm.default_model": "",
     # Channel integrations
+    "channels.telegram.context_trim_threshold": 50_000,
     "channels.telegram.enabled": True,
     "channels.telegram.bot_token": "",
     "channels.telegram.default_agent": "",
@@ -357,11 +361,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "channels.telegram.update_mode": "polling",
     "channels.telegram.webhook_url": "",
     "channels.telegram.webhook_secret": "",
+    "channels.discord.context_trim_threshold": 50_000,
     "channels.discord.enabled": True,
     "channels.discord.bot_token": "",
     "channels.discord.default_agent": "",
     "channels.discord.code_agent": "",
     "channels.discord.research_agent": "",
+    "channels.zalo.context_trim_threshold": 50_000,
     "channels.zalo.enabled": True,
     "channels.zalo.bot_token": "",
     "channels.zalo.default_agent": "",
@@ -429,6 +435,21 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
 # Metadata for settings - used by dashboard to render appropriate input types
 SETTING_METADATA: dict[str, dict[str, Any]] = {
+    "channels.zalo.context_trim_threshold": {
+        "type": "number", "category": "channels", "label": "Context Trim Threshold (tokens)",
+        "description": "Channel history token budget applied once per turn, after compaction.",
+        "min": 1, "step": 1,
+    },
+    "channels.discord.context_trim_threshold": {
+        "type": "number", "category": "channels", "label": "Context Trim Threshold (tokens)",
+        "description": "Channel history token budget applied once per turn, after compaction.",
+        "min": 1, "step": 1,
+    },
+    "channels.telegram.context_trim_threshold": {
+        "type": "number", "category": "channels", "label": "Context Trim Threshold (tokens)",
+        "description": "Channel history token budget applied once per turn, after compaction.",
+        "min": 1, "step": 1,
+    },
     "tools.permissions": {
         "type": "json", "category": "tools", "label": "Global tool permissions",
         "description": "Ordered JSON rules with action, resource and effect (allow/ask/deny). Last match wins; agents may override this list.",

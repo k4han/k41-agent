@@ -7,7 +7,7 @@ from agent.modules.agents.service import (
     AgentCatalogService,
     get_catalog_service,
 )
-from agent.modules.agents.models import AgentCard, AgentConfig
+from agent.modules.agents.models import AgentCard, AgentConfig, normalize_agent_model, reject_legacy_context_settings
 from agent.modules.agents.repository import (
     FilesystemAgentRepository,
     load_agents_from_dir,
@@ -29,6 +29,8 @@ def resolve_catalog_agent_name(*candidates: str | None) -> str | None:
 
 __all__ = [
     "AgentConfig",
+    "normalize_agent_model",
+    "reject_legacy_context_settings",
     "AgentCard",
     "AgentCatalogService",
     "FilesystemAgentRepository",

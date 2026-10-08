@@ -89,7 +89,7 @@ def _make_agent(
     provider: str = "default",
     model: str = "",
     tools: list[str] | None = None,
-    max_context_tokens: int = 50_000,
+    context_compact_threshold: int = 75,
     system_prompt: str = (
         "You are router {caller_agent_name}.\n"
         "Candidates:\n{agent_options}\n\n"
@@ -106,7 +106,7 @@ def _make_agent(
         model=model,
         tools=list(tools or []),
         sub_agents=None,
-        max_context_tokens=max_context_tokens,
+        context_compact_threshold=context_compact_threshold,
         system_prompt=system_prompt,
     )
 
@@ -115,7 +115,7 @@ def _runtime_context(**overrides) -> WorkflowContext:
     defaults = {
         "agent_name": "orchestrator",
         "working_dir": "D:/repo",
-        "max_context_tokens": 50_000,
+        "context_compact_threshold": 75,
         "allowed_tool_names": [],
     }
     defaults.update(overrides)
@@ -563,4 +563,4 @@ async def test_full_router_workflow_populates_state_telemetry(monkeypatch: pytes
 
     # Step 2: execution node
     exec_step = await router_module.llm_call(state, config, runtime)
-    assert exec_step["messages"][0].content == "research-result"
+    assert exec_step["messages"][-1].content == "research-result"

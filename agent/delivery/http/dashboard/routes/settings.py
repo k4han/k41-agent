@@ -12,6 +12,7 @@ from agent.delivery.http.dashboard.routes.helpers.settings import (
     delete_config_tree,
     ensure_runtime_keys,
     group_settings_by_category,
+    is_channel_context_trim_setting,
     normalize_setting_updates,
     normalize_setting_value,
     update_config_settings,
@@ -145,7 +146,7 @@ async def update_setting(
         except ValueError as exc:
             from fastapi import HTTPException
             raise HTTPException(400, str(exc)) from exc
-    if key.startswith("tools.") and value is None:
+    if (key.startswith("tools.") or is_channel_context_trim_setting(key)) and value is None:
         # Reset: remove the stored override so the schema default applies.
         delete_config_tree(service, key)
     else:
@@ -189,7 +190,8 @@ async def update_settings(body: UpdateSettingsBody, request: Request) -> dict[st
                 raise HTTPException(400, str(exc)) from exc
     values = translate_legacy_updates(service, values)
     reset_keys = {
-        key for key, value in values.items() if key.startswith("tools.") and value is None
+        key for key, value in values.items()
+        if (key.startswith("tools.") or is_channel_context_trim_setting(key)) and value is None
     }
     update_values = {key: value for key, value in values.items() if key not in reset_keys}
     for key in sorted(reset_keys):

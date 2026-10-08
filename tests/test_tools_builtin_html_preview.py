@@ -32,4 +32,4 @@ def test_html_preview_with_mode() -> None:
     result_page = html_preview.invoke(
         {"html": "<html>...</html>", "title": "Page Demo", "mode": "full_page"}
     )
-    assert result_page == f"HTML preview ready ({len('<html>...</html>')} chars): Page Demo"
+    assert result_page == f"HTML preview ready ({len('<html>...</html>')} chars): Page Demo"

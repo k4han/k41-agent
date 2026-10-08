@@ -19,7 +19,7 @@ tools:
 - schedule_task
 - web_fetch
 - web_search
-context_trim_threshold: 50000
+context_compact_threshold: 75
 mcp_servers: []
 ---
 

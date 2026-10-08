@@ -268,7 +268,17 @@ def _normalize_bootstrap_port(value: Any | None) -> int:
     return port
 
 
+def is_channel_context_trim_setting(key: str) -> bool:
+    return key in {f"channels.{channel}.context_trim_threshold" for channel in ("telegram", "discord", "zalo")}
+
+
 def normalize_setting_value(key: str, value: Any | None) -> Any | None:
+    if is_channel_context_trim_setting(key):
+        if value is None:
+            return None
+        if type(value) is not int or value < 1:
+            raise HTTPException(status_code=400, detail="Channel context trim threshold must be a positive integer.")
+        return value
     if key.startswith("llm.providers.") and key.endswith(".model_profiles"):
         from agent.modules.providers import parse_model_profiles
 

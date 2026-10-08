@@ -2475,7 +2475,7 @@ def test_dashboard_api_github_repository_detail_and_task(
             "repository_instructions": "Run tests first.",
             "provider_name": "main",
             "model_name": "model",
-            "context_trim_threshold": 24000,
+            "context_compact_threshold": 75,
             "tool_policy_mode": "custom",
             "allowed_tools": ["read"],
             "allowed_skills": ["code-style"],

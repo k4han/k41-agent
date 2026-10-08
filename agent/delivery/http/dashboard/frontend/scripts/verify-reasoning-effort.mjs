@@ -47,7 +47,7 @@ const effortAgent = {
   name: 'effort-agent', display_name: 'Effort Agent', description: '', graph_type: 'react_agent',
   provider: 'test', model: 'claude-opus-5-5', reasoning_effort: 'low',
   tools: [], mcp_servers: [], sub_agents: null, plan_approval_targets: [],
-  context_trim_threshold: 50000, system_prompt: '', hidden: false,
+  context_compact_threshold: 75, system_prompt: '', hidden: false,
   source: 'user', path: 'effort-agent.md', editable: true, valid: true,
 };
 fixtures['/dashboard-api/agents/cards'].cards.push(effortAgent);
@@ -221,6 +221,11 @@ try {
   const agentEffort = 'button[aria-label="Agent reasoning effort"]';
   await until(() => js(`!!document.querySelector('${agentEffort}')`), 'agent card effort editor');
   assert.equal(await js(`document.querySelector('${agentEffort}').disabled`), false);
+  const compactInput = `Array.from(document.querySelectorAll('.field')).find(field => field.querySelector('label')?.textContent === 'Context Compact Threshold (%)')?.querySelector('input')`;
+  assert.equal(await js(`(${compactInput}).value`), '75');
+  assert.equal(await js(`(${compactInput}).min`), '1');
+  assert.equal(await js(`(${compactInput}).max`), '100');
+  await js(`(() => { const input = ${compactInput}; input.value = '80'; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   assert.equal(await js(`document.querySelector('${agentEffort}').textContent.trim()`), 'low');
   await js(`document.querySelector('${agentEffort}').click()`);
   const effortMenu = '[role="listbox"][aria-label="Agent reasoning effort"]';
@@ -231,10 +236,14 @@ try {
   const agentSave = `Array.from(document.querySelectorAll('button')).find(button => button.textContent.trim() === 'Save')`;
   await js(`${agentSave}.click()`);
   await until(() => savedAgent?.reasoning_effort === 'high', 'agent effort saved');
+  assert.equal(savedAgent.context_compact_threshold, 80);
+  assert.equal('context_trim_threshold' in savedAgent, false);
+  assert.equal('max_context_tokens' in savedAgent, false);
   await until(() => js('location.pathname === "/settings/agents"'), 'saved agent navigation');
   await navigate('/settings/agents/effort-agent');
   await until(() => js(`!!document.querySelector('${agentEffort}')`), 'agent effort reopened');
   assert.equal(await js(`document.querySelector('${agentEffort}').textContent.trim()`), 'high');
+  assert.equal(await js(`(${compactInput}).value`), '80');
   await js(`document.querySelector('${agentEffort}').click()`);
   await js(`document.querySelector('${effortMenu} [role="option"]').click()`);
   await js(`${agentSave}.click()`);

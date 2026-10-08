@@ -18,7 +18,7 @@ export type AgentForm = {
   sub_agents: string[];
   plan_approval_targets: string[];
   hidden: boolean;
-  context_trim_threshold: number;
+  context_compact_threshold: number;
   system_prompt: string;
 };
 
@@ -29,7 +29,7 @@ export function isAgentTab(value: string | undefined): value is AgentTab {
   return typeof value === "string" && (AGENT_TABS as readonly string[]).includes(value);
 }
 
-export const DEFAULT_CONTEXT_TRIM_THRESHOLD = 50000;
+export const DEFAULT_CONTEXT_COMPACT_THRESHOLD = 75;
 
 export function blankForm(workflow: string): AgentForm {
   return {
@@ -47,7 +47,7 @@ export function blankForm(workflow: string): AgentForm {
     sub_agents: [],
     plan_approval_targets: [],
     hidden: false,
-    context_trim_threshold: DEFAULT_CONTEXT_TRIM_THRESHOLD,
+    context_compact_threshold: DEFAULT_CONTEXT_COMPACT_THRESHOLD,
     system_prompt: "",
   };
 }
@@ -68,7 +68,7 @@ export function cardToForm(card: AgentCard): AgentForm {
     sub_agents: card.sub_agents || [],
     plan_approval_targets: card.plan_approval_targets || [],
     hidden: card.hidden || false,
-    context_trim_threshold: card.context_trim_threshold || DEFAULT_CONTEXT_TRIM_THRESHOLD,
+    context_compact_threshold: card.context_compact_threshold || DEFAULT_CONTEXT_COMPACT_THRESHOLD,
     system_prompt: card.system_prompt || "",
   };
 }

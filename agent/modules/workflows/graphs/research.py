@@ -13,6 +13,7 @@ from agent.modules.workflows.nodes.trim import (
 )
 from agent.modules.workflows.run_config import WorkflowContext
 from agent.modules.workflows.message_history import normalize_messages_for_chat_model
+from agent.modules.workflows.model_context import prepare_model_context
 from agent.modules.workflows.state.extensions import (
     ResearchState,
 )
@@ -34,18 +35,22 @@ def _resolve_runtime_model(runtime):
     model = ctx.get_model() or agent_config.model or None
     resolved = get_resolved_chat_model(provider_name=provider, model=model)
     model_kwargs = get_workflow_reasoning_effort_kwargs(ctx, agent_config, resolved)
-    return resolved, model_kwargs
+    return resolved, model_kwargs, agent_config
 
 
 async def _research_node(state: ResearchState, config: RunnableConfig, runtime):
     """Collect research directions for the request."""
-    resolved, model_kwargs = _resolve_runtime_model(runtime)
+    resolved, model_kwargs, agent_config = _resolve_runtime_model(runtime)
     llm = resolved.model
     system = SystemMessage(content=(
         "You are a research assistant. "
         "Analyze the request and list the information sources to investigate."
     ))
-    messages = normalize_messages_for_chat_model([system, *state["messages"]])
+    history, history_updates = await prepare_model_context(
+        state["messages"], system=system, context=runtime.context,
+        agent_config=agent_config, resolved=resolved, config=config,
+    )
+    messages = normalize_messages_for_chat_model([system, *history])
     response = await llm.ainvoke(
         messages,
         config=with_usage_tracking(
@@ -57,18 +62,22 @@ async def _research_node(state: ResearchState, config: RunnableConfig, runtime):
         ),
         **model_kwargs,
     )
-    return {"messages": [response]}
+    return {"messages": [*history_updates, response]}
 
 
 async def _summarize_node(state: ResearchState, config: RunnableConfig, runtime):
     """Summarize the collected research context."""
-    resolved, model_kwargs = _resolve_runtime_model(runtime)
+    resolved, model_kwargs, agent_config = _resolve_runtime_model(runtime)
     llm = resolved.model
     system = SystemMessage(content=(
         "Based on the collected information, write a concise report with "
         "clear sections: Summary, Key Points, and Conclusion."
     ))
-    messages = normalize_messages_for_chat_model([system, *state["messages"]])
+    history, history_updates = await prepare_model_context(
+        state["messages"], system=system, context=runtime.context,
+        agent_config=agent_config, resolved=resolved, config=config,
+    )
+    messages = normalize_messages_for_chat_model([system, *history])
     response = await llm.ainvoke(
         messages,
         config=with_usage_tracking(
@@ -81,7 +90,7 @@ async def _summarize_node(state: ResearchState, config: RunnableConfig, runtime)
         **model_kwargs,
     )
     return {
-        "messages": [response],
+        "messages": [*history_updates, response],
         "summary": extract_final_text_content(response.content),
     }
 

@@ -7,7 +7,7 @@ provider: Google
 model: gemini-3.1-flash-lite-preview
 tools:
 - write_todos
-context_trim_threshold: 50000
+context_compact_threshold: 75
 mcp_servers: []
 sub_agents:
 - coder

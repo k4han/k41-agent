@@ -110,8 +110,8 @@ class AgentCatalogService:
             raise ValueError("Graph type is required.")
         if not config.provider.strip():
             raise ValueError('Provider is required. Use "default" to use llm.default_provider.')
-        if config.context_trim_threshold <= 0:
-            raise ValueError("context_trim_threshold must be greater than 0.")
+        if type(config.context_compact_threshold) is not int or not 1 <= config.context_compact_threshold <= 100:
+            raise ValueError("context_compact_threshold must be between 1 and 100 percent.")
         if config.graph_type == ROUTER_GRAPH_TYPE:
             for placeholder in ("{agent_options}", "{user_input}"):
                 if placeholder not in config.system_prompt:

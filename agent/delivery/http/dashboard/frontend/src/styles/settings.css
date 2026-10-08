@@ -1450,3 +1450,138 @@
 @media (max-width: 640px) {
   .provider-connection-actions .btn { width: 40px; min-height: 40px; }
 }
+
+/* Agent list */
+.agent-list .settings-resource-search input {
+  padding-left: 34px;
+}
+
+.agent-list-table.table {
+  min-width: 760px;
+  table-layout: fixed;
+}
+
+.agent-list-table th,
+.agent-list-table td {
+  padding: 14px 16px;
+  vertical-align: middle;
+}
+
+.agent-list-table thead {
+  background: var(--surface-2);
+}
+
+.agent-list-table tbody tr:hover {
+  background: color-mix(in srgb, var(--surface-2) 55%, var(--surface));
+}
+
+.agent-list-agent-column {
+  width: 24%;
+}
+
+.agent-list-model-column {
+  width: 25%;
+}
+
+.agent-list-table .agent-list-actions-column {
+  width: 156px;
+  text-align: right;
+}
+
+.agent-list-identity,
+.agent-list-model {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  overflow-wrap: anywhere;
+}
+
+.agent-list-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.agent-list-name {
+  max-width: 100%;
+  color: var(--fg);
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.agent-list-name:hover {
+  color: var(--primary);
+}
+
+.agent-list-name:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+.agent-list-source.badge {
+  min-height: 20px;
+  padding: 0 6px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.agent-list-identifier {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-list-description {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.6;
+}
+
+.agent-list-model-name {
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1.5;
+}
+
+.agent-list-error {
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.agent-list-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.agent-list-actions .btn {
+  min-height: 32px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.agent-list-actions .btn-icon {
+  width: 32px;
+  padding: 0;
+}
+
+@media (max-width: 640px) {
+  .agent-list-table .agent-list-actions-column {
+    width: 176px;
+  }
+
+  .agent-list-actions .btn {
+    min-height: var(--touch-target);
+  }
+
+  .agent-list-actions .btn-icon {
+    width: var(--touch-target);
+  }
+}

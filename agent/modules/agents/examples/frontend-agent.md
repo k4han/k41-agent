@@ -15,7 +15,7 @@ tools:
   - "read_process_output"
   - "write_process_input"
   - "stop_process"
-context_trim_threshold: 50000
+context_compact_threshold: 75
 ---
 
 # System Prompt

@@ -5,8 +5,8 @@ from typing import Any
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field, model_validator
 
-from agent.modules.agents.models import normalize_agent_model
-from agent.modules.providers.profiles import EFFORT_PATTERN
+from agent.modules.agents import normalize_agent_model, reject_legacy_context_settings
+from agent.modules.providers import EFFORT_PATTERN
 
 from agent.modules.workflows import REACT_AGENT_GRAPH_TYPE
 from agent.delivery.http.dashboard.routes.helpers.agents import (
@@ -48,13 +48,13 @@ class AgentCardBody(BaseModel):
     sub_agents: list[str] | None = Field(default=None, description="List of sub-agent names for delegation.")
     plan_approval_targets: list[str] = Field(default_factory=list, description="Plan step types requiring human approval.")
     hidden: bool = Field(default=False, description="Whether to hide this agent from the UI.")
-    max_context_tokens: int = Field(default=50_000, description="Maximum context window size in tokens.")
+    context_compact_threshold: int = Field(default=75, ge=1, le=100, strict=True, description="Context usage percentage triggering compaction.")
     system_prompt: str = Field(default="", description="Custom system prompt for this agent.")
 
     @model_validator(mode="before")
     @classmethod
     def _normalize_model(cls, data: Any) -> Any:
-        return normalize_agent_model(data)
+        return normalize_agent_model(reject_legacy_context_settings(data))
 
 
 @router.get("/agents/cards")

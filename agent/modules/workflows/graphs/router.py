@@ -5,7 +5,8 @@ import logging
 import time
 from typing import Any, Literal
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage, RemoveMessage
+from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
@@ -736,9 +737,10 @@ def _build_target_context(runtime_context: WorkflowContext, target_agent: AgentC
 
     workspace = runtime_context.get_workspace()
     allowed_tool_names = target_agent.tools if target_agent.tools else None
-    return make_context(
+    target_context = make_context(
         workspace=workspace,
-        max_context_tokens=target_agent.max_context_tokens,
+        context_compact_threshold=runtime_context.context_compact_threshold,
+        channel_context_trim_threshold=runtime_context.channel_context_trim_threshold,
         agent_name=target_agent.name,
         allowed_tool_names=allowed_tool_names,
         allowed_skill_names=runtime_context.get_allowed_skill_names(),
@@ -746,6 +748,8 @@ def _build_target_context(runtime_context: WorkflowContext, target_agent: AgentC
         model=runtime_context.get_model(),
         reasoning_effort=runtime_context.reasoning_effort,
     )
+    target_context.channel_trim_applied = runtime_context.channel_trim_applied
+    return target_context
 
 
 def _graph_accepts_context(graph: object) -> bool:
@@ -844,7 +848,7 @@ async def llm_call(
         {"messages": state["messages"]},
         **invoke_kwargs,
     )
-    return {"messages": result["messages"]}
+    return {"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES), *result["messages"]]}
 
 
 def build_router_graph() -> None:

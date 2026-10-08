@@ -10,7 +10,7 @@ tools:
   - "echo"
   - "read"
   - "list_dir"
-context_trim_threshold: 50000
+context_compact_threshold: 75
 ---
 
 # System Prompt

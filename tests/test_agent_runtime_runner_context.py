@@ -225,7 +225,7 @@ async def test_run_agent_omits_context_for_graph_without_context_schema(monkeypa
         def get_agent(self, name: str):
             return SimpleNamespace(
                 graph_type="research_chain",
-                max_context_tokens=1234,
+                context_compact_threshold=75,
                 tools=["list_dir"],
             )
 
@@ -270,7 +270,7 @@ async def test_run_agent_passes_model_override_to_context(monkeypatch):
         def get_agent(self, name: str):
             return SimpleNamespace(
                 graph_type="react_agent",
-                max_context_tokens=1234,
+                context_compact_threshold=75,
                 tools=["list_dir"],
             )
 
@@ -319,7 +319,7 @@ async def test_run_agent_resume_payload_marks_run_as_resume(monkeypatch):
         def get_agent(self, name: str):
             return SimpleNamespace(
                 graph_type="react_agent",
-                max_context_tokens=1234,
+                context_compact_threshold=75,
                 tools=["list_dir"],
             )
 
@@ -376,7 +376,7 @@ async def test_run_agent_stream_builds_multimodal_user_message(monkeypatch):
         def get_agent(self, name: str):
             return SimpleNamespace(
                 graph_type="react_agent",
-                max_context_tokens=1234,
+                context_compact_threshold=75,
                 tools=["list_dir"],
             )
 
@@ -509,7 +509,7 @@ async def test_run_agent_stream_omits_context_for_graph_without_context_schema(
         def get_agent(self, name: str):
             return SimpleNamespace(
                 graph_type="research_chain",
-                max_context_tokens=1234,
+                context_compact_threshold=75,
                 tools=["list_dir"],
             )
 
@@ -552,7 +552,7 @@ async def test_run_agent_extracts_last_text_from_structured_content(monkeypatch)
         def get_agent(self, name: str):
             return SimpleNamespace(
                 graph_type="research_chain",
-                max_context_tokens=1234,
+                context_compact_threshold=75,
                 tools=["list_dir"],
             )
 
@@ -601,7 +601,7 @@ async def test_run_agent_stream_extracts_last_text_from_structured_content(monke
         def get_agent(self, name: str):
             return SimpleNamespace(
                 graph_type="research_chain",
-                max_context_tokens=1234,
+                context_compact_threshold=75,
                 tools=["list_dir"],
             )
 
@@ -653,7 +653,7 @@ async def test_run_agent_stream_emits_message_chunks_and_final(monkeypatch):
         def get_agent(self, name: str):
             return SimpleNamespace(
                 graph_type="react_agent",
-                max_context_tokens=1234,
+                context_compact_threshold=75,
                 tools=["list_dir"],
             )
 
@@ -707,7 +707,7 @@ async def test_run_agent_stream_skips_checkpoint_messages_before_current_user(mo
         def get_agent(self, name: str):
             return SimpleNamespace(
                 graph_type="react_agent",
-                max_context_tokens=1234,
+                context_compact_threshold=75,
                 tools=["list_dir"],
             )
 
@@ -761,7 +761,7 @@ async def test_run_agent_stream_emits_tool_call_and_result(monkeypatch, display_
         def get_agent(self, name: str):
             return SimpleNamespace(
                 graph_type="react_agent",
-                max_context_tokens=1234,
+                context_compact_threshold=75,
                 tools=["list_dir"],
             )
 
@@ -839,7 +839,7 @@ async def test_run_agent_stream_emits_text_attached_to_tool_call(monkeypatch):
         def get_agent(self, name: str):
             return SimpleNamespace(
                 graph_type="react_agent",
-                max_context_tokens=1234,
+                context_compact_threshold=75,
                 tools=["list_dir"],
             )
 
@@ -919,7 +919,7 @@ async def test_run_agent_stream_resume(monkeypatch):
         def get_agent(self, name: str):
             return SimpleNamespace(
                 graph_type="react_agent",
-                max_context_tokens=1234,
+                context_compact_threshold=75,
                 tools=["list_dir"],
             )
 
@@ -980,7 +980,7 @@ async def test_run_agent_stream_emits_plan_review_interrupt(monkeypatch):
         def get_agent(self, name: str):
             return SimpleNamespace(
                 graph_type="react_agent",
-                max_context_tokens=1234,
+                context_compact_threshold=75,
                 tools=[PLAN_MODE_TOOL_NAME],
             )
 
@@ -1062,7 +1062,7 @@ async def test_run_agent_stream_emits_user_input_request_interrupt(monkeypatch):
         def get_agent(self, name: str):
             return SimpleNamespace(
                 graph_type="react_agent",
-                max_context_tokens=1234,
+                context_compact_threshold=75,
                 tools=[ASK_USER_TOOL_NAME],
             )
 
@@ -1147,7 +1147,7 @@ async def test_run_agent_stream_answer_resume_payload_does_not_switch_agent(
                 return None
             return SimpleNamespace(
                 graph_type="react_agent",
-                max_context_tokens=1234,
+                context_compact_threshold=75,
                 tools=[ASK_USER_TOOL_NAME],
             )
 
@@ -1231,7 +1231,7 @@ async def test_run_agent_stream_resume_payload_switches_agent(monkeypatch):
                 return None
             return SimpleNamespace(
                 graph_type="react_agent",
-                max_context_tokens=1234,
+                context_compact_threshold=75,
                 tools=["read"],
             )
 
@@ -1317,7 +1317,7 @@ async def test_run_agent_stream_resume_payload_rejects_disallowed_plan_target(
                 return None
             return SimpleNamespace(
                 graph_type="react_agent",
-                max_context_tokens=1234,
+                context_compact_threshold=75,
                 tools=["read"],
             )
 
@@ -1355,7 +1355,7 @@ def test_plan_resume_rejects_missing_source_agent_card():
             if name == "worker":
                 return SimpleNamespace(
                     graph_type="react_agent",
-                    max_context_tokens=1234,
+                    context_compact_threshold=75,
                     tools=["read"],
                 )
             return None
@@ -1405,7 +1405,7 @@ async def test_run_agent_edit_stream_forks_from_parent_and_preserves_attachments
         def get_agent(self, name: str):
             return SimpleNamespace(
                 graph_type="react_agent",
-                max_context_tokens=1234,
+                context_compact_threshold=75,
                 tools=["list_dir"],
             )
 
@@ -1474,7 +1474,7 @@ def _title_stream_mocks(monkeypatch) -> None:
         def get_agent(self, name: str):
             return SimpleNamespace(
                 graph_type="react_agent",
-                max_context_tokens=1234,
+                context_compact_threshold=75,
                 tools=["list_dir"],
             )
 

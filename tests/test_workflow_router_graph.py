@@ -64,7 +64,7 @@ def _make_agent(
     provider: str = "default",
     model: str = "",
     tools: list[str] | None = None,
-    max_context_tokens: int = 50_000,
+    context_compact_threshold: int = 75,
     system_prompt: str = (
         "You are router {caller_agent_name}.\n"
         "Candidates:\n{agent_options}\n\n"
@@ -81,7 +81,7 @@ def _make_agent(
         model=model,
         tools=list(tools or []),
         sub_agents=None,
-        max_context_tokens=max_context_tokens,
+        context_compact_threshold=context_compact_threshold,
         system_prompt=system_prompt,
     )
 
@@ -90,7 +90,7 @@ def _runtime_context(**overrides) -> WorkflowContext:
     defaults = {
         "agent_name": "orchestrator",
         "working_dir": "D:/repo",
-        "max_context_tokens": 50_000,
+        "context_compact_threshold": 75,
         "allowed_tool_names": [],
     }
     defaults.update(overrides)
@@ -190,7 +190,7 @@ async def test_router_node_routes_to_selected_sub_agent(
                     graph_type="research_chain",
                     description="Research specialist",
                     tools=["websearch", "webfetch"],
-                    max_context_tokens=12000,
+                    context_compact_threshold=75,
                 ),
                 "default": _make_agent(name="default", graph_type="react_agent"),
             },
@@ -202,7 +202,7 @@ async def test_router_node_routes_to_selected_sub_agent(
     config = {"configurable": {"thread_id": "thread-1"}}
     runtime = SimpleNamespace(
         context=_runtime_context(
-            max_context_tokens=9999,
+            context_compact_threshold=75,
             allowed_tool_names=["call_agent"],
             reasoning_effort=reasoning_effort,
         )
@@ -213,14 +213,14 @@ async def test_router_node_routes_to_selected_sub_agent(
     state.update(router_result)
     result = await router_module.llm_call(state, config, runtime)
 
-    assert result["messages"][0].content == "planned-result"
+    assert result["messages"][-1].content == "planned-result"
     assert len(target_graph.calls) == 1
     assert target_graph.calls[0]["state"] == {"messages": state["messages"]}
     assert target_graph.calls[0]["config"] == config
     target_context = target_graph.calls[0]["context"]
     assert target_context.agent_name == "researcher"
     assert target_context.workspace.locator == str(Path("D:/repo").resolve())
-    assert target_context.max_context_tokens == 12000
+    assert target_context.context_compact_threshold == 75
     assert target_context.allowed_tool_names == ["websearch", "webfetch"]
     assert target_context.provider is None
     assert target_context.model is None
@@ -264,7 +264,7 @@ async def test_router_node_falls_back_to_first_callable_agent_when_llm_selects_i
                     name="planner",
                     graph_type="planner_chain",
                     tools=["list_dir"],
-                    max_context_tokens=4321,
+                    context_compact_threshold=75,
                 ),
                 "outsider": _make_agent(name="outsider", graph_type="research_chain"),
                 "default": _make_agent(name="default", graph_type="react_agent"),
@@ -282,7 +282,7 @@ async def test_router_node_falls_back_to_first_callable_agent_when_llm_selects_i
     state.update(router_result)
     result = await router_module.llm_call(state, config, runtime)
 
-    assert result["messages"][0].content == "planner-result"
+    assert result["messages"][-1].content == "planner-result"
     assert planner_graph.calls[0]["context"].agent_name == "planner"
 
 
@@ -322,7 +322,7 @@ async def test_router_node_falls_back_to_default_agent_when_no_callable_sub_agen
                     name="default",
                     graph_type="react_agent",
                     tools=["list_dir"],
-                    max_context_tokens=15000,
+                    context_compact_threshold=75,
                 ),
             },
             callable_map={"orchestrator": []},
@@ -338,7 +338,7 @@ async def test_router_node_falls_back_to_default_agent_when_no_callable_sub_agen
     state.update(router_result)
     result = await router_module.llm_call(state, config, runtime)
 
-    assert result["messages"][0].content == "default-result"
+    assert result["messages"][-1].content == "default-result"
     assert len(default_graph.calls) == 1
     assert default_graph.calls[0]["context"].agent_name == "default"
 
@@ -383,7 +383,7 @@ async def test_router_node_omits_context_for_graph_without_context_schema(
     state.update(router_result)
     result = await router_module.llm_call(state, config, runtime)
 
-    assert result["messages"][0].content == "planned-result"
+    assert result["messages"][-1].content == "planned-result"
     assert len(target_graph.calls) == 1
     assert target_graph.calls[0]["state"] == {"messages": state["messages"]}
     assert target_graph.calls[0]["config"] == config

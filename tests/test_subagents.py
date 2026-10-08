@@ -25,7 +25,7 @@ graph_type: react_agent
 provider: default
 tools: [read_file, list_dir, call_agent]
 sub_agents: []
-max_context_tokens: 30000
+context_compact_threshold: 75
 ---
 
 You are a research assistant. Help the user find and synthesize information.
@@ -42,7 +42,7 @@ graph_type: react_agent
 provider: default
 tools: [read_file, write_file, bash, list_dir, call_agent]
 sub_agents: [researcher]
-max_context_tokens: 50000
+context_compact_threshold: 75
 ---
 
 You are a coding assistant specialized in Python development.
@@ -84,7 +84,7 @@ class TestParseAgentFile:
         assert config.graph_type == "react_agent"
         assert config.tools == ["read", "list_dir", "call_agent"]
         assert config.sub_agents == []
-        assert config.max_context_tokens == 30000
+        assert config.context_compact_threshold == 75
         assert "research assistant" in config.system_prompt
 
     def test_parse_file_no_frontmatter(self):

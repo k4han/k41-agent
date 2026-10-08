@@ -12,6 +12,7 @@ class ChannelDescriptor(IntegrationDescriptor):
 
 
 TELEGRAM_SETTINGS_SECTIONS = (
+    ChannelSettingSection(id="context", title="Context", subtitle="Channel conversation history retention"),
     ChannelSettingSection(
         id="authentication",
         title="Authentication",
@@ -32,6 +33,14 @@ TELEGRAM_SETTINGS_SECTIONS = (
 )
 
 TELEGRAM_SETTINGS_SCHEMA = (
+    ChannelSettingField(
+        name="context_trim_threshold",
+        label="Context Trim Threshold (tokens)",
+        description="Trim older channel messages at the start of a turn, after automatic compaction.",
+        input_type="number",
+        section="context",
+        default=50_000,
+    ),
     ChannelSettingField(
         name="enabled",
         label="Telegram Enabled",
@@ -98,6 +107,7 @@ TELEGRAM_SETTINGS_SCHEMA = (
 
 
 DISCORD_SETTINGS_SECTIONS = (
+    ChannelSettingSection(id="context", title="Context", subtitle="Channel conversation history retention"),
     ChannelSettingSection(
         id="authentication",
         title="Authentication",
@@ -112,6 +122,14 @@ DISCORD_SETTINGS_SECTIONS = (
 )
 
 DISCORD_SETTINGS_SCHEMA = (
+    ChannelSettingField(
+        name="context_trim_threshold",
+        label="Context Trim Threshold (tokens)",
+        description="Trim older channel messages at the start of a turn, after automatic compaction.",
+        input_type="number",
+        section="context",
+        default=50_000,
+    ),
     ChannelSettingField(
         name="enabled",
         label="Discord Enabled",
@@ -154,6 +172,7 @@ DISCORD_SETTINGS_SCHEMA = (
 
 
 ZALO_SETTINGS_SECTIONS = (
+    ChannelSettingSection(id="context", title="Context", subtitle="Channel conversation history retention"),
     ChannelSettingSection(
         id="authentication",
         title="Authentication",
@@ -174,6 +193,14 @@ ZALO_SETTINGS_SECTIONS = (
 )
 
 ZALO_SETTINGS_SCHEMA = (
+    ChannelSettingField(
+        name="context_trim_threshold",
+        label="Context Trim Threshold (tokens)",
+        description="Trim older channel messages at the start of a turn, after automatic compaction.",
+        input_type="number",
+        section="context",
+        default=50_000,
+    ),
     ChannelSettingField(
         name="enabled",
         label="Zalo Enabled",

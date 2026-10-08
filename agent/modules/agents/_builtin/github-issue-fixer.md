@@ -17,7 +17,7 @@ tools:
   - "stop_process"
   - "web_search"
   - "web_fetch"
-context_trim_threshold: 50000
+context_compact_threshold: 75
 ---
 
 # System Prompt

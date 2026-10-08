@@ -6,6 +6,7 @@ from typing import Any
 from langchain_core.language_models import BaseChatModel
 
 from agent.modules.providers.profiles import get_model_profile, reasoning_metadata
+from agent.modules.providers.context_window import DEFAULT_CONTEXT_WINDOW
 
 
 def supports_reasoning_effort(provider_type: str, model_name: str) -> bool:
@@ -82,3 +83,4 @@ class ResolvedChatModel:
     model_name: str
     profile: dict[str, Any] | None = None
     used_fallback: bool = False
+    context_window: int = DEFAULT_CONTEXT_WINDOW

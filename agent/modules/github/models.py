@@ -36,7 +36,7 @@ class GitHubRepositoryBinding(BaseModel):
     repository_instructions = Column(Text, nullable=False, default="")
     provider_name = Column(String(255), nullable=False, default="")
     model_name = Column(String(255), nullable=False, default="")
-    context_trim_threshold = Column(Integer, nullable=True)
+    context_compact_threshold = Column(Integer, nullable=True)
     tool_policy_mode = Column(String(50), nullable=False, default="inherit")
     allowed_tools_json = Column(Text, nullable=False, default="[]")
     allowed_skills_json = Column(Text, nullable=False, default="[]")

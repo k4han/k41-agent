@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 from langchain_core.messages import (
@@ -159,7 +160,7 @@ async def _generate_context_summary(
     ]
 
     config = attach_usage_context(
-        {"configurable": {"thread_id": thread_id}},
+        {"configurable": {"thread_id": thread_id}, "tags": ["context_compaction"], "metadata": {"context_compaction": True}},
         await load_usage_context(thread_id),
     )
     try:
@@ -218,6 +219,7 @@ def is_valid_message_sequence(msgs: list[BaseMessage]) -> bool:
     1. It is non-empty.
     2. It does not start with an orphan ToolMessage.
     3. Every ToolMessage corresponds to a tool_call_id defined in an earlier AIMessage within this sequence.
+    4. All calls receive exactly one result before the next non-tool message.
     """
     if not msgs:
         return False
@@ -227,6 +229,8 @@ def is_valid_message_sequence(msgs: list[BaseMessage]) -> bool:
     active_tool_call_ids: set[str] = set()
     for m in msgs:
         if isinstance(m, AIMessage):
+            if active_tool_call_ids:
+                return False
             tool_calls = getattr(m, "tool_calls", None) or []
             for tc in tool_calls:
                 if isinstance(tc, dict) and "id" in tc:
@@ -237,7 +241,10 @@ def is_valid_message_sequence(msgs: list[BaseMessage]) -> bool:
             t_id = getattr(m, "tool_call_id", None)
             if not t_id or t_id not in active_tool_call_ids:
                 return False
-    return True
+            active_tool_call_ids.remove(t_id)
+        elif active_tool_call_ids:
+            return False
+    return not active_tool_call_ids
 
 
 def resolve_compaction_cutoff(messages: list[BaseMessage], target_keep: int = DEFAULT_KEEP_RECENT_MESSAGES) -> int:
@@ -308,6 +315,100 @@ async def has_pending_interrupt(thread_id: str) -> bool:
     return False
 
 
+@dataclass(frozen=True)
+class CompactedHistory:
+    messages: list[BaseMessage]
+    summary: str
+    compacted_count: int
+    kept_count: int
+
+
+async def compact_message_history(
+    messages: list[BaseMessage],
+    *,
+    thread_id: str = "",
+    keep_recent_messages: int | None = None,
+    provider_name: str | None = None,
+    model_name: str | None = None,
+    max_retained_tokens: int | None = None,
+) -> CompactedHistory:
+    """Summarize a supplied history without reading or writing graph checkpoints."""
+    if len(messages) <= 2:
+        raise ValueError("Conversation has too few messages to compact.")
+    target_keep = keep_recent_messages if keep_recent_messages is not None else get_default_keep_recent_messages()
+    effective_keep = min(target_keep, max(1, len(messages) - 2))
+
+    cutoff_index: int | None = None
+
+    # Try LangChain trim_messages first if a human boundary exists within retention target
+    try:
+        trimmed = trim_messages(
+            messages,
+            strategy="last",
+            max_tokens=effective_keep,
+            token_counter=len,
+            start_on="human",
+            include_system=False,
+            allow_partial=False,
+        )
+        if trimmed and 0 < len(trimmed) < len(messages) and is_valid_message_sequence(trimmed):
+            first_id = getattr(trimmed[0], "id", None)
+            if first_id:
+                matched_idx = next(
+                    (i for i, m in enumerate(messages) if getattr(m, "id", None) == first_id),
+                    None,
+                )
+                if matched_idx is not None and 0 < matched_idx < len(messages):
+                    cutoff_index = matched_idx
+    except Exception:
+        cutoff_index = None
+
+    # Fall back to robust turn & tool-chain resolution
+    if cutoff_index is None:
+        cutoff_index = resolve_compaction_cutoff(messages, target_keep=effective_keep)
+
+    if max_retained_tokens is not None:
+        from langchain_core.messages.utils import count_tokens_approximately
+        from agent.modules.workflows import normalize_messages_for_chat_model
+
+        def retained_tokens(index: int) -> int:
+            return count_tokens_approximately(normalize_messages_for_chat_model(messages[index:]))
+
+        # A long active turn can exceed the budget by itself. Cut between complete
+        # tool groups when keeping the entire turn would prevent useful compaction.
+        if retained_tokens(cutoff_index) >= max_retained_tokens:
+            for index in range(cutoff_index + 1, len(messages)):
+                if is_valid_message_sequence(messages[index:]) and retained_tokens(index) < max_retained_tokens:
+                    cutoff_index = index
+                    break
+
+    to_summarize = messages[:cutoff_index]
+    recent_messages = messages[cutoff_index:]
+
+    summary_text = await _generate_context_summary(
+        to_summarize,
+        thread_id=thread_id,
+        provider_name=provider_name,
+        model_name=model_name,
+    )
+    summary_human, summary_ai = _build_summary_message_pair(summary_text)
+
+    # Avoid consecutive assistant messages when recent window begins with an AIMessage
+    if recent_messages and isinstance(recent_messages[0], AIMessage):
+        injected_messages = [
+            summary_human,
+            *recent_messages,
+        ]
+    else:
+        injected_messages = [
+            summary_human,
+            summary_ai,
+            *recent_messages,
+        ]
+
+    return CompactedHistory(injected_messages, summary_text, len(to_summarize), len(recent_messages))
+
+
 async def compact_conversation_thread(
     thread_id: str,
     *,
@@ -372,40 +473,6 @@ async def _compact_conversation_thread_locked(
             "Please answer or dismiss the pending request first."
         )
 
-    effective_keep = min(target_keep, max(1, len(messages) - 2))
-
-    cutoff_index: int | None = None
-
-    # Try LangChain trim_messages first if a human boundary exists within retention target
-    try:
-        trimmed = trim_messages(
-            messages,
-            strategy="last",
-            max_tokens=effective_keep,
-            token_counter=len,
-            start_on="human",
-            include_system=False,
-            allow_partial=False,
-        )
-        if trimmed and 0 < len(trimmed) < len(messages) and is_valid_message_sequence(trimmed):
-            first_id = getattr(trimmed[0], "id", None)
-            if first_id:
-                matched_idx = next(
-                    (i for i, m in enumerate(messages) if getattr(m, "id", None) == first_id),
-                    None,
-                )
-                if matched_idx is not None and 0 < matched_idx < len(messages):
-                    cutoff_index = matched_idx
-    except Exception:
-        cutoff_index = None
-
-    # Fall back to robust turn & tool-chain resolution
-    if cutoff_index is None:
-        cutoff_index = resolve_compaction_cutoff(messages, target_keep=effective_keep)
-
-    to_summarize = messages[:cutoff_index]
-    recent_messages = messages[cutoff_index:]
-
     if not provider_name or not model_name:
         try:
             thread_meta = await get_conversation_thread(thread_id)
@@ -415,12 +482,14 @@ async def _compact_conversation_thread_locked(
         except Exception:
             logger.debug("Could not read thread metadata for %s; using default model.", thread_id)
 
-    summary_text = await _generate_context_summary(
-        to_summarize,
+    compacted = await compact_message_history(
+        messages,
         thread_id=thread_id,
+        keep_recent_messages=target_keep,
         provider_name=provider_name,
         model_name=model_name,
     )
+    injected_messages = compacted.messages
 
     # Re-read checkpoint after the (slow) LLM summarize call. If new messages
     # arrived meanwhile, abort instead of wiping them with REMOVE_ALL.
@@ -439,21 +508,6 @@ async def _compact_conversation_thread_locked(
             "Cannot compact while conversation is awaiting user input. "
             "Please answer or dismiss the pending request first."
         )
-
-    summary_human, summary_ai = _build_summary_message_pair(summary_text)
-
-    # Avoid consecutive assistant messages when recent window begins with an AIMessage
-    if recent_messages and isinstance(recent_messages[0], AIMessage):
-        injected_messages = [
-            summary_human,
-            *recent_messages,
-        ]
-    else:
-        injected_messages = [
-            summary_human,
-            summary_ai,
-            *recent_messages,
-        ]
 
     graph = get_workflow_graph(_INJECTION_GRAPH_NAME)
     await graph.aupdate_state(
@@ -505,9 +559,9 @@ async def _compact_conversation_thread_locked(
         "thread_id": thread_id,
         "active_checkpoint_id": active_checkpoint_id,
         "messages": updated_messages,
-        "compacted_count": len(to_summarize),
-        "kept_count": len(recent_messages),
-        "summary": summary_text,
+        "compacted_count": compacted.compacted_count,
+        "kept_count": compacted.kept_count,
+        "summary": compacted.summary,
         "retained_tokens": retained_tokens,
         "current_context_tokens": retained_tokens,
     }

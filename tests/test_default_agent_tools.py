@@ -91,7 +91,7 @@ async def test_default_agent_context_includes_tools():
         # Create context with default agent
         context = make_run_context(
             working_dir=".",
-            max_context_tokens=default_config.max_context_tokens,
+            context_compact_threshold=default_config.context_compact_threshold,
             agent_name="default",
             allowed_tool_names=default_config.tools if default_config.tools else None,
         )

@@ -6,7 +6,7 @@ from langchain_core.runnables import RunnableConfig
 from agent.modules.workspaces import WorkspaceRef, normalize_workspace_ref
 from agent.shared.config.constants import DEFAULT_WORKSPACE_ROOT
 
-DEFAULT_CONTEXT_TRIM_THRESHOLD = 50_000
+DEFAULT_CONTEXT_COMPACT_THRESHOLD = 75
 DEFAULT_WORKING_DIR = DEFAULT_WORKSPACE_ROOT
 
 
@@ -15,7 +15,9 @@ class WorkflowContext:
     """Run-scoped context passed via LangGraph context_schema."""
 
     workspace: WorkspaceRef
-    context_trim_threshold: int
+    context_compact_threshold: int | None
+    channel_context_trim_threshold: int | None
+    channel_trim_applied: bool
     agent_name: str
     allowed_tool_names: list[str]
     allowed_skill_names: list[str] | None
@@ -28,8 +30,8 @@ class WorkflowContext:
         *,
         workspace: WorkspaceRef | dict[str, Any] | str | None = None,
         working_dir: str | None = None,
-        context_trim_threshold: int | None = None,
-        max_context_tokens: int | None = None,  # Backward compatibility
+        context_compact_threshold: int | None = None,
+        channel_context_trim_threshold: int | None = None,
         agent_name: str = "default",
         allowed_tool_names: list[str] | None = None,
         allowed_skill_names: list[str] | None = None,
@@ -45,11 +47,17 @@ class WorkflowContext:
             workspace if workspace is not None else working_dir,
             default_locator=default_locator,
         )
-        self.context_trim_threshold = (
-            context_trim_threshold 
-            if context_trim_threshold is not None 
-            else (max_context_tokens if max_context_tokens is not None else DEFAULT_CONTEXT_TRIM_THRESHOLD)
-        )
+        if context_compact_threshold is not None and (
+            type(context_compact_threshold) is not int or not 1 <= context_compact_threshold <= 100
+        ):
+            raise ValueError("context_compact_threshold must be an integer between 1 and 100.")
+        if channel_context_trim_threshold is not None and (
+            type(channel_context_trim_threshold) is not int or channel_context_trim_threshold < 1
+        ):
+            raise ValueError("channel_context_trim_threshold must be a positive integer.")
+        self.context_compact_threshold = context_compact_threshold
+        self.channel_context_trim_threshold = channel_context_trim_threshold
+        self.channel_trim_applied = False
         self.agent_name = agent_name
         self.allowed_tool_names = list(allowed_tool_names or [])
         self.allowed_skill_names = (
@@ -97,25 +105,16 @@ class WorkflowContext:
         """Get run-scoped global skill whitelist."""
         return self.allowed_skill_names
 
-    def get_context_trim_threshold(self) -> int:
-        """Get context trim threshold from context."""
-        return self.context_trim_threshold
-
-    def get_max_context_tokens(self) -> int:
-        """Get max context tokens from context (backward compatibility)."""
-        return self.context_trim_threshold
-
-    @property
-    def max_context_tokens(self) -> int:
-        """Get max context tokens property (backward compatibility)."""
-        return self.context_trim_threshold
+    def get_context_compact_threshold(self) -> int | None:
+        """Return the run override, or None to inherit the executing agent card."""
+        return self.context_compact_threshold
 
 
 def make_context(
     workspace: WorkspaceRef | dict[str, Any] | str | None = None,
     working_dir: str | None = None,
-    context_trim_threshold: int | None = None,
-    max_context_tokens: int | None = None,  # Backward compatibility
+    context_compact_threshold: int | None = None,
+    channel_context_trim_threshold: int | None = None,
     agent_name: str = "default",
     allowed_tool_names: list[str] | None = None,
     allowed_skill_names: list[str] | None = None,
@@ -140,8 +139,8 @@ def make_context(
 
     return WorkflowContext(
         workspace=resolved_workspace,
-        context_trim_threshold=context_trim_threshold,
-        max_context_tokens=max_context_tokens,
+        context_compact_threshold=context_compact_threshold,
+        channel_context_trim_threshold=channel_context_trim_threshold,
         agent_name=agent_name,
         allowed_tool_names=allowed_tool_names,
         allowed_skill_names=allowed_skill_names,

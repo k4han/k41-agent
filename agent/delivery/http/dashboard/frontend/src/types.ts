@@ -125,8 +125,7 @@ export type AgentCard = {
   sub_agents: string[] | null;
   plan_approval_targets: string[];
   hidden: boolean;
-  context_trim_threshold: number;
-  max_context_tokens?: number | null;
+  context_compact_threshold: number;
   system_prompt: string;
   source: "builtin" | "user";
   path: string;
@@ -150,8 +149,7 @@ export type AgentConfig = {
   sub_agents: string[] | null;
   plan_approval_targets: string[];
   hidden: boolean;
-  context_trim_threshold: number;
-  max_context_tokens?: number | null;
+  context_compact_threshold: number;
   system_prompt: string;
 };
 
@@ -606,7 +604,7 @@ export type GitHubRepositoryBinding = {
   repository_instructions: string;
   provider_name: string;
   model_name: string;
-  context_trim_threshold: number | null;
+  context_compact_threshold: number | null;
   tool_policy_mode: "inherit" | "custom";
   allowed_tools: string[];
   allowed_skills: string[];

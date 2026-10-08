@@ -15,7 +15,7 @@ tools:
   - "read_process_output"
   - "write_process_input"
   - "stop_process"
-max_context_tokens: 50000
+context_compact_threshold: 75
 ---
 
 # System Prompt

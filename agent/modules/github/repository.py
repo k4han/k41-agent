@@ -57,14 +57,14 @@ def _tool_policy_mode(mode: str, allowed_tools: list[str]) -> str:
     return "inherit"
 
 
-def _context_trim_threshold(value: int | None) -> int | None:
+def _context_compact_threshold(value: int | None, *, strict: bool = False) -> int | None:
     if value is None:
         return None
-    try:
-        normalized = int(value)
-    except (TypeError, ValueError):
+    if type(value) is not int or not 1 <= value <= 100:
+        if strict:
+            raise ValueError("Context compact threshold must be an integer between 1 and 100.")
         return None
-    return normalized if normalized > 0 else None
+    return value
 
 
 def _serialize_binding(binding: GitHubRepositoryBinding) -> dict[str, Any]:
@@ -91,7 +91,7 @@ def _serialize_binding(binding: GitHubRepositoryBinding) -> dict[str, Any]:
         "repository_instructions": binding.repository_instructions or "",
         "provider_name": binding.provider_name or "",
         "model_name": binding.model_name or "",
-        "context_trim_threshold": _context_trim_threshold(binding.context_trim_threshold),
+        "context_compact_threshold": _context_compact_threshold(binding.context_compact_threshold),
         "tool_policy_mode": tool_policy_mode,
         "allowed_tools": allowed_tools if tool_policy_mode == "custom" else [],
         "allowed_skills": load_allowed_skills(
@@ -168,7 +168,7 @@ class GitHubRepositoryStore:
         repository_instructions: str = "",
         provider_name: str = "",
         model_name: str = "",
-        context_trim_threshold: int | None = None,
+        context_compact_threshold: int | None = None,
         tool_policy_mode: str = "inherit",
         allowed_tools: list[str] | None = None,
         allowed_skills: list[str] | None = None,
@@ -198,7 +198,9 @@ class GitHubRepositoryStore:
             binding.repository_instructions = repository_instructions.strip()
             binding.provider_name = provider_name.strip()
             binding.model_name = model_name.strip()
-            binding.context_trim_threshold = _context_trim_threshold(context_trim_threshold)
+            binding.context_compact_threshold = _context_compact_threshold(
+                context_compact_threshold, strict=True
+            )
             normalized_allowed_tools = load_allowed_tools(
                 _json_list(allowed_tools or [])
             )

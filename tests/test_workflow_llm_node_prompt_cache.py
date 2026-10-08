@@ -69,7 +69,7 @@ def cached_llm_node(monkeypatch):
 
     async def _fake_resolve(self, agent_name, *, override_tool_names=None):
         names = list(override_tool_names) if override_tool_names else []
-        return [SimpleNamespace(name=name) for name in names]
+        return [SimpleNamespace(name=name, description="Test tool", tool_call_schema={"type": "object", "properties": {}}) for name in names]
 
     monkeypatch.setattr(
         llm_node_module,
@@ -104,7 +104,7 @@ def cached_llm_node(monkeypatch):
                 context=WorkflowContext(
                     agent_name=agent_name,
                     working_dir="D:/repo",
-                    max_context_tokens=50000,
+                    context_compact_threshold=75,
                     allowed_tool_names=["skill", "read"],
                     model=model,
                     reasoning_effort=reasoning_effort,

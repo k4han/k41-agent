@@ -139,6 +139,25 @@ def test_model_profile_settings_save_validate_and_clear(make_dashboard_client) -
     assert db_source.get(key) == {}
 
 
+@pytest.mark.parametrize("channel", ["telegram", "discord", "zalo"])
+@pytest.mark.parametrize("batch", [False, True])
+def test_channel_trim_setting_saves_and_resets_default(make_dashboard_client, channel, batch) -> None:
+    service, db_source = _db_config_service("llm: {default_model: ''}")
+    client = make_dashboard_client(service)
+    key = f"channels.{channel}.context_trim_threshold"
+    def update(value):
+        return client.put("/settings", json={"values": {key: value}}) if batch else client.put(f"/settings/{key}", json={"value": value})
+    assert service.get_int(key) == 50_000
+    assert update(12345).status_code == 200
+    assert db_source.get(key) == 12345
+    assert service.get_int(key) == 12345
+    assert update(0).status_code == 400
+    assert service.get_int(key) == 12345
+    assert update(None).status_code == 200
+    assert db_source.get(key) is None
+    assert service.get_int(key) == 50_000
+
+
 class TestDashboardSettingsEndpoints:
     def test_get_config_api_includes_bootstrap_and_excludes_dedicated_settings(self, dashboard_client) -> None:
         resp = dashboard_client.get("/dashboard-api/config")

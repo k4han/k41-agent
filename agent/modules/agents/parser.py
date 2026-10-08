@@ -7,7 +7,7 @@ import re
 import yaml
 from pathlib import Path
 
-from agent.modules.agents.models import AgentConfig
+from agent.modules.agents.models import AgentConfig, reject_legacy_context_settings
 from agent.shared.infrastructure.parsing import parse_string_or_list
 from agent.modules.workflows import (
     ROUTER_GRAPH_TYPE,
@@ -24,6 +24,16 @@ _FRONTMATTER_RE = re.compile(
 
 class AgentMarkdownError(ValueError):
     """Raised when an agent Markdown document cannot be parsed."""
+
+
+def agent_markdown_name(content: str) -> str | None:
+    """Read an identity for reporting a card whose other settings are invalid."""
+    match = _FRONTMATTER_RE.match(content)
+    if not match:
+        return None
+    data = yaml.safe_load(match.group(1))
+    name = data.get("name") if isinstance(data, dict) else None
+    return name.strip() if isinstance(name, str) and name.strip() else None
 
 
 def parse_agent_markdown_content(
@@ -126,7 +136,7 @@ def serialize_agent_config(config: AgentConfig) -> str:
             if config.reasoning_effort is not None else config.model
         ),
         "tools": list(config.tools),
-        "context_trim_threshold": config.context_trim_threshold,
+        "context_compact_threshold": config.context_compact_threshold,
     }
     tool_configs = {
         name: dict(values)
@@ -187,16 +197,11 @@ def _build_agent_config(
     raw_model = data.get("model", "")
     model = raw_model if isinstance(raw_model, dict) else str(raw_model).strip()
 
-    raw_threshold = data.get("context_trim_threshold")
-    if raw_threshold is None:
-        raw_threshold = data.get("max_context_tokens")
-
     try:
-        context_trim_threshold = int(raw_threshold if raw_threshold is not None else 50_000)
-    except (TypeError, ValueError) as exc:
-        raise AgentMarkdownError(
-            f"Agent file {source_label} has invalid 'context_trim_threshold'."
-        ) from exc
+        reject_legacy_context_settings(data)
+    except ValueError as exc:
+        raise AgentMarkdownError(f"Agent file {source_label}: {exc}") from exc
+    context_compact_threshold = data.get("context_compact_threshold", 75)
     tools = parse_string_or_list(data.get("tools", []))
     raw_tool_configs = data.get("tool_configs", {})
     tool_configs: dict[str, dict[str, object]] = {}
@@ -248,7 +253,7 @@ def _build_agent_config(
             sub_agents=sub_agents,
             plan_approval_targets=plan_approval_targets,
             hidden=hidden,
-            context_trim_threshold=context_trim_threshold,
+            context_compact_threshold=context_compact_threshold,
             system_prompt=body,
         )
     except Exception as exc:

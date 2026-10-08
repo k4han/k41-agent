@@ -9,6 +9,7 @@ from langchain_core.language_models import BaseChatModel
 from agent.modules.providers.service import ProviderService
 from agent.modules.providers.models import ModelConfig, ResolvedChatModel
 from agent.modules.providers.profiles import get_model_profile
+from agent.modules.providers.context_window import resolve_context_window
 from agent.modules.providers.provider import ProviderConfig
 from agent.shared.config import get_config_service
 
@@ -153,6 +154,11 @@ def _resolve_chat_model_info_impl(
         provider_type=str(provider_config.provider_type),
         model_name=model_config.model_name,
         profile=model_config.profile,
+        context_window=resolve_context_window(
+            provider_config.catalog_id or provider_config.name,
+            resolved_model,
+            model_config.profile,
+        ),
     )
 
 

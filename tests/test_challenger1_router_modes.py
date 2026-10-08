@@ -125,7 +125,7 @@ def _make_agent(
         model="gpt-4o",
         tools=[],
         sub_agents=None,
-        max_context_tokens=50_000,
+        context_compact_threshold=75,
         system_prompt="Router prompt {agent_options} {user_input}",
     )
 
@@ -134,7 +134,7 @@ def _runtime_context() -> WorkflowContext:
     return make_context(
         agent_name="orchestrator",
         working_dir="D:/repo",
-        max_context_tokens=50_000,
+        context_compact_threshold=75,
         allowed_tool_names=[],
     )
 
