@@ -57,6 +57,8 @@ class CodingService(CodingEngine):
 
     async def invoke(self, definition: ToolDefinition, args: dict[str, Any], context: InvocationContext) -> ToolResult:
         started = time.monotonic()
+        # Reads must observe the current file, including when a call ID is reused.
+        use_journal = definition.name != "read"
         fingerprint_args = {key: value for key, value in args.items()
                             if not (definition.name == "read" and key == "byte_offset" and value is None)}
         fingerprint = digest(json.dumps([definition.name, fingerprint_args], sort_keys=True, ensure_ascii=True))
@@ -70,9 +72,14 @@ class CodingService(CodingEngine):
             parsed = definition.input_schema.model_validate(args)
             values = parsed.model_dump()
             async with lock:
+                if not use_journal and context.tool_call_id:
+                    try:
+                        self.storage.journal_path(context).unlink(missing_ok=True)
+                    except OSError:
+                        pass
                 # Completed settlements are returned before authorization so
                 # replay cannot consume a resume value intended for another call.
-                if context.tool_call_id:
+                if use_journal and context.tool_call_id:
                     path = self.storage.journal_path(context)
                     if path.exists():
                         result = self.storage.begin(context, fingerprint)
@@ -80,12 +87,13 @@ class CodingService(CodingEngine):
                         result = self.model_result(definition.name, result, context)
                         return result
                 await self.prepare(definition.name, values, context)
-                cached = self.storage.begin(context, fingerprint)
-                if cached is not None:
-                    cached = await self.restore_output_paths(cached, context)
-                    result = self.model_result(definition.name, cached, context)
-                    return result
-                journal_started = True
+                if use_journal:
+                    cached = self.storage.begin(context, fingerprint)
+                    if cached is not None:
+                        cached = await self.restore_output_paths(cached, context)
+                        result = self.model_result(definition.name, cached, context)
+                        return result
+                    journal_started = True
                 try:
                     result = await definition.execute(parsed, context, self)
                     result = definition.output_schema.model_validate(result)
@@ -104,7 +112,8 @@ class CodingService(CodingEngine):
                 result = self.model_result(definition.name, result, context)
                 result = await self.restore_output_paths(result, context)
                 result = self.storage.bound(result, context, tail=definition.name in PROCESS_TOOLS)
-                self.storage.complete(context, fingerprint, result)
+                if use_journal:
+                    self.storage.complete(context, fingerprint, result)
                 return result
         except (CodingError, ValidationError, OSError, ValueError) as exc:
             result = self.failure(exc)

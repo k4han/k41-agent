@@ -140,19 +140,29 @@ class SandboxWorker:
             return {"permissions": list(engine.permissions.requests.values())}
         if operation != "execute":
             raise CodingError("invalid_input", "Unknown sandbox runtime operation.")
-        fingerprint_values = {key: value for key, value in values.items()
-                              if not (name == "read" and key == "byte_offset" and value is None)}
-        fingerprint = digest(json.dumps([name, fingerprint_values], sort_keys=True, ensure_ascii=True))
+        # Ignore read journals from older workers so repeated reads stay fresh.
+        use_journal = name != "read"
+        fingerprint = None
+        if use_journal:
+            fingerprint_values = {key: value for key, value in values.items()
+                                  if not (name == "read" and key == "byte_offset" and value is None)}
+            fingerprint = digest(json.dumps([name, fingerprint_values], sort_keys=True, ensure_ascii=True))
         key = f"{context.owner}\0{context.agent_name}\0{context.message_id}\0{context.tool_call_id}"
         lock = self.invocation_locks.setdefault(key, asyncio.Lock())
         try:
             async with lock:
-                if context.tool_call_id and self.storage.journal_path(context).exists():
+                if not use_journal and context.tool_call_id:
+                    try:
+                        self.storage.journal_path(context).unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                if use_journal and context.tool_call_id and self.storage.journal_path(context).exists():
                     return self.storage.begin(context, fingerprint).to_dict()
                 await engine.prepare(name, values, context)
-                cached = self.storage.begin(context, fingerprint)
-                if cached is not None:
-                    return cached.to_dict()
+                if use_journal:
+                    cached = self.storage.begin(context, fingerprint)
+                    if cached is not None:
+                        return cached.to_dict()
                 try:
                     result = await engine.execute(name, values, context)
                 except (CodingError, OSError, ValueError) as exc:
@@ -165,7 +175,8 @@ class SandboxWorker:
                     result.content = content
                     result.output_truncated = False
                 result = self.storage.bound(result, context, tail=name in PROCESS_TOOLS)
-                self.storage.complete(context, fingerprint, result)
+                if use_journal:
+                    self.storage.complete(context, fingerprint, result)
                 return result.to_dict()
         finally:
             if not lock.locked() and not getattr(lock, "_waiters", None):

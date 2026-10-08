@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import hashlib
 import json
 import os
 import shutil
@@ -23,7 +24,7 @@ from langgraph.types import Command
 
 from agent.modules.tools.coding.adapter import SCHEMAS, make_coding_tool
 from agent.modules.tools.coding.files import read_byte_page
-from agent.modules.tools.coding.models import InvocationContext, ToolDefinition, ToolResult
+from agent.modules.tools.coding.models import InvocationContext, PermissionRule, ToolDefinition, ToolResult
 from agent.modules.tools.coding.remote_worker import SandboxWorker
 from agent.modules.tools.coding.service import CodingService
 from agent.modules.tools.coding.storage import (
@@ -472,22 +473,91 @@ async def test_sandbox_hydration_uses_a_single_storage_prefix(tmp_path, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_legacy_invocation_replay_restores_paths_without_executing_again(output_environment):
+@pytest.mark.parametrize("byte_offset", [None, 0])
+async def test_read_reusing_call_id_observes_current_content(output_environment, byte_offset):
+    service, context, workspace, _ = output_environment
+    context = replace(context, tool_call_id="read", message_id="message")
+    path = workspace / "source.txt"
+    path.write_text("old content\nsecond line\n", encoding="utf-8")
+    args = {"file_path": "source.txt", "byte_offset": byte_offset}
+    first = await invoke(service, context, "read", **args)
+    assert first.status == "success" and "old content" in first.content
+    path.write_text("updated content\nsecond line\n", encoding="utf-8")
+    refreshed = await invoke(service, context, "read", **args)
+    assert refreshed.status == "success" and "updated content" in refreshed.content
+    assert "old content" not in refreshed.content
+    assert refreshed.data["version"] != first.data["version"]
+    assert refreshed.data["version"] == hashlib.sha256(path.read_bytes()).hexdigest()
+    page = await invoke(service, context, "read", file_path="source.txt", offset=2, limit=1)
+    assert page.status == "success" and page.content.startswith("2: second line\n")
+    await service.processes.close()
+
+
+@pytest.mark.asyncio
+async def test_read_reusing_call_id_observes_creation_and_deletion(output_environment):
+    service, context, workspace, _ = output_environment
+    context = replace(context, tool_call_id="read", message_id="message")
+    args = {"file_path": "source.txt"}
+    missing = await invoke(service, context, "read", **args)
+    assert missing.status == "error" and missing.error.code == "not_found"
+    path = workspace / "source.txt"
+    path.write_text("created content\n", encoding="utf-8")
+    created = await invoke(service, context, "read", **args)
+    assert created.status == "success" and "created content" in created.content
+    path.unlink()
+    deleted = await invoke(service, context, "read", **args)
+    assert deleted.status == "error" and deleted.error.code == "not_found"
+    await service.processes.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["started", "completed"])
+async def test_read_ignores_legacy_invocation_journals(output_environment, state):
+    service, context, workspace, worker = output_environment
+    context = replace(context, tool_call_id="legacy-read", message_id="message")
+    (workspace / "source.txt").write_text("current content\n", encoding="utf-8")
+    stores = [service.storage] + ([worker.storage] if worker else [])
+    for store in stores:
+        store.begin(context, "legacy-read-fingerprint")
+        if state == "completed":
+            store.complete(context, "legacy-read-fingerprint", ToolResult(content="old content"))
+    result = await invoke(service, context, "read", file_path="source.txt")
+    assert result.status == "success" and "current content" in result.content
+    assert "old content" not in result.content
+    await service.processes.close()
+
+
+@pytest.mark.asyncio
+async def test_read_reusing_call_id_checks_current_permissions(output_environment):
+    service, context, workspace, _ = output_environment
+    context = replace(context, tool_call_id="read", message_id="message")
+    (workspace / "source.txt").write_text("private content\n", encoding="utf-8")
+    first = await invoke(service, context, "read", file_path="source.txt")
+    assert first.status == "success"
+    denied = replace(context, permission_rules=(PermissionRule(action="read", effect="deny"),))
+    result = await invoke(service, denied, "read", file_path="source.txt")
+    assert result.status == "error" and result.error.code == "permission_denied"
+    assert "private content" not in result.content
+    await service.processes.close()
+
+
+@pytest.mark.asyncio
+async def test_legacy_mutation_replay_restores_paths_without_executing_again(output_environment):
     service, context, workspace, worker = output_environment
     context = replace(context, tool_call_id="legacy", message_id="message")
     store = worker.storage if worker else service.storage
     reference = "b" * 32
     legacy = store.owner_dir(context) / f"{reference}.output"
     legacy.write_bytes(b"old retained text")
-    args = {"file_path": "missing.txt"}
-    fingerprint = digest(json.dumps(["read", args], sort_keys=True, ensure_ascii=True))
+    args = {"file_path": "missing.txt", "content": "must not write"}
+    fingerprint = digest(json.dumps(["write", args], sort_keys=True, ensure_ascii=True))
     result = ToolResult(content=f"[read_tool_output output_ref={reference}]", output_refs=[reference])
     service.storage.complete(context, fingerprint, result)
-    restored = await invoke(service, context, "read", **args, byte_offset=None)
+    restored = await invoke(service, context, "write", **args)
     assert restored.status == "success" and restored.output_paths
     assert (workspace / restored.output_paths[0]).read_bytes() == b"old retained text"
     assert "read_tool_output" not in restored.content
-    again = await invoke(service, context, "read", **args)
+    again = await invoke(service, context, "write", **args)
     assert again.output_paths == restored.output_paths
     assert not (workspace / "missing.txt").exists()
     await service.processes.close()
