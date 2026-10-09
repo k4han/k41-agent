@@ -11,6 +11,7 @@ from langgraph.config import get_stream_writer
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
 from agent.modules.conversations import (
+    CompactionBudgetError,
     CompactionSummaryError,
     compact_message_history,
 )
@@ -18,6 +19,7 @@ from agent.modules.workflows.message_history import normalize_messages_for_chat_
 from agent.modules.workflows.history_trim import trim_channel_history
 from agent.modules.workflows.run_config import DEFAULT_CONTEXT_COMPACT_THRESHOLD
 from agent.modules.providers import DEFAULT_CONTEXT_WINDOW
+from agent.modules.providers.context_budget import model_input_budget
 from agent.modules.usage.context_breakdown import (
     estimate_response_breakdown,
     include_response_in_context,
@@ -97,7 +99,8 @@ async def prepare_model_context(
     """Compact before every model call and trim channel history once per run."""
     override = getattr(context, "context_compact_threshold", None)
     threshold = override if override is not None else getattr(agent_config, "context_compact_threshold", DEFAULT_CONTEXT_COMPACT_THRESHOLD)
-    limit = getattr(resolved, "context_window", DEFAULT_CONTEXT_WINDOW)
+    target_budget = model_input_budget(resolved, threshold)
+    hard_budget = model_input_budget(resolved)
     current = history
 
     def count(items):
@@ -105,19 +108,17 @@ async def prepare_model_context(
         return count_tokens_approximately(payload, tools=tools)
 
     before = count(current)
-    if before * 100 >= limit * threshold:
+    if before >= target_budget:
         try:
             compacted = await compact_message_history(
                 current,
                 thread_id=str(config.get("configurable", {}).get("thread_id", "")),
                 provider_name=resolved.provider_name,
                 model_name=resolved.model_name,
-                max_retained_tokens=max(
-                    1,
-                    limit * threshold // 100 - count_tokens_approximately([system], tools=tools),
-                ),
+                max_retained_tokens=target_budget - count([]),
             )
-            if count(compacted.messages) < before:
+            after = count(compacted.messages)
+            if after < before and after <= target_budget:
                 current = compacted.messages
         except (ValueError, CompactionSummaryError) as exc:
             logger.warning("Automatic context compaction skipped: %s", exc)
@@ -126,6 +127,12 @@ async def prepare_model_context(
     if trim_threshold is not None and not getattr(context, "channel_trim_applied", False):
         current = trim_channel_history(current, trim_threshold)
         context.channel_trim_applied = True
+
+    if count(current) > hard_budget:
+        raise CompactionBudgetError(
+            "Conversation exceeds the model input budget after compaction. "
+            "Reduce the latest message or tool output, unload instructions, or select a larger context model."
+        )
 
     if current is history:
         return current, []

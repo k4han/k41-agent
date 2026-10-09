@@ -160,10 +160,17 @@ def test_old_card_keys_require_explicit_migration(key, has_new_key):
 async def test_trigger_below_at_and_above_threshold(monkeypatch, offset, expected):
     messages = history()
     tokens = count_tokens_approximately([SystemMessage(content="system"), *messages])
-    # At 100%, the boundary is precisely the estimated input count.
+    # At 75%, this window places the input exactly on the trigger boundary.
     compact = AsyncMock(return_value=compaction.CompactedHistory(messages[-1:], "summary", 4, 1))
     monkeypatch.setattr(model_context, "compact_message_history", compact)
-    kept, updates = await prepare(messages, card=agent(context_compact_threshold=100), model=resolved(tokens - offset))
+    # Shift the input count one token across a fixed budget without changing
+    # the response reservation or tool accounting.
+    window = (tokens * 100 + 74) // 75
+    boundary = window * 75 // 100
+    monkeypatch.setattr(model_context, "count_tokens_approximately", lambda items, **kwargs: (
+        boundary + offset if len(items) > 2 else count_tokens_approximately(items, **kwargs)
+    ))
+    kept, updates = await prepare(messages, model=resolved(window))
     assert bool(compact.await_count) is expected
     assert bool(updates) is expected
     assert add_messages(messages, updates) == kept
@@ -189,9 +196,11 @@ async def test_trigger_counts_rendered_system_and_tool_schemas(monkeypatch):
     monkeypatch.setattr(model_context, "compact_message_history", compact)
     await prepare(messages, model=resolved(1000))
     assert compact.await_count == 0
-    await prepare(messages, system=SystemMessage(content="x" * 4000), model=resolved(1000))
+    with pytest.raises(compaction.CompactionBudgetError):
+        await prepare(messages, system=SystemMessage(content="x" * 4000), model=resolved(1000))
     assert compact.await_count == 1
-    await prepare(messages, tools=[{"name": "large", "description": "x" * 4000}], model=resolved(1000))
+    with pytest.raises(compaction.CompactionBudgetError):
+        await prepare(messages, tools=[{"name": "large", "description": "x" * 4000}], model=resolved(1000))
     assert compact.await_count == 2
 
 
@@ -201,7 +210,7 @@ async def test_failed_compaction_preserves_history_and_retries(monkeypatch):
     compact = AsyncMock(side_effect=compaction.CompactionSummaryError("timeout"))
     monkeypatch.setattr(model_context, "compact_message_history", compact)
     for _ in range(2):
-        kept, updates = await prepare(messages, model=resolved(100))
+        kept, updates = await prepare(messages, model=resolved(1000), card=agent(context_compact_threshold=10))
         assert kept is messages
         assert updates == []
     assert compact.await_count == 2
@@ -212,7 +221,7 @@ async def test_non_reducing_compaction_does_not_replace_state(monkeypatch):
     messages = history()
     oversized = [HumanMessage(content="x" * 10000)]
     monkeypatch.setattr(model_context, "compact_message_history", AsyncMock(return_value=compaction.CompactedHistory(oversized, "summary", 4, 1)))
-    kept, updates = await prepare(messages, model=resolved(100))
+    kept, updates = await prepare(messages, model=resolved(1000), card=agent(context_compact_threshold=10))
     assert kept is messages
     assert updates == []
 
@@ -501,7 +510,7 @@ async def test_react_graph_compacts_after_tool_growth_and_resumes_checkpoint(mon
     async def tools(self, name, **kwargs):
         return []
     async def tool_node(state, config, runtime):
-        return {"messages": [ToolMessage(content="x" * 3000, tool_call_id="call", id="tool-result")]}
+        return {"messages": [ToolMessage(content="x" * 2200, tool_call_id="call", id="tool-result")]}
     monkeypatch.setattr("agent.modules.agents.get_catalog_service", lambda: SimpleNamespace(get_agent=lambda name: card))
     monkeypatch.setattr(llm_module, "get_resolved_chat_model", lambda **kwargs: SimpleNamespace(model=Model(), provider_name="test", provider_type="openai_compatible", model_name="model-a", context_window=1000, profile={}))
     monkeypatch.setattr(llm_module, "get_workflow_reasoning_effort_kwargs", lambda *args: {})

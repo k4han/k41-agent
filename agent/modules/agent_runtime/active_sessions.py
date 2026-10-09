@@ -8,6 +8,7 @@ import signal
 import threading
 import time
 import uuid
+from contextlib import ExitStack, asynccontextmanager, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
@@ -24,6 +25,10 @@ SESSION_STEP_THINKING = "thinking"
 SESSION_STEP_RESPONDING = "responding"
 SESSION_STEP_FINALIZING = "finalizing"
 TOOL_STEP_PREFIX = "tool:"
+
+
+class ThreadMutationConflictError(RuntimeError):
+    """A checkpoint mutation conflicts with another operation on the thread."""
 
 
 @dataclass
@@ -82,7 +87,47 @@ class ActiveSessionRegistry:
         self._tasks: dict[str, Any] = {}
         self._refcounts: dict[str, int] = {}
         self._listeners: set[Any] = set()
+        self._thread_mutations: set[str] = set()
         self._lock = threading.Lock()
+
+    @contextmanager
+    def reserve_thread_mutation(self, thread_id: str, *, require_idle: bool = False):
+        """Exclude new runs and checkpoint mutations across in-process workers.
+
+        Reserve synchronously under the session lock, then release that lock
+        before any asynchronous work. Reservations are cleaned up on cancellation.
+        """
+        with self._lock:
+            if thread_id in self._thread_mutations:
+                raise ThreadMutationConflictError("Conversation checkpoint is being updated. Please try again.")
+            if require_idle and any(session.thread_id == thread_id for session in self._sessions.values()):
+                raise ThreadMutationConflictError("Cannot compact while agent is running.")
+            self._thread_mutations.add(thread_id)
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._thread_mutations.discard(thread_id)
+
+    def _check_thread_mutation_locked(self, thread_id: str) -> None:
+        if thread_id in self._thread_mutations:
+            raise ThreadMutationConflictError("Conversation checkpoint is being updated. Please try again.")
+
+    @asynccontextmanager
+    async def wait_for_thread_mutation(self, thread_id: str):
+        """Queue asynchronous notifications without dropping them during compaction."""
+        import asyncio
+
+        while True:
+            reservation = ExitStack()
+            try:
+                reservation.enter_context(self.reserve_thread_mutation(thread_id))
+                break
+            except ThreadMutationConflictError:
+                reservation.close()
+                await asyncio.sleep(0.05)
+        with reservation:
+            yield
 
     def subscribe(self) -> Any:
         """Subscribe to session events (returns asyncio.Queue)."""
@@ -146,6 +191,7 @@ class ActiveSessionRegistry:
     def register(self, session: ActiveSession, task: Any | None = None) -> str:
         """Register a new active session."""
         with self._lock:
+            self._check_thread_mutation_locked(session.thread_id)
             session_dict = self._register_locked(session, task)
         self._broadcast("session_started", session_dict)
         return session.session_id
@@ -170,6 +216,7 @@ class ActiveSessionRegistry:
         ID the caller should use.
         """
         with self._lock:
+            self._check_thread_mutation_locked(session.thread_id)
             for existing_id, existing in self._sessions.items():
                 if existing.thread_id == session.thread_id:
                     self._refcounts[existing_id] = self._refcounts.get(existing_id, 1) + 1
@@ -294,6 +341,7 @@ def get_active_session_registry(container=None) -> ActiveSessionRegistry:
 
 
 __all__ = [
+    "ThreadMutationConflictError",
     "ActiveSession",
     "ActiveSessionRegistry",
     "SESSION_STEP_FINALIZING",

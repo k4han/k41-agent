@@ -61,11 +61,13 @@ def get_checkpointer():
 
 async def delete_workflow_thread(thread_id: str) -> None:
     thread_id = resolve_thread_id(thread_id)
+    from agent.modules.agent_runtime.active_sessions import get_active_session_registry
     from agent.modules.workflows.checkpoint.store import get_checkpointer
 
     checkpointer = get_checkpointer()
     if checkpointer is not None:
-        await checkpointer.adelete_thread(thread_id)
+        async with get_active_session_registry().wait_for_thread_mutation(thread_id):
+            await checkpointer.adelete_thread(thread_id)
 
 
 def _checkpoint_tuple_thread_id(checkpoint_tuple: object) -> str:
@@ -99,6 +101,14 @@ async def _list_workflow_child_thread_ids(checkpointer: object, thread_id: str) 
 
 async def delete_workflow_thread_tree(thread_id: str) -> None:
     thread_id = resolve_thread_id(thread_id)
+    from agent.modules.agent_runtime.active_sessions import get_active_session_registry
+
+    async with get_active_session_registry().wait_for_thread_mutation(thread_id):
+        await _delete_workflow_thread_tree_reserved(thread_id)
+
+
+async def _delete_workflow_thread_tree_reserved(thread_id: str) -> None:
+    from agent.modules.agent_runtime.active_sessions import get_active_session_registry
     from agent.modules.tools import clear_conversation_storage
     from agent.modules.workflows.checkpoint.store import get_checkpointer
 
@@ -117,7 +127,11 @@ async def delete_workflow_thread_tree(thread_id: str) -> None:
     parent_error: Exception | None = None
     for target_thread_id in sorted(thread_ids, key=lambda value: (value == thread_id, value)):
         try:
-            await checkpointer.adelete_thread(target_thread_id)
+            if target_thread_id == thread_id:
+                await checkpointer.adelete_thread(target_thread_id)
+            else:
+                async with get_active_session_registry().wait_for_thread_mutation(target_thread_id):
+                    await checkpointer.adelete_thread(target_thread_id)
         except Exception as exc:
             logger.warning(
                 "Failed to delete workflow thread %s: %s",

@@ -392,16 +392,19 @@ async def inject_agent_message_pair(
 
     config = make_run_config(thread_id=thread_id)
     graph = get_workflow_graph(_INJECTION_GRAPH_NAME)
-    await graph.aupdate_state(
-        config,
-        {
-            "messages": [
-                HumanMessage(content=human_content),
-                AIMessage(content=ai_content),
-            ]
-        },
-        as_node=_INJECTION_AS_NODE,
-    )
+    from agent.modules.agent_runtime.active_sessions import get_active_session_registry
+
+    async with get_active_session_registry().wait_for_thread_mutation(resolve_thread_id(thread_id)):
+        await graph.aupdate_state(
+            config,
+            {
+                "messages": [
+                    HumanMessage(content=human_content),
+                    AIMessage(content=ai_content),
+                ]
+            },
+            as_node=_INJECTION_AS_NODE,
+        )
 
 
 __all__ = [

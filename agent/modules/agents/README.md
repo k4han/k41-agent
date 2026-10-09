@@ -76,7 +76,31 @@ null inherits the executing agent card. Existing token values are not converted.
 
 Context limits come from the provider/model catalog, then model metadata, with a
 128,000-token fallback. Input estimates include the rendered prompt and tool schemas.
-Failed compaction preserves history and allows execution to continue.
+Compaction must reduce the normalized history and fit the input budget, including
+the summary and its wrapper messages. The budget reserves response capacity (the
+model's configured output limit, or up to 4,096 tokens by default) and estimation
+headroom (2 percent, capped at 2,048 tokens). At high compaction thresholds, this
+safety ceiling can trigger compaction before the configured percentage is reached.
+Failed compaction preserves history; execution continues only when the remaining
+input fits the safety ceiling. Otherwise the model call is stopped with an
+actionable context budget error.
+
+Manual compaction uses the thread's agent threshold and the latest available
+system/tool/skill prompt estimates. Those estimates are not a freshly rendered
+prompt. Both manual and automatic compaction enforce the same history budget,
+with up to three summary generations and no partial tool groups.
+
+Summaries receive tool arguments, result statuses, error diagnostics, attachment
+references, and retained output paths. Oversized tool text keeps its beginning,
+ending, and selected diagnostics rather than only a short leading preview.
+
+Manual compaction reserves the thread in the active session registry, excluding
+new runs and competing checkpoint mutations in the same application process.
+Background notifications wait for this reservation and are then appended. The
+checkpoint and pending writes are checked again before an update pinned to the
+original checkpoint; the response is loaded from the resulting checkpoint.
+Reservations are released on success, failure, and cancellation. This is not a
+distributed lock across application processes sharing a database.
 
 ## Agent Discovery
 

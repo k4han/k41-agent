@@ -12,6 +12,7 @@ from agent.modules.conversations.history import (
     list_user_threads_with_stats,
 )
 from agent.modules.conversations.compaction import (
+    CompactionBudgetError,
     CompactionConflictError,
     CompactionSummaryError,
     CompactedHistory,
@@ -60,6 +61,7 @@ __all__ = [
     "get_history_checkpointer",
     "ConversationThreadRepository",
     "CompactionConflictError",
+    "CompactionBudgetError",
     "CompactionSummaryError",
     "CompactedHistory",
     "compact_message_history",

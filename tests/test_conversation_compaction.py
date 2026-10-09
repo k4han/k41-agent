@@ -26,9 +26,16 @@ from agent.modules.conversations.compaction import (
 )
 
 
+@pytest.fixture(autouse=True)
+def compaction_model(monkeypatch):
+    monkeypatch.setattr("agent.modules.conversations.compaction.get_resolved_chat_model", lambda **kwargs: SimpleNamespace(
+        provider_name="test", model_name="test-model", context_window=128_000,
+    ))
+
+
 def _make_sample_messages():
     return [
-        HumanMessage(content="Hello, I want to build a feature.", id="msg-1"),
+        HumanMessage(content="Hello, I want to build a feature. " * 30, id="msg-1"),
         AIMessage(
             content="Sure! Let me inspect files.",
             tool_calls=[{"id": "call-1", "name": "list_dir", "args": {"path": "."}}],
@@ -216,7 +223,7 @@ def test_resolve_compaction_cutoff_safe_ai_boundary_for_single_prompt():
 async def test_compact_succeeds_when_recent_window_has_no_human_message():
     # Reproduces the user's issue: thread where 6 recent messages have no HumanMessage
     msgs = [
-        HumanMessage(content="Initial request", id="h0"),
+        HumanMessage(content="Initial request " * 100, id="h0"),
         AIMessage(content="Reply 1", id="a0"),
         HumanMessage(content="Followup request", id="h1"),
         AIMessage(content="", tool_calls=[{"id": "c1", "name": "f", "args": {}}], id="a1"),
