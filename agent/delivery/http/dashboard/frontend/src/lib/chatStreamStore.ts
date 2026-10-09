@@ -1,8 +1,30 @@
-import { createSignal } from "solid-js";
+import { createSignal, untrack, type Accessor } from "solid-js";
+import { createStore, reconcile, unwrap } from "solid-js/store";
 import type { TranscriptItem } from "@/components/Transcript";
 import type { ContextBreakdown } from "@/types";
+import { cloneValue } from "@/lib/utils";
 
 export type ChatTranscriptItem = TranscriptItem & { id: number; key?: string };
+
+export type TranscriptItemsUpdater =
+  | ChatTranscriptItem[]
+  | ((previous: ChatTranscriptItem[]) => ChatTranscriptItem[]);
+
+/** Keep row identities stable while retaining the existing accessor/setter API. */
+export function createTranscriptItems(initialItems: ChatTranscriptItem[] = []): [
+  Accessor<ChatTranscriptItem[]>,
+  (update: TranscriptItemsUpdater) => ChatTranscriptItem[],
+] {
+  const [state, setState] = createStore({ items: cloneValue(unwrap(initialItems)) });
+  return [
+    () => state.items,
+    (update) => {
+      const next = untrack(() => typeof update === "function" ? update(unwrap(state.items)) : update);
+      setState("items", reconcile(next, { key: "id" }));
+      return state.items;
+    },
+  ];
+}
 
 export interface ContextUsage {
   current_context_tokens: number;
@@ -14,7 +36,7 @@ export interface ContextUsage {
 }
 
 export type PersistedStreamSignals = {
-  items: ReturnType<typeof createSignal<ChatTranscriptItem[]>>;
+  items: ReturnType<typeof createTranscriptItems>;
   streaming: ReturnType<typeof createSignal<boolean>>;
   controller: ReturnType<typeof createSignal<AbortController | null>>;
   reportedContextUsage: ReturnType<typeof createSignal<ContextUsage | null>>;
@@ -37,7 +59,7 @@ export function getOrCreateStreamSignals(
   let entry = persistedStreams.get(threadId);
   if (!entry) {
     entry = {
-      items: createSignal<ChatTranscriptItem[]>(initialItems),
+      items: createTranscriptItems(initialItems),
       streaming: createSignal<boolean>(false),
       controller: createSignal<AbortController | null>(null),
       reportedContextUsage: createSignal<ContextUsage | null>(null),

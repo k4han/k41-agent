@@ -174,9 +174,9 @@ export function DecisionProvidersPage() {
                 </div>
                 <p class="hint">Save separate decision model configurations and choose one default. Without a named default, legacy settings and environment credentials remain available.</p>
                 <SettingsResourceToolbar searchValue={search()} searchPlaceholder="Search configurations and providers..." onSearchInput={setSearch} />
-                <ProviderConnectionList busy={busy()} items={payload.providers
+                <ProviderConnectionList busy={busy()} items={payload().providers
                   .filter((item) => `${item.name} ${item.type} ${item.fields.model || ""}`.toLowerCase().includes(search().trim().toLowerCase()))
-                  .map((item) => ({ name: item.name, label: payload.services.find((service) => service.type === item.type)?.label || item.type,
+                  .map((item) => ({ name: item.name, label: payload().services.find((service) => service.type === item.type)?.label || item.type,
                     model: String(item.fields.model || ""), configured: item.configured, isDefault: item.is_default,
                     canSetDefault: item.configured && !item.is_default, canDelete: !item.is_default,
                     deleteReason: item.is_default ? "Choose another default or clear it before deleting." : "",
@@ -186,9 +186,9 @@ export function DecisionProvidersPage() {
                   onDelete={(name) => setDeleteTarget(name)}
                   onTest={testConnectionByName}
                   testStates={testStates()} />
-                <Show when={payload.default_provider}><button class="btn btn-sm" disabled={busy()} onClick={() => setClearDefaultOpen(true)}>Clear default</button></Show>
-                <ProviderPicker items={payload.services.filter((item) => item.label.toLowerCase().includes(search().trim().toLowerCase())).map((item) => ({
-                  id: item.type, label: item.label, count: payload.providers.filter((provider) => provider.type === item.type).length,
+                <Show when={payload().default_provider}><button class="btn btn-sm" disabled={busy()} onClick={() => setClearDefaultOpen(true)}>Clear default</button></Show>
+                <ProviderPicker items={payload().services.filter((item) => item.label.toLowerCase().includes(search().trim().toLowerCase())).map((item) => ({
+                  id: item.type, label: item.label, count: payload().providers.filter((provider) => provider.type === item.type).length,
                 }))} onSelect={(id) => navigate(`/settings/providers?tab=decision&new=${id}`)} />
               </>
             }>

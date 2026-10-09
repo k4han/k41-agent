@@ -5,7 +5,7 @@ import {
   PanelRightOpen,
   X,
 } from "lucide-solid";
-import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { batch, createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 
 import { AppShell } from "@/components/AppShell";
 import { ChatComposer } from "@/components/ChatComposer";
@@ -575,7 +575,7 @@ export function ChatPage() {
     }
   };
 
-  const applyThreadPayload = (payload: ThreadMessagesPayload) => {
+  const applyThreadPayload = (payload: ThreadMessagesPayload) => batch(() => {
     scroll.clearTurnAnchor();
     setThreadData(payload);
     setThreadTitleOverride(payload.title || "");
@@ -596,7 +596,7 @@ export function ChatPage() {
     }
     scroll.setAutoScroll(true);
     scroll.scrollToBottom(true);
-  };
+  });
 
   const onThreadCreated = (threadId: string, streamThreadIdRef: StreamThreadIdRef) => {
     // Apply buffered deltas before the persisted stream entry is re-keyed below.
@@ -1960,7 +1960,7 @@ export function ChatPage() {
                   setProvider(nextProvider);
                   setModel(nextModel);
                 }}
-                payload={payload}
+                payload={payload()}
                 recursionLimitReached={recursionLimitReached()}
                 currentTodos={currentTodos()}
                 todoProgress={todoProgress()}

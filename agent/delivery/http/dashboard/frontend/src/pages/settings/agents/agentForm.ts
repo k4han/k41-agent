@@ -1,4 +1,5 @@
 import type { AgentCard } from "@/types";
+import { sameJsonValue } from "@/lib/utils";
 
 export type ToolConfigValue = string | number | boolean | null;
 export type ToolConfigs = Record<string, Record<string, ToolConfigValue>>;
@@ -74,7 +75,7 @@ export function cardToForm(card: AgentCard): AgentForm {
 }
 
 export function isFormDirty(a: AgentForm, b: AgentForm): boolean {
-  return JSON.stringify(a) !== JSON.stringify(b);
+  return !sameJsonValue(a, b);
 }
 
 function normalizeToolConfigs(value: unknown): ToolConfigs {

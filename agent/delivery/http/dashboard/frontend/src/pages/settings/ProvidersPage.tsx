@@ -450,7 +450,7 @@ export function ProvidersPage() {
               open={confirmOpen()}
               saving={savingProvider()}
               changes={changesToConfirm()}
-              settings={settingsFromPayload(payload)}
+              settings={settingsFromPayload(payload())}
               onClose={() => setConfirmOpen(false)}
               onConfirm={saveConfirmedChanges}
             />

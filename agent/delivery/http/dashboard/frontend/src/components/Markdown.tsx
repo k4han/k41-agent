@@ -205,7 +205,10 @@ export function Markdown(props: {
   let mermaidRenderTimer: number | undefined;
   let iconDisposers = new Set<() => void>();
   let iconDisposerByElement = new WeakMap<Element, () => void>();
-  const highlightInFlight = new WeakSet<HTMLPreElement>();
+  const iconElements = new Map<() => void, Element>();
+  const sourceMarkup = new WeakMap<Node, string>();
+  const highlightInFlight = new WeakMap<HTMLPreElement, symbol>();
+  const pendingMermaidFrames = new WeakSet<HTMLElement>();
   const dark = createDarkMode();
 
   const html = createMemo(() => {
@@ -217,6 +220,7 @@ export function Markdown(props: {
   const cleanupIcons = () => {
     iconDisposers.forEach((dispose) => dispose());
     iconDisposers.clear();
+    iconElements.clear();
     iconDisposerByElement = new WeakMap<Element, () => void>();
   };
 
@@ -225,6 +229,7 @@ export function Markdown(props: {
     if (currentDispose) {
       currentDispose();
       iconDisposers.delete(currentDispose);
+      iconElements.delete(currentDispose);
       iconDisposerByElement.delete(element);
     }
     element.replaceChildren();
@@ -246,6 +251,118 @@ export function Markdown(props: {
     );
     iconDisposerByElement.set(element, dispose);
     iconDisposers.add(dispose);
+    iconElements.set(dispose, element);
+  };
+
+  // Preserve completed blocks and their controls as the trailing Markdown grows.
+  // Update compatible frames in place and invalidate asynchronous work when
+  // their source changes, retaining copy controls and the selected Mermaid view.
+  const updateFramedCode = (frame: HTMLElement, nextPre: HTMLPreElement, markup: string): boolean => {
+    if (!frame.classList.contains("markdown-code-frame")) {
+      return false;
+    }
+    const currentPre = frame.querySelector("pre");
+    if (!currentPre) {
+      return false;
+    }
+    const oldText = currentPre.querySelector("code")?.textContent ?? currentPre.textContent ?? "";
+    const newText = nextPre.querySelector("code")?.textContent ?? nextPre.textContent ?? "";
+    const language = codeBlockLanguage(nextPre);
+    if (isMermaidLanguage(language)) {
+      return false;
+    }
+    if (oldText === newText && codeBlockLanguage(currentPre) === language) {
+      sourceMarkup.set(frame, markup);
+      return true;
+    }
+    const currentCode = currentPre.querySelector("code");
+    const nextCode = nextPre.querySelector("code");
+    highlightInFlight.delete(currentPre);
+    if (currentCode && nextCode) {
+      currentCode.textContent = nextCode.textContent;
+      currentCode.className = nextCode.className;
+    } else {
+      currentPre.textContent = nextPre.textContent;
+    }
+    currentPre.classList.remove("markdown-code-highlighted", "markdown-code-plain");
+    const label = frame.querySelector(".markdown-code-language");
+    if (label) {
+      label.textContent = formatCodeLanguage(language);
+    }
+    sourceMarkup.set(frame, markup);
+    if (!untrack(() => Boolean(props.deferHighlight))) {
+      void highlightBlock(currentPre, language);
+    }
+    return true;
+  };
+
+  const updateFramedMermaid = (frame: HTMLElement, nextPre: HTMLPreElement, markup: string): boolean => {
+    if (!frame.classList.contains("markdown-mermaid-frame")) {
+      return false;
+    }
+    if (!isMermaidLanguage(codeBlockLanguage(nextPre))) {
+      return false;
+    }
+    const newSource = normalizeMermaidSource(nextPre.querySelector("code")?.textContent ?? nextPre.textContent ?? "");
+    if (normalizeMermaidSource(newSource) === normalizeMermaidSource(frame.dataset.mermaidSource ?? "")) {
+      sourceMarkup.set(frame, markup);
+      return true;
+    }
+    frame.dataset.mermaidSource = newSource;
+    delete frame.dataset.mermaidRenderKey;
+    pendingMermaidFrames.add(frame);
+    const rawCode = frame.querySelector(".markdown-mermaid-raw code");
+    if (rawCode) {
+      rawCode.textContent = newSource;
+    }
+    const diagram = frame.querySelector<HTMLElement>(".markdown-mermaid");
+    if (diagram) {
+      diagram.classList.remove("markdown-mermaid-error");
+      diagram.classList.add("is-loading");
+      diagram.setAttribute("aria-busy", "true");
+      diagram.textContent = "Rendering diagram...";
+    }
+    frame.classList.remove("markdown-mermaid-frame-error");
+    sourceMarkup.set(frame, markup);
+    return true;
+  };
+
+  const updateHtml = (value: string) => {
+    if (!containerRef) return;
+    const template = document.createElement("template");
+    template.innerHTML = value;
+    const nextNodes = Array.from(template.content.childNodes);
+    for (let index = 0; index < nextNodes.length; index += 1) {
+      const next = nextNodes[index];
+      const markup = next instanceof Element ? next.outerHTML : next.textContent || "";
+      const current = containerRef.childNodes[index];
+      if (current && sourceMarkup.get(current) === markup) continue;
+      if (
+        current instanceof HTMLElement &&
+        next instanceof Element &&
+        next.tagName === "PRE"
+      ) {
+        if (updateFramedCode(current, next as HTMLPreElement, markup)) continue;
+        if (updateFramedMermaid(current, next as HTMLPreElement, markup)) continue;
+      }
+      sourceMarkup.set(next, markup);
+      if (current) current.replaceWith(next);
+      else containerRef.appendChild(next);
+    }
+    while (containerRef.childNodes.length > nextNodes.length) containerRef.lastChild?.remove();
+    for (const [dispose, element] of iconElements) {
+      if (!containerRef.contains(element)) {
+        dispose();
+        iconDisposers.delete(dispose);
+        iconElements.delete(dispose);
+        iconDisposerByElement.delete(element);
+      }
+    }
+  };
+
+  const preserveMarkup = (source: Node, target: Node) => {
+    const markup = sourceMarkup.get(source);
+    if (markup !== undefined) sourceMarkup.set(target, markup);
   };
 
   const highlightBlock = async (pre: HTMLPreElement, language: string) => {
@@ -258,10 +375,12 @@ export function Markdown(props: {
       return;
     }
 
-    highlightInFlight.add(pre);
+    const request = Symbol();
+    highlightInFlight.set(pre, request);
+    const isCurrent = () => !disposed && pre.isConnected && highlightInFlight.get(pre) === request;
     try {
       const highlighted = await highlightCode(source, languageFromName(language), true);
-      if (disposed || !pre.isConnected) {
+      if (!isCurrent()) {
         return;
       }
 
@@ -273,9 +392,13 @@ export function Markdown(props: {
         pre.classList.add("markdown-code-highlighted");
       }
     } catch {
-      pre.classList.add("markdown-code-plain");
+      if (isCurrent()) {
+        pre.classList.add("markdown-code-plain");
+      }
     } finally {
-      highlightInFlight.delete(pre);
+      if (highlightInFlight.get(pre) === request) {
+        highlightInFlight.delete(pre);
+      }
     }
   };
 
@@ -462,6 +585,7 @@ export function Markdown(props: {
   ) => {
     const frame = createMermaidFrame(source, darkMode);
     pre.classList.add("is-rendering");
+    preserveMarkup(pre, frame);
     pre.replaceWith(frame);
     await renderMermaidFrame(frame, source, darkMode);
   };
@@ -472,7 +596,7 @@ export function Markdown(props: {
     }
 
     containerRef.querySelectorAll<HTMLPreElement>("pre").forEach((pre) => {
-      if (pre.parentElement?.classList.contains("markdown-code-frame")) {
+      if (pre.closest(".markdown-code-frame, .markdown-mermaid-frame, .markdown-mermaid-raw")) {
         return;
       }
 
@@ -510,6 +634,7 @@ export function Markdown(props: {
       mountIcon(copyButton, "copy");
       header.appendChild(copyButton);
 
+      preserveMarkup(pre, frame);
       pre.replaceWith(frame);
       frame.append(header, pre);
       if (!props.deferHighlight) {
@@ -525,6 +650,17 @@ export function Markdown(props: {
     if (!containerRef) {
       return;
     }
+
+    containerRef
+      .querySelectorAll<HTMLElement>(".markdown-mermaid-frame[data-mermaid-source]")
+      .forEach((frame) => {
+        const source = normalizeMermaidSource(frame.dataset.mermaidSource || "");
+        const complete = consumeMermaidBlock(completeMermaidBlocks, source);
+        if (complete && pendingMermaidFrames.has(frame)) {
+          pendingMermaidFrames.delete(frame);
+          void renderMermaidFrame(frame, source, darkMode);
+        }
+      });
 
     containerRef.querySelectorAll<HTMLPreElement>("pre").forEach((pre) => {
       const language = codeBlockLanguage(pre);
@@ -551,7 +687,7 @@ export function Markdown(props: {
     containerRef
       .querySelectorAll<HTMLElement>(".markdown-mermaid-frame[data-mermaid-source]")
       .forEach((frame) => {
-        if (frame.dataset.mermaidTheme === theme) {
+        if (pendingMermaidFrames.has(frame) || frame.dataset.mermaidTheme === theme) {
           return;
         }
         const source = frame.dataset.mermaidSource || "";
@@ -674,8 +810,7 @@ export function Markdown(props: {
 
   createEffect(() => {
     const source = props.text || "";
-    html();
-    cleanupIcons();
+    updateHtml(html());
     clearMermaidRenderTimer();
     queueMicrotask(() => {
       if (!disposed) {
@@ -750,8 +885,6 @@ export function Markdown(props: {
     <div
       ref={containerRef}
       class={`markdown ${props.class || ""}`}
-      // eslint-disable-next-line solid/no-innerhtml
-      innerHTML={html()}
     />
   );
 }

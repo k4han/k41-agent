@@ -1,4 +1,4 @@
-import { JSX, Show } from "solid-js";
+import { type Accessor, JSX, Show } from "solid-js";
 
 export function LoadingPanel() {
   return (
@@ -28,21 +28,25 @@ export function DataGate<T>(props: {
   data: T | undefined;
   error: string;
   onRetry?: () => void;
-  children: (data: T) => JSX.Element;
+  children: (data: Accessor<NonNullable<T>>) => JSX.Element;
 }) {
   return (
-    <Show
-      when={props.data}
-      keyed
-      fallback={
-        props.error ? (
-          <ErrorPanel message={props.error} onRetry={props.onRetry} />
-        ) : (
-          <LoadingPanel />
-        )
-      }
-    >
-      {(data) => props.children(data)}
-    </Show>
+    <>
+      <Show when={props.data && props.error}>
+        <ErrorPanel message={props.error} onRetry={props.onRetry} />
+      </Show>
+      <Show
+        when={props.data}
+        fallback={
+          props.error ? (
+            <ErrorPanel message={props.error} onRetry={props.onRetry} />
+          ) : (
+            <LoadingPanel />
+          )
+        }
+      >
+        {(data) => props.children(data)}
+      </Show>
+    </>
   );
 }

@@ -339,22 +339,22 @@ export function RepositoriesTab() {
                 <div class="channel-card-meta">
                   <div class="channel-card-meta-row">
                     <span class="channel-card-meta-label">App Slug</span>
-                    <span class="mono">{payload.app_slug || "Not set"}</span>
+                    <span class="mono">{payload().app_slug || "Not set"}</span>
                   </div>
                   <div class="channel-card-meta-row">
                     <span class="channel-card-meta-label">Repositories</span>
-                    <span class="mono">{payload.repositories.length}</span>
+                    <span class="mono">{payload().repositories.length}</span>
                   </div>
                 </div>
                 <div class="field">
                   <label>Webhook URL</label>
                   <div class="channel-webhook-helper-value" onClick={(e) => e.stopPropagation()}>
-                    <code>{payload.webhook_url}</code>
+                    <code>{payload().webhook_url}</code>
                     <button
                       class="btn btn-sm"
                       type="button"
                       onClick={() =>
-                        void writeToClipboard(payload.webhook_url).catch(() => {})
+                        void writeToClipboard(payload().webhook_url).catch(() => {})
                       }
                     >
                       <Copy size={13} />
@@ -528,7 +528,7 @@ export function GitHubSettingsPage() {
                   <div>
                     <h2 class="channel-config-title">GitHub Connection</h2>
                     <p class="hint channel-config-subtitle">
-                      App Slug: {payload.app_slug || "Not set"} &bull; Repositories: {payload.repositories.length}
+                      App Slug: {payload().app_slug || "Not set"} &bull; Repositories: {payload().repositories.length}
                     </p>
                   </div>
                 </div>
@@ -558,10 +558,10 @@ export function GitHubSettingsPage() {
                     <GitPullRequest size={13} />
                     {gh.busy() === "sync" ? "Syncing..." : "Sync Repos"}
                   </button>
-                  <Show when={payload.install_url && payload.configured}>
+                  <Show when={payload().install_url && payload().configured}>
                     <a
                       class="btn btn-sm"
-                      href={payload.install_url}
+                      href={payload().install_url}
                       target="_blank"
                       rel="noreferrer"
                     >

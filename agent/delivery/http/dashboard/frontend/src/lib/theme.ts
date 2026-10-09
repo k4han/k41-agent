@@ -1,4 +1,4 @@
-import { createSignal, onCleanup } from "solid-js";
+import { createSignal, getOwner, onCleanup } from "solid-js";
 
 function readDarkMode(): boolean {
   if (typeof document === "undefined") {
@@ -7,33 +7,16 @@ function readDarkMode(): boolean {
   return document.documentElement.classList.contains("dark");
 }
 
+const [dark, setDark] = createSignal(readDarkMode());
+let observer: MutationObserver | null = null;
+let consumers = 0;
+
 export function createDarkMode(): () => boolean {
-  const [dark, setDark] = createSignal(readDarkMode());
-
-  if (typeof MutationObserver !== "undefined" && typeof document !== "undefined") {
-    const observer = new MutationObserver(() => {
-      setDark(readDarkMode());
-    });
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
-    onCleanup(() => observer.disconnect());
-  }
-
-  return dark;
-}
-
-let sharedDark: (() => boolean) | null = null;
-
-export function getSharedDarkMode(): () => boolean {
-  if (sharedDark) {
-    return sharedDark;
-  }
-  const [dark, setDark] = createSignal(readDarkMode());
-  sharedDark = dark;
-  if (typeof MutationObserver !== "undefined" && typeof document !== "undefined") {
-    const observer = new MutationObserver(() => {
+  setDark(readDarkMode());
+  if (!getOwner()) return dark;
+  consumers += 1;
+  if (!observer && typeof MutationObserver !== "undefined" && typeof document !== "undefined") {
+    observer = new MutationObserver(() => {
       setDark(readDarkMode());
     });
     observer.observe(document.documentElement, {
@@ -41,5 +24,14 @@ export function getSharedDarkMode(): () => boolean {
       attributeFilter: ["class"],
     });
   }
+  onCleanup(() => {
+    consumers -= 1;
+    if (consumers === 0) {
+      observer?.disconnect();
+      observer = null;
+    }
+  });
   return dark;
 }
+
+export const getSharedDarkMode = createDarkMode;

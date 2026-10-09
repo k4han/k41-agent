@@ -177,7 +177,7 @@ export function GoogleCalendarTab() {
             {(data) => (
               <div class="stack" style={{ gap: "16px" }}>
                 {/* Server configuration alert - only shown when OAuth is missing */}
-                <Show when={!data.configured}>
+                <Show when={!data().configured}>
                   <div
                     class="channel-card-error"
                     style={{
@@ -201,7 +201,7 @@ export function GoogleCalendarTab() {
                 </Show>
 
                 {/* State 1: Connected */}
-                <Show when={data.connected}>
+                <Show when={data().connected}>
                   <div class="gcal-account-box">
                     <div class="gcal-account-info">
                       <div class="gcal-account-avatar">
@@ -209,8 +209,8 @@ export function GoogleCalendarTab() {
                       </div>
                       <div class="gcal-account-details">
                         <span class="gcal-account-label">Connected Account</span>
-                        <span class="gcal-account-email" title={data.email || undefined}>
-                          {data.email || "Primary Calendar"}
+                        <span class="gcal-account-email" title={data().email || undefined}>
+                          {data().email || "Primary Calendar"}
                         </span>
                         <span class="gcal-account-status">
                           Agent calendar tools (reading & managing events) are active.
@@ -252,23 +252,23 @@ export function GoogleCalendarTab() {
                     </div>
                     <button
                       id="gcal-enabled"
-                      class={`toggle-control ${data.enabled ? "active" : ""}`}
+                      class={`toggle-control ${data().enabled ? "active" : ""}`}
                       type="button"
                       role="switch"
-                      aria-checked={data.enabled}
+                      aria-checked={data().enabled}
                       disabled={busy() === "toggle"}
-                      onClick={() => void toggleEnabled(!data.enabled)}
+                      onClick={() => void toggleEnabled(!data().enabled)}
                     >
                       <span class="toggle-track">
                         <span class="toggle-thumb" />
                       </span>
-                      <span class="toggle-label">{data.enabled ? "Enabled" : "Disabled"}</span>
+                      <span class="toggle-label">{data().enabled ? "Enabled" : "Disabled"}</span>
                     </button>
                   </div>
                 </Show>
 
                 {/* State 2: Not connected */}
-                <Show when={!data.connected}>
+                <Show when={!data().connected}>
                   <div class="gcal-connect-cta">
                     <p class="gcal-connect-desc">
                       Connect your Google Calendar account to let AI agents check your schedule,
@@ -277,7 +277,7 @@ export function GoogleCalendarTab() {
                     <button
                       class="btn btn-primary"
                       type="button"
-                      disabled={!data.configured || busy() === "connect"}
+                      disabled={!data().configured || busy() === "connect"}
                       onClick={() => void connect()}
                     >
                       <ExternalLink size={14} />
@@ -299,8 +299,8 @@ export function GoogleCalendarTab() {
                     <div class="field">
                       <label class="channel-card-meta-label">Authorized Redirect URI</label>
                       <div class="channel-webhook-helper-value" style={{ "margin-top": "4px" }}>
-                        <code class="gcal-code-break" title={data.redirect_uri}>
-                          {data.redirect_uri || "—"}
+                        <code class="gcal-code-break" title={data().redirect_uri}>
+                          {data().redirect_uri || "—"}
                         </code>
                         <button
                           class="btn btn-sm"
@@ -322,23 +322,23 @@ export function GoogleCalendarTab() {
                       <div class="channel-card-meta-row">
                         <span class="channel-card-meta-label">Client ID</span>
                         <span class="mono gcal-text-break">
-                          {data.client_id || "Not set in server environment"}
+                          {data().client_id || "Not set in server environment"}
                         </span>
                       </div>
                       <div class="channel-card-meta-row">
                         <span class="channel-card-meta-label">Client Secret</span>
                         <span class="mono">
-                          {data.client_secret_configured ? "Set (server env)" : "Not set"}
+                          {data().client_secret_configured ? "Set (server env)" : "Not set"}
                         </span>
                       </div>
                     </div>
 
                     {/* Permissions (Scopes) as neat badges */}
-                    <Show when={data.scopes.length > 0}>
+                    <Show when={data().scopes.length > 0}>
                       <div class="field">
                         <label class="channel-card-meta-label">OAuth Permissions (Scopes)</label>
                         <div class="gcal-scopes-list">
-                          <For each={data.scopes}>
+                          <For each={data().scopes}>
                             {(scope) => (
                               <span class="gcal-scope-pill" title={scope}>
                                 {formatScopeName(scope)}

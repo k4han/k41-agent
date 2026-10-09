@@ -333,7 +333,7 @@ function RepositoryListPage() {
               <div class="panel-header">
                 <div class="panel-title">Synced repositories</div>
                 <span class="hint">
-                  Showing {filteredRepositories().length} of {payload.repositories.length}
+                  Showing {filteredRepositories().length} of {payload().repositories.length}
                 </span>
               </div>
               <div class="repository-list">
@@ -364,7 +364,7 @@ function RepositoryListPage() {
                             <div class="chips">
                               <span class="chip">{repo.default_branch}</span>
                               <span class="chip">{repo.private ? "private" : "public"}</span>
-                              <span class="chip">agent: {repo.agent_name || payload.default_agent}</span>
+                              <span class="chip">agent: {repo.agent_name || payload().default_agent}</span>
                             </div>
                           </div>
                         </div>
@@ -372,7 +372,7 @@ function RepositoryListPage() {
                           <span class={`badge ${repo.enabled ? "badge-success" : "badge-warning"}`}>
                             {repo.enabled ? "enabled" : "disabled"}
                           </span>
-                          <span class="badge">trigger: {repo.trigger_label || payload.trigger_label}</span>
+                          <span class="badge">trigger: {repo.trigger_label || payload().trigger_label}</span>
                           <span class={activity().active_count ? "badge badge-info" : "badge"}>
                             {activity().active_count
                               ? `${activity().active_count} active`
@@ -552,30 +552,30 @@ function RepositoryDetailPage(props: { repositoryId: string }) {
     >
       <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => (
-          <Show when={draft()} keyed>
+          <Show when={draft()}>
             {(currentDraft) => (
               <div class="stack repository-detail">
                 <div class="repository-detail-banner panel">
                   <div class="repository-detail-identity">
-                    <div class="repository-row-icon" data-enabled={currentDraft.enabled}>
+                    <div class="repository-row-icon" data-enabled={currentDraft().enabled}>
                       <GitBranch size={18} />
                     </div>
                     <div>
-                      <div class="repository-detail-title">{payload.repository.full_name}</div>
+                      <div class="repository-detail-title">{payload().repository.full_name}</div>
                       <div class="chips">
-                        <span class="chip">{payload.repository.default_branch}</span>
-                        <span class="chip">{payload.repository.private ? "private" : "public"}</span>
-                        <span class="chip">installation {payload.repository.installation_id}</span>
+                        <span class="chip">{payload().repository.default_branch}</span>
+                        <span class="chip">{payload().repository.private ? "private" : "public"}</span>
+                        <span class="chip">installation {payload().repository.installation_id}</span>
                       </div>
                     </div>
                   </div>
                   <div class="row-wrap">
-                    <span class={`badge ${currentDraft.enabled ? "badge-success" : "badge-warning"}`}>
-                      {currentDraft.enabled ? "enabled" : "disabled"}
+                    <span class={`badge ${currentDraft().enabled ? "badge-success" : "badge-warning"}`}>
+                      {currentDraft().enabled ? "enabled" : "disabled"}
                     </span>
-                    <span class="badge">agent: {currentDraft.agent_name}</span>
-                    <span class={payload.activity.active_count ? "badge badge-info" : "badge"}>
-                      {payload.activity.active_count} active
+                    <span class="badge">agent: {currentDraft().agent_name}</span>
+                    <span class={payload().activity.active_count ? "badge badge-info" : "badge"}>
+                      {payload().activity.active_count} active
                     </span>
                   </div>
                 </div>
@@ -604,16 +604,16 @@ function RepositoryDetailPage(props: { repositoryId: string }) {
 
                 <Show when={activeTab() === "overview"}>
                   <RepositoryOverview
-                    repository={payload.repository}
-                    draft={currentDraft}
-                    activity={payload.activity}
+                    repository={payload().repository}
+                    draft={currentDraft()}
+                    activity={payload().activity}
                   />
                 </Show>
 
                 <Show when={activeTab() === "automation"}>
                   <RepositoryAutomation
-                    draft={currentDraft}
-                    identities={payload.identities}
+                    draft={currentDraft()}
+                    identities={payload().identities}
                     agentNames={visibleAgentNames()}
                     onChange={updateDraft}
                   />
@@ -621,8 +621,8 @@ function RepositoryDetailPage(props: { repositoryId: string }) {
 
                 <Show when={activeTab() === "optimization"}>
                   <RepositoryOptimization
-                    payload={payload}
-                    draft={currentDraft}
+                    payload={payload()}
+                    draft={currentDraft()}
                     selectedTools={selectedTools()}
                     selectedSkills={selectedSkills()}
                     onChange={updateDraft}
@@ -632,12 +632,12 @@ function RepositoryDetailPage(props: { repositoryId: string }) {
                 </Show>
 
                 <Show when={activeTab() === "activity"}>
-                  <RepositoryActivity tasks={payload.activity.tasks} />
+                  <RepositoryActivity tasks={payload().activity.tasks} />
                 </Show>
 
                 <Dialog
                   open={runDialogOpen()}
-                  title={`Run task in ${payload.repository.full_name}`}
+                  title={`Run task in ${payload().repository.full_name}`}
                   onClose={() => setRunDialogOpen(false)}
                   footer={
                     <>
@@ -672,7 +672,7 @@ function RepositoryDetailPage(props: { repositoryId: string }) {
                       <IdentityPicker
                         value={taskNotify()}
                         onChange={setTaskNotify}
-                        identities={payload.identities}
+                        identities={payload().identities}
                       />
                     </div>
                   </div>

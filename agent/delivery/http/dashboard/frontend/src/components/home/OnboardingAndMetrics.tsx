@@ -129,31 +129,31 @@ function OnboardingItem(props: {
 }
 
 export function HomeMetrics(props: { counters: HomeCounters }) {
-  const c = props.counters;
+  const c = () => props.counters;
   return (
     <div class="grid-metrics">
       <MetricCard
-        value={String(c.sessions_active)}
+        value={String(c().sessions_active)}
         label="Sessions running"
-        tone={c.sessions_active > 0 ? "info" : "neutral"}
+        tone={c().sessions_active > 0 ? "info" : "neutral"}
         href="/chat"
       />
       <MetricCard
-        value={String(c.tasks.active)}
-        label={`Active tasks${c.tasks.failed ? ` (${c.tasks.failed} failed)` : ""}`}
-        tone={c.tasks.failed > 0 ? "danger" : "neutral"}
+        value={String(c().tasks.active)}
+        label={`Active tasks${c().tasks.failed ? ` (${c().tasks.failed} failed)` : ""}`}
+        tone={c().tasks.failed > 0 ? "danger" : "neutral"}
         href="/tasks"
       />
       <MetricCard
-        value={`${c.channels.running}/${c.channels.total}`}
-        label={`Channels running${c.channels.error ? ` (${c.channels.error} error)` : ""}`}
-        tone={c.channels.error > 0 ? "warning" : "neutral"}
+        value={`${c().channels.running}/${c().channels.total}`}
+        label={`Channels running${c().channels.error ? ` (${c().channels.error} error)` : ""}`}
+        tone={c().channels.error > 0 ? "warning" : "neutral"}
         href="/settings/channels"
       />
       <MetricCard
-        value={`${c.providers.ready}/${c.providers.total}`}
+        value={`${c().providers.ready}/${c().providers.total}`}
         label="Providers ready"
-        tone={c.providers.ready === 0 && c.providers.total > 0 ? "warning" : "neutral"}
+        tone={c().providers.ready === 0 && c().providers.total > 0 ? "warning" : "neutral"}
         href="/settings/providers"
       />
     </div>
@@ -166,9 +166,9 @@ function MetricCard(props: {
   tone?: "neutral" | "info" | "warning" | "danger";
   href?: string;
 }) {
-  const tone = props.tone || "neutral";
+  const tone = () => props.tone || "neutral";
   const inner = (
-    <div class={`panel metric metric-card metric-${tone}`}>
+    <div class={`panel metric metric-card metric-${tone()}`}>
       <div class="metric-value">{props.value}</div>
       <div class="metric-label">{props.label}</div>
     </div>

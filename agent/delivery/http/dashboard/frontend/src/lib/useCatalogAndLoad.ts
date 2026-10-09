@@ -1,4 +1,4 @@
-import { onMount } from "solid-js";
+import { onCleanup, onMount } from "solid-js";
 
 import { useToast } from "@/components/Toast";
 import { fetchCatalog } from "@/lib/catalogStore";
@@ -13,15 +13,18 @@ import { fetchCatalog } from "@/lib/catalogStore";
  */
 export function useCatalogAndLoad(loader: () => Promise<void>): void {
   const { showToast } = useToast();
+  let disposed = false;
+  onCleanup(() => { disposed = true; });
   onMount(async () => {
     try {
       await fetchCatalog();
     } catch (err) {
+      if (disposed) return;
       showToast(
         err instanceof Error ? err.message : "Failed to load catalog options",
         "error",
       );
     }
-    await loader();
+    if (!disposed) await loader();
   });
 }

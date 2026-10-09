@@ -195,23 +195,23 @@ export function WebConnectionsPage() {
               <>
                 <SettingsResourceToolbar searchValue={search()} searchPlaceholder="Search configurations and providers..." onSearchInput={setSearch} />
                 <ProviderConnectionList
-                  items={payload.connections.filter((entry) => `${entry.name} ${payload.services.find((item) => item.type === entry.type)?.label || entry.type}`.toLowerCase().includes(search().trim().toLowerCase())).map((entry) => ({
-                    name: entry.name, label: payload.services.find((item) => item.type === entry.type)?.label || entry.type,
+                  items={payload().connections.filter((entry) => `${entry.name} ${payload().services.find((item) => item.type === entry.type)?.label || entry.type}`.toLowerCase().includes(search().trim().toLowerCase())).map((entry) => ({
+                    name: entry.name, label: payload().services.find((item) => item.type === entry.type)?.label || entry.type,
                     configured: entry.configured, isDefault: entry.is_default, canSetDefault: entry.configured && !entry.is_default, canDelete: true,
                   }))}
                   busy={busy()}
                   emptyMessage="No saved configurations. Environment credentials remain available."
                   onEdit={(name) => navigate(`/settings/providers/web/${encodeURIComponent(name)}`)}
-                  onSetDefault={(name) => { const entry = payload.connections.find((item) => item.name === name); if (entry) void action(() => putJson(`${API}/defaults/${entry.type}`, { name })); }}
+                  onSetDefault={(name) => { const entry = payload().connections.find((item) => item.name === name); if (entry) void action(() => putJson(`${API}/defaults/${entry.type}`, { name })); }}
                   onDelete={(name) => setDeleteTarget(name)}
                   onTest={testConnectionByName}
                   testStates={testStates()}
                 />
-                <Show when={Object.values(payload.defaults).some(Boolean)}>
-                  <div class="row-wrap"><For each={payload.services.filter((item) => payload.defaults[item.type])}>{(item) => <button class="btn btn-sm" disabled={busy()} onClick={() => setClearDefaultTarget({ type: item.type, label: item.label })}>Clear {item.label} default</button>}</For></div>
+                <Show when={Object.values(payload().defaults).some(Boolean)}>
+                  <div class="row-wrap"><For each={payload().services.filter((item) => payload().defaults[item.type])}>{(item) => <button class="btn btn-sm" disabled={busy()} onClick={() => setClearDefaultTarget({ type: item.type, label: item.label })}>Clear {item.label} default</button>}</For></div>
                 </Show>
-                <ProviderPicker items={payload.services.filter((item) => item.label.toLowerCase().includes(search().trim().toLowerCase())).map((item) => ({
-                  id: item.type, label: item.label, description: item.capabilities.join(" / "), count: payload.connections.filter((entry) => entry.type === item.type).length,
+                <ProviderPicker items={payload().services.filter((item) => item.label.toLowerCase().includes(search().trim().toLowerCase())).map((item) => ({
+                  id: item.type, label: item.label, description: item.capabilities.join(" / "), count: payload().connections.filter((entry) => entry.type === item.type).length,
                 }))} onSelect={(id) => navigate(`/settings/providers?tab=web&new=${id}`)} />
               </>
             }>
@@ -253,8 +253,8 @@ export function WebConnectionsPage() {
                 }
               >
                 <label class="stack">Name<input class="input" required pattern="[A-Za-z0-9_-]+" disabled={isEditing() || busy()} value={form().name} onInput={(event) => setForm({ ...form(), name: event.currentTarget.value })} /></label>
-                <label class="stack">Service<select class="input" disabled={isEditing() || busy()} value={form().type} onChange={(event) => setForm({ ...emptyForm(event.currentTarget.value), name: suggestProviderName(event.currentTarget.value, payload.connections.map((item) => item.name)) })}>
-                  <For each={payload.services}>{(item) => <option value={item.type}>{item.label}</option>}</For>
+                <label class="stack">Service<select class="input" disabled={isEditing() || busy()} value={form().type} onChange={(event) => setForm({ ...emptyForm(event.currentTarget.value), name: suggestProviderName(event.currentTarget.value, payload().connections.map((item) => item.name)) })}>
+                  <For each={payload().services}>{(item) => <option value={item.type}>{item.label}</option>}</For>
                 </select></label>
                 <Show when={isEditing()}>
                   <p class="hint">API key: {current()?.has_api_key ? "Stored" : "Not stored"}. Effective source: {current()?.sources.api_key || "default"}.</p>

@@ -3,7 +3,9 @@ import { lazy } from "solid-js";
 import { render } from "solid-js/web";
 
 import { ToastProvider } from "@/components/Toast";
-import "diff2html/bundles/css/diff2html.min.css";
+import { AppBoundary } from "@/components/AppBoundary";
+import { preloadDashboardData } from "@/lib/dashboardData";
+import { API_PATHS } from "@/lib/endpoints";
 import "@/styles.css";
 
 const ChatHistoryListPage = lazy(() =>
@@ -97,7 +99,7 @@ function NotFoundPage() {
 render(
   () => (
     <ToastProvider>
-      <Router>
+      <Router root={AppBoundary}>
         <Route path="/" component={HomePage} />
         <Route path="/login" component={LoginPage} />
         <Route path={["/chat", "/c/:threadId"]} component={ChatPage} />
@@ -107,9 +109,9 @@ render(
         <Route path="/tasks" component={TasksPage} />
         <Route path="/scheduler" component={SchedulerPage} />
         <Route path="/settings" component={() => <Navigate href="/settings/config" />} />
-        <Route path="/settings/config" component={ConfigPage} />
-        <Route path="/settings/decisions" component={() => <DecisionsPage />} />
-        <Route path="/settings/tools" component={ToolsPage} />
+        <Route path="/settings/config" component={ConfigPage} preload={() => preloadDashboardData("/dashboard-api/config")} />
+        <Route path="/settings/decisions" component={() => <DecisionsPage />} preload={() => preloadDashboardData("/dashboard-api/decisions")} />
+        <Route path="/settings/tools" component={ToolsPage} preload={() => preloadDashboardData("/dashboard-api/tools")} />
         <Route path="/settings/backends" component={() => <Navigate href="/settings/providers?tab=workspace" />} />
         <Route path="/settings/backends/:backendName" component={LegacyBackendDetail} />
         <Route path="/settings/sandboxes" component={SandboxesPage} />
@@ -124,7 +126,7 @@ render(
         <Route path="/settings/channels" component={ChannelsPage} />
         <Route path="/settings/channels/:channelName" component={ChannelsPage} />
         <Route path="/settings/pairing" component={() => <Navigate href="/settings/channels?tab=pairing" />} />
-        <Route path="/settings/agents" component={AgentsPage} />
+        <Route path="/settings/agents" component={AgentsPage} preload={() => preloadDashboardData(API_PATHS.agentCards)} />
         <Route path="/settings/agents/new" component={AgentsPage} />
         <Route path="/settings/agents/:agentName" component={AgentsPage} />
         <Route path="/settings/skills" component={SkillsPage} />

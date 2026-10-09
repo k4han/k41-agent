@@ -1,4 +1,5 @@
 import { html as diff2htmlRender } from "diff2html";
+import "diff2html/bundles/css/diff2html.min.css";
 import type { Diff2HtmlConfig } from "diff2html";
 
 function ensureGitHeader(diff: string, path: string): string {

@@ -58,12 +58,8 @@ test("providers design tokens and stylesheet are correctly integrated", async ()
   assert.match(stylesCss, /@import ["']\.\/styles\/providers\.css["'];/);
 
   const providersCss = await readFile(new URL("../src/styles/providers.css", import.meta.url), "utf8");
-  assert.match(providersCss, /\.spec-badge-tools\s*\{[^}]*var\(--warning\)/);
-  assert.match(providersCss, /\.spec-badge-context\s*\{[^}]*var\(--info\)/);
-  assert.match(providersCss, /\.spec-badge-reasoning\s*\{[^}]*var\(--primary\)/);
-  assert.match(providersCss, /\.dark\s+\.spec-badge-reasoning\s*\{[^}]*var\(--primary-hover\)/);
-  assert.match(providersCss, /\.spec-badge-tools\s*\{[^}]*color-mix\(in srgb, var\(--warning\)\s+8%, transparent\)/);
-  assert.match(providersCss, /\.spec-badge-context\s*\{[^}]*color-mix\(in srgb, var\(--info\)\s+8%, transparent\)/);
+  assert.match(providersCss, /\.model-spec-capabilities\s*\{[^}]*text-overflow:\s*ellipsis/);
+  assert.match(providersCss, /\.model-spec-card\.is-default\s*\{[^}]*var\(--primary\)/);
   assert.match(providersCss, /\.provider-picker-logo-container\s*\{[^}]*var\(--surface-2\)/);
   assert.match(providersCss, /\.decision-signpost-banner\s*\{[^}]*var\(--primary\)/);
 });
@@ -293,9 +289,11 @@ test("ProvidersPage Model Specifications catalog features interactive controls a
   assert.match(providersPage, /Set Default/);
   assert.match(providersPage, /Add to Models/);
 
-  // Status badges
-  assert.match(providersPage, /badge badge-info spec-badge-status/);
-  assert.match(providersPage, /badge badge-success spec-badge-status/);
+  // The compact catalog exposes state through card classes and action controls.
+  assert.match(providersPage, /"is-default": isDefault\(\)/);
+  assert.match(providersPage, /"is-configured": isConfigured\(\)/);
+  assert.match(providersPage, /disabled=\{isDefault\(\)\}/);
+  assert.match(providersPage, /disabled=\{isConfigured\(\)\}/);
 
   // State changes update drafts
   assert.match(providersPage, /props\.onChange\(defaultModelKey\(\), modelId\)/);
@@ -307,7 +305,7 @@ test("providers.css contains token-compliant styling for interactive model catal
   assert.match(providersCss, /\.model-spec-card\.is-default\s*\{[^}]*var\(--primary\)/);
   assert.match(providersCss, /\.model-spec-card\.is-default\s*\{[^}]*var\(--primary-subtle\)/);
   assert.match(providersCss, /\.model-spec-actions\s*\{[^}]*display:\s*flex;/);
-  assert.match(providersCss, /\.spec-badge-status\s*\{/);
+  assert.match(providersCss, /\.model-spec-card\.is-configured:not\(\.is-default\)\s*\{/);
   assert.match(providersCss, /\.model-spec-grid\s*\{[^}]*max-height:\s*400px;/);
 });
 

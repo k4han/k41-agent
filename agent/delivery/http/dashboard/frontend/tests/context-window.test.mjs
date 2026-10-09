@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import test from 'node:test';
 import * as solid from 'solid-js/dist/solid.js';
+import * as solidStore from 'solid-js/store/dist/store.js';
 import ts from 'typescript';
 
 function loadModule(path, dependencies = {}) {
@@ -12,7 +13,7 @@ function loadModule(path, dependencies = {}) {
   });
   const exports = {};
   runInNewContext(outputText, {
-    exports, console,
+    exports, console, structuredClone,
     require: (name) => {
       assert.ok(name in dependencies, `Unexpected dependency: ${name}`);
       return dependencies[name];
@@ -22,7 +23,8 @@ function loadModule(path, dependencies = {}) {
 }
 
 function createFixture(t, { streaming = true } = {}) {
-  const store = loadModule('../src/lib/chatStreamStore.ts', { 'solid-js': solid });
+  const utils = loadModule('../src/lib/utils.ts');
+  const store = loadModule('../src/lib/chatStreamStore.ts', { 'solid-js': solid, 'solid-js/store': solidStore, '@/lib/utils': utils, '@/components/Transcript': {} });
   const types = loadModule('../src/types.ts');
   const requests = [];
   const hookModule = loadModule('../src/lib/useContextWindow.ts', {
@@ -190,7 +192,7 @@ test('compacted context and history persist when revisiting the conversation', a
   if (!store.hasPersistedStream('thread-a')) {
     chat.setItems(compactedItems);
   }
-  assert.deepEqual(chat.items(), compactedItems);
+  assert.deepEqual(Array.from(chat.items(), item => solidStore.unwrap(item)), compactedItems);
   assert.equal(control.contextWindowData().totalTokens, 2000);
   assert.ok(control.contextWindowData().categories.every((category) => category.tokens !== null));
 });
@@ -311,7 +313,7 @@ test('clearing context for an existing stream keeps its transcript', (t) => {
   dispatch(8100);
   control.clearContextUsage('thread-a');
   assert.equal(control.contextWindowData().hasReportedUsage, false);
-  assert.deepEqual(stream.items[0](), items);
+  assert.deepEqual(Array.from(stream.items[0](), item => solidStore.unwrap(item)), items);
 });
 
 test('a usage response for a previous conversation is ignored', async (t) => {

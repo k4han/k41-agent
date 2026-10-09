@@ -1,4 +1,5 @@
-import { createMemo, createSignal, For, onMount, Show } from "solid-js";
+import { batch, createMemo, createSignal, For, onMount, Show } from "solid-js";
+import { unwrap } from "solid-js/store";
 import { RotateCcw, Save, SearchX } from "lucide-solid";
 
 import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
@@ -46,7 +47,9 @@ export function ToolsPage() {
     await load();
     if (!data()) return;
     const saved = takeSettingsDraft<Record<string, unknown>>("tools");
-    if (saved) for (const [key, value] of Object.entries(saved)) setDraft(key, value);
+    if (saved) batch(() => {
+      for (const [key, value] of Object.entries(saved)) setDraft(key, value);
+    });
   };
   onMount(() => { void loadWithDraft(); });
   useUnsavedChanges(() => !preservingDraft && pendingChanges().length > 0, discardAll);
@@ -70,7 +73,7 @@ export function ToolsPage() {
     return tool === "web_fetch" ? "firecrawl" : "tavily";
   };
   const createConnection = (tool: string) => {
-    keepSettingsDraft("tools", drafts());
+    keepSettingsDraft("tools", unwrap(drafts()));
     preservingDraft = true;
     const payload = data();
     const kind = payload ? connectionKindForTool(tool, payload, drafts()) : "tavily";
@@ -233,12 +236,12 @@ export function ToolsPage() {
                           )}
                         </For>
                       </div>
-                      <Show when={group.tool === "web_search" && (drafts()["tools.web_search.provider"] ?? payload.settings["tools.web_search.provider"]?.value) === "duckduckgo"}>
+                      <Show when={group.tool === "web_search" && (drafts()["tools.web_search.provider"] ?? payload().settings["tools.web_search.provider"]?.value) === "duckduckgo"}>
                         <div class="hint" style={{ padding: "10px 16px" }}>
                           DuckDuckGo operates without API credentials.
                         </div>
                       </Show>
-                      <Show when={group.tool === "web_fetch" && (drafts()["tools.web_fetch.provider"] ?? payload.settings["tools.web_fetch.provider"]?.value) === "local"}>
+                      <Show when={group.tool === "web_fetch" && (drafts()["tools.web_fetch.provider"] ?? payload().settings["tools.web_fetch.provider"]?.value) === "local"}>
                         <div class="hint" style={{ padding: "10px 16px" }}>
                           Local fetch operates directly via HTTP without API credentials.
                         </div>
@@ -266,7 +269,7 @@ export function ToolsPage() {
               open={confirmOpen()}
               saving={saving()}
               changes={pendingChanges()}
-              settings={payload.settings}
+              settings={payload().settings}
               onClose={() => setConfirmOpen(false)}
               onConfirm={handleSave}
             />

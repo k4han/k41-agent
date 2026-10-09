@@ -1,3 +1,5 @@
+import { invalidateDashboardCache } from "@/lib/dashboardCache";
+
 type ApiInit = RequestInit & {
   json?: unknown;
 };
@@ -110,6 +112,8 @@ export async function apiFetch<T>(path: string, init: ApiInit = {}): Promise<T> 
   if (!response.ok) {
     throw new Error(await readError(response));
   }
+
+  if (UNSAFE_METHODS.has(requestMethod(path, init))) invalidateDashboardCache();
 
   if (response.status === 204) {
     return undefined as T;

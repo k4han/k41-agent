@@ -173,8 +173,7 @@ function FileCodeView(props: { content: string; path: string; dark: boolean }) {
 }
 
 function BackendIcon(props: { backend: WorkspaceBackendKey }) {
-  const iconFn = getBackendIcon(props.backend);
-  return iconFn();
+  return <>{getBackendIcon(props.backend)()}</>;
 }
 
 async function writeToClipboard(text: string): Promise<void> {

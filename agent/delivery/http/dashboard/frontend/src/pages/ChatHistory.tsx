@@ -283,7 +283,7 @@ export function ChatHistoryListPage() {
       <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => (
           <Show
-            when={payload.threads.length > 0}
+            when={payload().threads.length > 0}
             fallback={<div class="empty">No conversation threads found.</div>}
           >
             <div class="history-workspace-groups">

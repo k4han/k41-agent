@@ -43,12 +43,12 @@ import {
   threadWorkspaceLabel,
 } from "@/lib/chatThreads";
 import type { ThreadListPayload, ThreadSummary, ThreadWorkspaceGroup } from "@/lib/chatThreads";
-import { CUSTOM_DOM_EVENTS, SESSION_EVENTS } from "@/lib/eventConstants";
-import { API_PATHS, SSE_URLS } from "@/lib/endpoints";
+import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
+import { API_PATHS } from "@/lib/endpoints";
+import { useSessions } from "@/lib/sessionStore";
 import { updateDashboardFavicon } from "@/lib/favicon";
 import {
   HISTORY_PAGE_SIZE,
-  SSE_RECONNECT_DELAY_MS,
   STORAGE_KEYS,
 } from "@/lib/uiConstants";
 import { useMobileDrawer } from "@/lib/useMobileDrawer";
@@ -138,7 +138,7 @@ export function AppShell(props: {
   const [editingHistoryTitle, setEditingHistoryTitle] = createSignal("");
   const [deleteTarget, setDeleteTarget] = createSignal<ThreadSummary | null>(null);
   const [deleting, setDeleting] = createSignal(false);
-  const [activeSessions, setActiveSessions] = createSignal<ActiveSession[]>([]);
+  const { sessions: activeSessions, invalidate: invalidateSessions } = useSessions();
   const {
     isMobileViewport,
     mobileDrawerOpen,
@@ -151,7 +151,6 @@ export function AppShell(props: {
   let disposed = false;
   let deferredHistoryLoad: DeferredHistoryLoad | null = null;
 
-  let sessionEventSource: EventSource | null = null;
 
   const runningThreadIds = createMemo(() => {
     const activeIds = new Set<string>();
@@ -179,92 +178,6 @@ export function AppShell(props: {
     updateDashboardFavicon(isRunning);
   });
 
-  const connectSessionEvents = () => {
-    if (disposed) return;
-    if (sessionEventSource) {
-      sessionEventSource.close();
-    }
-    
-    const source = new EventSource(SSE_URLS.sessions);
-    sessionEventSource = source;
-    
-    source.addEventListener(SESSION_EVENTS.SNAPSHOT, (event) => {
-      try {
-        const payload = JSON.parse(event.data) as { sessions: ActiveSession[] };
-        if (payload && Array.isArray(payload.sessions)) {
-          setActiveSessions(payload.sessions);
-        }
-      } catch (err) {
-        console.error("Failed to parse sessions snapshot", err);
-      }
-    });
-
-    source.addEventListener(SESSION_EVENTS.SESSION_STARTED, (event) => {
-      try {
-        const session = JSON.parse(event.data) as ActiveSession;
-        setActiveSessions((prev) => {
-          const exists = prev.some((s) => s.session_id === session.session_id);
-          if (exists) {
-            return prev.map((s) => s.session_id === session.session_id ? session : s);
-          }
-          return [...prev, session];
-        });
-        window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.SESSION_STARTED, { detail: session }));
-        window.dispatchEvent(
-          new CustomEvent(CUSTOM_DOM_EVENTS.THREAD_START_RUNNING, {
-            detail: {
-              threadId: session.thread_id,
-              agent_name: session.agent_name,
-            },
-          }),
-        );
-        window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.THREADS_CHANGED));
-      } catch (err) {
-        console.error("Failed to parse session_started event", err);
-      }
-    });
-
-    source.addEventListener(SESSION_EVENTS.SESSION_STOPPED, (event) => {
-      try {
-        const stoppedData = JSON.parse(event.data) as { session_id: string; thread_id: string };
-        setActiveSessions((prev) => prev.filter((s) => s.session_id !== stoppedData.session_id));
-        window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.SESSION_STOPPED, { detail: stoppedData }));
-        window.dispatchEvent(
-          new CustomEvent(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, {
-            detail: { threadId: stoppedData.thread_id },
-          }),
-        );
-        window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.THREADS_CHANGED));
-      } catch (err) {
-        console.error("Failed to parse session_stopped event", err);
-      }
-    });
-
-    source.addEventListener(SESSION_EVENTS.SESSION_UPDATED, (event) => {
-      try {
-        const session = JSON.parse(event.data) as ActiveSession;
-        setActiveSessions((prev) => prev.map((s) => s.session_id === session.session_id ? session : s));
-        window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.SESSION_UPDATED, { detail: session }));
-        window.dispatchEvent(
-          new CustomEvent(CUSTOM_DOM_EVENTS.THREAD_START_RUNNING, {
-            detail: {
-              threadId: session.thread_id,
-              agent_name: session.agent_name,
-            },
-          }),
-        );
-      } catch (err) {
-        console.error("Failed to parse session_updated event", err);
-      }
-    });
-
-    source.onerror = () => {
-      if (source.readyState === EventSource.CLOSED && !disposed) {
-        setTimeout(connectSessionEvents, SSE_RECONNECT_DELAY_MS);
-      }
-    };
-  };
-
   const handleThreadStartRunning = (event: Event) => {
     const customEvent = event as CustomEvent<{
       threadId: string;
@@ -277,7 +190,7 @@ export function AppShell(props: {
     
     optimisticLocks.set(threadId, { state: "running", timestamp: Date.now() });
     
-    setActiveSessions((prev) => [...prev]);
+    invalidateSessions();
 
     const exists = historyThreads().some((t) => t.thread_id === threadId);
     if (exists) {
@@ -319,7 +232,7 @@ export function AppShell(props: {
     
     optimisticLocks.set(threadId, { state: "stopped", timestamp: Date.now() });
     
-    setActiveSessions((prev) => [...prev]);
+    invalidateSessions();
   };
 
   const handleThreadTitleUpdated = (event: Event) => {
@@ -782,7 +695,7 @@ export function AppShell(props: {
     
     const threadId = thread.thread_id;
     optimisticLocks.set(threadId, { state: "stopped", timestamp: Date.now() });
-    setActiveSessions((prev) => [...prev]);
+    invalidateSessions();
     
     // Abort locally if viewing
     window.dispatchEvent(
@@ -796,7 +709,7 @@ export function AppShell(props: {
       showToast("Execution stop request sent.", "success");
     } catch (err) {
       optimisticLocks.delete(threadId);
-      setActiveSessions((prev) => [...prev]);
+      invalidateSessions();
       showToast(err instanceof Error ? err.message : "Failed to stop execution", "error");
     }
   };
@@ -900,17 +813,12 @@ export function AppShell(props: {
     window.addEventListener(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, handleThreadStopRunning);
     window.addEventListener(CUSTOM_DOM_EVENTS.THREAD_TITLE_UPDATED, handleThreadTitleUpdated);
 
-    connectSessionEvents();
     void checkForUpdates();
   });
 
   onCleanup(() => {
     disposed = true;
     cancelDeferredHistoryLoad();
-    if (sessionEventSource) {
-      sessionEventSource.close();
-      sessionEventSource = null;
-    }
     document.removeEventListener("click", handleClickOutside);
     document.removeEventListener("keydown", handleKeydown);
     window.removeEventListener(CUSTOM_DOM_EVENTS.OPEN_MOBILE_NAV, handleOpenMobileNav);

@@ -404,9 +404,9 @@ export function TasksPage() {
     >
       <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => {
-          const liveSessionsByThread = new Map(
-            payload.sessions.map((session) => [session.thread_id, session]),
-          );
+          const liveSessionsByThread = createMemo(() => new Map(
+            payload().sessions.map((session) => [session.thread_id, session]),
+          ));
           return (
             <div class="stack">
               <section class="panel">
@@ -438,7 +438,7 @@ export function TasksPage() {
                     <IdentityPicker
                       value={notify()}
                       onChange={setNotify}
-                      identities={payload.identities}
+                      identities={payload().identities}
                     />
                     <button class="btn btn-primary" type="button" onClick={submitTask}>
                       <Play size={14} />
@@ -452,7 +452,7 @@ export function TasksPage() {
                 <div class="panel-header task-history-header">
                   <div class="panel-title">Task History</div>
                   <div class="task-history-controls">
-                    <Show when={payload.tasks.length > 0}>
+                    <Show when={payload().tasks.length > 0}>
                       <SelectControl
                         class="task-workspace-filter"
                         value={workspaceFilter()}
@@ -472,7 +472,7 @@ export function TasksPage() {
                     {(task) => {
                       const isActive = ACTIVE_TASK_STATUSES.has(task.status);
                       const hasDetails = Boolean(task.result || task.error);
-                      const liveSession = liveSessionsByThread.get(task.thread_id);
+                      const liveSession = () => liveSessionsByThread().get(task.thread_id);
                       return (
                         <article class="panel">
                           <div class="panel-body stack">
@@ -496,7 +496,7 @@ export function TasksPage() {
                               </div>
                             </div>
                             <Show
-                              when={liveSession}
+                              when={liveSession()}
                               fallback={
                                 isActive ? (
                                   <div class="task-live task-live-muted">

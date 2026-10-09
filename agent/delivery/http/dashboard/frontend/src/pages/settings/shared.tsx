@@ -1,10 +1,12 @@
-import { createMemo, createSignal, For, type JSX, Show } from "solid-js";
+import { createComputed, createMemo, createSignal, For, type JSX, Show, untrack } from "solid-js";
+import { createStore, reconcile, unwrap } from "solid-js/store";
 import { ArrowRight, Check, RotateCcw, TriangleAlert } from "lucide-solid";
 
 import { Dialog } from "@/components/Dialog";
 import { useToast } from "@/components/Toast";
-import { apiFetch, putJson } from "@/lib/api";
-import { formatValue, parseModelList } from "@/lib/utils";
+import { putJson } from "@/lib/api";
+import { useDashboardData } from "@/lib/dashboardData";
+import { cloneValue, formatValue, parseModelList, sameJsonValue } from "@/lib/utils";
 import type { SettingInfo, SettingsPayload } from "@/types";
 
 // Import new form components
@@ -28,7 +30,7 @@ export const RESTART_REQUIRED_NOTICE = "Restart required to apply bootstrap chan
 // --- Helpers -------------------------------------------------------------
 
 export function sameValue(a: unknown, b: unknown): boolean {
-  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  return sameJsonValue(a, b);
 }
 
 function booleanValue(value: unknown): boolean {
@@ -147,33 +149,65 @@ export function settingsFromPayload(payload: SettingsPayload): Record<string, Se
 // --- Hooks ---------------------------------------------------------------
 
 export function useSettingsData(endpoint: string) {
-  const [data, setData] = createSignal<SettingsPayload>();
-  const [error, setError] = createSignal("");
-  const [drafts, setDrafts] = createSignal<Record<string, unknown>>({});
+  const { data, error, load } = useDashboardData<SettingsPayload>(endpoint, { defer: true });
+  const [draftState, setDraftState] = createStore<{ values: Record<string, unknown> }>({ values: {} });
+  const drafts = () => draftState.values;
+  const setDrafts = (values: Record<string, unknown>) =>
+    setDraftState("values", reconcile(cloneValue(unwrap(values))));
   const { showToast } = useToast();
+  let lastSynced: Record<string, unknown> | undefined;
 
-  const load = async () => {
-    setError("");
-    try {
-      const payload = await apiFetch<SettingsPayload>(endpoint);
-      setData(payload);
-      const settings = settingsFromPayload(payload);
-      setDrafts(
-        Object.fromEntries(
-          Object.entries(settings).map(([key, info]) => [key, info.value]),
-        ),
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load settings");
+  // Synchronize drafts before downstream computations and form controls read the payload.
+  createComputed(() => {
+    const payload = data();
+    if (!payload) {
+      return;
     }
-  };
+    const settings = settingsFromPayload(payload);
+    const serverValues = Object.fromEntries(
+      Object.entries(settings).map(([key, info]) => [key, info.value]),
+    );
+    if (!lastSynced) {
+      setDrafts(serverValues);
+      lastSynced = cloneValue(unwrap(serverValues));
+      return;
+    }
+    // Merge server refresh without dropping unsaved edits: only clean keys
+    // (draft matches the previous server baseline) follow the new payload.
+    const currentDrafts = untrack(() => unwrap(draftState.values));
+    const next: Record<string, unknown> = { ...currentDrafts };
+    let changed = false;
+    for (const [key, serverValue] of Object.entries(serverValues)) {
+      if (!(key in next) || sameJsonValue(currentDrafts[key], lastSynced[key])) {
+        if (!sameJsonValue(next[key], serverValue)) {
+          next[key] = serverValue;
+          changed = true;
+        }
+      }
+    }
+    for (const key of Object.keys(next)) {
+      if (!(key in serverValues)) {
+        delete next[key];
+        changed = true;
+      }
+    }
+    if (changed) {
+      setDrafts(next);
+    }
+    lastSynced = cloneValue(unwrap(serverValues));
+  });
+
+  const serverSettings = createMemo(() => {
+    const payload = data();
+    return payload ? settingsFromPayload(payload) : {};
+  });
 
   const pendingChanges = createMemo<PendingChange[]>(() => {
     const payload = data();
     if (!payload) {
       return [];
     }
-    return Object.entries(settingsFromPayload(payload))
+    return Object.entries(serverSettings())
       .map(([key, info]) => {
         const settingInfo = { ...info, key };
         const oldValue = typedValue(settingInfo, info.value);
@@ -188,7 +222,7 @@ export function useSettingsData(endpoint: string) {
   });
 
   const setDraft = (key: string, value: unknown) => {
-    setDrafts((current: Record<string, unknown>) => ({ ...current, [key]: value }));
+    setDraftState("values", key, reconcile(cloneValue(unwrap(value))));
   };
 
   const restoreDraft = (key: string) => {

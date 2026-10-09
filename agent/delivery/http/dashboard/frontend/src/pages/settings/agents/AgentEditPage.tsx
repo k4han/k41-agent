@@ -1,4 +1,5 @@
-import { batch, createEffect, createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
+import { batch, createEffect, createMemo, createSignal, onCleanup, onMount, Show, untrack } from "solid-js";
+import { createStore, reconcile, unwrap } from "solid-js/store";
 import { useBeforeLeave, useNavigate } from "@solidjs/router";
 import { ArrowLeft, Bot, Save } from "lucide-solid";
 
@@ -8,7 +9,7 @@ import { useToast } from "@/components/Toast";
 import { API_PATHS } from "@/lib/endpoints";
 import { fetchAgentEditorOptions } from "@/lib/agents";
 import { apiFetch, postJson, putJson } from "@/lib/api";
-import { uniqueSorted } from "@/lib/utils";
+import { cloneValue, uniqueSorted } from "@/lib/utils";
 import { SettingsLayout } from "@/pages/settings/SettingsLayout";
 import type { AgentsPayload, PromptVariable, PromptVariablesPayload } from "@/types";
 
@@ -38,7 +39,12 @@ export function AgentEditPage(props: { agentName?: string }) {
 
   const [payload, setPayload] = createSignal<AgentsPayload>();
   const [error, setError] = createSignal("");
-  const [form, setForm] = createSignal<AgentForm>(blankForm(""));
+  const [formState, setFormState] = createStore({ value: blankForm("") });
+  const form = () => formState.value;
+  const setForm = (update: AgentForm | ((current: AgentForm) => AgentForm)) => {
+    const next = untrack(() => typeof update === "function" ? update(unwrap(formState.value)) : update);
+    setFormState("value", reconcile(cloneValue(unwrap(next))));
+  };
   const [initialForm, setInitialForm] = createSignal<AgentForm>(blankForm(""));
   const [mode, setMode] = createSignal<Mode>(isCreate ? "create" : "view");
   const [saving, setSaving] = createSignal(false);
@@ -53,7 +59,7 @@ export function AgentEditPage(props: { agentName?: string }) {
   const readOnly = () => mode() === "view";
 
   const updateForm = <K extends keyof AgentForm>(key: K, value: AgentForm[K]) => {
-    setForm((current) => ({ ...current, [key]: value }));
+    setFormState("value", key, () => cloneValue(unwrap(value)));
   };
 
   const toggleListValue = (
@@ -327,7 +333,7 @@ export function AgentEditPage(props: { agentName?: string }) {
   // In-app navigation guard (back button, sidebar link, etc.)
   useBeforeLeave((e) => {
     if (typeof e.to === "string" && e.to.startsWith("/settings/providers?") && e.to.includes("tab=web") && e.to.includes("new=") && e.to.includes("returnTo=")) {
-      keepSettingsDraft(`agent:${props.agentName || "new"}`, { form: form(), initial: initialForm() });
+      keepSettingsDraft(`agent:${props.agentName || "new"}`, { form: unwrap(form()), initial: initialForm() });
       return;
     }
     if (savedRef() || !isDirty() || confirmDiscardOpen()) {

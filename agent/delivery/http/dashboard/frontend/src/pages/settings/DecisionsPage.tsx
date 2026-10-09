@@ -289,7 +289,7 @@ export function DecisionsPage() {
               open={confirmOpen()}
               saving={saving()}
               changes={pendingChanges()}
-              settings={payload.settings}
+              settings={payload().settings}
               onClose={() => setConfirmOpen(false)}
               onConfirm={handleSave}
             />

@@ -1,5 +1,6 @@
-import { createSignal } from "solid-js";
-import { apiFetch } from "./api";
+import { batch, createSignal } from "solid-js";
+import { query } from "@solidjs/router";
+import { readDashboardData } from "@/lib/dashboardData";
 import type { CatalogResponse, ChannelCatalogItem, BackendCatalogItem, ProviderTypeOption, SelectOption } from "@/types";
 
 const [catalog, setCatalog] = createSignal<CatalogResponse | null>(null);
@@ -8,26 +9,34 @@ const [error, setError] = createSignal<string | null>(null);
 
 let fetchPromise: Promise<CatalogResponse> | null = null;
 
-export async function fetchCatalog(): Promise<CatalogResponse> {
-  if (catalog()) {
+export async function fetchCatalog(refresh = false): Promise<CatalogResponse> {
+  if (!refresh && catalog()) {
     return catalog()!;
   }
   if (fetchPromise) {
     return fetchPromise;
   }
-  setLoading(true);
-  setError(null);
-  fetchPromise = apiFetch<CatalogResponse>("/dashboard-api/catalog")
+  batch(() => {
+    setLoading(true);
+    setError(null);
+  });
+  fetchPromise = Promise.resolve(readDashboardData("/dashboard-api/catalog"))
     .then((data) => {
-      setCatalog(data);
-      setLoading(false);
+      const payload = data as CatalogResponse;
+      batch(() => {
+        setCatalog(payload);
+        setLoading(false);
+      });
       fetchPromise = null;
-      return data;
+      return payload;
     })
     .catch((err) => {
+      query.delete(readDashboardData.keyFor("/dashboard-api/catalog"));
       const message = err instanceof Error ? err.message : "Failed to load catalog";
-      setError(message);
-      setLoading(false);
+      batch(() => {
+        setError(message);
+        setLoading(false);
+      });
       fetchPromise = null;
       throw err;
     });
@@ -35,8 +44,9 @@ export async function fetchCatalog(): Promise<CatalogResponse> {
 }
 
 export async function refreshCatalog(): Promise<CatalogResponse> {
-  fetchPromise = null;
-  return fetchCatalog();
+  if (fetchPromise) await fetchPromise.catch(() => undefined);
+  query.delete(readDashboardData.keyFor("/dashboard-api/catalog"));
+  return fetchCatalog(true);
 }
 
 export function getCatalog(): CatalogResponse | null {

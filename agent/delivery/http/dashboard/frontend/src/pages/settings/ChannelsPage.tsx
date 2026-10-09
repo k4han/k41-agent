@@ -614,7 +614,7 @@ export function ChannelsPage() {
                               configured={isChannelConfigured(channel.name)}
                               busy={busy()[channel.name] || null}
                               testResult={testResults()[channel.name] || null}
-                              paired={countPairedFor(payload, channel.name)}
+                              paired={countPairedFor(payload(), channel.name)}
                               onToggle={(value) => void toggleEnabled(channel.name, value)}
                               onStart={() => void startChannel(channel.name)}
                               onStopRequest={() => setStopTarget(channel.name)}
@@ -637,7 +637,7 @@ export function ChannelsPage() {
                   />
 
                   <PairedIdentitiesTable
-                    identities={payload.identities}
+                    identities={payload().identities}
                     onUnpair={requestUnpair}
                   />
                 </Show>

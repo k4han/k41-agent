@@ -1,5 +1,5 @@
 import { ChevronDown } from "lucide-solid";
-import { createEffect, createMemo, createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSelector, createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 
 import { computeFloatingPosition, floatingMenuStyle } from "@/lib/floating";
@@ -70,6 +70,7 @@ export function SelectControl(props: {
     props.options.find((option) => option.value === props.value),
   );
   const selectedLabel = createMemo(() => selectedOption()?.label || props.value || "");
+  const isSelected = createSelector(() => props.value);
 
   const close = () => setOpen(false);
   const toggle = () => {
@@ -164,11 +165,11 @@ export function SelectControl(props: {
             <For each={props.options}>
               {(option) => (
                 <button
-                  class={`select-control-option ${option.value === props.value ? "active" : ""}`}
+                  class={`select-control-option ${isSelected(option.value) ? "active" : ""}`}
                   type="button"
                   disabled={option.disabled}
                   role="option"
-                  aria-selected={option.value === props.value}
+                  aria-selected={isSelected(option.value)}
                   title={option.title || option.label}
                   onClick={() => selectOption(option)}
                 >

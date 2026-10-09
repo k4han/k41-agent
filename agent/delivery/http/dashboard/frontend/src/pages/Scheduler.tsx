@@ -719,7 +719,7 @@ export function SchedulerPage() {
             <section class="panel">
                 <div class="panel-header">
                   <div class="panel-title">Create Scheduled Job</div>
-                  <span class="hint">{payload.scheduler_timezone}</span>
+                  <span class="hint">{payload().scheduler_timezone}</span>
                 </div>
                 <div class="panel-body stack">
                   <div class="field">
@@ -732,7 +732,7 @@ export function SchedulerPage() {
                       <SelectControl
                         value={form().identity}
                         options={[
-                          ...payload.identities.map((identity) => ({
+                          ...payload().identities.map((identity) => ({
                             value: `${identity.platform}:${identity.external_id}`,
                             label: `${identity.platform} - ${identity.external_id}`,
                           })),
@@ -793,7 +793,7 @@ export function SchedulerPage() {
                     { header: "Status" },
                     { header: "Actions" },
                   ]}
-                  rows={payload.jobs}
+                  rows={payload().jobs}
                   emptyMessage="No scheduled jobs."
                 >
                   {(job) => (

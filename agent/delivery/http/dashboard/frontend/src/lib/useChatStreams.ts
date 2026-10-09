@@ -14,6 +14,7 @@ import {
 } from "@/components/Transcript";
 import {
   allocItemId,
+  createTranscriptItems,
   persistedStreams,
   type ChatTranscriptItem,
 } from "@/lib/chatStreamStore";
@@ -39,7 +40,7 @@ export interface UseChatStreamsParams {
 export function useChatStreams(params: UseChatStreamsParams) {
   const { scroll, getCurrentThreadId, getIsUnmounting } = params;
 
-  const [localItems, setLocalItems] = createSignal<ChatTranscriptItem[]>([]);
+  const [localItems, setLocalItems] = createTranscriptItems();
   const [localStreaming, setLocalStreaming] = createSignal(false);
   const [localController, setLocalController] = createSignal<AbortController | null>(null);
   const [currentStreamThreadId, setCurrentStreamThreadId] = createSignal<string | null>(null);
@@ -55,10 +56,10 @@ export function useChatStreams(params: UseChatStreamsParams) {
   const setItems = (v: ItemsUpdater, targetThreadId?: string) => {
     const tid = targetThreadId || currentStreamThreadId();
     if (tid && persistedStreams.has(tid)) {
-      persistedStreams.get(tid)!.items[1](v as any);
+      persistedStreams.get(tid)!.items[1](v);
       return;
     }
-    setLocalItems(v as any);
+    setLocalItems(v);
   };
 
   const streaming = () => {
@@ -95,12 +96,8 @@ export function useChatStreams(params: UseChatStreamsParams) {
     setLocalController(v);
   };
 
-  // Buffer for streamed message deltas. Token-level updates arrive dozens of
-  // times per second; applying each one synchronously recreates the whole
-  // message view (Solid's <For> is referentially keyed) and re-renders its
-  // Markdown every token. Deltas are accumulated here and flushed at a fixed
-  // interval so rendering stays smooth. A timer is used instead of
-  // requestAnimationFrame so background tabs still flush (throttled).
+  // Keep row identities stable and limit Markdown parsing to one update per
+  // flush. A timer also flushes buffered deltas in background tabs.
   const STREAM_FLUSH_INTERVAL_MS = 50;
   const pendingChunksByThread = new Map<string, Map<number, string>>();
   let flushTimer: number | null = null;
@@ -113,10 +110,10 @@ export function useChatStreams(params: UseChatStreamsParams) {
     updater: (prev: ChatTranscriptItem[]) => ChatTranscriptItem[],
   ) => {
     if (threadKey && persistedStreams.has(threadKey)) {
-      persistedStreams.get(threadKey)!.items[1](updater as any);
+      persistedStreams.get(threadKey)!.items[1](updater);
       return;
     }
-    setLocalItems(updater as any);
+    setLocalItems(updater);
   };
 
   const flushPendingMessageChunks = () => {

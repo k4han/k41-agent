@@ -297,7 +297,7 @@ export function ConfigPage() {
               open={confirmOpen()}
               saving={saving()}
               changes={pendingChanges()}
-              settings={payload.settings}
+              settings={payload().settings}
               restartRequired={pendingRestartChanges().length > 0}
               onClose={() => setConfirmOpen(false)}
               onConfirm={handleSave}

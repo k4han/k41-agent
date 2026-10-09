@@ -276,7 +276,7 @@ export function UsagePage() {
                         {item.icon({ size: 13 })}
                       </span>
                       <span>{item.label}</span>
-                      <span class="usage-filter-count">{tabCount(payload, item.value)}</span>
+                      <span class="usage-filter-count">{tabCount(payload(), item.value)}</span>
                     </button>
                   )}
                 </For>
@@ -307,16 +307,16 @@ export function UsagePage() {
 
             <MetricGrid
               items={[
-                { label: "Total tokens", value: formatNumber(payload.summary.total_tokens) },
-                { label: "Input tokens", value: formatNumber(payload.summary.input_tokens) },
-                { label: "Output tokens", value: formatNumber(payload.summary.output_tokens) },
+                { label: "Total tokens", value: formatNumber(payload().summary.total_tokens) },
+                { label: "Input tokens", value: formatNumber(payload().summary.input_tokens) },
+                { label: "Output tokens", value: formatNumber(payload().summary.output_tokens) },
               ]}
             />
             <MetricGrid
               items={[
-                { label: "LLM calls", value: formatNumber(payload.summary.event_count) },
-                { label: "Missing usage", value: formatNumber(payload.summary.missing_usage_count) },
-                { label: "Internal calls", value: formatNumber(payload.summary.internal_event_count) },
+                { label: "LLM calls", value: formatNumber(payload().summary.event_count) },
+                { label: "Missing usage", value: formatNumber(payload().summary.missing_usage_count) },
+                { label: "Internal calls", value: formatNumber(payload().summary.internal_event_count) },
               ]}
             />
 
@@ -358,7 +358,7 @@ export function UsagePage() {
                     value={platform()}
                     options={[
                       { value: "", label: "All platforms" },
-                      ...payload.filters.platforms.map((item) => ({ value: item, label: item })),
+                      ...payload().filters.platforms.map((item) => ({ value: item, label: item })),
                     ]}
                     onChange={(value) => {
                       setPlatform(value);
@@ -375,7 +375,7 @@ export function UsagePage() {
                     value={selectedUser()}
                     options={[
                       { value: optionKey(["", ""]), label: "All users" },
-                      ...payload.filters.users.map((item) => ({
+                      ...payload().filters.users.map((item) => ({
                         value: optionKey([item.platform, item.user_id]),
                         label: item.label,
                       })),
@@ -390,7 +390,7 @@ export function UsagePage() {
                     value={selectedChannel()}
                     options={[
                       { value: optionKey(["", "", ""]), label: "All channels" },
-                      ...payload.filters.channels.map((item) => ({
+                      ...payload().filters.channels.map((item) => ({
                         value: optionKey([item.platform, item.user_id, item.channel_id]),
                         label: item.label,
                       })),
@@ -405,7 +405,7 @@ export function UsagePage() {
                     value={agent()}
                     options={[
                       { value: "", label: "All agents" },
-                      ...payload.filters.agents.map((item) => ({ value: item, label: item })),
+                      ...payload().filters.agents.map((item) => ({ value: item, label: item })),
                     ]}
                     onChange={resetOffsetOnChange(setAgent, setOffset)}
                     ariaLabel="Agent"
@@ -417,7 +417,7 @@ export function UsagePage() {
                     value={provider()}
                     options={[
                       { value: "", label: "All providers" },
-                      ...payload.filters.providers.map((item) => ({ value: item, label: item })),
+                      ...payload().filters.providers.map((item) => ({ value: item, label: item })),
                     ]}
                     onChange={resetOffsetOnChange(setProvider, setOffset)}
                     ariaLabel="Provider"
@@ -429,7 +429,7 @@ export function UsagePage() {
                     value={model()}
                     options={[
                       { value: "", label: "All models" },
-                      ...payload.filters.models.map((item) => ({ value: item, label: item })),
+                      ...payload().filters.models.map((item) => ({ value: item, label: item })),
                     ]}
                     onChange={resetOffsetOnChange(setModel, setOffset)}
                     ariaLabel="Model"
@@ -441,7 +441,7 @@ export function UsagePage() {
                     value={callKind()}
                     options={[
                       { value: "", label: "All call kinds" },
-                      ...(payload.filters.call_kinds || []).map((item) => ({ value: item, label: item })),
+                      ...(payload().filters.call_kinds || []).map((item) => ({ value: item, label: item })),
                     ]}
                     onChange={resetOffsetOnChange(setCallKind, setOffset)}
                     ariaLabel="Call kind"
@@ -469,31 +469,31 @@ export function UsagePage() {
             </section>
 
             <Show when={activeTab() === "users"}>
-              <UsageTable rows={payload.rows} displayTimezone={payload.display_timezone} />
+              <UsageTable rows={payload().rows} displayTimezone={payload().display_timezone} />
             </Show>
             <Show when={activeTab() === "workspaces"}>
               <WorkspaceUsageTable
-                list={payload.workspaces || []}
-                displayTimezone={payload.display_timezone}
+                list={payload().workspaces || []}
+                displayTimezone={payload().display_timezone}
               />
             </Show>
             <Show when={activeTab() === "threads"}>
               <ThreadUsageTable
-                list={filterThreads(payload.threads || [], threadSearch())}
-                displayTimezone={payload.display_timezone}
+                list={filterThreads(payload().threads || [], threadSearch())}
+                displayTimezone={payload().display_timezone}
               />
             </Show>
 
             <Show when={activeTab() === "users"}>
               <div class="usage-pagination">
                 <span class="hint">
-                  Showing {paginationStart(payload)}-{paginationEnd(payload)} of {payload.pagination.total}
+                  Showing {paginationStart(payload())}-{paginationEnd(payload())} of {payload().pagination.total}
                 </span>
                 <div class="row-wrap">
-                  <button class="btn btn-sm" type="button" disabled={payload.pagination.offset === 0} onClick={previousPage}>
+                  <button class="btn btn-sm" type="button" disabled={payload().pagination.offset === 0} onClick={previousPage}>
                     Previous
                   </button>
-                  <button class="btn btn-sm" type="button" disabled={!payload.pagination.has_more} onClick={nextPage}>
+                  <button class="btn btn-sm" type="button" disabled={!payload().pagination.has_more} onClick={nextPage}>
                     Next
                   </button>
                 </div>

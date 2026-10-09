@@ -227,7 +227,7 @@ try {
       await until(() => js(`!!document.querySelector('[data-connection-name="${expected}"]') && !document.querySelector('form')`), `${group} saved configuration`);
       assert.equal(await js(`!!document.querySelector('[data-provider-id="${provider}"]')`), true);
       assert.equal(await js('document.querySelector("[data-provider-connections]").compareDocumentPosition(document.querySelector("[data-provider-picker]")) & Node.DOCUMENT_POSITION_FOLLOWING'), 4);
-      assert.equal(await js(`!!document.querySelector('[data-connection-name="${expected}"] .badge-info')`), false);
+      assert.equal(await js(`document.querySelector('button[aria-label="Set ${expected} as default"]').getAttribute('aria-pressed')`), 'false');
     }
     await navigate(`/settings/providers?tab=${group}`);
     await until(() => js(`!!document.querySelector('[data-connection-name="${provider}-2"]')`), `${group} reload saved configurations`);
@@ -251,7 +251,7 @@ try {
   await navigate('/settings/providers?tab=decision');
   await until(() => js('!!document.querySelector("[data-connection-name=cloudflare]")'), 'decision default action');
   await js(`document.querySelector('button[aria-label="Set cloudflare as default"]').click()`);
-  await until(() => js('!!document.querySelector("[data-connection-name=cloudflare] .badge-info")'), 'decision selected default');
+  await until(() => js(`document.querySelector('button[aria-label="Set cloudflare as default"]')?.getAttribute('aria-pressed') === 'true'`), 'decision selected default');
   assert.equal(decisionDefault, 'cloudflare');
   assert.equal(await js(`document.querySelector('button[aria-label="Delete cloudflare"]').disabled`), true);
   await js(`document.querySelector('button[aria-label="Edit cloudflare-2"]').click()`);
@@ -274,7 +274,7 @@ try {
   await navigate('/settings/providers?tab=llm');
   await until(() => js('!!document.querySelector("[data-connection-name=google-2]")'), 'AI list refreshed');
   await js(`document.querySelector('button[aria-label="Set google-2 as default"]').click()`);
-  await until(() => js('!!document.querySelector("[data-connection-name=google-2] .badge-info")'), 'AI default selected');
+  await until(() => js(`document.querySelector('button[aria-label="Set google-2 as default"]')?.getAttribute('aria-pressed') === 'true'`), 'AI default selected');
   assert.equal(aiDefault, 'google-2/gemini-test');
   await navigate('/settings/providers/web');
   await until(() => js('location.pathname === "/settings/providers/llm/web"'), 'legacy provider named web');

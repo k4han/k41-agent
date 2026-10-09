@@ -7,30 +7,21 @@ import { DashboardTable } from "@/components/DashboardTable";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
 import { deleteJson, postJson } from "@/lib/api";
-import { fetchAgentCards } from "@/lib/agents";
+import { useDashboardData } from "@/lib/dashboardData";
+import { API_PATHS } from "@/lib/endpoints";
 import { SettingsLayout } from "@/pages/settings/SettingsLayout";
 import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import type { AgentCard, AgentCardsPayload } from "@/types";
 
 export function AgentListPage() {
   const navigate = useNavigate();
-  const [data, setData] = createSignal<AgentCardsPayload>();
-  const [error, setError] = createSignal("");
+  const { data, error, load, setData } = useDashboardData<AgentCardsPayload>(API_PATHS.agentCards, { defer: true });
   const [query, setQuery] = createSignal("");
   const [deleteTarget, setDeleteTarget] = createSignal<AgentCard | null>(null);
   const [cloningName, setCloningName] = createSignal<string | null>(null);
   const [deleting, setDeleting] = createSignal(false);
   const [reloading, setReloading] = createSignal(false);
   const { showToast } = useToast();
-
-  const load = async () => {
-    setError("");
-    try {
-      setData(await fetchAgentCards());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load agents");
-    }
-  };
 
   const filteredCards = createMemo(() => {
     const payload = data();

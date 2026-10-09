@@ -4,6 +4,33 @@ export function classNames(
   return values.filter(Boolean).join(" ");
 }
 
+/** Compare JSON values independently of object property insertion order. */
+export function sameJsonValue(first: unknown, second: unknown): boolean {
+  const serialize = (value: unknown) => JSON.stringify(value ?? null, (_key, nested: unknown) => {
+    if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+      return Object.fromEntries(Object.entries(nested).sort(([left], [right]) =>
+        left < right ? -1 : left > right ? 1 : 0));
+    }
+    return nested;
+  });
+  return serialize(first) === serialize(second);
+}
+
+/** Deep clone plain data with a JSON fallback for browsers without structuredClone. */
+export function cloneValue<T>(value: T): T {
+  if (value === undefined) {
+    return value;
+  }
+  try {
+    if (typeof structuredClone === "function") {
+      return structuredClone(value);
+    }
+  } catch {
+    // Fall through to JSON clone for values structuredClone cannot handle.
+  }
+  return JSON.parse(JSON.stringify(value ?? null)) as T;
+}
+
 export function formatValue(value: unknown): string {
   if (value === null || value === undefined || value === "") {
     return "(empty)";
