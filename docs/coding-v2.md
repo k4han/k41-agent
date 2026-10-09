@@ -154,8 +154,9 @@ their contiguous page. `output_truncated` describes omitted model content,
 independently of capture loss. Ordinary nonzero exits are reported in
 `exit_code`; timeout/cancellation produce structured errors.
 
-Retained text lives in `.k41-agent/outputs/<thread-key>/<output-id>.txt` inside
-its workspace. Tool results expose `output_paths`; read them with the existing
+Retained text lives in `.k41-agent/outputs/<output-id>.txt` inside
+its workspace and is readable by all conversations in that workspace. Tool
+results expose `output_paths`; read them with the existing
 `read(file_path=..., offset=1, limit=2000)` tool. For JSON or other very long
 lines, use `byte_offset=0` and continue with `next_byte_offset`; byte pages
 preserve exact UTF-8 text, including newline sequences. `read_tool_output` is
@@ -172,7 +173,7 @@ UI artifacts are preserved; paginated file tools retain their page semantics.
 Agents without project file tools get a reader limited to retained outputs.
 
 See [workspace storage](workspace-storage.md) for directory purposes and
-conversation-scoped scratchpad cleanup.
+project-shared scratchpads that survive conversation reset and deletion.
 
 Jobs survive chat turns. Stopping/deleting a conversation, deleting its
 temporary workspace, or closing the application stops jobs and releases

@@ -303,7 +303,7 @@ async def test_process_timeout_and_stop(coding):
 
 
 @pytest.mark.asyncio
-async def test_process_large_output_has_bounded_capture_and_owned_artifact(coding, monkeypatch):
+async def test_process_large_output_has_bounded_capture_and_shared_artifact(coding, monkeypatch):
     service, context, workspace = coding
     monkeypatch.setattr("agent.modules.tools.coding.processes.MAX_STORED_BYTES", 128 * 1024)
     result = await invoke(service, context, "bash", command=python_command("import sys; sys.stdout.write('x' * (3 * 1024 * 1024))"), yield_time_ms=0)
@@ -315,7 +315,8 @@ async def test_process_large_output_has_bounded_capture_and_owned_artifact(codin
     assert observed.capture_truncated and observed.output_truncated
     assert len(observed.content.encode()) <= MAX_MODEL_BYTES
     read = await invoke(service, replace(context, thread_id="foreign"), "read", file_path=observed.output_paths[0])
-    assert read.error.code == "not_found"
+    assert read.status == "success"
+    assert read.content
 
 
 @pytest.mark.asyncio

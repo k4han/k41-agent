@@ -35,7 +35,6 @@ _SANDBOX_BACKENDS = frozenset({"daytona", "modal"})
 # names, which are stable for a given workspace scope.
 _workspace_storage_root_cache: dict[str, Path] = {}
 _workspace_storage_ready: set[str] = set()
-_thread_storage_ready: set[str] = set()
 _physical_storage_ready: set[str] = set()
 
 _WINDOWS_RESERVED_NAMES = {
@@ -88,6 +87,7 @@ def workspace_storage_key(workspace_scope: WorkspaceScope | str) -> str:
 
 
 def thread_storage_root(thread_id: str) -> Path:
+    """Resolve a legacy thread storage directory for backward-compatible reads."""
     root_id = root_thread_id(thread_id)
     if not root_id:
         raise ValueError("thread_id is required for thread storage.")
@@ -105,16 +105,6 @@ def workspace_storage_root(workspace_scope: WorkspaceScope | str) -> Path:
     return root
 
 
-def ensure_thread_storage_root(thread_id: str) -> Path:
-    root = thread_storage_root(thread_id)
-    key = str(root)
-    if key in _thread_storage_ready:
-        return root
-    root.mkdir(parents=True, exist_ok=True)
-    _thread_storage_ready.add(key)
-    return root
-
-
 def ensure_workspace_storage_root(workspace_scope: WorkspaceScope | str) -> Path:
     root = workspace_storage_root(workspace_scope)
     key = str(root)
@@ -123,14 +113,6 @@ def ensure_workspace_storage_root(workspace_scope: WorkspaceScope | str) -> Path
     root.mkdir(parents=True, exist_ok=True)
     _workspace_storage_ready.add(key)
     return root
-
-
-def generated_images_dir_for_thread(thread_id: str, *, create: bool = True) -> Path:
-    root = ensure_thread_storage_root(thread_id) if create else thread_storage_root(thread_id)
-    target = root / "generated-images"
-    if create:
-        target.mkdir(parents=True, exist_ok=True)
-    return target
 
 
 def generated_images_dir_for_workspace(
@@ -163,11 +145,6 @@ def virtual_storage_relative_path(path: str | None) -> str | None:
     if raw.startswith(prefix):
         return raw[len(prefix) :].lstrip("/")
     return None
-
-
-def resolve_thread_storage_path(thread_id: str, relative_path: str = ".") -> Path:
-    root = ensure_thread_storage_root(thread_id)
-    return Path(resolve_safe_path(str(root), relative_path or "."))
 
 
 def resolve_workspace_storage_path(
@@ -209,18 +186,6 @@ def managed_storage_walk(root: Path):
         for directory, dirs, files in os.walk(base):
             dirs[:] = [name for name in dirs if not (Path(directory) / name).is_symlink()]
             yield directory, dirs, [name for name in files if not (Path(directory) / name).is_symlink()]
-
-
-def clear_persistent_scratchpads(thread_id: str) -> None:
-    """Remove only this conversation's managed notes from host mirrors."""
-    from agent.modules.tools.coding.storage import conversation_key
-    if not THREAD_STORAGE_BASE_DIR.is_dir():
-        return
-    for root in THREAD_STORAGE_BASE_DIR.iterdir():
-        target = root / "scratchpad" / conversation_key(thread_id)
-        if (root.is_dir() and not root.is_symlink() and target.is_dir() and not target.is_symlink()
-                and target.resolve().is_relative_to(root.resolve())):
-            shutil.rmtree(target)
 
 
 def hydrate_workspace_storage(
@@ -570,15 +535,12 @@ __all__ = [
     "ensure_git_exclude",
     "ensure_physical_workspace_storage",
     "ensure_sandbox_workspace_storage",
-    "ensure_thread_storage_root",
     "ensure_workspace_storage_root",
-    "generated_images_dir_for_thread",
     "generated_images_dir_for_workspace",
     "hydrate_workspace_storage",
     "hydrate_workspace_storage_to_sandbox",
     "ingest_attachment_file",
     "ingest_attachment_file_to_sandbox",
-    "resolve_thread_storage_path",
     "resolve_workspace_storage_path",
     "root_thread_id",
     "sanitize_thread_id",

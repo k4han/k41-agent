@@ -207,8 +207,7 @@ class ProcessManager:
         environment = build_safe_env(extra_vars={"PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1", "PYTHONUNBUFFERED": "1",
                                                "PYTHONDONTWRITEBYTECODE": "1", "K41_WORKSPACE_ROOT": context.workspace,
                                                **dict(context.skill_environment)})
-        from agent.modules.tools.coding.storage import conversation_key
-        lease_root = Path(context.workspace) / ".k41-agent" / "skills" / conversation_key(context.thread_id)
+        lease_root = Path(context.workspace) / ".k41-agent" / "skills"
         if os.name == "nt" and not str(lease_root).startswith("\\\\?\\"):
             lease_root = Path("\\\\?\\" + str(lease_root.resolve()))
         skill_lease = None

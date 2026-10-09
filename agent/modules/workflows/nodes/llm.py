@@ -66,7 +66,6 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
     tools = ToolResolver().for_workspace(tools, workspace, agent_name)
 
     thread_id = get_thread_id(config)
-    from agent.modules.tools import conversation_key
     from agent.modules.skills import get_repository_skill_dir
 
     try:
@@ -110,7 +109,7 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
             catalog=catalog,
             prompt_variables=prompt_variables,
             skills_catalog_xml=skills_catalog_xml,
-            scratchpad_path=f".k41-agent/scratchpad/{conversation_key(thread_id or '')}/",
+            scratchpad_path=".k41-agent/scratchpad/",
             sections=prompt_sections,
         )
         store_system_prompt(cache_key, system_prompt, sections=prompt_sections)

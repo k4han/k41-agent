@@ -107,8 +107,8 @@ class SandboxWorker:
             await self.processes.close()
             return {"closed": True}
         if operation == "clear_scratchpads":
-            self.storage.clear_scratchpads(resolve_thread_id(request["thread_id"]))
-            return {"cleared": True}
+            # Older application clients must not remove workspace-shared notes.
+            return {"cleared": False}
         name, values = request["name"], request["values"]
         context = InvocationContext(**request["context"])
         context = replace(context, workspace=str(Path(context.workspace or self.default_root).resolve()))

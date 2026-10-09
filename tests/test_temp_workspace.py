@@ -81,6 +81,9 @@ def test_delete_thread_workspace_cleans_temp_directory(
         return None
 
     class FakeRepository:
+        async def has_other_conversations(self, workspace, thread_id: str) -> bool:
+            return False
+
         async def delete(self, thread_id: str) -> None:
             deleted.append(thread_id)
 
@@ -116,6 +119,9 @@ def test_delete_thread_workspace_keeps_regular_workspace_directory(
         return None
 
     class FakeRepository:
+        async def has_other_conversations(self, workspace, thread_id: str) -> bool:
+            return False
+
         async def delete(self, thread_id: str) -> None:
             return None
 
@@ -132,6 +138,56 @@ def test_delete_thread_workspace_keeps_regular_workspace_directory(
     assert project_dir.exists()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["local", "daytona", "modal"])
+async def test_delete_conversation_preserves_workspace_used_by_another_conversation(
+    _temp_workspace_root, monkeypatch, isolated_container, backend,
+):
+    from agent.modules.workspaces import get_thread_workspace_ref, remember_thread_workspace_ref
+    from agent.modules.workspaces.refs import WorkspaceRef
+
+    await isolated_container.initialize_persistence()
+    if backend == "local":
+        workspace = await create_temp_workspace("first")
+        note = Path(workspace.locator) / ".k41-agent" / "scratchpad" / "shared.md"
+        note.parent.mkdir(parents=True)
+        note.write_text("Shared project decision", encoding="utf-8")
+    else:
+        workspace = WorkspaceRef(backend=backend, locator="shared-sandbox", metadata={"root": "/workspace"})
+
+    async def unexpected_lifecycle(*args, **kwargs):
+        pytest.fail("Deleting one conversation must not delete a shared workspace.")
+
+    class Packages:
+        snapshots = SimpleNamespace(release=lambda conversation: None)
+
+        def execution_transport(self, workspace, thread_id):
+            return self
+
+        async def operation(self, *args, **kwargs):
+            return {}
+
+    monkeypatch.setattr(service_module, "get_workspace_lifecycle_manager", unexpected_lifecycle)
+    monkeypatch.setattr("agent.modules.skills.get_skill_packages", lambda: Packages())
+    try:
+        repository = service_module.get_thread_workspace_repository()
+        await remember_thread_workspace_ref("first", workspace)
+        await remember_thread_workspace_ref("first:sub:worker", workspace)
+        assert not await repository.has_other_conversations(workspace, "first")
+        await remember_thread_workspace_ref("second", workspace)
+        shared_ref = await get_thread_workspace_ref("second")
+        assert await repository.has_other_conversations(workspace, "first")
+        await delete_thread_workspace("first")
+        assert await get_thread_workspace_ref("first") is None
+        assert await get_thread_workspace_ref("second") == shared_ref
+        if backend == "local":
+            assert note.read_text(encoding="utf-8") == "Shared project decision"
+        await repository.delete("first:sub:worker")
+        assert not await repository.has_other_conversations(workspace, "second")
+    finally:
+        await isolated_container.close_persistence()
+
+
 def _patch_delete_thread_dependencies(
     monkeypatch: pytest.MonkeyPatch,
     workspace_ref,
@@ -145,6 +201,9 @@ def _patch_delete_thread_dependencies(
         return None
 
     class FakeRepository:
+        async def has_other_conversations(self, workspace, thread_id: str) -> bool:
+            return False
+
         async def delete(self, thread_id: str) -> None:
             return None
 

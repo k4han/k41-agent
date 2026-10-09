@@ -1376,6 +1376,9 @@ async def test_delete_thread_workspace_deletes_daytona_sandbox_and_record(monkey
     calls: list[tuple[str, str]] = []
 
     class FakeWorkspaceRepository:
+        async def has_other_conversations(self, workspace, thread_id: str) -> bool:
+            return False
+
         async def get(self, thread_id: str):
             calls.append(("get", thread_id))
             return {"workspace": workspace.model_dump()}
@@ -1421,6 +1424,9 @@ async def test_delete_thread_workspace_deletes_modal_sandbox_and_record(monkeypa
     calls: list[tuple[str, str]] = []
 
     class FakeWorkspaceRepository:
+        async def has_other_conversations(self, workspace, thread_id: str) -> bool:
+            return False
+
         async def get(self, thread_id: str):
             calls.append(("get", thread_id))
             return {"workspace": workspace.model_dump()}

@@ -24,11 +24,11 @@ from langgraph.types import Command
 
 from agent.modules.tools.coding.adapter import SCHEMAS, make_coding_tool
 from agent.modules.tools.coding.files import read_byte_page
-from agent.modules.tools.coding.models import InvocationContext, PermissionRule, ToolDefinition, ToolResult
+from agent.modules.tools.coding.models import CodingError, InvocationContext, PermissionRule, ToolDefinition, ToolResult
 from agent.modules.tools.coding.remote_worker import SandboxWorker
 from agent.modules.tools.coding.service import CodingService
 from agent.modules.tools.coding.storage import (
-    MAX_MODEL_BYTES, MAX_MODEL_LINES, RETENTION_SECONDS, OutputStore, conversation_key, digest, ensure_workspace_exclude,
+    MAX_MODEL_BYTES, MAX_MODEL_LINES, RETENTION_SECONDS, OutputStore, digest, ensure_workspace_exclude,
 )
 from agent.modules.tools.runtime import output_retention, thread_storage
 from agent.modules.workspaces import WorkspaceRef
@@ -266,7 +266,7 @@ async def test_generic_output_preserves_media_errors_and_exact_long_lines(output
     repeated = await output_retention.retain_message(retained, runtime)
     assert repeated is retained
     foreign = await invoke(service, replace(context, thread_id="other"), "read", file_path=path)
-    assert foreign.error.code == "not_found"
+    assert foreign.status == "success" and foreign.content
     await service.processes.close()
 
 
@@ -318,15 +318,23 @@ def test_retention_quota_and_cleanup_protect_active_output_and_unmanaged_files(t
     unknown = retained.parent / "user-notes.txt"
     unknown.write_text("keep", encoding="utf-8")
     os.utime(unknown, (old, old))
+    legacy = retained.parent / digest("old-conversation")[:24] / ("b" * 32 + ".txt")
+    legacy.parent.mkdir()
+    legacy.write_text("expired legacy output", encoding="utf-8")
+    os.utime(legacy, (old, old))
+    store.owner_dir(replace(context, thread_id="other-conversation"))
     store.active_paths.add(retained)
     store.cleanup()
-    assert retained.exists()
+    assert retained.exists() and not legacy.exists()
     store.active_paths.clear()
     store.cleanup()
     assert not retained.exists() and unknown.exists()
 
 
-def test_lazy_storage_sync_and_scratchpad_reset_after_restart(tmp_path, monkeypatch):
+@pytest.mark.asyncio
+async def test_lazy_storage_sync_and_scratchpad_survive_reset_after_restart(tmp_path, monkeypatch, isolated_container):
+    from agent.modules.tools import clear_conversation_storage
+
     monkeypatch.setattr(thread_storage, "THREAD_STORAGE_BASE_DIR", tmp_path / "mirrors")
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -337,21 +345,84 @@ def test_lazy_storage_sync_and_scratchpad_reset_after_restart(tmp_path, monkeypa
     context = InvocationContext("default", str(workspace), "conversation:sub:worker:1")
     store = OutputStore(tmp_path / "records")
     store.owner_dir(context)
-    note = target / "scratchpad" / conversation_key(context.thread_id) / "worker.md"
-    other = target / "scratchpad" / conversation_key("other") / "note.md"
+    note = target / "scratchpad" / "worker.md"
+    other = target / "scratchpad" / "note.md"
+    old_note = target / "scratchpad" / digest("conversation")[:24] / "legacy.md"
     unknown = target / "project" / "source.py"
     legacy = target / "assets" / "old.txt"
-    for path in (note, other, unknown, legacy):
+    for path in (note, other, old_note, unknown, legacy):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("keep", encoding="utf-8")
     thread_storage.sync_back_workspace_storage(workspace, "workspace")
     assert not (root / "project").exists() and not (root / "assets").exists()
     assert (root / note.relative_to(target)).exists()
-    reloaded = OutputStore(tmp_path / "records")
-    reloaded.clear_scratchpads("conversation")
-    thread_storage.clear_persistent_scratchpads("conversation")
-    assert not note.exists() and not (root / note.relative_to(target)).exists()
-    assert other.exists() and legacy.exists() and unknown.exists()
+    reloaded = CodingService(tmp_path / "records")
+    isolated_container._coding_service = reloaded
+    await clear_conversation_storage("conversation")
+    assert note.exists() and (root / note.relative_to(target)).exists()
+    assert other.exists() and old_note.exists() and legacy.exists() and unknown.exists()
+    assert (root / old_note.relative_to(target)).exists()
+    await reloaded.processes.close()
+    await reloaded.storage.close()
+
+
+@pytest.mark.asyncio
+async def test_conversations_share_notes_outputs_and_search(output_environment):
+    service, context, workspace, worker = output_environment
+    other = replace(context, thread_id="other-conversation")
+    try:
+        note_path = ".k41-agent/scratchpad/project.md"
+        written = await invoke(service, context, "write", file_path=note_path, content="Shared project decision")
+        assert written.status == "success"
+        read = await invoke(service, other, "read", file_path=note_path)
+        assert read.status == "success" and "Shared project decision" in read.content
+        changed = await invoke(service, other, "write", file_path=note_path, content="Updated project decision",
+                               expected_version=written.data["version"])
+        assert changed.status == "success"
+        original = await invoke(service, context, "read", file_path=note_path)
+        assert "Updated project decision" in original.content
+
+        store = worker.storage if worker else service.storage
+        result = store.bound(ToolResult(content="Shared retained output\n" * 5000), context)
+        output_path = result.output_paths[0]
+        assert Path(output_path).parent.as_posix() == ".k41-agent/outputs"
+        read = await invoke(service, other, "read", file_path=output_path)
+        assert read.status == "success" and "Shared retained output" in read.content
+        for name, pattern in (("glob", "**/*.txt"), ("grep", "Shared retained output")):
+            filters = {"include": Path(output_path).name} if name == "grep" else {}
+            found = await invoke(service, other, name, path=".k41-agent/outputs", pattern=pattern, **filters)
+            assert found.status == "success" and Path(output_path).name in found.content
+        from agent.modules.tools import clear_conversation_storage
+        await clear_conversation_storage(context.thread_id)
+        assert (workspace / note_path).exists() and (workspace / output_path).exists()
+        if worker:
+            assert await worker.dispatch({"operation": "clear_scratchpads", "thread_id": context.thread_id}) == {"cleared": False}
+            assert (workspace / note_path).exists()
+    finally:
+        await service.processes.close()
+        await service.storage.close()
+        if worker:
+            await worker.processes.close()
+            await worker.storage.close()
+
+
+def test_legacy_thread_outputs_are_recovered_into_shared_workspace_storage(tmp_path):
+    store = OutputStore(tmp_path / "records")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    context = InvocationContext("default", str(workspace), "other-conversation")
+    reference = "a" * 32
+    legacy = workspace / ".k41-agent" / "outputs" / digest("original-conversation")[:24] / f"{reference}.txt"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("Saved output", encoding="utf-8")
+    recovered = store.output_path(context, reference)
+    assert recovered == workspace / ".k41-agent" / "outputs" / f"{reference}.txt"
+    assert recovered.read_text(encoding="utf-8") == "Saved output"
+    assert legacy.exists()
+    other_workspace = tmp_path / "other-workspace"
+    other_workspace.mkdir()
+    with pytest.raises(CodingError, match="does not exist in this workspace"):
+        store.output_path(replace(context, workspace=str(other_workspace)), reference)
 
 
 def test_git_worktree_internal_storage_is_excluded(tmp_path):

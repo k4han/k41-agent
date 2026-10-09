@@ -1,4 +1,4 @@
-"""Owner-scoped output retention and durable invocation settlement records."""
+"""Workspace-shared output retention and thread-scoped invocation records."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def conversation_key(thread_id: str) -> str:
 
 
 def output_relative_path(context: InvocationContext, reference: str) -> str:
-    return f".k41-agent/outputs/{digest(storage_thread_id(context.thread_id))[:24]}/{reference}.txt"
+    return f".k41-agent/outputs/{reference}.txt"
 
 
 def ensure_workspace_exclude(workspace: Path) -> None:
@@ -110,22 +110,6 @@ class OutputStore:
             await asyncio.gather(self.cleanup_task, return_exceptions=True)
             self.cleanup_task = None
 
-    def clear_scratchpads(self, thread_id: str) -> None:
-        key = conversation_key(thread_id)
-        for directory in self.root.iterdir():
-            try:
-                if directory.is_symlink():
-                    continue
-                record = json.loads((directory / "owner.json").read_text(encoding="utf-8"))
-                if not record.get("physical", record.get("backend", "local") == "local"):
-                    continue
-                base = Path(record["workspace"]).resolve()
-                target = base / ".k41-agent" / "scratchpad" / key
-                if target.is_dir() and not target.is_symlink() and target.resolve().is_relative_to(base):
-                    shutil.rmtree(target)
-            except (OSError, ValueError, KeyError):
-                continue
-
     def owner_dir(self, context: InvocationContext) -> Path:
         directory = self.root / digest(context.owner)[:32]
         directory.mkdir(parents=True, exist_ok=True)
@@ -187,12 +171,18 @@ class OutputStore:
             raise CodingError("invalid_input", "Invalid output reference.")
         path = self.physical_output_path(context, reference, create=False)
         if not path.exists():
-            legacy = self.owner_dir(context) / f"{reference}.output"
-            if legacy.is_file() and not legacy.is_symlink() and legacy.stat().st_mtime >= time.time() - RETENTION_SECONDS:
-                self.physical_output_path(context, reference)
-                shutil.copy2(legacy, path)
+            candidates = [self.owner_dir(context) / f"{reference}.output"]
+            if path.parent.is_dir():
+                candidates.extend(directory / f"{reference}.txt" for directory in path.parent.iterdir()
+                                  if re.fullmatch(r"[a-f0-9]{24}", directory.name)
+                                  and directory.is_dir() and not directory.is_symlink())
+            for legacy in candidates:
+                if legacy.is_file() and not legacy.is_symlink() and legacy.stat().st_mtime >= time.time() - RETENTION_SECONDS:
+                    self.physical_output_path(context, reference)
+                    shutil.copy2(legacy, path)
+                    break
         if path.is_symlink() or not path.is_file():
-            raise CodingError("not_found", "Output reference does not exist in this workspace/thread.")
+            raise CodingError("not_found", "Output reference does not exist in this workspace.")
         return path
 
     def bound(self, result: ToolResult, context: InvocationContext, *, tail: bool = False) -> ToolResult:
@@ -265,6 +255,7 @@ class OutputStore:
     def cleanup(self) -> None:
         self.last_cleanup = time.time()
         cutoff = time.time() - RETENTION_SECONDS
+        visited_workspaces: set[Path] = set()
         for directory in self.root.iterdir():
             if directory.is_symlink() or not directory.is_dir():
                 continue
@@ -276,13 +267,22 @@ class OutputStore:
                 if not record.get("physical", record.get("backend", "local") == "local"):
                     continue
                 base = Path(record["workspace"]).resolve()
-                output_dir = base / ".k41-agent" / "outputs" / digest(record["thread_id"])[:24]
+                if base in visited_workspaces:
+                    continue
+                visited_workspaces.add(base)
+                output_dir = base / ".k41-agent" / "outputs"
                 if not output_dir.resolve().is_relative_to(base) or output_dir.is_symlink():
                     continue
-                for path in output_dir.glob("*.txt"):
-                    if (re.fullmatch(r"[a-f0-9]{32}\.txt", path.name) and not path.is_symlink()
-                            and path not in self.active_paths and path.stat().st_mtime < cutoff):
-                        path.unlink(missing_ok=True)
+                directories = [output_dir]
+                if output_dir.is_dir():
+                    directories.extend(directory for directory in output_dir.iterdir()
+                                       if re.fullmatch(r"[a-f0-9]{24}", directory.name)
+                                       and directory.is_dir() and not directory.is_symlink())
+                for retained_dir in directories:
+                    for path in retained_dir.glob("*.txt"):
+                        if (re.fullmatch(r"[a-f0-9]{32}\.txt", path.name) and not path.is_symlink()
+                                and path not in self.active_paths and path.stat().st_mtime < cutoff):
+                            path.unlink(missing_ok=True)
             except (OSError, ValueError, KeyError):
                 continue
 

@@ -204,6 +204,20 @@ class ThreadWorkspaceRepository:
                 for record in result.scalars().all()
             }
 
+    async def has_other_conversations(self, workspace: WorkspaceRef, thread_id: str) -> bool:
+        """Check whether another root conversation still uses this execution workspace."""
+        root_thread = resolve_thread_id(thread_id).split(":sub:", 1)[0]
+        session = await get_async_session()
+        async with session:
+            result = await session.execute(
+                select(ThreadWorkspace.thread_id).where(
+                    ThreadWorkspace.execution_backend == workspace.backend,
+                    ThreadWorkspace.execution_locator == workspace.locator,
+                )
+            )
+            return any(resolve_thread_id(value).split(":sub:", 1)[0] != root_thread
+                       for value in result.scalars().all())
+
     async def update_metadata(
         self,
         *,

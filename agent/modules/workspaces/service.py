@@ -1181,11 +1181,12 @@ async def delete_thread_workspace(thread_id: str) -> WorkspaceRef | None:
     if workspace is None:
         return None
 
+    shared_workspace = False
+    if workspace.backend != LOCAL_BACKEND or is_temp_workspace(workspace):
+        shared_workspace = await get_thread_workspace_repository().has_other_conversations(workspace, thread_id)
+
     try:
-        from agent.modules.skills import WorkspacePackageIO
         if owner_is_gone:
-            await WorkspacePackageIO(workspace, thread_id=thread_id).operation("cleanup", ".k41-agent/skills", all=True,
-                conversation=conversation_key(thread_id))
             packages = get_skill_packages()
             transport = packages.execution_transport(workspace, thread_id)
             await transport.operation("cleanup", "" if workspace.backend == LOCAL_BACKEND else ".k41-agent/s", cache_only=True)
@@ -1195,12 +1196,13 @@ async def delete_thread_workspace(thread_id: str) -> WorkspaceRef | None:
     if (
         workspace.backend == LOCAL_BACKEND
         and is_temp_workspace(workspace)
+        and not shared_workspace
         and await _temp_workspace_owner_is_gone(thread_id)
     ):
         await _delete_temp_workspace_directory(workspace.locator)
 
     try:
-        lifecycle = await get_workspace_lifecycle_manager(
+        lifecycle = None if shared_workspace else await get_workspace_lifecycle_manager(
             workspace,
             thread_id=thread_id,
         )

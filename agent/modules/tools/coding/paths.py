@@ -43,17 +43,6 @@ class PathPermissions:
                 self.assert_allowed(context, "external_directory", str(target.parent if action != "shell" else target), allow_interrupt=allow_interrupt)
         if authorize:
             self.assert_allowed(context, action, str(target), allow_interrupt=allow_interrupt)
-        if inside:
-            relative = target.relative_to(base).parts
-            if len(relative) >= 3 and relative[:2] == (".k41-agent", "skills"):
-                from agent.modules.tools.coding.storage import conversation_key
-                if relative[2] != conversation_key(context.thread_id):
-                    raise CodingError("not_found", "Skill resource does not exist in this workspace/thread.")
-            if len(relative) >= 3 and relative[:2] == (".k41-agent", "outputs"):
-                from agent.modules.tools.coding.storage import digest
-                from agent.shared.thread_ids import storage_thread_id
-                if relative[2] != digest(storage_thread_id(context.thread_id))[:24]:
-                    raise CodingError("not_found", "Output file does not exist in this workspace/thread.")
         if os.name == "nt" and len(str(target)) >= 240:
             raw = str(target)
             return Path("\\\\?\\UNC\\" + raw[2:] if raw.startswith("\\\\") else "\\\\?\\" + raw)

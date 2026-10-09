@@ -65,9 +65,10 @@ WORKSPACE_STORAGE_PROMPT = (
     "The working directory is the project workspace. Create project folders, source code, "
     "dependencies, and deliverables there. Keep shell workdir at the workspace or a project subdirectory.\n"
     "Use .k41-agent/ only for internal supporting files, never as the project workspace:\n"
-    "- scratchpad/<conversation-key>/ holds drafts, notes, and temporary helper scripts. "
-    "Sub-agents use distinct filenames. Notes survive turns and restarts until the conversation is reset or deleted.\n"
-    "- outputs/<thread-key>/ holds retained tool output for seven days. When a result is shortened, "
+    "- scratchpad/ holds project-shared drafts, notes, and temporary helper scripts. "
+    "All conversations and sub-agents in this workspace share these files. Reuse existing project notes, "
+    "and use distinct filenames for independent tasks. Notes survive turns, restarts, and conversation reset or deletion.\n"
+    "- outputs/ holds project-shared retained tool output for seven days. When a result is shortened, "
     "read its returned file path in pages using read; use byte_offset=0 and next_byte_offset for long lines.\n"
     "- uploads/ holds user attachments; generated-images/ holds generated images. "
     "Create directories only when writing files. Do not create assets/ or memory/.\n"
@@ -236,7 +237,7 @@ def build_llm_system_prompt(
     if _has_workspace_storage_tool(tools):
         system_prompt = f"{system_prompt}\n\n{WORKSPACE_STORAGE_PROMPT}"
         if scratchpad_path:
-            system_prompt += f"\nYour draft directory is {scratchpad_path}. Use distinct filenames for delegated tasks."
+            system_prompt += f"\nThe shared project draft directory is {scratchpad_path}. Read existing notes and use distinct filenames for independent tasks."
 
     return system_prompt
 

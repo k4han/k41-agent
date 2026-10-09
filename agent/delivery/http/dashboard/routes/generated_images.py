@@ -8,9 +8,7 @@ from fastapi.responses import FileResponse
 
 from agent.delivery.http.dashboard.routes.helpers.workspace import workspace_ref_for_thread
 from agent.modules.tools import (
-    ensure_thread_storage_root,
     ensure_workspace_storage_root,
-    generated_images_dir_for_workspace,
     get_generated_images_dir,
 )
 from agent.modules.workspaces import derive_workspace_scope
@@ -43,7 +41,7 @@ async def resolve_storage_file(
         raise HTTPException(status_code=404, detail="File not found.")
 
     safe_category = Path(category).name
-    root = GENERATED_IMAGES_DIR if safe_category == "generated-images" else ensure_thread_storage_root(thread_id or "default") / safe_category
+    root = GENERATED_IMAGES_DIR
     if thread_id and thread_id.strip():
         workspace = await workspace_ref_for_thread(thread_id, include_default=False)
         if workspace is not None:
@@ -51,6 +49,12 @@ async def resolve_storage_file(
             root = ensure_workspace_storage_root(scope) / safe_category
         elif safe_category == "generated-images":
             root = GENERATED_IMAGES_DIR
+
+    if safe_category != "generated-images" and root == GENERATED_IMAGES_DIR:
+        workspace = await workspace_ref_for_thread(thread_id or "")
+        if workspace is None:
+            raise HTTPException(status_code=404, detail="File not found.")
+        root = ensure_workspace_storage_root(derive_workspace_scope(workspace)) / safe_category
 
     root = root.resolve()
     path = (root / filename).resolve()

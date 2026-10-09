@@ -53,10 +53,12 @@ def test_workspace_storage_instructions_distinguish_projects_notes_and_output() 
     assert "read_tool_output" not in prompt
 
 
-def test_workspace_storage_instructions_provide_conversation_draft_directory() -> None:
+def test_workspace_storage_instructions_provide_shared_project_draft_directory() -> None:
     prompt = prompt_builders.build_llm_system_prompt(
         system_prompt_template="Base", working_dir="/workspace", agent_name="default",
         tools=[SimpleNamespace(name="write")], catalog=SimpleNamespace(),
-        scratchpad_path=".k41-agent/scratchpad/conversation-key/",
+        scratchpad_path=".k41-agent/scratchpad/",
     )
-    assert "Your draft directory is .k41-agent/scratchpad/conversation-key/" in prompt
+    assert "The shared project draft directory is .k41-agent/scratchpad/" in prompt
+    assert "All conversations and sub-agents in this workspace share these files" in prompt
+    assert "Notes survive turns, restarts, and conversation reset or deletion" in prompt
