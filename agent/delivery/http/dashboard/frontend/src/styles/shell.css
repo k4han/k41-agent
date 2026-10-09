@@ -1083,20 +1083,45 @@
   cursor: pointer;
   text-align: left;
   transition: opacity 120ms ease;
+  max-width: 100%;
 }
 
 .brand-version-btn:hover {
-  opacity: 0.8;
+  opacity: 0.85;
+}
+
+.brand-version-btn.has-update {
+  color: var(--fg);
 }
 
 .brand-update-badge {
-  font-size: 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3.5px;
+  font-size: 9.5px;
   font-weight: 600;
-  padding: 1px 5px;
+  padding: 1.5px 5.5px;
   border-radius: 4px;
   background: var(--accent);
   color: var(--accent-fg, #fff);
   letter-spacing: 0.02em;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.brand-update-badge:hover {
+  filter: brightness(1.12);
+}
+
+.brand-collapsed-update-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 5px var(--accent);
 }
 
 /* --- Sidebar Footer Version Badge -------------------------------------- */

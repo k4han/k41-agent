@@ -21,6 +21,7 @@ import {
   PlaySquare,
   RefreshCw,
   Settings,
+  Sparkles,
   Square,
   Trash2,
   X,
@@ -32,7 +33,6 @@ import { DeleteThreadDialog } from "@/components/DeleteThreadDialog";
 import { InlineRenameInput } from "@/components/InlineRenameInput";
 import { SelectControl } from "@/components/SelectControl";
 import { UpdateDialog } from "@/components/UpdateDialog";
-import { VersionBadge } from "@/components/VersionBadge";
 import { apiFetch, deleteJson, patchJson, postJson } from "@/lib/api";
 import { checkForUpdates, openUpdateDialog, versionInfo } from "@/lib/versionStore";
 import {
@@ -841,10 +841,19 @@ export function AppShell(props: {
                 class="brand-mark brand-expand-btn"
                 type="button"
                 onClick={toggleSidebar}
-                title="Expand sidebar"
+                title={
+                  versionInfo()?.has_update
+                    ? `Update available: v${versionInfo()?.latest_version} (click to expand)`
+                    : "Expand sidebar"
+                }
               >
                 <span class="brand-expand-icon"><ChevronsRight size={14} /></span>
-                <span class="brand-expand-default"><Bot size={16} /></span>
+                <span class="brand-expand-default">
+                  <Bot size={16} />
+                  <Show when={versionInfo()?.has_update}>
+                    <span class="brand-collapsed-update-dot" />
+                  </Show>
+                </span>
               </button>
             }
           >
@@ -855,7 +864,7 @@ export function AppShell(props: {
               <div class="brand-title">Kai Console</div>
               <button
                 type="button"
-                class="brand-subtitle brand-version-btn"
+                class={`brand-subtitle brand-version-btn ${versionInfo()?.has_update ? "has-update" : ""}`}
                 onClick={openUpdateDialog}
                 title={
                   versionInfo()?.has_update
@@ -865,7 +874,10 @@ export function AppShell(props: {
               >
                 <span>v{versionInfo()?.current_version || "..."}</span>
                 <Show when={versionInfo()?.has_update}>
-                  <span class="brand-update-badge">New</span>
+                  <span class="brand-update-badge">
+                    <Sparkles size={11} />
+                    <span>Update: v{versionInfo()?.latest_version}</span>
+                  </span>
                 </Show>
               </button>
             </div>
@@ -1051,7 +1063,6 @@ export function AppShell(props: {
           </Show>
         </nav>
         <div class="sidebar-footer">
-          <VersionBadge collapsed={collapsed() && !isMobileViewport()} />
           <div class="sidebar-footer-row">
             <div class="user-menu-wrapper">
               <button
