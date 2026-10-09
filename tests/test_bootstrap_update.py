@@ -5,6 +5,7 @@ import shutil
 import zipfile
 from pathlib import Path
 
+import psutil
 import pytest
 
 from agent.bootstrap import update as update_module
@@ -90,6 +91,219 @@ def disable_server(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(update_module, "get_running_server_pid", lambda: None)
     monkeypatch.setattr(update_module, "start_server", lambda install: None)
     monkeypatch.setattr(update_module, "stop_running_server", lambda pid: None)
+
+
+@pytest.fixture
+def stopping_server(tmp_path, monkeypatch):
+    class Server:
+        pid = 123
+        alive = True
+        same_process = True
+        command = ["python", "-m", "agent.bootstrap.cli", "--no-tray"]
+        events = []
+        exit_on = "terminate"
+        now = 0.0
+        child_processes = []
+
+        def cmdline(self):
+            return self.command
+
+        def is_running(self):
+            return self.alive and self.same_process
+
+        def status(self):
+            return psutil.STATUS_RUNNING if self.alive else psutil.STATUS_DEAD
+
+        def children(self, recursive=False):
+            assert recursive
+            return self.child_processes
+
+        def parents(self):
+            return []
+
+        def terminate(self):
+            self.events.append("terminate")
+            if self.exit_on == "terminate":
+                self.alive = False
+
+        def kill(self):
+            self.events.append("kill")
+            if self.exit_on == "kill":
+                self.alive = False
+
+        def sleep(self, seconds):
+            self.now += seconds
+            if self.exit_on == "signal":
+                self.alive = False
+
+    server = Server()
+    monkeypatch.setattr(psutil, "Process", lambda pid: server)
+    monkeypatch.setattr(update_module, "is_process_alive", lambda pid: server.alive)
+    monkeypatch.setattr(update_module.time, "monotonic", lambda: server.now)
+    monkeypatch.setattr(update_module.time, "time", lambda: server.now)
+    monkeypatch.setattr(update_module.time, "sleep", server.sleep)
+    monkeypatch.setattr(update_module, "PID_FILE", tmp_path / "server.pid")
+    monkeypatch.setattr(update_module, "SHUTDOWN_SIGNAL", tmp_path / "shutdown.signal")
+    update_module.PID_FILE.write_text("123")
+    return server
+
+
+@pytest.mark.parametrize("exit_on, events", [
+    ("signal", []), ("terminate", ["terminate"]), ("kill", ["terminate", "kill"]),
+])
+def test_stop_server_escalates_only_after_graceful_shutdown(stopping_server, exit_on, events):
+    stopping_server.exit_on = exit_on
+    update_module.stop_running_server(123)
+    assert stopping_server.events == events
+    assert not update_module.PID_FILE.exists()
+    assert not update_module.SHUTDOWN_SIGNAL.exists()
+    if events:
+        assert stopping_server.now >= update_module.SERVER_STOP_TIMEOUT_SECONDS
+
+
+@pytest.mark.parametrize("command", [
+    [], ["python", "unrelated.py"],
+    ["python", "-m", "agent.bootstrap.cli", "update", "--yes"],
+])
+def test_stop_server_never_terminates_unverified_process(stopping_server, command):
+    stopping_server.command = command
+    with pytest.raises(UpdateError, match="could not be verified"):
+        update_module.stop_running_server(123)
+    assert stopping_server.events == []
+    assert update_module.PID_FILE.exists()
+
+
+def test_stop_server_aborts_when_process_survives_kill(stopping_server):
+    stopping_server.exit_on = "never"
+    with pytest.raises(UpdateError, match="did not stop"):
+        update_module.stop_running_server(123)
+    assert stopping_server.events == ["terminate", "kill"]
+    assert update_module.PID_FILE.exists()
+
+
+def test_stop_server_does_not_signal_reused_pid(stopping_server):
+    stopping_server.same_process = False
+    update_module.stop_running_server(123)
+    assert stopping_server.events == []
+
+
+def test_stop_server_preserves_replacement_pid_file(stopping_server):
+    stopping_server.exit_on = "signal"
+    update_module.PID_FILE.write_text("456")
+    update_module.stop_running_server(123)
+    assert update_module.PID_FILE.read_text() == "456"
+
+
+def test_stop_server_surfaces_permission_denied(stopping_server, monkeypatch):
+    def denied():
+        raise psutil.AccessDenied(123)
+
+    monkeypatch.setattr(stopping_server, "terminate", denied)
+    with pytest.raises(UpdateError, match="Permission denied"):
+        update_module.stop_running_server(123)
+    assert stopping_server.events == []
+    assert update_module.PID_FILE.exists()
+
+
+@pytest.fixture
+def stopping_child(stopping_server):
+    child = type(stopping_server)()
+    child.pid = 456
+    child.events = []
+    stopping_server.child_processes = [child]
+    return child
+
+
+@pytest.mark.parametrize("exit_on, events", [
+    ("terminate", ["terminate"]), ("kill", ["terminate", "kill"]),
+])
+def test_stop_server_waits_for_children_after_parent_exits(stopping_server, stopping_child, exit_on, events):
+    stopping_child.exit_on = exit_on
+    update_module.stop_running_server(123)
+    assert stopping_server.events == ["terminate"]
+    assert stopping_child.events == events
+    assert not stopping_child.alive
+    assert not update_module.PID_FILE.exists()
+    assert not update_module.SHUTDOWN_SIGNAL.exists()
+    if exit_on == "kill":
+        assert stopping_server.now >= (
+            update_module.SERVER_STOP_TIMEOUT_SECONDS + update_module.SERVER_TERMINATE_TIMEOUT_SECONDS
+        )
+
+
+def test_stop_server_aborts_when_child_survives_kill(stopping_server, stopping_child):
+    stopping_child.exit_on = "never"
+    with pytest.raises(UpdateError, match="did not stop"):
+        update_module.stop_running_server(123)
+    assert not stopping_server.alive
+    assert stopping_child.events == ["terminate", "kill"]
+    assert update_module.PID_FILE.exists()
+    assert update_module.SHUTDOWN_SIGNAL.exists()
+
+
+def test_stop_server_continues_when_child_exits_during_termination(stopping_server, stopping_child, monkeypatch):
+    def disappeared():
+        stopping_child.alive = False
+        raise psutil.NoSuchProcess(456)
+
+    monkeypatch.setattr(stopping_child, "terminate", disappeared)
+    update_module.stop_running_server(123)
+    assert stopping_server.events == ["terminate"]
+    assert not update_module.PID_FILE.exists()
+
+
+def test_stop_server_does_not_signal_reused_child_pid(stopping_server, stopping_child):
+    stopping_child.same_process = False
+    update_module.stop_running_server(123)
+    assert stopping_child.events == []
+    assert stopping_server.events == ["terminate"]
+
+
+def test_stop_server_treats_zombie_child_as_exited(stopping_server, stopping_child, monkeypatch):
+    monkeypatch.setattr(stopping_child, "status", lambda: psutil.STATUS_ZOMBIE)
+    update_module.stop_running_server(123)
+    assert stopping_child.events == []
+    assert not update_module.PID_FILE.exists()
+
+
+def test_stop_server_aborts_when_child_termination_is_denied(stopping_server, stopping_child, monkeypatch):
+    def denied():
+        raise psutil.AccessDenied(456)
+
+    monkeypatch.setattr(stopping_child, "terminate", denied)
+    with pytest.raises(UpdateError, match="Permission denied"):
+        update_module.stop_running_server(123)
+    assert stopping_server.events == []
+    assert update_module.PID_FILE.exists()
+
+
+def test_stop_server_preserves_dashboard_updater_child(stopping_server, stopping_child):
+    stopping_child.pid = os.getpid()
+    update_module.stop_running_server(123)
+    assert stopping_child.events == []
+    assert stopping_child.alive
+    assert stopping_server.events == ["terminate"]
+    assert not update_module.PID_FILE.exists()
+
+
+def test_stop_server_preserves_updater_launcher_ancestor(stopping_server, stopping_child, monkeypatch):
+    monkeypatch.setattr(stopping_server, "parents", lambda: [stopping_child])
+    update_module.stop_running_server(123)
+    assert stopping_child.events == []
+    assert stopping_child.alive
+    assert stopping_server.events == ["terminate"]
+
+
+@pytest.mark.parametrize("command", [
+    ["python", "-m", "agent.bootstrap.cli", "-f", "--no-tray"],
+    ["python", "-m", "agent.bootstrap.cli", "--verbose", "--no-tray"],
+    ["/home/user/envs/bin/k41", "--foreground"],
+    ["python", "/home/user/envs/bin/k41", "--no-tray"],
+])
+def test_stop_server_recognizes_installed_entrypoints(stopping_server, command):
+    stopping_server.command = command
+    update_module.stop_running_server(123)
+    assert stopping_server.events == ["terminate"]
 
 
 def test_update_check_reports_available(monkeypatch: pytest.MonkeyPatch) -> None:

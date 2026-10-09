@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 import shutil
@@ -15,6 +16,7 @@ from typing import Callable
 from uuid import uuid4
 
 import httpx
+import psutil
 
 from agent.bootstrap.version import APP_VERSION, PACKAGE_NAME
 from agent.bootstrap.update_state import (
@@ -31,10 +33,13 @@ DEFAULT_ARTIFACT_NAME = "k41-agent-release.zip"
 BACKUP_PREFIX = "app-"
 DOWNLOAD_TIMEOUT_SECONDS = 60.0
 SERVER_STOP_TIMEOUT_SECONDS = 15.0
+SERVER_TERMINATE_TIMEOUT_SECONDS = 10.0
+SERVER_KILL_TIMEOUT_SECONDS = 5.0
 SERVER_LOG_FILE = Path.home() / ".k41-agent" / "server.log"
 PID_FILE = Path.home() / ".k41-agent" / "server.pid"
 TRAY_PID_FILE = Path.home() / ".k41-agent" / "tray.pid"
 SHUTDOWN_SIGNAL = Path.home() / ".k41-agent" / "shutdown.signal"
+logger = logging.getLogger(__name__)
 
 
 class UpdateError(RuntimeError):
@@ -780,16 +785,103 @@ def stop_running_tray(pid: int) -> bool:
 
 
 def stop_running_server(pid: int) -> None:
+    # Keep the same Process object: psutil checks creation time before sending
+    # signals, protecting unrelated processes if the PID is reused while waiting.
+    try:
+        process = psutil.Process(pid)
+    except psutil.NoSuchProcess:
+        _cleanup_server_stop_files(pid)
+        return
+    except psutil.AccessDenied:
+        process = None
+
+    children: list[psutil.Process] = []
+
+    def tracked_process_alive(target: psutil.Process) -> bool:
+        try:
+            return target.is_running() and target.status() not in {psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD}
+        except psutil.NoSuchProcess:
+            return False
+
+    def wait_for_exit(timeout: float) -> bool:
+        deadline = time.monotonic() + timeout
+        while True:
+            server_alive = is_process_alive(pid) and (process is None or process.is_running())
+            if not server_alive and not any(tracked_process_alive(child) for child in children):
+                _cleanup_server_stop_files(pid)
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.5)
+
     SHUTDOWN_SIGNAL.parent.mkdir(parents=True, exist_ok=True)
     SHUTDOWN_SIGNAL.write_text(str(pid), encoding="utf-8")
-    deadline = time.time() + SERVER_STOP_TIMEOUT_SECONDS
-    while time.time() < deadline:
-        if not is_process_alive(pid):
-            PID_FILE.unlink(missing_ok=True)
-            SHUTDOWN_SIGNAL.unlink(missing_ok=True)
+    if wait_for_exit(SERVER_STOP_TIMEOUT_SECONDS):
+        return
+
+    try:
+        if process is None or not _is_server_command(process.cmdline()):
+            raise UpdateError(
+                f"Server process {pid} did not stop and its identity could not be verified. "
+                "The installation was not changed."
+            )
+        # Capture descendants before stopping the parent: orphaned children
+        # cannot reliably be discovered afterward and may keep app files open.
+        # Dashboard updates run as a child of the server. Preserve the updater
+        # and any launcher ancestors so tree shutdown cannot stop this update.
+        protected_pids = {os.getpid()}
+        protected_pids.update(
+            ancestor.pid for ancestor in psutil.Process(os.getpid()).parents() if ancestor.pid != pid
+        )
+        children = [child for child in process.children(recursive=True) if child.pid not in protected_pids]
+        targets = [*reversed(children), process]
+        logger.warning("Server process %s did not stop gracefully; requesting termination.", pid)
+        for target in targets:
+            try:
+                if tracked_process_alive(target):
+                    target.terminate()
+            except psutil.NoSuchProcess:
+                pass
+        if wait_for_exit(SERVER_TERMINATE_TIMEOUT_SECONDS):
             return
-        time.sleep(0.5)
+        logger.warning("Server process %s did not terminate; forcing it to stop.", pid)
+        for target in targets:
+            try:
+                if tracked_process_alive(target):
+                    target.kill()
+            except psutil.NoSuchProcess:
+                pass
+        if wait_for_exit(SERVER_KILL_TIMEOUT_SECONDS):
+            return
+    except psutil.NoSuchProcess:
+        _cleanup_server_stop_files(pid)
+        return
+    except psutil.AccessDenied as exc:
+        raise UpdateError(f"Permission denied while stopping server process {pid}.") from exc
     raise UpdateError(f"Server process {pid} did not stop within timeout.")
+
+
+def _is_server_command(command: list[str]) -> bool:
+    if len(command) >= 3 and command[1:3] == ["-m", "agent.bootstrap.cli"]:
+        arguments = command[3:]
+    elif command and Path(command[0]).name.lower() in {"k41", "k41.exe"}:
+        arguments = command[1:]
+    elif len(command) >= 2 and Path(command[1]).name.lower() in {"k41", "k41.exe"}:
+        arguments = command[2:]
+    else:
+        return False
+    # Subcommands such as update, init and tray must never be terminated here.
+    server_flags = {"--foreground", "-f", "--no-tray", "--tray", "--verbose", "--quiet", "-q"}
+    return all(argument in server_flags for argument in arguments)
+
+
+def _cleanup_server_stop_files(pid: int) -> None:
+    for path in (PID_FILE, SHUTDOWN_SIGNAL):
+        try:
+            if path.read_text(encoding="utf-8").strip() == str(pid):
+                path.unlink(missing_ok=True)
+        except FileNotFoundError:
+            pass
 
 
 def start_tray(install: ManagedInstall) -> None:

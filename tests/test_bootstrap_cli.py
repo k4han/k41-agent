@@ -132,12 +132,11 @@ def test_background_python_executable_prefers_pythonw_on_windows(tmp_path):
 
 
 def test_is_process_alive_uses_psutil_pid_exists(monkeypatch):
-    class FakePsutil:
-        @staticmethod
-        def pid_exists(pid: int) -> bool:
-            return pid == 123
+    import psutil
+    from types import SimpleNamespace
 
-    monkeypatch.setitem(sys.modules, "psutil", FakePsutil)
+    monkeypatch.setattr(psutil, "pid_exists", lambda pid: pid == 123)
+    monkeypatch.setattr(psutil, "Process", lambda pid: SimpleNamespace(status=lambda: psutil.STATUS_RUNNING))
 
     assert cli_module._is_process_alive(123) is True
     assert cli_module._is_process_alive(456) is False

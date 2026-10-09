@@ -55,7 +55,15 @@ def is_process_alive(pid: int) -> bool:
     try:
         import psutil
 
-        return psutil.pid_exists(pid)
+        if not psutil.pid_exists(pid):
+            return False
+        try:
+            return psutil.Process(pid).status() not in {psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD}
+        except psutil.NoSuchProcess:
+            return False
+        except psutil.AccessDenied:
+            # An unreadable process must still block duplicate server startup.
+            return True
     except Exception:
         try:
             os.kill(pid, 0)

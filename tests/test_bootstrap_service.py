@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
+
+import pytest
 
 from agent.bootstrap import service as service_module
 
@@ -22,6 +25,7 @@ def test_render_unit_uses_foreground_no_tray(tmp_path: Path) -> None:
     assert "WantedBy=default.target" in content
     assert "Restart=on-failure" in content
     assert "--foreground --no-tray" in content
+    assert "TimeoutStopSec=30" in content
     assert str(paths.python_exe) in content
     assert str(paths.app_dir) in content
     assert "-m agent.bootstrap.cli" in content
@@ -107,3 +111,27 @@ def test_service_cli_rejects_unknown_action() -> None:
     result = runner.invoke(cli_module.app, ["service", "bogus"])
     assert result.exit_code == 2
     assert "Unknown service action" in result.output
+
+
+def test_stop_service_waits_for_slow_shutdown(monkeypatch) -> None:
+    monkeypatch.setattr(service_module, "is_systemd_available", lambda: (True, "ok"))
+
+    def slow_stop(command, **kwargs):
+        assert command == ["systemctl", "--user", "stop", service_module.SERVICE_NAME]
+        # Older installed units may take systemd's default 90 seconds to stop.
+        if kwargs["timeout"] <= 90:
+            raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(service_module.subprocess, "run", slow_stop)
+    service_module.stop_service()
+
+
+def test_stop_service_preserves_systemd_error(monkeypatch) -> None:
+    monkeypatch.setattr(service_module, "is_systemd_available", lambda: (True, "ok"))
+    monkeypatch.setattr(
+        service_module.subprocess, "run",
+        lambda command, **kwargs: subprocess.CompletedProcess(command, 1, "", "Access denied"),
+    )
+    with pytest.raises(RuntimeError, match="Access denied"):
+        service_module.stop_service()

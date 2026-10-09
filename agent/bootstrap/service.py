@@ -15,6 +15,9 @@ from pathlib import Path
 
 SERVICE_NAME = "k41-agent.service"
 SERVICE_DESCRIPTION = "K41 Agent Server"
+SERVICE_STOP_TIMEOUT_SECONDS = 30
+# Allow older installed units to finish their default 90-second stop timeout.
+SYSTEMCTL_STOP_TIMEOUT_SECONDS = 120.0
 
 
 @dataclass(frozen=True)
@@ -91,6 +94,7 @@ WorkingDirectory={app_dir}
 ExecStart={python_exe} -m agent.bootstrap.cli --foreground --no-tray
 Restart=on-failure
 RestartSec=5
+TimeoutStopSec={SERVICE_STOP_TIMEOUT_SECONDS}
 Environment=K41_AGENT_HOME={agent_home}
 Environment=AGENT_HOME={agent_home}
 Environment=VIRTUAL_ENV={agent_home}/envs
@@ -250,7 +254,7 @@ def start_service() -> None:
 
 def stop_service() -> None:
     _ensure_systemd_available()
-    result = _run_systemctl(["stop", SERVICE_NAME])
+    result = _run_systemctl(["stop", SERVICE_NAME], timeout=SYSTEMCTL_STOP_TIMEOUT_SECONDS)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
         raise RuntimeError(f"Could not stop {SERVICE_NAME}: {detail or 'unknown error'}")
