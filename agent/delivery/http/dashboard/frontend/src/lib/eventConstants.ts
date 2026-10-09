@@ -1,6 +1,7 @@
 export const STREAM_EVENTS = {
   THREAD_CREATED: "thread_created",
   THREAD_TITLE: "thread_title",
+  CONTEXT_USAGE: "context_usage",
   MESSAGE: "message",
   FINAL: "final",
   TOOL_CALL: "tool_call",

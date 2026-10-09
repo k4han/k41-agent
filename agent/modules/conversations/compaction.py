@@ -35,6 +35,7 @@ from agent.modules.usage import (
     load_usage_context,
     with_usage_tracking,
 )
+from agent.modules.usage.context_breakdown import estimate_compacted_context_breakdown
 from agent.modules.workflows import get_workflow_graph, make_run_config
 from agent.shared.config import get_config_service
 from agent.shared.infrastructure.parsing import extract_final_text_content
@@ -482,6 +483,15 @@ async def _compact_conversation_thread_locked(
         except Exception:
             logger.debug("Could not read thread metadata for %s; using default model.", thread_id)
 
+    previous_breakdown = estimate_compacted_context_breakdown(messages)
+    try:
+        from agent.modules.usage import get_usage_service
+
+        previous_usage = await get_usage_service().get_thread_usage(thread_id)
+        previous_breakdown = previous_usage.get("context_breakdown") or previous_breakdown
+    except Exception as exc:
+        logger.debug("Could not load prompt estimates for thread %s: %s", thread_id, exc)
+
     compacted = await compact_message_history(
         messages,
         thread_id=thread_id,
@@ -528,6 +538,8 @@ async def _compact_conversation_thread_locked(
 
     from langchain_core.messages.utils import count_tokens_approximately
     retained_tokens = count_tokens_approximately(injected_messages)
+    context_breakdown = estimate_compacted_context_breakdown(injected_messages, previous_breakdown)
+    context_tokens = sum(context_breakdown.values())
 
     try:
         from agent.modules.usage import UsageEventInput, get_usage_service
@@ -548,7 +560,10 @@ async def _compact_conversation_thread_locked(
             input_tokens=0,
             output_tokens=0,
             total_tokens=0,
-            usage_metadata={"retained_tokens": retained_tokens},
+            usage_metadata={
+                "retained_tokens": retained_tokens,
+                "context_breakdown": context_breakdown,
+            },
         )
         await get_usage_service().record_event(usage_event)
     except Exception as exc:
@@ -563,7 +578,9 @@ async def _compact_conversation_thread_locked(
         "kept_count": compacted.kept_count,
         "summary": compacted.summary,
         "retained_tokens": retained_tokens,
-        "current_context_tokens": retained_tokens,
+        "current_context_tokens": context_tokens,
+        "context_breakdown": context_breakdown,
+        "context_estimated": True,
     }
 
 

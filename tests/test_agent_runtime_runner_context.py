@@ -646,7 +646,8 @@ async def test_run_agent_stream_extracts_last_text_from_structured_content(monke
 
 
 @pytest.mark.asyncio
-async def test_run_agent_stream_emits_message_chunks_and_final(monkeypatch):
+@pytest.mark.parametrize("resume", [False, True])
+async def test_run_agent_stream_emits_message_chunks_and_final(monkeypatch, resume):
     captured: dict = {}
 
     class _FakeCatalog:
@@ -658,8 +659,16 @@ async def test_run_agent_stream_emits_message_chunks_and_final(monkeypatch):
             )
 
     class _FakeGraph:
+        async def aget_state(self, config):
+            return SimpleNamespace(values={"messages": []})
+
         async def astream(self, payload, **kwargs):
             captured["kwargs"] = kwargs
+            yield ("custom", {"type": "ignored_event"})
+            yield ("custom", {
+                "type": "context_usage", "thread_id": "thread-1",
+                "current_context_tokens": 100, "context_window": 128000, "estimated": True,
+            })
             yield ("messages", (AIMessageChunk(content="hel"), {"langgraph_node": "llm"}))
             yield ("messages", (AIMessageChunk(content=" "), {"langgraph_node": "llm"}))
             yield (
@@ -689,11 +698,16 @@ async def test_run_agent_stream_emits_message_chunks_and_final(monkeypatch):
             user_input="hi",
             thread_id="thread-1",
             agent_name="default",
+            resume=resume,
         )
     ]
 
-    assert captured["kwargs"]["stream_mode"] == ["messages", "values"]
+    assert captured["kwargs"]["stream_mode"] == ["messages", "values", "custom"]
     assert events == [
+        {
+            "type": "context_usage", "thread_id": "thread-1",
+            "current_context_tokens": 100, "context_window": 128000, "estimated": True,
+        },
         {"type": "message", "content": "hel"},
         {"type": "message", "content": " "},
         {"type": "message", "content": "lo"},
@@ -1435,6 +1449,7 @@ async def test_run_agent_edit_stream_forks_from_parent_and_preserves_attachments
             captured["payload"] = payload
             captured["kwargs"] = kwargs
             edited = payload["messages"][0]
+            yield ("custom", {"type": "context_usage", "current_context_tokens": 120, "context_window": 128000})
             yield ("values", {"messages": [edited, AIMessage(content="edited response", id="ai-1")]})
 
     monkeypatch.setattr(
@@ -1460,7 +1475,11 @@ async def test_run_agent_edit_stream_forks_from_parent_and_preserves_attachments
         )
     ]
 
-    assert events == [{"type": "final", "content": "edited response"}]
+    assert events == [
+        {"type": "context_usage", "current_context_tokens": 120, "context_window": 128000},
+        {"type": "final", "content": "edited response"},
+    ]
+    assert captured["kwargs"]["stream_mode"] == ["messages", "values", "custom"]
     assert captured["kwargs"]["config"]["configurable"]["checkpoint_id"] == "parent-1"
     edited_message = captured["payload"]["messages"][0]
     assert edited_message.id == "user-1"

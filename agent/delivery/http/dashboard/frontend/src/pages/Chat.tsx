@@ -363,15 +363,13 @@ export function ChatPage() {
   });
   const { attachments, addFiles, addTextContent, removeAttachment, clearAttachments, clearAllAttachments } = attach;
 
-  const { contextWindowData, refreshThreadUsage, updateContextTokens } = useContextWindow({
+  const { contextWindowData, refreshThreadUsage, updateContextUsage, updateCompactedContextUsage } = useContextWindow({
     getCurrentThreadId: currentThreadId,
     getStreaming: streaming,
     getSelectedCard: selectedCard,
     getData: data,
     getProvider: provider,
     getModel: model,
-    getAttachments: attachments,
-    getItems: items,
   });
 
   const [compacting, setCompacting] = createSignal(false);
@@ -651,6 +649,7 @@ export function ChatPage() {
     onError: (message) => showToast(message, "error"),
     setRecursionLimitReached: (v) => setRecursionLimitReached(v),
     onThreadCreated,
+    onContextUsage: updateContextUsage,
     onThreadTitle: (threadId, title) => {
       if (threadId === currentThreadId()) {
         setThreadTitleOverride(title);
@@ -1757,6 +1756,7 @@ export function ChatPage() {
         summary: string;
         current_context_tokens?: number;
         retained_tokens?: number;
+        context_breakdown?: unknown;
       }>(`/dashboard-api/chat-history/${encodeURIComponent(threadId)}/compact`, {});
 
       if (currentThreadId() !== threadId) {
@@ -1773,10 +1773,9 @@ export function ChatPage() {
           id: allocItemId(),
         }));
         setItems(newTranscriptItems, threadId);
-        const nextTokens = payload.current_context_tokens ?? payload.retained_tokens;
-        if (typeof nextTokens === "number") {
-          updateContextTokens(nextTokens);
-        }
+        updateCompactedContextUsage(
+          payload.current_context_tokens ?? payload.retained_tokens, threadId, payload.context_breakdown,
+        );
         void refreshThreadUsage(threadId);
         showToast(
           `Conversation compacted! Summarized ${payload.compacted_count} earlier message(s).`,

@@ -11,9 +11,10 @@ from langchain_core.runnables import RunnableConfig
 from agent.modules.providers import get_resolved_chat_model
 from agent.modules.workflows.model_effort import get_workflow_reasoning_effort_kwargs
 from agent.modules.usage import with_usage_tracking
+from agent.modules.usage.context_breakdown import estimate_context_breakdown
 from agent.modules.prompt_variables import get_runtime_prompt_variable_values
 from agent.modules.workflows.message_history import normalize_messages_for_chat_model
-from agent.modules.workflows.model_context import prepare_model_context
+from agent.modules.workflows.model_context import emit_reported_context_usage, prepare_model_context
 from agent.modules.workflows.prompt_builders import (
     build_llm_system_prompt,
 )
@@ -84,7 +85,8 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
         workspace=workspace,
         repository_skill_dir=repository_skill_dir,
     )
-    system_prompt = get_cached_system_prompt(cache_key)
+    prompt_sections: dict[str, str] = {}
+    system_prompt = get_cached_system_prompt(cache_key, sections=prompt_sections)
     catalog_has_skills = None
 
     if system_prompt is None:
@@ -110,8 +112,9 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
             prompt_variables=prompt_variables,
             skills_catalog_xml=skills_catalog_xml,
             scratchpad_path=f".k41-agent/scratchpad/{conversation_key(thread_id or '')}/",
+            sections=prompt_sections,
         )
-        store_system_prompt(cache_key, system_prompt)
+        store_system_prompt(cache_key, system_prompt, sections=prompt_sections)
 
     from types import SimpleNamespace
     from agent.modules.tools import migrate_history_outputs
@@ -143,6 +146,8 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
         agent_config=agent_config, resolved=resolved, config=config,
     )
     messages: list[BaseMessage] = normalize_messages_for_chat_model([system, *history])
+    prompt_sections["active_skills"] = skill_context
+    context_breakdown = estimate_context_breakdown(messages, tools=tools, prompt_sections=prompt_sections)
     model_kwargs = get_workflow_reasoning_effort_kwargs(ctx, agent_config, resolved)
     llm = resolved.model.bind_tools(tools, **model_kwargs)
     response = await llm.ainvoke(
@@ -153,8 +158,10 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
             provider_name=resolved.provider_name,
             model_name=resolved.model_name,
             call_kind="agent",
+            context_breakdown=context_breakdown,
         ),
     )
+    emit_reported_context_usage(response, resolved=resolved, config=config, context_breakdown=context_breakdown)
     updates = {"messages": [*history_updates, response]}
     if active_skills or state.get("active_skills") or processed_skill_messages:
         updates.update(active_skills=active_skills, processed_skill_messages=processed_skill_messages)

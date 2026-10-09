@@ -13,13 +13,14 @@ from agent.modules.workflows.nodes.trim import (
 )
 from agent.modules.workflows.run_config import WorkflowContext
 from agent.modules.workflows.message_history import normalize_messages_for_chat_model
-from agent.modules.workflows.model_context import prepare_model_context
+from agent.modules.workflows.model_context import emit_reported_context_usage, prepare_model_context
 from agent.modules.workflows.state.extensions import (
     ResearchState,
 )
 from agent.modules.providers import get_resolved_chat_model
 from agent.modules.workflows.model_effort import get_workflow_reasoning_effort_kwargs
 from agent.modules.usage import with_usage_tracking
+from agent.modules.usage.context_breakdown import estimate_context_breakdown
 from agent.shared.infrastructure.parsing import extract_final_text_content
 
 
@@ -51,6 +52,7 @@ async def _research_node(state: ResearchState, config: RunnableConfig, runtime):
         agent_config=agent_config, resolved=resolved, config=config,
     )
     messages = normalize_messages_for_chat_model([system, *history])
+    context_breakdown = estimate_context_breakdown(messages)
     response = await llm.ainvoke(
         messages,
         config=with_usage_tracking(
@@ -59,9 +61,11 @@ async def _research_node(state: ResearchState, config: RunnableConfig, runtime):
             provider_name=resolved.provider_name,
             model_name=resolved.model_name,
             call_kind="research",
+            context_breakdown=context_breakdown,
         ),
         **model_kwargs,
     )
+    emit_reported_context_usage(response, resolved=resolved, config=config, context_breakdown=context_breakdown)
     return {"messages": [*history_updates, response]}
 
 
@@ -78,6 +82,7 @@ async def _summarize_node(state: ResearchState, config: RunnableConfig, runtime)
         agent_config=agent_config, resolved=resolved, config=config,
     )
     messages = normalize_messages_for_chat_model([system, *history])
+    context_breakdown = estimate_context_breakdown(messages)
     response = await llm.ainvoke(
         messages,
         config=with_usage_tracking(
@@ -86,9 +91,11 @@ async def _summarize_node(state: ResearchState, config: RunnableConfig, runtime)
             provider_name=resolved.provider_name,
             model_name=resolved.model_name,
             call_kind="research_summary",
+            context_breakdown=context_breakdown,
         ),
         **model_kwargs,
     )
+    emit_reported_context_usage(response, resolved=resolved, config=config, context_breakdown=context_breakdown)
     return {
         "messages": [*history_updates, response],
         "summary": extract_final_text_content(response.content),

@@ -806,12 +806,31 @@ export interface ModelUsageDetail {
   percentage: number;
 }
 
+export const CONTEXT_CATEGORIES = [
+  "system_prompt", "system_tools", "skills", "subagents",
+  "user_messages", "agent_responses", "tool_calls",
+] as const;
+
+export type ContextCategory = typeof CONTEXT_CATEGORIES[number];
+export type ContextBreakdown = Record<ContextCategory, number>;
+
+export function parseContextBreakdown(value: unknown): ContextBreakdown | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const breakdown = value as Record<string, unknown>;
+  if (!CONTEXT_CATEGORIES.every((key) => typeof breakdown[key] === "number"
+    && Number.isSafeInteger(breakdown[key]) && (breakdown[key] as number) >= 0)) return undefined;
+  return Object.fromEntries(CONTEXT_CATEGORIES.map((key) => [key, breakdown[key]])) as ContextBreakdown;
+}
+
 export interface ThreadUsagePayload {
   thread_id: string;
   total_tokens: number;
   input_tokens: number;
   output_tokens: number;
   current_context_tokens?: number;
+  context_estimated?: boolean;
+  has_context_usage?: boolean;
+  context_breakdown?: ContextBreakdown | null;
   latest_input_tokens?: number;
   latest_output_tokens?: number;
   latest_total_tokens?: number;

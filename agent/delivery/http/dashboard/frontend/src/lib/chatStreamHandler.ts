@@ -6,6 +6,8 @@ import {
   createTranscriptTool,
 } from "@/components/Transcript";
 import type { AppendScrollMode } from "@/lib/chatTypes";
+import type { ContextUsage } from "@/lib/chatStreamStore";
+import { parseContextBreakdown } from "@/types";
 import { recursionLimitStorageKey, STREAM_ERROR_CODES, STREAM_EVENTS } from "@/lib/eventConstants";
 import { GENERATE_IMAGE_TOOL_NAME } from "@/lib/generatedImages";
 import {
@@ -27,6 +29,7 @@ export interface StreamCallbacks {
   setRecursionLimitReached: (value: boolean) => void;
   onThreadCreated: (threadId: string, streamThreadIdRef: StreamThreadIdRef) => void;
   onThreadTitle?: (threadId: string, title: string) => void;
+  onContextUsage?: (usage: ContextUsage, threadId: string) => void;
 }
 
 // ── Mutable refs shared across event handling ──
@@ -60,6 +63,32 @@ export function handleStreamEvent(
       return;
     }
     callbacks.onThreadTitle?.(threadId, title);
+    return;
+  }
+
+  if (event.type === STREAM_EVENTS.CONTEXT_USAGE) {
+    if (event.estimated !== false) {
+      return;
+    }
+    const eventThreadId = typeof event.thread_id === "string" ? event.thread_id : "";
+    if (eventThreadId && streamThreadIdRef.id && eventThreadId !== streamThreadIdRef.id) {
+      return;
+    }
+    const tokens = event.current_context_tokens;
+    const limit = event.context_window;
+    if (typeof tokens !== "number" || !Number.isFinite(tokens) || tokens < 0
+      || typeof limit !== "number" || !Number.isFinite(limit) || limit <= 0) {
+      return;
+    }
+    callbacks.onContextUsage?.({
+      current_context_tokens: tokens,
+      context_window: limit,
+      input_tokens: typeof event.input_tokens === "number" && Number.isSafeInteger(event.input_tokens)
+        && event.input_tokens >= 0 ? event.input_tokens : undefined,
+      output_tokens: typeof event.output_tokens === "number" && Number.isSafeInteger(event.output_tokens)
+        && event.output_tokens >= 0 ? event.output_tokens : undefined,
+      context_breakdown: parseContextBreakdown(event.context_breakdown),
+    }, streamThreadIdRef.id);
     return;
   }
 

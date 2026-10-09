@@ -1,5 +1,13 @@
-import { createSignal, onCleanup, onMount } from "solid-js";
+import { For, createSignal, onCleanup, onMount } from "solid-js";
 import { useToast } from "@/components/Toast";
+import type { ContextCategory } from "@/types";
+
+export interface ContextWindowCategory {
+  key: ContextCategory;
+  label: string;
+  tokens: number | null;
+  formattedValue: string;
+}
 
 export interface ContextWindowData {
   maxTokens: number;
@@ -8,12 +16,11 @@ export interface ContextWindowData {
   outputTokens: number;
   totalPercent: number;
   reservedPercent: number;
-  systemPercent: string;
-  toolPercent: string;
-  messagesPercent: string;
-  filePercent: string;
+  categories: ContextWindowCategory[];
   formattedUsed: string;
   formattedMax: string;
+  hasReportedUsage: boolean;
+  estimated: boolean;
 }
 
 export interface ContextWindowIndicatorProps {
@@ -94,11 +101,14 @@ export function ContextWindowIndicator(props: ContextWindowIndicatorProps) {
         <div class="cw-title">Context Window</div>
         
         <div class="cw-tokens-row">
-          <span class="cw-tokens-value">
+          <span class="cw-tokens-value" title={props.data.estimated
+            ? "Estimated retained history after compaction plus the latest system, tools, skills and subagent prompt estimates."
+            : "Input and response tokens reported by the provider for the last completed model call"}>
             {props.data.formattedUsed} / {props.data.formattedMax} tokens
           </span>
           <span class="cw-tokens-percent">
-            {Math.round(props.data.totalPercent)}%
+            {props.data.hasReportedUsage || props.data.estimated
+              ? `${props.data.estimated ? "~" : ""}${Math.round(props.data.totalPercent)}%` : "—"}
           </span>
         </div>
 
@@ -112,25 +122,19 @@ export function ContextWindowIndicator(props: ContextWindowIndicatorProps) {
           <span>Reserved for response</span>
         </div>
 
-        <div class="cw-section-title">System</div>
-        <div class="cw-row">
-          <span class="cw-label">System Instructions</span>
-          <span class="cw-value">{props.data.systemPercent}</span>
+        <div class="cw-section-title" title={props.data.estimated
+          ? "Retained messages are recounted after compaction. System, tools, skills and subagent prompt estimates come from the latest available context. Percentages use the model context window capacity."
+          : "Estimated shares of the last model input and its response, scaled to provider-reported tokens. Percentages use the model context window capacity."}>
+          Context breakdown (Estimated)
         </div>
-        <div class="cw-row">
-          <span class="cw-label">Tool Definitions</span>
-          <span class="cw-value">{props.data.toolPercent}</span>
-        </div>
-
-        <div class="cw-section-title">User Context</div>
-        <div class="cw-row">
-          <span class="cw-label">Messages</span>
-          <span class="cw-value">{props.data.messagesPercent}</span>
-        </div>
-        <div class="cw-row">
-          <span class="cw-label">Files</span>
-          <span class="cw-value">{props.data.filePercent}</span>
-        </div>
+        <For each={props.data.categories}>
+          {(category) => (
+            <div class="cw-row">
+              <span class="cw-label">{category.label}</span>
+              <span class="cw-value">{category.formattedValue}</span>
+            </div>
+          )}
+        </For>
 
         <button 
           class="cw-compact-btn" 

@@ -1,12 +1,23 @@
 import { createSignal } from "solid-js";
 import type { TranscriptItem } from "@/components/Transcript";
+import type { ContextBreakdown } from "@/types";
 
 export type ChatTranscriptItem = TranscriptItem & { id: number; key?: string };
+
+export interface ContextUsage {
+  current_context_tokens: number;
+  context_window: number;
+  estimated?: boolean;
+  input_tokens?: number;
+  output_tokens?: number;
+  context_breakdown?: ContextBreakdown;
+}
 
 export type PersistedStreamSignals = {
   items: ReturnType<typeof createSignal<ChatTranscriptItem[]>>;
   streaming: ReturnType<typeof createSignal<boolean>>;
   controller: ReturnType<typeof createSignal<AbortController | null>>;
+  reportedContextUsage: ReturnType<typeof createSignal<ContextUsage | null>>;
 };
 
 export const persistedStreams = new Map<string, PersistedStreamSignals>();
@@ -29,6 +40,7 @@ export function getOrCreateStreamSignals(
       items: createSignal<ChatTranscriptItem[]>(initialItems),
       streaming: createSignal<boolean>(false),
       controller: createSignal<AbortController | null>(null),
+      reportedContextUsage: createSignal<ContextUsage | null>(null),
     };
     persistedStreams.set(threadId, entry);
   }

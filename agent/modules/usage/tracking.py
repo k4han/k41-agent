@@ -11,6 +11,7 @@ from langchain_core.messages import AIMessage
 from langchain_core.outputs import LLMResult
 
 from agent.modules.usage.repository import UsageEventInput
+from agent.modules.usage.context_breakdown import estimate_response_breakdown, reconcile_context_breakdown
 from agent.modules.usage.service import get_usage_service, usage_context_from_config
 from agent.shared.infrastructure.db.base import utcnow
 
@@ -43,10 +44,12 @@ class LLMUsageCallback(BaseCallbackHandler):
         *,
         config: dict[str, Any] | None,
         tracking: UsageTrackingInfo,
+        context_breakdown: dict[str, int] | None = None,
     ) -> None:
         super().__init__()
         self._context = usage_context_from_config(config)
         self._tracking = tracking
+        self._context_breakdown = dict(context_breakdown) if context_breakdown is not None else None
 
     def on_llm_end(
         self,
@@ -57,6 +60,20 @@ class LLMUsageCallback(BaseCallbackHandler):
         **kwargs: Any,
     ) -> Any:
         usage = extract_usage(response)
+        usage_metadata = dict(usage.usage_metadata or {})
+        if self._context_breakdown is not None and usage.input_tokens is not None:
+            usage_metadata["context_breakdown"] = reconcile_context_breakdown(
+                self._context_breakdown, usage.input_tokens,
+            )
+            usage_metadata["context_output_breakdown"] = estimate_response_breakdown(
+                [
+                    generation.message
+                    for generations in response.generations or []
+                    for generation in generations
+                    if isinstance(getattr(generation, "message", None), AIMessage)
+                ],
+                max(0, usage.output_tokens or 0),
+            )
         event = UsageEventInput(
             thread_id=self._context.thread_id,
             root_thread_id=self._context.root_thread_id,
@@ -74,7 +91,7 @@ class LLMUsageCallback(BaseCallbackHandler):
             total_tokens=usage.total_tokens,
             input_token_details=usage.input_token_details,
             output_token_details=usage.output_token_details,
-            usage_metadata=usage.usage_metadata,
+            usage_metadata=usage_metadata or None,
             run_id=str(run_id),
             parent_run_id=str(parent_run_id or ""),
             created_at=utcnow(),
@@ -90,10 +107,12 @@ def with_usage_tracking(
     model_name: str,
     call_kind: str = "agent",
     internal: bool = False,
+    context_breakdown: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     next_config = dict(config or {})
     handler = LLMUsageCallback(
         config=next_config,
+        context_breakdown=context_breakdown,
         tracking=UsageTrackingInfo(
             agent_name=agent_name,
             provider_name=provider_name,

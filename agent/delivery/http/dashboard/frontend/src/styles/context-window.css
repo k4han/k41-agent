@@ -34,7 +34,7 @@
   /* Align with the 40px send button across the 8px toolbar gap. */
   right: -48px;
   transform: translateY(8px);
-  width: 290px;
+  width: 350px;
   max-width: calc(100vw - 32px);
   background: var(--surface);
   color: var(--fg);
@@ -70,7 +70,7 @@
 
 @media (max-width: 640px) {
   .context-window-popover {
-    width: 280px;
+    width: 350px;
   }
 
   .cw-compact-btn {
@@ -196,6 +196,7 @@
   align-items: center;
   padding: 4px 0;
   font-size: 12px;
+  gap: 12px;
 }
 
 .cw-label {
@@ -205,6 +206,9 @@
 .cw-value {
   font-weight: 550;
   color: var(--fg);
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Compact Button */

@@ -49,6 +49,64 @@ async def prepare(messages, ctx=None, card=None, model=None, tools=None, system=
     )
 
 
+@pytest.mark.asyncio
+async def test_preparing_context_does_not_publish_token_estimates(monkeypatch):
+    from langchain_core.tools import tool
+
+    @tool
+    def read_document(path: str) -> str:
+        """Read the contents of a document at the given path."""
+        return path
+
+    events = []
+    monkeypatch.setattr(model_context, "get_stream_writer", lambda: events.append)
+    messages = [HumanMessage(content="Read the document")]
+    system = SystemMessage(content="Follow the user's instructions")
+    await prepare(messages, tools=[read_document], system=system)
+    assert not events
+
+
+@pytest.mark.asyncio
+async def test_context_usage_streams_only_after_the_provider_returns():
+    from langgraph.graph import END, START, MessagesState, StateGraph
+
+    release_model = asyncio.Event()
+    model_started = asyncio.Event()
+
+    async def model_node(state):
+        await prepare(state["messages"])
+        model_started.set()
+        await release_model.wait()
+        response = AIMessage(content="done", usage_metadata={"input_tokens": 123, "output_tokens": 5, "total_tokens": 128})
+        model_context.emit_reported_context_usage(response, resolved=resolved(), config={})
+        return {"messages": [response]}
+
+    graph = StateGraph(MessagesState)
+    graph.add_node("model", model_node)
+    graph.add_edge(START, "model")
+    graph.add_edge("model", END)
+    stream = graph.compile().astream(
+        {"messages": [HumanMessage(content="hello")]}, stream_mode="custom",
+    )
+    next_event = asyncio.create_task(anext(stream))
+    try:
+        await asyncio.wait_for(model_started.wait(), timeout=5)
+        assert not next_event.done()
+        release_model.set()
+        event = await asyncio.wait_for(next_event, timeout=5)
+        assert event["type"] == "context_usage"
+        assert event["current_context_tokens"] == 128
+        assert event["input_tokens"] == 123
+        assert event["output_tokens"] == 5
+        assert event["estimated"] is False
+    finally:
+        release_model.set()
+        if not next_event.done():
+            next_event.cancel()
+            await asyncio.gather(next_event, return_exceptions=True)
+        await stream.aclose()
+
+
 def test_card_default_and_markdown_roundtrip():
     card = agent()
     assert card.context_compact_threshold == 75
@@ -433,9 +491,10 @@ async def test_react_graph_compacts_after_tool_growth_and_resumes_checkpoint(mon
             return self
         async def ainvoke(self, messages, config):
             inputs.append(messages)
+            usage = {"input_tokens": 3000 + len(inputs), "output_tokens": 10, "total_tokens": 3010 + len(inputs)}
             if len(inputs) == 1:
-                return AIMessage(content="", tool_calls=[{"name": "grow", "args": {}, "id": "call"}], id="tool-call")
-            return AIMessage(content="done", id=f"response-{len(inputs)}")
+                return AIMessage(content="", tool_calls=[{"name": "grow", "args": {}, "id": "call"}], id="tool-call", usage_metadata=usage)
+            return AIMessage(content="done", id=f"response-{len(inputs)}", usage_metadata=usage)
     async def summarize(messages, **kwargs):
         summary_inputs.append(messages)
         return "Prior objectives preserved"
@@ -459,8 +518,22 @@ async def test_react_graph_compacts_after_tool_growth_and_resumes_checkpoint(mon
     graph = GraphRegistry.get("react_agent")
     config = {"configurable": {"thread_id": "context-test"}}
     messages = history()
-    result = await graph.ainvoke({"messages": messages}, config=config, context=WorkflowContext())
+    context_events = []
+    async for mode, event in graph.astream(
+        {"messages": messages}, config=config, context=WorkflowContext(),
+        stream_mode=["custom", "values"],
+    ):
+        if mode == "custom":
+            context_events.append(event)
+        else:
+            result = event
     assert len(inputs) == 2
+    assert [event["estimated"] for event in context_events] == [False, False]
+    assert [event["current_context_tokens"] for event in context_events] == [3011, 3012]
+    for event in context_events:
+        assert event["type"] == "context_usage"
+        assert event["thread_id"] == "context-test"
+        assert event["context_window"] == 1000
     assert summary_inputs
     assert any(item.additional_kwargs.get("is_compact_summary") for item in inputs[1])
     assert compaction.is_valid_message_sequence(result["messages"])
@@ -479,7 +552,11 @@ async def test_research_checks_context_before_both_model_calls(monkeypatch):
     async def prepare_context(items, **kwargs):
         calls.append(kwargs["system"].content)
         return items, []
-    model = SimpleNamespace(ainvoke=AsyncMock(return_value=AIMessage(content="report")))
+    events = []
+    monkeypatch.setattr(model_context, "get_stream_writer", lambda: events.append)
+    model = SimpleNamespace(ainvoke=AsyncMock(return_value=AIMessage(
+        content="report", usage_metadata={"input_tokens": 123, "output_tokens": 10, "total_tokens": 133},
+    )))
     selected = SimpleNamespace(model=model, provider_name="test", model_name="model-a")
     monkeypatch.setattr(research, "_resolve_runtime_model", lambda runtime: (selected, {}, agent()))
     monkeypatch.setattr(research, "prepare_model_context", prepare_context)
@@ -488,3 +565,12 @@ async def test_research_checks_context_before_both_model_calls(monkeypatch):
     await research._summarize_node({"messages": history()}, {}, runtime)
     assert len(calls) == 2
     assert calls[0] != calls[1]
+    assert len(events) == 2
+    assert all(not event["estimated"] and event["current_context_tokens"] == 133 for event in events)
+
+
+def test_reported_context_usage_is_not_estimated_when_provider_usage_is_missing(monkeypatch):
+    events = []
+    monkeypatch.setattr(model_context, "get_stream_writer", lambda: events.append)
+    model_context.emit_reported_context_usage(AIMessage(content="hello"), resolved=resolved(), config={})
+    assert not events

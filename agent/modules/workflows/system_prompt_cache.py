@@ -39,7 +39,7 @@ MAX_SYSTEM_PROMPT_CACHE_ENTRIES = 128
 SystemPromptCacheKey = tuple[object, ...]
 
 _lock = threading.Lock()
-_entries: OrderedDict[SystemPromptCacheKey, tuple[float, str]] = OrderedDict()
+_entries: OrderedDict[SystemPromptCacheKey, tuple[float, str, dict[str, str]]] = OrderedDict()
 
 
 def _now() -> float:
@@ -94,7 +94,7 @@ def build_system_prompt_cache_key(
     )
 
 
-def get_cached_system_prompt(key: SystemPromptCacheKey) -> str | None:
+def get_cached_system_prompt(key: SystemPromptCacheKey, *, sections: dict[str, str] | None = None) -> str | None:
     """Return a cached prompt for ``key`` when present and not expired."""
     if get_system_prompt_cache_ttl_seconds() <= 0:
         return None
@@ -104,11 +104,13 @@ def get_cached_system_prompt(key: SystemPromptCacheKey) -> str | None:
         entry = _entries.get(key)
         if entry is None:
             return None
-        expires_at, prompt = entry
+        expires_at, prompt, cached_sections = entry
         if now >= expires_at:
             del _entries[key]
             return None
         _entries.move_to_end(key)
+        if sections is not None:
+            sections.update(cached_sections)
         return prompt
 
 
@@ -116,14 +118,14 @@ def _drop_expired_entries(now: float) -> None:
     """Remove every expired entry. Caller must hold ``_lock``."""
     expired_keys = [
         entry_key
-        for entry_key, (expires_at, _) in _entries.items()
+        for entry_key, (expires_at, _, _) in _entries.items()
         if now >= expires_at
     ]
     for entry_key in expired_keys:
         del _entries[entry_key]
 
 
-def store_system_prompt(key: SystemPromptCacheKey, prompt: str) -> None:
+def store_system_prompt(key: SystemPromptCacheKey, prompt: str, *, sections: dict[str, str] | None = None) -> None:
     """Store ``prompt`` under ``key``, evicting the least recently used entry.
 
     Expired entries are swept on insert so they never occupy LRU slots;
@@ -137,7 +139,7 @@ def store_system_prompt(key: SystemPromptCacheKey, prompt: str) -> None:
     now = _now()
     expires_at = now + ttl_seconds
     with _lock:
-        _entries[key] = (expires_at, prompt)
+        _entries[key] = (expires_at, prompt, dict(sections or {}))
         _entries.move_to_end(key)
         _drop_expired_entries(now)
         while len(_entries) > MAX_SYSTEM_PROMPT_CACHE_ENTRIES:

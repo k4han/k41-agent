@@ -191,6 +191,7 @@ def build_llm_system_prompt(
     prompt_variables: dict[str, str] | None = None,
     skills_catalog_xml: str | None = None,
     scratchpad_path: str | None = None,
+    sections: dict[str, str] | None = None,
 ) -> str:
     """Build the final system prompt for llm_node from runtime state."""
     system_defaults = get_system_default_variables(
@@ -212,14 +213,16 @@ def build_llm_system_prompt(
     )
 
     if _has_tool(tools, "call_agent"):
-        system_prompt = (
-            f"{system_prompt}{_build_sub_agents_prompt_section(agent_name, catalog)}"
-        )
+        section = _build_sub_agents_prompt_section(agent_name, catalog)
+        system_prompt += section
+        if sections is not None:
+            sections["subagents"] = section
 
     if _has_tool(tools, "skill"):
-        system_prompt = (
-            f"{system_prompt}{_build_skills_prompt_section(skills_catalog_xml)}"
-        )
+        section = _build_skills_prompt_section(skills_catalog_xml)
+        system_prompt += section
+        if sections is not None:
+            sections["skills"] = section
 
     if _has_tool(tools, "write_todos"):
         system_prompt = f"{system_prompt}\n\n{WRITE_TODOS_PROMPT}"

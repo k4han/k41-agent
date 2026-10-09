@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -636,7 +638,7 @@ async def test_usage_repository_aggregates_by_thread(usage_db) -> None:
 
 
 @pytest.mark.asyncio
-async def test_usage_repository_thread_current_context_uses_latest_external_prompt(usage_db) -> None:
+async def test_usage_repository_thread_current_context_includes_latest_external_response(usage_db) -> None:
     repository = LLMUsageRepository()
     now = datetime.now(timezone.utc)
 
@@ -675,6 +677,11 @@ async def test_usage_repository_thread_current_context_uses_latest_external_prom
             input_tokens=88_000,
             output_tokens=700,
             total_tokens=88_700,
+            usage_metadata={"context_breakdown": {
+                "system_prompt": 10_000, "system_tools": 8_000, "skills": 5_000,
+                "subagents": 5_000, "user_messages": 20_000,
+                "agent_responses": 20_000, "tool_calls": 20_000,
+            }},
             created_at=now + timedelta(seconds=1),
         )
     )
@@ -720,13 +727,243 @@ async def test_usage_repository_thread_current_context_uses_latest_external_prom
     data = await repository.aggregate_by_thread("context_thread")
 
     assert data["input_tokens"] == 268_005
-    assert data["current_context_tokens"] == 88_000
+    assert data["current_context_tokens"] == 88_700
+    assert data["has_context_usage"] is True
     assert data["latest_input_tokens"] == 88_000
+    assert data["context_breakdown"]["skills"] == 5_000
+    assert data["context_breakdown"]["agent_responses"] == 20_700
+    assert sum(data["context_breakdown"].values()) == 88_700
     assert data["latest_output_tokens"] == 700
     assert data["latest_total_tokens"] == 88_700
     assert data["latest_model"] == "test-model"
     assert data["latest_provider"] == "test"
     assert data["latest_used_at"] is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_calls", [[], [{
+    "name": "read", "args": {"path": "source.py"}, "id": "read-1",
+}]])
+async def test_first_response_context_matches_stream_after_reload(usage_db, monkeypatch, tool_calls):
+    from uuid import uuid4
+
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    from agent.modules.usage import tracking
+    from agent.modules.usage.context_breakdown import estimate_context_breakdown
+    from agent.modules.workflows import model_context
+
+    records, events = [], []
+    monkeypatch.setattr(tracking, "_schedule_record", records.append)
+    monkeypatch.setattr(model_context, "get_stream_writer", lambda: events.append)
+    estimates = estimate_context_breakdown([
+        SystemMessage(content="Instructions"), HumanMessage(content="Hello"),
+    ])
+    config = with_usage_tracking(
+        {"configurable": {"thread_id": "first_response"}}, agent_name="default",
+        provider_name="test", model_name="test-model", context_breakdown=estimates,
+    )
+    response = AIMessage(content="First answer", tool_calls=tool_calls, usage_metadata={
+        "input_tokens": 123, "output_tokens": 80, "total_tokens": 203,
+    })
+    config["callbacks"][-1].on_llm_end(
+        LLMResult(generations=[[ChatGeneration(message=response)]]), run_id=uuid4(),
+    )
+    model_context.emit_reported_context_usage(
+        response, resolved=SimpleNamespace(provider_name="test", model_name="test-model"),
+        config=config, context_breakdown=estimates,
+    )
+    repository = LLMUsageRepository()
+    await repository.record(records[0])
+    payload = await repository.aggregate_by_thread("first_response")
+    assert payload["current_context_tokens"] == events[0]["current_context_tokens"] == 203
+    assert payload["context_breakdown"] == events[0]["context_breakdown"]
+    assert payload["context_breakdown"]["agent_responses"] > 0
+    assert (payload["context_breakdown"]["tool_calls"] > 0) == bool(tool_calls)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("has_usage_metadata", [True, False])
+async def test_usage_repository_preserves_context_after_summary_without_applied_compaction(
+    usage_db, has_usage_metadata,
+):
+    repository = LLMUsageRepository()
+    now = datetime.now(timezone.utc)
+    identity = {
+        "thread_id": "compaction_thread", "root_thread_id": "compaction_thread",
+        "platform": "dashboard", "user_id": "admin", "channel_id": "admin",
+        "provider_name": "test", "model_name": "test-model",
+    }
+    await repository.record(UsageEventInput(
+        **identity, agent_name="default", call_kind="agent", internal=False,
+        has_usage_metadata=True, input_tokens=8000, output_tokens=100,
+        total_tokens=8100, created_at=now,
+    ))
+    await repository.record(UsageEventInput(
+        **identity, agent_name="conversation-compactor", call_kind="compaction",
+        internal=True, has_usage_metadata=has_usage_metadata,
+        input_tokens=3000 if has_usage_metadata else None,
+        output_tokens=100 if has_usage_metadata else None,
+        total_tokens=3100 if has_usage_metadata else None,
+        usage_metadata={"input_tokens": 3000} if has_usage_metadata else None,
+        created_at=now + timedelta(seconds=1),
+    ))
+
+    payload = await repository.aggregate_by_thread("compaction_thread")
+    assert payload["has_context_usage"] is True
+    assert payload["current_context_tokens"] == 8100
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("has_provider_report", [True, False])
+@pytest.mark.parametrize("retained_tokens", [0, 2000])
+async def test_usage_repository_retains_compacted_estimate_until_next_model_call(
+    usage_db, has_provider_report, retained_tokens,
+):
+    repository = LLMUsageRepository()
+    now = datetime.now(timezone.utc)
+    identity = {
+        "thread_id": "compaction_thread", "root_thread_id": "compaction_thread",
+        "platform": "dashboard", "user_id": "admin", "channel_id": "admin",
+        "provider_name": "test", "model_name": "test-model",
+    }
+    if has_provider_report:
+        await repository.record(UsageEventInput(
+            **identity, agent_name="default", call_kind="agent", internal=False,
+            has_usage_metadata=True, input_tokens=8000, output_tokens=100,
+            total_tokens=8100, created_at=now,
+        ))
+    await repository.record(UsageEventInput(
+        **identity, agent_name="conversation-compactor", call_kind="compaction",
+        internal=True, has_usage_metadata=False, input_tokens=0, output_tokens=0,
+        total_tokens=0, usage_metadata={"retained_tokens": retained_tokens},
+        created_at=now + timedelta(seconds=1),
+    ))
+    # A later summarizer call does not replace the last applied compaction marker.
+    await repository.record(UsageEventInput(
+        **identity, agent_name="conversation-compactor", call_kind="compaction",
+        internal=True, has_usage_metadata=False,
+        created_at=now + timedelta(seconds=2),
+    ))
+
+    payload = await repository.aggregate_by_thread("compaction_thread")
+    assert payload["has_context_usage"] is False
+    assert payload["context_estimated"] is True
+    assert payload["current_context_tokens"] == retained_tokens
+    assert payload["latest_input_tokens"] == 0
+    assert payload["latest_output_tokens"] == 0
+    assert payload["context_breakdown"] is None
+
+    await repository.record(UsageEventInput(
+        **identity, agent_name="default", call_kind="agent", internal=False,
+        has_usage_metadata=True, input_tokens=2500, output_tokens=100,
+        total_tokens=2600, created_at=now + timedelta(seconds=3),
+    ))
+    payload = await repository.aggregate_by_thread("compaction_thread")
+    assert payload["has_context_usage"] is True
+    assert payload["context_estimated"] is False
+    assert payload["current_context_tokens"] == 2600
+
+
+@pytest.mark.asyncio
+async def test_usage_service_returns_provider_tokens_without_loading_checkpoint_estimates(monkeypatch):
+    repository = SimpleNamespace(aggregate_by_thread=AsyncMock(return_value={
+        "thread_id": "context_thread", "current_context_tokens": 88000,
+        "latest_input_tokens": 88000, "has_context_usage": True,
+    }))
+    checkpointer = SimpleNamespace(aget_tuple=AsyncMock(side_effect=AssertionError("Checkpoint estimates must not be loaded")))
+    monkeypatch.setattr("agent.modules.conversations.get_history_checkpointer", lambda: checkpointer)
+    payload = await UsageService(repository).get_thread_usage("context_thread")
+    assert payload["current_context_tokens"] == 88000
+    assert payload["latest_input_tokens"] == 88000
+    assert "estimated_context_tokens" not in payload
+    checkpointer.aget_tuple.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_usage_repository_restores_compacted_breakdown_without_stale_history(usage_db):
+    repository = LLMUsageRepository()
+    now = datetime.now(timezone.utc)
+    identity = {
+        "thread_id": "snapshot_thread", "root_thread_id": "snapshot_thread",
+        "platform": "dashboard", "user_id": "admin", "channel_id": "admin",
+        "provider_name": "test", "model_name": "test-model",
+    }
+    await repository.record(UsageEventInput(
+        **identity, agent_name="default", call_kind="agent", internal=False,
+        has_usage_metadata=True, input_tokens=80000, output_tokens=1000,
+        total_tokens=81000, created_at=now,
+    ))
+    breakdown = {
+        "system_prompt": 1000, "system_tools": 800, "skills": 500, "subagents": 300,
+        "user_messages": 200, "agent_responses": 100, "tool_calls": 50,
+    }
+    await repository.record(UsageEventInput(
+        **identity, agent_name="conversation-compactor", call_kind="compaction",
+        internal=True, has_usage_metadata=False, input_tokens=0, output_tokens=0,
+        total_tokens=0, usage_metadata={"retained_tokens": 350, "context_breakdown": breakdown},
+        created_at=now + timedelta(seconds=1),
+    ))
+    payload = await repository.aggregate_by_thread("snapshot_thread")
+    assert payload["context_breakdown"] == breakdown
+    assert payload["current_context_tokens"] == sum(breakdown.values())
+    assert payload["context_estimated"] is True
+    assert payload["has_context_usage"] is False
+    assert payload["total_tokens"] == 81000
+
+
+@pytest.mark.asyncio
+async def test_usage_service_recovers_breakdown_for_older_compaction_markers(usage_db, monkeypatch):
+    from langchain_core.messages import HumanMessage
+    from agent.modules.usage.context_breakdown import estimate_compacted_context_breakdown
+
+    messages = [HumanMessage(content="Retained summary"), AIMessage(content="Acknowledged")]
+    previous = {
+        "system_prompt": 1000, "system_tools": 800, "skills": 500, "subagents": 300,
+        "user_messages": 40000, "agent_responses": 30000, "tool_calls": 20000,
+    }
+    repository = LLMUsageRepository()
+    now = datetime.now(timezone.utc)
+    identity = {
+        "thread_id": "legacy_thread", "root_thread_id": "legacy_thread",
+        "platform": "dashboard", "user_id": "admin", "channel_id": "admin",
+        "provider_name": "test", "model_name": "test-model",
+    }
+    await repository.record(UsageEventInput(
+        **identity, agent_name="default", call_kind="agent", internal=False,
+        has_usage_metadata=True, input_tokens=sum(previous.values()), output_tokens=100,
+        total_tokens=sum(previous.values()) + 100, usage_metadata={"context_breakdown": previous},
+        created_at=now,
+    ))
+    await repository.record(UsageEventInput(
+        **identity, agent_name="conversation-compactor", call_kind="compaction",
+        internal=True, has_usage_metadata=False, input_tokens=0, output_tokens=0,
+        total_tokens=0, usage_metadata={"retained_tokens": 200},
+        created_at=now + timedelta(seconds=1),
+    ))
+    await repository.record(UsageEventInput(
+        **identity, agent_name="conversation-compactor", call_kind="compaction",
+        internal=True, has_usage_metadata=True, input_tokens=3000, output_tokens=100,
+        total_tokens=3100, usage_metadata={"context_breakdown": {**previous, "skills": 99999}},
+        created_at=now + timedelta(seconds=2),
+    ))
+    checkpointer = SimpleNamespace(aget_tuple=AsyncMock(return_value=SimpleNamespace(
+        checkpoint={"channel_values": {"messages": messages}},
+    )))
+    monkeypatch.setattr("agent.modules.conversations.history.get_history_checkpointer", lambda: checkpointer)
+    payload = await UsageService(repository).get_thread_usage("legacy_thread")
+    expected = estimate_compacted_context_breakdown(messages, previous)
+    assert payload["context_breakdown"] == expected
+    assert payload["current_context_tokens"] == sum(expected.values())
+    assert payload["context_estimated"] is True
+    assert payload["has_context_usage"] is False
+
+
+@pytest.mark.asyncio
+async def test_usage_repository_marks_context_without_provider_tokens_as_unavailable(usage_db):
+    payload = await LLMUsageRepository().aggregate_by_thread("empty_thread")
+    assert payload["has_context_usage"] is False
+    assert payload["latest_input_tokens"] == 0
 
 
 @pytest.mark.asyncio

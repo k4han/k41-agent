@@ -1,6 +1,7 @@
 """Unit tests for conversation compaction service and API endpoint."""
 
 import pytest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from langchain_core.messages import (
@@ -95,11 +96,21 @@ async def test_compact_conversation_success():
 
     mock_graph = MagicMock()
     mock_graph.aupdate_state = AsyncMock()
+    previous_breakdown = {
+        "system_prompt": 1000, "system_tools": 800, "skills": 500, "subagents": 300,
+        "user_messages": 40000, "agent_responses": 30000, "tool_calls": 20000,
+    }
+    usage_service = SimpleNamespace(
+        get_thread_usage=AsyncMock(return_value={"context_breakdown": previous_breakdown}),
+        record_event=AsyncMock(),
+    )
 
     with patch("agent.modules.conversations.compaction.get_history_checkpointer") as mock_chk, \
          patch("agent.modules.conversations.compaction._generate_context_summary", return_value="Dense summary of tools and discussion"), \
          patch("agent.modules.conversations.compaction.get_workflow_graph", return_value=mock_graph), \
-         patch("agent.modules.conversations.compaction.get_thread_messages_payload", return_value=([{"role": "user", "content": "test"}], "chk-new")):
+         patch("agent.modules.conversations.compaction.get_thread_messages_payload", return_value=([{"role": "user", "content": "test"}], "chk-new")), \
+         patch("agent.modules.usage.get_usage_service", return_value=usage_service), \
+         patch("agent.modules.conversations.compaction.load_usage_context", new=AsyncMock(return_value=SimpleNamespace(platform="dashboard", user_id="admin", channel_id="admin"))):
 
         mock_chk.return_value.aget_tuple = AsyncMock(return_value=mock_tuple)
 
@@ -129,6 +140,17 @@ async def test_compact_conversation_success():
 
         # And recent messages start with human
         assert isinstance(updated_msgs[3], HumanMessage)
+        breakdown = result["context_breakdown"]
+        assert result["current_context_tokens"] == sum(breakdown.values())
+        assert result["current_context_tokens"] > result["retained_tokens"]
+        assert result["context_estimated"] is True
+        for key in ("system_prompt", "system_tools", "skills", "subagents"):
+            assert breakdown[key] == previous_breakdown[key]
+        assert 0 < breakdown["user_messages"] < previous_breakdown["user_messages"]
+        usage_service.record_event.assert_awaited_once()
+        assert usage_service.record_event.call_args.args[0].usage_metadata == {
+            "retained_tokens": result["retained_tokens"], "context_breakdown": breakdown,
+        }
 
 
 def test_is_valid_message_sequence():

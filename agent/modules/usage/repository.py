@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import case, delete, distinct, func, select
 
 from agent.modules.usage.models import LLMUsageEvent
+from agent.modules.usage.context_breakdown import CONTEXT_CATEGORIES, include_response_in_context
 from agent.shared.infrastructure.db.session import get_async_session
 
 
@@ -73,6 +74,24 @@ def _json_dict(value: str | None) -> dict[str, Any]:
 
 def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
+
+
+def _sanitize_context_breakdown(value: Any) -> dict[str, int] | None:
+    """Validate stored breakdowns before arithmetic.
+
+    Writer output is controlled, but the API also reads old or manually
+    written rows. Mirror the frontend ``parseContextBreakdown`` guard so a
+    malformed dict yields ``None`` instead of a 500 from ``+``/``.get``.
+    """
+    if not isinstance(value, dict):
+        return None
+    sanitized: dict[str, int] = {}
+    for key in CONTEXT_CATEGORIES:
+        raw = value.get(key, 0)
+        if isinstance(raw, bool) or not isinstance(raw, int) or raw < 0:
+            return None
+        sanitized[key] = raw
+    return sanitized
 
 
 def _root_thread_expr() -> Any:
@@ -296,6 +315,19 @@ class LLMUsageRepository:
             result = await session.execute(stmt)
             rows = result.all()
             latest_event = await self._latest_context_event(session, thread_id)
+            compaction = await self._latest_compaction_event(session, thread_id)
+            context_estimated = compaction is not None and (
+                latest_event is None or self._is_newer(compaction, latest_event)
+            )
+            retained_tokens = None
+            compacted_breakdown = None
+            if context_estimated:
+                compaction_metadata = _json_dict(compaction.usage_metadata_json)
+                retained_tokens = compaction_metadata["retained_tokens"]
+                compacted_breakdown = _sanitize_context_breakdown(compaction_metadata.get("context_breakdown"))
+                if compacted_breakdown is not None:
+                    retained_tokens = sum(compacted_breakdown.values())
+                latest_event = None
 
         models = []
         total_tokens = 0
@@ -323,24 +355,43 @@ class LLMUsageRepository:
 
         models.sort(key=lambda x: x["total_tokens"], reverse=True)
 
+        context_metadata = _json_dict(latest_event.usage_metadata_json) if latest_event else {}
+        input_breakdown = _sanitize_context_breakdown(context_metadata.get("context_breakdown"))
+        output_breakdown = _sanitize_context_breakdown(
+            context_metadata.get("context_output_breakdown")
+        )
+        latest_input_tokens = max(0, int(latest_event.input_tokens or 0)) if latest_event else 0
+        latest_output_tokens = max(0, int(latest_event.output_tokens or 0)) if latest_event else 0
+        context_breakdown = compacted_breakdown if context_estimated else (
+            include_response_in_context(input_breakdown, latest_output_tokens, output_breakdown)
+            if input_breakdown is not None else None
+        )
+
         return {
             "thread_id": thread_id,
             "total_tokens": total_tokens,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
-            "current_context_tokens": (
-                int(latest_event.input_tokens or 0) if latest_event else 0
-            ),
-            "latest_input_tokens": int(latest_event.input_tokens or 0) if latest_event else 0,
-            "latest_output_tokens": (
-                int(latest_event.output_tokens or 0) if latest_event else 0
-            ),
+            "current_context_tokens": retained_tokens if context_estimated else latest_input_tokens + latest_output_tokens,
+            "context_estimated": context_estimated,
+            "latest_input_tokens": latest_input_tokens,
+            "has_context_usage": latest_event is not None,
+            "context_breakdown": context_breakdown,
+            "latest_output_tokens": latest_output_tokens,
             "latest_total_tokens": int(latest_event.total_tokens or 0) if latest_event else 0,
             "latest_model": latest_event.model_name if latest_event else "",
             "latest_provider": latest_event.provider_name if latest_event else "",
             "latest_used_at": _iso(latest_event.created_at) if latest_event else None,
             "models": models,
         }
+
+    async def latest_context_breakdown(self, thread_id: str) -> dict[str, int] | None:
+        """Read the latest provider input composition, including before compaction."""
+        session = await get_async_session()
+        async with session:
+            event = await self._latest_context_event(session, thread_id)
+        metadata = _json_dict(event.usage_metadata_json) if event else {}
+        return _sanitize_context_breakdown(metadata.get("context_breakdown"))
 
     async def _latest_context_event(self, session: Any, thread_id: str) -> LLMUsageEvent | None:
         common_clauses = [
@@ -371,6 +422,45 @@ class LLMUsageRepository:
             .limit(1)
         )
         return root_result.scalars().first()
+
+    async def _latest_compaction_event(
+        self, session: Any, thread_id: str
+    ) -> LLMUsageEvent | None:
+        """Return an applied compaction marker, excluding summarizer calls."""
+        order_by = (LLMUsageEvent.created_at.desc(), LLMUsageEvent.id.desc())
+        result = await session.execute(
+            select(LLMUsageEvent)
+            .where(
+                LLMUsageEvent.thread_id == thread_id,
+                LLMUsageEvent.call_kind == "compaction",
+                LLMUsageEvent.internal.is_(True),
+                LLMUsageEvent.has_usage_metadata.is_(False),
+                LLMUsageEvent.usage_metadata_json.is_not(None),
+            )
+            .order_by(*order_by)
+        )
+        # The compactor writes retained_tokens only after updating the checkpoint.
+        for event in result.scalars():
+            retained_tokens = _json_dict(event.usage_metadata_json).get("retained_tokens")
+            if isinstance(retained_tokens, int) and not isinstance(retained_tokens, bool) and retained_tokens >= 0:
+                return event
+        return None
+
+    @staticmethod
+    def _is_newer(first: LLMUsageEvent, second: LLMUsageEvent) -> bool:
+        first_created = getattr(first, "created_at", None)
+        second_created = getattr(second, "created_at", None)
+        if first_created is not None and second_created is not None:
+            try:
+                if first_created != second_created:
+                    return first_created > second_created
+            except TypeError:
+                pass
+        first_id = getattr(first, "id", None)
+        second_id = getattr(second, "id", None)
+        if isinstance(first_id, int) and isinstance(second_id, int):
+            return first_id > second_id
+        return False
 
     async def aggregate_by_workspace(self, key: str) -> dict[str, Any]:
         from agent.modules.workspaces import ThreadWorkspace

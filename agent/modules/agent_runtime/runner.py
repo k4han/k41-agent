@@ -1291,7 +1291,7 @@ async def run_agent_stream(
 
     stream_kwargs: dict[str, Any] = {
         "config": config,
-        "stream_mode": ["messages", "values"],
+        "stream_mode": ["messages", "values", "custom"],
     }
     if _graph_accepts_context(graph):
         stream_kwargs["context"] = context
@@ -1350,6 +1350,20 @@ async def run_agent_stream(
                 stream_mode, event_data = _coerce_stream_event(event)
                 while not title_event_queue.empty():
                     yield title_event_queue.get_nowait()
+                if stream_mode == "custom":
+                    if isinstance(event_data, dict) and event_data.get("type") == "context_usage":
+                        event_thread_id = str(event_data.get("thread_id") or "")
+                        if not event_thread_id or event_thread_id == thread_id:
+                            yield event_data
+                        else:
+                            logger.debug(
+                                "Ignoring context_usage for sub-thread '%s' (main '%s')",
+                                event_thread_id,
+                                thread_id,
+                            )
+                    else:
+                        logger.debug("Ignoring unsupported custom stream event: %r", event_data)
+                    continue
                 if stream_mode == "messages":
                     delta = chunk_extractor.extract(event_data)
                     if delta.text:
@@ -1558,7 +1572,7 @@ async def run_agent_edit_stream(
 
     stream_kwargs: dict[str, Any] = {
         "config": config,
-        "stream_mode": ["messages", "values"],
+        "stream_mode": ["messages", "values", "custom"],
     }
     if _graph_accepts_context(graph):
         stream_kwargs["context"] = context
@@ -1574,6 +1588,21 @@ async def run_agent_edit_stream(
             **stream_kwargs,
         ):
             stream_mode, event_data = _coerce_stream_event(event)
+            if stream_mode == "custom":
+                # Only context_usage custom events are forwarded to the client today.
+                if isinstance(event_data, dict) and event_data.get("type") == "context_usage":
+                    event_thread_id = str(event_data.get("thread_id") or "")
+                    if not event_thread_id or event_thread_id == thread_id:
+                        yield event_data
+                    else:
+                        logger.debug(
+                            "Ignoring context_usage for sub-thread '%s' (main '%s')",
+                            event_thread_id,
+                            thread_id,
+                        )
+                else:
+                    logger.debug("Ignoring unsupported custom stream event: %r", event_data)
+                continue
             if stream_mode == "messages":
                 delta = chunk_extractor.extract(event_data)
                 if delta.text:

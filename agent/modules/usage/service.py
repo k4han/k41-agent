@@ -242,31 +242,22 @@ class UsageService:
 
         thread_id = resolve_thread_id(thread_id)
         payload = await self._repository.aggregate_by_thread(thread_id)
-        try:
-            from agent.modules.conversations import (
-                checkpoint_messages,
-                get_history_checkpointer,
-            )
-            from agent.modules.workflows import make_run_config
-            from langchain_core.messages.utils import count_tokens_approximately
+        if payload.get("context_estimated") and payload.get("context_breakdown") is None:
+            # Older compaction markers stored only the retained history total.
+            try:
+                from agent.modules.conversations.history import _checkpoint_messages, get_history_checkpointer
+                from agent.modules.usage.context_breakdown import estimate_compacted_context_breakdown
 
-            checkpointer = get_history_checkpointer()
-            config = make_run_config(thread_id=thread_id)
-            checkpoint_tuple = await checkpointer.aget_tuple(config)
-            if checkpoint_tuple is not None:
-                messages = checkpoint_messages(checkpoint_tuple)
-                if messages:
-                    is_compacted = any(
-                        getattr(m, "additional_kwargs", {}).get("is_compact_summary")
-                        for m in messages
-                    )
-                    if is_compacted:
-                        approx_tokens = count_tokens_approximately(messages)
-                        if approx_tokens > 0:
-                            payload["current_context_tokens"] = approx_tokens
-        except Exception as exc:
-            logger.debug("Failed to calculate active checkpoint tokens for thread %s: %s", thread_id, exc)
-
+                checkpoint = await get_history_checkpointer().aget_tuple(
+                    {"configurable": {"thread_id": thread_id}},
+                )
+                if checkpoint is not None:
+                    previous = await self._repository.latest_context_breakdown(thread_id)
+                    breakdown = estimate_compacted_context_breakdown(_checkpoint_messages(checkpoint), previous)
+                    payload["context_breakdown"] = breakdown
+                    payload["current_context_tokens"] = sum(breakdown.values())
+            except Exception as exc:
+                logger.debug("Could not recover compacted context for %s: %s", thread_id, exc)
         return payload
 
     async def get_workspace_usage(self, key: str) -> dict[str, Any]:
