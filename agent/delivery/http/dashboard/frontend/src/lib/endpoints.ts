@@ -10,7 +10,6 @@ export const API_PATHS = {
   agentWorkflows: "/dashboard-api/agents/workflows",
   agentProviders: "/dashboard-api/agents/providers",
   agentMcpOptions: "/dashboard-api/agents/mcp",
-  tasks: "/dashboard-api/tasks",
   sessions: "/dashboard-api/sessions",
   sessionsEvents: "/dashboard-api/sessions/events",
   sessionsStop: "/dashboard-api/sessions/stop",
@@ -50,10 +49,7 @@ export const API_PATHS = {
     }
     return `${path}?checkpoint_id=${encodeURIComponent(checkpointId)}`;
   },
-  task: (taskId: string) => `/tasks/${encodeURIComponent(taskId)}`,
   taskCancel: (taskId: string) => `/tasks/${encodeURIComponent(taskId)}/cancel`,
-  tasksList: "/tasks/list",
-  tasksSubmit: "/tasks",
   schedulerJob: (jobId: string) => `/scheduler/jobs/${encodeURIComponent(jobId)}`,
   schedulerJobAction: (jobId: string, action: "run" | "pause" | "resume") =>
     `/scheduler/jobs/${encodeURIComponent(jobId)}/${action}`,

@@ -9,7 +9,6 @@ import {
   HomeMetrics,
   OnboardingChecklist,
   ProvidersHealthPanel,
-  RecentTasksPanel,
   RecentThreadsPanel,
   ServicesPanel,
   UpcomingJobsPanel,
@@ -174,7 +173,6 @@ export function HomePage() {
             <div class="home-grid">
               <div class="home-col">
                 <ActiveSessionsPanel initial={payload().active_sessions} />
-                <RecentTasksPanel tasks={payload().recent.tasks} />
                 <RecentThreadsPanel threads={payload().recent.threads} />
               </div>
               <div class="home-col">
@@ -205,7 +203,7 @@ function HomeSkeleton() {
   return (
     <div class="stack home-stack" aria-busy="true" aria-label="Loading dashboard">
       <div class="grid-metrics">
-        <For each={Array.from({ length: 4 })}>
+        <For each={Array.from({ length: 3 })}>
           {() => (
             <div class="panel metric metric-card home-skeleton-metric">
               <span class="skeleton-line home-skeleton-value" />
@@ -238,7 +236,6 @@ function HomeSkeleton() {
 
       <div class="home-grid">
         <div class="home-col">
-          <HomePanelSkeleton rows={3} />
           <HomePanelSkeleton rows={3} />
           <HomePanelSkeleton rows={4} />
         </div>

@@ -1,6 +1,5 @@
 export { ActiveSessionsPanel } from "./ActiveSessionsPanel";
 export { OnboardingChecklist, HomeMetrics } from "./OnboardingAndMetrics";
-export { RecentTasksPanel } from "./RecentTasksPanel";
 export { RecentThreadsPanel } from "./RecentThreadsPanel";
 export { UpcomingJobsPanel } from "./UpcomingJobsPanel";
 export { ProvidersHealthPanel } from "./ProvidersHealthPanel";

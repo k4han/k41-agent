@@ -194,78 +194,6 @@ async function runM3ChallengerEmpiricalSuite() {
   });
 
   // =========================================================================
-  // Section 2: Tasks Output Structured Card Formatting (F11)
-  // =========================================================================
-  harness.setFeature('CHAL-M3-02: Tasks Output Structured Card Formatting & Decoupling');
-
-  const tasksCode = ast.readSrcFile('pages/Tasks.tsx');
-
-  harness.test('Tasks.tsx imports AlertTriangle, CheckCircle2, CopyButton, and Markdown', () => {
-    assert(tasksCode.includes('AlertTriangle'), 'Tasks.tsx must import AlertTriangle');
-    assert(tasksCode.includes('CheckCircle2'), 'Tasks.tsx must import CheckCircle2');
-    assert(tasksCode.includes('CopyButton'), 'Tasks.tsx must import CopyButton');
-    assert(tasksCode.includes('Markdown'), 'Tasks.tsx must import Markdown');
-  });
-
-  harness.test('Tasks.tsx renders structured .task-output-stack containing decoupled result and error cards', () => {
-    assert(tasksCode.includes('task-output-stack'), 'Tasks.tsx must render .task-output-stack container');
-    assert(tasksCode.includes('task-output-card task-output-card--result'), 'Tasks.tsx must render result card');
-    assert(tasksCode.includes('task-output-card task-output-card--error'), 'Tasks.tsx must render error card');
-  });
-
-  harness.test('Tasks.tsx result card uses Markdown component with copy button', () => {
-    assert(
-      tasksCode.includes('<Markdown') && tasksCode.includes('task-result-markdown'),
-      'Tasks.tsx result card must render <Markdown class="... task-result-markdown" />'
-    );
-    assert(
-      tasksCode.includes('title="Copy result"'),
-      'Tasks.tsx result card must have CopyButton with title="Copy result"'
-    );
-  });
-
-  harness.test('Tasks.tsx error card renders danger styling with copy button', () => {
-    assert(
-      tasksCode.includes('<pre class="task-error-pre">{task.error}</pre>'),
-      'Tasks.tsx error card must render <pre class="task-error-pre">{task.error}</pre>'
-    );
-    assert(
-      tasksCode.includes('title="Copy error"'),
-      'Tasks.tsx error card must have CopyButton with title="Copy error"'
-    );
-    assert(
-      tasksCode.includes('task-output-copy-btn--error'),
-      'Tasks.tsx error card must use error variant for CopyButton'
-    );
-  });
-
-  harness.test('tasks.css enforces danger palette and scroll isolation on error and markdown output', () => {
-    const errorCardRules = css.findRules('.task-output-card--error');
-    assert(errorCardRules.length > 0, '.task-output-card--error styling must exist');
-
-    const errorPreRules = css.findRules('.task-error-pre');
-    const preRule = errorPreRules.find((r) => !r.mediaQuery);
-    assert(preRule !== undefined, '.task-error-pre base styling must exist');
-    assertEqual(preRule.declarations['white-space'], 'pre-wrap');
-    assertEqual(preRule.declarations['overflow-wrap'], 'anywhere');
-
-    const mdPreRules = css.findRules('.task-result-markdown pre');
-    const mdPre = mdPreRules.find((r) => !r.mediaQuery);
-    assert(mdPre !== undefined, '.task-result-markdown pre styling must exist');
-    assertEqual(mdPre.declarations['overflow-x'], 'auto');
-  });
-
-  harness.test('tasks.css enforces >= 40px touch targets on mobile for copy buttons and action buttons', () => {
-    const copyBtnRules = css.findRules('.task-output-copy-btn', '640px');
-    const has40pxCopy = copyBtnRules.some((r) => parseInt(r.declarations['min-height'] || '0', 10) >= 40);
-    assert(has40pxCopy, '.task-output-copy-btn must enforce min-height >= 40px on mobile (<= 640px)');
-
-    const listBtnRules = css.findRules('.task-history-list .btn-sm', '640px');
-    const has40pxListBtn = listBtnRules.some((r) => parseInt(r.declarations['min-height'] || '0', 10) >= 40);
-    assert(has40pxListBtn, '.task-history-list .btn-sm must enforce min-height >= 40px on mobile (<= 640px)');
-  });
-
-  // =========================================================================
   // Section 3: Scheduler Frequency Presets, Two-Way Sync, & Summaries (F12)
   // =========================================================================
   harness.setFeature('CHAL-M3-03: Scheduler Presets, Two-Way Sync, & formatCronDescription Oracle');
@@ -559,7 +487,6 @@ async function runM3ChallengerEmpiricalSuite() {
   const m3SourceFiles = [
     'src/pages/settings/SettingsLayout.tsx',
     'src/pages/settings/agents/AgentPromptTab.tsx',
-    'src/pages/Tasks.tsx',
     'src/pages/Scheduler.tsx',
     'src/styles/settings.css',
     'src/styles/tasks.css',

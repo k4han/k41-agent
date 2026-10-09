@@ -88,9 +88,6 @@ const SecurityPage = lazy(() =>
 const UsagePage = lazy(() =>
   import("@/pages/settings/UsagePage").then((module) => ({ default: module.UsagePage })),
 );
-const TasksPage = lazy(() =>
-  import("@/pages/Tasks").then((module) => ({ default: module.TasksPage })),
-);
 
 function NotFoundPage() {
   return <HomePage />;
@@ -106,7 +103,6 @@ render(
         <Route path="/history" component={ChatHistoryListPage} />
         <Route path="/repositories" component={RepositoriesPage} />
         <Route path="/repositories/:repositoryId" component={RepositoriesPage} />
-        <Route path="/tasks" component={TasksPage} />
         <Route path="/scheduler" component={SchedulerPage} />
         <Route path="/settings" component={() => <Navigate href="/settings/config" />} />
         <Route path="/settings/config" component={ConfigPage} preload={() => preloadDashboardData("/dashboard-api/config")} />
@@ -135,6 +131,7 @@ render(
         <Route path="/settings/usage" component={UsagePage} />
         <Route path="/settings/appearance" component={AppearancePage} />
         {/* Legacy redirects */}
+        <Route path="/tasks" component={() => <Navigate href="/chat" />} />
         <Route path="/channels" component={() => <Navigate href="/settings/channels" />} />
         <Route path="/agents" component={() => <Navigate href="/settings/agents" />} />
         <Route path="/change-password" component={() => <Navigate href="/settings/security" />} />

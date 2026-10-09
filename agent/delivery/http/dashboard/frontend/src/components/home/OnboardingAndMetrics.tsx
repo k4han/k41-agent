@@ -139,12 +139,6 @@ export function HomeMetrics(props: { counters: HomeCounters }) {
         href="/chat"
       />
       <MetricCard
-        value={String(c().tasks.active)}
-        label={`Active tasks${c().tasks.failed ? ` (${c().tasks.failed} failed)` : ""}`}
-        tone={c().tasks.failed > 0 ? "danger" : "neutral"}
-        href="/tasks"
-      />
-      <MetricCard
         value={`${c().channels.running}/${c().channels.total}`}
         label={`Channels running${c().channels.error ? ` (${c().channels.error} error)` : ""}`}
         tone={c().channels.error > 0 ? "warning" : "neutral"}
