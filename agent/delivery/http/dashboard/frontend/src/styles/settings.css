@@ -571,9 +571,9 @@
 }
 
 .settings-category-pill.active {
-  background: var(--primary, #6366f1);
-  border-color: var(--primary, #6366f1);
-  color: #fff;
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--accent-fg);
 }
 
 .settings-category-pill-badge {
@@ -592,8 +592,8 @@
 }
 
 .settings-category-pill.active .settings-category-pill-badge {
-  background: rgba(255, 255, 255, 0.25);
-  color: #fff;
+  background: color-mix(in srgb, var(--accent-fg) 25%, transparent);
+  color: inherit;
 }
 
 .settings-search-meta {

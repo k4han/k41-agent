@@ -6,9 +6,9 @@
   --radius-xl: 16px;
   --radius-full: 9999px;
   --radius: var(--radius-md);
-  --primary: #4f46e5;
-  --primary-hover: #4338ca;
-  --primary-subtle: rgba(79, 70, 229, 0.08);
+  --primary: var(--accent);
+  --primary-hover: #262626;
+  --primary-subtle: color-mix(in srgb, var(--primary) 8%, transparent);
   --bg: #fafafa;
   --fg: #0a0a0a;
   --fg-muted: #595959;
@@ -56,9 +56,9 @@
 
 .dark {
   color-scheme: dark;
-  --primary: #6366f1;
-  --primary-hover: #818cf8;
-  --primary-subtle: rgba(99, 102, 241, 0.15);
+  --primary: var(--accent);
+  --primary-hover: #e5e5e5;
+  --primary-subtle: color-mix(in srgb, var(--primary) 15%, transparent);
   --bg: #0a0a0a;
   --fg: #fafafa;
   --fg-muted: #a3a3a3;
