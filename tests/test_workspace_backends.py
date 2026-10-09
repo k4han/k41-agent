@@ -1627,18 +1627,29 @@ def test_local_workspace_backend_execute_uses_safe_workspace(
 
     from agent.modules.tools.coding.service import CodingService
     from agent.modules.tools.coding import windows_job
+    import agent.modules.tools.coding.processes as processes_module
     service = CodingService(tmp_path / "outputs")
     isolated_container._coding_service = service
     original_popen = windows_job.subprocess.Popen
+    original_spawn = processes_module.spawn_contained
     original_start = service.processes.start
-    def capture_spawn(command, **kwargs):
-        captured["command"] = command
+    def capture_spawn(*args, **kwargs):
+        if args:
+            captured["command"] = args[0]
         captured.update(kwargs)
-        return original_popen(command, **kwargs)
+        return original_spawn(*args, **kwargs)
+    def capture_popen(*args, **kwargs):
+        if args:
+            captured["command"] = args[0]
+        captured.update(kwargs)
+        return original_popen(*args, **kwargs)
     async def capture_start(context, command, cwd, timeout_seconds, shell):
+        captured["start_command"] = command
+        captured["start_cwd"] = cwd
         captured["timeout"] = timeout_seconds
         return await original_start(context, command, cwd, timeout_seconds, shell)
-    monkeypatch.setattr(windows_job.subprocess, "Popen", capture_spawn)
+    monkeypatch.setattr(windows_job.subprocess, "Popen", capture_popen)
+    monkeypatch.setattr(processes_module, "spawn_contained", capture_spawn)
     monkeypatch.setattr(service.processes, "start", capture_start)
 
     async def _run():
@@ -1648,10 +1659,12 @@ def test_local_workspace_backend_execute_uses_safe_workspace(
 
     assert result.output.strip() == "ok"
     assert result.exit_code == 0
-    assert "echo ok" in captured["command"][-1]
-    assert captured["cwd"] == str(tmp_path.resolve())
+    spawned_command = captured.get("command", [""])
+    assert "echo ok" in captured.get("start_command", "") or "echo ok" in spawned_command[-1]
+    cwd_value = str(captured.get("start_cwd") or captured.get("cwd", ""))
+    assert cwd_value == str(tmp_path.resolve())
     assert captured["timeout"] == 12
-    if hasattr(local_backend_module.subprocess, "CREATE_NO_WINDOW"):
+    if hasattr(local_backend_module.subprocess, "CREATE_NO_WINDOW") and "creationflags" in captured:
         assert (
             captured["creationflags"]
             & local_backend_module.subprocess.CREATE_NO_WINDOW

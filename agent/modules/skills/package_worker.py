@@ -25,6 +25,33 @@ _VERSION_CACHE: OrderedDict[str, tuple[str, str]] = OrderedDict()
 _VERSION_CACHE_LOCK = threading.Lock()
 
 
+def _lease_pid_alive(pid: int) -> bool:
+    """Check lease PID liveness without delivering signals.
+
+    run_operation executes inside asyncio.to_thread workers, and probing with
+    os.kill(pid, 0) on Windows from a worker thread leaves a stray SIGINT
+    pending that surfaces as KeyboardInterrupt during event loop shutdown.
+    psutil is a hard dependency, so prefer it; keep the os.kill probe for
+    POSIX where signal 0 is a pure existence check.
+    """
+    if os.name == "nt":
+        try:
+            import psutil
+        except ImportError:
+            return True
+        try:
+            return psutil.pid_exists(pid)
+        except Exception:
+            return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
 def native_path(path: Path) -> Path:
     resolved = path.resolve()
     if os.name == "nt" and not str(resolved).startswith("\\\\?\\"):
@@ -398,12 +425,14 @@ def run_operation(workspace: str, request: dict) -> dict:
                 leased = False
                 for lease in candidate.rglob(".skill-lease-*"):
                     try:
-                        os.kill(int(lease.read_text()), 0)
+                        lease_pid = int(lease.read_text().strip())
+                    except (ValueError, OSError):
                         leased = True
-                    except ProcessLookupError:
+                        continue
+                    if _lease_pid_alive(lease_pid):
+                        leased = True
+                    else:
                         lease.unlink(missing_ok=True)
-                    except (PermissionError, ValueError, OSError):
-                        leased = True
                 if leased:
                     continue
                 if request.get("all") or candidate.stat().st_mtime < time.time() - 7 * 86400:
