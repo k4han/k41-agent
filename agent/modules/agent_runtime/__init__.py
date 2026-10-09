@@ -1,10 +1,15 @@
+from agent.modules.agent_runtime import active_sessions
 from agent.modules.agent_runtime.active_sessions import (
     ActiveSession,
     ActiveSessionRegistry,
+    ThreadMutationConflictError,
     current_session_id_var,
     current_thread_id_var,
-    get_active_session_registry,
 )
+
+
+def get_active_session_registry() -> ActiveSessionRegistry:
+    return active_sessions.get_active_session_registry()
 from agent.modules.agent_runtime.runner import (
     build_run_params,
     clear_agent_session,
@@ -38,6 +43,7 @@ from agent.modules.agent_runtime.chat_stream_manager import (
 __all__ = [
     "ActiveSession",
     "ActiveSessionRegistry",
+    "ThreadMutationConflictError",
     "BackgroundTask",
     "BackgroundTaskManager",
     "BackgroundTaskRecord",

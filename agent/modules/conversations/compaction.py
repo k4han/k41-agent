@@ -23,11 +23,11 @@ from langchain_core.messages import (
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langchain_core.messages.utils import count_tokens_approximately
 
-from agent.modules.agent_runtime.active_sessions import (
+from agent.modules.agent_runtime import (
     ThreadMutationConflictError,
     get_active_session_registry,
 )
-from agent.modules.providers.context_budget import model_input_budget
+from agent.modules.providers import model_input_budget
 
 from agent.modules.conversations.history import (
     _checkpoint_messages,
@@ -42,12 +42,16 @@ from agent.modules.conversations.service import (
 from agent.modules.providers import get_resolved_chat_model
 from agent.modules.usage import (
     attach_usage_context,
+    estimate_compacted_context_breakdown,
     load_usage_context,
     with_usage_tracking,
 )
-from agent.modules.usage.context_breakdown import estimate_compacted_context_breakdown
-from agent.modules.workflows import get_workflow_graph, make_run_config
-from agent.modules.workflows.run_config import DEFAULT_CONTEXT_COMPACT_THRESHOLD
+from agent.modules.workflows import (
+    DEFAULT_CONTEXT_COMPACT_THRESHOLD,
+    get_workflow_graph,
+    make_run_config,
+    normalize_messages_for_chat_model,
+)
 from agent.shared.config import get_config_service
 from agent.shared.infrastructure.parsing import extract_final_text_content
 from agent.shared.thread_ids import resolve_thread_id
@@ -442,8 +446,6 @@ async def compact_message_history(
     if cutoff_index is None:
         cutoff_index = resolve_compaction_cutoff(messages, target_keep=effective_keep)
 
-    from agent.modules.workflows.message_history import normalize_messages_for_chat_model
-
     def count(items: list[BaseMessage]) -> int:
         return count_tokens_approximately(normalize_messages_for_chat_model(items))
 
@@ -598,8 +600,6 @@ async def _compact_conversation_thread_locked(
         max_retained_tokens=budget - prompt_tokens,
     )
     injected_messages = compacted.messages
-
-    from agent.modules.workflows.message_history import normalize_messages_for_chat_model
 
     retained_tokens = count_tokens_approximately(normalize_messages_for_chat_model(injected_messages))
     before_tokens = count_tokens_approximately(normalize_messages_for_chat_model(messages))

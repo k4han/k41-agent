@@ -13,6 +13,7 @@ from agent.modules.providers.openai_compatible.factory import OpenAICompatibleFa
 from agent.modules.providers.provider import ProviderConfig, ProviderType
 from agent.modules.providers.profiles import EFFORT_PATTERN, parse_model_profiles
 from agent.modules.providers.context_window import DEFAULT_CONTEXT_WINDOW
+from agent.modules.providers.context_budget import model_input_budget
 from agent.modules.providers.repository import ConfigProviderRepository
 from agent.modules.providers.service import ProviderService
 from agent.modules.providers.internal_loader import load_internal_providers
@@ -133,6 +134,7 @@ from agent.modules.providers.verification import (
 __all__ = [
     "EFFORT_PATTERN",
     "DEFAULT_CONTEXT_WINDOW",
+    "model_input_budget",
     "parse_model_profiles",
     "AnthropicFactory",
     "ConfigProviderRepository",

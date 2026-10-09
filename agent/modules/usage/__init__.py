@@ -20,10 +20,24 @@ from agent.modules.usage.tracking import (
     extract_usage,
     with_usage_tracking,
 )
+from agent.modules.usage.context_breakdown import (
+    CONTEXT_CATEGORIES,
+    estimate_compacted_context_breakdown,
+    estimate_context_breakdown,
+    estimate_response_breakdown,
+    include_response_in_context,
+    reconcile_context_breakdown,
+)
 
 __all__ = [
     "DEFAULT_USAGE_LIMIT",
     "ExtractedUsage",
+    "CONTEXT_CATEGORIES",
+    "estimate_compacted_context_breakdown",
+    "estimate_context_breakdown",
+    "estimate_response_breakdown",
+    "include_response_in_context",
+    "reconcile_context_breakdown",
     "LLMUsageCallback",
     "LLMUsageEvent",
     "LLMUsageRepository",

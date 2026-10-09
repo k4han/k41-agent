@@ -4,6 +4,7 @@ from agent.shared.thread_ids import resolve_thread_id
 from typing import Any
 
 from agent.modules.workflows.run_config import (
+    DEFAULT_CONTEXT_COMPACT_THRESHOLD,
     DEFAULT_WORKING_DIR,
     make_context as make_run_context,
     make_config as make_run_config,
@@ -61,7 +62,7 @@ def get_checkpointer():
 
 async def delete_workflow_thread(thread_id: str) -> None:
     thread_id = resolve_thread_id(thread_id)
-    from agent.modules.agent_runtime.active_sessions import get_active_session_registry
+    from agent.modules.agent_runtime import get_active_session_registry
     from agent.modules.workflows.checkpoint.store import get_checkpointer
 
     checkpointer = get_checkpointer()
@@ -101,14 +102,14 @@ async def _list_workflow_child_thread_ids(checkpointer: object, thread_id: str) 
 
 async def delete_workflow_thread_tree(thread_id: str) -> None:
     thread_id = resolve_thread_id(thread_id)
-    from agent.modules.agent_runtime.active_sessions import get_active_session_registry
+    from agent.modules.agent_runtime import get_active_session_registry
 
     async with get_active_session_registry().wait_for_thread_mutation(thread_id):
         await _delete_workflow_thread_tree_reserved(thread_id)
 
 
 async def _delete_workflow_thread_tree_reserved(thread_id: str) -> None:
-    from agent.modules.agent_runtime.active_sessions import get_active_session_registry
+    from agent.modules.agent_runtime import get_active_session_registry
     from agent.modules.tools import clear_conversation_storage
     from agent.modules.workflows.checkpoint.store import get_checkpointer
 
@@ -146,6 +147,7 @@ async def _delete_workflow_thread_tree_reserved(thread_id: str) -> None:
 
 
 __all__ = [
+    "DEFAULT_CONTEXT_COMPACT_THRESHOLD",
     "normalize_messages_for_chat_model",
     "DEFAULT_WORKING_DIR",
     "delete_workflow_thread",

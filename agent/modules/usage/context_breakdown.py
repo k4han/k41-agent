@@ -73,7 +73,7 @@ def estimate_compacted_context_breakdown(
     previous_breakdown: dict[str, int] | None = None,
 ) -> dict[str, int]:
     """Recount retained history and carry forward the latest prompt estimates."""
-    from agent.modules.workflows.message_history import normalize_messages_for_chat_model
+    from agent.modules.workflows import normalize_messages_for_chat_model
 
     result = estimate_context_breakdown(normalize_messages_for_chat_model(list(messages)))
     for key in ("system_prompt", "system_tools", "skills", "subagents"):

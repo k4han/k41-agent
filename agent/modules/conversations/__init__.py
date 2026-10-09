@@ -1,16 +1,20 @@
 from agent.modules.conversations.models import ConversationThread
 from agent.modules.conversations.migrations import migrate_conversation_ids, migrate_conversation_tables
+from agent.modules.conversations import history
 from agent.modules.conversations.history import (
     CheckpointNotFoundError,
     ConversationHistoryUnavailableError,
     checkpoint_messages,
     get_checkpoint_stats,
-    get_history_checkpointer,
     get_thread_messages,
     get_thread_messages_payload,
     list_background_threads_with_stats,
     list_user_threads_with_stats,
 )
+
+
+def get_history_checkpointer():
+    return history.get_history_checkpointer()
 from agent.modules.conversations.compaction import (
     CompactionBudgetError,
     CompactionConflictError,

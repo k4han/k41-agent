@@ -245,15 +245,15 @@ class UsageService:
         if payload.get("context_estimated") and payload.get("context_breakdown") is None:
             # Older compaction markers stored only the retained history total.
             try:
-                from agent.modules.conversations.history import _checkpoint_messages, get_history_checkpointer
-                from agent.modules.usage.context_breakdown import estimate_compacted_context_breakdown
+                from agent.modules.conversations import checkpoint_messages, get_history_checkpointer
+                from agent.modules.usage import estimate_compacted_context_breakdown
 
                 checkpoint = await get_history_checkpointer().aget_tuple(
                     {"configurable": {"thread_id": thread_id}},
                 )
                 if checkpoint is not None:
                     previous = await self._repository.latest_context_breakdown(thread_id)
-                    breakdown = estimate_compacted_context_breakdown(_checkpoint_messages(checkpoint), previous)
+                    breakdown = estimate_compacted_context_breakdown(checkpoint_messages(checkpoint), previous)
                     payload["context_breakdown"] = breakdown
                     payload["current_context_tokens"] = sum(breakdown.values())
             except Exception as exc:
