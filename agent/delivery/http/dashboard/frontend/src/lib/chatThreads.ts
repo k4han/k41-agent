@@ -204,7 +204,7 @@ export function toThreadTranscript(
         return;
       }
 
-      if (msg.name === PLAN_MODE_TOOL_NAME) {
+      if (msg.name === PLAN_MODE_TOOL_NAME || msg.name === "plan_mode_respond") {
         const planTarget = findTranscriptPlanReviewTarget(items, msg.tool_call_id);
         if (planTarget) {
           Object.assign(planTarget, parsePlanReviewToolResult(msg.content));
@@ -293,7 +293,7 @@ export function toThreadTranscript(
           });
           return;
         }
-        if (toolCall.name === PLAN_MODE_TOOL_NAME) {
+        if (toolCall.name === PLAN_MODE_TOOL_NAME || toolCall.name === "plan_mode_respond") {
           const args = toolCall.args as { plan?: unknown } | null;
           const existingPlanReview = findTranscriptPlanReviewTarget(items, toolCall.id);
           if (existingPlanReview) {

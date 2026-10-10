@@ -13,13 +13,14 @@ from agent.modules.tools.builtin.utility.plan_resume import (
 )
 
 
-PLAN_MODE_TOOL_NAME = "plan_mode_respond"
+REQUEST_PLAN_REVIEW_TOOL_NAME = "request_plan_review"
+PLAN_MODE_TOOL_NAME = REQUEST_PLAN_REVIEW_TOOL_NAME
 PLAN_REVIEW_INTERRUPT_TYPE = "plan_review"
 PLAN_REVIEW_APPROVED_PREFIX = "PLAN_REVIEW_APPROVED"
 PLAN_REVIEW_REVISION_PREFIX = "PLAN_REVIEW_REVISION_REQUESTED"
 
 
-class PlanModeRespondInput(BaseModel):
+class RequestPlanReviewInput(BaseModel):
     """Input schema for requesting human review of an implementation plan."""
 
     plan: str = Field(
@@ -29,13 +30,15 @@ class PlanModeRespondInput(BaseModel):
     )
 
 
+PlanModeRespondInput = RequestPlanReviewInput
 PlanModeResumePayload = PlanResumePayload
 
 
-PLAN_MODE_RESPOND_DESCRIPTION = (
+REQUEST_PLAN_REVIEW_DESCRIPTION = (
     "Show an implementation plan to the user and pause execution until the "
     "user either approves it with a target agent or provides feedback to revise it."
 )
+PLAN_MODE_RESPOND_DESCRIPTION = REQUEST_PLAN_REVIEW_DESCRIPTION
 
 
 def _normalize_resume_payload(value: Any) -> PlanModeResumePayload:
@@ -44,7 +47,7 @@ def _normalize_resume_payload(value: Any) -> PlanModeResumePayload:
     return PlanModeResumePayload.model_validate(value)
 
 
-def _plan_mode_respond(
+def _request_plan_review(
     plan: str,
     runtime: Annotated[ToolRuntime[Any, Any], InjectedToolArg],
 ) -> str:
@@ -70,23 +73,37 @@ def _plan_mode_respond(
     return (
         f"{PLAN_REVIEW_REVISION_PREFIX}\n"
         f"User feedback:\n{feedback}\n\n"
-        "Revise the plan according to the feedback and call plan_mode_respond again."
+        "Revise the plan according to the feedback and call request_plan_review again."
     )
+
+
+def _plan_mode_respond(
+    plan: str,
+    runtime: Annotated[ToolRuntime[Any, Any], InjectedToolArg],
+) -> str:
+    return _request_plan_review(plan, runtime)
+
+
+async def _arequest_plan_review(
+    plan: str,
+    runtime: Annotated[ToolRuntime[Any, Any], InjectedToolArg],
+) -> str:
+    return _request_plan_review(plan, runtime)
 
 
 async def _aplan_mode_respond(
     plan: str,
     runtime: Annotated[ToolRuntime[Any, Any], InjectedToolArg],
 ) -> str:
-    return _plan_mode_respond(plan, runtime)
+    return _request_plan_review(plan, runtime)
 
 
-plan_mode_respond = StructuredTool.from_function(
-    name=PLAN_MODE_TOOL_NAME,
-    description=PLAN_MODE_RESPOND_DESCRIPTION,
-    func=_plan_mode_respond,
-    coroutine=_aplan_mode_respond,
-    args_schema=PlanModeRespondInput,
+request_plan_review = StructuredTool.from_function(
+    name=REQUEST_PLAN_REVIEW_TOOL_NAME,
+    description=REQUEST_PLAN_REVIEW_DESCRIPTION,
+    func=_request_plan_review,
+    coroutine=_arequest_plan_review,
+    args_schema=RequestPlanReviewInput,
     infer_schema=False,
 )
 
@@ -97,7 +114,9 @@ register_tool(
         ToolCapability.REQUIRES_THREAD,
     ],
     tags=["planning", "approval", "human-in-the-loop"],
-)(plan_mode_respond)
+)(request_plan_review)
+
+plan_mode_respond = request_plan_review
 
 
 __all__ = [
@@ -108,5 +127,8 @@ __all__ = [
     "PlanResumeAction",
     "PlanModeRespondInput",
     "PlanModeResumePayload",
+    "REQUEST_PLAN_REVIEW_TOOL_NAME",
+    "RequestPlanReviewInput",
     "plan_mode_respond",
+    "request_plan_review",
 ]

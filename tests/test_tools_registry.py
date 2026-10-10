@@ -193,7 +193,7 @@ class TestBuiltinToolSource:
             "get_current_time",
             "write_todos",
             "ask_user",
-            "plan_mode_respond",
+            "request_plan_review",
             "call_agent",
             "schedule_task",
             "list_scheduled_tasks",
@@ -229,7 +229,7 @@ class TestBuiltinToolSource:
         assert ToolCapability.NETWORK in by_name["web_search"].capabilities
         assert ToolCapability.MUTATES_STATE in by_name["write_todos"].capabilities
         assert ToolCapability.MUTATES_STATE in by_name["ask_user"].capabilities
-        assert ToolCapability.MUTATES_STATE in by_name["plan_mode_respond"].capabilities
+        assert ToolCapability.MUTATES_STATE in by_name["request_plan_review"].capabilities
 
     def test_load_is_idempotent_in_id_space(self) -> None:
         source = BuiltinToolSource()

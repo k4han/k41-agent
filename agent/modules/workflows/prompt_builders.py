@@ -39,15 +39,16 @@ WRITE_TODOS_PROMPT = (
 )
 
 PLAN_MODE_PROMPT = (
-    "The plan_mode_respond tool can present an implementation plan to the user "
+    "The request_plan_review tool can present an implementation plan to the user "
     "and pause execution for human review.\n"
     "Use it when the user asks to review or approve a plan before work proceeds, "
     "or when a task needs an explicit handoff decision before implementation.\n"
     "The plan must be complete enough for another agent to execute without "
     "guessing. After the user approves, continue from the tool response and "
     "execute the approved plan. If the user provides feedback, revise the plan "
-    "and call plan_mode_respond again."
+    "and call request_plan_review again."
 )
+REQUEST_PLAN_REVIEW_PROMPT = PLAN_MODE_PROMPT
 
 ASK_USER_PROMPT = (
     "The ask_user tool can ask the user one or more structured questions and "
@@ -228,7 +229,7 @@ def build_llm_system_prompt(
     if _has_tool(tools, "write_todos"):
         system_prompt = f"{system_prompt}\n\n{WRITE_TODOS_PROMPT}"
 
-    if _has_tool(tools, "plan_mode_respond"):
+    if _has_tool(tools, "request_plan_review") or _has_tool(tools, "plan_mode_respond"):
         system_prompt = f"{system_prompt}\n\n{PLAN_MODE_PROMPT}"
 
     if _has_tool(tools, "ask_user"):
@@ -246,6 +247,7 @@ __all__ = [
     "SKILLS_DISCLOSURE_PROMPT",
     "ASK_USER_PROMPT",
     "PLAN_MODE_PROMPT",
+    "REQUEST_PLAN_REVIEW_PROMPT",
     "SUB_AGENT_DISCLOSURE_PROMPT",
     "SUB_AGENT_EMPTY_PROMPT",
     "WRITE_TODOS_PROMPT",

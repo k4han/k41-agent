@@ -159,7 +159,7 @@ export function handleStreamEvent(
 
   if (event.type === STREAM_EVENTS.TOOL_RESULT) {
     const toolName = String(event.name || "unknown");
-    if (toolName === PLAN_MODE_TOOL_NAME) {
+    if (toolName === PLAN_MODE_TOOL_NAME || toolName === "plan_mode_respond") {
       callbacks.updatePlanReviewResult(
         String(event.tool_call_id || ""),
         event.content ?? null,

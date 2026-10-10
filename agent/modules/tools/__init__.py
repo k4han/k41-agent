@@ -48,7 +48,12 @@ from agent.modules.tools.builtin.utility.plan_mode import (
     PLAN_REVIEW_APPROVED_PREFIX,
     PLAN_REVIEW_INTERRUPT_TYPE,
     PLAN_REVIEW_REVISION_PREFIX,
+    PlanModeRespondInput,
     PlanModeResumePayload,
+    REQUEST_PLAN_REVIEW_TOOL_NAME,
+    RequestPlanReviewInput,
+    plan_mode_respond,
+    request_plan_review,
 )
 from agent.modules.tools.builtin.utility.plan_resume import PlanResumePayload
 from agent.modules.tools.builtin.utility.ask_user import (
@@ -233,6 +238,11 @@ __all__ = [
     "PLAN_REVIEW_APPROVED_PREFIX",
     "PLAN_REVIEW_INTERRUPT_TYPE",
     "PLAN_REVIEW_REVISION_PREFIX",
+    "REQUEST_PLAN_REVIEW_TOOL_NAME",
+    "RequestPlanReviewInput",
+    "PlanModeRespondInput",
+    "request_plan_review",
+    "plan_mode_respond",
     "ASK_USER_INTERRUPT_TYPE",
     "ASK_USER_TOOL_NAME",
     "AskUserAnswerResumePayload",

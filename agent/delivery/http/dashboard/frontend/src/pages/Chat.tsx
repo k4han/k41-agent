@@ -382,6 +382,7 @@ export function ChatPage() {
           (
             item.name === "write_todos"
             || item.name === PLAN_MODE_TOOL_NAME
+            || item.name === "plan_mode_respond"
             || item.name === ASK_USER_TOOL_NAME
             || item.name === GENERATE_IMAGE_TOOL_NAME
           )

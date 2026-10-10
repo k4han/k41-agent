@@ -66,10 +66,13 @@ import {
 } from "@/lib/userInputRequest";
 import type { AgentCard } from "@/types";
 
-export const PLAN_MODE_TOOL_NAME = "plan_mode_respond";
+export const REQUEST_PLAN_REVIEW_TOOL_NAME = "request_plan_review";
+export const PLAN_MODE_TOOL_NAME = REQUEST_PLAN_REVIEW_TOOL_NAME;
 export const PLAN_REVIEW_APPROVED_PREFIX = "PLAN_REVIEW_APPROVED";
 export const PLAN_REVIEW_REVISION_PREFIX = "PLAN_REVIEW_REVISION_REQUESTED";
 const PLAN_REVIEW_REVISION_INSTRUCTION =
+  "\n\nRevise the plan according to the feedback and call request_plan_review again.";
+const LEGACY_PLAN_REVIEW_REVISION_INSTRUCTION =
   "\n\nRevise the plan according to the feedback and call plan_mode_respond again.";
 
 export type TranscriptRole = "user" | "assistant" | "error" | "system";
@@ -288,6 +291,8 @@ export function parsePlanReviewToolResult(
       feedback = text.slice(feedbackPrefix.length);
       if (feedback.endsWith(PLAN_REVIEW_REVISION_INSTRUCTION)) {
         feedback = feedback.slice(0, -PLAN_REVIEW_REVISION_INSTRUCTION.length);
+      } else if (feedback.endsWith(LEGACY_PLAN_REVIEW_REVISION_INSTRUCTION)) {
+        feedback = feedback.slice(0, -LEGACY_PLAN_REVIEW_REVISION_INSTRUCTION.length);
       }
     }
     return {

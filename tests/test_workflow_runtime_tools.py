@@ -26,7 +26,10 @@ from agent.modules.tools.builtin.utility.plan_mode import (
     PLAN_REVIEW_APPROVED_PREFIX,
     PLAN_REVIEW_INTERRUPT_TYPE,
     PlanModeResumePayload,
+    REQUEST_PLAN_REVIEW_TOOL_NAME,
+    RequestPlanReviewInput,
     plan_mode_respond,
+    request_plan_review,
 )
 from agent.modules.workflows.state.base import BaseState
 
@@ -434,14 +437,21 @@ def test_default_tool_registry_includes_runtime_tools():
     assert "call_agent" in get_default_tool_names()
     assert "write_todos" in get_default_tool_names()
     assert ASK_USER_TOOL_NAME in get_default_tool_names()
-    assert PLAN_MODE_TOOL_NAME in get_default_tool_names()
+    assert REQUEST_PLAN_REVIEW_TOOL_NAME in get_default_tool_names()
+    assert PLAN_MODE_TOOL_NAME == REQUEST_PLAN_REVIEW_TOOL_NAME
+    assert request_plan_review.name == "request_plan_review"
+    assert plan_mode_respond == request_plan_review
 
 
 def test_plan_mode_tool_validates_plan() -> None:
+    assert request_plan_review.args_schema is not None
     assert plan_mode_respond.args_schema is not None
 
     with pytest.raises(ValidationError):
-        plan_mode_respond.args_schema.model_validate({"plan": ""})
+        request_plan_review.args_schema.model_validate({"plan": ""})
+
+    with pytest.raises(ValidationError):
+        RequestPlanReviewInput.model_validate({"plan": ""})
 
     with pytest.raises(ValidationError):
         PlanModeResumePayload.model_validate({"action": "unknown"})
