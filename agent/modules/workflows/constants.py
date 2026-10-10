@@ -3,6 +3,7 @@
 # Graph type constants
 ROUTER_GRAPH_TYPE = "router"
 REACT_AGENT_GRAPH_TYPE = "react_agent"
+DECISION_AGENT_GRAPH_TYPE = "decision_agent"
 
 # Context key constants
 CONTEXT_KEY_AGENT_NAME = "agent_name"
@@ -19,6 +20,7 @@ STRIP_QUOTES = "`'\""
 __all__ = [
     "ROUTER_GRAPH_TYPE",
     "REACT_AGENT_GRAPH_TYPE",
+    "DECISION_AGENT_GRAPH_TYPE",
     "CONTEXT_KEY_AGENT_NAME",
     "CONTEXT_KEY_WORKING_DIR",
     "DEFAULT_AGENT_NAME",

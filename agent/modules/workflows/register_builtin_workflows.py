@@ -1,4 +1,5 @@
 from agent.modules.workflows.graphs import (
+    build_decision_agent_graph,
     build_react_graph,
     build_research_graph,
     build_router_graph,
@@ -12,5 +13,6 @@ def register_builtin_workflows() -> None:
     build_react_graph()
     build_research_graph()
     build_router_graph()
+    build_decision_agent_graph()
     scan_agents_from_md()
     print("[Registry] All graphs ready.")

@@ -14,7 +14,16 @@ class CodingState(BaseState):
 
 
 class ResearchState(BaseState):
-    """State cho research agent — có thể lưu sources, summary trung gian."""
+    """State for research agent — can store intermediate sources and summary."""
 
     sources: Optional[list[str]] = None
     summary: Optional[str] = None
+
+
+class DecisionAgentState(BaseState):
+    """State for decision-guided context curation agent."""
+
+    directory_tree: Optional[str] = None
+    candidate_files: Optional[list[str]] = None
+    included_files: Optional[list[dict]] = None
+    curated_context: Optional[str] = None
