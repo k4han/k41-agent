@@ -62,6 +62,21 @@ def python_command(source):
 
 
 @pytest.mark.asyncio
+async def test_remote_shell_cleans_output_and_reports_nonzero_exit(remote_coding):
+    service, context, _, worker = remote_coding
+    try:
+        result = await invoke(service, context, "bash", command=python_command(
+            "import sys; sys.stdout.write('\\x1b[32mfailure\\x1b[0m\\n'); sys.exit(2)"
+        ), yield_time_ms=30000)
+        assert result.status == "error" and result.error.code == "nonzero_exit"
+        assert result.content == "failure\n\n\nCommand exited with code 2."
+        assert result.data["exit_code"] == 2
+    finally:
+        await service.processes.close()
+        await worker.processes.close()
+
+
+@pytest.mark.asyncio
 async def test_remote_versioned_edits_write_search_and_replay(remote_coding):
     service, context, workspace, _ = remote_coding
     source = workspace / "source.py"

@@ -150,9 +150,9 @@ async def test_process_spills_only_after_output_grows_and_preserves_cursors(outp
         while cursor < job.stored_bytes:
             page = await manager.observe(job, cursor=cursor)
             assert page.data["cursor"] > cursor and page.output_paths == result.output_paths
-            pieces.append(page.content.split("\n\nProcess ", 1)[0])
+            pieces.append(page.content.split("\n\nCommand exited with code ", 1)[0])
             cursor = page.data["cursor"]
-        assert "".join(pieces).encode("utf-8") == path.read_bytes()[short.data["cursor"]:]
+        assert "".join(pieces).encode("utf-8") == path.read_bytes()[short.data["cursor"]:].replace(b"\r\n", b"\n")
         assert len(list(path.parent.glob("*.txt"))) == 1
     finally:
         await service.processes.close()

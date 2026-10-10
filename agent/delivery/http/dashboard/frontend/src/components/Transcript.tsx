@@ -41,6 +41,7 @@ import { useToast } from "@/components/Toast";
 import { isChatStatusText } from "@/lib/chatStatus";
 import { getSharedDarkMode } from "@/lib/theme";
 import { toolCallSummary } from "@/lib/toolCallSummary";
+import { isShellTool, shellToolResult } from "@/lib/shellToolResult";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
 import {
   HTML_PREVIEW_TOOL_NAME,
@@ -868,6 +869,8 @@ export function ToolCallDetail(props: {
   threadId?: string | null;
 }) {
   const summary = createMemo(() => toolCallSummary(props.name, props.args));
+  const shell = createMemo(() => isShellTool(props.name));
+  const shellResult = createMemo(() => shell() ? shellToolResult(props.result) : null);
   const generatedImage = () =>
     props.name === GENERATE_IMAGE_TOOL_NAME
       ? generatedImageFromToolResult(props.result, props.threadId)
@@ -909,7 +912,12 @@ export function ToolCallDetail(props: {
             <span class="mono tool-call-summary">{summary()}</span>
           </summary>
           <div class="tool-call-body">
-            <pre>{formatValue(props.args)}</pre>
+            <Show when={shell()} fallback={<pre>{formatValue(props.args)}</pre>}>
+              <details class="tool-call-arguments">
+                <summary>Parameters</summary>
+                <pre>{formatValue(props.args)}</pre>
+              </details>
+            </Show>
             <Show when={generatedImage()}>
               {(image) => (
                 <a
@@ -922,7 +930,16 @@ export function ToolCallDetail(props: {
                 </a>
               )}
             </Show>
-            <pre>{props.result === null ? (props.name === "skill" ? "Preparing skill resources and runtimes in the workspace..." : "Waiting for tool result...") : formatValue(props.result)}</pre>
+            <Show when={shellResult()} fallback={
+              <pre>{props.result === null ? (props.name === "skill" ? "Preparing skill resources and runtimes in the workspace..." : "Waiting for tool result...") : formatValue(props.result)}</pre>
+            }>
+              {(result) => <>
+                <pre>{result().output}</pre>
+                <div class="tool-shell-outcome" classList={{ "is-error": result().failed, "is-running": result().running }} role="status">
+                  {result().outcome}
+                </div>
+              </>}
+            </Show>
           </div>
         </details>
       }

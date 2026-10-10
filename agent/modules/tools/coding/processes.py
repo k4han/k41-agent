@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import codecs
-import io
 import logging
 import os
 import platform
@@ -34,6 +33,42 @@ from agent.modules.tools.runtime.sandbox import build_safe_env
 from agent.shared.infrastructure.subprocess_utils import hidden_subprocess_kwargs
 
 logger = logging.getLogger(__name__)
+
+_ANSI_ESCAPE_RE = re.compile(
+    r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]|\x1b(?![\[\]])[@-_]"
+)
+_INCOMPLETE_ESCAPE_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*|\][^\x07\x1b]*(?:\x1b)?|)$")
+
+
+def clean_terminal_output(text: str) -> str:
+    """Remove terminal chrome while keeping the retained source unchanged."""
+    text = _INCOMPLETE_ESCAPE_RE.sub("", _ANSI_ESCAPE_RE.sub("", text)).replace("\r\n", "\n")
+    if "\r" in text:
+        text = "\n".join(line.rstrip("\r").rsplit("\r", 1)[-1] for line in text.split("\n"))
+    if "\b" in text:
+        characters: list[str] = []
+        for character in text:
+            if character == "\b":
+                if characters and characters[-1] != "\n":
+                    characters.pop()
+            else:
+                characters.append(character)
+        text = "".join(characters)
+    return text
+
+
+def output_page(raw: bytes, byte_limit: int, line_limit: int) -> str:
+    """Page source bytes without splitting UTF-8 or a short terminal escape."""
+    text = raw[:byte_limit].decode("utf-8", errors="ignore")
+    text = "".join(text.splitlines(keepends=True)[:line_limit])
+    incomplete = _INCOMPLETE_ESCAPE_RE.search(text)
+    if incomplete and incomplete.start() > 0:
+        text = text[:incomplete.start()]
+    # Keep CRLF together so the cleaner does not interpret a page boundary
+    # as a progress update and hide the preceding line.
+    if text.endswith("\r") and raw[len(text.encode("utf-8")):].startswith(b"\n"):
+        text = text[:-1]
+    return text
 
 
 def resolve_shell(configured: str | None = None) -> str:
@@ -113,9 +148,9 @@ class ProcessJob:
             pass
 
     def append(self, text: str, label: str = "stdout") -> None:
-        payload = text.encode("utf-8")
-        prefix = f"[{label} bytes={len(payload)}] ".encode("utf-8")
-        raw = prefix + payload
+        # Store exact pipe text. Stream read boundaries are not logical lines
+        # and must never insert framing into output or its byte cursors.
+        raw = text.encode("utf-8")
         with self.lock:
             self.received_bytes += len(raw)
             self.head = (self.head + raw)[:MAX_CAPTURE_BYTES // 2]
@@ -162,21 +197,10 @@ class ProcessJob:
             self.storage.active_paths.add(path)
 
     def retained_plain(self) -> str:
-        """Legacy consumers receive exact text without injected stream labels."""
-        with self.lock, (self.path.open("rb") if self.path is not None else io.BytesIO(self.buffer)) as handle:
-            output = []
-            while True:
-                header = bytearray()
-                while len(header) < 80 and not header.endswith(b"] "):
-                    char = handle.read(1)
-                    if not char:
-                        break
-                    header.extend(char)
-                match = re.fullmatch(rb"\[(?:stdout|stderr) bytes=(\d+)\] ", bytes(header))
-                if match is None:
-                    break
-                output.append(handle.read(int(match.group(1))))
-            return b"".join(output).decode("utf-8", errors="replace")
+        """Legacy consumers receive exact retained pipe text."""
+        with self.lock:
+            raw = self.path.read_bytes() if self.path is not None else self.buffer
+            return raw.decode("utf-8", errors="replace")
 
 
 class ProcessManager:
@@ -352,7 +376,7 @@ class ProcessManager:
         with job.lock:
             if cursor < 0 or cursor > job.stored_bytes:
                 raise CodingError("invalid_input", "Output cursor is outside the retained output.")
-            size = min(MAX_MODEL_BYTES - 1024, job.stored_bytes - cursor)
+            size = min(MAX_MODEL_BYTES - 1024 + 1, job.stored_bytes - cursor)
             if job.path is None:
                 raw = job.buffer[cursor:cursor + size]
             else:
@@ -361,17 +385,16 @@ class ProcessManager:
                     raw = handle.read(size)
             if raw and (raw[0] & 0xC0) == 0x80:
                 raise CodingError("invalid_input", "Use a cursor returned by the previous observation, on a UTF-8 boundary.")
-            output = raw.decode("utf-8", errors="ignore")
-            output = "".join(output.splitlines(keepends=True)[:MAX_MODEL_LINES - 4])
+            output = output_page(raw, MAX_MODEL_BYTES - 1024, MAX_MODEL_LINES - 8)
             consumed = len(output.encode("utf-8"))
             more = cursor + consumed < job.stored_bytes
             tail_preview = ""
             if preview and (more or job.capture_truncated):
-                output = output.encode("utf-8")[:MAX_MODEL_BYTES // 2 - 1024].decode("utf-8", errors="ignore")
-                output = "".join(output.splitlines(keepends=True)[:(MAX_MODEL_LINES - 8) // 2])
+                output = output_page(raw, MAX_MODEL_BYTES // 2 - 1024, (MAX_MODEL_LINES - 12) // 2)
                 consumed = len(output.encode("utf-8"))
-                end = job.tail[-(MAX_MODEL_BYTES // 2 - 1024):].decode("utf-8", errors="ignore")
-                end = "".join(end.splitlines(keepends=True)[-(MAX_MODEL_LINES - 8) // 2:])
+                end = clean_terminal_output(job.tail.decode("utf-8", errors="ignore"))
+                end = end.encode("utf-8")[-(MAX_MODEL_BYTES // 2 - 1024):].decode("utf-8", errors="ignore")
+                end = "".join(end.splitlines(keepends=True)[-(MAX_MODEL_LINES - 12) // 2:])
                 tail_preview = "\n[tail preview; subsequent cursor reads continue through the retained output]\n" + end
                 more = cursor + consumed < job.stored_bytes
             data = {"process_id": job.id, "state": job.status, "exit_code": job.process.poll(),
@@ -381,20 +404,42 @@ class ProcessManager:
             relative = job.path.relative_to(Path(job.workspace)).as_posix() if job.path is not None else None
             output_refs = [job.output_ref] if relative is not None else []
             output_paths = [relative] if relative is not None else []
-        footer = f"\n\nProcess {job.id}: {job.status}; exit_code={data['exit_code']}; next_cursor={data['cursor']}."
+            finished = job.finished.is_set()
+        if not finished:
+            outcome = f"Process {job.id}: running; next_cursor={data['cursor']}."
+            display_outcome = "Process is still running."
+        elif data["state"] == "timeout":
+            outcome = display_outcome = "Command timed out."
+        elif data["state"] == "cancelled":
+            outcome = display_outcome = "Command was cancelled."
+        else:
+            outcome = display_outcome = f"Command exited with code {data['exit_code']}."
+        footer = f"\n\n{outcome}"
         data["output_paths"] = output_paths
         marker = f"\n[more output; read_process_output process_id={job.id} cursor={data['cursor']}" if more else ""
         if more:
             marker += f"; read file_path={relative} byte_offset=0]" if relative is not None else "]"
         loss_marker = "\n[capture quota exceeded or pipe drain incomplete; some output was lost]" if job.capture_truncated else ""
-        content, cut = bounded_text((output or "(no output)") + tail_preview + footer + marker + loss_marker)
-        result = ToolResult(status="running" if not job.finished.is_set() else "success", data=data,
-                            content=content, output_refs=output_refs, output_paths=output_paths, capture_truncated=job.capture_truncated,
+        body = (clean_terminal_output(output) or "(no output)") + tail_preview
+        content, cut = bounded_text(body + footer + marker + loss_marker)
+        display_marker = ""
+        if more:
+            display_marker = f"\n[more output available; saved in {relative}]" if relative else "\n[more output available]"
+        display, display_cut = bounded_text(body + display_marker + loss_marker + f"\n\n{display_outcome}")
+        result = ToolResult(status="success" if finished else "running", data=data,
+                            content=content, display_content=display if display != content else None,
+                            display_truncated=more or display_cut,
+                            output_refs=output_refs, output_paths=output_paths, capture_truncated=job.capture_truncated,
                             output_truncated=more or cut)
-        if job.status in {"timeout", "cancelled"}:
+        if finished and data["state"] in {"timeout", "cancelled"}:
             from agent.modules.tools.coding.contracts import RuntimeError as ResultError
             result.status = "error"
-            result.error = ResultError(code=job.status, message=f"Process {job.status}.")
+            result.error = ResultError(code=data["state"], message=f"Process {data['state']}.")
+        elif finished and data["exit_code"] not in {None, 0}:
+            from agent.modules.tools.coding.contracts import RuntimeError as ResultError
+            result.status = "error"
+            result.error = ResultError(code="nonzero_exit", message=outcome,
+                                       details={"exit_code": data["exit_code"]})
         return result
 
     async def send(self, job: ProcessJob, text: str) -> None:

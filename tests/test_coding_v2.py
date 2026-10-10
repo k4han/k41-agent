@@ -484,11 +484,40 @@ async def test_output_cursors_preserve_utf8_and_all_retained_lines(coding):
         page = await service.processes.observe(job, cursor=cursor)
         assert page.data["cursor"] > cursor
         assert len(page.content.splitlines()) <= MAX_MODEL_LINES
-        pieces.append(page.content.split("\n\nProcess ", 1)[0])
+        pieces.append(page.content.split("\n\nCommand exited with code ", 1)[0])
         cursor = page.data["cursor"]
     assert "".join(pieces).count("\U0001f600") == 10000
     preview = await service.processes.observe(job, preview=True)
     assert preview.data["tail_preview"] and "tail preview" in preview.content
+
+
+@pytest.mark.asyncio
+async def test_bash_nonzero_exit_sets_tool_message_error(coding, monkeypatch):
+    service, context, _ = coding
+    monkeypatch.setattr("agent.modules.tools.coding.adapter.invocation_context", lambda runtime: context)
+    runtime = SimpleNamespace(tool_call_id="failed-command")
+    message = await make_coding_tool("bash").coroutine(
+        runtime=runtime, command=python_command("import sys; print('failure detail'); sys.exit(2)"),
+        yield_time_ms=30000,
+    )
+    assert message.status == "error"
+    assert message.artifact["error"]["code"] == "nonzero_exit"
+    assert message.artifact["data"]["exit_code"] == 2
+    assert "failure detail" in message.content
+    assert message.content.endswith("Command exited with code 2.")
+
+
+@pytest.mark.asyncio
+async def test_legacy_run_bash_does_not_duplicate_the_command_outcome(coding, monkeypatch):
+    from agent.modules.tools.builtin.shell.run_bash_tool import _run_local
+
+    service, context, workspace = coding
+    monkeypatch.setattr("agent.modules.tools.coding.adapter.invocation_context", lambda runtime: context)
+    result = await _run_local(python_command("print('ok')"), str(workspace), 10, 10000,
+                              ["Advisory detail."], SimpleNamespace())
+    assert result.count("Command exited with code 0.") == 1
+    assert result.count("Advisory detail.") == 1
+    assert result.startswith("ok")
 
 
 @pytest.mark.asyncio

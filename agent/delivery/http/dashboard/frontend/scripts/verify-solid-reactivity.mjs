@@ -254,6 +254,18 @@ try {
   send({ type: 'tool_result', tool_call_id: 'tool-1', name: 'read_file', content: 'completed result' });
   await until(() => js('document.querySelector("details.tool-call").textContent.includes("completed result")'), 'tool result');
   assert.equal(await js('toolDetails.isConnected && toolDetails.open && document.querySelector("details.tool-call") === toolDetails'), true);
+  send({ type: 'tool_call', id: 'shell-1', name: 'bash', args: { command: 'git status --short', workdir: '.' } });
+  await until(() => js('!!document.querySelector(".tool-call-arguments")'), 'shell parameters');
+  assert.equal(await js('document.querySelector(".tool-call-arguments").open'), false);
+  await js('window.shellDetails = document.querySelector(".tool-call-arguments").closest("details.tool-call"); shellDetails.open = true;');
+  send({ type: 'tool_result', tool_call_id: 'shell-1', name: 'bash', content: 'ready\n\nProcess is still running.' });
+  await until(() => js('!!document.querySelector(".tool-shell-outcome.is-running")'), 'running shell outcome');
+  send({ type: 'tool_result', tool_call_id: 'shell-1', name: 'bash', content: 'failure detail\n\nCommand exited with code 2.' });
+  await until(() => js('!!document.querySelector(".tool-shell-outcome.is-error")'), 'failed shell outcome');
+  assert.equal(await js('document.querySelector(".tool-shell-outcome").textContent'), 'Command exited with code 2.');
+  assert.equal(await js('shellDetails.isConnected && shellDetails.open && shellDetails.querySelector("pre").textContent.includes("git status --short")'), true);
+  assert.equal(await js('shellDetails.querySelector(".tool-call-body > pre").textContent'), 'failure detail');
+  console.log('PASS: shell parameters stay collapsed while running and failed outcomes update in place.');
   send({ type: 'message', content: 'Second assistant response' });
   await until(() => js('document.body.textContent.includes("Second assistant response")'), 'second Markdown consumer');
   assert.equal(await js('themeObserverCounts.active'), 1);

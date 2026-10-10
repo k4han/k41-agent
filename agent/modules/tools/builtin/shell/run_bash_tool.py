@@ -368,6 +368,9 @@ async def _run_local(
             await service.processes.stop(job)
             raise
     body = str(result.content)
+    plain_footer = _model_footer(result.data.get('exit_code'), result.data.get('state') == 'timeout', [])
+    if body.endswith(plain_footer):
+        body = body[:-len(plain_footer)].rstrip("\n")
     if result.output_paths:
         body += f"\nOutput file: {result.output_paths[0]} (read)."
     return f"{body}\n\n{_model_footer(result.data.get('exit_code'), result.data.get('state') == 'timeout', warnings)}"

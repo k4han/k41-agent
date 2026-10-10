@@ -194,6 +194,32 @@
   border-top: 1px solid var(--border);
 }
 
+.tool-call-arguments {
+  border-bottom: 1px solid var(--border);
+}
+
+.tool-call-arguments > summary {
+  padding: 8px 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.tool-shell-outcome {
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+  color: var(--success);
+  font-size: 12px;
+}
+
+.tool-shell-outcome.is-error {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 6%, transparent);
+}
+
+.tool-shell-outcome.is-running {
+  color: var(--muted);
+}
+
 .tool-generated-image {
   display: block;
   margin: 10px;
