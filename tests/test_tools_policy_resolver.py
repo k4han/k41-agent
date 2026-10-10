@@ -156,7 +156,7 @@ class TestToolPolicy:
         )
         config = SimpleNamespace(
             name="default",
-            tools=["echo"],
+            tools=["get_current_time"],
             mcp_servers=[],
             sub_agents=None,
         )
@@ -174,7 +174,7 @@ class TestToolPolicy:
         )
         config = SimpleNamespace(
             name="default",
-            tools=["echo"],
+            tools=["get_current_time"],
             mcp_servers=None,
             sub_agents=None,
         )
@@ -242,7 +242,7 @@ class TestToolResolver:
         names = {t.name for t in tools}
         # default policy = allow_all, so all builtin tools come back
         assert "read" in names
-        assert "echo" in names
+        assert "get_current_time" in names
 
     def test_resolve_for_default_agent(self) -> None:
         tools = resolve_tools_for_agent("default")
@@ -253,7 +253,7 @@ class TestToolResolver:
     def test_resolver_uses_policy_for_filtering(self, monkeypatch) -> None:
         fake_config = SimpleNamespace(
             name="restricted",
-            tools=["echo"],
+            tools=["get_current_time"],
             mcp_servers=None,
             sub_agents=None,
         )
@@ -273,7 +273,7 @@ class TestToolResolver:
 
         tools = ToolResolver().resolve_for_agent("restricted")
         names = {t.name for t in tools}
-        assert names == {"echo"}
+        assert names == {"get_current_time"}
 
     def test_resolver_materializes_configurable_tool_with_agent_override(
         self,

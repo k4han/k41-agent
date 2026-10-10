@@ -6,8 +6,7 @@ graph_type: "react_agent"
 provider: "default"
 model: ""
 hidden: true
-tools:
-  - "echo"
+tools: []
 context_compact_threshold: 75
 ---
 

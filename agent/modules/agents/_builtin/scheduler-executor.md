@@ -7,7 +7,6 @@ model: ""
 hidden: true
 tools:
   - "get_current_time"
-  - "echo"
   - "read"
   - "list_dir"
 context_compact_threshold: 75

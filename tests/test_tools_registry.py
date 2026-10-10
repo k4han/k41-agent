@@ -189,7 +189,6 @@ class TestBuiltinToolSource:
             "write_process_input",
             "stop_process",
             "skill",
-            "echo",
             "get_current_time",
             "write_todos",
             "ask_user",
