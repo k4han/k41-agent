@@ -18,7 +18,7 @@ from langgraph.prebuilt import ToolNode
 from langgraph.types import Command
 
 from agent.modules.tools.coding.adapter import SCHEMAS, make_coding_tool
-from agent.modules.tools.coding.models import CodingError, InvocationContext, PermissionRule, ToolDefinition, ToolResult
+from agent.modules.tools.coding.models import CodingError, InvocationContext, PermissionRule, ToolDefinition
 from agent.modules.tools.coding.service import CodingService
 from agent.modules.tools.coding.storage import MAX_CAPTURE_BYTES, MAX_MODEL_BYTES, MAX_MODEL_LINES, bounded_text
 
@@ -232,14 +232,13 @@ async def test_direct_tool_invocation_without_runtime_call_id_excludes_diff(codi
 @pytest.mark.asyncio
 async def test_legacy_journal_replay_removes_diff_without_repeating_mutation(coding):
     import json
-    from agent.modules.tools.coding.storage import digest
 
     service, context, workspace = coding
     called = replace(context, tool_call_id="legacy-write")
     args = {"file_path": "old.txt", "content": "submitted-content\n", "append": True}
     first = await invoke(service, called, "write", **args)
     legacy = first.model_copy(update={"content": first.display_content, "display_content": None})
-    fingerprint = digest(json.dumps(["write", args], sort_keys=True, ensure_ascii=True))
+    fingerprint = json.loads(service.storage.journal_path(called).read_text(encoding="utf-8"))["fingerprint"]
     service.storage.complete(called, fingerprint, legacy)
     replay = await invoke(service, called, "write", **args)
     assert "submitted-content" not in replay.content
@@ -260,7 +259,8 @@ async def test_journal_prevents_reexecution_and_unknown_outcomes(coding):
     import json
     from agent.modules.tools.coding.storage import digest
     args = {"file_path": "a.txt", "content": "must not append", "append": True}
-    fingerprint = digest(json.dumps(["write", args], sort_keys=True, ensure_ascii=True))
+    values = SCHEMAS["write"].model_validate(args).model_dump()
+    fingerprint = digest(json.dumps(["write", values], sort_keys=True, ensure_ascii=True))
     service.storage.begin(uncertain, fingerprint)
     result = await invoke(service, uncertain, "write", **args)
     assert result.error.code == "unknown_outcome"
@@ -508,19 +508,6 @@ async def test_bash_nonzero_exit_sets_tool_message_error(coding, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_legacy_run_bash_does_not_duplicate_the_command_outcome(coding, monkeypatch):
-    from agent.modules.tools.builtin.shell.run_bash_tool import _run_local
-
-    service, context, workspace = coding
-    monkeypatch.setattr("agent.modules.tools.coding.adapter.invocation_context", lambda runtime: context)
-    result = await _run_local(python_command("print('ok')"), str(workspace), 10, 10000,
-                              ["Advisory detail."], SimpleNamespace())
-    assert result.count("Command exited with code 0.") == 1
-    assert result.count("Advisory detail.") == 1
-    assert result.startswith("ok")
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize("orphan", [False, True])
 async def test_process_tree_cleanup_including_exited_parent(coding, orphan):
     import time
@@ -581,13 +568,10 @@ def test_all_workspace_backends_use_one_coding_toolset(coding):
     _, _, workspace = coding
     from agent.modules.tools import ToolResolver
     resolver = ToolResolver()
-    tools = [SimpleNamespace(name="read_file"), SimpleNamespace(name="write_file"),
-             SimpleNamespace(name="edit_file"), SimpleNamespace(name="exec_command"),
-             SimpleNamespace(name="run_bash"), SimpleNamespace(name="apply_patch"), make_coding_tool("bash")]
-    for ref in (str(workspace), {"backend": "daytona", "locator": "sandbox"},
-                {"backend": "modal", "locator": "sandbox"}):
-        resolved = resolver.for_workspace(tools, ref)
-        assert [tool.name for tool in resolved] == ["read", "write", "edit", "bash"]
+    tools = [make_coding_tool(name) for name in ("read", "write", "edit", "bash")]
+    for backend in ("local", "daytona", "modal"):
+        resolved = ToolResolver().for_workspace(tools, {"backend": backend, "locator": str(coding[1].workspace)})
+        assert {tool.name for tool in resolved} == {"read", "write", "edit", "bash"}
         assert all(getattr(tool, "coding_definition", None) for tool in resolved)
 
 

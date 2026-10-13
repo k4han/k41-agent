@@ -98,19 +98,6 @@ def test_incomplete_valid_json_journal_is_an_unknown_outcome(tmp_path):
     assert caught.value.code == "unknown_outcome"
 
 
-def test_legacy_shell_propagates_permission_interrupt(monkeypatch, tmp_path):
-    import asyncio
-    import importlib
-    from langgraph.errors import GraphInterrupt
-    shell = importlib.import_module("agent.modules.tools.builtin.shell.run_bash_tool")
-    monkeypatch.setattr(shell, "get_workspace", lambda runtime: SimpleNamespace(backend="local", locator=str(tmp_path)))
-    async def interrupted(*args, **kwargs):
-        raise GraphInterrupt(())
-    monkeypatch.setattr(shell, "_run_local", interrupted)
-    with pytest.raises(GraphInterrupt):
-        asyncio.run(shell.run_bash.coroutine("echo test", SimpleNamespace()))
-
-
 def test_global_permission_editor_validates_json_and_rules():
     from agent.modules.tools import normalize_tool_setting_value
     assert normalize_tool_setting_value("tools.permissions", '[{"action":"shell","effect":"ask"}]') == [

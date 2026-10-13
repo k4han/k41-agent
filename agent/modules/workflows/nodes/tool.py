@@ -3,6 +3,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph.prebuilt import ToolNode
 from langgraph.runtime import Runtime
+from types import SimpleNamespace
 
 from agent.modules.tools import (
     ASK_USER_TOOL_NAME,
@@ -10,6 +11,8 @@ from agent.modules.tools import (
     ToolResolver,
     get_runtime_context_value,
     get_tool_by_name,
+    prepare_tool_batch,
+    retain_tool_messages,
 )
 from agent.modules.workflows.run_config import WorkflowContext
 
@@ -100,6 +103,9 @@ async def tool_node(
     runtime: Runtime[WorkflowContext],
 ):
     """Resolve the executable tool set at runtime to match llm_node bindings."""
+    import logging
+
+    logger = logging.getLogger(__name__)
     control_error = _parallel_control_tool_error(state)
     if control_error is not None:
         return control_error
@@ -114,6 +120,16 @@ async def tool_node(
         "agent_name",
         "default",
     )
+    # Fall back to "default" like llm_node so bindings and execution agree
+    # when the requested agent was deleted or renamed mid-run.
+    try:
+        from agent.modules.agents import get_catalog_service
+
+        if get_catalog_service().get_agent(agent_name) is None:
+            logger.warning("Unknown agent '%s'; falling back to 'default'.", agent_name)
+            agent_name = "default"
+    except Exception:
+        pass
 
     tools: list[BaseTool] = await ToolResolver().aresolve_for_agent(
         agent_name,
@@ -123,39 +139,20 @@ async def tool_node(
     if workspace is None:
         workspace = get_runtime_context_value(runtime.context, "working_dir", None)
     if workspace is not None:
-        tools = ToolResolver().for_workspace(tools, workspace, agent_name)
+        tools = ToolResolver().for_workspace(tools, workspace)
     tools = _include_pending_control_tools(state, tools)
-    # Authorize the whole coding batch before any tool can mutate files or
-    # start a process. Completed settlements survive node replay.
-    from types import SimpleNamespace
-    from agent.modules.tools import invocation_context, CodingError, get_coding_service
-    from pydantic import ValidationError
-
     calls = getattr(state.get("messages", [])[-1], "tool_calls", []) if state.get("messages") else []
-    by_name = {tool.name: tool for tool in tools}
     next_config = {**config, "configurable": dict(config.get("configurable", {}))}
-    if calls and any(getattr(tool, "coding_definition", None) for tool in tools):
+    if calls:
         next_config["configurable"]["coding_message_id"] = str(getattr(state["messages"][-1], "id", "") or "")
-    for call in calls:
-        definition = getattr(by_name.get(call["name"]), "coding_definition", None)
-        if definition is None:
-            continue
-        try:
-            context = invocation_context(SimpleNamespace(context=runtime.context, state=state, config=next_config, tool_call_id=call["id"]))
-            service = get_coding_service()
-            if not service.storage.journal_path(context).exists():
-                parsed = definition.input_schema.model_validate(call["args"])
-                await service.prepare(definition.name, parsed.model_dump(), context)
-        except (CodingError, ValidationError, OSError, ValueError) as exc:
-            result = get_coding_service().failure(exc)
-            result.data["batch_stopped_before_execution"] = True
-            result.content = f"[error] Batch stopped before execution: {exc}"
-            from agent.modules.tools import retain_tool_messages
-            return await retain_tool_messages(
-                {"messages": [ToolMessage(content=result.content, artifact=result.model_dump(exclude={"content"}),
-                     name=item["name"], tool_call_id=item["id"], status="error") for item in calls]},
-                SimpleNamespace(context=runtime.context, config=next_config),
-            )
+        failure = await prepare_tool_batch(tools, calls, SimpleNamespace(
+            context=runtime.context, state=state, config=next_config,
+        ))
+        if failure is not None:
+            return await retain_tool_messages({"messages": [ToolMessage(
+                content=failure.content, artifact=failure.model_dump(exclude={"content"}),
+                name=call["name"], tool_call_id=call["id"], status="error",
+            ) for call in calls]}, SimpleNamespace(context=runtime.context, config=next_config))
     result = await ToolNode(tools).ainvoke(state, config=next_config, runtime=runtime)
     from agent.modules.skills import skill_events
     from langgraph.types import Command
@@ -175,5 +172,4 @@ async def tool_node(
             result["active_skills"] = active
         elif isinstance(result, list):
             result.append(Command(update={"active_skills": active}))
-    from agent.modules.tools import retain_tool_messages
     return await retain_tool_messages(result, SimpleNamespace(context=runtime.context, config=next_config))

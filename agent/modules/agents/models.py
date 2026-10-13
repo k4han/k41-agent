@@ -51,7 +51,6 @@ class AgentConfig(BaseModel):
     tools: list[str] = Field(default_factory=list)
     tool_permissions: list[dict[str, Any]] | None = None
     tool_configs: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    mcp_servers: Optional[list[str]] = None
     sub_agents: Optional[list[str]] = None  # None = leaf (no call_agent), list = allowed targets
     plan_approval_targets: list[str] = Field(default_factory=list)
     hidden: bool = False
@@ -73,9 +72,20 @@ class AgentConfig(BaseModel):
     @classmethod
     def _normalize(cls, data: Any) -> Any:
         data = normalize_agent_model(reject_legacy_context_settings(data))
-        if isinstance(data, dict) and data.get("tools"):
-            from agent.modules.tools import canonical_tool_names
-            data = {**data, "tools": canonical_tool_names(data["tools"])}
+        if isinstance(data, dict):
+            from agent.modules.tools import TOOL_ALIASES, canonical_tool_names
+            if "tools" in data and data["tools"] is not None:
+                tools = data["tools"]
+                if isinstance(tools, (list, tuple)):
+                    data = {**data, "tools": canonical_tool_names(list(tools))}
+            raw_configs = data.get("tool_configs")
+            if isinstance(raw_configs, dict):
+                data = {
+                    **data,
+                    "tool_configs": {
+                        TOOL_ALIASES.get(str(k), str(k)): v for k, v in raw_configs.items()
+                    },
+                }
         return data
 
 class AgentCard(BaseModel):
@@ -91,7 +101,6 @@ class AgentCard(BaseModel):
     tools: list[str] = Field(default_factory=list)
     tool_permissions: list[dict[str, Any]] | None = None
     tool_configs: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    mcp_servers: Optional[list[str]] = None
     sub_agents: Optional[list[str]] = None
     plan_approval_targets: list[str] = Field(default_factory=list)
     hidden: bool = False
@@ -108,9 +117,20 @@ class AgentCard(BaseModel):
     @classmethod
     def _normalize(cls, data: Any) -> Any:
         data = normalize_agent_model(reject_legacy_context_settings(data))
-        if isinstance(data, dict) and data.get("tools"):
-            from agent.modules.tools import canonical_tool_names
-            data = {**data, "tools": canonical_tool_names(data["tools"])}
+        if isinstance(data, dict):
+            from agent.modules.tools import TOOL_ALIASES, canonical_tool_names
+            if "tools" in data and data["tools"] is not None:
+                tools = data["tools"]
+                if isinstance(tools, (list, tuple)):
+                    data = {**data, "tools": canonical_tool_names(list(tools))}
+            raw_configs = data.get("tool_configs")
+            if isinstance(raw_configs, dict):
+                data = {
+                    **data,
+                    "tool_configs": {
+                        TOOL_ALIASES.get(str(k), str(k)): v for k, v in raw_configs.items()
+                    },
+                }
         return data
 
     @classmethod
@@ -138,7 +158,6 @@ class AgentCard(BaseModel):
                 name: dict(values)
                 for name, values in config.tool_configs.items()
             },
-            mcp_servers=list(config.mcp_servers) if config.mcp_servers is not None else None,
             sub_agents=list(config.sub_agents) if config.sub_agents is not None else None,
             plan_approval_targets=list(config.plan_approval_targets),
             hidden=config.hidden,
@@ -190,7 +209,6 @@ class AgentCard(BaseModel):
                 name: dict(values)
                 for name, values in self.tool_configs.items()
             },
-            mcp_servers=list(self.mcp_servers) if self.mcp_servers is not None else None,
             sub_agents=list(self.sub_agents) if self.sub_agents is not None else None,
             plan_approval_targets=list(self.plan_approval_targets),
             hidden=self.hidden,

@@ -448,12 +448,12 @@ async def clear_agent_session(
     channel_id: str = "",
 ) -> None:
     """Clear the session history (checkpoint thread) for a specific user and channel."""
-    from agent.modules.tools import close_thread_shell_sessions
+    from agent.modules.tools import stop_thread_processes
     from agent.modules.workspaces import delete_thread_workspace
     from agent.modules.workflows import delete_workflow_thread_tree
 
     thread_id = SessionManager.make_thread_id(platform, user_id, channel_id)
-    close_thread_shell_sessions(thread_id)
+    stop_thread_processes(thread_id)
     await delete_thread_workspace(thread_id)
     await delete_workflow_thread_tree(thread_id)
 
@@ -1112,7 +1112,7 @@ async def run_agent(
         context_compact_threshold=context_compact_threshold,
         channel_context_trim_threshold=channel_context_trim_threshold,
         agent_name=agent_name,
-        allowed_tool_names=resolved_tools or None,
+        allowed_tool_names=resolved_tools,
         allowed_skill_names=allowed_skill_names,
         provider=provider,
         model=model,
@@ -1257,7 +1257,7 @@ async def run_agent_stream(
         context_compact_threshold=context_compact_threshold,
         channel_context_trim_threshold=channel_context_trim_threshold,
         agent_name=agent_name,
-        allowed_tool_names=resolved_tools or None,
+        allowed_tool_names=resolved_tools,
         allowed_skill_names=allowed_skill_names,
         provider=provider,
         model=model,
@@ -1550,7 +1550,7 @@ async def run_agent_edit_stream(
         context_compact_threshold=context_compact_threshold,
         channel_context_trim_threshold=channel_context_trim_threshold,
         agent_name=agent_name,
-        allowed_tool_names=resolved_tools or None,
+        allowed_tool_names=resolved_tools,
         allowed_skill_names=allowed_skill_names,
         provider=provider,
         model=model,

@@ -7,6 +7,9 @@ the codebase so workflow nodes do not need to know about descriptors.
 
 from __future__ import annotations
 
+import logging
+from typing import Any
+
 from langchain_core.tools import BaseTool
 
 from agent.modules.tools.domain import (
@@ -17,12 +20,14 @@ from agent.modules.tools.domain import (
 )
 from agent.modules.tools.registry import ToolRegistry
 
+logger = logging.getLogger(__name__)
+
 
 class ToolRegistryService:
     """Service for managing tool registration and resolution."""
 
     def __init__(self, registry: ToolRegistry | None = None) -> None:
-        self._registry = registry or ToolRegistry()
+        self._registry = registry if registry is not None else ToolRegistry()
 
     @property
     def registry(self) -> ToolRegistry:
@@ -37,6 +42,18 @@ class ToolRegistryService:
     def remove_by_source(self, source: ToolSource) -> None:
         for desc in list(self._registry.find(source=source)):
             self._registry.remove(desc.id)
+
+    def replace_source(self, source: ToolSource, descriptors: list[ToolDescriptor]) -> None:
+        """Validate a new source snapshot before replacing the catalog."""
+        replacement = ToolRegistry()
+        for descriptor in self._registry.all_descriptors():
+            if descriptor.source is not source:
+                replacement.add(descriptor)
+        for descriptor in descriptors:
+            if descriptor.source is not source:
+                raise ValueError(f"Unexpected tool source: {descriptor.source}")
+            replacement.add(descriptor)
+        self._registry = replacement
 
     def get_tool_by_name(self, name: str) -> BaseTool | None:
         return self._registry.get_tool(name)
@@ -102,33 +119,69 @@ def get_registry_service(container=None) -> ToolRegistryService:
     return require_active_container(container).tool_registry_service
 
 
-async def ensure_mcp_loaded(*, force: bool = False, container=None) -> None:
+def _get_mcp_load_lock(active) -> Any:
+    getter = getattr(active, "get_mcp_load_lock", None)
+    if callable(getter):
+        return getter()
+    # Fallback for containers without the helper: guard lazy creation so two
+    # worker threads share one lock instance.
+    guard = getattr(active, "_lazy_lock", None)
+    if guard is None:
+        import threading
+
+        guard = threading.Lock()
+    with guard:
+        lock = getattr(active, "_mcp_load_lock", None)
+        if lock is None:
+            import asyncio
+
+            lock = asyncio.Lock()
+            active._mcp_load_lock = lock
+    return lock
+
+
+async def ensure_mcp_loaded(*, force: bool = False, container=None) -> bool:
     """Load MCP-backed tools into the unified registry (idempotent per scope)."""
     from agent.bootstrap.container import require_active_container
 
     active = require_active_container(container)
-    if bool(getattr(active, "_mcp_loaded", False)) and not force:
-        return
-    from agent.modules.tools.sources.mcp import McpToolSource
+    async with _get_mcp_load_lock(active):
+        if active._mcp_loaded and not force:
+            return True
+        return await _load_mcp_snapshot(active)
 
-    service = get_registry_service(container=active)
-    if force:
-        service.remove_by_source(ToolSource.MCP)
-    descriptors = await McpToolSource().load()
-    service.load_descriptors(descriptors)
-    active._mcp_loaded = True
+
+async def _load_mcp_snapshot(container) -> bool:
+    """Replace a snapshot while the caller owns the container load lock."""
+    from agent.modules.tools.sources.mcp import McpToolSource, _extract_server_name
+
+    try:
+        mcp_service = container.mcp_service
+        descriptors = await McpToolSource(mcp_service).aload()
+        failed_servers = getattr(mcp_service, "failed_server_names", frozenset())
+        registry_service = get_registry_service(container=container)
+        descriptors.extend(
+            descriptor for descriptor in registry_service.find(source=ToolSource.MCP)
+            if _extract_server_name(descriptor.name) in failed_servers
+        )
+        registry_service.replace_source(ToolSource.MCP, descriptors)
+    except Exception:
+        container._mcp_loaded = False
+        logger.warning("Failed to refresh MCP tools; preserving the previous catalog", exc_info=True)
+        return False
+    container._mcp_loaded = not failed_servers
+    return container._mcp_loaded
 
 
 async def reload_mcp_descriptors(container=None) -> None:
     """Reload MCP service state and replace MCP descriptors in the registry."""
     from agent.bootstrap.container import require_active_container
 
-    from agent.modules.mcp import reload_mcp_service
-
     active = require_active_container(container)
-    reload_mcp_service()
-    active._mcp_loaded = False
-    await ensure_mcp_loaded(force=True, container=active)
+    async with _get_mcp_load_lock(active):
+        active.mcp_service.reload()
+        active._mcp_loaded = False
+        await _load_mcp_snapshot(active)
 
 
 def _reset_registry_service_for_tests() -> None:

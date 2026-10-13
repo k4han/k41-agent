@@ -121,7 +121,6 @@ export type AgentCard = {
   tool_permissions?: { action?: string; resource?: string; effect: "allow" | "ask" | "deny" }[] | null;
   tools: string[];
   tool_configs?: Record<string, Record<string, unknown>>;
-  mcp_servers?: string[];
   sub_agents: string[] | null;
   plan_approval_targets: string[];
   hidden: boolean;
@@ -145,7 +144,6 @@ export type AgentConfig = {
   reasoning_effort?: string | null;
   tools: string[];
   tool_configs?: Record<string, Record<string, unknown>>;
-  mcp_servers?: string[];
   sub_agents: string[] | null;
   plan_approval_targets: string[];
   hidden: boolean;
@@ -261,6 +259,7 @@ export type AgentProviderOptionsPayload = {
 
 export type AgentMcpOptionsPayload = {
   mcp_server_options?: string[];
+  mcp_tools?: Record<string, string[]>;
   mcp_installs?: Record<string, AgentMcpInstall[]>;
 };
 

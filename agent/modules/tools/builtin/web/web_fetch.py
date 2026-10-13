@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import re
 from typing import Any
 
@@ -14,6 +13,7 @@ from langchain_core.tools import StructuredTool
 from markdownify import markdownify as md
 
 from agent.modules.tools.decorators import register_tool
+from agent.modules.tools.builtin.web.config import normalize_fetch_config
 from agent.modules.tools.domain import (
     ToolCapability,
     ToolCategory,
@@ -101,36 +101,6 @@ WEB_FETCH_CONFIG_SCHEMA = ToolConfigSchema(
 )
 
 WEB_FETCH_CONFIG_SCHEMA = with_web_connections(WEB_FETCH_CONFIG_SCHEMA, "web_fetch")
-
-
-def _effective_credential(
-    configured: Any,
-    env_name: str,
-    *,
-    fallback_setting_key: str = "",
-) -> str:
-    """Resolve a credential from tool config with peer tool and env fallback.
-
-    The closure captures the configured value at materialization time while
-    the fallback setting key and environment are read lazily so long-lived
-    instances pick up runtime settings and local-dev env changes.
-    """
-    text = str(configured or "").strip()
-    if text:
-        return text
-
-    if fallback_setting_key:
-        try:
-            from agent.shared.config import get_config_service
-
-            val = get_config_service().get(fallback_setting_key)
-            val_text = str(val or "").strip()
-            if val_text:
-                return val_text
-        except Exception:
-            pass
-
-    return os.environ.get(env_name, "").strip()
 
 
 def _html_to_markdown(html: str) -> str:
@@ -428,6 +398,7 @@ def _build_web_fetch_tool(config: dict[str, ToolConfigValue]) -> StructuredTool:
 
 
 web_fetch = register_tool(
+    config_normalizer=normalize_fetch_config,
     category=ToolCategory.WEB,
     capabilities=[ToolCapability.NETWORK],
     tags=["fetch", "web"],
@@ -443,7 +414,6 @@ __all__ = [
     "WEB_FETCH_CONFIG_SCHEMA",
     "WEB_FETCH_TOOL_DESCRIPTION",
     "WEB_FETCH_TOOL_NAME",
-    "_effective_credential",
     "_read_limited_response",
     "web_fetch",
 ]

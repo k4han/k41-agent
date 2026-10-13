@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import re
-import time
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -16,7 +13,7 @@ from langgraph.types import Command
 from agent.modules.tools.coding.adapter import invocation_context
 from agent.modules.tools.coding.models import ToolResult
 from agent.modules.tools.coding.service import get_coding_service
-from agent.modules.tools.coding.storage import MAX_STORED_BYTES, RETENTION_SECONDS, bounded_text, output_relative_path
+from agent.modules.tools.coding.storage import MAX_STORED_BYTES, bounded_text
 
 logger = logging.getLogger(__name__)
 
@@ -79,55 +76,3 @@ async def retain_tool_messages(value, runtime):
     if isinstance(value, list):
         return await asyncio.gather(*(retain_tool_messages(item, runtime) for item in value))
     return value
-
-
-async def migrate_history_outputs(messages, runtime):
-    """Translate legacy output references without mutating stored checkpoints."""
-    context = None
-    migrated = []
-    for message in messages:
-        if not isinstance(message, ToolMessage):
-            migrated.append(message)
-            continue
-        artifact = message.artifact if isinstance(message.artifact, dict) else {}
-        if not artifact and isinstance(message.content, str) and message.content.lstrip().startswith("{"):
-            try:
-                envelope = json.loads(message.content)
-                if isinstance(envelope, dict) and {"status", "data", "output_refs"}.issubset(envelope):
-                    artifact = envelope
-                    message = message.model_copy(update={"content": envelope.get("content", message.content)})
-            except ValueError:
-                pass
-        references = artifact.get("output_refs", []) if not artifact.get("output_paths") else []
-        if isinstance(message.content, str):
-            references = list(dict.fromkeys([*references, *re.findall(r"output_ref=([a-f0-9]{32})", message.content)]))
-        paths = []
-        for reference in references:
-            if not isinstance(reference, str) or not re.fullmatch(r"[a-f0-9]{32}", reference):
-                continue
-            try:
-                if context is None:
-                    context = invocation_context(runtime)
-                service = get_coding_service()
-                if context.backend == "local":
-                    await asyncio.to_thread(service.storage.output_path, context, reference)
-                    paths.append(output_relative_path(context, reference))
-                else:
-                    # Host-side legacy diffs need uploading; sandbox process logs migrate in place.
-                    legacy = service.storage.owner_dir(context) / f"{reference}.output"
-                    if legacy.is_file() and not legacy.is_symlink() and legacy.stat().st_mtime >= time.time() - RETENTION_SECONDS:
-                        content = await asyncio.to_thread(legacy.read_text, encoding="utf-8", errors="replace")
-                        paths.extend(await service.remote.migrate_outputs([reference], context, legacy_content=content))
-                    else:
-                        paths.extend(await service.remote.migrate_outputs([reference], context))
-            except Exception:
-                continue
-        if paths:
-            notice = "\n[Retained output: " + "; ".join(f"read file_path={path} byte_offset=0" for path in paths) + "]"
-            content = message.content + notice if isinstance(message.content, str) else [*message.content, {"type": "text", "text": notice}]
-            if isinstance(content, str):
-                content = re.sub(r"read_tool_output output_ref=[a-f0-9]{32}", "read the retained output file", content)
-                content, _ = bounded_text(content, notice)
-            message = message.model_copy(update={"content": content, "artifact": {**artifact, "output_paths": paths}})
-        migrated.append(message)
-    return migrated

@@ -11,7 +11,6 @@ sub_agents:
 - channel-agent
 - github-issue-fixer
 context_compact_threshold: 75
-mcp_servers: []
 ---
 
 # System Prompt

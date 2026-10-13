@@ -6,7 +6,6 @@ tools may raise :class:`ToolError` instead of returning ad-hoc strings.
 """
 
 from agent.modules.tools.middleware.base import (
-    ToolInvocationContext,
     apply_default_middleware,
     wrap_tool,
 )
@@ -20,7 +19,6 @@ from agent.modules.tools.middleware.logging import (
 )
 
 __all__ = [
-    "ToolInvocationContext",
     "apply_default_middleware",
     "error_normalization",
     "error_normalization_async",

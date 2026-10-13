@@ -1,6 +1,5 @@
 """LangChain adapter preserving structured artifacts and error status."""
 
-import json
 import os
 from typing import Annotated, Any
 
@@ -8,10 +7,9 @@ from langchain_core.messages import ToolMessage
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from langgraph.prebuilt import ToolRuntime
 
-from agent.modules.tools.coding.models import InvocationContext, PermissionRule, ToolDefinition, ToolResult
+from agent.modules.tools.coding.models import CodingError, CodingInvocation, InvocationContext, PermissionRule, ToolDefinition, ToolResult
 from agent.modules.tools.coding.schemas import (EditInput, ExecInput, GlobInput, GrepInput, ListInput,
     ProcessInput, ProcessReadInput, ProcessWriteInput, ReadInput, WriteInput)
-from agent.modules.tools.coding.names import TOOL_ALIASES
 from agent.modules.tools.coding.service import get_coding_service
 from agent.modules.tools.coding.storage import bounded_text
 from agent.modules.tools.runtime.context import get_context_value, get_thread_id
@@ -83,22 +81,14 @@ class CodingStructuredTool(StructuredTool):
 
 
 def coding_message_for_model(message: ToolMessage) -> ToolMessage:
-    """Drop coding UI artifacts and normalize receipts from older checkpoints."""
-    name = TOOL_ALIASES.get(message.name, message.name)
-    if name not in SCHEMAS and name != "read_tool_output":
+    """Keep coding UI artifacts outside model messages."""
+    name = message.name
+    if name not in SCHEMAS:
         return message
     artifact = message.artifact
     content = message.content
     if not isinstance(artifact, dict):
-        if not isinstance(content, str) or not content.lstrip().startswith("{"):
-            return message
-        try:
-            artifact = json.loads(content)
-        except ValueError:
-            return message
-        if not isinstance(artifact, dict):
-            return message
-        content = artifact.get("content", content)
+        return message
     if not {"status", "data", "output_refs", "capture_truncated", "output_truncated"}.issubset(artifact):
         return message
     try:
@@ -109,6 +99,43 @@ def coding_message_for_model(message: ToolMessage) -> ToolMessage:
     if isinstance(content, str):
         content, _ = bounded_text(content)
     return message.model_copy(update={"content": content, "artifact": None})
+
+
+async def prepare_tool_batch(tools, calls, runtime) -> ToolResult | None:
+    """Translate graph calls into coding invocations without exposing storage."""
+    from types import SimpleNamespace
+
+    definitions = {tool.name: getattr(tool, "coding_definition", None) for tool in tools}
+    if not any(definitions.get(call["name"]) for call in calls):
+        return None
+    service = get_coding_service()
+    invocations = []
+    try:
+        for call in calls:
+            definition = definitions.get(call["name"])
+            if definition is not None:
+                context = invocation_context(SimpleNamespace(
+                    context=runtime.context, state=runtime.state,
+                    config=runtime.config, tool_call_id=call["id"],
+                ))
+                invocations.append(CodingInvocation(definition, call["args"], context))
+    except (CodingError, ValueError, OSError) as exc:
+        result = service.failure(exc)
+        result.data["batch_stopped_before_execution"] = True
+        result.content = f"[error] Batch stopped before execution: {exc}"
+        return result
+    except Exception as exc:
+        import asyncio
+
+        from langgraph.errors import GraphInterrupt
+
+        if isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt, GraphInterrupt)):
+            raise
+        result = service.failure(exc)
+        result.data["batch_stopped_before_execution"] = True
+        result.content = f"[error] Batch stopped before execution: {exc}"
+        return result
+    return await service.prepare_batch(invocations)
 
 
 def make_coding_tool(name: str, *, retained_only: bool = False) -> StructuredTool:

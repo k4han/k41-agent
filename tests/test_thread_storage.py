@@ -2,14 +2,13 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from agent.modules.tools.coding.adapter import make_coding_tool
 
-import agent.modules.tools.builtin.filesystem.edit_file as edit_file_module
-import agent.modules.tools.builtin.filesystem.glob as glob_module
-import agent.modules.tools.builtin.filesystem.grep as grep_module
-import agent.modules.tools.builtin.filesystem.list_dir as list_dir_module
-import agent.modules.tools.builtin.filesystem.read_file as read_file_module
-import agent.modules.tools.builtin.filesystem.write_file as write_file_module
 import agent.modules.tools.runtime.thread_storage as thread_storage
+
+
+async def _invoke(name, **kwargs):
+    return await make_coding_tool(name).ainvoke(kwargs)
 
 
 def _runtime(working_dir: str, thread_id: str = "platform_user_channel") -> SimpleNamespace:
@@ -47,8 +46,8 @@ async def test_filesystem_tools_expose_workspace_storage_mount(
     workspace.mkdir()
     runtime = _runtime(str(workspace))
 
-    root_listing = await list_dir_module.list_dir.coroutine(runtime=runtime, path="")
-    mount_listing = await list_dir_module.list_dir.coroutine(runtime=runtime, path=".k41-agent")
+    root_listing = await _invoke("list_dir", runtime=runtime, path="")
+    mount_listing = await _invoke("list_dir", runtime=runtime, path=".k41-agent")
 
     assert ".k41-agent/" not in root_listing
     assert not (workspace / ".k41-agent").exists()
@@ -64,35 +63,35 @@ async def test_filesystem_tools_read_write_edit_search_workspace_storage(
     workspace.mkdir()
     runtime = _runtime(str(workspace), "chat_user:sub:worker:abcd1234")
 
-    write_result = await write_file_module.write_file.coroutine(
+    write_result = await _invoke("write",
         file_path=".k41-agent/assets/note.txt",
         content="hello needle\n",
         runtime=runtime,
     )
-    read_result = await read_file_module.read_file.coroutine(
+    read_result = await _invoke("read",
         file_path=".k41-agent/assets/note.txt",
         runtime=runtime,
     )
-    edit_result = await edit_file_module.edit_file.coroutine(
+    edit_result = await _invoke("edit",
         file_path=".k41-agent/assets/note.txt",
         old_string="hello",
         new_string="updated",
         runtime=runtime,
     )
-    glob_result = await glob_module.glob.coroutine(
+    glob_result = await _invoke("glob",
         pattern="*.txt",
         path=".k41-agent/assets",
         runtime=runtime,
     )
-    grep_result = await grep_module.grep.coroutine(
+    grep_result = await _invoke("grep",
         pattern="needle",
         path=".k41-agent",
         runtime=runtime,
     )
 
-    assert "[OK] Wrote file" in write_result
-    assert read_result == "hello needle\n"
-    assert "[OK] Wrote file" in edit_result
+    assert "Changed " in write_result
+    assert "hello needle" in read_result
+    assert "Changed " in edit_result
     assert ".k41-agent/assets/note.txt" in glob_result
     assert "updated needle" in grep_result
     assert (workspace / ".k41-agent" / "assets" / "note.txt").exists()
@@ -107,17 +106,17 @@ async def test_workspace_storage_is_shared_by_workspace_not_thread(
     workspace = tmp_path / "workspace"
     workspace.mkdir()
 
-    await write_file_module.write_file.coroutine(
+    await _invoke("write",
         file_path=".k41-agent/memory/note.txt",
         content="shared",
         runtime=_runtime(str(workspace), "thread-one"),
     )
-    read_result = await read_file_module.read_file.coroutine(
+    read_result = await _invoke("read",
         file_path=".k41-agent/memory/note.txt",
         runtime=_runtime(str(workspace), "thread-two"),
     )
 
-    assert read_result == "shared"
+    assert "shared" in read_result
 
 
 @pytest.mark.asyncio
@@ -131,12 +130,12 @@ async def test_workspace_storage_is_isolated_between_workspaces(
     first_workspace.mkdir()
     second_workspace.mkdir()
 
-    await write_file_module.write_file.coroutine(
+    await _invoke("write",
         file_path=".k41-agent/memory/note.txt",
         content="first",
         runtime=_runtime(str(first_workspace), "same-thread"),
     )
-    read_result = await read_file_module.read_file.coroutine(
+    read_result = await _invoke("read",
         file_path=".k41-agent/memory/note.txt",
         runtime=_runtime(str(second_workspace), "same-thread"),
     )
@@ -155,13 +154,13 @@ async def test_workspace_storage_mount_blocks_path_traversal(
     workspace.mkdir()
     runtime = _runtime(str(workspace))
 
-    result = await write_file_module.write_file.coroutine(
+    result = await _invoke("write",
         file_path=".k41-agent/../../outside.txt",
         content="secret",
         runtime=runtime,
     )
 
-    assert "Path escapes working directory" in result
+    assert "[error]" in result
     assert not (workspace.parent / "outside.txt").exists()
 
 

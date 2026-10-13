@@ -147,8 +147,6 @@ def serialize_agent_config(config: AgentConfig) -> str:
         data["tool_configs"] = tool_configs
     if config.tool_permissions is not None:
         data["tool_permissions"] = config.tool_permissions
-    if config.mcp_servers is not None:
-        data["mcp_servers"] = list(config.mcp_servers)
     if config.sub_agents is not None:
         data["sub_agents"] = list(config.sub_agents)
     if config.plan_approval_targets:
@@ -202,6 +200,12 @@ def _build_agent_config(
     except ValueError as exc:
         raise AgentMarkdownError(f"Agent file {source_label}: {exc}") from exc
     context_compact_threshold = data.get("context_compact_threshold", 75)
+    if "tools" not in data:
+        logger.warning(
+            "Agent file %s has no 'tools' field; defaulting to deny-all (no tools). "
+            "Add an explicit 'tools' list to allow tools.",
+            source_label,
+        )
     tools = parse_string_or_list(data.get("tools", []))
     raw_tool_configs = data.get("tool_configs", {})
     tool_configs: dict[str, dict[str, object]] = {}
@@ -211,12 +215,6 @@ def _build_agent_config(
             for tool_name, values in raw_tool_configs.items()
             if isinstance(values, dict)
         }
-    raw_mcp = data.get("mcp_servers")
-    if raw_mcp is None:
-        mcp_servers = None
-    else:
-        mcp_servers = parse_string_or_list(raw_mcp) or []
-
     # sub_agents: None means leaf (cannot call anyone), list means can call those
     raw_sub = data.get("sub_agents")
     if raw_sub is None:
@@ -249,7 +247,6 @@ def _build_agent_config(
             tools=tools,
             tool_permissions=data.get("tool_permissions"),
             tool_configs=tool_configs,
-            mcp_servers=mcp_servers,
             sub_agents=sub_agents,
             plan_approval_targets=plan_approval_targets,
             hidden=hidden,

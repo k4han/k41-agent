@@ -13,7 +13,7 @@ class ToolSourceAdapter(Protocol):
 
     name: str
 
-    def load(self) -> list[ToolDescriptor]:
+    async def aload(self) -> list[ToolDescriptor]:
         """Return all descriptors known by this source."""
         ...
 

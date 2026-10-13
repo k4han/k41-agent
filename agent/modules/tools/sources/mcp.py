@@ -7,8 +7,6 @@ because the MCP service itself is async.
 
 from __future__ import annotations
 
-import logging
-
 from langchain_core.tools import BaseTool
 
 from agent.modules.tools.domain import (
@@ -18,8 +16,6 @@ from agent.modules.tools.domain import (
 )
 from agent.modules.tools.middleware import apply_default_middleware
 
-logger = logging.getLogger(__name__)
-
 MCP_TOOL_PREFIX = "mcp__"
 
 
@@ -28,27 +24,24 @@ class McpToolSource:
 
     name = "mcp"
 
-    def __init__(self) -> None:
+    def __init__(self, service=None) -> None:
+        self._service = service
         self._descriptors: list[ToolDescriptor] | None = None
 
-    async def load(self) -> list[ToolDescriptor]:
+    async def aload(self) -> list[ToolDescriptor]:
         if self._descriptors is None:
             self._descriptors = await self._build()
         return list(self._descriptors)
 
     async def reload(self) -> list[ToolDescriptor]:
         self._descriptors = None
-        return await self.load()
+        return await self.aload()
 
     async def _build(self) -> list[ToolDescriptor]:
         # local import to avoid loading MCP machinery during built-in setup
         from agent.modules.mcp import get_all_mcp_tools
 
-        try:
-            tools = await get_all_mcp_tools()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Failed to load MCP tools: %s", exc)
-            return []
+        tools = await self._service.get_all_tools() if self._service is not None else await get_all_mcp_tools()
 
         descriptors: list[ToolDescriptor] = []
         seen_ids: set[str] = set()

@@ -51,8 +51,8 @@ Can use {working_dir} placeholder.
 - **graph_type**: Workflow template (default: `react_agent`)
 - **provider**: Provider name. Use `default` to follow `llm.default_provider`
 - **model**: Model ID override (default: empty, so runtime uses provider default)
-- **tools**: Danh sách tools agent có thể sử dụng (empty = all default tools)
-- **sub_agents**: 
+- **tools**: Explicit tool allow-list; an empty list — including a missing field which defaults to `[]` — disables tools (deny-all, fail-closed)
+- **sub_agents**:
   - `null` (không có field): leaf agent, không thể call sub-agents
   - `[]` (empty list): có thể call sub-agents nhưng chưa config
   - `["agent1", "agent2"]`: chỉ có thể call các agents trong list

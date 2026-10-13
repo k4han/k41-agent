@@ -13,5 +13,5 @@ REMOVED_TOOLS = frozenset({"bash_list_sessions", "apply_patch", "read_tool_outpu
 def canonical_tool_names(names):
     """Normalize persisted allow lists without exposing another tool profile."""
     # Retired names remain an explicit restriction. Dropping the last entry
-    # would turn an existing allow list into the empty-list allow-all default.
+    # would turn an existing allow list into deny-all (empty disables all tools).
     return list(dict.fromkeys(TOOL_ALIASES.get(name, name) for name in names))

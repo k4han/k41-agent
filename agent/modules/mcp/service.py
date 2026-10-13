@@ -44,7 +44,6 @@ class MCPService:
         self._repository = repository
         self._cache: dict[str, _ServerCacheEntry] = {}
         self._locks: dict[str, asyncio.Lock] = {}
-        self._global_lock = asyncio.Lock()
 
     # --- Public API ---
 
@@ -68,12 +67,22 @@ class MCPService:
         return list(entry.tools) if entry.loaded else []
 
     async def get_all_tools(self) -> list[BaseTool]:
+        """Return available tools while individual server failures stay retryable."""
         await self.ensure_loaded()
         tools: list[BaseTool] = []
-        for entry in self._cache.values():
-            if entry.loaded:
+        for config in self.list_servers():
+            entry = self._cache.get(config.name)
+            if config.enabled and entry is not None and entry.loaded:
                 tools.extend(entry.tools)
         return tools
+
+    @property
+    def failed_server_names(self) -> frozenset[str]:
+        """Identify enabled servers whose latest tool load failed."""
+        return frozenset(
+            config.name for config in self.list_servers()
+            if config.enabled and (entry := self._cache.get(config.name)) is not None and entry.error
+        )
 
     async def ensure_loaded(self) -> None:
         """Load all enabled servers' tools (cache hits short-circuit)."""
@@ -142,7 +151,7 @@ class MCPService:
     async def test_connection(self, config: MCPServerConfig) -> MCPTestResult:
         try:
             tools = await fetch_tools_for_config(config)
-        except BaseException as exc:
+        except Exception as exc:
             message = format_exception_chain(exc)
             logger.warning(
                 "MCP test_connection failed for %s: %s",
@@ -164,17 +173,17 @@ class MCPService:
 
     async def _ensure_loaded(self, config: MCPServerConfig) -> _ServerCacheEntry:
         cached = self._cache.get(config.name)
-        if cached is not None:
+        if cached is not None and cached.loaded:
             return cached
 
         async with self._lock_for(config.name):
             cached = self._cache.get(config.name)
-            if cached is not None:
+            if cached is not None and cached.loaded:
                 return cached
 
             try:
                 tools = await fetch_tools_for_config(config)
-            except BaseException as exc:
+            except Exception as exc:
                 message = format_exception_chain(exc)
                 logger.warning(
                     "Failed to load MCP server %s: %s",

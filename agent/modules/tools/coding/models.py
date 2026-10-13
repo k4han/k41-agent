@@ -52,3 +52,11 @@ class ToolDefinition:
     output_schema: type[ToolResult] = ToolResult
     render: Callable[[ToolResult], str | list[dict[str, Any]]] | None = None
 
+
+@dataclass(frozen=True)
+class CodingInvocation:
+    """Validated operation boundary used when preparing a workflow batch."""
+
+    definition: ToolDefinition
+    args: dict[str, Any]
+    context: InvocationContext

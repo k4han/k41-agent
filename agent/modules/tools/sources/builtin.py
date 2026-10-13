@@ -1,7 +1,7 @@
 """Built-in tool source.
 
 Walks the configured tool packages, imports every submodule (so that any
-``@register_tool`` decorators run), then converts the pending registrations
+``@register_tool`` decorators run), then converts their attached metadata
 into ``ToolDescriptor`` instances.
 """
 
@@ -16,14 +16,13 @@ from langchain_core.tools import BaseTool
 
 from agent.modules.tools.decorators import (
     META_ATTR,
-    PendingToolMeta,
+    ToolRegistration,
 )
 from agent.modules.tools.domain import (
     ToolCategory,
     ToolDescriptor,
     ToolSource,
 )
-from agent.modules.tools.middleware import apply_default_middleware
 
 logger = logging.getLogger(__name__)
 
@@ -47,22 +46,23 @@ class BuiltinToolSource:
             self._descriptors = self._build_descriptors(tagged)
         return list(self._descriptors)
 
+    async def aload(self) -> list[ToolDescriptor]:
+        """Expose the shared asynchronous source interface."""
+        return self.load()
+
     def reload(self) -> list[ToolDescriptor]:
         self._descriptors = None
         return self.load()
 
     def _discover_tagged_tools(
         self,
-    ) -> list[tuple[BaseTool, PendingToolMeta]]:
+    ) -> list[tuple[BaseTool, ToolRegistration]]:
         """Walk configured packages and collect every BaseTool that was
         marked by ``@register_tool``.
 
-        Scanning module attributes is more robust than relying on the
-        pending-registrations list because importlib caches modules: once a
-        test clears the pending list, re-running discovery would yield
-        nothing if the source depended on the list alone.
+        Module attributes remain discoverable even when imports are cached.
         """
-        found: dict[int, tuple[BaseTool, PendingToolMeta]] = {}
+        found: dict[int, tuple[BaseTool, ToolRegistration]] = {}
         for pkg_name in self._packages:
             try:
                 pkg = importlib.import_module(pkg_name)
@@ -83,14 +83,14 @@ class BuiltinToolSource:
                     if not isinstance(obj, BaseTool):
                         continue
                     meta = getattr(obj, META_ATTR, None)
-                    if not isinstance(meta, PendingToolMeta):
+                    if not isinstance(meta, ToolRegistration):
                         continue
                     found.setdefault(id(obj), (obj, meta))
         return list(found.values())
 
     @staticmethod
     def _build_descriptors(
-        pending: Iterable[tuple[BaseTool, PendingToolMeta]],
+        pending: Iterable[tuple[BaseTool, ToolRegistration]],
     ) -> list[ToolDescriptor]:
         out: list[ToolDescriptor] = []
         seen_ids: set[str] = set()
@@ -104,7 +104,6 @@ class BuiltinToolSource:
                 logger.debug("Skipping duplicate tool id %s", desc_id)
                 continue
             seen_ids.add(desc_id)
-            apply_default_middleware(tool_obj)
             out.append(
                 ToolDescriptor(
                     id=desc_id,
@@ -120,6 +119,7 @@ class BuiltinToolSource:
                     config_schema=meta.config_schema,
                     default_config=meta.default_config,
                     factory=meta.factory,
+                    config_normalizer=meta.config_normalizer,
                 )
             )
         return out

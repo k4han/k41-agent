@@ -193,7 +193,7 @@ export function AgentToolsTab(props: {
       <div class="agent-config-summary">
         <div class="agent-config-stat">
           <span>Built-in tools</span>
-          <strong>{`${props.form.tools.length}/${props.totalBuiltInTools}`}</strong>
+          <strong>{`${props.form.tools.filter((tool) => !tool.startsWith("mcp__")).length}/${props.totalBuiltInTools}`}</strong>
         </div>
         <div class="agent-config-stat">
           <span>MCP servers</span>
@@ -473,17 +473,37 @@ export function AgentToolsTab(props: {
                   const install = () => installForServer(server);
                   const isChecked = () => Boolean(install()?.agent_enabled);
                   return (
-                    <label class={optionCardClass(isChecked(), props.mcpUpdating)}>
-                      <input
-                        type="checkbox"
-                        checked={isChecked()}
-                        disabled={props.mcpUpdating}
-                        onChange={(event) =>
-                          props.onToggleMcpInstall(server, event.currentTarget.checked)
-                        }
-                      />
-                      <span class="agent-config-option-text mono">{server}</span>
-                    </label>
+                    <div>
+                      <label class={optionCardClass(isChecked(), props.mcpUpdating)}>
+                        <input
+                          type="checkbox"
+                          checked={isChecked()}
+                          disabled={props.mcpUpdating}
+                          onChange={(event) =>
+                            props.onToggleMcpInstall(server, event.currentTarget.checked)
+                          }
+                        />
+                        <span class="agent-config-option-text mono">{server}</span>
+                      </label>
+                      <Show when={isChecked()}>
+                        <For each={props.payload.mcp_tools?.[server] || []}>
+                          {(toolName) => (
+                            <label class={optionCardClass(props.form.tools.includes(toolName), props.readOnly || props.mcpUpdating)}>
+                              <input
+                                type="checkbox"
+                                checked={props.form.tools.includes(toolName)}
+                                disabled={props.readOnly || props.mcpUpdating}
+                                onChange={(event) => props.onToggleListValue("tools", toolName, event.currentTarget.checked)}
+                              />
+                              <span class="agent-config-option-text mono">{toolName}</span>
+                            </label>
+                          )}
+                        </For>
+                        <Show when={!props.payload.mcp_tools?.[server]?.length}>
+                          <div class="agent-config-empty">No tools loaded. Refresh after checking the server connection.</div>
+                        </Show>
+                      </Show>
+                    </div>
                   );
                 }}
               </For>

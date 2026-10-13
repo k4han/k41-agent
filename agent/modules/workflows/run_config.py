@@ -19,7 +19,7 @@ class WorkflowContext:
     channel_context_trim_threshold: int | None
     channel_trim_applied: bool
     agent_name: str
-    allowed_tool_names: list[str]
+    allowed_tool_names: list[str] | None
     allowed_skill_names: list[str] | None
     provider: str | None = None
     model: str | None = None
@@ -59,7 +59,7 @@ class WorkflowContext:
         self.channel_context_trim_threshold = channel_context_trim_threshold
         self.channel_trim_applied = False
         self.agent_name = agent_name
-        self.allowed_tool_names = list(allowed_tool_names or [])
+        self.allowed_tool_names = None if allowed_tool_names is None else list(allowed_tool_names)
         self.allowed_skill_names = (
             None if allowed_skill_names is None else list(allowed_skill_names)
         )
@@ -97,7 +97,7 @@ class WorkflowContext:
         """Get workspace reference from context."""
         return self.workspace
 
-    def get_allowed_tool_names(self) -> list[str]:
+    def get_allowed_tool_names(self) -> list[str] | None:
         """Get allowed tool names from context."""
         return self.allowed_tool_names
 
@@ -123,11 +123,6 @@ def make_context(
     reasoning_effort: str | None = None,
 ) -> WorkflowContext:
     """Create a runtime context payload for a graph run."""
-    from agent.modules.tools import get_default_tool_names
-
-    if allowed_tool_names is None:
-        allowed_tool_names = get_default_tool_names()
-
     from agent.shared.config.service import get_config_service
     default_locator = str(
         get_config_service().get_path("workspace.root", DEFAULT_WORKSPACE_ROOT)
@@ -168,4 +163,3 @@ def make_config(
         },
         "recursion_limit": recursion_limit,
     }
-

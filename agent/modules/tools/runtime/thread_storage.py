@@ -12,12 +12,9 @@ import shutil
 import shlex
 from pathlib import Path
 
-from agent.modules.tools.runtime.path_guard import resolve_safe_path
 from agent.modules.workspaces import (
     WORKSPACE_STORAGE_EXCLUDE_COMMAND,
-    UnsupportedWorkspaceCapabilityError,
     WorkspaceScope,
-    WorkspaceFileIO,
 )
 
 logger = logging.getLogger(__name__)
@@ -86,14 +83,6 @@ def workspace_storage_key(workspace_scope: WorkspaceScope | str) -> str:
     return key
 
 
-def thread_storage_root(thread_id: str) -> Path:
-    """Resolve a legacy thread storage directory for backward-compatible reads."""
-    root_id = root_thread_id(thread_id)
-    if not root_id:
-        raise ValueError("thread_id is required for thread storage.")
-    return THREAD_STORAGE_BASE_DIR / sanitize_thread_id(root_id)
-
-
 def workspace_storage_root(workspace_scope: WorkspaceScope | str) -> Path:
     key = sanitize_workspace_key(workspace_storage_key(workspace_scope))
     cache_key = str(THREAD_STORAGE_BASE_DIR / key)
@@ -135,33 +124,12 @@ def virtual_generated_image_path(filename: str) -> str:
     return f"{THREAD_STORAGE_MOUNT}/generated-images/{Path(filename).name}"
 
 
-def virtual_storage_relative_path(path: str | None) -> str | None:
-    raw = str(path or "").replace("\\", "/")
-    while raw.startswith("./"):
-        raw = raw[2:]
-    if raw == THREAD_STORAGE_MOUNT:
-        return ""
-    prefix = f"{THREAD_STORAGE_MOUNT}/"
-    if raw.startswith(prefix):
-        return raw[len(prefix) :].lstrip("/")
-    return None
-
-
-def resolve_workspace_storage_path(
-    workspace_scope: WorkspaceScope | str,
-    relative_path: str = ".",
-) -> Path:
-    root = ensure_workspace_storage_root(workspace_scope)
-    return Path(resolve_safe_path(str(root), relative_path or "."))
-
-
 def ensure_git_exclude(workspace_root: Path | str, pattern: str = f"{THREAD_STORAGE_MOUNT}/") -> None:
     """Ensure a pattern is excluded in .git/info/exclude if .git exists."""
     from agent.modules.tools.coding.storage import ensure_workspace_exclude
 
     if pattern == f"{THREAD_STORAGE_MOUNT}/":
         ensure_workspace_exclude(Path(workspace_root))
-
 
 
 def ensure_physical_workspace_storage(workspace_root: Path | str) -> Path:
@@ -465,73 +433,11 @@ async def hydrate_workspace_storage_to_sandbox(
         logger.debug("hydrate_workspace_storage_to_sandbox failed: %s", exc)
 
 
-class WorkspaceStorageFileIO:
-    """Workspace file I/O wrapper ensuring physical workspace storage."""
-
-    def __init__(self, base: WorkspaceFileIO, workspace_scope: WorkspaceScope | str | None = None) -> None:
-        self._base = base
-        self._workspace_scope = workspace_storage_key(workspace_scope) if workspace_scope else None
-        self.ref = base.ref
-        if getattr(base.ref, "backend", "local") == "local" and hasattr(base, "root") and base.root:
-            ensure_physical_workspace_storage(base.root)
-
-    async def list_dir(self, path: str = "") -> str:
-        return await self._base.list_dir(path)
-
-    async def read_text(self, file_path: str) -> str:
-        return await self._base.read_text(file_path)
-
-    async def read_bytes(self, file_path: str) -> bytes:
-        reader = getattr(self._base, "read_bytes", None)
-        if callable(reader):
-            result = reader(file_path)
-            if inspect.isawaitable(result):
-                return await result
-            return result
-        raise UnsupportedWorkspaceCapabilityError(
-            backend=getattr(getattr(self._base, "ref", None), "backend", "unknown"),
-            capability="read_bytes",
-        )
-
-    async def write_text(self, file_path: str, content: str, *, append: bool = False) -> str:
-        return await self._base.write_text(file_path, content, append=append)
-
-    async def glob(
-        self,
-        pattern: str,
-        *,
-        path: str = "",
-        include_dirs: bool = False,
-    ) -> str:
-        return await self._base.glob(pattern, path=path, include_dirs=include_dirs)
-
-    async def grep(
-        self,
-        pattern: str,
-        *,
-        path: str = "",
-        include: str | None = None,
-        case_insensitive: bool = False,
-        max_results: int = 100,
-    ) -> str:
-        return await self._base.grep(
-            pattern,
-            path=path,
-            include=include,
-            case_insensitive=case_insensitive,
-            max_results=max_results,
-        )
-
-
-ThreadStorageFileIO = WorkspaceStorageFileIO  # Backwards-compatible alias.
-
 __all__ = [
     "GENERATED_IMAGES_DIR",
     "THREAD_STORAGE_BASE_DIR",
     "THREAD_STORAGE_DIRS",
     "THREAD_STORAGE_MOUNT",
-    "ThreadStorageFileIO",
-    "WorkspaceStorageFileIO",
     "ensure_git_exclude",
     "ensure_physical_workspace_storage",
     "ensure_sandbox_workspace_storage",
@@ -541,15 +447,12 @@ __all__ = [
     "hydrate_workspace_storage_to_sandbox",
     "ingest_attachment_file",
     "ingest_attachment_file_to_sandbox",
-    "resolve_workspace_storage_path",
     "root_thread_id",
     "sanitize_thread_id",
     "sanitize_workspace_key",
     "save_generated_image",
     "sync_back_workspace_storage",
-    "thread_storage_root",
     "virtual_generated_image_path",
-    "virtual_storage_relative_path",
     "workspace_storage_key",
     "workspace_storage_root",
 ]

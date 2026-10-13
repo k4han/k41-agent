@@ -22,7 +22,7 @@ from agent.modules.mcp import (
     reload_mcp_server_tools,
     test_mcp_connection,
 )
-from agent.modules.tools import reload_mcp_descriptors
+from agent.modules.tools import ensure_mcp_loaded, reload_mcp_descriptors
 
 
 router = APIRouter()
@@ -253,6 +253,9 @@ async def reload_dashboard_mcp_server(server_name: str) -> dict[str, Any]:
         status = await reload_mcp_server_tools(server_name)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await ensure_mcp_loaded(force=True)
+    invalidate_agent_tools_cache()
+    invalidate_agent_mcp_cache()
     return _serialize_status(status)
 
 

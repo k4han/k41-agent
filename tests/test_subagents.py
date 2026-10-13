@@ -23,7 +23,7 @@ name: researcher
 display_name: Research Agent
 graph_type: react_agent
 provider: default
-tools: [read_file, list_dir, call_agent]
+tools: [read, list_dir, call_agent]
 sub_agents: []
 context_compact_threshold: 75
 ---
@@ -40,7 +40,7 @@ name: coder
 display_name: Coder Agent
 graph_type: react_agent
 provider: default
-tools: [read_file, write_file, bash, list_dir, call_agent]
+tools: [read, write, bash, list_dir, call_agent]
 sub_agents: [researcher]
 context_compact_threshold: 75
 ---

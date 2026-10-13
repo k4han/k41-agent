@@ -6,18 +6,21 @@ set of tools an agent may use at runtime.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 from dataclasses import replace
 
 from langchain_core.tools import BaseTool
 
 from agent.modules.tools.config import materialize_tool
-from agent.modules.tools.domain import ToolDescriptor
+from agent.modules.tools.domain import ToolDescriptor, ToolSource
 from agent.modules.tools.policy import ToolPolicy
 from agent.modules.tools.registry_service import (
     ensure_mcp_loaded,
     get_registry_service,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ToolResolver:
@@ -26,19 +29,13 @@ class ToolResolver:
     def __init__(self, *, include_mcp: bool = True) -> None:
         self._include_mcp = include_mcp
 
-    def for_workspace(self, tools: list[BaseTool], workspace, agent_name: str = "default") -> list[BaseTool]:
+    def for_workspace(self, tools: list[BaseTool], workspace) -> list[BaseTool]:
         """Use the same coding definitions on every workspace backend."""
         from agent.modules.tools.coding.adapter import make_coding_tool
-        from agent.modules.tools.coding.names import CODING_TOOLS, TOOL_ALIASES, REMOVED_TOOLS
         from agent.modules.workspaces import normalize_workspace_ref
         from agent.shared.config.constants import DEFAULT_WORKSPACE_ROOT
         normalize_workspace_ref(workspace, default_locator=DEFAULT_WORKSPACE_ROOT)
-        result = []
-        for tool in tools:
-            if tool.name in REMOVED_TOOLS:
-                continue
-            name = TOOL_ALIASES.get(tool.name, tool.name)
-            result.append(make_coding_tool(name) if name in CODING_TOOLS else tool)
+        result = list(tools)
         control_tools = {"ask_user", "request_plan_review", "plan_mode_respond", "write_todos"}
         if result and not any(tool.name == "read" for tool in result) and any(tool.name not in control_tools for tool in result):
             result.append(make_coding_tool("read", retained_only=True))
@@ -52,9 +49,8 @@ class ToolResolver:
     ) -> list[BaseTool]:
         """Async resolution that pulls in MCP tools as well.
 
-        ``override_tool_names``: when provided, replaces the agent config's
-        ``tools`` allow-list (used by sub-agent calls that explicitly scope
-        the toolset for the runtime).
+        ``override_tool_names`` narrows the agent policy for this run. An
+        empty iterable disables every tool.
         """
         if self._include_mcp:
             await ensure_mcp_loaded()
@@ -79,7 +75,20 @@ class ToolResolver:
         self, policy: ToolPolicy
     ) -> list[ToolDescriptor]:
         service = get_registry_service()
-        return policy.filter(service.get_descriptors())
+        descriptors = service.get_descriptors()
+        if not self._include_mcp:
+            descriptors = [d for d in descriptors if d.source is not ToolSource.MCP]
+        filtered = policy.filter(descriptors)
+        if policy.allowed_tool_names is not None:
+            known = {d.name for d in descriptors}
+            unknown = sorted(set(policy.allowed_tool_names) - known)
+            if unknown:
+                logger.warning(
+                    "Agent '%s' requests unknown tools %s; they resolve to no tool.",
+                    policy.agent_name,
+                    unknown,
+                )
+        return filtered
 
     def _resolve_for_agent_sync(
         self,
@@ -91,14 +100,16 @@ class ToolResolver:
         policy = (
             ToolPolicy.from_agent_config(config)
             if config is not None
-            else ToolPolicy.allow_all(agent_name=agent_name or "default")
+            else ToolPolicy(agent_name=agent_name or "default", allowed_tool_names=frozenset())
         )
         if override_tool_names is not None:
             from agent.modules.tools.coding.names import canonical_tool_names
-            override_set = frozenset(canonical_tool_names(override_tool_names))
+            override_set = frozenset(canonical_tool_names(list(override_tool_names)))
+            if policy.allowed_tool_names is not None:
+                override_set &= policy.allowed_tool_names
             policy = replace(
                 policy,
-                allowed_tool_names=override_set if override_set else None,
+                allowed_tool_names=override_set,
             )
         agent_tool_configs = (
             getattr(config, "tool_configs", None)

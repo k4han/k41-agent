@@ -20,6 +20,10 @@ from agent.shared.infrastructure.db.engine import close_async_engine, initialize
 
 @pytest_asyncio.fixture
 async def background_task_db(monkeypatch: pytest.MonkeyPatch, tmp_path, request):
+    async def fake_generate_title(**kwargs):
+        return ""
+
+    monkeypatch.setattr("agent.modules.conversations.service.generate_conversation_title", fake_generate_title)
     await close_async_engine()
 
     db_path = tmp_path / f"{request.node.name}.sqlite"
@@ -339,7 +343,7 @@ async def test_background_task_remove_is_persisted(
     closed_thread_ids: list[str] = []
 
     shell_manager_module = importlib.import_module(
-        "agent.modules.tools.builtin.shell.session_manager"
+        "agent.modules.tools"
     )
 
     class FakeSessionManager:
@@ -354,7 +358,7 @@ async def test_background_task_remove_is_persisted(
         deleted_workspace_thread_ids.append(thread_id)
 
     monkeypatch.setattr(runner_module, "run_agent_stream", fake_run_agent_stream)
-    monkeypatch.setattr(shell_manager_module, "session_manager", FakeSessionManager())
+    monkeypatch.setattr(shell_manager_module, "stop_thread_processes", FakeSessionManager().close_thread_sessions)
     monkeypatch.setattr(
         workspaces_module,
         "delete_thread_workspace",

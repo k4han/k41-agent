@@ -114,7 +114,7 @@ async def test_migration_preserves_history_workspaces_usage_and_files(isolated_c
     child = f"{old}:sub:worker:123"
     new = canonical_thread_id(old)
     monkeypatch.setattr(thread_storage, "THREAD_STORAGE_BASE_DIR", tmp_path / "storage")
-    original_storage = thread_storage.thread_storage_root(old)
+    original_storage = thread_storage.workspace_storage_root(str(tmp_path))
     original_storage.mkdir(parents=True)
     (original_storage / "note.txt").write_text("Saved note", encoding="utf-8")
     old_context = InvocationContext("default", str(tmp_path), old)
@@ -158,8 +158,8 @@ async def test_migration_preserves_history_workspaces_usage_and_files(isolated_c
         usage = await get_usage_service().get_thread_usage(old)
         assert usage["thread_id"] == new
         assert usage["total_tokens"] == 15
-        assert thread_storage.thread_storage_root(new) == original_storage
-        assert (thread_storage.thread_storage_root(new) / "note.txt").read_text(encoding="utf-8") == "Saved note"
+        assert thread_storage.workspace_storage_root(str(tmp_path)) == original_storage
+        assert (thread_storage.workspace_storage_root(str(tmp_path)) / "note.txt").read_text(encoding="utf-8") == "Saved note"
         assert conversation_key(new) == old_key
         migrated_context = replace(old_context, thread_id=new)
         assert migrated_context.owner == old_context.owner

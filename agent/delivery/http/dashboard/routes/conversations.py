@@ -43,7 +43,7 @@ from agent.modules.conversations import (
     parse_thread_metadata,
     rename_conversation_thread,
 )
-from agent.modules.tools import close_thread_shell_sessions
+from agent.modules.tools import stop_thread_processes
 from agent.modules.workspaces import (
     bind_workspace_ref,
     delete_thread_workspace,
@@ -246,7 +246,7 @@ async def rename_chat_thread(
 async def delete_chat_thread(thread_id: str) -> dict[str, str]:
     """Delete a conversation thread and all its checkpoints."""
     thread_id = resolve_thread_id(thread_id)
-    close_thread_shell_sessions(thread_id)
+    stop_thread_processes(thread_id)
     await delete_thread_workspace(thread_id)
     await mark_conversation_thread_deleted(thread_id)
     await delete_workflow_thread_tree(thread_id)
@@ -469,7 +469,7 @@ async def stream_background_task_events(
 async def delete_background_task_thread(thread_id: str) -> dict[str, str]:
     """Delete a background task thread and its associated resources."""
     thread_id = resolve_thread_id(thread_id)
-    close_thread_shell_sessions(thread_id)
+    stop_thread_processes(thread_id)
     await delete_thread_workspace(thread_id)
     await get_background_task_repository().mark_deleted_by_thread_id(thread_id)
     await mark_conversation_thread_deleted(thread_id)

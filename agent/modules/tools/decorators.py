@@ -1,9 +1,7 @@
 """Decorator-based registration for built-in tools.
 
-Applying ``@register_tool`` to a ``BaseTool`` attaches metadata and records
-the tool in a module-level pending list. A ``BuiltinToolSource`` later walks
-the tool packages, imports each module, then drains this list into typed
-``ToolDescriptor`` objects.
+Applying ``@register_tool`` attaches metadata to a ``BaseTool`` instance.
+``BuiltinToolSource`` discovers those instances directly from their modules.
 
 Tools live as the result of the LangChain ``@tool`` decorator (or
 ``StructuredTool.from_function``), so this decorator must operate on the
@@ -22,6 +20,7 @@ from agent.modules.tools.domain import (
     ToolCategory,
     ToolConfigSchema,
     ToolConfigValue,
+    ToolConfigNormalizer,
     ToolFactory,
 )
 
@@ -29,7 +28,7 @@ META_ATTR = "__k41_tool_meta__"
 
 
 @dataclass(frozen=True)
-class PendingToolMeta:
+class ToolRegistration:
     """Metadata captured by ``@register_tool`` before a descriptor is built."""
 
     category: ToolCategory
@@ -40,10 +39,7 @@ class PendingToolMeta:
     config_schema: ToolConfigSchema | None
     default_config: dict[str, ToolConfigValue]
     factory: ToolFactory | None
-
-
-_PENDING: list[tuple[BaseTool, PendingToolMeta]] = []
-_REGISTERED_TOOL_IDS: set[int] = set()
+    config_normalizer: ToolConfigNormalizer | None
 
 
 def register_tool(
@@ -53,16 +49,15 @@ def register_tool(
     tags: Iterable[str] = (),
     id: str | None = None,
     version: str = "1.0.0",
-    apply_middleware: bool = True,
     config_schema: ToolConfigSchema | None = None,
     default_config: dict[str, ToolConfigValue] | None = None,
     factory: ToolFactory | None = None,
+    config_normalizer: ToolConfigNormalizer | None = None,
 ) -> Callable[[BaseTool], BaseTool]:
     """Mark a ``BaseTool`` instance for built-in registration.
 
-    When ``apply_middleware`` is True (default) the project's default middleware
-    chain is applied immediately so error normalization works regardless of
-    whether the registry has been initialized.
+    Apply the default middleware immediately so error normalization works
+    regardless of whether the registry has been initialized.
     """
 
     def decorator(tool_obj: BaseTool) -> BaseTool:
@@ -72,7 +67,7 @@ def register_tool(
                 "(the result of @tool or StructuredTool.from_function); "
                 f"got {type(tool_obj).__name__!r} instead."
             )
-        meta = PendingToolMeta(
+        meta = ToolRegistration(
             category=category,
             capabilities=frozenset(capabilities),
             tags=frozenset(tags),
@@ -81,41 +76,20 @@ def register_tool(
             config_schema=config_schema,
             default_config=dict(default_config or {}),
             factory=factory,
+            config_normalizer=config_normalizer,
         )
         setattr(tool_obj, META_ATTR, meta)
-        if builtins_id(tool_obj) not in _REGISTERED_TOOL_IDS:
-            _PENDING.append((tool_obj, meta))
-            _REGISTERED_TOOL_IDS.add(builtins_id(tool_obj))
-        if apply_middleware:
-            # local import to avoid circular dependency at module-import time
-            from agent.modules.tools.middleware import apply_default_middleware
+        # local import to avoid circular dependency at module-import time
+        from agent.modules.tools.middleware import apply_default_middleware
 
-            apply_default_middleware(tool_obj)
+        apply_default_middleware(tool_obj)
         return tool_obj
 
     return decorator
 
 
-def builtins_id(obj: object) -> int:
-    """Stable identity for dedup; isolated for testability."""
-    return id(obj)
-
-
-def get_pending_registrations() -> list[tuple[BaseTool, PendingToolMeta]]:
-    """Snapshot of all tools registered so far via ``@register_tool``."""
-    return list(_PENDING)
-
-
-def clear_pending_registrations() -> None:
-    """Reset registration state. Intended for tests only."""
-    _PENDING.clear()
-    _REGISTERED_TOOL_IDS.clear()
-
-
 __all__ = [
     "META_ATTR",
-    "PendingToolMeta",
-    "clear_pending_registrations",
-    "get_pending_registrations",
+    "ToolRegistration",
     "register_tool",
 ]

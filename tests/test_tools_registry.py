@@ -18,9 +18,7 @@ from agent.modules.tools import (
     get_tool_by_name,
 )
 from agent.modules.tools.decorators import (
-    PendingToolMeta,
-    clear_pending_registrations,
-    get_pending_registrations,
+    ToolRegistration,
     register_tool,
 )
 from agent.modules.tools.registry import ToolRegistry
@@ -142,8 +140,7 @@ class TestToolRegistry:
 
 
 class TestRegisterToolDecorator:
-    def test_decorator_attaches_meta_and_records(self) -> None:
-        clear_pending_registrations()
+    def test_decorator_attaches_metadata(self) -> None:
 
         @register_tool(
             category=ToolCategory.UTILITY,
@@ -156,14 +153,11 @@ class TestRegisterToolDecorator:
             return text
 
         meta = getattr(my_local_tool, "__k41_tool_meta__", None)
-        assert isinstance(meta, PendingToolMeta)
+        assert isinstance(meta, ToolRegistration)
         assert meta.category is ToolCategory.UTILITY
         assert ToolCapability.MUTATES_STATE in meta.capabilities
         assert "x" in meta.tags
 
-        pending = get_pending_registrations()
-        names = [t.name for t, _ in pending]
-        assert "my_local_tool" in names
 
     def test_decorator_rejects_non_basetool(self) -> None:
         with pytest.raises(TypeError):

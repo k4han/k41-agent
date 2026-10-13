@@ -48,7 +48,11 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
 
     # Fallback to "default" agent if the requested agent is not found.
     # The builtin default is always guaranteed to exist after catalog.load().
+    # Fall back the full resolution (provider/model/tools) so an unknown
+    # agent behaves like default instead of running with no tools.
     if agent_config is None:
+        logger.warning("Unknown agent '%s'; falling back to 'default'.", agent_name)
+        agent_name = "default"
         agent_config = catalog.get_agent("default")
 
     # config is guaranteed non-None at this point (builtin default always present).
@@ -63,7 +67,7 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
         agent_name,
         override_tool_names=ctx_tool_names,
     )
-    tools = ToolResolver().for_workspace(tools, workspace, agent_name)
+    tools = ToolResolver().for_workspace(tools, workspace)
 
     thread_id = get_thread_id(config)
     from agent.modules.skills import get_repository_skill_dir
@@ -114,9 +118,7 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
         )
         store_system_prompt(cache_key, system_prompt, sections=prompt_sections)
 
-    from types import SimpleNamespace
-    from agent.modules.tools import migrate_history_outputs
-    history = await migrate_history_outputs(state["messages"], SimpleNamespace(context=ctx, config=config))
+    history = state["messages"]
     from agent.modules.skills import active_context, model_skill_history, skill_commands
     skill_context, active_skills = ("", state.get("active_skills", {}))
     processed_skill_messages = state.get("processed_skill_messages", [])

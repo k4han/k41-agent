@@ -14,8 +14,8 @@ from pydantic import ValidationError
 
 from agent.modules.tools.coding.files import FileService
 from agent.modules.tools.coding.engine import CodingEngine
-from agent.modules.tools.coding.names import CODING_TOOLS, FILE_TOOLS, PROCESS_TOOLS
-from agent.modules.tools.coding.models import CodingError, InvocationContext, ResultError, ToolDefinition, ToolResult
+from agent.modules.tools.coding.names import PROCESS_TOOLS
+from agent.modules.tools.coding.models import CodingError, CodingInvocation, InvocationContext, ResultError, ToolDefinition, ToolResult
 from agent.modules.tools.coding.permissions import Permissions
 from agent.modules.tools.coding.processes import ProcessManager, resolve_shell
 from agent.modules.tools.coding.storage import OutputStore, digest
@@ -39,29 +39,43 @@ class CodingService(CodingEngine):
         self.storage.start_cleanup()
 
     async def prepare(self, name: str, values: dict[str, Any], context: InvocationContext) -> None:
-        if self._uses_remote(name, values, context):
+        if context.backend != "local":
             await self.remote.prepare(name, values, context)
         else:
             await super().prepare(name, values, context)
 
     async def execute(self, name: str, values: dict[str, Any], context: InvocationContext) -> ToolResult:
-        if self._uses_remote(name, values, context):
+        if context.backend != "local":
             return await self.remote.execute(name, values, context)
         result = await super().execute(name, values, context)
         return ToolResult.model_validate(result.to_dict())
 
-    def _uses_remote(self, name: str, values: dict[str, Any], context: InvocationContext) -> bool:
-        if context.backend == "local":
-            return False
-        return True
+    async def prepare_batch(self, invocations: list[CodingInvocation]) -> ToolResult | None:
+        """Authorize every operation before a batch can execute any effects."""
+        try:
+            for invocation in invocations:
+                definition, args, context = invocation.definition, invocation.args, invocation.context
+                parsed = definition.input_schema.model_validate(args)
+                if definition.name != "read" and context.tool_call_id and self.storage.journal_path(context).exists():
+                    self.storage.begin(context, self.fingerprint(definition.name, parsed.model_dump()))
+                    continue
+                await self.prepare(definition.name, parsed.model_dump(), context)
+        except (CodingError, ValidationError, OSError, ValueError) as exc:
+            result = self.failure(exc)
+            result.data["batch_stopped_before_execution"] = True
+            result.content = f"[error] Batch stopped before execution: {exc}"
+            return result
+        return None
+
+    @staticmethod
+    def fingerprint(name: str, args: dict[str, Any]) -> str:
+        return digest(json.dumps([name, args], sort_keys=True, ensure_ascii=True))
 
     async def invoke(self, definition: ToolDefinition, args: dict[str, Any], context: InvocationContext) -> ToolResult:
         started = time.monotonic()
         # Reads must observe the current file, including when a call ID is reused.
         use_journal = definition.name != "read"
-        fingerprint_args = {key: value for key, value in args.items()
-                            if not (definition.name == "read" and key == "byte_offset" and value is None)}
-        fingerprint = digest(json.dumps([definition.name, fingerprint_args], sort_keys=True, ensure_ascii=True))
+        fingerprint = self.fingerprint(definition.name, args)
         key = f"{context.owner}\0{context.message_id}\0{context.tool_call_id}" if context.tool_call_id else os.urandom(16).hex()
         lock = self.invocation_locks.setdefault(key, asyncio.Lock())
         journal_started = False
@@ -71,26 +85,20 @@ class CodingService(CodingEngine):
             self.storage.start_cleanup()
             parsed = definition.input_schema.model_validate(args)
             values = parsed.model_dump()
+            fingerprint = self.fingerprint(definition.name, values)
             async with lock:
-                if not use_journal and context.tool_call_id:
-                    try:
-                        self.storage.journal_path(context).unlink(missing_ok=True)
-                    except OSError:
-                        pass
                 # Completed settlements are returned before authorization so
                 # replay cannot consume a resume value intended for another call.
                 if use_journal and context.tool_call_id:
                     path = self.storage.journal_path(context)
                     if path.exists():
                         result = self.storage.begin(context, fingerprint)
-                        result = await self.restore_output_paths(result, context)
                         result = self.model_result(definition.name, result, context)
                         return result
                 await self.prepare(definition.name, values, context)
                 if use_journal:
                     cached = self.storage.begin(context, fingerprint)
                     if cached is not None:
-                        cached = await self.restore_output_paths(cached, context)
                         result = self.model_result(definition.name, cached, context)
                         return result
                     journal_started = True
@@ -110,7 +118,6 @@ class CodingService(CodingEngine):
                     result = ToolResult(status="error", error=ResultError(code="unexpected", message="Tool execution failed unexpectedly."),
                                         content="[error] unexpected: Tool execution failed unexpectedly.")
                 result = self.model_result(definition.name, result, context)
-                result = await self.restore_output_paths(result, context)
                 result = self.storage.bound(result, context, tail=definition.name in PROCESS_TOOLS)
                 if use_journal:
                     self.storage.complete(context, fingerprint, result)
@@ -148,31 +155,6 @@ class CodingService(CodingEngine):
             result = self.storage.bound(result, context)
         return result
 
-    async def restore_output_paths(self, result: ToolResult, context: InvocationContext) -> ToolResult:
-        if result.output_paths or not result.output_refs:
-            return result
-        from agent.modules.tools.coding.storage import output_relative_path, bounded_text
-        import re
-        for reference in result.output_refs:
-            try:
-                if context.backend == "local":
-                    await asyncio.to_thread(self.storage.output_path, context, reference)
-                    result.output_paths.append(output_relative_path(context, reference))
-                else:
-                    legacy = self.storage.owner_dir(context) / f"{reference}.output"
-                    from agent.modules.tools.coding.storage import RETENTION_SECONDS
-                    if legacy.is_file() and not legacy.is_symlink() and legacy.stat().st_mtime >= time.time() - RETENTION_SECONDS:
-                        content = await asyncio.to_thread(legacy.read_text, encoding="utf-8", errors="replace")
-                        result.output_paths.extend(await self.remote.migrate_outputs([reference], context, legacy_content=content))
-                    else:
-                        result.output_paths.extend(await self.remote.migrate_outputs([reference], context))
-            except (CodingError, OSError, ValueError):
-                continue
-        if result.output_paths and isinstance(result.content, str):
-            result.content = re.sub(r"read_tool_output output_ref=[a-f0-9]{32}", "read the retained output file", result.content)
-            notice = "\n[Retained output: " + "; ".join(f"read file_path={path} byte_offset=0" for path in result.output_paths) + "]"
-            result.content, _ = bounded_text(result.content + notice, notice)
-        return result
 
     @staticmethod
     def failure(exc: Exception) -> ToolResult:

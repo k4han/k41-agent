@@ -29,7 +29,7 @@ from agent.modules.tools.config import (
     ToolConfigService,
 )
 from agent.modules.tools.policy import ToolPolicy
-from agent.modules.tools.coding.names import canonical_tool_names
+from agent.modules.tools.coding.names import TOOL_ALIASES, canonical_tool_names
 from agent.modules.tools.sources.builtin import BuiltinToolSource
 from agent.modules.tools.registry_service import (
     ToolRegistryService,
@@ -92,7 +92,6 @@ from agent.modules.tools.runtime.thread_storage import (
     sanitize_workspace_key,
     save_generated_image,
     sync_back_workspace_storage,
-    thread_storage_root,
     virtual_generated_image_path,
     workspace_storage_root,
 )
@@ -136,24 +135,11 @@ def get_generated_images_dir():
     return GENERATED_IMAGES_DIR
 
 
-def close_thread_shell_sessions(thread_id: str) -> int:
-    """Close local and remote shell sessions for a thread tree."""
-    from agent.modules.tools.builtin.shell.daytona_session_manager import (
-        daytona_session_manager,
-    )
-    from agent.modules.tools.builtin.shell.modal_session_manager import (
-        modal_session_manager,
-    )
-    from agent.modules.tools.builtin.shell.session_manager import session_manager
-
+def stop_thread_processes(thread_id: str) -> int:
+    """Stop coding processes owned by a thread tree without creating a runtime."""
     from agent.bootstrap.container import require_active_container
     container = require_active_container()
-    coding_count = container._coding_service.processes.stop_thread_now(thread_id) if container._coding_service else 0
-    return coding_count + (
-        session_manager.close_thread_sessions(thread_id)
-        + daytona_session_manager.close_thread_sessions(thread_id)
-        + modal_session_manager.close_thread_sessions(thread_id)
-    )
+    return container._coding_service.processes.stop_thread_now(thread_id) if container._coding_service else 0
 
 
 def get_default_descriptors() -> list[ToolDescriptor]:
@@ -234,6 +220,8 @@ __all__ = [
     "ToolRegistryService",
     "ToolResolver",
     "ToolSource",
+    "TOOL_ALIASES",
+    "canonical_tool_names",
     "PLAN_MODE_TOOL_NAME",
     "PLAN_REVIEW_APPROVED_PREFIX",
     "PLAN_REVIEW_INTERRUPT_TYPE",
@@ -255,7 +243,7 @@ __all__ = [
     "PlanResumePayload",
     "UserQuestionAnswer",
     "aresolve_tools_for_agent",
-    "close_thread_shell_sessions",
+    "stop_thread_processes",
     "ensure_mcp_loaded",
     "reload_mcp_descriptors",
     "find_descriptors",
@@ -295,25 +283,24 @@ __all__ = [
     "ingest_attachment_file_to_sandbox",
     "save_generated_image",
     "sync_back_workspace_storage",
-    "thread_storage_root",
     "virtual_generated_image_path",
     "workspace_storage_root",
 ]
 
 from agent.modules.tools.coding.models import CodingError, PermissionResume, ToolResult
-from agent.modules.tools.coding.adapter import coding_message_for_model, invocation_context
+from agent.modules.tools.coding.adapter import coding_message_for_model, invocation_context, prepare_tool_batch
 from agent.modules.tools.coding.service import get_coding_service
 from agent.modules.tools.coding.permissions import pending_permission_requests, permission_request_event
 from agent.modules.tools.coding.storage import bounded_text as bound_tool_text
 from agent.modules.tools.coding.storage import conversation_key
 from agent.modules.tools.coding.processes import kill_tree as kill_process_tree
-from agent.modules.tools.runtime.output_retention import migrate_history_outputs, retain_tool_messages
+from agent.modules.tools.runtime.output_retention import retain_tool_messages
 from agent.modules.tools.runtime.output_policy import TextCapture
 
 __all__ += [
+    "prepare_tool_batch",
     "kill_process_tree",
     "conversation_key",
-    "migrate_history_outputs",
     "retain_tool_messages",
     "TextCapture",
 ]
@@ -323,7 +310,6 @@ async def clear_conversation_storage(thread_id: str) -> None:
     """Stop a conversation's processes while preserving shared workspace files."""
     service = get_coding_service()
     await service.processes.stop_thread(thread_id)
-    close_thread_shell_sessions(thread_id)
     await service.remote.stop_thread(thread_id)
 
 

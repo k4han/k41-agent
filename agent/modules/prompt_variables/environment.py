@@ -3,7 +3,7 @@
 Single source of truth for ``host_os``, ``shell_name`` and ``shell_kind``.
 Both ``prompt_builders.get_system_default_variables`` and
 ``PromptVariableService.list_variables`` read from here so the values stay
-consistent. Shell detection mirrors ``run_bash_tool._resolve_shell`` without
+consistent. Shell detection follows the coding runtime without
 importing it to avoid heavy/circular imports.
 """
 
@@ -30,7 +30,7 @@ def get_shell_name(
     platform_name: str | None = None,
     path_lookup=shutil.which,
 ) -> str:
-    """Return resolved shell executable name for local ``bash``/``run_bash`` tools.
+    """Return resolved shell executable name for local ``bash`` tools.
 
     ``K41_SHELL`` wins when set; otherwise auto-detect the best available
     shell. Returns a short name such as ``pwsh.exe``, ``cmd.exe``, ``bash``

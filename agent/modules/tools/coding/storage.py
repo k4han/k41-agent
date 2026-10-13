@@ -7,7 +7,6 @@ import hashlib
 import json
 import os
 import re
-import shutil
 import time
 import uuid
 from pathlib import Path
@@ -170,17 +169,6 @@ class OutputStore:
         if not re.fullmatch(r"[a-f0-9]{32}", reference):
             raise CodingError("invalid_input", "Invalid output reference.")
         path = self.physical_output_path(context, reference, create=False)
-        if not path.exists():
-            candidates = [self.owner_dir(context) / f"{reference}.output"]
-            if path.parent.is_dir():
-                candidates.extend(directory / f"{reference}.txt" for directory in path.parent.iterdir()
-                                  if re.fullmatch(r"[a-f0-9]{24}", directory.name)
-                                  and directory.is_dir() and not directory.is_symlink())
-            for legacy in candidates:
-                if legacy.is_file() and not legacy.is_symlink() and legacy.stat().st_mtime >= time.time() - RETENTION_SECONDS:
-                    self.physical_output_path(context, reference)
-                    shutil.copy2(legacy, path)
-                    break
         if path.is_symlink() or not path.is_file():
             raise CodingError("not_found", "Output reference does not exist in this workspace.")
         return path

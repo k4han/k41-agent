@@ -24,7 +24,7 @@ from langgraph.types import Command
 
 from agent.modules.tools.coding.adapter import SCHEMAS, make_coding_tool
 from agent.modules.tools.coding.files import read_byte_page
-from agent.modules.tools.coding.models import CodingError, InvocationContext, PermissionRule, ToolDefinition, ToolResult
+from agent.modules.tools.coding.models import InvocationContext, PermissionRule, ToolDefinition, ToolResult
 from agent.modules.tools.coding.remote_worker import SandboxWorker
 from agent.modules.tools.coding.service import CodingService
 from agent.modules.tools.coding.storage import (
@@ -285,24 +285,6 @@ async def test_retention_failure_keeps_media_and_returns_no_broken_path(output_e
     await service.processes.close()
 
 
-@pytest.mark.asyncio
-async def test_legacy_history_migration_is_repeatable(output_environment):
-    service, context, workspace, worker = output_environment
-    store = worker.storage if worker else service.storage
-    reference = "a" * 32
-    legacy = store.owner_dir(context) / f"{reference}.output"
-    legacy.write_bytes(b"legacy log\n")
-    message = ToolMessage(content=f"[output truncated; read_tool_output output_ref={reference}]",
-                          name="bash", tool_call_id="call", artifact={"output_refs": [reference]})
-    runtime = SimpleNamespace(context={}, config={})
-    first = (await output_retention.migrate_history_outputs([message], runtime))[0]
-    second = (await output_retention.migrate_history_outputs([message], runtime))[0]
-    assert first.artifact["output_paths"] == second.artifact["output_paths"]
-    assert (workspace / first.artifact["output_paths"][0]).read_bytes() == legacy.read_bytes()
-    assert "read_tool_output" not in first.content and "read_tool_output" in message.content
-    await service.processes.close()
-
-
 def test_retention_quota_and_cleanup_protect_active_output_and_unmanaged_files(tmp_path, monkeypatch):
     store = OutputStore(tmp_path / "records")
     workspace = tmp_path / "workspace"
@@ -396,7 +378,7 @@ async def test_conversations_share_notes_outputs_and_search(output_environment):
         await clear_conversation_storage(context.thread_id)
         assert (workspace / note_path).exists() and (workspace / output_path).exists()
         if worker:
-            assert await worker.dispatch({"operation": "clear_scratchpads", "thread_id": context.thread_id}) == {"cleared": False}
+            assert await worker.dispatch({"operation": "stop_thread", "thread_id": context.thread_id}) == {"stopped": 0}
             assert (workspace / note_path).exists()
     finally:
         await service.processes.close()
@@ -404,25 +386,6 @@ async def test_conversations_share_notes_outputs_and_search(output_environment):
         if worker:
             await worker.processes.close()
             await worker.storage.close()
-
-
-def test_legacy_thread_outputs_are_recovered_into_shared_workspace_storage(tmp_path):
-    store = OutputStore(tmp_path / "records")
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    context = InvocationContext("default", str(workspace), "other-conversation")
-    reference = "a" * 32
-    legacy = workspace / ".k41-agent" / "outputs" / digest("original-conversation")[:24] / f"{reference}.txt"
-    legacy.parent.mkdir(parents=True)
-    legacy.write_text("Saved output", encoding="utf-8")
-    recovered = store.output_path(context, reference)
-    assert recovered == workspace / ".k41-agent" / "outputs" / f"{reference}.txt"
-    assert recovered.read_text(encoding="utf-8") == "Saved output"
-    assert legacy.exists()
-    other_workspace = tmp_path / "other-workspace"
-    other_workspace.mkdir()
-    with pytest.raises(CodingError, match="does not exist in this workspace"):
-        store.output_path(replace(context, workspace=str(other_workspace)), reference)
 
 
 def test_git_worktree_internal_storage_is_excluded(tmp_path):
@@ -582,23 +545,6 @@ async def test_read_reusing_call_id_observes_creation_and_deletion(output_enviro
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("state", ["started", "completed"])
-async def test_read_ignores_legacy_invocation_journals(output_environment, state):
-    service, context, workspace, worker = output_environment
-    context = replace(context, tool_call_id="legacy-read", message_id="message")
-    (workspace / "source.txt").write_text("current content\n", encoding="utf-8")
-    stores = [service.storage] + ([worker.storage] if worker else [])
-    for store in stores:
-        store.begin(context, "legacy-read-fingerprint")
-        if state == "completed":
-            store.complete(context, "legacy-read-fingerprint", ToolResult(content="old content"))
-    result = await invoke(service, context, "read", file_path="source.txt")
-    assert result.status == "success" and "current content" in result.content
-    assert "old content" not in result.content
-    await service.processes.close()
-
-
-@pytest.mark.asyncio
 async def test_read_reusing_call_id_checks_current_permissions(output_environment):
     service, context, workspace, _ = output_environment
     context = replace(context, tool_call_id="read", message_id="message")
@@ -609,26 +555,4 @@ async def test_read_reusing_call_id_checks_current_permissions(output_environmen
     result = await invoke(service, denied, "read", file_path="source.txt")
     assert result.status == "error" and result.error.code == "permission_denied"
     assert "private content" not in result.content
-    await service.processes.close()
-
-
-@pytest.mark.asyncio
-async def test_legacy_mutation_replay_restores_paths_without_executing_again(output_environment):
-    service, context, workspace, worker = output_environment
-    context = replace(context, tool_call_id="legacy", message_id="message")
-    store = worker.storage if worker else service.storage
-    reference = "b" * 32
-    legacy = store.owner_dir(context) / f"{reference}.output"
-    legacy.write_bytes(b"old retained text")
-    args = {"file_path": "missing.txt", "content": "must not write"}
-    fingerprint = digest(json.dumps(["write", args], sort_keys=True, ensure_ascii=True))
-    result = ToolResult(content=f"[read_tool_output output_ref={reference}]", output_refs=[reference])
-    service.storage.complete(context, fingerprint, result)
-    restored = await invoke(service, context, "write", **args)
-    assert restored.status == "success" and restored.output_paths
-    assert (workspace / restored.output_paths[0]).read_bytes() == b"old retained text"
-    assert "read_tool_output" not in restored.content
-    again = await invoke(service, context, "write", **args)
-    assert again.output_paths == restored.output_paths
-    assert not (workspace / "missing.txt").exists()
     await service.processes.close()

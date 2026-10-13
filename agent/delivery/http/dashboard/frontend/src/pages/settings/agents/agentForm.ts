@@ -15,7 +15,6 @@ export type AgentForm = {
   tools: string[];
   tool_permissions: AgentCard["tool_permissions"];
   tool_configs: ToolConfigs;
-  mcp_servers: string[];
   sub_agents: string[];
   plan_approval_targets: string[];
   hidden: boolean;
@@ -44,7 +43,6 @@ export function blankForm(workflow: string): AgentForm {
     tools: [],
     tool_permissions: null,
     tool_configs: {},
-    mcp_servers: [],
     sub_agents: [],
     plan_approval_targets: [],
     hidden: false,
@@ -65,7 +63,6 @@ export function cardToForm(card: AgentCard): AgentForm {
     tools: card.tools || [],
     tool_permissions: card.tool_permissions ?? null,
     tool_configs: normalizeToolConfigs(card.tool_configs),
-    mcp_servers: card.mcp_servers || [],
     sub_agents: card.sub_agents || [],
     plan_approval_targets: card.plan_approval_targets || [],
     hidden: card.hidden || false,

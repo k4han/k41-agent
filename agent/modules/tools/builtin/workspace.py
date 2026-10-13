@@ -4,16 +4,9 @@ from typing import Any
 
 from langgraph.prebuilt import ToolRuntime
 
-from agent.modules.tools.runtime.context import ToolContext, get_context_value
-from agent.modules.tools.runtime.thread_storage import (
-    WorkspaceStorageFileIO,
-    ensure_physical_workspace_storage,
-)
+from agent.modules.tools.runtime.context import get_context_value
 from agent.modules.workspaces import (
-    WorkspaceFileIO,
     WorkspaceRef,
-    derive_workspace_scope,
-    get_workspace_file_io,
     normalize_workspace_ref,
 )
 from agent.shared.config.constants import DEFAULT_WORKSPACE_ROOT
@@ -33,34 +26,8 @@ def get_workspace(runtime: ToolRuntime[Any, Any]) -> WorkspaceRef:
     )
 
 
-async def get_file_io(runtime: ToolRuntime[Any, Any]) -> WorkspaceFileIO:
-    """Return the workspace file I/O capability for a tool runtime."""
-    tool_context = ToolContext.from_runtime(runtime)
-    workspace = get_workspace(runtime)
-    file_io = await get_workspace_file_io(
-        workspace,
-        thread_id=tool_context.thread_id,
-    )
-    if tool_context.thread_id:
-        if workspace.backend == "local":
-            ensure_physical_workspace_storage(workspace.locator)
-        elif workspace.backend in {"daytona", "modal"}:
-            try:
-                from agent.modules.tools.runtime.thread_storage import (
-                    ensure_sandbox_workspace_storage,
-                )
-
-                await ensure_sandbox_workspace_storage(
-                    workspace, thread_id=tool_context.thread_id
-                )
-            except Exception:
-                pass
-        return WorkspaceStorageFileIO(file_io, derive_workspace_scope(workspace))
-    return file_io
-
-
 def get_working_dir(runtime: ToolRuntime[Any, Any]) -> str:
-    """Return the physical workspace path for prompt/tool compatibility.
+    """Return the physical workspace path for prompt rendering.
 
     For Daytona/Modal sandboxes the workspace ``locator`` is a sandbox ID and
     is not a usable filesystem path. Prefer ``metadata["root"]`` so the value

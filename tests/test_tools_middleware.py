@@ -32,21 +32,27 @@ class TestErrorNormalizationSync:
         def boom() -> str:
             raise ToolError(ToolErrorCode.NOT_FOUND, "missing")
 
-        assert boom() == "[error] not_found: missing"
+        with pytest.raises(ToolError) as caught:
+            boom()
+        assert format_tool_error(caught.value) == "[error] not_found: missing"
 
     def test_catches_unexpected_exception(self) -> None:
         @error_normalization
         def boom() -> str:
             raise RuntimeError("bad thing")
 
-        assert boom() == "[error] unexpected: bad thing"
+        with pytest.raises(ToolError) as caught:
+            boom()
+        assert format_tool_error(caught.value) == "[error] unexpected: bad thing"
 
     def test_unexpected_with_no_message_uses_class_name(self) -> None:
         @error_normalization
         def boom() -> str:
             raise RuntimeError("")
 
-        assert boom() == "[error] unexpected: RuntimeError"
+        with pytest.raises(ToolError) as caught:
+            boom()
+        assert format_tool_error(caught.value) == "[error] unexpected: RuntimeError"
 
 
 class TestErrorNormalizationAsync:
@@ -64,7 +70,9 @@ class TestErrorNormalizationAsync:
         async def boom() -> str:
             raise ToolError(ToolErrorCode.TIMEOUT, "too slow")
 
-        assert await boom() == "[error] timeout: too slow"
+        with pytest.raises(ToolError) as caught:
+            await boom()
+        assert format_tool_error(caught.value) == "[error] timeout: too slow"
 
     @pytest.mark.asyncio
     async def test_async_catches_unexpected(self) -> None:
@@ -72,7 +80,9 @@ class TestErrorNormalizationAsync:
         async def boom() -> str:
             raise ValueError("invalid")
 
-        assert await boom() == "[error] unexpected: invalid"
+        with pytest.raises(ToolError) as caught:
+            await boom()
+        assert format_tool_error(caught.value) == "[error] unexpected: invalid"
 
 
 class TestInvocationLogging:
@@ -175,20 +185,6 @@ class TestWrapTool:
 
 
 class TestToolErrorEndToEndOnBuiltin:
-    @pytest.mark.asyncio
-    async def test_read_file_uses_normalized_format(self, tmp_path) -> None:
-        from types import SimpleNamespace
-
-        from agent.modules.tools.builtin.filesystem import read_file as read_file_module
-
-        sandbox = tmp_path / "sandbox"
-        sandbox.mkdir()
-        result = await read_file_module.read_file.coroutine(
-            file_path="../escape.txt",
-            runtime=SimpleNamespace(context={"working_dir": str(sandbox)}),
-        )
-        assert result.startswith("[error] ")
-        assert "Path escapes working directory" in result
 
     @pytest.mark.asyncio
     async def test_skill_tool_uses_normalized_format(self, monkeypatch) -> None:
@@ -204,10 +200,9 @@ class TestToolErrorEndToEndOnBuiltin:
             "get_effective_skill_content_xml",
             fake_get_effective_skill_content_xml,
         )
-        result = await skill_module.skill.coroutine(
-            name="missing",
-            runtime=SimpleNamespace(context={}, config={}),
-        )
+        with pytest.raises(ToolError) as caught:
+            await skill_module.skill.coroutine(name="missing", runtime=SimpleNamespace(context={}, config={}))
+        result = format_tool_error(caught.value)
         assert result == format_tool_error(
             ToolError(ToolErrorCode.NOT_FOUND, "skill not found")
         )

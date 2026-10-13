@@ -143,8 +143,8 @@ class BackgroundTask:
             "elapsed_display": _format_elapsed(elapsed),
             "thread_id": self.thread_id,
             "notify_channel": notify_info,
-            "allowed_tool_names": list(self.allowed_tool_names or []),
-            "allowed_skill_names": list(self.allowed_skill_names or []),
+            "allowed_tool_names": list(self.allowed_tool_names) if self.allowed_tool_names is not None else None,
+            "allowed_skill_names": list(self.allowed_skill_names) if self.allowed_skill_names is not None else None,
             "task_timeout": self.task_timeout,
             "max_retries": self.max_retries,
             "retry_count": self.retry_count,
@@ -335,7 +335,7 @@ class BackgroundTaskManager:
                 else None
             ),
             context_compact_threshold=context_compact_threshold,
-            allowed_tool_names=list(allowed_tool_names) if allowed_tool_names else None,
+            allowed_tool_names=list(allowed_tool_names) if allowed_tool_names is not None else None,
             allowed_skill_names=(
                 list(allowed_skill_names) if allowed_skill_names is not None else None
             ),
@@ -717,13 +717,13 @@ class BackgroundTaskManager:
 
         from agent.modules.agent_runtime.repository import get_background_task_repository
         from agent.modules.conversations import mark_conversation_thread_deleted
-        from agent.modules.tools import close_thread_shell_sessions
+        from agent.modules.tools import stop_thread_processes
         from agent.modules.workspaces import delete_thread_workspace
         from agent.modules.workflows import delete_workflow_thread_tree
 
         await get_background_task_repository().mark_deleted(task_id)
         if thread_id:
-            close_thread_shell_sessions(thread_id)
+            stop_thread_processes(thread_id)
             await delete_thread_workspace(thread_id)
             await mark_conversation_thread_deleted(thread_id)
             await delete_workflow_thread_tree(thread_id)

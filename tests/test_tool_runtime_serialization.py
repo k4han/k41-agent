@@ -5,8 +5,8 @@ from typing import Annotated, Any, get_args, get_origin, get_type_hints
 import pytest
 from langgraph.prebuilt import ToolRuntime
 
-from agent.modules.tools.builtin.filesystem.list_dir import list_dir
-from agent.modules.tools.builtin.registry import get_all_builtin_tools
+from agent.modules.tools.builtin.coding_tools import list_dir
+from agent.modules.tools import get_default_tools
 from agent.modules.workflows.run_config import make_context
 
 
@@ -24,7 +24,7 @@ def _contains_unparameterized_tool_runtime(annotation: object) -> bool:
 def test_tool_runtime_annotations_are_parameterized() -> None:
     unparameterized: list[str] = []
 
-    for tool in get_all_builtin_tools():
+    for tool in get_default_tools():
         for attr_name in ("func", "coroutine"):
             fn = getattr(tool, attr_name, None)
             if fn is None:
@@ -66,7 +66,7 @@ async def test_runtime_injected_tool_validation_does_not_warn(tmp_path) -> None:
             }
         )
 
-    assert result.content == "(Empty directory)"
+    assert result.content == "(empty directory)"
     assert not any(
         "Pydantic serializer warnings" in str(warning.message)
         for warning in caught

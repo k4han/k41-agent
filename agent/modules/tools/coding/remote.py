@@ -245,14 +245,6 @@ class RemoteCodingRuntime:
         request["result"] = result.model_dump()
         return ToolResult.model_validate(await client.call(request))
 
-    async def migrate_outputs(self, references, context, *, legacy_content=None):
-        client = await self.client(context)
-        await client.ensure_started()
-        request = self.request("migrate_outputs", "", {}, context, workspace=client.backend.root)
-        request["references"] = references
-        if legacy_content is not None:
-            request["legacy_content"] = legacy_content
-        return (await client.call(request))["output_paths"]
 
     async def stop_thread(self, thread_id):
         thread_id = resolve_thread_id(thread_id)

@@ -21,12 +21,12 @@ propagate; media content is preserved. Existing control tools retain their
 Direct tool invocations without a runtime tool call ID return model content
 only, never a serialized result containing UI fields. Before model invocation
 or conversation summarization, coding artifacts are removed from a copy of
-each tool message. Older journal results and checkpoint messages containing
-mutation diffs are rendered as receipts from their metadata without replaying
-file changes; the original UI history remains available.
+each tool message. The original structured UI history remains available.
+Serialized legacy checkpoints and retired output references are not converted.
 
 Context includes agent, canonical workspace, thread, message and tool call ID.
-The workflow prepares all coding calls in a model turn before running them.
+`CodingService.prepare_batch()` authorizes all coding calls in a model turn
+before the workflow executes them. The workflow does not access invocation storage.
 Permissions are checked again at actual file access. Per-file locks serialize
 mutations; invocation locks serialize duplicate calls in one container.
 
@@ -48,15 +48,34 @@ tools:
   - stop_process
 ```
 
-Old `read_file`, `write_file`, `edit_file`, and `exec_command` allow-list
-entries normalize to `read`, `write`, `edit`, and `bash` on every backend.
-`run_bash` also normalizes to `bash`; `apply_patch` is retired without an
-automatic replacement. Process-control entries normalize to the corresponding
-process tools; `bash_list_sessions` is retired. Names are deduplicated before policy
-filtering. Persistent session arguments and cwd/environment state do not carry
-over. Existing agent files can still be parsed; saving writes canonical tool
-names and omits the retired profile field. Legacy tools are not registered in
-the public catalog.
+The public catalog uses the canonical tool names above. Legacy filesystem and
+shell names in agent allow lists normalize to their canonical replacements and
+are deduplicated; tool configuration keys normalize the same way. Retired tool
+implementations, persistent terminal sessions, and legacy output migration are
+removed. An explicit empty `tools` list
+— including a missing `tools` field which the parser defaults to `[]` —
+disables tools (deny-all, fail-closed). Run-scoped `allowed_tool_names=None`
+inherits the agent policy; `[]` disables tools, and a nonempty list can only
+narrow the policy.
+
+MCP access requires a database agent-server binding and a tool name permitted
+by the agent policy. Agent cards no longer contain `mcp_servers`; manage server
+bindings in the dashboard. Missing or failed binding lookup denies MCP access. The default
+agent has no special permission bypass. MCP loading is serialized per container;
+failed servers remain retryable and retain their previous tools while healthy
+servers publish their current tools. Refresh replaces the combined source
+snapshot atomically, including empty results from healthy servers.
+Dashboard startup does not connect to MCP servers. Agent options load MCP tools
+on demand with a five-second timeout, returning the available catalog without
+caching a timed-out result. Requests share a container-owned loading task that
+continues after the dashboard timeout and is cancelled during shutdown.
+Reloading a server refreshes the registry and
+invalidates the dashboard options cache.
+
+Default middleware preserves `ToolError` as a LangChain `ToolException` and
+uses native tool error handling, so graph invocations produce
+`ToolMessage.status="error"`. Calling the underlying function directly raises
+structured exceptions. Cancellation and graph interrupts continue to propagate.
 
 ## Sandbox runtime
 
@@ -160,8 +179,9 @@ results expose `output_paths`; read them with the existing
 `read(file_path=..., offset=1, limit=2000)` tool. For JSON or other very long
 lines, use `byte_offset=0` and continue with `next_byte_offset`; byte pages
 preserve exact UTF-8 text, including newline sequences. `read_tool_output` is
-retired. Legacy references and journals remain decodable, and existing output
-files are migrated lazily when resuming history or replaying a completed call.
+retired. Serialized legacy checkpoints and retired output references are not
+converted; legacy `.output` files and pre-migration journals return `not_found`
+or `unknown_outcome`. Re-issue the tool call to create a new retained output.
 
 Output expires after seven days. Cleanup runs at startup and every hour while
 the runtime is active, excluding running processes. Ownership records,
@@ -219,10 +239,10 @@ output references.
 
 Run `uv run python -m pytest -q`, `pnpm dashboard:check`, and
 `pnpm dashboard:build`. `.github/workflows/coding-tools.yml` runs the coding
-and compatibility contracts on Windows/Linux, plus dashboard validation.
+and current tool contracts on Windows/Linux, plus dashboard validation.
 Tests cover real pipes, Unicode, stdin, nonzero exits, timeout, descendant
 cleanup, cursor boundaries, ownership, approvals/replay, large pages, images,
-BOM/CRLF, permissions, concurrent creation/edits, tool-name migration, and the shared sandbox engine and transport.
+BOM/CRLF, permissions, concurrent creation/edits, exact tool names, and the shared sandbox engine and transport.
 Symlink tests skip when Windows symlink privileges are unavailable.
 
 Run `uv run python scripts/benchmark_coding_v2.py --baseline-ref <old-commit>

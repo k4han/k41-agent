@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 ToolConfigValue = str | int | float | bool | None
 ToolFactory = Callable[[dict[str, ToolConfigValue]], "BaseTool"]
+ToolConfigNormalizer = Callable[[dict[str, ToolConfigValue], dict[str, Any], Any], dict[str, ToolConfigValue]]
 
 
 class ToolSource(StrEnum):
@@ -131,6 +132,7 @@ class ToolDescriptor:
     config_schema: ToolConfigSchema | None = None
     default_config: dict[str, ToolConfigValue] = field(default_factory=dict)
     factory: ToolFactory | None = None
+    config_normalizer: ToolConfigNormalizer | None = None
 
     def has_capability(self, capability: ToolCapability) -> bool:
         return capability in self.capabilities
@@ -146,6 +148,7 @@ __all__ = [
     "ToolConfigInputType",
     "ToolConfigSchema",
     "ToolConfigValue",
+    "ToolConfigNormalizer",
     "ToolDescriptor",
     "ToolFactory",
     "ToolSource",

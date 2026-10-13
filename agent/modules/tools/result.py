@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from enum import StrEnum
 
+from langchain_core.tools import ToolException
+
 
 class ToolErrorCode(StrEnum):
     INVALID_INPUT = "invalid_input"
@@ -20,7 +22,7 @@ class ToolErrorCode(StrEnum):
     UNEXPECTED = "unexpected"
 
 
-class ToolError(Exception):
+class ToolError(ToolException):
     """Structured error raised by tools."""
 
     def __init__(

@@ -25,9 +25,10 @@ WORKSPACE_IDENTITY_COLUMNS: dict[str, str] = {
 # Columns that only the background_tasks table needs (tool/skill whitelists).
 # Kept in this module so that the workspace migration stays the single source
 # of truth for ``background_tasks`` schema evolution.
+# Default 'null' means unrestricted; '[]' means deny-all.
 BACKGROUND_TASK_EXTRA_COLUMNS: dict[str, str] = {
-    "allowed_tool_names_json": "TEXT NOT NULL DEFAULT '[]'",
-    "allowed_skill_names_json": "TEXT NOT NULL DEFAULT '[]'",
+    "allowed_tool_names_json": "TEXT NOT NULL DEFAULT 'null'",
+    "allowed_skill_names_json": "TEXT NOT NULL DEFAULT 'null'",
 }
 
 _TABLES_WITH_WORKSPACE_COLUMNS = ("thread_workspaces", "background_tasks")

@@ -22,6 +22,11 @@ from agent.shared.infrastructure.subprocess_utils import hidden_subprocess_kwarg
 
 @pytest.fixture
 def setup(tmp_path, isolated_container):
+    from agent.modules.agents import AgentConfig
+
+    isolated_container.agent_repository._cache["default"] = AgentConfig(
+        name="default", graph_type="react_agent", provider="default", tools=['skill', 'read'],
+    )
     root = tmp_path / "skills"
     directory = root / "demo"
     directory.mkdir(parents=True)

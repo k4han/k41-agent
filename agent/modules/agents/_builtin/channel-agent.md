@@ -20,7 +20,6 @@ tools:
 - web_fetch
 - web_search
 context_compact_threshold: 75
-mcp_servers: []
 ---
 
 # System Prompt

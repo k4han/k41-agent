@@ -8,6 +8,7 @@ process lifetime (web server, CLI, or isolated test).
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import logging
 import threading
@@ -174,6 +175,8 @@ class AppContainer:
     _tool_registry_service: Any = field(default=None, repr=False)
     _coding_service: Any = field(default=None, repr=False)
     _mcp_loaded: bool = field(default=False, repr=False)
+    _mcp_load_lock: Any = field(default=None, repr=False)
+    _mcp_load_task: Any = field(default=None, repr=False)
     _mcp_service: Any = field(default=None, repr=False)
     _skill_repository: Any = field(default=None, repr=False)
     _skill_packages: Any = field(default=None, repr=False)
@@ -658,6 +661,10 @@ class AppContainer:
         from agent.shared.config.service import detach_database_config_source
         from agent.shared.infrastructure.db.engine import close_async_engine
 
+        if self._mcp_load_task is not None:
+            self._mcp_load_task.cancel()
+            await asyncio.gather(self._mcp_load_task, return_exceptions=True)
+            self._mcp_load_task = None
         if self._coding_service is not None:
             await self._coding_service.processes.close()
         await close_checkpointer(container=self)
@@ -667,6 +674,15 @@ class AppContainer:
         except Exception:
             logger.debug("Detach database config source failed.", exc_info=True)
         self._persistence_ready = False
+
+    def get_mcp_load_lock(self) -> Any:
+        """Lazily create the MCP load lock inside a running loop."""
+        # Guard with the threading RLock so two FastAPI worker threads
+        # creating the lock concurrently share one instance.
+        with self._lazy_lock:
+            if self._mcp_load_lock is None:
+                self._mcp_load_lock = asyncio.Lock()
+            return self._mcp_load_lock
 
     def activate(self) -> Any:
         """Set this container active and return previous for restore."""

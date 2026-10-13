@@ -25,7 +25,7 @@ async def test_clear_agent_session_closes_shell_sessions_and_deletes_thread_tree
     monkeypatch,
 ):
     shell_manager_module = importlib.import_module(
-        "agent.modules.tools.builtin.shell.session_manager"
+        "agent.modules.tools"
     )
     workflows_module = importlib.import_module("agent.modules.workflows")
     workspaces_module = importlib.import_module("agent.modules.workspaces")
@@ -42,7 +42,7 @@ async def test_clear_agent_session_closes_shell_sessions_and_deletes_thread_tree
     async def fake_delete_thread_workspace(thread_id: str):
         calls.append(("delete_workspace", thread_id))
 
-    monkeypatch.setattr(shell_manager_module, "session_manager", FakeSessionManager())
+    monkeypatch.setattr(shell_manager_module, "stop_thread_processes", FakeSessionManager().close_thread_sessions)
     monkeypatch.setattr(
         workspaces_module,
         "delete_thread_workspace",
@@ -1630,4 +1630,3 @@ async def test_run_agent_stream_without_title_task_has_no_title_events(monkeypat
     ]
 
     assert events == [{"type": "final", "content": "hello"}]
-

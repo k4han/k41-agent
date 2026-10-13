@@ -1820,7 +1820,7 @@ async def test_dashboard_delete_chat_thread_deletes_workflow_tree(
 ) -> None:
     conversations_module = importlib.import_module("agent.modules.conversations")
     shell_manager_module = importlib.import_module(
-        "agent.modules.tools.builtin.shell.session_manager"
+        "agent.modules.tools"
     )
     workflows_module = importlib.import_module("agent.modules.workflows")
     workspaces_module = importlib.import_module("agent.modules.workspaces")
@@ -1846,7 +1846,7 @@ async def test_dashboard_delete_chat_thread_deletes_workflow_tree(
         "mark_conversation_thread_deleted",
         fake_mark_deleted,
     )
-    monkeypatch.setattr(shell_manager_module, "session_manager", FakeSessionManager())
+    _patch_dashboard_attr(monkeypatch, "stop_thread_processes", FakeSessionManager().close_thread_sessions)
     _patch_dashboard_attr(
         monkeypatch,
         "delete_workflow_thread_tree",
@@ -1876,7 +1876,7 @@ async def test_dashboard_delete_background_task_thread_deletes_workflow_tree(
     agent_runtime_module = importlib.import_module("agent.modules.agent_runtime")
     conversations_module = importlib.import_module("agent.modules.conversations")
     shell_manager_module = importlib.import_module(
-        "agent.modules.tools.builtin.shell.session_manager"
+        "agent.modules.tools"
     )
     workflows_module = importlib.import_module("agent.modules.workflows")
     workspaces_module = importlib.import_module("agent.modules.workspaces")
@@ -1912,7 +1912,7 @@ async def test_dashboard_delete_background_task_thread_deletes_workflow_tree(
         "mark_conversation_thread_deleted",
         fake_mark_deleted,
     )
-    monkeypatch.setattr(shell_manager_module, "session_manager", FakeSessionManager())
+    _patch_dashboard_attr(monkeypatch, "stop_thread_processes", FakeSessionManager().close_thread_sessions)
     _patch_dashboard_attr(
         monkeypatch,
         "delete_workflow_thread_tree",

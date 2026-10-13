@@ -2,6 +2,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from agent.modules.tools import ToolError, format_tool_error
+
 import agent.modules.tools.builtin.skill.skill as skills_tool_module
 
 
@@ -38,10 +40,12 @@ async def test_skill_tool_returns_error_when_not_found(monkeypatch):
     )
 
     runtime = SimpleNamespace(context={}, config={})
-    result = await skills_tool_module.skill.coroutine(
-        name="missing-skill",
-        runtime=runtime,
-    )
+    with pytest.raises(ToolError) as caught:
+        await skills_tool_module.skill.coroutine(
+            name="missing-skill",
+            runtime=runtime,
+        )
+    result = format_tool_error(caught.value)
 
     assert result == "[error] not_found: skill not found"
 
@@ -59,9 +63,11 @@ async def test_skill_tool_returns_permission_error_when_not_allowed(monkeypatch)
     )
 
     runtime = SimpleNamespace(context={"allowed_skill_names": ["allowed-skill"]}, config={})
-    result = await skills_tool_module.skill.coroutine(
-        name="missing-skill",
-        runtime=runtime,
-    )
+    with pytest.raises(ToolError) as caught:
+        await skills_tool_module.skill.coroutine(
+            name="missing-skill",
+            runtime=runtime,
+        )
+    result = format_tool_error(caught.value)
 
     assert result == "[error] permission_denied: skill is not available"

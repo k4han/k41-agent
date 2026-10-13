@@ -60,7 +60,7 @@ def test_default_agent_config_exists():
     assert default_config.graph_type == "react_agent"
 
     # Default agent should have tools defined (either from MD or builtin)
-    # Empty list means "use all default tools"
+    # An empty list disables tools
     assert default_config.tools is not None or default_config.tools == []
 
 
@@ -93,7 +93,7 @@ async def test_default_agent_context_includes_tools():
             working_dir=".",
             context_compact_threshold=default_config.context_compact_threshold,
             agent_name="default",
-            allowed_tool_names=default_config.tools if default_config.tools else None,
+            allowed_tool_names=default_config.tools,
         )
 
         assert context.agent_name == "default"

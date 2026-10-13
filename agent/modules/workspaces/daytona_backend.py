@@ -5,6 +5,7 @@ import logging
 import mimetypes
 import posixpath
 import shlex
+import threading
 from contextlib import suppress
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -93,13 +94,21 @@ class _DaytonaLifecycleSweeper:
 
     def __init__(self) -> None:
         self._task: asyncio.Task | None = None
-        self._lock = asyncio.Lock()
+        self._lock: asyncio.Lock | None = None
+        self._lock_guard = threading.Lock()
+
+    def _get_lock(self) -> asyncio.Lock:
+        if self._lock is None:
+            with self._lock_guard:
+                if self._lock is None:
+                    self._lock = asyncio.Lock()
+        return self._lock
 
     def is_running(self) -> bool:
         return self._task is not None and not self._task.done()
 
     async def start(self) -> None:
-        async with self._lock:
+        async with self._get_lock():
             if self.is_running():
                 return
             self._task = asyncio.create_task(
@@ -108,7 +117,7 @@ class _DaytonaLifecycleSweeper:
             )
 
     async def stop(self) -> None:
-        async with self._lock:
+        async with self._get_lock():
             task = self._task
             if task is None:
                 return
@@ -720,7 +729,7 @@ async def sweep_idle_daytona_workspaces(
     stop_after = timedelta(minutes=auto_stop) if auto_stop > 0 else None
     archive_after = timedelta(days=auto_archive) if auto_archive > 0 else None
 
-    from agent.modules.tools import close_thread_shell_sessions
+    from agent.modules.tools import stop_thread_processes
     from agent.modules.workspaces.repository import get_thread_workspace_repository
     from agent.modules.workspaces.service import resolve_workspace_ref
 
@@ -750,7 +759,7 @@ async def sweep_idle_daytona_workspaces(
                 continue
 
             if archive_after is not None and idle_for >= archive_after:
-                close_thread_shell_sessions(thread_id)
+                stop_thread_processes(thread_id)
                 archive_daytona_workspace(workspace, thread_id=thread_id)
                 result["archived"] += 1
                 continue
@@ -765,7 +774,7 @@ async def sweep_idle_daytona_workspaces(
                     DAYTONA_STATUS_DESTROYED,
                 }
             ):
-                close_thread_shell_sessions(thread_id)
+                stop_thread_processes(thread_id)
                 stop_daytona_workspace(workspace, thread_id=thread_id)
                 result["stopped"] += 1
             else:

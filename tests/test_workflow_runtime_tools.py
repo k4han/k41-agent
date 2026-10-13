@@ -228,11 +228,14 @@ async def test_call_agent_blocks_when_validate_call_fails(monkeypatch):
         config={"configurable": {"thread_id": "parent-thread"}},
     )
 
-    result = await call_agent.coroutine(
-        task="delegate this",
-        sub_agent="child-agent",
-        runtime=runtime,
-    )
+    from agent.modules.tools import ToolError, format_tool_error
+    with pytest.raises(ToolError) as caught:
+        await call_agent.coroutine(
+            task="delegate this",
+            sub_agent="child-agent",
+            runtime=runtime,
+        )
+    result = format_tool_error(caught.value)
 
     assert result == "[error] permission_denied: not allowed to call agent 'child-agent'."
     assert invoked is False
@@ -269,11 +272,14 @@ async def test_call_agent_reports_runner_failure(monkeypatch):
         config={"configurable": {"thread_id": "parent-thread"}},
     )
 
-    result = await call_agent.coroutine(
-        task="delegate this",
-        sub_agent="child-agent",
-        runtime=runtime,
-    )
+    from agent.modules.tools import ToolError, format_tool_error
+    with pytest.raises(ToolError) as caught:
+        await call_agent.coroutine(
+            task="delegate this",
+            sub_agent="child-agent",
+            runtime=runtime,
+        )
+    result = format_tool_error(caught.value)
 
     assert result == "[error] upstream: sub-agent 'child-agent' failed: boom"
 

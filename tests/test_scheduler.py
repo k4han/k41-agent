@@ -7,9 +7,9 @@ from sqlalchemy import Column, Float, LargeBinary, MetaData, String, Table, crea
 
 
 def test_schedule_task_in_registry():
-    from agent.modules.tools.builtin.registry import get_all_builtin_tools
+    from agent.modules.tools import get_default_tools
 
-    tools = get_all_builtin_tools()
+    tools = get_default_tools()
     tool_names = [tool.name for tool in tools]
     assert "schedule_task" in tool_names
 

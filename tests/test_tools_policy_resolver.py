@@ -131,7 +131,7 @@ class TestToolPolicy:
     def test_disallow_call_agent_when_sub_agents_none(self) -> None:
         config = SimpleNamespace(
             name="leaf",
-            tools=[],
+            tools=None,
             mcp_servers=None,
             sub_agents=None,
         )
@@ -142,14 +142,14 @@ class TestToolPolicy:
     def test_allow_call_agent_when_sub_agents_list(self) -> None:
         config = SimpleNamespace(
             name="parent",
-            tools=[],
+            tools=None,
             mcp_servers=None,
             sub_agents=["child"],
         )
         policy = ToolPolicy.from_agent_config(config)
         assert policy.is_allowed(_builtin_descriptor("call_agent", _t_call_agent_stub))
 
-    def test_default_agent_auto_includes_mcp_when_empty_list(self, monkeypatch) -> None:
+    def test_default_agent_does_not_include_unbound_mcp(self, monkeypatch) -> None:
         monkeypatch.setattr(
             "agent.modules.mcp.list_agent_mcp_server_names",
             lambda name: [],
@@ -162,10 +162,9 @@ class TestToolPolicy:
         )
         policy = ToolPolicy.from_agent_config(config)
         d_gh = _mcp_descriptor("mcp__github__list_repos", _t_read_stub)
-        assert policy.is_allowed(d_gh)
-        assert policy.auto_include_all_mcp is True
+        assert not policy.is_allowed(d_gh)
 
-    def test_default_agent_auto_includes_mcp_when_mcp_servers_missing(
+    def test_default_agent_requires_mcp_bindings(
         self, monkeypatch
     ) -> None:
         monkeypatch.setattr(
@@ -180,8 +179,7 @@ class TestToolPolicy:
         )
         policy = ToolPolicy.from_agent_config(config)
         d_gh = _mcp_descriptor("mcp__github__list_repos", _t_read_stub)
-        assert policy.is_allowed(d_gh)
-        assert policy.auto_include_all_mcp is True
+        assert not policy.is_allowed(d_gh)
 
     def test_mcp_server_allow_list(self) -> None:
         policy = ToolPolicy(
@@ -237,18 +235,16 @@ class TestToolResolver:
             "restricted", override_tool_names=["apply_patch"] if override else None,
         ) == []
 
-    def test_resolve_for_unknown_agent_returns_default_allow_all(self) -> None:
-        tools = resolve_tools_for_agent("__no_such_agent__")
-        names = {t.name for t in tools}
-        # default policy = allow_all, so all builtin tools come back
-        assert "read" in names
-        assert "get_current_time" in names
+    def test_unknown_agent_has_no_tools(self) -> None:
+        assert resolve_tools_for_agent("__no_such_agent__") == []
 
-    def test_resolve_for_default_agent(self) -> None:
+    def test_default_agent_respects_its_config(self) -> None:
+        from agent.modules.agents import get_catalog_service
+        from agent.modules.agents.repository import load_agents_from_dir
+        load_agents_from_dir()
+        config = get_catalog_service().get_agent("default")
         tools = resolve_tools_for_agent("default")
-        names = {t.name for t in tools}
-        # default agent in this project allows the full builtin set
-        assert "read" in names
+        assert {tool.name for tool in tools} == set(config.tools)
 
     def test_resolver_uses_policy_for_filtering(self, monkeypatch) -> None:
         fake_config = SimpleNamespace(
@@ -354,7 +350,7 @@ class TestMcpToolSource:
             return []
 
         monkeypatch.setattr("agent.modules.mcp.get_all_mcp_tools", _fake)
-        descriptors = await McpToolSource().load()
+        descriptors = await McpToolSource().aload()
         assert descriptors == []
 
     @pytest.mark.asyncio
@@ -368,7 +364,7 @@ class TestMcpToolSource:
             return [mcp__github__list]
 
         monkeypatch.setattr("agent.modules.mcp.get_all_mcp_tools", _fake)
-        descriptors = await McpToolSource().load()
+        descriptors = await McpToolSource().aload()
         assert len(descriptors) == 1
         d = descriptors[0]
         assert d.source is ToolSource.MCP
@@ -384,7 +380,7 @@ class TestMcpToolSource:
             return ["not-a-tool", 123]
 
         monkeypatch.setattr("agent.modules.mcp.get_all_mcp_tools", _fake)
-        descriptors = await McpToolSource().load()
+        descriptors = await McpToolSource().aload()
         assert descriptors == []
 
     def test_prefix_constant(self) -> None:

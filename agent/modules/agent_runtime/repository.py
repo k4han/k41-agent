@@ -37,14 +37,9 @@ def _trim(value: str | None, max_length: int) -> str:
 
 
 def _dump_json_list(values: list[str] | None) -> str:
-    """Serialize a list of names to a JSON string for storage.
-
-    ``None`` is treated as "no whitelist configured" and stored as an
-    empty list. Empty list means "deny all" (semantically distinct from
-    unset), so we preserve that distinction at the API layer.
-    """
+    """Preserve the distinction between an unset whitelist and an empty one."""
     if values is None:
-        return "[]"
+        return "null"
     return json.dumps([str(v) for v in values], ensure_ascii=False)
 
 
@@ -74,13 +69,20 @@ def serialize_background_task(record: BackgroundTaskRecord) -> dict[str, Any]:
     }
 
 
-def _parse_json_list(value: Any) -> list[str]:
+def _parse_json_list(value: Any) -> list[str] | None:
+    # None/missing means unrestricted. Legacy rows stored unrestricted as "[]"
+    # (old _dump mapped None to "[]"); they now read as deny-all [] which is
+    # fail-closed and safe for history. New rows use "null" for unrestricted.
+    if value is None or value == "":
+        return None
     if not value:
         return []
     try:
         data = json.loads(str(value))
     except (TypeError, ValueError):
         return []
+    if data is None:
+        return None
     if not isinstance(data, list):
         return []
     return [str(item) for item in data if item is not None]

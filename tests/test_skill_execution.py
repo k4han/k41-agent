@@ -33,6 +33,11 @@ from agent.modules.workflows.state.base import BaseState
 
 @pytest.fixture
 def execution(tmp_path, isolated_container):
+    from agent.modules.agents import AgentConfig
+
+    isolated_container.agent_repository._cache["default"] = AgentConfig(
+        name="default", graph_type="react_agent", provider="default", tools=['skill', 'read', 'bash'],
+    )
     source = tmp_path / "skills" / "demo"
     (source / "scripts").mkdir(parents=True)
     (source / "SKILL.md").write_text("---\nname: demo\ndescription: Execution check.\n---\nRun the bundled scripts.\n")

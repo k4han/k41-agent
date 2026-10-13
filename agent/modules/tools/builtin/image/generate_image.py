@@ -183,7 +183,7 @@ def _build_generate_image_tool(config: dict[str, ToolConfigValue]) -> BaseTool:
         prompt: str,
         runtime: Annotated[ToolRuntime[Any, Any], InjectedToolArg],
     ) -> str:
-        """Sync wrapper for local workspaces (used by legacy tests)."""
+        """Generate and store an image for a local workspace synchronously."""
         provider = _resolve_provider(provider_name)
         output_dir, thread_scoped = _output_target(runtime)
         kwargs: dict[str, Any] = {

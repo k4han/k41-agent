@@ -13,9 +13,6 @@ from agent.modules.tools.domain import (
     ToolDescriptor,
 )
 from agent.shared.config import ConfigService, get_config_service
-from agent.shared.config.web_connections import (
-    DEFAULT_CONNECTION, MIGRATION_KEY, WEB_SERVICES, WEB_TOOLS, is_legacy_web_key, resolve_web_field, validate_tool_references,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +106,7 @@ def normalize_tool_setting_value(key: str, value: Any) -> Any:
     if descriptor is None:
         raise ValueError(f"Unknown tool '{tool_name}'.")
     if descriptor.config_schema is None:
-        return value
+        raise ValueError(f"Tool '{tool_name}' has no configurable fields.")
     field = descriptor.config_schema.field_map().get(field_name)
     if field is None:
         allowed = ", ".join(sorted(descriptor.config_schema.field_map()))
@@ -199,13 +196,6 @@ def resolve_global_tool_config_schemas(
             if _is_secret_field(field) and str(value).strip():
                 value = MASKED_SECRET_VALUE
             values[field_name] = value
-        if descriptor.name in WEB_TOOLS:
-            for kind, definition in WEB_SERVICES.items():
-                if WEB_TOOLS[descriptor.name] not in definition["capabilities"]:
-                    continue
-                for field_name in definition["fields"]:
-                    value, _ = resolve_web_field(config_service, descriptor.name, kind, field_name, {})
-                    values[f"{kind}_{field_name}"] = MASKED_SECRET_VALUE if field_name == "api_key" and value else value
         result[descriptor.name] = values
     return result
 
@@ -229,11 +219,7 @@ class ToolConfigService:
         }
 
         config_service = get_config_service()
-        has_migration = bool(getattr(config_service, "get", None) and config_service.get(MIGRATION_KEY))
         for field_name in field_map:
-            if has_migration and is_legacy_web_key(_tool_config_key(descriptor.name, field_name)):
-                values.pop(field_name, None)
-                continue
             setting = config_service.get_effective(
                 _tool_config_key(descriptor.name, field_name)
             )
@@ -248,42 +234,14 @@ class ToolConfigService:
                     values[field_name] = value
 
         coerced: dict[str, ToolConfigValue] = {}
-        if descriptor.name in WEB_TOOLS:
-            provider = str(values.get("provider") or "auto").strip().lower() or "auto"
-            if provider == "auto":
-                for field_name in list(values.keys()):
-                    if not field_name.endswith("_connection"):
-                        continue
-                    try:
-                        validate_tool_references(config_service, descriptor.name, {field_name: values[field_name]})
-                    except ValueError:
-                        logger.warning("Ignoring invalid %s connection for %s in auto mode: %s",
-                                       field_name, descriptor.name, values[field_name])
-                        values[field_name] = DEFAULT_CONNECTION
-            elif provider in WEB_SERVICES and WEB_TOOLS[descriptor.name] in WEB_SERVICES[provider]["capabilities"]:
-                for field_name in list(values.keys()):
-                    if not field_name.endswith("_connection"):
-                        continue
-                    kind = field_name.removesuffix("_connection")
-                    if kind == provider:
-                        validate_tool_references(config_service, descriptor.name, {field_name: values[field_name]})
-                    else:
-                        try:
-                            validate_tool_references(config_service, descriptor.name, {field_name: values[field_name]})
-                        except ValueError:
-                            values[field_name] = DEFAULT_CONNECTION
-            else:
-                for field_name in list(values.keys()):
-                    if not field_name.endswith("_connection"):
-                        continue
-                    try:
-                        validate_tool_references(config_service, descriptor.name, {field_name: values[field_name]})
-                    except ValueError:
-                        values[field_name] = DEFAULT_CONNECTION
-        else:
-            validate_tool_references(config_service, descriptor.name, values)
+        if descriptor.config_normalizer is not None:
+            values = descriptor.config_normalizer(values, overrides or {}, config_service)
         for field_name, field in field_map.items():
-            value = _coerce_value(field, values.get(field_name))
+            if field_name not in values:
+                if field.required:
+                    raise ValueError(f"Missing required config '{field_name}' for tool '{descriptor.name}'.")
+                continue
+            value = _coerce_value(field, values[field_name])
             if field.required and value in (None, ""):
                 raise ValueError(
                     f"Missing required config '{field_name}' for tool '{descriptor.name}'."

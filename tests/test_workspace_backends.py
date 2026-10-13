@@ -1529,7 +1529,7 @@ async def test_daytona_lifecycle_sweeper_stops_and_archives_idle_workspaces(
         lambda: FakeWorkspaceRepository(),
     )
     monkeypatch.setattr(
-        "agent.modules.tools.close_thread_shell_sessions",
+        "agent.modules.tools.stop_thread_processes",
         lambda thread_id: closed.append(thread_id) or 0,
     )
     monkeypatch.setattr(
@@ -1602,7 +1602,7 @@ async def test_daytona_sweeper_marks_not_found_as_destroyed(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        "agent.modules.tools.close_thread_shell_sessions",
+        "agent.modules.tools.stop_thread_processes",
         lambda thread_id: 0,
     )
     monkeypatch.setattr(

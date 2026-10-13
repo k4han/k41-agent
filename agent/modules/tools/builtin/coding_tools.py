@@ -13,8 +13,7 @@ def registered(name: str, category: ToolCategory, mutates: bool = False):
         capabilities.append(ToolCapability.WRITE_FS if mutates else ToolCapability.READ_FS)
     if mutates:
         capabilities.append(ToolCapability.MUTATES_STATE)
-    return register_tool(category=category, capabilities=capabilities, tags=["coding"],
-                         apply_middleware=False)(make_coding_tool(name))
+    return register_tool(category=category, capabilities=capabilities, tags=["coding"])(make_coding_tool(name))
 
 
 bash = registered("bash", ToolCategory.SHELL, True)

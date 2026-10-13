@@ -4,22 +4,11 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Callable
-from dataclasses import dataclass, field
-from functools import partial
 from typing import Any
 
 from langchain_core.tools import BaseTool
 
 MIDDLEWARE_APPLIED_ATTR = "__k41_middleware_applied__"
-
-
-@dataclass
-class ToolInvocationContext:
-    """Information about a single tool call passed through middleware."""
-
-    tool_name: str
-    args: tuple[Any, ...] = ()
-    kwargs: dict[str, Any] = field(default_factory=dict)
 
 
 def wrap_tool(
@@ -70,22 +59,24 @@ def apply_default_middleware(tool_obj: BaseTool) -> BaseTool:
         error_normalization_async,
     )
 
-    response_format = getattr(tool_obj, "response_format", "content")
+    from agent.modules.tools.result import format_tool_error
+
+    tool_obj.handle_tool_error = format_tool_error
+    tool_obj.handle_validation_error = lambda exc: f"[error] invalid_input: {exc}"
 
     return wrap_tool(
         tool_obj,
         sync_middlewares=[
-            partial(error_normalization, response_format=response_format),
+            error_normalization,
         ],
         async_middlewares=[
-            partial(error_normalization_async, response_format=response_format),
+            error_normalization_async,
         ],
     )
 
 
 __all__ = [
     "MIDDLEWARE_APPLIED_ATTR",
-    "ToolInvocationContext",
     "apply_default_middleware",
     "wrap_tool",
 ]
