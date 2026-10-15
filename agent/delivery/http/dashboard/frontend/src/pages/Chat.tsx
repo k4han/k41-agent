@@ -1988,6 +1988,8 @@ export function ChatPage() {
                 aria-label="Resize workspace explorer"
               />
               <WorkspaceExplorer
+                visible={explorer.open()}
+                running={conversationBusy()}
                 threadId={currentThreadId()}
                 workingDir={workingDir()}
                 workspace={workspaceRef()}

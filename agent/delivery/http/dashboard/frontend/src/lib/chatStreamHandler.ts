@@ -8,7 +8,7 @@ import {
 import type { AppendScrollMode } from "@/lib/chatTypes";
 import type { ContextUsage } from "@/lib/chatStreamStore";
 import { parseContextBreakdown } from "@/types";
-import { recursionLimitStorageKey, STREAM_ERROR_CODES, STREAM_EVENTS } from "@/lib/eventConstants";
+import { CUSTOM_DOM_EVENTS, recursionLimitStorageKey, STREAM_ERROR_CODES, STREAM_EVENTS } from "@/lib/eventConstants";
 import { GENERATE_IMAGE_TOOL_NAME } from "@/lib/generatedImages";
 import {
   ASK_USER_TOOL_NAME,
@@ -37,6 +37,54 @@ export interface StreamCallbacks {
 export type AssistantIdRef = { id: number | null };
 export type StreamedRef = { received: boolean };
 export type StreamThreadIdRef = { id: string; message: string };
+
+const WORKSPACE_FILE_ACTION_REGEX = /(?:^|_)(?:write|edit|patch|create|delete|remove|modify|save|append|mkdir|touch|rm|mv|cp)(?:_|$)/i;
+const KNOWN_WORKSPACE_AFFECTING_TOOLS = new Set([
+  "write",
+  "edit",
+  "bash",
+  "shell",
+  "terminal",
+  "write_process_input",
+  "write_to_file",
+  "replace_file_content",
+  "create_file",
+  "delete_file",
+  "patch",
+  "apply_diff",
+  "save_file",
+  "append_file",
+]);
+
+const WORKSPACE_READ_ONLY_TOOLS = new Set([
+  "read",
+  "read_file",
+  "view_file",
+  "list_dir",
+  "glob",
+  "grep",
+  "search",
+  "search_web",
+  "web_search",
+  "read_url_content",
+  "fetch_url",
+  "read_process_output",
+  "browse_page",
+  "read_browser_page",
+  "ask_user",
+  "plan_mode",
+]);
+
+export function isWorkspaceAffectingTool(toolName: string): boolean {
+  const normalized = toolName.trim().toLowerCase();
+  if (!normalized || WORKSPACE_READ_ONLY_TOOLS.has(normalized)) {
+    return false;
+  }
+  if (KNOWN_WORKSPACE_AFFECTING_TOOLS.has(normalized)) {
+    return true;
+  }
+  return WORKSPACE_FILE_ACTION_REGEX.test(normalized);
+}
 
 // ── Core event handler ──
 
@@ -181,6 +229,18 @@ export function handleStreamEvent(
       event.content ?? null,
       streamThreadIdRef.id,
     );
+    // Refresh the workspace only when the agent runs file-modifying tools.
+    // Read-only tools (e.g. read, grep, glob, web search) are filtered out,
+    // and external writes or long-running processes are covered by fallback polling.
+    if (
+      streamThreadIdRef.id
+      && typeof window !== "undefined"
+      && isWorkspaceAffectingTool(toolName)
+    ) {
+      window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.WORKSPACE_CHANGED, {
+        detail: { threadId: streamThreadIdRef.id },
+      }));
+    }
     return;
   }
 

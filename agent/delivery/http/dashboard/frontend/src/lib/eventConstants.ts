@@ -37,6 +37,7 @@ export const CUSTOM_DOM_EVENTS = {
   THREAD_TITLE_UPDATED: "k41:thread-title-updated",
   THREAD_EXTERNAL_ABORT: "k41:thread-external-abort",
   THREADS_CHANGED: "k41:threads-changed",
+  WORKSPACE_CHANGED: "k41:workspace-changed",
   TASKS_CHANGED: "k41:tasks-changed",
   TRANSCRIPT_TOOL_TOGGLE: "k41:transcript-tool-toggle",
   OPEN_MOBILE_NAV: "k41:open-mobile-nav",

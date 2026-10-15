@@ -86,13 +86,40 @@ try {
   await call('Page.navigate', { url: base + '/__workspace' });
 
   await until(() => js('!!window.workspaceTest && document.querySelectorAll(".workspace-tree-row").length === 201'), 'initial workspace tree');
-  await until(() => js(`!document.querySelector('button[aria-label="Refresh workspace"]').disabled`), 'initial workspace load');
+  await until(() => js('!workspaceTest.refreshing()'), 'initial workspace load');
   const row = path => `Array.from(document.querySelectorAll('.workspace-tree-row')).find(row => row.title === ${JSON.stringify(path)})`;
   const tab = title => `Array.from(document.querySelectorAll('.workspace-tab')).find(tab => tab.title === ${JSON.stringify(title)})`;
-  const refreshDone = () => js(`!document.querySelector('button[aria-label="Refresh workspace"]').disabled`);
+  const refreshDone = () => js('!workspaceTest.refreshing()');
+
+  const initialReads = await js('workspaceTest.requests.length');
+  await js('window.dispatchEvent(new Event("focus"));');
+  await delay(400);
+  assert.equal(await js('workspaceTest.requests.length'), initialReads, 'focus must not repeat the initial workspace load');
 
   await js(`${row('src')}.click()`);
   await until(() => js(`!!(${row('src/nested.txt')})`), 'expanded directory');
+  await js(`window.nestedRow = ${row('src/nested.txt')};
+    window.treeBody = document.querySelector('.workspace-tree'); treeBody.style.maxHeight = '240px'; treeBody.scrollTop = 120;
+    window.visualMutations = [];
+    window.visualObserver = new MutationObserver(records => visualMutations.push(...records.filter(record => record.type === 'childList')));
+    visualObserver.observe(document.querySelector('.workspace-explorer'), { childList: true, subtree: true });
+    workspaceTest.hold('tree:src'); workspaceTest.refresh();`);
+  await until(() => js('workspaceTest.pendingCount("tree:src") === 1'), 'expanded folder background refresh');
+  assert.equal(await js('document.querySelector(".workspace-tree-status")?.textContent.includes("Loading") || false'), false, 'cached folders must not insert a loading row');
+  assert.equal(await js(`document.querySelector('button[aria-label="Refresh workspace"]').classList.contains('is-refreshing')`), false, 'background refresh must not animate the refresh button');
+  assert.equal(await js('visualMutations.length'), 0, 'unchanged background reads must not rebuild visible content');
+  assert.equal(await js('treeBody.scrollTop'), 120, 'background loading must preserve tree scroll');
+  await js('workspaceTest.release("tree:src");');
+  await until(refreshDone, 'expanded folder background refresh completes');
+  assert.equal(await js(`${row('src/nested.txt')} === nestedRow`), true);
+  assert.equal(await js('visualMutations.length'), 0, 'unchanged responses must preserve rendered content');
+  await js('visualObserver.disconnect();');
+
+  await js(`workspaceTest.hold('tree:'); document.querySelector('button[aria-label="Refresh workspace"]').click();`);
+  await until(() => js('workspaceTest.pendingCount("tree:") === 1'), 'manual refresh');
+  assert.equal(await js(`document.querySelector('button[aria-label="Refresh workspace"]').classList.contains('is-refreshing')`), true, 'manual refresh keeps visible feedback');
+  await js('workspaceTest.release("tree:");');
+  await until(() => js(`!document.querySelector('button[aria-label="Refresh workspace"]').classList.contains('is-refreshing')`), 'manual refresh completes');
   await js(`window.originalRows = new Map(Array.from(document.querySelectorAll('.workspace-tree-row'), row => [row.title, row]));
     workspaceTest.hold('tree:'); workspaceTest.hold('changes:'); workspaceTest.updateEntries(); workspaceTest.refresh();`);
   await until(() => js('workspaceTest.pendingCount("tree:") === 1'), 'refresh in flight');
@@ -118,13 +145,26 @@ try {
   assert.equal(await js('getComputedStyle(document.querySelector(".workspace-tree-section")).display'), 'none');
   const rootsBefore = await js('workspaceTest.requests.filter(request => request.kind === "tree" && !request.path).length');
   await js('workspaceTest.refresh(); workspaceTest.refresh();');
+  await until(() => js(`workspaceTest.requests.filter(request => request.kind === "tree" && !request.path).length === ${rootsBefore + 1}`), 'coalesced refresh starts');
   await until(refreshDone, 'coalesced refresh');
   assert.equal(await js('workspaceTest.requests.filter(request => request.kind === "tree" && !request.path).length'), rootsBefore + 1);
   await js('workspaceTest.release("file:file-0.txt")');
   await until(() => js('document.querySelector(".workspace-file-panel").textContent.includes("Preview of file-0.txt")'), 'file preview after refresh');
+  await js('workspaceTest.updateContent(); workspaceTest.toolResult(); workspaceTest.toolResult();');
+  await until(() => js('document.querySelector(".workspace-file-panel").textContent.includes("revision 1")'), 'tool result updates active preview');
+  await until(() => js('workspaceTest.pollCount() === 1'), 'tool refresh completed');
+  const beforeUnrelatedTool = await js('workspaceTest.requests.length');
+  await js('workspaceTest.toolResult("another-thread")');
+  await delay(400);
+  assert.equal(await js('workspaceTest.requests.length'), beforeUnrelatedTool, 'unrelated tool results must not refresh');
   await js(`${tab('Files Explorer')}.click()`);
   assert.equal(await js(`${row('file-0.txt')} === originalRows.get('file-0.txt')`), true, 'switching tabs must preserve the tree');
   assert.notEqual(await js('getComputedStyle(document.querySelector(".workspace-tree-section")).display'), 'none');
+  const cachedReads = await js('workspaceTest.requests.length');
+  await js(`${tab('file-0.txt')}.click();`);
+  await delay(100);
+  await js(`${tab('Files Explorer')}.click();`);
+  assert.equal(await js('workspaceTest.requests.length'), cachedReads, 'clean file tabs must use cached previews');
   console.log('PASS: tab switches retain the tree; duplicate events coalesce and pending file previews complete across refresh.');
 
   await js(`document.querySelector('button[aria-label="New tab"]').click();
@@ -139,6 +179,64 @@ try {
   await until(() => js('document.querySelector(".workspace-change-diff").textContent.includes("Diff of file-0.txt")'), 'diff after refresh');
   assert.equal(await js('document.querySelector(".workspace-change-row") === originalChange'), true);
   assert.equal(await js('document.querySelector(".workspace-change-additions").textContent.trim()'), '+5');
+  await js('workspaceTest.updateContent(); workspaceTest.toolResult();');
+  await until(() => js('document.querySelector(".workspace-change-diff").textContent.includes("revision 2")'), 'tool result updates expanded diff');
+  await until(() => js('workspaceTest.pollCount() === 1'), 'diff refresh completed');
+  const cachedDiffReads = await js('workspaceTest.requests.length');
+  await js(`${tab('Files Explorer')}.click();`);
+  await js(`${tab('Git Changes')}.click();`);
+  await delay(100);
+  assert.equal(await js('workspaceTest.requests.length'), cachedDiffReads, 'clean changes tab must use cached diff');
+  await js(`${tab('file-0.txt')}.click()`);
+  await until(() => js('document.querySelector(".workspace-file-panel").textContent.includes("revision 2")'), 'inactive preview refreshes on activation');
+  await js('workspaceTest.updateContent(); workspaceTest.poll();');
+  await until(() => js('document.querySelector(".workspace-file-panel").textContent.includes("revision 3")'), 'fallback poll updates external changes');
+  await until(() => js('workspaceTest.pollCount() === 1'), 'fallback poll rearmed');
+
+  const beforeFocus = await js('workspaceTest.requests.length');
+  await js('window.dispatchEvent(new Event("focus"));');
+  await delay(400);
+  assert.equal(await js('workspaceTest.requests.length'), beforeFocus, 'focus must not refetch a fresh workspace');
+
+  await js('workspaceTest.setRunning(true); workspaceTest.updateContent();');
+  await until(() => js('document.querySelector(".workspace-file-panel").textContent.includes("revision 4")'), 'running tools refresh before a result arrives', 18000);
+  await js('workspaceTest.setRunning(false);');
+  await until(() => js('workspaceTest.pollCount() === 1'), 'idle polling restored');
+
+  await js(`${tab('Git Changes')}.click();`);
+  await until(() => js('document.querySelector(".workspace-change-diff").textContent.includes("revision 4")'), 'dirty diff reloads on activation');
+  await js('workspaceTest.hold("diff:file-0.txt"); workspaceTest.toolResult();');
+  await until(() => js('workspaceTest.pendingCount("diff:file-0.txt") === 1'), 'background diff request');
+  await js('document.querySelector(".workspace-change-row").click(); workspaceTest.release("diff:file-0.txt");');
+  await until(() => js('workspaceTest.pollCount() === 1'), 'collapsed diff refresh completed');
+  assert.equal(await js('!!document.querySelector(".workspace-change-diff")'), false, 'late diff response must not reopen a collapsed row');
+  await js('document.querySelector(".workspace-change-row").click();');
+  await until(() => js('document.querySelector(".workspace-change-diff").textContent.includes("revision 4")'), 'diff reopens after cancellation');
+  await js(`${tab('file-0.txt')}.click();`);
+
+  for (const setter of ['setVisible', 'setDocumentVisible']) {
+    await js(`workspaceTest.${setter}(false); workspaceTest.updateContent();`);
+    const beforeHidden = await js('workspaceTest.requests.length');
+    await js('workspaceTest.toolResult(); workspaceTest.poll();');
+    await delay(400);
+    assert.equal(await js('workspaceTest.requests.length'), beforeHidden, 'hidden explorer must not refresh');
+    assert.equal(await js('workspaceTest.pollCount()'), 0, 'hidden explorer must stop polling');
+    await js(`workspaceTest.${setter}(true);`);
+    await until(() => js(`workspaceTest.requests.length > ${beforeHidden}`), 'visible explorer refreshes');
+    await until(() => js('workspaceTest.pollCount() === 1'), 'visible explorer resumes polling');
+  }
+  console.log('PASS: tool results refresh previews and diffs; fallback polling and visibility resume cover external changes.');
+
+  // Events arriving during a slow refresh must produce one follow-up read.
+  await js('workspaceTest.hold("tree:"); workspaceTest.toolResult();');
+  await until(() => js('workspaceTest.pendingCount("tree:") === 1'), 'slow refresh');
+  const slowRoots = await js('workspaceTest.requests.filter(request => request.kind === "tree" && !request.path).length');
+  await js('workspaceTest.toolResult(); workspaceTest.toolResult();');
+  await delay(400);
+  assert.equal(await js('workspaceTest.requests.filter(request => request.kind === "tree" && !request.path).length'), slowRoots, 'refresh batches must not overlap');
+  await js('workspaceTest.release("tree:")');
+  await until(() => js(`workspaceTest.requests.filter(request => request.kind === "tree" && !request.path).length === ${slowRoots + 1}`), 'queued follow-up refresh');
+  await until(refreshDone, 'follow-up completes');
   console.log('PASS: Git changes retain their DOM and expanded diff during background refresh.');
 
   await js(`${tab('Files Explorer')}.click(); ${row('src')}.click();`);
@@ -155,10 +253,33 @@ try {
   assert.equal(await js('workspaceTest.requests.some(request => request.locator === "/next" && request.path === "src")'), false, 'expanded paths must not leak across workspaces');
   assert.equal(await js('document.querySelectorAll(".workspace-tab").length'), 1);
   assert.equal(await js('!!document.querySelector(".workspace-file-panel")'), false);
+
+  await js('workspaceTest.emptyWorkspace(); workspaceTest.refresh();');
+  await until(() => js('document.querySelector(".workspace-tree-section").textContent.includes("No files in workspace.")'), 'empty tree loaded');
+  await until(refreshDone, 'empty workspace load');
+  await js(`document.querySelector('button[aria-label="New tab"]').click();
+    Array.from(document.querySelectorAll('.workspace-plus-menu-item')).find(item => item.textContent.includes('Git Changes')).click();
+    window.emptyTree = document.querySelector('.workspace-empty-tree-actions');
+    window.emptyChanges = document.querySelector('.workspace-explorer-body > section:not([hidden]) .empty');
+    window.gitHint = document.querySelector('.workspace-hint');
+    window.emptyMutations = [];
+    window.emptyObserver = new MutationObserver(records => emptyMutations.push(...records));
+    emptyObserver.observe(document.querySelector('.workspace-explorer-body'), { childList: true, subtree: true });
+    workspaceTest.hold('tree:'); workspaceTest.hold('changes:'); workspaceTest.poll();`);
+  await until(() => js('workspaceTest.pendingCount("tree:") === 1 && workspaceTest.pendingCount("changes:") === 1'), 'empty workspace background refresh');
+  assert.equal(await js('document.querySelector(".workspace-explorer-body").textContent.includes("Loading")'), false, 'empty states must remain visible during background reads');
+  assert.equal(await js('document.querySelector(".workspace-empty-tree-actions") === emptyTree && emptyChanges.isConnected && gitHint.isConnected'), true, 'empty states and Git hint must retain their DOM');
+  assert.equal(await js('emptyMutations.length'), 0, 'empty workspace must not flash while polling');
+  await js('workspaceTest.release("tree:"); workspaceTest.release("changes:");');
+  await until(refreshDone, 'empty workspace refresh completes');
+  assert.equal(await js('emptyMutations.length'), 0, 'unchanged empty responses must not rebuild content');
+  await js('emptyObserver.disconnect();');
+  console.log('PASS: background refresh preserves content, empty states, folder layout and scroll; only manual refresh animates.');
   const beforeUnmount = await js('workspaceTest.requests.length');
   await js('workspaceTest.refresh(); workspaceTest.unmount();');
   await delay(100);
   assert.equal(await js('workspaceTest.requests.length'), beforeUnmount, 'queued refresh must stop after unmount');
+  assert.equal(await js('workspaceTest.pollCount()'), 0, 'polling must stop after unmount');
   assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
   console.log('PASS: workspace changes cancel obsolete reads, reset tabs and expansion, and disposed explorers ignore queued refresh.');
 } finally {

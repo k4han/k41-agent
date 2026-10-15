@@ -4,6 +4,8 @@ import { render } from "solid-js/web";
 import { ToastProvider } from "@/components/Toast";
 import { WorkspaceExplorer } from "@/components/WorkspaceExplorer";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
+import { handleStreamEvent, readNDJSONStream } from "@/lib/chatStreamHandler";
+import type { StreamCallbacks } from "@/lib/chatStreamHandler";
 import "@/styles/workspace.css";
 
 const entry = (path: string, kind = "file", size = 10) => ({
@@ -16,6 +18,23 @@ const held = new Set<string>();
 const pending = new Map<string, (() => void)[]>();
 const nativeFetch = window.fetch.bind(window);
 let aborted = 0;
+let contentRevision = 0;
+let emptyWorkspace = false;
+const activeRequests = new Map<string, number>();
+const pollTimers = new Map<number, () => void>();
+const nativeSetTimeout = window.setTimeout.bind(window);
+const nativeClearTimeout = window.clearTimeout.bind(window);
+window.setTimeout = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+  let id: number;
+  const callback = () => { nativeClearTimeout(id); pollTimers.delete(id); if (typeof handler === "function") handler(...args); };
+  const isPoll = (timeout === 15_000 || timeout === 10_000 || timeout === 30_000 || timeout === 2_000) && typeof handler === "function";
+  id = nativeSetTimeout(isPoll ? callback : handler, timeout, ...args);
+  if (isPoll) {
+    pollTimers.set(id, callback);
+  }
+  return id;
+}) as typeof window.setTimeout;
+window.clearTimeout = (id) => { pollTimers.delete(id!); nativeClearTimeout(id); };
 
 window.fetch = async (input, init) => {
   const url = new URL(String(input), window.location.href);
@@ -28,45 +47,75 @@ window.fetch = async (input, init) => {
   if (kind === "tree") {
     payload = {
       root: locator, path,
-      entries: locator === "/next" ? [entry("next.txt")]
+      entries: emptyWorkspace ? [] : locator === "/next" ? [entry("next.txt")]
         : path === "src" ? [entry("src/nested.txt")] : entries,
       truncated: false,
     };
   } else if (kind === "changes") {
-    payload = { root: locator, is_git_repo: true, changes, message: "" };
+    payload = { root: locator, is_git_repo: !emptyWorkspace, changes: emptyWorkspace ? [] : changes, message: emptyWorkspace ? "Workspace is not a Git repository." : "" };
   } else if (kind === "file") {
-    payload = { root: locator, path, content: `Preview of ${path}`, binary: false, truncated: false, size: 20, mime_type: "text/plain", message: "" };
+    payload = { root: locator, path, content: `Preview of ${path} revision ${contentRevision}`, binary: false, truncated: false, size: 20, mime_type: "text/plain", message: "" };
   } else if (kind === "diff") {
-    payload = { root: locator, path, diff: "", message: `Diff of ${path}`, truncated: false, is_git_repo: true, status: "modified" };
+    payload = { root: locator, path, diff: "", message: `Diff of ${path} revision ${contentRevision}`, truncated: false, is_git_repo: true, status: "modified" };
   } else {
     throw new Error(`Unexpected workspace request: ${kind}`);
   }
   const body = JSON.stringify(payload);
   const key = `${kind}:${path}`;
-  if (held.has(key)) {
-    await new Promise<void>((resolve, reject) => {
-      const abort = () => {
-        aborted += 1;
-        reject(new DOMException("Aborted", "AbortError"));
-      };
-      if (init?.signal?.aborted) return abort();
-      init?.signal?.addEventListener("abort", abort, { once: true });
-      pending.set(key, [...(pending.get(key) || []), () => {
-        init?.signal?.removeEventListener("abort", abort);
-        resolve();
-      }]);
-    });
+  activeRequests.set(key, (activeRequests.get(key) || 0) + 1);
+  try {
+    if (held.has(key)) {
+      await new Promise<void>((resolve, reject) => {
+        const abort = () => {
+          aborted += 1;
+          reject(new DOMException("Aborted", "AbortError"));
+        };
+        if (init?.signal?.aborted) return abort();
+        init?.signal?.addEventListener("abort", abort, { once: true });
+        pending.set(key, [...(pending.get(key) || []), () => {
+          init?.signal?.removeEventListener("abort", abort);
+          resolve();
+        }]);
+      });
+    }
+    return new Response(body, { headers: { "content-type": "application/json" } });
+  } finally {
+    activeRequests.set(key, (activeRequests.get(key) || 1) - 1);
   }
-  return new Response(body, { headers: { "content-type": "application/json" } });
 };
 
 function WorkspaceFixture() {
   const [locator, setLocator] = createSignal("/project");
   const [mounted, setMounted] = createSignal(true);
   const [revision, setRevision] = createSignal(0);
+  const [visible, setVisible] = createSignal(true);
+  const [running, setRunning] = createSignal(false);
   Object.assign(window, {
     workspaceTest: {
       requests,
+      refreshing: () => [...activeRequests].some(([key, count]) => count > 0 && (key.startsWith("tree:") || key.startsWith("changes:"))),
+      emptyWorkspace: () => { emptyWorkspace = true; },
+      setVisible,
+      setRunning,
+      setDocumentVisible: (visible: boolean) => {
+        Object.defineProperty(document, "visibilityState", { configurable: true, value: visible ? "visible" : "hidden" });
+        document.dispatchEvent(new Event("visibilitychange"));
+      },
+      poll: () => { for (const callback of [...pollTimers.values()]) callback(); },
+      pollCount: () => pollTimers.size,
+      updateContent: () => { contentRevision += 1; },
+      toolResult: (threadId = "thread-one") => readNDJSONStream(
+        new ReadableStream({ start(controller) {
+          const encoded = new TextEncoder().encode(JSON.stringify({ type: "tool_result", name: "shell", content: "done" }) + "\n");
+          controller.enqueue(encoded.slice(0, 20));
+          controller.enqueue(encoded.slice(20));
+          controller.close();
+        } }),
+        (event) => handleStreamEvent(
+          event, { id: null }, { received: false }, { id: threadId, message: "" },
+          { updateToolResult: () => {} } as unknown as StreamCallbacks,
+        ),
+      ),
       setLocator,
       unmount: () => setMounted(false),
       replaceWorkspaceObject: () => setRevision((value) => value + 1),
@@ -90,6 +139,9 @@ function WorkspaceFixture() {
     <ToastProvider>
       <Show when={mounted()}>
         <WorkspaceExplorer
+          visible={visible()}
+          running={running()}
+          disabled={running()}
           threadId="thread-one"
           workingDir={locator()}
           workspace={{ backend: "local", locator: locator(), label: `Project ${revision()}`, metadata: {} }}

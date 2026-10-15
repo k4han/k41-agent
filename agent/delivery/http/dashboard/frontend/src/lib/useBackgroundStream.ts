@@ -104,6 +104,9 @@ export function useBackgroundStream(params: UseBackgroundStreamParams) {
         backgroundEventThreadId = "";
       }
       window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.TASKS_CHANGED));
+      window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.WORKSPACE_CHANGED, {
+        detail: { threadId },
+      }));
     });
     source.addEventListener("heartbeat", () => {
       if (backgroundEventThreadId === threadId) {

@@ -93,6 +93,11 @@ type WorkspaceResolvePayload = {
 
 type WorkspaceTab = "changes" | "files" | `file:${string}`;
 
+const WORKSPACE_POLL_INTERVAL_MS = 15_000;
+// Fallback polling during active tool runs (10-15s).
+const WORKSPACE_RUNNING_POLL_INTERVAL_MS = 10_000;
+const WORKSPACE_REFRESH_DELAY_MS = 300;
+
 function workspaceQuery(threadId: string, workspace: WorkspaceRef | null, extra?: Record<string, string>) {
   const params = new URLSearchParams();
   if (threadId) {
@@ -154,20 +159,25 @@ function DiffView(props: { diff: string; path: string }) {
 }
 
 function FileCodeView(props: { content: string; path: string; dark: boolean }) {
+  const [cachedHtml, setCachedHtml] = createSignal("");
   const [highlighted] = createResource(
     () => ({ content: props.content, path: props.path, dark: props.dark }),
     async ({ content, path, dark }) => {
       const lang = languageFromPath(path);
-      return highlightCode(content, lang, dark);
+      const html = await highlightCode(content, lang, dark);
+      setCachedHtml(html);
+      return html;
     },
   );
+  const displayHtml = () => highlighted() || cachedHtml();
+
   return (
     <div class="workspace-file-view">
       <Show
-        when={highlighted()}
+        when={displayHtml()}
         fallback={<pre class="workspace-file-view-plain">{props.content}</pre>}
       >
-        <div class="workspace-file-view-shiki" innerHTML={highlighted()} />
+        <div class="workspace-file-view-shiki" innerHTML={displayHtml()} />
       </Show>
     </div>
   );
@@ -201,6 +211,8 @@ export function WorkspaceExplorer(props: {
   workingDir: string;
   workspace?: WorkspaceRef | null;
   disabled?: boolean;
+  visible?: boolean;
+  running?: boolean;
   onWorkingDirChange: (value: WorkspaceRef | string | null) => void;
   onCollapse?: () => void;
 }) {
@@ -215,6 +227,8 @@ export function WorkspaceExplorer(props: {
   const [changeState, setChangeState] = createStore<{ items: WorkspaceChange[] }>({ items: [] });
   const changes = () => changeState.items;
   const [changesLoading, setChangesLoading] = createSignal(false);
+  const [changesLoaded, setChangesLoaded] = createSignal(false);
+  const [manualRefreshing, setManualRefreshing] = createSignal(false);
   const [changesError, setChangesError] = createSignal("");
   const [gitMessage, setGitMessage] = createSignal("");
   const [isGitRepo, setIsGitRepo] = createSignal(true);
@@ -248,10 +262,24 @@ export function WorkspaceExplorer(props: {
   let generation = 0;
   let requestController = new AbortController();
   const treeRequestIds = new Map<string, number>();
+  const fileRequestIds = new Map<string, number>();
+  // Retain inactive previews until a workspace refresh invalidates them.
+  const fileVersions = new Map<string, number>();
+  let workspaceVersion = 0;
+  let diffVersion = -1;
+  let lastRefreshAt = 0;
   let changesRequestId = 0;
   let diffRequestId = 0;
   let disposed = false;
-  let refreshQueued = false;
+  let refreshTimer: number | undefined;
+  let pollTimer: number | undefined;
+  let refreshRunning = false;
+  let refreshPending = false;
+  const [documentVisible, setDocumentVisible] = createSignal(
+    typeof document !== "undefined" && document.visibilityState !== "hidden",
+  );
+  const canAutoRefresh = () => props.visible !== false && documentVisible();
+  const pollInterval = () => props.running ? WORKSPACE_RUNNING_POLL_INTERVAL_MS : WORKSPACE_POLL_INTERVAL_MS;
   const isActiveTab = createSelector(activeTab);
   const isActionMenuOpen = createSelector(actionMenuPath);
   const isChangeExpanded = createSelector(expandedChangePath);
@@ -275,6 +303,7 @@ export function WorkspaceExplorer(props: {
   };
   const rootPath = () => workspaceRoot() || "";
   const rootEntries = () => entriesByPath[rootPath()] || entriesByPath[""] || [];
+  const rootLoaded = () => entriesByPath[rootPath()] !== undefined || entriesByPath[""] !== undefined;
   const rootTreeTruncated = () =>
     treeTruncatedByPath[rootPath()] || treeTruncatedByPath[""] || false;
   const canQuery = () => Boolean(queryWorkspace()?.locator.trim() || props.threadId);
@@ -356,6 +385,7 @@ export function WorkspaceExplorer(props: {
         setChangeState("items", reconcile(payload.changes || [], { key: "path" }));
         setGitMessage(payload.message || "");
         setIsGitRepo(payload.is_git_repo);
+        setChangesLoaded(true);
       });
     } catch (err) {
       if (isCurrent()) {
@@ -372,11 +402,15 @@ export function WorkspaceExplorer(props: {
     if (disposed || !path || !canQuery()) {
       return;
     }
+    if (expandedChangePath() === path && (
+      diffLoading() || (diffPayload()?.path === path && diffVersion === workspaceVersion)
+    )) return;
+    const targetVersion = workspaceVersion;
     const requestId = ++diffRequestId;
     const isCurrent = () => targetGeneration === generation && requestId === diffRequestId;
     batch(() => {
       setExpandedChangePath(path);
-      setDiffPayload(null);
+      if (diffPayload()?.path !== path) setDiffPayload(null);
       setDiffError("");
       setDiffLoading(true);
     });
@@ -387,7 +421,17 @@ export function WorkspaceExplorer(props: {
         { signal: requestController.signal },
       );
       if (isCurrent() && expandedChangePath() === path) {
-        setDiffPayload(payload);
+        diffVersion = targetVersion;
+        const current = diffPayload();
+        if (
+          !current
+          || current.diff !== payload.diff
+          || current.status !== payload.status
+          || current.truncated !== payload.truncated
+          || current.message !== payload.message
+        ) {
+          setDiffPayload(payload);
+        }
       }
     } catch (err) {
       if (isCurrent() && expandedChangePath() === path) {
@@ -396,6 +440,7 @@ export function WorkspaceExplorer(props: {
     } finally {
       if (isCurrent() && expandedChangePath() === path) {
         setDiffLoading(false);
+        if (targetVersion !== workspaceVersion) scheduleRefresh();
       }
     }
   };
@@ -404,6 +449,11 @@ export function WorkspaceExplorer(props: {
     if (disposed || !path || !canQuery()) {
       return;
     }
+    if (fileLoadingByPath[path] || (filePayloads[path] && fileVersions.get(path) === workspaceVersion)) return;
+    const targetVersion = workspaceVersion;
+    const requestId = (fileRequestIds.get(path) || 0) + 1;
+    fileRequestIds.set(path, requestId);
+    const isCurrent = () => targetGeneration === generation && fileRequestIds.get(path) === requestId;
     setFileLoadingByPath(path, true);
     setFileErrorByPath(path, "");
     try {
@@ -412,26 +462,48 @@ export function WorkspaceExplorer(props: {
         `/dashboard-api/workspace/file?${query}`,
         { signal: requestController.signal },
       );
-      if (targetGeneration !== generation) {
+      if (!isCurrent()) {
         return;
       }
-      setFilePayloads(path, reconcile(payload));
+      fileVersions.set(path, targetVersion);
+      const current = filePayloads[path];
+      if (
+        !current
+        || current.content !== payload.content
+        || current.size !== payload.size
+        || current.truncated !== payload.truncated
+        || current.binary !== payload.binary
+        || current.message !== payload.message
+      ) {
+        setFilePayloads(path, reconcile(payload));
+      }
     } catch (err) {
-      if (targetGeneration === generation) {
+      if (isCurrent()) {
         setFileErrorByPath(path, err instanceof Error ? err.message : "Failed to load file");
       }
     } finally {
-      if (targetGeneration === generation) {
+      if (isCurrent()) {
         setFileLoadingByPath(path, false);
+        if (activeFilePath() === path && targetVersion !== workspaceVersion) scheduleRefresh();
       }
     }
   };
 
   const hardRefresh = () => {
     generation += 1;
+    const targetGeneration = generation;
     requestController.abort();
     requestController = new AbortController();
     treeRequestIds.clear();
+    fileRequestIds.clear();
+    fileVersions.clear();
+    workspaceVersion += 1;
+    diffVersion = -1;
+    lastRefreshAt = 0;
+    window.clearTimeout(refreshTimer);
+    refreshTimer = undefined;
+    refreshRunning = false;
+    refreshPending = false;
     batch(() => {
       setEntriesByPath(reconcile({}));
       setExpandedByPath(reconcile({ "": true }));
@@ -441,6 +513,8 @@ export function WorkspaceExplorer(props: {
       setWorkspaceRoot("");
       setChangeState("items", []);
       setChangesLoading(false);
+      setChangesLoaded(false);
+      setManualRefreshing(false);
       setChangesError("");
       setGitMessage("");
       setIsGitRepo(true);
@@ -455,32 +529,95 @@ export function WorkspaceExplorer(props: {
       setFilePayloads(reconcile({}));
       setFileLoadingByPath(reconcile({}));
       setFileErrorByPath(reconcile({}));
-      void loadTree();
-      void loadChanges();
+      if (canAutoRefresh()) {
+        void Promise.all([loadTree(), loadChanges()]).then(() => {
+          if (!disposed && targetGeneration === generation) lastRefreshAt = Date.now();
+        });
+      }
     });
+    schedulePoll();
   };
 
-  const softRefresh = () => {
-    if (!canQuery() || disposed) return;
+  const schedulePoll = () => {
+    window.clearTimeout(pollTimer);
+    pollTimer = undefined;
+    if (disposed || !canQuery() || !canAutoRefresh()) return;
+    pollTimer = window.setTimeout(() => {
+      pollTimer = undefined;
+      void softRefresh();
+    }, pollInterval());
+  };
+
+  const scheduleRefresh = () => {
+    if (disposed || !canQuery() || !canAutoRefresh()) return;
+    if (refreshRunning) {
+      refreshPending = true;
+      return;
+    }
+    // Keep a bounded delay even when tool results arrive continuously.
+    if (refreshTimer !== undefined) return;
+    refreshTimer = window.setTimeout(() => {
+      refreshTimer = undefined;
+      void softRefresh();
+    }, WORKSPACE_REFRESH_DELAY_MS);
+  };
+
+  const softRefresh = async () => {
+    if (!canQuery() || disposed || !canAutoRefresh()) return;
+    if (refreshRunning) {
+      refreshPending = true;
+      return;
+    }
+    window.clearTimeout(refreshTimer);
+    refreshTimer = undefined;
+    window.clearTimeout(pollTimer);
+    pollTimer = undefined;
+    refreshRunning = true;
+    workspaceVersion += 1;
     const targetGeneration = generation;
     const paths = untrack(() => Object.keys(expandedByPath).filter((path) => path && expandedByPath[path]));
-    // Refresh in place without invalidating pending file previews or diffs.
     // Expansion remains user-owned, including changes made during the request.
     const reloadWithExpansion = async () => {
       await loadTree("", targetGeneration);
       for (const path of paths) {
-        if (targetGeneration !== generation) return;
+        if (disposed || targetGeneration !== generation || !canAutoRefresh()) return;
         if (expandedByPath[path]) await loadTree(path, targetGeneration);
       }
     };
-    void reloadWithExpansion();
-    void loadChanges(targetGeneration);
+    const filePath = activeFilePath();
+    const diffPath = activeTab() === "changes" ? expandedChangePath() : "";
+    try {
+      await Promise.all([
+        reloadWithExpansion(),
+        loadChanges(targetGeneration),
+        filePath ? loadFile(filePath, targetGeneration) : undefined,
+        diffPath ? loadDiff(diffPath, targetGeneration) : undefined,
+      ]);
+    } finally {
+      if (!disposed && targetGeneration === generation) {
+        refreshRunning = false;
+        lastRefreshAt = Date.now();
+        if (refreshPending) {
+          refreshPending = false;
+          scheduleRefresh();
+        }
+        schedulePoll();
+      }
+    }
   };
 
-  const refresh = () => {
-    // Keep for external callers (manual refresh button). Use soft refresh to
-    // avoid flashing when the workspace hasn't actually changed.
-    softRefresh();
+  const refresh = async () => {
+    if (refreshRunning) {
+      refreshPending = true;
+      return;
+    }
+    const targetGeneration = generation;
+    setManualRefreshing(true);
+    try {
+      await softRefresh();
+    } finally {
+      if (targetGeneration === generation) setManualRefreshing(false);
+    }
   };
 
   const applyWorkingDir = () => {
@@ -529,7 +666,10 @@ export function WorkspaceExplorer(props: {
 
   const toggleChangeDiff = (path: string) => {
     if (expandedChangePath() === path) {
+      diffRequestId += 1;
+      diffVersion = -1;
       setExpandedChangePath("");
+      setDiffLoading(false);
       setDiffPayload(null);
       setDiffError("");
       return;
@@ -562,10 +702,13 @@ export function WorkspaceExplorer(props: {
   const openFile = (path: string) => {
     const tab = fileTabId(path);
     openTab(tab);
-    if (!filePayloads[path] && !fileLoadingByPath[path]) {
-      void loadFile(path);
-    }
   };
+
+  createEffect(on(activeTab, (tab) => {
+    const path = fileTabPath(tab);
+    if (path) void loadFile(path);
+    if (tab === "changes" && expandedChangePath()) void loadDiff(expandedChangePath());
+  }, { defer: true }));
 
   const toggleActionMenu = (path: string, event: MouseEvent) => {
     event.stopPropagation();
@@ -764,9 +907,7 @@ export function WorkspaceExplorer(props: {
     onCleanup(() => document.removeEventListener("click", handleDocumentClick));
   }
 
-  // Auto-refresh workspace when the agent finishes a turn (files may have
-  // changed). Use soft refresh so expanded folders and open file tabs are
-  // preserved and the tree doesn't flash to "No files".
+  // Tool completion is the primary signal; polling covers external writes.
   if (typeof window !== "undefined") {
     const handleWorkspaceRefreshEvent = (event: Event) => {
       const custom = event as CustomEvent<{ threadId?: string }>;
@@ -776,40 +917,73 @@ export function WorkspaceExplorer(props: {
       if (tid && tid !== props.threadId) {
         return;
       }
-      // Defer to next microtask so ChatPage's refreshThread has already
-      // updated threadData/workspaceRef if it will.
-      if (refreshQueued) return;
-      refreshQueued = true;
-      const targetGeneration = generation;
-      queueMicrotask(() => {
-        refreshQueued = false;
-        if (disposed || targetGeneration !== generation) return;
-        softRefresh();
-      });
+      workspaceVersion += 1;
+      scheduleRefresh();
     };
     window.addEventListener(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, handleWorkspaceRefreshEvent);
     window.addEventListener(CUSTOM_DOM_EVENTS.THREADS_CHANGED, handleWorkspaceRefreshEvent);
+    window.addEventListener(CUSTOM_DOM_EVENTS.WORKSPACE_CHANGED, handleWorkspaceRefreshEvent);
+    const handleVisibilityChange = () => setDocumentVisible(document.visibilityState !== "hidden");
+    const handleFocus = () => {
+      if (Date.now() - lastRefreshAt >= pollInterval()) scheduleRefresh();
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleFocus);
     onCleanup(() => {
       window.removeEventListener(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, handleWorkspaceRefreshEvent);
       window.removeEventListener(CUSTOM_DOM_EVENTS.THREADS_CHANGED, handleWorkspaceRefreshEvent);
+      window.removeEventListener(CUSTOM_DOM_EVENTS.WORKSPACE_CHANGED, handleWorkspaceRefreshEvent);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleFocus);
     });
   }
+
+  createEffect(on(canAutoRefresh, (visible) => {
+    if (visible) {
+      scheduleRefresh();
+    } else {
+      window.clearTimeout(refreshTimer);
+      refreshTimer = undefined;
+      window.clearTimeout(pollTimer);
+      pollTimer = undefined;
+    }
+  }, { defer: true }));
+
+  createEffect(on(() => props.running, () => schedulePoll(), { defer: true }));
 
   createEffect(() => {
     setDraftWorkingDir(props.workingDir || "");
   });
 
+  const normalizeWorkspacePath = (p: string | null | undefined): string => {
+    if (!p) return "";
+    return p.trim().replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+  };
+
   const workspaceRefreshKey = createMemo(() => {
-    const ws = props.workspace;
-    const root = typeof ws?.metadata?.root === "string" ? ws.metadata.root.trim() : "";
-    return JSON.stringify([props.threadId, props.workingDir, ws?.backend, ws?.locator, root]);
+    const ws = effectiveWorkspace();
+    if (!ws) return "";
+    const backend = ws.backend || "local";
+    const locator = normalizeWorkspacePath(ws.locator);
+    const root = typeof ws.metadata?.root === "string" ? normalizeWorkspacePath(ws.metadata.root) : "";
+    return `${backend}:${locator}:${root}`;
   });
   createEffect(on(workspaceRefreshKey, hardRefresh));
+
+  createEffect(on(() => props.threadId, (newTid, prevTid) => {
+    // When switching threads within the same workspace, sync changes softly
+    // without resetting expanded folders or closing open tabs.
+    if (newTid && prevTid && newTid !== prevTid) {
+      scheduleRefresh();
+    }
+  }, { defer: true }));
 
   onCleanup(() => {
     disposed = true;
     generation += 1;
     requestController.abort();
+    window.clearTimeout(refreshTimer);
+    window.clearTimeout(pollTimer);
   });
 
   const TreeEntry = (entryProps: { entry: WorkspaceTreeEntry; depth: number }) => {
@@ -920,7 +1094,7 @@ export function WorkspaceExplorer(props: {
           </div>
         </div>
         <Show when={isDirectory() && isOpen()}>
-          <Show when={treeLoadingByPath[entry().path]}>
+          <Show when={treeLoadingByPath[entry().path] && entriesByPath[entry().path] === undefined}>
             <div class="workspace-tree-status" style={`--depth: ${entryProps.depth + 1};`}>
               Loading...
             </div>
@@ -964,11 +1138,11 @@ export function WorkspaceExplorer(props: {
           }}
         />
         <button
-          class={`workspace-icon-btn ${isRefreshing() ? "is-refreshing" : ""}`}
+          class={`workspace-icon-btn ${manualRefreshing() ? "is-refreshing" : ""}`}
           type="button"
           onClick={refresh}
-          disabled={!canQuery() || isRefreshing()}
-          title={isRefreshing() ? "Refreshing workspace..." : "Refresh workspace"}
+          disabled={!canQuery() || manualRefreshing()}
+          title={manualRefreshing() ? "Refreshing workspace..." : "Refresh workspace"}
           aria-label="Refresh workspace"
         >
           <RefreshCw size={18} />
@@ -1179,7 +1353,7 @@ export function WorkspaceExplorer(props: {
         <Show when={openTabs().includes("changes")}>
           <section class="workspace-section workspace-tab-panel" role="tabpanel" hidden={!isActiveTab("changes")}>
             <Show
-              when={!changesLoading() || changes().length > 0}
+              when={!changesLoading() || changesLoaded()}
               fallback={<div class="empty compact">Loading changes...</div>}
             >
               <Show
@@ -1231,7 +1405,7 @@ export function WorkspaceExplorer(props: {
                           <Show when={isChangeExpanded(change.path)}>
                             <div class="workspace-change-diff">
                               <Show
-                                when={!diffLoading()}
+                                when={!diffLoading() || Boolean(diffPayload())}
                                 fallback={<div class="empty compact">Loading diff...</div>}
                               >
                                 <Show
@@ -1265,7 +1439,7 @@ export function WorkspaceExplorer(props: {
                 </Show>
               </Show>
             </Show>
-            <Show when={!isGitRepo() && !changesLoading()}>
+            <Show when={!isGitRepo()}>
               <div class="hint workspace-hint">Diff requires a Git workspace.</div>
             </Show>
           </section>
@@ -1301,7 +1475,7 @@ export function WorkspaceExplorer(props: {
                 when={rootEntries().length > 0}
                 fallback={
                   <Show
-                    when={!treeLoadingByPath[rootPath()] && !treeLoadingByPath[""]}
+                    when={rootLoaded() || (!treeLoadingByPath[rootPath()] && !treeLoadingByPath[""])}
                     fallback={<div class="empty compact">Loading files...</div>}
                   >
                     <div class="empty compact">
@@ -1346,7 +1520,7 @@ export function WorkspaceExplorer(props: {
         <Show when={activeTab().startsWith("file:")}>
           <section class="workspace-section workspace-file-panel workspace-tab-panel" role="tabpanel">
             <Show
-              when={!fileLoadingByPath[activeFilePath()]}
+              when={!fileLoadingByPath[activeFilePath()] || Boolean(activeFilePayload())}
               fallback={<div class="empty compact">Loading file...</div>}
             >
               <Show
