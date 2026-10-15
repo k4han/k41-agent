@@ -614,6 +614,10 @@ body.workspace-resizing * {
   min-width: 0;
 }
 
+.workspace-tab-panel[hidden] {
+  display: none;
+}
+
 /* Tree Toolbar */
 .workspace-tree-toolbar {
   display: flex;

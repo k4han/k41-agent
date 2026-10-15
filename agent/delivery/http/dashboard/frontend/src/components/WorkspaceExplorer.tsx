@@ -16,7 +16,8 @@ import {
   X,
   Zap,
 } from "lucide-solid";
-import { createEffect, createMemo, createResource, createSignal, For, onCleanup, Show, untrack } from "solid-js";
+import { batch, createEffect, createMemo, createResource, createSelector, createSignal, For, on, onCleanup, Show, untrack } from "solid-js";
+import { createStore, reconcile } from "solid-js/store";
 import { Portal } from "solid-js/web";
 
 import { Dialog } from "@/components/Dialog";
@@ -206,12 +207,13 @@ export function WorkspaceExplorer(props: {
   const dark = createDarkMode();
   const { showToast } = useToast();
   const [draftWorkingDir, setDraftWorkingDir] = createSignal(props.workingDir);
-  const [entriesByPath, setEntriesByPath] = createSignal<Record<string, WorkspaceTreeEntry[]>>({});
-  const [expandedByPath, setExpandedByPath] = createSignal<Record<string, boolean>>({ "": true });
-  const [treeLoadingByPath, setTreeLoadingByPath] = createSignal<Record<string, boolean>>({});
+  const [entriesByPath, setEntriesByPath] = createStore<Record<string, WorkspaceTreeEntry[]>>({});
+  const [expandedByPath, setExpandedByPath] = createStore<Record<string, boolean>>({ "": true });
+  const [treeLoadingByPath, setTreeLoadingByPath] = createStore<Record<string, boolean>>({});
   const [treeError, setTreeError] = createSignal("");
-  const [treeTruncatedByPath, setTreeTruncatedByPath] = createSignal<Record<string, boolean>>({});
-  const [changes, setChanges] = createSignal<WorkspaceChange[]>([]);
+  const [treeTruncatedByPath, setTreeTruncatedByPath] = createStore<Record<string, boolean>>({});
+  const [changeState, setChangeState] = createStore<{ items: WorkspaceChange[] }>({ items: [] });
+  const changes = () => changeState.items;
   const [changesLoading, setChangesLoading] = createSignal(false);
   const [changesError, setChangesError] = createSignal("");
   const [gitMessage, setGitMessage] = createSignal("");
@@ -226,10 +228,9 @@ export function WorkspaceExplorer(props: {
   let plusBtnRef: HTMLButtonElement | undefined;
   let plusMenuRef: HTMLDivElement | undefined;
   const [plusMenuPos, setPlusMenuPos] = createSignal({ top: 0, left: 0 });
-  const [fileTabs, setFileTabs] = createSignal<string[]>([]);
-  const [filePayloads, setFilePayloads] = createSignal<Record<string, WorkspaceFilePayload>>({});
-  const [fileLoadingByPath, setFileLoadingByPath] = createSignal<Record<string, boolean>>({});
-  const [fileErrorByPath, setFileErrorByPath] = createSignal<Record<string, string>>({});
+  const [filePayloads, setFilePayloads] = createStore<Partial<Record<string, WorkspaceFilePayload>>>({});
+  const [fileLoadingByPath, setFileLoadingByPath] = createStore<Record<string, boolean>>({});
+  const [fileErrorByPath, setFileErrorByPath] = createStore<Record<string, string>>({});
   const [actionMenuPath, setActionMenuPath] = createSignal<string | null>(null);
   const [renameTarget, setRenameTarget] = createSignal<WorkspaceTreeEntry | null>(null);
   const [renameDraft, setRenameDraft] = createSignal("");
@@ -245,6 +246,15 @@ export function WorkspaceExplorer(props: {
   const [workspaceRoot, setWorkspaceRoot] = createSignal("");
   const [reconnectingModal, setReconnectingModal] = createSignal(false);
   let generation = 0;
+  let requestController = new AbortController();
+  const treeRequestIds = new Map<string, number>();
+  let changesRequestId = 0;
+  let diffRequestId = 0;
+  let disposed = false;
+  let refreshQueued = false;
+  const isActiveTab = createSelector(activeTab);
+  const isActionMenuOpen = createSelector(actionMenuPath);
+  const isChangeExpanded = createSelector(expandedChangePath);
 
   const effectiveWorkspace = createMemo(() => props.workspace || localWorkspaceRef(props.workingDir));
   // Network queries must use a *real* workspace ref, never the local fallback
@@ -264,28 +274,31 @@ export function WorkspaceExplorer(props: {
     return "local";
   };
   const rootPath = () => workspaceRoot() || "";
-  const rootEntries = () => entriesByPath()[rootPath()] || entriesByPath()[""] || [];
+  const rootEntries = () => entriesByPath[rootPath()] || entriesByPath[""] || [];
   const rootTreeTruncated = () =>
-    treeTruncatedByPath()[rootPath()] || treeTruncatedByPath()[""] || false;
+    treeTruncatedByPath[rootPath()] || treeTruncatedByPath[""] || false;
   const canQuery = () => Boolean(queryWorkspace()?.locator.trim() || props.threadId);
   const isRefreshing = () =>
     Boolean(
-      treeLoadingByPath()[rootPath()]
-      || treeLoadingByPath()[""]
+      treeLoadingByPath[rootPath()]
+      || treeLoadingByPath[""]
       || changesLoading(),
     );
   const activeFilePath = () => fileTabPath(activeTab());
-  const activeFilePayload = () => filePayloads()[activeFilePath()];
+  const activeFilePayload = () => filePayloads[activeFilePath()];
   const workingDirDisplayValue = () =>
     isLocalWorkspace()
       ? props.disabled ? formatWorkspaceRoot(draftWorkingDir()) : draftWorkingDir()
       : workspaceDisplayLabel(effectiveWorkspace()) || effectiveWorkspace()?.locator || "";
 
   const loadTree = async (path = "", targetGeneration = generation) => {
-    if (!canQuery()) {
+    if (disposed || !canQuery()) {
       return;
     }
-    setTreeLoadingByPath((current) => ({ ...current, [path]: true }));
+    const requestId = (treeRequestIds.get(path) || 0) + 1;
+    treeRequestIds.set(path, requestId);
+    const isCurrent = () => targetGeneration === generation && treeRequestIds.get(path) === requestId;
+    setTreeLoadingByPath(path, true);
     if (!path) {
       setTreeError("");
     }
@@ -293,22 +306,23 @@ export function WorkspaceExplorer(props: {
       const query = workspaceQuery(props.threadId, queryWorkspace(), { path });
       const payload = await apiFetch<WorkspaceTreePayload>(
         `/dashboard-api/workspace/tree?${query}`,
+        { signal: requestController.signal },
       );
-      if (targetGeneration !== generation) {
+      if (!isCurrent()) {
         return;
       }
-      setEntriesByPath((current) => ({ ...current, [payload.path]: payload.entries }));
-      setTreeTruncatedByPath((current) => ({ ...current, [payload.path]: payload.truncated }));
-      if (payload.root) {
-        setWorkspaceRoot(payload.root);
-      }
+      batch(() => {
+        setEntriesByPath(payload.path, reconcile(payload.entries, { key: "path" }));
+        setTreeTruncatedByPath(payload.path, payload.truncated);
+        if (payload.root) setWorkspaceRoot(payload.root);
+      });
     } catch (err) {
-      if (targetGeneration === generation) {
+      if (isCurrent()) {
         setTreeError(err instanceof Error ? err.message : "Failed to load workspace tree");
       }
     } finally {
-      if (targetGeneration === generation) {
-        setTreeLoadingByPath((current) => ({ ...current, [path]: false }));
+      if (isCurrent()) {
+        setTreeLoadingByPath(path, false);
       }
     }
   };
@@ -322,147 +336,141 @@ export function WorkspaceExplorer(props: {
   };
 
   const loadChanges = async (targetGeneration = generation) => {
-    if (!canQuery()) {
+    if (disposed || !canQuery()) {
       return;
     }
+    const requestId = ++changesRequestId;
+    const isCurrent = () => targetGeneration === generation && requestId === changesRequestId;
     setChangesLoading(true);
     setChangesError("");
     try {
       const query = workspaceQuery(props.threadId, queryWorkspace());
       const payload = await apiFetch<WorkspaceChangesPayload>(
         `/dashboard-api/workspace/changes?${query}`,
+        { signal: requestController.signal },
       );
-      if (targetGeneration !== generation) {
+      if (!isCurrent()) {
         return;
       }
-      setChanges(payload.changes || []);
-      setGitMessage(payload.message || "");
-      setIsGitRepo(payload.is_git_repo);
+      batch(() => {
+        setChangeState("items", reconcile(payload.changes || [], { key: "path" }));
+        setGitMessage(payload.message || "");
+        setIsGitRepo(payload.is_git_repo);
+      });
     } catch (err) {
-      if (targetGeneration === generation) {
+      if (isCurrent()) {
         setChangesError(err instanceof Error ? err.message : "Failed to load changes");
       }
     } finally {
-      if (targetGeneration === generation) {
+      if (isCurrent()) {
         setChangesLoading(false);
       }
     }
   };
 
   const loadDiff = async (path: string, targetGeneration = generation) => {
-    if (!path || !canQuery()) {
+    if (disposed || !path || !canQuery()) {
       return;
     }
-    setExpandedChangePath(path);
-    setDiffPayload(null);
-    setDiffError("");
-    setDiffLoading(true);
+    const requestId = ++diffRequestId;
+    const isCurrent = () => targetGeneration === generation && requestId === diffRequestId;
+    batch(() => {
+      setExpandedChangePath(path);
+      setDiffPayload(null);
+      setDiffError("");
+      setDiffLoading(true);
+    });
     try {
       const query = workspaceQuery(props.threadId, queryWorkspace(), { path });
       const payload = await apiFetch<WorkspaceDiffPayload>(
         `/dashboard-api/workspace/diff?${query}`,
+        { signal: requestController.signal },
       );
-      if (targetGeneration === generation && expandedChangePath() === path) {
+      if (isCurrent() && expandedChangePath() === path) {
         setDiffPayload(payload);
       }
     } catch (err) {
-      if (targetGeneration === generation && expandedChangePath() === path) {
+      if (isCurrent() && expandedChangePath() === path) {
         setDiffError(err instanceof Error ? err.message : "Failed to load diff");
       }
     } finally {
-      if (targetGeneration === generation && expandedChangePath() === path) {
+      if (isCurrent() && expandedChangePath() === path) {
         setDiffLoading(false);
       }
     }
   };
 
   const loadFile = async (path: string, targetGeneration = generation) => {
-    if (!path || !canQuery()) {
+    if (disposed || !path || !canQuery()) {
       return;
     }
-    setFileLoadingByPath((current) => ({ ...current, [path]: true }));
-    setFileErrorByPath((current) => ({ ...current, [path]: "" }));
+    setFileLoadingByPath(path, true);
+    setFileErrorByPath(path, "");
     try {
       const query = workspaceQuery(props.threadId, queryWorkspace(), { path });
       const payload = await apiFetch<WorkspaceFilePayload>(
         `/dashboard-api/workspace/file?${query}`,
+        { signal: requestController.signal },
       );
       if (targetGeneration !== generation) {
         return;
       }
-      setFilePayloads((current) => ({ ...current, [path]: payload }));
+      setFilePayloads(path, reconcile(payload));
     } catch (err) {
       if (targetGeneration === generation) {
-        setFileErrorByPath((current) => ({
-          ...current,
-          [path]: err instanceof Error ? err.message : "Failed to load file",
-        }));
+        setFileErrorByPath(path, err instanceof Error ? err.message : "Failed to load file");
       }
     } finally {
       if (targetGeneration === generation) {
-        setFileLoadingByPath((current) => ({ ...current, [path]: false }));
+        setFileLoadingByPath(path, false);
       }
     }
   };
 
   const hardRefresh = () => {
     generation += 1;
-    const targetGeneration = generation;
-    const savedExpanded = { ...untrack(expandedByPath) };
-    setEntriesByPath({});
-    setExpandedByPath({ "": true });
-    setTreeTruncatedByPath({});
-    setWorkspaceRoot("");
-    setExpandedChangePath("");
-    setDiffPayload(null);
-    setDiffError("");
-    setOpenTabs(["files"]);
-    setActiveTab("files");
-    setFileTabs([]);
-    setFilePayloads({});
-    setFileLoadingByPath({});
-    setFileErrorByPath({});
-    const reloadWithExpansion = async () => {
-      await loadTree("", targetGeneration);
-      if (targetGeneration !== generation) return;
-      const paths = Object.keys(savedExpanded).filter((p) => p !== "" && savedExpanded[p]);
-      for (const path of paths) {
-        if (targetGeneration !== generation) return;
-        await loadTree(path, targetGeneration);
-      }
-      if (targetGeneration === generation) {
-        setExpandedByPath(savedExpanded);
-      }
-    };
-    void reloadWithExpansion();
-    void loadChanges(targetGeneration);
+    requestController.abort();
+    requestController = new AbortController();
+    treeRequestIds.clear();
+    batch(() => {
+      setEntriesByPath(reconcile({}));
+      setExpandedByPath(reconcile({ "": true }));
+      setTreeLoadingByPath(reconcile({}));
+      setTreeTruncatedByPath(reconcile({}));
+      setTreeError("");
+      setWorkspaceRoot("");
+      setChangeState("items", []);
+      setChangesLoading(false);
+      setChangesError("");
+      setGitMessage("");
+      setIsGitRepo(true);
+      setExpandedChangePath("");
+      setDiffPayload(null);
+      setDiffLoading(false);
+      setDiffError("");
+      setOpenTabs(["files"]);
+      setActiveTab("files");
+      setActionMenuPath(null);
+      setPlusMenuOpen(false);
+      setFilePayloads(reconcile({}));
+      setFileLoadingByPath(reconcile({}));
+      setFileErrorByPath(reconcile({}));
+      void loadTree();
+      void loadChanges();
+    });
   };
 
   const softRefresh = () => {
-    if (!canQuery()) {
-      return;
-    }
-    generation += 1;
+    if (!canQuery() || disposed) return;
     const targetGeneration = generation;
-    const savedExpanded = { ...untrack(expandedByPath) };
-    // Keep existing tree entries visible to avoid flicker; only mark root as loading.
-    setTreeLoadingByPath((current) => ({ ...current, [""]: true }));
-    setTreeError("");
-    setChangesLoading(true);
+    const paths = untrack(() => Object.keys(expandedByPath).filter((path) => path && expandedByPath[path]));
+    // Refresh in place without invalidating pending file previews or diffs.
+    // Expansion remains user-owned, including changes made during the request.
     const reloadWithExpansion = async () => {
       await loadTree("", targetGeneration);
-      if (targetGeneration !== generation) return;
-      const paths = Object.keys(savedExpanded).filter((p) => p !== "" && savedExpanded[p]);
       for (const path of paths) {
         if (targetGeneration !== generation) return;
-        // Skip missing expanded paths (deleted/renamed) silently.
-        if (entriesByPath()[path] === undefined && path !== "") {
-          // Still attempt to load; tree will stay empty if path gone.
-        }
-        await loadTree(path, targetGeneration);
-      }
-      if (targetGeneration === generation) {
-        setExpandedByPath(savedExpanded);
+        if (expandedByPath[path]) await loadTree(path, targetGeneration);
       }
     };
     void reloadWithExpansion();
@@ -498,22 +506,9 @@ export function WorkspaceExplorer(props: {
         },
       );
       props.onWorkingDirChange(payload.workspace);
-      generation += 1;
       const targetGeneration = generation;
-      setEntriesByPath({});
-      setExpandedByPath({ "": true });
-      setTreeTruncatedByPath({});
-      setWorkspaceRoot("");
-      setExpandedChangePath("");
-      setDiffPayload(null);
-      setDiffError("");
-      setFileTabs([]);
-      setFilePayloads({});
-      setFileLoadingByPath({});
-      setFileErrorByPath({});
       queueMicrotask(() => {
-        void loadTree("", targetGeneration);
-        void loadChanges(targetGeneration);
+        if (!disposed && targetGeneration === generation) hardRefresh();
       });
       showToast(`${ws.backend} workspace reconnected.`, "success");
     } catch (err) {
@@ -524,9 +519,9 @@ export function WorkspaceExplorer(props: {
   };
 
   const toggleDirectory = (path: string) => {
-    const isOpen = Boolean(expandedByPath()[path]);
-    setExpandedByPath((current) => ({ ...current, [path]: !isOpen }));
-    if (isOpen || entriesByPath()[path]) {
+    const isOpen = Boolean(expandedByPath[path]);
+    setExpandedByPath(path, !isOpen);
+    if (isOpen || entriesByPath[path] || treeLoadingByPath[path]) {
       return;
     }
     void loadTree(path);
@@ -562,18 +557,12 @@ export function WorkspaceExplorer(props: {
         setActiveTab("" as WorkspaceTab);
       }
     }
-
-    if (tab.startsWith("file:")) {
-      const path = fileTabPath(tab);
-      setFileTabs((curr) => curr.filter((item) => item !== path));
-    }
   };
 
   const openFile = (path: string) => {
     const tab = fileTabId(path);
-    setFileTabs((current) => (current.includes(path) ? current : [...current, path]));
     openTab(tab);
-    if (!filePayloads()[path] && !fileLoadingByPath()[path]) {
+    if (!filePayloads[path] && !fileLoadingByPath[path]) {
       void loadFile(path);
     }
   };
@@ -618,11 +607,7 @@ export function WorkspaceExplorer(props: {
       showToast(`Renamed to ${nextName}`, "success");
       const openedPath = entry.path;
       closeTab(fileTabId(openedPath));
-      setFilePayloads((current) => {
-        const copy = { ...current };
-        delete copy[openedPath];
-        return copy;
-      });
+      setFilePayloads(openedPath, undefined);
       cancelRename();
       const parentPath = entry.path.split("/").slice(0, -1).join("/") || "";
       await reloadPath(parentPath);
@@ -656,11 +641,7 @@ export function WorkspaceExplorer(props: {
       showToast(`Deleted ${entry.name}`, "success");
       const removedPath = entry.path;
       closeTab(fileTabId(removedPath));
-      setFilePayloads((current) => {
-        const copy = { ...current };
-        delete copy[removedPath];
-        return copy;
-      });
+      setFilePayloads(removedPath, undefined);
       setDeleteTarget(null);
       const parentPath = entry.path.split("/").slice(0, -1).join("/") || "";
       await reloadPath(parentPath);
@@ -713,7 +694,7 @@ export function WorkspaceExplorer(props: {
       );
       cancelCreate();
       if (target.parentPath) {
-        setExpandedByPath((current) => ({ ...current, [target.parentPath]: true }));
+        setExpandedByPath(target.parentPath, true);
       }
       await reloadPath(target.parentPath);
       if (target.kind === "file") {
@@ -797,10 +778,12 @@ export function WorkspaceExplorer(props: {
       }
       // Defer to next microtask so ChatPage's refreshThread has already
       // updated threadData/workspaceRef if it will.
+      if (refreshQueued) return;
+      refreshQueued = true;
+      const targetGeneration = generation;
       queueMicrotask(() => {
-        if (!canQuery()) {
-          return;
-        }
+        refreshQueued = false;
+        if (disposed || targetGeneration !== generation) return;
         softRefresh();
       });
     };
@@ -816,33 +799,26 @@ export function WorkspaceExplorer(props: {
     setDraftWorkingDir(props.workingDir || "");
   });
 
-  let lastWorkspaceRefreshKey = "";
-  createEffect(() => {
+  const workspaceRefreshKey = createMemo(() => {
     const ws = props.workspace;
     const root = typeof ws?.metadata?.root === "string" ? ws.metadata.root.trim() : "";
-    const key = `${props.threadId}|${props.workingDir}|${ws?.backend || ""}|${ws?.locator || ""}|${root}`;
-    if (key === lastWorkspaceRefreshKey) {
-      return;
-    }
-    lastWorkspaceRefreshKey = key;
-    // Workspace identity changed (new thread, switched project) — hard reset
-    // so stale entries from the previous workspace don't linger.
-    if (!key || key.startsWith("|")) {
-      // Initial mount or empty workspace: keep hard reset to clear stale state
-      // but allow the first load to happen. Use hard path for correctness.
-      hardRefresh();
-      return;
-    }
-    hardRefresh();
+    return JSON.stringify([props.threadId, props.workingDir, ws?.backend, ws?.locator, root]);
+  });
+  createEffect(on(workspaceRefreshKey, hardRefresh));
+
+  onCleanup(() => {
+    disposed = true;
+    generation += 1;
+    requestController.abort();
   });
 
   const TreeEntry = (entryProps: { entry: WorkspaceTreeEntry; depth: number }) => {
     const entry = () => entryProps.entry;
-    const children = () => entriesByPath()[entry().path] || [];
-    const isOpen = () => Boolean(expandedByPath()[entry().path]);
+    const children = () => entriesByPath[entry().path] || [];
+    const isOpen = () => Boolean(expandedByPath[entry().path]);
     const isDirectory = () => entry().kind === "directory";
-    const isSelected = () => activeTab() === fileTabId(entry().path);
-    const isMenuOpen = () => actionMenuPath() === entry().path;
+    const isSelected = () => isActiveTab(fileTabId(entry().path));
+    const isMenuOpen = () => isActionMenuOpen(entry().path);
 
     return (
       <>
@@ -944,7 +920,7 @@ export function WorkspaceExplorer(props: {
           </div>
         </div>
         <Show when={isDirectory() && isOpen()}>
-          <Show when={treeLoadingByPath()[entry().path]}>
+          <Show when={treeLoadingByPath[entry().path]}>
             <div class="workspace-tree-status" style={`--depth: ${entryProps.depth + 1};`}>
               Loading...
             </div>
@@ -952,7 +928,7 @@ export function WorkspaceExplorer(props: {
           <For each={children()}>
             {(child) => <TreeEntry entry={child} depth={entryProps.depth + 1} />}
           </For>
-          <Show when={treeTruncatedByPath()[entry().path]}>
+          <Show when={treeTruncatedByPath[entry().path]}>
             <div class="workspace-tree-status" style={`--depth: ${entryProps.depth + 1};`}>
               Tree truncated
             </div>
@@ -1034,9 +1010,9 @@ export function WorkspaceExplorer(props: {
 
               return (
                 <div
-                  class={`workspace-tab ${activeTab() === tab ? "active" : ""}`}
+                  class={`workspace-tab ${isActiveTab(tab) ? "active" : ""}`}
                   role="tab"
-                  aria-selected={activeTab() === tab}
+                  aria-selected={isActiveTab(tab)}
                   onClick={() => setActiveTab(tab)}
                   onAuxClick={(event) => {
                     if (event.button === 1) {
@@ -1200,10 +1176,10 @@ export function WorkspaceExplorer(props: {
             </div>
           </div>
         </Show>
-        <Show when={activeTab() === "changes"}>
-          <section class="workspace-section workspace-tab-panel" role="tabpanel">
+        <Show when={openTabs().includes("changes")}>
+          <section class="workspace-section workspace-tab-panel" role="tabpanel" hidden={!isActiveTab("changes")}>
             <Show
-              when={!changesLoading()}
+              when={!changesLoading() || changes().length > 0}
               fallback={<div class="empty compact">Loading changes...</div>}
             >
               <Show
@@ -1218,18 +1194,18 @@ export function WorkspaceExplorer(props: {
                     <For each={changes()}>
                       {(change) => (
                         <div
-                          class={`workspace-change-item ${expandedChangePath() === change.path ? "expanded" : ""}`}
+                          class={`workspace-change-item ${isChangeExpanded(change.path) ? "expanded" : ""}`}
                         >
                           <button
-                            class={`workspace-change-row ${expandedChangePath() === change.path ? "active" : ""}`}
+                            class={`workspace-change-row ${isChangeExpanded(change.path) ? "active" : ""}`}
                             type="button"
                             title={change.path}
-                            aria-expanded={expandedChangePath() === change.path}
+                            aria-expanded={isChangeExpanded(change.path)}
                             onClick={() => toggleChangeDiff(change.path)}
                           >
                             <span class="workspace-change-caret">
                               <Show
-                                when={expandedChangePath() === change.path}
+                                when={isChangeExpanded(change.path)}
                                 fallback={<ChevronRight size={14} />}
                               >
                                 <ChevronDown size={14} />
@@ -1252,7 +1228,7 @@ export function WorkspaceExplorer(props: {
                               {statusLabel(change.status)}
                             </span>
                           </button>
-                          <Show when={expandedChangePath() === change.path}>
+                          <Show when={isChangeExpanded(change.path)}>
                             <div class="workspace-change-diff">
                               <Show
                                 when={!diffLoading()}
@@ -1295,8 +1271,8 @@ export function WorkspaceExplorer(props: {
           </section>
         </Show>
 
-        <Show when={activeTab() === "files"}>
-          <section class="workspace-section workspace-tree-section workspace-tab-panel" role="tabpanel">
+        <Show when={openTabs().includes("files")}>
+          <section class="workspace-section workspace-tree-section workspace-tab-panel" role="tabpanel" hidden={!isActiveTab("files")}>
             <div class="workspace-tree-toolbar">
               <span class="workspace-tree-toolbar-title">Files</span>
               <div class="workspace-tree-toolbar-actions">
@@ -1322,62 +1298,46 @@ export function WorkspaceExplorer(props: {
             </div>
             <Show when={!treeError()} fallback={<div class="empty compact">{treeError()}</div>}>
               <Show
-                when={treeLoadingByPath()[rootPath()] || treeLoadingByPath()[""]}
+                when={rootEntries().length > 0}
                 fallback={
                   <Show
-                    when={rootEntries().length > 0}
-                    fallback={
-                      <div class="empty compact">
-                        <span>No files in workspace.</span>
-                        <div class="workspace-empty-tree-actions">
-                          <button
-                            class="btn btn-sm btn-primary"
-                            type="button"
-                            onClick={(event) => requestCreate("file", "", event)}
-                          >
-                            <FilePlus size={14} />
-                            <span>New file</span>
-                          </button>
-                          <button
-                            class="btn btn-sm"
-                            type="button"
-                            onClick={(event) => requestCreate("directory", "", event)}
-                          >
-                            <FolderPlus size={14} />
-                            <span>New folder</span>
-                          </button>
-                        </div>
-                      </div>
-                    }
+                    when={!treeLoadingByPath[rootPath()] && !treeLoadingByPath[""]}
+                    fallback={<div class="empty compact">Loading files...</div>}
                   >
-                    <div class="workspace-tree">
-                      <For each={rootEntries()}>
-                        {(entry) => <TreeEntry entry={entry} depth={0} />}
-                      </For>
-                      <Show when={rootTreeTruncated()}>
-                        <div class="workspace-tree-status" style="--depth: 0;">
-                          Tree truncated
-                        </div>
-                      </Show>
+                    <div class="empty compact">
+                      <span>No files in workspace.</span>
+                      <div class="workspace-empty-tree-actions">
+                        <button
+                          class="btn btn-sm btn-primary"
+                          type="button"
+                          onClick={(event) => requestCreate("file", "", event)}
+                        >
+                          <FilePlus size={14} />
+                          <span>New file</span>
+                        </button>
+                        <button
+                          class="btn btn-sm"
+                          type="button"
+                          onClick={(event) => requestCreate("directory", "", event)}
+                        >
+                          <FolderPlus size={14} />
+                          <span>New folder</span>
+                        </button>
+                      </div>
                     </div>
                   </Show>
                 }
               >
-                <Show
-                  when={rootEntries().length > 0}
-                  fallback={<div class="empty compact">Loading files...</div>}
-                >
-                  <div class="workspace-tree">
-                    <For each={rootEntries()}>
-                      {(entry) => <TreeEntry entry={entry} depth={0} />}
-                    </For>
-                    <Show when={rootTreeTruncated()}>
-                      <div class="workspace-tree-status" style="--depth: 0;">
-                        Tree truncated
-                      </div>
-                    </Show>
-                  </div>
-                </Show>
+                <div class="workspace-tree" aria-busy={isRefreshing()}>
+                  <For each={rootEntries()}>
+                    {(entry) => <TreeEntry entry={entry} depth={0} />}
+                  </For>
+                  <Show when={rootTreeTruncated()}>
+                    <div class="workspace-tree-status" style="--depth: 0;">
+                      Tree truncated
+                    </div>
+                  </Show>
+                </div>
               </Show>
             </Show>
           </section>
@@ -1386,12 +1346,12 @@ export function WorkspaceExplorer(props: {
         <Show when={activeTab().startsWith("file:")}>
           <section class="workspace-section workspace-file-panel workspace-tab-panel" role="tabpanel">
             <Show
-              when={!fileLoadingByPath()[activeFilePath()]}
+              when={!fileLoadingByPath[activeFilePath()]}
               fallback={<div class="empty compact">Loading file...</div>}
             >
               <Show
-                when={!fileErrorByPath()[activeFilePath()]}
-                fallback={<div class="empty compact">{fileErrorByPath()[activeFilePath()]}</div>}
+                when={!fileErrorByPath[activeFilePath()]}
+                fallback={<div class="empty compact">{fileErrorByPath[activeFilePath()]}</div>}
               >
                 <Show
                   when={activeFilePayload() && !activeFilePayload()?.binary}
