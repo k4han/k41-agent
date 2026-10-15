@@ -253,6 +253,8 @@ try {
   assert.equal(await js('messageRow.textContent.includes("chunk-4")'), true);
   send({ type: 'tool_call', id: 'tool-1', name: 'read_file', args: { path: 'example.txt' } });
   await until(() => js('!!document.querySelector("details.tool-call")'), 'streamed tool call');
+  await until(() => js('!!codeFrame.querySelector("pre.markdown-code-highlighted, pre.markdown-code-plain")'), 'completed message highlighting during tool execution');
+  assert.equal(await js('!!document.querySelector(\'button[aria-label="Stop generating"]\')'), true);
   await js('window.toolDetails = document.querySelector("details.tool-call"); toolDetails.open = true;');
   send({ type: 'tool_result', tool_call_id: 'tool-1', name: 'read_file', content: 'completed result' });
   await until(() => js('document.querySelector("details.tool-call").textContent.includes("completed result")'), 'tool result');

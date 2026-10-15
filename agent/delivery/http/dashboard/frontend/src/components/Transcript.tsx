@@ -359,13 +359,8 @@ export function TranscriptMessageView(props: {
   threadId?: string | null;
 }) {
   const [editing, setEditing] = createSignal(false);
-  const [draft, setDraft] = createSignal(props.text);
-
-  createEffect(() => {
-    if (!editing()) {
-      setDraft(props.text);
-    }
-  });
+  // Initialize the draft when editing starts instead of mirroring every delta.
+  const [draft, setDraft] = createSignal("");
 
   const canEdit = () =>
     props.role === "user" &&

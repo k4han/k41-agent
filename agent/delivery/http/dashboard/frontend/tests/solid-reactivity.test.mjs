@@ -163,6 +163,90 @@ test('message chunks update only their rows and remain correct after snapshot re
   });
 });
 
+test('direct transcript writes preserve history and maintain the ID index after snapshots', t => {
+  const utils = loadModule('../src/lib/utils.ts');
+  const { createTranscriptItems } = loadModule('../src/lib/chatStreamStore.ts', { '@/lib/utils': utils });
+  mount(t, () => {
+    const [items, setItems, appendChunks, appendItem, replaceMessage] = createTranscriptItems([
+      { id: 1, type: 'message', role: 'assistant', text: 'history' },
+    ]);
+    const first = items()[0];
+    let historyUpdates = 0;
+    solid.createComputed(() => { first.text; historyUpdates += 1; });
+    const next = { id: 2, type: 'message', role: 'assistant', text: '', attachments: [{ name: 'original' }] };
+    appendItem(next);
+    const second = items()[1];
+    appendChunks(new Map([[2, 'delta']]));
+    replaceMessage(2, 'final');
+    assert.equal(items()[0], first);
+    assert.equal(items()[1], second);
+    assert.equal(second.text, 'final');
+    assert.equal(next.text, '');
+    next.attachments[0].name = 'external mutation';
+    assert.equal(second.attachments[0].name, 'original');
+    assert.equal(historyUpdates, 1);
+
+    setItems([{ ...next, text: 'snapshot' }, { id: 3, type: 'tool', name: 'read', result: null }]);
+    replaceMessage(1, 'removed');
+    replaceMessage(3, 'not a message');
+    replaceMessage(2, 'reordered');
+    appendItem({ id: 4, type: 'message', role: 'assistant', text: 'new' });
+    appendChunks(new Map([[4, ' chunk']]));
+    assert.equal(items()[0], second);
+    assert.equal(second.text, 'reordered');
+    assert.equal(items()[1].text, undefined);
+    assert.equal(items()[2].text, 'new chunk');
+    setItems([]);
+    appendItem({ id: 5, type: 'message', role: 'assistant', text: '' });
+    replaceMessage(4, 'stale');
+    replaceMessage(5, 'fresh');
+    assert.equal(items().length, 1);
+    assert.equal(items()[0].text, 'fresh');
+  });
+});
+
+test('streaming selection notifies only the active rows in a long transcript', t => {
+  const utils = loadModule('../src/lib/utils.ts');
+  const { createTranscriptItems } = loadModule('../src/lib/chatStreamStore.ts', { '@/lib/utils': utils });
+  const { useStreamingTranscriptItem } = loadModule('../src/lib/useStreamingTranscriptItem.ts');
+  mount(t, () => {
+    const [items, setItems, appendChunks, appendItem] = createTranscriptItems(
+      Array.from({ length: 1000 }, (_, id) => ({ id, type: 'message', role: 'assistant', text: 'history' })),
+    );
+    const [streaming, setStreaming] = solid.createSignal(false);
+    const selected = useStreamingTranscriptItem(items, streaming);
+    const updates = new Map();
+    const rows = solid.mapArray(items, item => {
+      solid.createComputed(() => {
+        selected(item.id);
+        updates.set(item.id, (updates.get(item.id) || 0) + 1);
+      });
+      return item;
+    });
+    solid.createComputed(rows);
+    setStreaming(true);
+    assert.equal(selected(999), true);
+    assert.equal(updates.get(999), 2);
+    for (let i = 0; i < 50; i += 1) appendChunks(new Map([[999, ' delta']]));
+    assert.equal(updates.get(999), 2, 'text changes must not recalculate streaming selection');
+    appendItem({ id: 1000, type: 'tool', name: 'read', args: {}, result: null });
+    assert.equal(selected(999), false);
+    assert.equal(selected(1000), false);
+    assert.equal(updates.get(999), 3);
+    appendItem({ id: 1001, type: 'message', role: 'assistant', text: 'next' });
+    assert.equal(selected(1001), true);
+    setStreaming(false);
+    assert.equal(selected(1001), false);
+    for (let id = 0; id < 999; id += 1) assert.equal(updates.get(id), 1);
+    assert.equal(updates.get(1000), 1);
+    setItems([{ id: 2000, type: 'message', role: 'user', text: 'new thread' }]);
+    setStreaming(true);
+    assert.equal(selected(2000), false);
+    setItems([]);
+    assert.equal(selected(1001), false);
+  });
+});
+
 test('buffered chunks stay isolated by thread and authoritative replacements discard pending appends', t => {
   const utils = loadModule('../src/lib/utils.ts');
   const streams = loadModule('../src/lib/chatStreamStore.ts', { '@/lib/utils': utils });
@@ -207,6 +291,10 @@ test('buffered chunks stay isolated by thread and authoritative replacements dis
     const first = streams.getOrCreateStreamSignals('first', [{ id: 10, type: 'message', text: 'A' }]);
     const second = streams.getOrCreateStreamSignals('second', [{ id: 20, type: 'message', text: 'B' }]);
     chat.setCurrentStreamThreadId('first');
+    const backgroundId = chat.appendItem({ type: 'message', role: 'assistant', text: 'background' }, 'none', 'second');
+    chat.replaceMessage(backgroundId, 'background final', 'second');
+    assert.equal(second.items[0]()[1].text, 'background final');
+    assert.equal(first.items[0]().length, 1);
     scrolls = 0;
     chat.updateMessage(10, '-one');
     chat.updateMessage(20, '-two', 'second');

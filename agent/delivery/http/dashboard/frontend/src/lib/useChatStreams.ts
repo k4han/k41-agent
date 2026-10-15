@@ -40,7 +40,8 @@ export interface UseChatStreamsParams {
 export function useChatStreams(params: UseChatStreamsParams) {
   const { scroll, getCurrentThreadId, getIsUnmounting } = params;
 
-  const [localItems, setLocalItems, appendLocalMessageChunks] = createTranscriptItems();
+  const localTranscript = createTranscriptItems();
+  const [localItems, setLocalItems, appendLocalMessageChunks] = localTranscript;
   const [localStreaming, setLocalStreaming] = createSignal(false);
   const [localController, setLocalController] = createSignal<AbortController | null>(null);
   const [currentStreamThreadId, setCurrentStreamThreadId] = createSignal<string | null>(null);
@@ -105,6 +106,9 @@ export function useChatStreams(params: UseChatStreamsParams) {
   const resolveThreadKey = (targetThreadId?: string) =>
     targetThreadId || currentStreamThreadId() || "";
 
+  const transcriptFor = (targetThreadId?: string) =>
+    persistedStreams.get(resolveThreadKey(targetThreadId))?.items || localTranscript;
+
   const flushPendingMessageChunks = () => {
     if (flushTimer !== null) {
       window.clearTimeout(flushTimer);
@@ -147,7 +151,7 @@ export function useChatStreams(params: UseChatStreamsParams) {
     targetThreadId?: string,
   ): number => {
     const id = allocItemId();
-    setItems((current) => [...current, { ...item, id } as ChatTranscriptItem], targetThreadId);
+    transcriptFor(targetThreadId)[3]({ ...item, id } as ChatTranscriptItem);
 
     const isCurrent = !getIsUnmounting() && (!targetThreadId || targetThreadId === getCurrentThreadId());
     if (isCurrent) {
@@ -180,15 +184,7 @@ export function useChatStreams(params: UseChatStreamsParams) {
   const replaceMessage = (id: number, text: string, targetThreadId?: string) => {
     // Replacement text is authoritative; discard any buffered appends.
     dropPendingChunksForId(id);
-    setItems(
-      (current) =>
-        current.map((item) =>
-          item.id === id && item.type === "message"
-            ? { ...item, text }
-            : item,
-        ),
-      targetThreadId,
-    );
+    transcriptFor(targetThreadId)[4](id, text);
     const isCurrent = !getIsUnmounting() && (!targetThreadId || targetThreadId === getCurrentThreadId());
     if (isCurrent) {
       scroll.scrollToBottom();

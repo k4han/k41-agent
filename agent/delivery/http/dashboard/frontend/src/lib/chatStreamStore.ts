@@ -12,9 +12,11 @@ export type TranscriptItemsUpdater =
 
 /** Keep row identities stable while retaining the existing accessor/setter API. */
 export function createTranscriptItems(initialItems: ChatTranscriptItem[] = []): [
-  Accessor<ChatTranscriptItem[]>,
-  (update: TranscriptItemsUpdater) => ChatTranscriptItem[],
-  (chunks: ReadonlyMap<number, string>) => void,
+  items: Accessor<ChatTranscriptItem[]>,
+  setItems: (update: TranscriptItemsUpdater) => ChatTranscriptItem[],
+  appendChunks: (chunks: ReadonlyMap<number, string>) => void,
+  appendItem: (item: ChatTranscriptItem) => void,
+  replaceMessage: (id: number, text: string) => void,
 ] {
   const [state, setState] = createStore({ items: cloneValue(unwrap(initialItems)) });
   const indices = new Map(initialItems.map((item, index) => [item.id, index]));
@@ -36,6 +38,19 @@ export function createTranscriptItems(initialItems: ChatTranscriptItem[] = []): 
         }));
       }
     })),
+    (item) => untrack(() => {
+      const index = state.items.length;
+      indices.set(item.id, index);
+      // Append through the store path without copying or reconciling history.
+      setState("items", index, cloneValue(unwrap(item)));
+    }),
+    (id, text) => untrack(() => {
+      const index = indices.get(id);
+      if (index === undefined) return;
+      setState("items", index, produce((item) => {
+        if (item.type === "message") item.text = text;
+      }));
+    }),
   ];
 }
 

@@ -4,6 +4,7 @@ import { For, Show } from "solid-js";
 import { TranscriptItemView, type TranscriptAttachment, type TranscriptRole } from "@/components/Transcript";
 import { WorkspaceSelector } from "@/components/WorkspaceSelector";
 import type { ChatTranscriptItem } from "@/lib/chatStreamStore";
+import { useStreamingTranscriptItem } from "@/lib/useStreamingTranscriptItem";
 import type { AgentCard, WorkspaceRef } from "@/types";
 import type { WorkspaceSelectionDraft } from "@/components/WorkspaceSelector";
 
@@ -98,6 +99,11 @@ export interface ChatTranscriptProps {
 }
 
 export function ChatTranscript(props: ChatTranscriptProps) {
+  const isStreamingItem = useStreamingTranscriptItem(
+    () => props.items,
+    () => props.streaming || props.backgroundLive,
+  );
+
   return (
     <div class="transcript-container">
       <div
@@ -152,8 +158,8 @@ export function ChatTranscript(props: ChatTranscriptProps) {
               <TranscriptItemView
                 item={item}
                 itemId={item.id}
-                deferMermaid={props.streaming || props.backgroundLive}
-                deferHighlight={props.streaming || props.backgroundLive}
+                deferMermaid={isStreamingItem(item.id)}
+                deferHighlight={isStreamingItem(item.id)}
                 agents={props.agents}
                 activeAgentName={props.activeAgentName}
                 actionsDisabled={props.conversationBusy}
