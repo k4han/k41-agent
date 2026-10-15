@@ -59,7 +59,10 @@ const fixtures = {
   '/dashboard-api/agents/tools': { tools: [], tool_groups: [] },
   '/dashboard-api/agents/mcp': { mcp_server_options: [], mcp_installs: {} },
   '/dashboard-api/sessions': { sessions: [] },
-  '/dashboard-api/chat-history': { threads: [], has_more: false },
+  '/dashboard-api/chat-history': { threads: [
+    { thread_id: 'history-one', title: 'First history thread', platform: 'dashboard', user_id: 'dashboard', checkpoint_count: 1, workspace_key: 'one', workspace_label: 'Workspace one' },
+    { thread_id: 'history-two', title: 'Second history thread', platform: 'dashboard', user_id: 'dashboard', checkpoint_count: 1, workspace_key: 'two', workspace_label: 'Workspace two' },
+  ], has_more: false },
   '/dashboard-api/workspace/default': { workspace: null },
   '/dashboard-api/prompt-variables': { variables: [] },
   '/dashboard-api/github/repositories/1': {
@@ -276,6 +279,14 @@ try {
   await js(`document.querySelector('a[href="/history"]').click()`);
   await until(() => js('location.pathname === "/history" && themeObserverCounts.active === 0'), 'theme observer cleanup');
   console.log('PASS: Markdown consumers share one theme observer and release it after navigation.');
+  await until(() => js('document.querySelectorAll(".history-workspace-section").length === 2'), 'history workspace groups');
+  await js('window.historyGroups = Array.from(document.querySelectorAll(".history-workspace-section")); window.historyRows = Array.from(document.querySelectorAll(".history-table tbody tr")); document.querySelector(".history-table input").click();');
+  await js('window.dispatchEvent(new CustomEvent("k41:thread-title-updated", { detail: { threadId: "history-one", title: "Updated history thread" } }))');
+  await until(() => js('document.querySelector(".history-thread-link").textContent.includes("Updated history thread")'), 'history title update');
+  assert.equal(await js('historyGroups.every((group, index) => document.querySelectorAll(".history-workspace-section")[index] === group)'), true);
+  assert.equal(await js('historyRows.every((row, index) => document.querySelectorAll(".history-table tbody tr")[index] === row)'), true);
+  assert.equal(await js('document.querySelector(".history-table input").checked'), true);
+  console.log('PASS: history title updates retain workspace sections, thread rows, and selection.');
   await call('Fetch.enable', { patterns: [{ urlPattern: '*SecurityPage-*.js', requestStage: 'Request' }] });
   await navigate('/settings/security');
   await until(() => Boolean(pausedPageRequest), 'paused lazy page');

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { runInNewContext } from 'node:vm';
+import { compileFunction, runInNewContext } from 'node:vm';
 import test from 'node:test';
 import * as solid from 'solid-js';
 import * as store from 'solid-js/store';
@@ -12,7 +12,7 @@ function loadModule(path, dependencies = {}, globals = {}) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   });
   const exports = {};
-  runInNewContext(outputText, {
+  const context = {
     exports, console, structuredClone, JSON, Error, ...globals,
     require: name => {
       if (name === 'solid-js') return solid;
@@ -20,7 +20,9 @@ function loadModule(path, dependencies = {}, globals = {}) {
       assert.ok(name in dependencies, `Unexpected dependency: ${name}`);
       return dependencies[name];
     },
-  });
+  };
+  // Keep plain object prototypes in Solid's realm while isolating module bindings.
+  compileFunction(outputText, Object.keys(context))(...Object.values(context));
   return exports;
 }
 
@@ -105,6 +107,208 @@ test('persisted transcripts do not share mutable data with the previous local st
     setLocal([]);
     assert.equal(persisted().length, 1);
     assert.equal(persisted()[0].text, 'streaming');
+  });
+});
+
+test('message chunks update only their rows and remain correct after snapshot reordering and removal', t => {
+  const utils = loadModule('../src/lib/utils.ts');
+  const { createTranscriptItems } = loadModule('../src/lib/chatStreamStore.ts', { '@/lib/utils': utils });
+  mount(t, () => {
+    const initial = [
+      { id: 1, type: 'message', role: 'assistant', text: 'first' },
+      { id: 2, type: 'message', role: 'assistant', text: 'second' },
+      { id: 3, type: 'tool', name: 'read', args: {}, result: null },
+    ];
+    const [items, setItems, appendChunks] = createTranscriptItems(initial);
+    const first = items()[0];
+    const second = items()[1];
+    let mounted = 0;
+    let destroyed = 0;
+    let observed = 0;
+    let toolUpdates = 0;
+    const rows = solid.mapArray(items, item => {
+      mounted += 1;
+      solid.onCleanup(() => destroyed += 1);
+      return item;
+    });
+    solid.createComputed(() => { first.text; second.text; observed += 1; });
+    solid.createComputed(() => { items()[2]?.result; toolUpdates += 1; });
+    rows();
+    appendChunks(new Map([[1, '-a'], [2, '-b'], [3, 'ignored'], [99, 'missing']]));
+    assert.equal(first.text, 'first-a');
+    assert.equal(second.text, 'second-b');
+    assert.equal(observed, 2, 'multiple chunks should notify shared consumers once');
+    assert.equal(toolUpdates, 1);
+    assert.equal(initial[0].text, 'first', 'streaming must not mutate the source snapshot');
+    assert.equal(mounted, 3);
+
+    setItems([initial[2], { ...initial[1], text: 'replaced' }, { ...initial[0], text: 'reset' }]);
+    rows();
+    appendChunks(new Map([[1, '-after-reorder'], [2, '-after-reorder']]));
+    assert.equal(items()[1], second);
+    assert.equal(items()[2], first);
+    assert.equal(first.text, 'reset-after-reorder');
+    assert.equal(second.text, 'replaced-after-reorder');
+    assert.equal(mounted, 3);
+
+    setItems(current => current.filter(item => item.id !== 1));
+    rows();
+    appendChunks(new Map([[1, 'removed'], [2, '-after-removal']]));
+    assert.equal(items().length, 2);
+    assert.equal(second.text, 'replaced-after-reorder-after-removal');
+    assert.equal(destroyed, 1);
+    setItems([]);
+    appendChunks(new Map([[2, 'stale']]));
+    assert.equal(items().length, 0);
+  });
+});
+
+test('buffered chunks stay isolated by thread and authoritative replacements discard pending appends', t => {
+  const utils = loadModule('../src/lib/utils.ts');
+  const streams = loadModule('../src/lib/chatStreamStore.ts', { '@/lib/utils': utils });
+  const timers = new Map();
+  let nextTimer = 0;
+  const { useChatStreams } = loadModule('../src/lib/useChatStreams.ts', {
+    '@/components/Transcript': {},
+    '@/lib/chatStreamStore': streams,
+    '@/lib/generatedImages': {},
+  }, {
+    window: {
+      setTimeout: callback => { const id = ++nextTimer; timers.set(id, callback); return id; },
+      clearTimeout: id => timers.delete(id),
+    },
+  });
+  mount(t, () => {
+    let scrolls = 0;
+    let unmounting = false;
+    const chat = useChatStreams({
+      scroll: { scrollToBottom: () => scrolls += 1 },
+      getCurrentThreadId: () => 'first',
+      getIsUnmounting: () => unmounting,
+    });
+    const localId = chat.appendItem({ type: 'message', role: 'assistant', text: '' }, 'none');
+    chat.updateMessage(localId, 'buffered');
+    chat.updateMessage(localId, ' text');
+    assert.equal(chat.items()[0].text, '');
+    assert.equal(timers.size, 1);
+    chat.flushPendingMessageChunks();
+    assert.equal(chat.items()[0].text, 'buffered text');
+    assert.equal(timers.size, 0);
+
+    chat.updateMessage(localId, 'discarded');
+    chat.replaceMessage(localId, 'authoritative');
+    chat.flushPendingMessageChunks();
+    assert.equal(chat.items()[0].text, 'authoritative');
+    chat.updateMessage(localId, 'removed');
+    chat.removeItem(localId);
+    chat.flushPendingMessageChunks();
+    assert.equal(chat.items().length, 0);
+
+    const first = streams.getOrCreateStreamSignals('first', [{ id: 10, type: 'message', text: 'A' }]);
+    const second = streams.getOrCreateStreamSignals('second', [{ id: 20, type: 'message', text: 'B' }]);
+    chat.setCurrentStreamThreadId('first');
+    scrolls = 0;
+    chat.updateMessage(10, '-one');
+    chat.updateMessage(20, '-two', 'second');
+    chat.flushPendingMessageChunks();
+    assert.equal(first.items[0]()[0].text, 'A-one');
+    assert.equal(second.items[0]()[0].text, 'B-two');
+    assert.equal(scrolls, 1, 'background thread updates must not scroll the visible thread');
+    unmounting = true;
+    chat.updateMessage(10, '-after-navigation', 'first');
+    chat.flushPendingMessageChunks();
+    assert.equal(first.items[0]()[0].text, 'A-one-after-navigation');
+    assert.equal(scrolls, 1);
+    assert.equal(timers.size, 0);
+  });
+});
+
+function loadWorkspaceGroups() {
+  const threads = loadModule('../src/lib/chatThreads.ts', {
+    '@/components/Transcript': {},
+    '@/lib/userInputRequest': {},
+    '@/lib/generatedImages': {},
+    '@/lib/workspaceConstants': { NO_WORKSPACE_KEY: 'none', NO_WORKSPACE_LABEL: 'No workspace' },
+  });
+  return loadModule('../src/lib/useThreadWorkspaceGroups.ts', {
+    '@/lib/chatThreads': threads,
+    '@/lib/utils': loadModule('../src/lib/utils.ts'),
+  }).useThreadWorkspaceGroups;
+}
+
+test('history refreshes retain group and thread rows while updating labels, order and titles', t => {
+  const useThreadWorkspaceGroups = loadWorkspaceGroups();
+  mount(t, () => {
+    const initial = [
+      { thread_id: 'a', title: 'A', workspace_key: 'one', workspace_label: 'One' },
+      { thread_id: 'b', title: 'B', workspace_key: 'one', workspace_label: 'One' },
+      { thread_id: 'c', title: 'C', workspace_key: 'two', workspace_label: 'Two' },
+    ];
+    const [threads, setThreads] = solid.createSignal(initial);
+    const groups = useThreadWorkspaceGroups(threads);
+    const firstGroup = groups()[0];
+    const firstThread = firstGroup.threads[0];
+    const secondThread = firstGroup.threads[1];
+    let groupMounts = 0;
+    let groupDisposals = 0;
+    let threadMounts = 0;
+    let threadDisposals = 0;
+    let renderedTitle;
+    const rows = solid.mapArray(groups, group => {
+      groupMounts += 1;
+      solid.onCleanup(() => groupDisposals += 1);
+      return solid.mapArray(() => group.threads, thread => {
+        threadMounts += 1;
+        solid.onCleanup(() => threadDisposals += 1);
+        if (thread.thread_id === 'a') solid.createComputed(() => renderedTitle = thread.title);
+        return thread;
+      });
+    });
+    solid.createComputed(() => rows().forEach(groupRows => groupRows()));
+    setThreads([
+      { ...initial[2] },
+      { ...initial[1], workspace_label: 'Renamed workspace' },
+      { ...initial[0], title: 'Renamed thread', workspace_label: 'Renamed workspace' },
+    ]);
+    assert.equal(groups()[1], firstGroup);
+    assert.equal(firstGroup.label, 'Renamed workspace');
+    assert.equal(firstGroup.threads[0], secondThread);
+    assert.equal(firstGroup.threads[1], firstThread);
+    assert.equal(renderedTitle, 'Renamed thread');
+    assert.equal(initial[0].title, 'A');
+    assert.equal(groupMounts, 2);
+    assert.equal(threadMounts, 3);
+    assert.equal(groupDisposals, 0);
+    assert.equal(threadDisposals, 0);
+
+    setThreads([{ ...initial[0], title: 'Still here' }]);
+    assert.equal(groups()[0], firstGroup);
+    assert.equal(firstGroup.threads[0], firstThread);
+    assert.equal(groupDisposals, 1);
+    assert.equal(threadDisposals, 2);
+    setThreads([]);
+    assert.equal(groups().length, 0);
+    assert.equal(groupDisposals, 2);
+    assert.equal(threadDisposals, 3);
+  });
+});
+
+test('history groups track workspace moves and repository metadata without sharing source objects', t => {
+  const useThreadWorkspaceGroups = loadWorkspaceGroups();
+  mount(t, () => {
+    const source = { thread_id: 'a', title: 'A', workspace_key: 'one', workspace_label: 'One', workspace: { scope: { kind: 'local' } } };
+    const [threads, setThreads] = solid.createSignal([source]);
+    const groups = useThreadWorkspaceGroups(threads);
+    const original = groups()[0];
+    setThreads([{ ...source, workspace: { scope: { kind: 'github' } } }]);
+    assert.equal(groups()[0], original);
+    assert.equal(original.isRepo, true);
+    assert.equal(source.workspace.scope.kind, 'local');
+    setThreads([{ ...source, workspace_key: 'two', workspace_label: 'Two' }]);
+    assert.equal(groups()[0].key, 'two');
+    assert.equal(groups()[0].threads[0].thread_id, 'a');
+    setThreads([source]);
+    assert.notEqual(groups()[0], original, 'removed groups must be released before being reintroduced');
   });
 });
 

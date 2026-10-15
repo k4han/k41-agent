@@ -40,7 +40,7 @@ export interface UseChatStreamsParams {
 export function useChatStreams(params: UseChatStreamsParams) {
   const { scroll, getCurrentThreadId, getIsUnmounting } = params;
 
-  const [localItems, setLocalItems] = createTranscriptItems();
+  const [localItems, setLocalItems, appendLocalMessageChunks] = createTranscriptItems();
   const [localStreaming, setLocalStreaming] = createSignal(false);
   const [localController, setLocalController] = createSignal<AbortController | null>(null);
   const [currentStreamThreadId, setCurrentStreamThreadId] = createSignal<string | null>(null);
@@ -105,17 +105,6 @@ export function useChatStreams(params: UseChatStreamsParams) {
   const resolveThreadKey = (targetThreadId?: string) =>
     targetThreadId || currentStreamThreadId() || "";
 
-  const applyItemsToThread = (
-    threadKey: string,
-    updater: (prev: ChatTranscriptItem[]) => ChatTranscriptItem[],
-  ) => {
-    if (threadKey && persistedStreams.has(threadKey)) {
-      persistedStreams.get(threadKey)!.items[1](updater);
-      return;
-    }
-    setLocalItems(updater);
-  };
-
   const flushPendingMessageChunks = () => {
     if (flushTimer !== null) {
       window.clearTimeout(flushTimer);
@@ -128,15 +117,9 @@ export function useChatStreams(params: UseChatStreamsParams) {
     pendingChunksByThread.clear();
     const viewedThreadId = getCurrentThreadId();
     for (const [threadKey, chunks] of snapshot) {
-      applyItemsToThread(threadKey, (current) =>
-        current.map((item) => {
-          if (item.type !== "message") {
-            return item;
-          }
-          const chunk = chunks.get(item.id);
-          return chunk ? { ...item, text: item.text + chunk } : item;
-        }),
-      );
+      const persisted = threadKey ? persistedStreams.get(threadKey) : undefined;
+      const appendChunks = persisted ? persisted.items[2] : appendLocalMessageChunks;
+      appendChunks(chunks);
       if (!getIsUnmounting() && (!threadKey || threadKey === viewedThreadId)) {
         scroll.scrollToBottom();
       }

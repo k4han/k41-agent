@@ -142,27 +142,27 @@ export function McpInstallDialog(props: {
     >
       <Show when={props.server}>
         {(serverGetter) => {
-          const server = serverGetter();
+          const server = serverGetter;
           return (
             <div class="stack">
               <div class="stack" style={{ gap: "6px" }}>
-                <div class="hint">{server.description}</div>
+                <div class="hint">{server().description}</div>
                 <div class="row-wrap">
-                  <span class={server.verified ? "badge badge-success" : "badge badge-warning"}>
-                    {server.verified ? "verified" : "unverified"}
+                  <span class={server().verified ? "badge badge-success" : "badge badge-warning"}>
+                    {server().verified ? "verified" : "unverified"}
                   </span>
-                  <span class="badge">{server.version || "latest"}</span>
-                  <span class="badge">{server.auth_summary}</span>
+                  <span class="badge">{server().version || "latest"}</span>
+                  <span class="badge">{server().auth_summary}</span>
                 </div>
-                <Show when={server.repository_url || server.website_url}>
+                <Show when={server().repository_url || server().website_url}>
                   <a
                     class="mono"
                     style={{ "font-size": "12px" }}
-                    href={server.repository_url || server.website_url}
+                    href={server().repository_url || server().website_url}
                     target="_blank"
                     rel="noreferrer"
                   >
-                    {server.repository_url || server.website_url}
+                    {server().repository_url || server().website_url}
                   </a>
                 </Show>
               </div>
@@ -197,7 +197,7 @@ export function McpInstallDialog(props: {
                   value={targetId()}
                   onChange={(event) => setTargetId(event.currentTarget.value)}
                 >
-                  <For each={server.install_targets}>
+                  <For each={server().install_targets}>
                     {(item) => (
                       <option value={item.id}>
                         {item.label} ({item.transport})
@@ -209,21 +209,21 @@ export function McpInstallDialog(props: {
 
               <Show when={target()}>
                 {(targetGetter) => {
-                  const selectedTarget = targetGetter();
+                  const selectedTarget = targetGetter;
                   return (
                     <div class="stack">
-                      <Show when={selectedTarget.command || selectedTarget.url}>
+                      <Show when={selectedTarget().command || selectedTarget().url}>
                         <div class="panel" style={{ padding: "12px" }}>
                           <div class="setting-title">Connection</div>
                           <div class="hint mono" style={{ "font-size": "12px", "margin-top": "6px" }}>
-                            {selectedTarget.transport === "stdio"
-                              ? [selectedTarget.command, ...selectedTarget.args].join(" ")
-                              : selectedTarget.url}
+                            {selectedTarget().transport === "stdio"
+                              ? [selectedTarget().command, ...selectedTarget().args].join(" ")
+                              : selectedTarget().url}
                           </div>
                         </div>
                       </Show>
 
-                      <For each={selectedTarget.required_inputs}>
+                      <For each={selectedTarget().required_inputs}>
                         {(input) => (
                           <div class="field">
                             <label>

@@ -12,12 +12,12 @@ import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, patchJson } from "@/lib/api";
 import {
   chatThreadHref,
-  groupThreadsByWorkspace,
   threadApiPath,
 } from "@/lib/chatThreads";
 import { truncateText } from "@/lib/utils";
 import { ALL_WORKSPACES_KEY } from "@/lib/workspaceConstants";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
+import { useThreadWorkspaceGroups } from "@/lib/useThreadWorkspaceGroups";
 import type { ThreadListPayload, ThreadSummary } from "@/lib/chatThreads";
 
 export function ChatHistoryListPage() {
@@ -32,15 +32,7 @@ export function ChatHistoryListPage() {
   const [selectedWorkspaceKey, setSelectedWorkspaceKey] = createSignal(ALL_WORKSPACES_KEY);
   const { showToast } = useToast();
 
-  const workspaceGroups = createMemo(() => {
-    return groupThreadsByWorkspace(data()?.threads || []).map((group) => {
-      const isRepo = group.threads.some((t) => t.workspace?.scope.kind === "github");
-      return {
-        ...group,
-        isRepo,
-      };
-    });
-  });
+  const workspaceGroups = useThreadWorkspaceGroups(() => data()?.threads || []);
   const workspaceFilterOptions = createMemo(() => [
     {
       value: ALL_WORKSPACES_KEY,

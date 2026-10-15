@@ -1,5 +1,5 @@
-import { createSignal, untrack, type Accessor } from "solid-js";
-import { createStore, reconcile, unwrap } from "solid-js/store";
+import { batch, createSignal, untrack, type Accessor } from "solid-js";
+import { createStore, produce, reconcile, unwrap } from "solid-js/store";
 import type { TranscriptItem } from "@/components/Transcript";
 import type { ContextBreakdown } from "@/types";
 import { cloneValue } from "@/lib/utils";
@@ -14,15 +14,28 @@ export type TranscriptItemsUpdater =
 export function createTranscriptItems(initialItems: ChatTranscriptItem[] = []): [
   Accessor<ChatTranscriptItem[]>,
   (update: TranscriptItemsUpdater) => ChatTranscriptItem[],
+  (chunks: ReadonlyMap<number, string>) => void,
 ] {
   const [state, setState] = createStore({ items: cloneValue(unwrap(initialItems)) });
+  const indices = new Map(initialItems.map((item, index) => [item.id, index]));
   return [
     () => state.items,
     (update) => {
       const next = untrack(() => typeof update === "function" ? update(unwrap(state.items)) : update);
+      indices.clear();
+      next.forEach((item, index) => indices.set(item.id, index));
       setState("items", reconcile(next, { key: "id" }));
       return state.items;
     },
+    (chunks) => untrack(() => batch(() => {
+      for (const [id, chunk] of chunks) {
+        const index = indices.get(id);
+        if (index === undefined || !chunk) continue;
+        setState("items", index, produce((item) => {
+          if (item.type === "message") item.text += chunk;
+        }));
+      }
+    })),
   ];
 }
 

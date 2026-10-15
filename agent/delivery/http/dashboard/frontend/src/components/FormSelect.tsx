@@ -403,11 +403,10 @@ export function FormMultiSelect(props: FormMultiSelectProps) {
   };
 
   const toggleOption = (option: SelectControlOption) => {
-    if (option.disabled || !canSelectMore()) {
+    const isSelected = local.values.includes(option.value);
+    if (option.disabled || (!isSelected && !canSelectMore())) {
       return;
     }
-
-    const isSelected = local.values.includes(option.value);
     if (isSelected) {
       local.onChange(local.values.filter((v) => v !== option.value));
     } else {
@@ -528,24 +527,24 @@ export function FormMultiSelect(props: FormMultiSelectProps) {
           >
             <For each={local.options}>
               {(option) => {
-                const isSelected = local.values.includes(option.value);
-                const isDisabled = option.disabled || (!isSelected && !canSelectMore());
+                const isSelected = createMemo(() => local.values.includes(option.value));
+                const isDisabled = () => option.disabled || (!isSelected() && !canSelectMore());
                 return (
                   <button
                     class={classNames(
                       "form-select-option",
-                      isSelected && "form-select-option--active",
-                      isDisabled && "form-select-option--disabled",
+                      isSelected() && "form-select-option--active",
+                      isDisabled() && "form-select-option--disabled",
                     )}
                     type="button"
-                    disabled={isDisabled}
+                    disabled={isDisabled()}
                     role="option"
-                    aria-selected={isSelected}
+                    aria-selected={isSelected()}
                     title={option.title || option.label}
                     onClick={() => toggleOption(option)}
                   >
                     <span class="form-select-option-label">{option.label}</span>
-                    <Show when={isSelected}>
+                    <Show when={isSelected()}>
                       <Check size={14} class="form-select-option-check" />
                     </Show>
                   </button>
