@@ -73,6 +73,8 @@ export interface WorkspaceSelectorProps {
   selection?: WorkspaceSelectionDraft | null;
   locked: boolean;
   disabled?: boolean;
+  embedded?: boolean;
+  onBrowserOpenChange?: (open: boolean) => void;
   onSelectionChange: (selection: WorkspaceSelectionDraft) => void;
 }
 
@@ -160,6 +162,7 @@ function getTailPath(fullPath: string): string {
 }
 
 export function WorkspaceSelector(props: WorkspaceSelectorProps) {
+  let selectorRef: HTMLDivElement | undefined;
   const { showToast } = useToast();
   const [backend, setBackend] = createSignal<WorkspaceBackendKey>("local");
   const [source, setSource] = createSignal<WorkspaceSourceKey>(
@@ -180,6 +183,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
   const [sandboxSearch, setSandboxSearch] = createSignal("");
   const [resolvedLabel, setResolvedLabel] = createSignal("");
   const [browserOpen, setBrowserOpen] = createSignal(false);
+  createEffect(() => props.onBrowserOpenChange?.(browserOpen()));
   const [browsePayload, setBrowsePayload] = createSignal<WorkspaceBrowsePayload | null>(null);
   const [browseLoading, setBrowseLoading] = createSignal(false);
   const [browseError, setBrowseError] = createSignal("");
@@ -609,7 +613,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
   });
 
   return (
-    <div class={`workspace-selector ${props.locked ? "locked" : ""}`}>
+    <div ref={selectorRef} class={`workspace-selector ${props.locked ? "locked" : ""} ${props.embedded ? "workspace-selector--embedded" : ""}`}>
       <Show when={props.locked}>
         <div class="workspace-selector-locked-status">
           <Lock size={13} />
@@ -666,6 +670,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
                   title={backendOptions().find((b) => b.value === backend())?.label || backend()}
                   icon={selectedBackendIcon()}
                   align="right"
+                  portalMount={props.embedded ? selectorRef : undefined}
                 />
               </div>
             </Show>

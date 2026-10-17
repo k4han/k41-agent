@@ -23,6 +23,7 @@ export function SelectControl(props: {
   title?: string;
   style?: JSX.CSSProperties | string;
   align?: "left" | "right";
+  portalMount?: HTMLElement;
 }) {
   const [open, setOpen] = createSignal(false);
   const [menuPos, setMenuPos] = createSignal({ top: 0, left: 0, width: 0, maxHeight: 260 });
@@ -101,7 +102,9 @@ export function SelectControl(props: {
     if (props.disabled) {
       return;
     }
-    if (event.key === "Escape") {
+    if (event.key === "Escape" && open()) {
+      event.preventDefault();
+      event.stopPropagation();
       close();
       return;
     }
@@ -149,12 +152,20 @@ export function SelectControl(props: {
         <ChevronDown class="select-control-caret" size={14} />
       </button>
       <Show when={open()}>
-        <Portal>
+        <Portal mount={props.portalMount}>
           <div
             ref={menuRef}
             class="select-control-menu select-control-menu--portal"
             role="listbox"
             aria-label={props.ariaLabel}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                event.stopPropagation();
+                close();
+                triggerRef?.focus();
+              }
+            }}
             style={{
               top: `${menuPos().top}px`,
               left: `${menuPos().left}px`,

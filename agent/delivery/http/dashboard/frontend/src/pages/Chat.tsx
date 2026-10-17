@@ -1921,14 +1921,9 @@ export function ChatPage() {
                 showScrollToBottom={showScrollToBottom()}
                 turnAnchorSpacerHeight={turnAnchorSpacerHeight()}
                 onScrollToBottomClick={handleScrollToBottomClick}
-                workingDir={workingDir()}
-                defaultWorkingDir={defaultWorkingDir()}
-                workspace={workspaceRef()}
-                workspaceSelection={workspaceSelection()}
                 conversationBusy={conversationBusy()}
                 agents={validCards()}
                 activeAgentName={agentName()}
-                onWorkspaceSelectionChange={setWorkspaceDraft}
                 onSelectPrompt={handleSelectPrompt}
                 onEditMessage={(payload) => void handleEditMessage(payload)}
                 onRegenerateMessage={handleRegenerateMessage}
@@ -1939,6 +1934,13 @@ export function ChatPage() {
               />
               <ChatComposer
                 workspace={workspaceRef() || localWorkspaceRef(workingDir())}
+                projectWorkspace={workspaceRef()}
+                workingDir={workingDir()}
+                defaultWorkingDir={defaultWorkingDir()}
+                workspaceSelection={workspaceSelection()}
+                workspaceLocked={workspaceLocked()}
+                workspaceDisabled={conversationBusy()}
+                onWorkspaceSelectionChange={setWorkspaceDraft}
                 setChatPromptRef={(el) => (chatPromptRef = el)}
                 chatPromptRef={(el) => (chatPromptRef = el)}
                 prompt={prompt()}

@@ -21,9 +21,21 @@ const filePath = path.join(root, 'source.txt');
 fs.writeFileSync(filePath, 'initial content');
 const workspace = { backend: 'local', locator: root, metadata: {} };
 const requests = [];
+const sentMessages = [];
+const workspaceResolutions = [];
+let composerScenario = false;
+let failRepositories = false;
 let chatResponse;
 const fixtures = {
-  '/dashboard-api/agents/cards': { cards: [{ name: 'default', display_name: 'Default', provider: 'test', model: 'demo-model', valid: true }] },
+  '/dashboard-api/catalog': { backends: [
+    { name: 'local', title: 'Local', enabled: true },
+    { name: 'daytona', title: 'Daytona', enabled: true, capabilities: ['sandbox_inventory'] },
+    { name: 'modal', title: 'Modal', enabled: false },
+  ] },
+  '/dashboard-api/github': { repositories: [{ repository_id: 42, full_name: 'team/composer-project', default_branch: 'main' }] },
+  '/dashboard-api/sandboxes': { sandboxes: [{ sandbox_id: 'composer-sandbox', label: 'Composer sandbox', backend: 'daytona', root: '/workspace' }] },
+  '/dashboard-api/workspace/browse': { path: root, parent: path.dirname(root), entries: [], roots: [], truncated: false },
+  '/dashboard-api/agents/cards': { cards: [{ name: 'default', display_name: 'Default agent with a long display name', provider: 'test', model: 'demo-model', valid: true }] },
   '/dashboard-api/agents/providers': { provider_names: ['test'], default_provider: 'test', default_model: 'demo-model', model_catalogs: [{ provider: 'test', provider_type: 'openai', default_model: 'demo-model', models: [{ id: 'demo-model', label: 'Demo model', source: 'config' }] }] },
   '/dashboard-api/chat-history/workspace-chat': { thread_id: 'workspace-chat', messages: [], platform: 'api', user_id: 'dashboard', channel_id: '', agent_name: 'default', workspace: { execution: workspace } },
   '/dashboard-api/workspace/default': { workspace },
@@ -31,7 +43,14 @@ const fixtures = {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   if (url.pathname === '/api/chat/events') {
-    for await (const _chunk of req) { /* Consume the request before streaming. */ }
+    let body = '';
+    for await (const chunk of req) body += chunk;
+    sentMessages.push(JSON.parse(body));
+    if (composerScenario) {
+      res.setHeader('Content-Type', 'application/x-ndjson');
+      res.end();
+      return;
+    }
     chatResponse = res;
     res.setHeader('Content-Type', 'application/x-ndjson');
     res.setHeader('Cache-Control', 'no-cache');
@@ -42,6 +61,23 @@ const server = http.createServer(async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('X-CSRF-Token', 'workspace-test-csrf');
     const reply = value => res.end(JSON.stringify(value));
+    if (url.pathname === '/dashboard-api/github' && failRepositories) {
+      res.statusCode = 503;
+      return reply({ detail: 'Repository service unavailable' });
+    }
+    if (url.pathname === '/dashboard-api/workspace/resolve') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const selection = JSON.parse(body);
+      workspaceResolutions.push(selection);
+      const backend = selection.backend || selection.workspace?.backend || 'local';
+      return reply({ workspace: { execution: {
+        backend,
+        locator: selection.workspace?.locator || (backend === 'local' ? root : 'composer-sandbox'),
+        label: selection.kind === 'github' ? 'team/composer-project' : 'Composer project',
+        metadata: selection.kind === 'github' ? { source: 'github', repository_id: 42, repository_full_name: 'team/composer-project' } : {},
+      } } });
+    }
     if (fixtures[url.pathname]) return reply(fixtures[url.pathname]);
     if (url.pathname.startsWith('/dashboard-api/workspace/')) {
       requests.push({ kind: url.pathname.split('/').pop(), path: url.searchParams.get('path') });
@@ -110,9 +146,189 @@ try {
   };
   await call('Page.enable');
   await call('Runtime.enable');
+  composerScenario = true;
+  await call('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await call('Page.navigate', { url: base + '/chat' });
+  await until(() => js('!!document.querySelector(".composer-workspace-trigger")'), 'composer project picker');
+  await js(`document.querySelector('button[aria-label="Close workspace explorer"]')?.click()`);
+  await delay(300);
+  assert.equal(await js('document.querySelector(".composer-workspace-label").textContent'), 'Select project');
+  assert.equal(await js('!!document.querySelector(".chat-welcome-hero .workspace-selector")'), false, 'welcome must not duplicate project selection');
+  const click = async selector => {
+    await js('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+    const point = await js(`(() => {
+      const el = document.querySelector(${JSON.stringify(selector)});
+      el.scrollIntoView({ block: 'nearest' });
+      const r = el.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      if (!el.contains(hit)) throw new Error('Covered target: ' + ${JSON.stringify(selector)} + ', hit=' + hit?.className);
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    })()`);
+    await call('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point });
+    await call('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point });
+  };
+  const escape = () => call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  const openPicker = async () => {
+    await click('.composer-workspace-trigger');
+    await until(() => js('!!document.querySelector(".composer-workspace-popover .workspace-selector")'), 'project popover');
+  };
+  const screenshot = async name => {
+    const directory = process.env.COMPOSER_SCREENSHOT_DIR;
+    if (!directory) return;
+    fs.mkdirSync(directory, { recursive: true });
+    const { data } = await call('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(directory, `${name}.png`), Buffer.from(data, 'base64'));
+  };
+  const source = title => js(`Array.from(document.querySelectorAll('.workspace-tab-btn')).find(el => el.textContent.trim() === ${JSON.stringify(title)}).click()`);
+  const send = async text => {
+    const count = sentMessages.length;
+    await js(`(() => {
+      const input = document.querySelector('.chat-prompt-input');
+      input.value = ${JSON.stringify(text)};
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector('button[aria-label="Send message"]').click();
+    })()`);
+    await until(() => sentMessages.length === count + 1, 'composer message sent');
+    await until(() => js(`!!document.querySelector('button[aria-label="Send message"]')`), 'composer stream completed');
+  };
+  for (const dark of [false, true]) {
+    await js(`document.documentElement.classList.toggle('dark', ${dark})`);
+    for (const width of [320, 375, 399, 400, 480, 559, 560, 960]) {
+      await js(`document.querySelector('.chat-composer').style.width = '${width}px'`);
+      await delay(50);
+      const bounds = await js(`(() => {
+        const composer = document.querySelector('.chat-composer');
+        const bar = composer.querySelector('.chat-composer-toolbar');
+        const outer = bar.getBoundingClientRect();
+        const controls = ['.chat-composer-more-wrapper > button', '.agent-picker-trigger', '.model-picker-trigger', '.chat-effort-button', '.composer-workspace-trigger', '.chat-composer-send'];
+        const rects = controls.map(selector => composer.querySelector(selector)).filter(el => getComputedStyle(el).display !== 'none').map(el => el.getBoundingClientRect());
+        return {
+          fits: rects.every(r => r.left >= outer.left && r.right <= outer.right + 1 && r.width >= 40 && r.height >= 40),
+          row: rects.every(r => Math.abs(r.top - rects[0].top) < 1),
+          overflow: bar.scrollWidth > bar.clientWidth,
+          effort: getComputedStyle(composer.querySelector('.chat-effort-button')).display !== 'none',
+          project: getComputedStyle(composer.querySelector('.composer-workspace-label')).display !== 'none',
+          contentWidth: composer.clientWidth,
+          grouped: composer.querySelector('.agent-picker-trigger').parentElement === composer.querySelector('.model-picker-trigger').parentElement,
+          packed: rects.slice(1, -1).every((r, index) => r.left >= rects[index].right && r.left - rects[index].right <= 12),
+          sendRight: outer.right - rects.at(-1).right <= 12,
+          contextBesideSend: (() => {
+            const context = composer.querySelector('.context-window-circle-btn')?.getBoundingClientRect();
+            const send = rects.at(-1);
+            return !context || (context.right <= send.left && send.left - context.right <= 6);
+          })(),
+        };
+      })()`);
+      assert.equal(bounds.fits && bounds.row && !bounds.overflow, true, `single-row composer at ${width}px, dark=${dark}: ${JSON.stringify(bounds)}`);
+      assert.equal(bounds.grouped && bounds.packed && bounds.sendRight && bounds.contextBesideSend, true, `grouped left controls and right send at ${width}px: ${JSON.stringify(bounds)}`);
+      assert.equal(bounds.effort, width - 2 >= 400);
+      assert.equal(bounds.project, width - 2 >= 560);
+      await click('.agent-picker-trigger');
+      await until(() => js('!!document.querySelector(".agent-card-item")'), 'independent agent menu');
+      assert.equal(await js('!!document.querySelector(".model-item-row")'), false);
+      await click('.model-picker-trigger');
+      await until(() => js('!!document.querySelector(".model-item-row")'), 'independent model menu');
+      assert.equal(await js('!!document.querySelector(".agent-card-item")'), false);
+      await escape();
+      assert.equal(await js('document.activeElement === document.querySelector(".model-picker-trigger")'), true);
+      await openPicker();
+      assert.equal(await js(`(() => {
+        const r = document.querySelector('.composer-workspace-popover').getBoundingClientRect();
+        return r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight;
+      })()`), true, 'project popover stays within the viewport');
+      await escape();
+      await until(() => js('!document.querySelector(".composer-workspace-popover")'), 'Escape closes project popover');
+      assert.equal(await js('document.activeElement === document.querySelector(".composer-workspace-trigger")'), true, 'Escape restores project trigger focus');
+    }
+  }
+  await js('document.querySelector(".chat-composer").style.removeProperty("width")');
+  await js(`(() => {
+    const transfer = new DataTransfer();
+    for (let i = 0; i < 10; i++) transfer.items.add(new File(['Test attachment'], 'attachment-with-a-long-name-' + i + '.txt', { type: 'text/plain' }));
+    const input = document.querySelector('.chat-composer input[type=file]');
+    input.files = transfer.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  })()`);
+  await until(() => js('document.querySelectorAll(".chat-attachment-chip").length === 10'), 'multiple pending attachments');
+  assert.equal(await js(`(() => {
+    const list = document.querySelector('.chat-attachment-list');
+    return list.getBoundingClientRect().height <= 96 && list.scrollHeight > list.clientHeight;
+  })()`), true, 'pending attachment list must stay bounded and scrollable');
+  await js('Array.from(document.querySelectorAll(".chat-attachment-remove")).forEach(button => button.click())');
+  await send('Use an automatic temporary workspace');
+  assert.equal(workspaceResolutions.length, 0, 'unselected project must preserve automatic temporary provisioning');
+  assert.equal(sentMessages.at(-1).workspace ?? null, null);
+  await openPicker();
+  await source('Temporary');
+  assert.equal(await js('document.querySelector(".composer-workspace-label").textContent'), 'Temporary');
+  await source('Local Folder');
+  await js(`(() => {
+    const input = document.querySelector('.workspace-path-input');
+    input.value = '/unapplied-project';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`);
+  await click('.chat-header-title');
+  assert.equal(await js('!!document.querySelector(".composer-workspace-popover")'), false);
+  assert.equal(await js('document.querySelector(".composer-workspace-label").textContent'), 'Temporary', 'closing must not commit a typed path');
+  await openPicker();
+  await source('Local Folder');
+  await click('.workspace-browse-btn');
+  await until(() => js('!!document.querySelector(".dialog-backdrop") && !!document.querySelector(".workspace-browser-path-val")'), 'nested folder browser');
+  await escape();
+  assert.equal(await js('!!document.querySelector(".dialog-backdrop")'), false);
+  assert.equal(await js('!!document.querySelector(".composer-workspace-popover")'), true, 'nested Escape must preserve project popover');
+  await click('.workspace-browse-btn');
+  await until(() => js('document.querySelector(".workspace-browser-path-val")?.textContent !== "(none)"'), 'folder browse result');
+  await click('.workspace-browser-actions .btn-primary');
+  assert.equal(await js('!!document.querySelector(".composer-workspace-popover")'), true, 'choosing a folder must preserve the project popover');
+  await escape();
+  await send('Use the selected local project');
+  assert.equal(workspaceResolutions.at(-1).kind, 'local');
+  assert.equal(sentMessages.at(-1).workspace.locator, root);
+  await openPicker();
+  await source('GitHub');
+  await until(() => js('!!document.querySelector(".workspace-item-card")'), 'GitHub repository list');
+  await click('.workspace-item-card');
+  assert.equal(await js('document.querySelector(".composer-workspace-label").textContent'), 'team/composer-project');
+  await screenshot('project-popover');
+  await escape();
+  await send('Use the selected repository');
+  assert.equal(workspaceResolutions.at(-1).repository_id, 42);
+  assert.equal(workspaceResolutions.at(-1).backend, 'local');
+  await openPicker();
+  await click('.workspace-backend-control .select-control-trigger');
+  assert.equal(await js('document.querySelectorAll(".workspace-selector [role=option]").length'), 2, 'disabled backend must not be selectable');
+  await escape();
+  assert.equal(await js('!!document.querySelector(".composer-workspace-popover") && !document.querySelector(".workspace-selector [role=listbox]")'), true, 'backend Escape must preserve project popover');
+  await escape();
+  assert.equal(await js('!!document.querySelector(".composer-workspace-popover")'), false, 'a second Escape closes the project popover');
+  await openPicker();
+  await click('.workspace-backend-control .select-control-trigger');
+  await click('.workspace-selector [role=option]:last-child');
+  assert.equal(await js('!!document.querySelector(".composer-workspace-popover")'), true, 'backend selection must not dismiss the project popover');
+  await source('Cloud Sandbox');
+  await until(() => js('!!document.querySelector(".workspace-panel-sandbox .workspace-item-card")'), 'sandbox inventory');
+  await click('.workspace-panel-sandbox .workspace-item-card');
+  await escape();
+  await send('Use the selected sandbox');
+  assert.equal(workspaceResolutions.at(-1).kind, 'daytona');
+  assert.equal(sentMessages.at(-1).workspace.backend, 'daytona');
+  failRepositories = true;
+  await openPicker();
+  await source('GitHub');
+  await until(() => js('!!document.querySelector(".workspace-panel-github .error")'), 'repository error feedback');
+  await escape();
+  failRepositories = false;
+  console.log('PASS: composer container widths, themes, project popover, nested folder browser, backend selection, temporary/local/GitHub/sandbox sends, and repository errors.');
+  composerScenario = false;
   await call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   await call('Page.navigate', { url: base + '/c/workspace-chat' });
+  await until(() => js('!!document.querySelector(".chat-prompt-input") && !document.querySelector(".chat-prompt-input").disabled'), 'existing conversation');
+  await js(`document.querySelector('button[aria-label="Open workspace"]')?.click()`);
   await until(() => js('!!document.querySelector(".workspace-tree-row") && !!document.querySelector(".chat-prompt-input") && !document.querySelector(".chat-prompt-input").disabled'), 'production chat and local workspace');
+  await openPicker();
+  assert.equal(await js('!!document.querySelector(".workspace-selector.locked") && !document.querySelector(".workspace-tab-btn")'), true, 'existing conversation project must remain locked');
+  await escape();
   await js('document.querySelector(".workspace-tree-row").click();');
   await until(() => js('document.querySelector(".workspace-file-panel")?.textContent.includes("initial content")'), 'initial file preview');
   await until(() => js('!!document.querySelector(".workspace-file-view-shiki")'), 'initial code rendering');
@@ -133,6 +349,12 @@ try {
     document.querySelector('button[aria-label="Send message"]').click();
   })()`);
   await until(() => Boolean(chatResponse), 'chat stream starts');
+  assert.equal(await js(`(() => {
+    const bar = document.querySelector('.chat-composer-toolbar').getBoundingClientRect();
+    const stop = document.querySelector('.chat-composer-stop').getBoundingClientRect();
+    const context = document.querySelector('.context-window-circle-btn').getBoundingClientRect();
+    return bar.right - stop.right <= 12 && context.right <= stop.left && stop.left - context.right <= 6;
+  })()`), true, 'stop stays at the right edge beside context while streaming');
   await js(`window.previewNode = document.querySelector('.workspace-file-view-shiki').firstChild;
     window.backgroundMutations = [];
     window.backgroundObserver = new MutationObserver(records => backgroundMutations.push(...records));
@@ -168,6 +390,29 @@ try {
   assert.deepEqual(await fontSizes(['.chat-prompt-input']), ['16px'], 'mobile input prevents automatic zoom');
   chatResponse.end();
   await until(() => js(`!!document.querySelector('button[aria-label="Send message"]')`), 'chat completes');
+  await js(`document.querySelector('button[aria-label="Close workspace explorer"]')?.click()`);
+  await delay(300);
+  for (const width of [320, 375, 480, 560, 960]) {
+    await call('Emulation.setDeviceMetricsOverride', { width, height: 844, deviceScaleFactor: 1, mobile: width < 768 });
+    await delay(100);
+    assert.equal(await js(`(() => {
+      const composer = document.querySelector('.chat-composer');
+      const toolbar = composer.querySelector('.chat-composer-toolbar');
+      const bounds = composer.getBoundingClientRect();
+      const context = composer.querySelector('.context-window-circle-btn').getBoundingClientRect();
+      const send = composer.querySelector('.chat-composer-send').getBoundingClientRect();
+      const agent = composer.querySelector('.agent-picker-trigger').getBoundingClientRect();
+      const model = composer.querySelector('.model-picker-trigger').getBoundingClientRect();
+      return toolbar.scrollWidth <= toolbar.clientWidth && context.width >= 40 && send.width >= 40
+        && agent.width >= 40 && model.width >= 40 && model.left >= agent.right
+        && context.right <= send.left && send.left - context.right <= 6 && bounds.right - send.right <= 12
+        && send.right <= bounds.right && Math.abs(context.top - send.top) < 1;
+    })()`), true, `context and send remain visible at ${width}px`);
+    await openPicker();
+    if (width === 375 || width === 960) await screenshot(`locked-project-${width}`);
+    await escape();
+    if (width === 375 || width === 960) await screenshot(`composer-${width}`);
+  }
   assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
   console.log('PASS: production Chat refreshes real local files and previews while tools run and on streamed tool results.');
 } finally {

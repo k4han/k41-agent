@@ -2,23 +2,11 @@ import { ArrowDown, Loader2, Sparkles } from "lucide-solid";
 import { For, Show } from "solid-js";
 
 import { TranscriptItemView, type TranscriptAttachment, type TranscriptRole } from "@/components/Transcript";
-import { WorkspaceSelector } from "@/components/WorkspaceSelector";
 import type { ChatTranscriptItem } from "@/lib/chatStreamStore";
 import { useStreamingTranscriptItem } from "@/lib/useStreamingTranscriptItem";
-import type { AgentCard, WorkspaceRef } from "@/types";
-import type { WorkspaceSelectionDraft } from "@/components/WorkspaceSelector";
+import type { AgentCard } from "@/types";
 
-export interface ChatWelcomeHeroProps {
-  workingDir: string;
-  defaultWorkingDir: string;
-  workspace: WorkspaceRef | null;
-  workspaceSelection: WorkspaceSelectionDraft | null;
-  conversationBusy: boolean;
-  onWorkspaceSelectionChange: (value: WorkspaceSelectionDraft) => void;
-  onSelectPrompt?: (promptText: string) => void;
-}
-
-export function ChatWelcomeHero(props: ChatWelcomeHeroProps) {
+export function ChatWelcomeHero() {
   return (
     <div class="chat-welcome-hero">
       <div class="chat-welcome-hero-header">
@@ -27,22 +15,8 @@ export function ChatWelcomeHero(props: ChatWelcomeHeroProps) {
         </div>
         <h1 class="chat-welcome-hero-title">How can Kai help you today?</h1>
         <p class="chat-welcome-hero-desc">
-          Select a workspace context below, or write your own instructions.
+          Write a message below. Use the project picker beside the + button to choose a project and backend, or start with a temporary workspace.
         </p>
-      </div>
-
-      <div class="chat-workspace-empty">
-        <div class="chat-workspace-empty-inner">
-          <WorkspaceSelector
-            workingDir={props.workingDir}
-            defaultWorkingDir={props.defaultWorkingDir}
-            workspace={props.workspace}
-            selection={props.workspaceSelection}
-            locked={false}
-            disabled={props.conversationBusy}
-            onSelectionChange={props.onWorkspaceSelectionChange}
-          />
-        </div>
       </div>
     </div>
   );
@@ -62,14 +36,9 @@ export interface ChatTranscriptProps {
   showScrollToBottom: boolean;
   turnAnchorSpacerHeight: number;
   onScrollToBottomClick: () => void;
-  workingDir: string;
-  defaultWorkingDir: string;
-  workspace: WorkspaceRef | null;
-  workspaceSelection: WorkspaceSelectionDraft | null;
   conversationBusy: boolean;
   agents: AgentCard[];
   activeAgentName: string;
-  onWorkspaceSelectionChange: (value: WorkspaceSelectionDraft) => void;
   onSelectPrompt?: (promptText: string) => void;
   onEditMessage: (payload: {
     itemId?: number;
@@ -137,15 +106,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                   when={!props.currentThreadId}
                   fallback={<div class="empty">Send a message to continue this thread.</div>}
                 >
-                  <ChatWelcomeHero
-                    workingDir={props.workingDir}
-                    defaultWorkingDir={props.defaultWorkingDir}
-                    workspace={props.workspace}
-                    workspaceSelection={props.workspaceSelection}
-                    conversationBusy={props.conversationBusy}
-                    onWorkspaceSelectionChange={props.onWorkspaceSelectionChange}
-                    onSelectPrompt={props.onSelectPrompt}
-                  />
+                  <ChatWelcomeHero />
                 </Show>
               }
             >

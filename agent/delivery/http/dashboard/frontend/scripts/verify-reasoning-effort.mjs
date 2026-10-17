@@ -176,7 +176,7 @@ try {
   }
   assert.equal(await js(`document.querySelector('${select}').value`), 'high');
   const selectModel = async modelId => {
-    await js('document.querySelector(".agent-model-badge").click()');
+    await js('document.querySelector(".model-picker-trigger").click()');
     await until(() => js('!!document.querySelector(".model-item-row")'), 'model menu');
     await js(`Array.from(document.querySelectorAll('.model-item-row')).find(row => row.querySelector('.model-item-row-name').textContent === '${modelId}').click()`);
     await until(() => js('!document.querySelector(".agent-model-popover")'), 'model selected');
@@ -201,13 +201,22 @@ try {
     await call('Emulation.setDeviceMetricsOverride', { width, height: 844, deviceScaleFactor: 1, mobile: width < 500 });
     await delay(150);
     assert.equal(await js('document.documentElement.scrollWidth <= innerWidth'), true);
-    assert.equal(await js(`document.querySelector('${select}').getBoundingClientRect().width >= 76`), true);
+    if (width < 400) {
+      assert.equal(await js(`getComputedStyle(document.querySelector('${select}')).display`), 'none');
+      await js('document.querySelector(".chat-composer-more-wrapper > button").click()');
+      await until(() => js('!!document.querySelector(".chat-effort-menu-select")'), 'compact effort selector');
+      assert.equal(await js('document.querySelector(".chat-effort-menu-select").value'), '');
+      assert.equal(await js('document.querySelector(".chat-effort-menu-select").getBoundingClientRect().width >= 76'), true);
+      await js('document.querySelector(".chat-composer-more-wrapper > button").click()');
+    } else {
+      assert.equal(await js(`document.querySelector('${select}').getBoundingClientRect().width >= 76`), true);
+    }
   }
-  await js('document.querySelector(".agent-model-badge").click()');
+  await js('document.querySelector(".agent-picker-trigger").click()');
   await until(() => js('!!document.querySelector(".agent-card-item")'), 'agent menu');
   await js('Array.from(document.querySelectorAll(".agent-card-item")).find(item => item.querySelector(".agent-card-item-name").textContent.trim() === "Legacy Agent").click()');
   assert.equal(await js(`document.querySelector('${select}').value`), 'low');
-  await js('document.querySelector(".agent-model-popover-close").click()');
+  assert.equal(await js('!!document.querySelector(".agent-model-popover")'), false, 'agent selection closes its menu');
   await js(`(() => { const el = document.querySelector('${select}'); el.value = ''; el.dispatchEvent(new Event('change', { bubbles: true })); })()`);
   await js('(() => { const input = document.querySelector(".chat-prompt-input"); input.value = "Test automatic effort"; input.dispatchEvent(new Event("input", { bubbles: true })); })()');
   await js(`document.querySelector('button[aria-label="Send message"]').click()`);

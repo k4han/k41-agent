@@ -13,6 +13,8 @@ import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid
 import { Portal } from "solid-js/web";
 
 import { AgentModelPicker } from "@/components/AgentModelPicker";
+import { ComposerWorkspacePicker } from "@/components/ComposerWorkspacePicker";
+import type { WorkspaceSelectionDraft } from "@/components/WorkspaceSelector";
 import { ChatTodos, type TodoProgress } from "@/components/ChatTodos";
 import { ContextWindowIndicator, type ContextWindowData } from "@/components/ContextWindowIndicator";
 import { Dialog } from "@/components/Dialog";
@@ -28,6 +30,13 @@ import type { AgentCard, AgentChatPayload, WorkspaceRef } from "@/types";
 
 export interface ChatComposerProps {
   workspace?: WorkspaceRef | null;
+  projectWorkspace: WorkspaceRef | null;
+  workingDir: string;
+  defaultWorkingDir: string;
+  workspaceSelection: WorkspaceSelectionDraft | null;
+  workspaceLocked: boolean;
+  workspaceDisabled: boolean;
+  onWorkspaceSelectionChange: (selection: WorkspaceSelectionDraft) => void;
   prompt: string;
   onPromptChange: (value: string) => void;
   onSend: () => void;
@@ -74,6 +83,8 @@ export function ChatComposer(props: ChatComposerProps) {
 
   let chatPromptRef: HTMLTextAreaElement | undefined;
   let fileInputRef: HTMLInputElement | undefined;
+  let composerRef: HTMLDivElement | undefined;
+  const [compactToolbar, setCompactToolbar] = createSignal(false);
   const skillSuggestions = useSkillSuggestions(props, () => chatPromptRef);
 
   const [previewAttachment, setPreviewAttachment] = createSignal<PendingAttachment | null>(null);
@@ -81,7 +92,7 @@ export function ChatComposer(props: ChatComposerProps) {
   const [showMoreMenu, setShowMoreMenu] = createSignal(false);
   const [showPasteDialog, setShowPasteDialog] = createSignal(false);
   const [customPasteText, setCustomPasteText] = createSignal("");
-  const [moreMenuPos, setMoreMenuPos] = createSignal({ top: 0, left: 0 });
+  const [moreMenuPos, setMoreMenuPos] = createSignal({ top: 0, left: 0, maxHeight: 420 });
   let moreTriggerRef: HTMLButtonElement | undefined;
   let moreMenuRef: HTMLDivElement | undefined;
 
@@ -94,21 +105,26 @@ export function ChatComposer(props: ChatComposerProps) {
     if (left + width > window.innerWidth - 8) {
       left = Math.max(8, rect.right - width);
     }
-    const estimatedHeight = 260;
-    let top = rect.top - estimatedHeight - gap;
-    if (top < 8) {
-      top = rect.bottom + gap;
-    }
-    setMoreMenuPos({ top, left });
+    const spaceAbove = rect.top - gap * 2;
+    const spaceBelow = window.innerHeight - rect.bottom - gap * 2;
+    const above = spaceAbove >= spaceBelow;
+    const maxHeight = Math.max(0, above ? spaceAbove : spaceBelow);
+    const height = Math.min(moreMenuRef?.scrollHeight || 260, maxHeight);
+    const top = above ? Math.max(gap, rect.top - height - gap) : rect.bottom + gap;
+    setMoreMenuPos({ top, left, maxHeight });
   };
 
   createEffect(() => {
     if (!showMoreMenu()) return;
     updateMoreMenuPosition();
     const handler = () => updateMoreMenuPosition();
+    const observer = new ResizeObserver(handler);
+    if (moreMenuRef) observer.observe(moreMenuRef);
+    if (composerRef) observer.observe(composerRef);
     window.addEventListener("scroll", handler, true);
     window.addEventListener("resize", handler);
     onCleanup(() => {
+      observer.disconnect();
       window.removeEventListener("scroll", handler, true);
       window.removeEventListener("resize", handler);
     });
@@ -151,6 +167,9 @@ export function ChatComposer(props: ChatComposerProps) {
   };
 
   onMount(() => {
+    const observer = new ResizeObserver(([entry]) => setCompactToolbar(entry.contentRect.width < 400));
+    if (composerRef) observer.observe(composerRef);
+    onCleanup(() => observer.disconnect());
     document.addEventListener("click", handleGlobalClick);
     document.addEventListener("keydown", handleGlobalKeyDown);
   });
@@ -199,8 +218,27 @@ export function ChatComposer(props: ChatComposerProps) {
     }
   };
 
+  const effortSelect = (extraClass = "") => (
+    <select
+      class={`chat-effort-button ${extraClass}`}
+      value={props.reasoningEffort}
+      onChange={(event) => props.onReasoningEffortChange(event.currentTarget.value)}
+      disabled={props.composerDisabled || props.reasoningEffortLevels.length === 0}
+      title={props.reasoningEffortLevels.length
+        ? "Reasoning effort for the selected model"
+        : "No configurable effort levels available. Missing metadata can be supplied in provider settings."}
+      aria-label="Reasoning effort"
+    >
+      <option value="" selected={props.reasoningEffort === ""}>Auto{props.reasoningEffortDefault ? ` (${effortLabel(props.reasoningEffortDefault)})` : ""}</option>
+      <For each={props.reasoningEffortLevels}>
+        {(level) => <option value={level} selected={props.reasoningEffort === level}>{effortLabel(level)}</option>}
+      </For>
+    </select>
+  );
+
   return (
     <div
+      ref={composerRef}
       class={`composer chat-composer ${isDragging() ? "is-drag-over" : ""}`}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
@@ -214,8 +252,9 @@ export function ChatComposer(props: ChatComposerProps) {
         multiple
         accept={props.attachmentAccept}
         onChange={async (event) => {
-          await props.onAddFiles(event.currentTarget.files);
-          event.currentTarget.value = "";
+          const input = event.currentTarget;
+          await props.onAddFiles(input.files);
+          input.value = "";
         }}
       />
       <Show when={isDragging()}>
@@ -436,6 +475,8 @@ export function ChatComposer(props: ChatComposerProps) {
                   style={{
                     top: `${moreMenuPos().top}px`,
                     left: `${moreMenuPos().left}px`,
+                    "max-height": `${moreMenuPos().maxHeight}px`,
+                    "overflow-y": "auto",
                   }}
                 >
                   <button
@@ -475,6 +516,13 @@ export function ChatComposer(props: ChatComposerProps) {
                     <span>Clear prompt</span>
                   </button>
                   <div class="chat-composer-menu-divider" />
+                  <Show when={compactToolbar()}>
+                    <label class="chat-composer-effort-menu">
+                      <span>Reasoning effort</span>
+                      {effortSelect("chat-effort-menu-select")}
+                    </label>
+                    <div class="chat-composer-menu-divider" />
+                  </Show>
                   <div class="chat-composer-menu-shortcuts">
                     <div class="chat-composer-shortcut-row">
                       <span>Send message</span>
@@ -506,60 +554,51 @@ export function ChatComposer(props: ChatComposerProps) {
             defaultModel={props.payload.default_model}
             disabled={props.composerDisabled}
           />
-          <select
-            class="chat-effort-button"
-            value={props.reasoningEffort}
-            onChange={(event) => props.onReasoningEffortChange(event.currentTarget.value)}
-            disabled={props.composerDisabled || props.reasoningEffortLevels.length === 0}
-            title={props.reasoningEffortLevels.length
-              ? "Reasoning effort for the selected model"
-              : "No configurable effort levels available. Missing metadata can be supplied in provider settings."}
-            aria-label="Reasoning effort"
-          >
-            <option value="" selected={props.reasoningEffort === ""}>Auto{props.reasoningEffortDefault ? ` (${effortLabel(props.reasoningEffortDefault)})` : ""}</option>
-            <For each={props.reasoningEffortLevels}>
-              {(level) => <option value={level} selected={props.reasoningEffort === level}>{effortLabel(level)}</option>}
-            </For>
-          </select>
+          {effortSelect()}
+          <ComposerWorkspacePicker
+            workingDir={props.workingDir}
+            defaultWorkingDir={props.defaultWorkingDir}
+            workspace={props.projectWorkspace}
+            selection={props.workspaceSelection}
+            locked={props.workspaceLocked}
+            disabled={props.workspaceDisabled}
+            onSelectionChange={props.onWorkspaceSelectionChange}
+          />
         </div>
-        <div class="chat-composer-tier chat-composer-tier-actions">
-          <div class="chat-composer-actions">
-            <Show when={props.currentThreadId}>
-              <ContextWindowIndicator
-                data={props.contextWindowData}
-                onCompactClick={props.onCompactClick}
-                compacting={props.compacting}
-              />
-            </Show>
-          </div>
-          <div class="chat-composer-right-group">
-            <div class="chat-composer-send-wrapper">
-              <Show
-                when={props.stopActive}
-                fallback={
-                  <button
-                    class="chat-composer-icon chat-composer-send"
-                    type="button"
-                    onClick={() => props.onSend()}
-                    disabled={props.composerDisabled || (!props.prompt.trim() && !props.attachments.length)}
-                    title="Send message (Enter)"
-                    aria-label="Send message"
-                  >
-                    <Send size={15} />
-                  </button>
-                }
-              >
+        <div class="chat-composer-actions">
+          <Show when={props.currentThreadId}>
+            <ContextWindowIndicator
+              data={props.contextWindowData}
+              onCompactClick={props.onCompactClick}
+              compacting={props.compacting}
+            />
+          </Show>
+          <div class="chat-composer-send-wrapper">
+            <Show
+              when={props.stopActive}
+              fallback={
                 <button
-                  class="chat-composer-icon chat-composer-stop"
+                  class="chat-composer-icon chat-composer-send"
                   type="button"
-                  onClick={props.onStop}
-                  title="Stop generating"
-                  aria-label="Stop generating"
+                  onClick={() => props.onSend()}
+                  disabled={props.composerDisabled || (!props.prompt.trim() && !props.attachments.length)}
+                  title="Send message (Enter)"
+                  aria-label="Send message"
                 >
-                  <Square size={14} />
+                  <Send size={15} />
                 </button>
-              </Show>
-            </div>
+              }
+            >
+              <button
+                class="chat-composer-icon chat-composer-stop"
+                type="button"
+                onClick={props.onStop}
+                title="Stop generating"
+                aria-label="Stop generating"
+              >
+                <Square size={14} />
+              </button>
+            </Show>
           </div>
         </div>
       </div>

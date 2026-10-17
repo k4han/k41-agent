@@ -31,8 +31,7 @@
 .context-window-popover {
   position: absolute;
   bottom: calc(100% + 12px);
-  /* Align with the 40px send button across the 8px toolbar gap. */
-  right: -48px;
+  right: 0;
   transform: translateY(8px);
   width: 350px;
   max-width: calc(100vw - 32px);
@@ -86,7 +85,7 @@
   content: '';
   position: absolute;
   top: 100%;
-  right: 62px;
+  right: 14px;
   border-width: 6px;
   border-style: solid;
   border-color: var(--surface) transparent transparent transparent;
