@@ -573,7 +573,7 @@ function WorkspaceUsageTable(props: { list: WorkspaceUsageDetail[]; displayTimez
           <tr>
             <td>
               <div style="font-weight: 600; color: #fff;">{row.label}</div>
-              <div class="mono hint" style="font-size: 10px; color: #888; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 280px;" title={row.key}>
+              <div class="mono hint" style="font-size: 0.625rem; color: #888; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 280px;" title={row.key}>
                 {row.key}
               </div>
             </td>
@@ -581,7 +581,7 @@ function WorkspaceUsageTable(props: { list: WorkspaceUsageDetail[]; displayTimez
             <td>{formatNumber(row.event_count)}</td>
             <td>
               <div style="font-weight: 600; color: #3b82f6;">{formatNumber(row.total_tokens)}</div>
-              <div class="hint" style="font-size: 10px; color: #888;">In: {formatNumber(row.input_tokens)} / Out: {formatNumber(row.output_tokens)}</div>
+              <div class="hint" style="font-size: 0.625rem; color: #888;">In: {formatNumber(row.input_tokens)} / Out: {formatNumber(row.output_tokens)}</div>
             </td>
             <td>
               <div class="stack" style="gap: 4px; padding: 4px 0;">
@@ -599,7 +599,7 @@ function WorkspaceUsageTable(props: { list: WorkspaceUsageDetail[]; displayTimez
                     }}
                   </For>
                 </div>
-                <div style="display: flex; flex-direction: column; gap: 2px; font-size: 10px; color: #aaa;">
+                <div style="display: flex; flex-direction: column; gap: 2px; font-size: 0.625rem; color: #aaa;">
                   <For each={row.models.slice(0, 3)}>
                     {(item) => (
                       <div class="row-wrap" style="justify-content: space-between;">
@@ -609,7 +609,7 @@ function WorkspaceUsageTable(props: { list: WorkspaceUsageDetail[]; displayTimez
                     )}
                   </For>
                   <Show when={row.models.length > 3}>
-                    <div style="color: #666; font-size: 9px;">+ {row.models.length - 3} more models</div>
+                    <div style="color: #666; font-size: 0.5625rem;">+ {row.models.length - 3} more models</div>
                   </Show>
                 </div>
               </div>
@@ -648,13 +648,13 @@ function ThreadUsageTable(props: { list: ThreadUsageDetail[]; displayTimezone?: 
               <div style="font-weight: 600; color: #fff; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 250px;" title={row.title}>
                 {row.title}
               </div>
-              <div class="mono hint" style="font-size: 10px; color: #888;">{row.thread_id}</div>
+              <div class="mono hint" style="font-size: 0.625rem; color: #888;">{row.thread_id}</div>
             </td>
-            <td><span class="badge" style="font-size: 10px; padding: 2px 6px;">{row.agent_name}</span></td>
+            <td><span class="badge" style="font-size: 0.625rem; padding: 2px 6px;">{row.agent_name}</span></td>
             <td>{formatNumber(row.event_count)}</td>
             <td>
               <div style="font-weight: 600; color: #3b82f6;">{formatNumber(row.total_tokens)}</div>
-              <div class="hint" style="font-size: 10px; color: #888;">In: {formatNumber(row.input_tokens)} / Out: {formatNumber(row.output_tokens)}</div>
+              <div class="hint" style="font-size: 0.625rem; color: #888;">In: {formatNumber(row.input_tokens)} / Out: {formatNumber(row.output_tokens)}</div>
             </td>
             <td>
               <div class="stack" style="gap: 4px; padding: 4px 0;">
@@ -672,7 +672,7 @@ function ThreadUsageTable(props: { list: ThreadUsageDetail[]; displayTimezone?: 
                     }}
                   </For>
                 </div>
-                <div style="display: flex; flex-direction: column; gap: 2px; font-size: 10px; color: #aaa;">
+                <div style="display: flex; flex-direction: column; gap: 2px; font-size: 0.625rem; color: #aaa;">
                   <For each={row.models.slice(0, 3)}>
                     {(item) => (
                       <div class="row-wrap" style="justify-content: space-between;">
@@ -682,7 +682,7 @@ function ThreadUsageTable(props: { list: ThreadUsageDetail[]; displayTimezone?: 
                     )}
                   </For>
                   <Show when={row.models.length > 3}>
-                    <div style="color: #666; font-size: 9px;">+ {row.models.length - 3} more models</div>
+                    <div style="color: #666; font-size: 0.5625rem;">+ {row.models.length - 3} more models</div>
                   </Show>
                 </div>
               </div>

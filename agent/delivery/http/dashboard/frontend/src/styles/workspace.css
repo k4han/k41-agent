@@ -1,4 +1,5 @@
 .workspace-drawer {
+  font-size: var(--font-size-workspace);
   position: relative;
   min-width: 0;
   min-height: 0;
@@ -150,7 +151,7 @@ body.workspace-resizing * {
   color: var(--muted);
   padding: 0 8px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11.5px;
+  font-size: 0.71875rem;
   font-weight: 600;
   letter-spacing: 0.02em;
   white-space: nowrap;
@@ -191,7 +192,7 @@ body.workspace-resizing * {
   color: var(--fg);
   padding: 0 8px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12.5px;
+  font-size: var(--font-size-workspace);
   transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease;
 }
 
@@ -296,7 +297,7 @@ body.workspace-resizing * {
   background: transparent;
   color: var(--muted);
   padding: 0 10px 0 8px;
-  font-size: 12.5px;
+  font-size: var(--font-size-workspace);
   font-weight: 500;
   cursor: pointer;
   user-select: none;
@@ -423,7 +424,7 @@ body.workspace-resizing * {
   background: var(--surface-3);
   color: var(--muted);
   padding: 0 5px;
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 600;
   line-height: 1;
   margin-left: 6px;
@@ -509,7 +510,7 @@ body.workspace-resizing * {
   padding: 0 9px;
   text-align: left;
   cursor: pointer;
-  font-size: 12.5px;
+  font-size: var(--font-size-workspace);
   transition: background-color 100ms ease;
 }
 
@@ -529,7 +530,7 @@ body.workspace-resizing * {
 
 .workspace-menu-pill {
   margin-left: auto;
-  font-size: 10.5px;
+  font-size: 0.65625rem;
   font-weight: 600;
   padding: 1px 6px;
   border-radius: 4px;
@@ -573,13 +574,13 @@ body.workspace-resizing * {
 }
 
 .workspace-empty-title {
-  font-size: 14px;
+  font-size: var(--font-size-workspace);
   font-weight: 600;
   color: var(--fg);
 }
 
 .workspace-empty-desc {
-  font-size: 12.5px;
+  font-size: var(--font-size-workspace);
   color: var(--muted);
   max-width: 260px;
   line-height: 1.45;
@@ -632,7 +633,7 @@ body.workspace-resizing * {
 }
 
 .workspace-tree-toolbar-title {
-  font-size: 11.5px;
+  font-size: 0.71875rem;
   font-weight: 600;
   color: var(--muted);
   letter-spacing: 0.03em;
@@ -725,7 +726,7 @@ body.workspace-resizing * {
   color: var(--fg);
   padding: 3px 6px;
   padding-left: calc(6px + (var(--depth) * 16px));
-  font-size: 13px;
+  font-size: var(--font-size-workspace);
   text-align: left;
   cursor: pointer;
   transition: background-color 100ms ease, color 100ms ease;
@@ -773,7 +774,7 @@ body.workspace-resizing * {
 .workspace-tree-meta {
   color: var(--muted-2);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
+  font-size: 0.6875rem;
   white-space: nowrap;
   padding-left: 5px;
 }
@@ -851,7 +852,7 @@ body.workspace-resizing * {
   padding: 0 8px;
   text-align: left;
   cursor: pointer;
-  font-size: 12.5px;
+  font-size: var(--font-size-workspace);
   transition: background-color 100ms ease, color 100ms ease;
 }
 
@@ -868,7 +869,7 @@ body.workspace-resizing * {
 .workspace-tree-status {
   padding: 4px 8px 4px calc(24px + (var(--depth) * 16px));
   color: var(--muted-2);
-  font-size: 12px;
+  font-size: var(--font-size-workspace);
   font-style: italic;
 }
 
@@ -931,7 +932,7 @@ body.workspace-resizing * {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12.5px;
+  font-size: var(--font-size-workspace);
 }
 
 .workspace-change-stats {
@@ -939,7 +940,7 @@ body.workspace-resizing * {
   align-items: center;
   gap: 5px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11.5px;
+  font-size: 0.71875rem;
   font-weight: 600;
   white-space: nowrap;
 }
@@ -958,7 +959,7 @@ body.workspace-resizing * {
   background: color-mix(in srgb, var(--muted) 10%, transparent);
   color: var(--muted);
   padding: 2px 6px;
-  font-size: 10.5px;
+  font-size: 0.65625rem;
   font-weight: 600;
   text-overflow: ellipsis;
   text-transform: uppercase;
@@ -994,7 +995,7 @@ body.workspace-resizing * {
   margin: 0 10px 6px;
   color: var(--muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
+  font-size: var(--font-size-workspace);
 }
 
 /* Diff and File Viewers */
@@ -1008,7 +1009,7 @@ body.workspace-resizing * {
   background: var(--surface);
   border-radius: 6px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12.5px;
+  font-size: var(--font-size-workspace);
   line-height: 1.55;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
@@ -1018,6 +1019,10 @@ body.workspace-resizing * {
 .workspace-diff2html .d2h-file-wrapper,
 .workspace-diff2html .d2h-files-diff {
   background: transparent;
+}
+
+.workspace-diff2html .d2h-diff-table {
+  font-size: inherit;
 }
 
 .workspace-diff2html .d2h-file-wrapper {
@@ -1115,13 +1120,13 @@ body.workspace-resizing * {
 
 .workspace-hint {
   padding: 4px 10px 6px;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--muted-2);
 }
 
 .empty.compact {
   padding: 16px 12px;
-  font-size: 12.5px;
+  font-size: var(--font-size-workspace);
   color: var(--muted);
   text-align: center;
 }

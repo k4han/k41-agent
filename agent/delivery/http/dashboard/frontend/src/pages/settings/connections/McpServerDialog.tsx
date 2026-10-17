@@ -215,8 +215,8 @@ export function McpServerDialog(props: {
             <div class="stack" style={{ gap: "12px" }}>
               <Show when={props.initial?.error}>
                 <div class="panel" style={{ padding: "12px", "background-color": "rgba(239, 68, 68, 0.08)", "border": "1px solid rgb(239, 68, 68)", "border-radius": "6px", "margin-bottom": "8px" }}>
-                  <div style={{ "font-weight": "bold", "color": "rgb(239, 68, 68)", "margin-bottom": "4px", "font-size": "13px" }}>Server Connection Error</div>
-                  <div class="mono" style={{ "font-size": "12px", "color": "rgb(239, 68, 68)", "word-break": "break-all" }}>{props.initial?.error}</div>
+                  <div style={{ "font-weight": "bold", "color": "rgb(239, 68, 68)", "margin-bottom": "4px", "font-size": "0.8125rem" }}>Server Connection Error</div>
+                  <div class="mono" style={{ "font-size": "0.75rem", "color": "rgb(239, 68, 68)", "word-break": "break-all" }}>{props.initial?.error}</div>
                 </div>
               </Show>
 
@@ -228,8 +228,8 @@ export function McpServerDialog(props: {
                 <div style={{ display: "flex", "align-items": "center", gap: "10px", "margin-bottom": "8px", "padding": "12px", "background-color": "rgba(0, 0, 0, 0.02)", "border": "1px solid #e2e8f0", "border-radius": "8px" }}>
                   {getServerIcon(props.initial?.name ?? "")}
                   <div>
-                    <div style={{ "font-weight": "bold", "font-size": "14px" }}>{props.initial?.name}</div>
-                    <div class="hint" style={{ "font-size": "11px", "margin-top": "2px" }}>Exposed tools can be used by selecting them in Agent settings.</div>
+                    <div style={{ "font-weight": "bold", "font-size": "var(--font-size-base)" }}>{props.initial?.name}</div>
+                    <div class="hint" style={{ "font-size": "0.6875rem", "margin-top": "2px" }}>Exposed tools can be used by selecting them in Agent settings.</div>
                   </div>
                 </div>
                 <div style={{ display: "flex", "flex-direction": "column", gap: "10px" }}>
@@ -239,16 +239,16 @@ export function McpServerDialog(props: {
                         <div style={{ display: "flex", "align-items": "center", "justify-content": "space-between", "flex-wrap": "wrap", gap: "8px" }}>
                           <div style={{ display: "flex", "align-items": "center", gap: "8px" }}>
                             {getToolIcon(tool.name, props.initial?.name ?? "")}
-                            <span class="mono" style={{ "font-weight": "bold", "font-size": "13px", color: "var(--color-primary-light, #0076ff)" }}>
+                            <span class="mono" style={{ "font-weight": "bold", "font-size": "0.8125rem", color: "var(--color-primary-light, #0076ff)" }}>
                               {tool.name}
                             </span>
                           </div>
-                          <span class="hint mono" style={{ "font-size": "11px", opacity: 0.8 }}>
+                          <span class="hint mono" style={{ "font-size": "0.6875rem", opacity: 0.8 }}>
                             {tool.prefixed_name}
                           </span>
                         </div>
                         <Show when={tool.description}>
-                          <div class="hint" style={{ "font-size": "12px", "margin-top": "2px" }}>
+                          <div class="hint" style={{ "font-size": "0.75rem", "margin-top": "2px" }}>
                             {tool.description}
                           </div>
                         </Show>
@@ -379,7 +379,7 @@ export function McpServerDialog(props: {
                       <ul class="stack">
                         <For each={result.tools}>
                           {(tool) => (
-                            <li class="mono" style={{ "font-size": "12px" }}>
+                            <li class="mono" style={{ "font-size": "0.75rem" }}>
                               <strong>{tool.name}</strong>
                               <Show when={tool.description}>
                                 <span class="hint"> — {tool.description}</span>

@@ -1,5 +1,5 @@
 .message-markdown {
-  font-size: 14px;
+  font-size: var(--font-size-chat);
   line-height: 1.6;
   color: var(--fg);
   word-break: break-word;
@@ -28,12 +28,12 @@
   line-height: 1.3;
 }
 
-.message-markdown h1 { font-size: 1.4em; }
-.message-markdown h2 { font-size: 1.25em; }
-.message-markdown h3 { font-size: 1.12em; }
-.message-markdown h4 { font-size: 1em; }
+.message-markdown h1 { font-size: calc(var(--font-size-chat) * 1.4); }
+.message-markdown h2 { font-size: calc(var(--font-size-chat) * 1.25); }
+.message-markdown h3 { font-size: calc(var(--font-size-chat) * 1.12); }
+.message-markdown h4 { font-size: var(--font-size-chat); }
 .message-markdown h5,
-.message-markdown h6 { font-size: 0.95em; color: var(--muted); }
+.message-markdown h6 { font-size: calc(var(--font-size-chat) * 0.95); color: var(--muted); }
 
 .message-markdown ul,
 .message-markdown ol {
@@ -68,7 +68,7 @@
 
 .message-markdown code {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 0.88em;
+  font-size: var(--font-size-chat);
   padding: 1px 5px;
   border-radius: 5px;
   background: var(--surface-2);
@@ -91,7 +91,7 @@
   border: none;
   border-radius: 0;
   background: transparent;
-  font-size: 0.88em;
+  font-size: var(--font-size-chat);
   white-space: pre;
 }
 
@@ -130,7 +130,7 @@
   overflow: hidden;
   color: #c3ccd6;
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -181,7 +181,7 @@
   background: transparent;
   padding: 14px 20px 18px;
   color: #d8dee9;
-  font-size: 13px;
+  font-size: var(--font-size-chat);
   line-height: 1.65;
   overflow-x: auto;
 }
@@ -228,7 +228,7 @@
   gap: 9px;
   color: #c3ccd6;
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 700;
 }
 
@@ -304,7 +304,7 @@
   padding: 14px 20px 18px;
   color: #aeb8c3;
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .message-markdown .markdown-mermaid-error-message {
@@ -318,7 +318,7 @@
   background: transparent;
   padding: 14px 20px 18px;
   color: #d8dee9;
-  font-size: 13px;
+  font-size: var(--font-size-chat);
   line-height: 1.65;
 }
 
@@ -384,7 +384,7 @@
 
   .message-markdown .markdown-code-frame pre {
     padding: 10px 12px 12px;
-    font-size: 12px;
+    font-size: var(--font-size-chat);
   }
 
   /* Compact padding in Mermaid frame headers and render blocks */
@@ -408,7 +408,7 @@
   .message-markdown th,
   .message-markdown td {
     padding: 4px 8px;
-    font-size: 12px;
+    font-size: var(--font-size-chat);
   }
 }
 

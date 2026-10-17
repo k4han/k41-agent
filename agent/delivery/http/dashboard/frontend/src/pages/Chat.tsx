@@ -2027,7 +2027,7 @@ export function ChatPage() {
             <pre style={{
               "white-space": "pre-wrap",
               "word-break": "break-all",
-              "font-size": "13px",
+              "font-size": "var(--font-size-chat)",
               "line-height": "1.6",
               "margin": 0,
             }}>
@@ -2050,7 +2050,7 @@ export function ChatPage() {
             {(attachment) => (
               <div style={{ "margin-bottom": "8px" }}>
                 <div style={{
-                  "font-size": "12px",
+                  "font-size": "var(--font-size-chat)",
                   "font-weight": 600,
                   "color": "var(--muted)",
                   "margin-bottom": "4px",
@@ -2064,7 +2064,7 @@ export function ChatPage() {
                       <pre style={{
                         "white-space": "pre-wrap",
                         "word-break": "break-all",
-                        "font-size": "12px",
+                        "font-size": "var(--font-size-chat)",
                         "line-height": "1.5",
                         "margin": 0,
                         "background": "var(--surface-2)",

@@ -101,7 +101,7 @@
 .chat-header-title {
   min-width: 0;
   flex: 1;
-  font-size: 13.5px;
+  font-size: var(--font-size-chat);
   font-weight: 600;
   color: var(--fg);
   white-space: nowrap;
@@ -171,6 +171,7 @@
 }
 
 .chat-panel {
+  font-size: var(--font-size-chat);
   display: flex;
   height: 100%;
   min-height: 0;
@@ -193,7 +194,7 @@
   border-bottom: 1px solid var(--border);
   padding: 10px 14px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--font-size-chat);
 }
 
 .thread-banner-error {
@@ -399,7 +400,7 @@
 .message-branch-count {
   min-width: 34px;
   text-align: center;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
 }
 
@@ -448,7 +449,7 @@
   background: transparent;
   color: inherit;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--font-size-chat);
   font-weight: 500;
   line-height: 1;
   cursor: pointer;
@@ -553,7 +554,7 @@
   align-items: center;
   gap: 8px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--font-size-chat);
   line-height: 1.5;
   padding: 2px 0;
 }
@@ -697,7 +698,7 @@
   justify-content: center;
   gap: 8px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 0.8125rem;
   line-height: 1.5;
   background: transparent;
   border: none;
@@ -712,7 +713,7 @@
 
 .transcript-compacting-text {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-style: italic;
 }
 
@@ -759,7 +760,7 @@
 }
 
 .chat-welcome-hero-title {
-  font-size: 22px;
+  font-size: 1.375rem;
   font-weight: 650;
   color: var(--fg);
   margin: 0;
@@ -768,7 +769,7 @@
 }
 
 .chat-welcome-hero-desc {
-  font-size: 14px;
+  font-size: var(--font-size-chat);
   color: var(--muted);
   margin: 0;
   max-width: 520px;
@@ -787,7 +788,7 @@
 }
 
 .chat-welcome-workspace-label {
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 600;
   color: var(--muted);
   letter-spacing: 0.02em;
@@ -857,13 +858,13 @@
 }
 
 .chat-welcome-card-title {
-  font-size: 13.5px;
+  font-size: var(--font-size-chat);
   font-weight: 600;
   color: var(--fg);
 }
 
 .chat-welcome-card-prompt {
-  font-size: 12.5px;
+  font-size: var(--font-size-chat);
   color: var(--muted);
   margin: 0;
   line-height: 1.45;
@@ -880,7 +881,7 @@
   }
 
   .chat-welcome-hero-title {
-    font-size: 19px;
+    font-size: 1.1875rem;
   }
 
   .chat-welcome-starters-grid {

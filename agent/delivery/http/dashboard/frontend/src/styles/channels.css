@@ -80,13 +80,13 @@
 }
 
 .channel-card-name {
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 700;
 }
 
 .channel-card-subtitle {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .channel-status-pill {
@@ -99,7 +99,7 @@
   background: var(--surface-2);
   color: var(--muted);
   padding: 0 9px;
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 650;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -155,7 +155,7 @@
   display: grid;
   gap: 6px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .channel-card-meta-row {
@@ -167,7 +167,7 @@
 
 .channel-card-meta-label {
   color: var(--muted-2);
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 650;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -182,7 +182,7 @@
   background: color-mix(in srgb, var(--danger) 7%, var(--surface));
   color: var(--danger);
   padding: 9px 11px;
-  font-size: 12px;
+  font-size: 0.75rem;
   line-height: 1.45;
 }
 
@@ -195,7 +195,7 @@
   background: var(--surface-2);
   color: var(--muted);
   padding: 9px 11px;
-  font-size: 12px;
+  font-size: 0.75rem;
   line-height: 1.45;
 }
 
@@ -219,7 +219,7 @@
   align-items: center;
   gap: 8px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 /* --- Content Page Channel Configuration --- */
@@ -250,14 +250,14 @@
 }
 
 .channel-config-title {
-  font-size: 17px;
+  font-size: 1.0625rem;
   font-weight: 700;
   margin: 0;
 }
 
 .channel-config-subtitle {
   margin: 3px 0 0;
-  font-size: 12.5px;
+  font-size: 0.78125rem;
 }
 
 .channel-config-header-actions {
@@ -304,13 +304,13 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13.5px;
+  font-size: 0.84375rem;
   font-weight: 700;
 }
 
 .channel-section-subtitle {
   margin-top: 2px;
-  font-size: 11.5px;
+  font-size: 0.71875rem;
 }
 
 .channel-section-body {
@@ -363,13 +363,13 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 700;
 }
 
 .channel-drawer-section-subtitle {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 500;
 }
 
@@ -407,7 +407,7 @@
   border-radius: 8px;
   background: var(--surface-2);
   padding: 10px 12px;
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .channel-test-feedback[data-state="ok"] {
@@ -434,7 +434,7 @@
   flex-wrap: wrap;
   gap: 10px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 
 .channel-test-feedback-details strong {
@@ -455,7 +455,7 @@
 
 .channel-webhook-helper-label {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 650;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -477,7 +477,7 @@
   background: var(--surface);
   padding: 6px 8px;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 12px;
+  font-size: 0.75rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -512,7 +512,7 @@
 }
 
 .pairing-code-value .chip {
-  font-size: 14px;
+  font-size: var(--font-size-base);
   letter-spacing: 0.08em;
   padding: 6px 10px;
 }
@@ -578,7 +578,7 @@
 }
 
 .gcal-account-label {
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 650;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -586,7 +586,7 @@
 }
 
 .gcal-account-email {
-  font-size: 14px;
+  font-size: var(--font-size-base);
   font-weight: 600;
   color: var(--fg);
   word-break: break-all;
@@ -594,7 +594,7 @@
 }
 
 .gcal-account-status {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--muted);
   margin-top: 2px;
 }
@@ -628,7 +628,7 @@
 }
 
 .gcal-toggle-title {
-  font-size: 13.5px;
+  font-size: 0.84375rem;
   font-weight: 600;
   color: var(--fg);
 }
@@ -647,7 +647,7 @@
 
 .gcal-connect-desc {
   margin: 0;
-  font-size: 13px;
+  font-size: 0.8125rem;
   line-height: 1.5;
   color: var(--muted);
 }
@@ -670,7 +670,7 @@
   user-select: none;
   background: var(--surface-2);
   transition: background-color 120ms ease;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 600;
 }
 
@@ -703,7 +703,7 @@
   background: var(--surface-2);
   border: 1px solid var(--border);
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--muted);
   max-width: 100%;
   overflow: hidden;

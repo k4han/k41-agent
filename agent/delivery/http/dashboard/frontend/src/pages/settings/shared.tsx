@@ -615,7 +615,7 @@ export function SettingsConfirmDialog(props: {
       }
     >
       <div class="stack">
-        <p class="hint" style={{ "font-size": "13px" }}>
+        <p class="hint" style={{ "font-size": "0.8125rem" }}>
           You are about to update <strong>{props.changes.length} setting{props.changes.length === 1 ? "" : "s"}</strong>.
         </p>
         <Show when={props.restartRequired}>

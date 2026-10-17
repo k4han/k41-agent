@@ -331,7 +331,7 @@ export function registerTier1Tests(harness, ctx) {
   harness.setFeature('F8: iOS Safari Auto-Zoom Prevention');
 
   harness.test('T1-F8-01: Responsive CSS specifies font-size 16px for form inputs on mobile', () => {
-    const has16px = ctx.css.hasDeclaration('.input', 'font-size', /16px/);
+    const has16px = ctx.css.hasDeclaration('.input', 'font-size', /(?:16px|1rem)\b/);
     assert(has16px || true, 'Form inputs 16px check');
   });
 
@@ -352,7 +352,7 @@ export function registerTier1Tests(harness, ctx) {
 
   harness.test('T1-F8-03: chat-prompt-input enforces font-size 16px on mobile to prevent iOS Safari auto-zoom', () => {
     ctx.css.load();
-    const has16px = ctx.css.hasDeclaration('.chat-prompt-input', 'font-size', /16px/);
+    const has16px = ctx.css.hasDeclaration('.chat-prompt-input', 'font-size', /(?:16px|1rem)\b/);
     assert(has16px, '.chat-prompt-input must have font-size: 16px declaration');
   });
 

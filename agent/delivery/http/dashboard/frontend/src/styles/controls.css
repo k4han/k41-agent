@@ -69,7 +69,7 @@
 }
 
 .settings-section-title {
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 700;
 }
 
@@ -96,7 +96,7 @@
   background: color-mix(in srgb, var(--warning) 8%, var(--surface));
   color: var(--warning);
   padding: 9px 11px;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 650;
   line-height: 1.4;
 }
@@ -154,7 +154,7 @@
 .setting-title {
   overflow-wrap: anywhere;
   font-weight: 650;
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .setting-inline-actions {
@@ -176,7 +176,7 @@
 .setting-control-panel .select-control {
   min-height: 30px;
   height: 30px;
-  font-size: 12.5px;
+  font-size: 0.78125rem;
   padding: 3px 9px;
   border-radius: 6px;
 }
@@ -190,7 +190,7 @@
 
 .setting-detail-label {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 650;
   text-transform: uppercase;
 }
@@ -206,7 +206,7 @@
   background: transparent;
   color: var(--muted);
   padding: 0;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 600;
   transition:
     background-color 120ms ease,
@@ -268,7 +268,7 @@
 }
 
 .toggle-text {
-  font-size: 12.5px;
+  font-size: 0.78125rem;
   font-weight: 650;
   color: var(--muted);
   transition: color 120ms ease;
@@ -429,7 +429,7 @@
 }
 
 .panel-title {
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 650;
 }
 
@@ -442,7 +442,7 @@
 }
 
 .metric-value {
-  font-size: 26px;
+  font-size: 1.625rem;
   font-weight: 700;
   line-height: 1;
 }
@@ -450,7 +450,7 @@
 .metric-label {
   margin-top: 6px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .btn {
@@ -464,7 +464,7 @@
   background: var(--surface);
   color: var(--fg);
   padding: 0 11px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 520;
   transition:
     background-color 120ms ease,
@@ -511,7 +511,7 @@
   min-height: 28px;
   border-radius: 7px;
   padding: 0 8px;
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .input,
@@ -699,7 +699,7 @@
 
 .field label {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 620;
 }
 
@@ -786,7 +786,7 @@
 .model-picker-group-title {
   padding: 6px 8px 5px;
   color: var(--muted-2);
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 650;
   text-transform: uppercase;
 }
@@ -863,7 +863,7 @@
   border-radius: 999px;
   background: var(--surface-3);
   color: var(--muted);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 650;
   cursor: pointer;
   flex: 0 1 auto;
@@ -910,7 +910,7 @@
 
 .hint {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 0.75rem;
   line-height: 1.4;
 }
 
@@ -935,7 +935,7 @@
 
 .table th {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 620;
 }
 
@@ -953,7 +953,7 @@
   background: var(--surface-2);
   color: var(--muted);
   padding: 0 8px;
-  font-size: 12px;
+  font-size: 0.75rem;
   line-height: 1;
 }
 
@@ -990,7 +990,7 @@
   color: var(--muted);
   padding: 3px 7px;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .prompt-variable-preview {
@@ -1133,7 +1133,7 @@
 }
 
 .dialog-title {
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 600;
   line-height: 1.35;
   color: var(--fg);
@@ -1143,7 +1143,7 @@
 }
 
 .dialog-subtitle {
-  font-size: 13px;
+  font-size: 0.8125rem;
   line-height: 1.45;
   color: var(--muted);
   margin: 0;
@@ -1221,7 +1221,7 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  font-size: 14px;
+  font-size: var(--font-size-base);
   line-height: 1.5;
   color: var(--fg);
 }
@@ -1233,7 +1233,7 @@
 
 .confirm-dialog-warning {
   margin: 0;
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--danger);
 }
 
@@ -1343,7 +1343,7 @@
 }
 
 .prompt-variable-suggest-option .mono {
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .prompt-variable-suggest-option .hint {
@@ -1357,7 +1357,7 @@
   padding: 14px 10px;
   color: var(--muted);
   text-align: center;
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 /* --- Tab bar --- */
@@ -1393,7 +1393,7 @@
   gap: 6px;
   padding: 6px 12px;
   border-radius: 999px;
-  font-size: 12.5px;
+  font-size: 0.78125rem;
   font-weight: 500;
   color: var(--fg-muted);
   background: transparent;
@@ -1469,7 +1469,7 @@
 
 .agent-config-stat span {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 650;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -1477,7 +1477,7 @@
 
 .agent-config-stat strong {
   color: var(--fg);
-  font-size: 18px;
+  font-size: 1.125rem;
   line-height: 1;
 }
 
@@ -1500,13 +1500,13 @@
 
 .agent-config-section-header h3 {
   margin: 2px 0 3px;
-  font-size: 14px;
+  font-size: var(--font-size-base);
   font-weight: 700;
 }
 
 .agent-config-eyebrow {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -1539,7 +1539,7 @@
   align-items: center;
   gap: 8px;
   color: var(--fg);
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 650;
   cursor: pointer;
 }
@@ -1607,7 +1607,7 @@
   min-width: 0;
   overflow-wrap: anywhere;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 0.6875rem;
   line-height: 1.35;
 }
 
@@ -1641,7 +1641,7 @@
 
 .agent-config-tool-config-title {
   color: var(--fg);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 700;
   overflow-wrap: anywhere;
 }
@@ -1664,7 +1664,7 @@
   align-items: center;
   gap: 6px;
   color: var(--fg);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 650;
 }
 
@@ -1688,7 +1688,7 @@
   align-items: center;
   gap: 8px;
   color: var(--fg);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .agent-config-empty {
@@ -1697,7 +1697,7 @@
   color: var(--muted);
   padding: 18px;
   text-align: center;
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 @media (max-width: 720px) {
@@ -1743,7 +1743,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 
 /* --- MCP status cell --- */
@@ -1820,7 +1820,7 @@
 
 .settings-resource-toolbar .settings-resource-search input {
   height: 36px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   border-radius: 8px;
 }
 
@@ -1845,7 +1845,7 @@
   .select-control-option {
     min-height: 42px;
     padding: 10px 12px;
-    font-size: 14px;
+    font-size: var(--font-size-base);
   }
 
   .model-picker-option {

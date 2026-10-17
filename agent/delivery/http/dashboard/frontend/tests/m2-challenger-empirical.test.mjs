@@ -104,7 +104,8 @@ async function runM2ChallengerEmpiricalSuite() {
   harness.test('Chat prompt input enforces font-size >= 16px under <= 768px breakpoint', () => {
     const rules = css.findRules('.chat-prompt-input', '768px');
     assert(rules.length > 0, 'No rule found for .chat-prompt-input under max-width: 768px');
-    const fontSize = parseFloat(rules[0].declarations['font-size'] || '0');
+    const value = rules[0].declarations['font-size'] || '0';
+    const fontSize = parseFloat(value) * (value.includes('rem') ? 16 : 1);
     assertGreaterThanOrEqual(fontSize, 16, 'chat-prompt-input font-size on mobile/tablet');
   });
 

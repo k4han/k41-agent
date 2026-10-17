@@ -467,7 +467,8 @@ const mobileSelectOption = selectOptionRules.find((r) => r.mediaQuery && r.media
 
 if (mobileSelectOption) {
   const minH = parseInt(mobileSelectOption.declarations['min-height'] || '0', 10);
-  const fontSize = parseInt(mobileSelectOption.declarations['font-size'] || '0', 10);
+  const fontValue = mobileSelectOption.declarations['font-size'] || '0';
+  const fontSize = parseFloat(fontValue) * (fontValue.includes('rem') ? 16 : 1);
   if (minH >= 42) {
     recordPass('.select-control-option has min-height >= 42px on mobile', `min-height: ${minH}px, font-size: ${fontSize}px`);
   } else {
@@ -516,7 +517,7 @@ const mobileSettingInput = settingInputs.find((r) => r.mediaQuery && r.mediaQuer
 if (mobileSettingInput) {
   const fontSize = mobileSettingInput.declarations['font-size'];
   const minH = parseInt(mobileSettingInput.declarations['min-height'] || '0', 10);
-  const is16px = fontSize && fontSize.includes('16px');
+  const is16px = fontSize && /(?:16px|1rem)\b/.test(fontSize);
   if (is16px && minH >= 42) {
     recordPass('Settings inputs enforce font-size: 16px !important and min-height: 42px !important (iOS zoom prevention)', `font-size: ${fontSize}, min-height: ${minH}px`);
   } else {

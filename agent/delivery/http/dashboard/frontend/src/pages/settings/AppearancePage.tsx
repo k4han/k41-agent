@@ -205,7 +205,7 @@ export function AppearancePage() {
                 <div class="appearance-preview-header">
                   <Eye size={13} />
                   <span>Preview</span>
-                  <span class="hint" style={{ "margin-left": "auto", "font-size": "11px" }}>Live preview</span>
+                  <span class="hint" style={{ "margin-left": "auto", "font-size": "0.6875rem" }}>Live preview</span>
                 </div>
                 <div class="appearance-preview-body">
                   <div class="appearance-preview-mock">
@@ -231,13 +231,13 @@ export function AppearancePage() {
                     </div>
                   </div>
                   <div class="appearance-preview-caption">
-                    Background <span class="mono" style={{ "font-size": "11px" }}>{dark() ? "#0a0a0a" : "#fafafa"}</span>
-                    {" · "} Surface <span class="mono" style={{ "font-size": "11px" }}>{dark() ? "#111" : "#fff"}</span>
+                    Background <span class="mono" style={{ "font-size": "0.6875rem" }}>{dark() ? "#0a0a0a" : "#fafafa"}</span>
+                    {" · "} Surface <span class="mono" style={{ "font-size": "0.6875rem" }}>{dark() ? "#111" : "#fff"}</span>
                   </div>
                 </div>
               </div>
 
-              <div class="hint" style={{ "font-size": "12px", "line-height": "1.5" }}>
+              <div class="hint" style={{ "font-size": "0.75rem", "line-height": "1.5" }}>
                 Tip: use <span class="kbd">System</span> to automatically follow your OS dark mode. Changes apply instantly and are saved locally on this browser.
               </div>
             </div>
@@ -271,7 +271,7 @@ export function AppearancePage() {
                     {(opt) => <option value={opt}>{opt}</option>}
                   </For>
                 </select>
-                <div class="hint" style={{ "font-size": "12px" }}>
+                <div class="hint" style={{ "font-size": "0.75rem" }}>
                   Used to format timestamps across session history, logs, and tables.
                 </div>
               </div>
@@ -291,8 +291,8 @@ export function AppearancePage() {
             <div class="stack" style={{ gap: "16px" }}>
               <div class="row" style={{ "justify-content": "space-between", "align-items": "center" }}>
                 <div>
-                  <div style={{ "font-weight": "550", "font-size": "13px" }}>Stream Thinking to UI</div>
-                  <div class="hint" style={{ "font-size": "12px", "max-width": "380px" }}>
+                  <div style={{ "font-weight": "550", "font-size": "0.8125rem" }}>Stream Thinking to UI</div>
+                  <div class="hint" style={{ "font-size": "0.75rem", "max-width": "380px" }}>
                     Show model reasoning while it streams.
                   </div>
                 </div>

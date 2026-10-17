@@ -305,7 +305,7 @@ export function McpTab() {
                           {getServerIcon(server.title)}
                           {server.title}
                         </div>
-                        <div class="hint mono" style={{ "font-size": "11px" }}>
+                        <div class="hint mono" style={{ "font-size": "0.6875rem" }}>
                           {server.registry_name}
                         </div>
                         <div class="hint mcp-popular-card-description">

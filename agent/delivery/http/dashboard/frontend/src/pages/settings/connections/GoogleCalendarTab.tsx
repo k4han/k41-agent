@@ -190,7 +190,7 @@ export function GoogleCalendarTab() {
                       size={16}
                       style={{ "color": "var(--warning)", "flex-shrink": "0", "margin-top": "2px" }}
                     />
-                    <div class="stack" style={{ gap: "2px", "font-size": "12.5px" }}>
+                    <div class="stack" style={{ gap: "2px", "font-size": "0.78125rem" }}>
                       <strong>Google OAuth is not configured on the server</strong>
                       <span class="hint">
                         Environment variables <code>GOOGLE_CALENDAR_CLIENT_ID</code> and{" "}
@@ -394,7 +394,7 @@ export function GoogleCalendarTab() {
             </button>
           </div>
           <Show when={payload()?.updated_at}>
-            <span class="hint" style={{ "font-size": "11px" }}>
+            <span class="hint" style={{ "font-size": "0.6875rem" }}>
               Synced: {formatUpdatedTime(payload()?.updated_at)}
             </span>
           </Show>

@@ -27,12 +27,12 @@ export function AgentEditSkeleton(props: {
             fallback={
               <div class="stack" style="align-items: center; text-align: center; padding: 48px 24px;">
                 <Show when={props.icon}>
-                  <div class="badge" style="font-size: 18px; padding: 12px 16px;">
+                  <div class="badge" style="font-size: 1.125rem; padding: 12px 16px;">
                     {props.icon}
                   </div>
                 </Show>
                 <Show when={props.title}>
-                  <div style="font-size: 18px; font-weight: 650;">{props.title}</div>
+                  <div style="font-size: 1.125rem; font-weight: 650;">{props.title}</div>
                 </Show>
                 <Show when={props.description}>
                   <p class="hint">{props.description}</p>

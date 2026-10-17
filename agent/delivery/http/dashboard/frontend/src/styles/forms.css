@@ -15,7 +15,7 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 620;
   color: var(--fg);
   line-height: 1.4;
@@ -34,7 +34,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--danger);
   line-height: 1.4;
   margin-top: 2px;
@@ -44,7 +44,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--muted);
   line-height: 1.4;
   margin-top: 2px;
@@ -71,14 +71,14 @@
 }
 
 .form-field-group-title {
-  font-size: 14px;
+  font-size: var(--font-size-base);
   font-weight: 700;
   color: var(--fg);
   margin: 0;
 }
 
 .form-field-group-description {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--muted);
   line-height: 1.5;
   margin: 0;
@@ -101,7 +101,7 @@
 .form-field-inline-label {
   flex-shrink: 0;
   width: 140px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 620;
   color: var(--fg);
   line-height: 1.4;
@@ -192,7 +192,7 @@
   position: absolute;
   bottom: -18px;
   left: 0;
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--danger);
   white-space: nowrap;
   overflow: hidden;
@@ -242,7 +242,7 @@
   position: absolute;
   bottom: -18px;
   left: 0;
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--danger);
   white-space: nowrap;
   overflow: hidden;
@@ -316,7 +316,7 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 620;
   color: var(--fg);
   line-height: 1.4;
@@ -371,7 +371,7 @@
   border-radius: 6px;
   background: transparent;
   color: var(--fg);
-  font-size: 13px;
+  font-size: 0.8125rem;
   cursor: pointer;
   text-align: left;
 }
@@ -450,7 +450,7 @@
   border: none;
   background: transparent;
   color: var(--fg);
-  font-size: 12px;
+  font-size: 0.75rem;
   outline: none;
 }
 
@@ -461,7 +461,7 @@
 .form-select-empty {
   padding: 12px;
   text-align: center;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--muted);
 }
 
@@ -476,7 +476,7 @@
   border-radius: 4px;
   background: transparent;
   color: var(--fg);
-  font-size: 13px;
+  font-size: 0.8125rem;
   cursor: pointer;
   text-align: left;
   transition: background-color 120ms ease;
@@ -538,13 +538,13 @@
 }
 
 .form-select-error {
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--danger);
   margin-top: 2px;
 }
 
 .form-select-helper {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--muted);
   margin-top: 2px;
 }
@@ -575,7 +575,7 @@
   border-radius: 4px;
   background: var(--accent);
   color: white;
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 620;
 }
 
@@ -588,7 +588,7 @@
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.2);
   color: white;
-  font-size: 14px;
+  font-size: var(--font-size-base);
   line-height: 1;
   cursor: pointer;
   transition: background-color 120ms ease;
@@ -614,7 +614,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 620;
   color: var(--fg);
   padding-bottom: 8px;
@@ -627,7 +627,7 @@
   gap: 4px;
   padding: 2px 8px;
   border-radius: 4px;
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 
 .form-validation-summary-count--error {
@@ -652,7 +652,7 @@
   gap: 8px;
   padding: 8px;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: 0.75rem;
   line-height: 1.4;
 }
 
@@ -691,7 +691,7 @@
 
 .form-validation-message-field {
   font-weight: 620;
-  font-size: 11px;
+  font-size: 0.6875rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -708,7 +708,7 @@
   border-radius: 50%;
   background: transparent;
   color: inherit;
-  font-size: 16px;
+  font-size: 1rem;
   line-height: 1;
   cursor: pointer;
   opacity: 0.6;
@@ -724,7 +724,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: 0.6875rem;
   line-height: 1.4;
   margin-top: 2px;
 }
@@ -754,7 +754,7 @@
   border-radius: 6px;
   background: color-mix(in srgb, var(--success) 5%, transparent);
   color: var(--success);
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 620;
   border: 1px solid color-mix(in srgb, var(--success) 20%, transparent);
 }
@@ -775,7 +775,7 @@
   border-radius: 50%;
   background: transparent;
   color: inherit;
-  font-size: 18px;
+  font-size: 1.125rem;
   line-height: 1;
   cursor: pointer;
   opacity: 0.6;
@@ -841,7 +841,7 @@
   border-radius: 50%;
   background: var(--surface-3);
   color: var(--muted);
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 620;
   transition: all 120ms ease;
 }
@@ -858,7 +858,7 @@
 }
 
 .form-progress-step-label {
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 620;
   color: var(--muted);
   text-align: center;
@@ -890,7 +890,7 @@
 }
 
 .form-loading-text {
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--muted);
 }
 
@@ -912,7 +912,7 @@
   padding: 8px 16px;
   border: 1px solid transparent;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 620;
   cursor: pointer;
   transition: all 120ms ease;
@@ -969,12 +969,12 @@
 
 .form-button--sm {
   padding: 6px 12px;
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .form-button--lg {
   padding: 10px 20px;
-  font-size: 14px;
+  font-size: var(--font-size-base);
 }
 
 .form-button--loading {
@@ -998,7 +998,7 @@
   gap: 8px;
   padding: 12px;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 620;
 }
 
@@ -1048,7 +1048,7 @@
   border-radius: 4px;
   background: transparent;
   color: inherit;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 620;
   cursor: pointer;
   transition: background-color 120ms ease;
@@ -1237,14 +1237,14 @@
 }
 
 .form-section-title {
-  font-size: 14px;
+  font-size: var(--font-size-base);
   font-weight: 700;
   color: var(--fg);
   margin: 0;
 }
 
 .form-section-description {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--muted);
   line-height: 1.5;
   margin: 4px 0 0 0;
@@ -1252,7 +1252,7 @@
 
 .form-section-collapse-icon {
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: 0.625rem;
   color: var(--muted);
   transition: transform 120ms ease;
 }
@@ -1308,7 +1308,7 @@
   padding: 0 12px;
   background: var(--surface);
   color: var(--muted);
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 620;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -1379,14 +1379,14 @@
 }
 
 .form-card-title {
-  font-size: 14px;
+  font-size: var(--font-size-base);
   font-weight: 700;
   color: var(--fg);
   margin: 0;
 }
 
 .form-card-description {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--muted);
   line-height: 1.5;
   margin: 0;

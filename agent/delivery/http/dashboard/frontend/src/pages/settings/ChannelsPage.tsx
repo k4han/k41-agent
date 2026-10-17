@@ -1024,7 +1024,7 @@ function ChannelCard(props: {
             <TriangleAlert size={14} />
             <div>
               <strong>Runtime error</strong>
-              <div class="mono" style={{ "font-size": "11px" }}>
+              <div class="mono" style={{ "font-size": "0.6875rem" }}>
                 {props.runtime.error}
               </div>
             </div>

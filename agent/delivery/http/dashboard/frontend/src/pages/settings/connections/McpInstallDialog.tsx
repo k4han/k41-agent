@@ -157,7 +157,7 @@ export function McpInstallDialog(props: {
                 <Show when={server().repository_url || server().website_url}>
                   <a
                     class="mono"
-                    style={{ "font-size": "12px" }}
+                    style={{ "font-size": "0.75rem" }}
                     href={server().repository_url || server().website_url}
                     target="_blank"
                     rel="noreferrer"
@@ -215,7 +215,7 @@ export function McpInstallDialog(props: {
                       <Show when={selectedTarget().command || selectedTarget().url}>
                         <div class="panel" style={{ padding: "12px" }}>
                           <div class="setting-title">Connection</div>
-                          <div class="hint mono" style={{ "font-size": "12px", "margin-top": "6px" }}>
+                          <div class="hint mono" style={{ "font-size": "0.75rem", "margin-top": "6px" }}>
                             {selectedTarget().transport === "stdio"
                               ? [selectedTarget().command, ...selectedTarget().args].join(" ")
                               : selectedTarget().url}

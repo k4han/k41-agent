@@ -26,7 +26,7 @@
 
 .provider-title {
   margin: 0;
-  font-size: 18px;
+  font-size: 1.125rem;
   font-weight: 700;
   color: var(--fg);
 }
@@ -38,7 +38,7 @@
 .provider-section-heading {
   margin-top: 0;
   margin-bottom: 16px;
-  font-size: 15px;
+  font-size: 0.9375rem;
 }
 
 /* Provider Summary Grid Spacing */
@@ -78,7 +78,7 @@
 
 .logo-fallback {
   font-weight: 700;
-  font-size: 18px;
+  font-size: 1.125rem;
   color: var(--primary);
   background: var(--primary-subtle);
   width: 100%;
@@ -124,7 +124,7 @@
 
 .provider-picker-logo-fallback {
   font-weight: 700;
-  font-size: 16px;
+  font-size: 1rem;
   color: var(--primary);
 }
 
@@ -138,7 +138,7 @@
 }
 
 .model-spec-title {
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 700;
   color: var(--fg);
   display: flex;
@@ -251,7 +251,7 @@
 }
 
 .model-spec-name {
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 600;
   color: var(--fg);
   overflow: hidden;
@@ -260,7 +260,7 @@
 }
 
 .model-spec-id {
-  font-size: 10px;
+  font-size: 0.625rem;
   color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -269,13 +269,13 @@
 
 .model-spec-capabilities {
   overflow: hidden;
-  font-size: 10.5px;
+  font-size: 0.65625rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .model-spec-cost {
-  font-size: 10.5px;
+  font-size: 0.65625rem;
   color: var(--muted);
   margin-top: 4px;
   border-top: 1px dashed var(--border);
@@ -298,7 +298,7 @@
 
 .model-spec-actions .btn {
   flex: 1;
-  font-size: 11px;
+  font-size: 0.6875rem;
   padding: 4px 8px;
   justify-content: center;
   gap: 4px;
@@ -309,7 +309,7 @@
   grid-column: 1 / -1;
   padding: 24px 12px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 0.75rem;
   text-align: center;
 }
 
@@ -363,7 +363,7 @@
   align-items: center;
   gap: 4px;
   font-family: var(--font-mono, monospace);
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 600;
   padding: 3px 8px;
   border-radius: var(--radius-sm);
@@ -389,7 +389,7 @@
 }
 
 .connection-error-msg {
-  font-size: 12.5px;
+  font-size: 0.78125rem;
   color: var(--danger);
   word-break: break-word;
 }
@@ -400,7 +400,7 @@
 
 .test-result-badge {
   font-family: var(--font-mono, monospace);
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 600;
   padding: 2px 7px;
   border-radius: var(--radius-sm);

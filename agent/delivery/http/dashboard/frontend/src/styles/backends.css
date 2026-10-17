@@ -70,13 +70,13 @@
 }
 
 .backend-card-name {
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 700;
 }
 
 .backend-card-subtitle {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .backend-status-pill {
@@ -89,7 +89,7 @@
   background: var(--surface-2);
   color: var(--muted);
   padding: 0 9px;
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 650;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -144,7 +144,7 @@
   background: var(--surface-2);
   color: var(--muted);
   padding: 9px 11px;
-  font-size: 12px;
+  font-size: 0.75rem;
   line-height: 1.45;
 }
 
@@ -168,7 +168,7 @@
   align-items: center;
   gap: 8px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 /* --- Content Page Backend Configuration --- */
@@ -199,7 +199,7 @@
 }
 
 .backend-config-title {
-  font-size: 17px;
+  font-size: 1.0625rem;
   font-weight: 700;
   margin: 0;
 }
@@ -242,7 +242,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13.5px;
+  font-size: 0.84375rem;
   font-weight: 700;
 }
 
@@ -296,13 +296,13 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 700;
 }
 
 .backend-drawer-section-subtitle {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 500;
 }
 

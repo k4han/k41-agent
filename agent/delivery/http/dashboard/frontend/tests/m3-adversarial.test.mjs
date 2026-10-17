@@ -619,7 +619,7 @@ async function runAdversarialM3Suite() {
 
   harness.test('Mobile form inputs enforce font-size >= 16px to prevent iOS Safari auto-zoom', () => {
     const rules = css.findRules('.input', '640px');
-    const has16px = rules.some((r) => /16px/.test(r.declarations['font-size'] || ''));
+    const has16px = rules.some((r) => /(?:16px|1rem)\b/.test(r.declarations['font-size'] || ''));
     assert(has16px, 'Mobile form inputs must enforce 16px font-size');
   });
 
@@ -634,7 +634,7 @@ async function runAdversarialM3Suite() {
     const hasOverride = rules.some(
       (r) =>
         r.declarations['font-size'] &&
-        r.declarations['font-size'].includes('16px') &&
+        /(?:16px|1rem)\b/.test(r.declarations['font-size']) &&
         r.declarations['min-height'] &&
         r.declarations['min-height'].includes('42px')
     );

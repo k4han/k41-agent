@@ -85,7 +85,7 @@
   padding: 8px 16px;
   border-radius: 999px;
   color: var(--info);
-  font-size: 13.5px;
+  font-size: var(--font-size-chat);
   font-weight: 600;
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
 }
@@ -135,7 +135,7 @@
   cursor: pointer;
   user-select: none;
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--font-size-chat);
   font-weight: 600;
 }
 
@@ -173,7 +173,7 @@
 
 .chat-todos-progress {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 500;
   flex-shrink: 0;
 }
@@ -197,7 +197,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--font-size-chat);
   color: var(--fg);
 }
 
@@ -224,7 +224,7 @@
 
 .user-input-request-title {
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--font-size-chat);
   font-weight: 700;
   overflow-wrap: anywhere;
 }
@@ -232,7 +232,7 @@
 .user-input-request-meta {
   margin-top: 2px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .user-input-request-questions {
@@ -253,7 +253,7 @@
   align-items: baseline;
   gap: 6px;
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--font-size-chat);
   font-weight: 600;
   overflow-wrap: anywhere;
 }
@@ -261,7 +261,7 @@
 .user-input-question-optional,
 .user-input-required {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 500;
 }
 
@@ -316,7 +316,7 @@
 }
 
 .user-input-option-label {
-  font-size: 13px;
+  font-size: var(--font-size-chat);
   font-weight: 600;
   line-height: 1.35;
   overflow-wrap: anywhere;
@@ -324,7 +324,7 @@
 
 .user-input-option-description {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 0.75rem;
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
@@ -334,7 +334,7 @@
   flex-direction: column;
   gap: 5px;
   color: var(--fg);
-  font-size: 12px;
+  font-size: var(--font-size-chat);
   font-weight: 600;
 }
 
@@ -415,7 +415,7 @@
   background: rgba(180, 83, 9, 0.08);
   border: 1px solid var(--warning);
   border-radius: var(--radius);
-  font-size: 13px;
+  font-size: var(--font-size-chat);
   color: var(--fg);
 }
 
@@ -436,7 +436,7 @@
   background-color: var(--warning);
   border: 1px solid var(--warning);
   color: #fff;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 600;
   padding: 8px 12px;
   min-height: 40px;

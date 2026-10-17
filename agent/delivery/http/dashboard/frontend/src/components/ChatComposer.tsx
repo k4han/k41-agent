@@ -244,7 +244,7 @@ export function ChatComposer(props: ChatComposerProps) {
       <Show when={props.recursionLimitReached}>
         <div class="chat-recursion-warning">
           <div class="chat-recursion-warning-left">
-            <span style="font-size: 16px;">⚠️</span>
+            <span style="font-size: 1rem;">⚠️</span>
             <span>Agent reached the step limit without completing the task. Do you want to continue running?</span>
           </div>
           <button
@@ -576,7 +576,7 @@ export function ChatComposer(props: ChatComposerProps) {
             <pre style={{
               "white-space": "pre-wrap",
               "word-break": "break-all",
-              "font-size": "12px",
+              "font-size": "var(--font-size-chat)",
               "line-height": "1.5",
               "margin": 0,
               "max-height": "60vh",

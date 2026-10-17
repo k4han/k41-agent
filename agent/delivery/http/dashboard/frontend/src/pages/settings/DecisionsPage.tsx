@@ -136,12 +136,12 @@ export function DecisionsPage() {
                 </div>
                 <div style={{ display: "flex", "flex-direction": "column", gap: "4px" }}>
                   <div style={{ display: "flex", "align-items": "center", gap: "8px" }}>
-                    <span style={{ "font-weight": "650", "font-size": "14px" }}>
+                    <span style={{ "font-weight": "650", "font-size": "var(--font-size-base)" }}>
                       Cloudflare Clef-flash Decision Engine
                     </span>
                     <span
                       style={{
-                        "font-size": "11px",
+                        "font-size": "0.6875rem",
                         padding: "2px 8px",
                         "border-radius": "999px",
                         background: "rgba(16, 185, 129, 0.12)",
@@ -152,7 +152,7 @@ export function DecisionsPage() {
                       Fast-path (~100-200ms)
                     </span>
                   </div>
-                  <div class="hint" style={{ "font-size": "12px", "line-height": "1.5" }}>
+                  <div class="hint" style={{ "font-size": "0.75rem", "line-height": "1.5" }}>
                     Clef-flash evaluates system state against typed schemas (choice, noul, score) returning calibrated
                     probabilities. In <strong>Cascade mode</strong>, queries with confidence above threshold are routed
                     immediately with ultra-low latency and minimal cost ($0.09/M tokens), cascading to standard LLM only when ambiguous.
@@ -252,12 +252,12 @@ export function DecisionsPage() {
                             </div>
                             <div style={{ display: "flex", "flex-direction": "column", gap: "2px", flex: 1 }}>
                               <div style={{ display: "flex", "align-items": "center", "justify-content": "space-between", gap: "6px" }}>
-                                <span style={{ "font-size": "12px", "font-weight": "650" }}>
+                                <span style={{ "font-size": "0.75rem", "font-weight": "650" }}>
                                   {evaluator.name}
                                 </span>
                                 <span
                                   style={{
-                                    "font-size": "10px",
+                                    "font-size": "0.625rem",
                                     padding: "1px 6px",
                                     "border-radius": "4px",
                                     background: "rgba(16, 185, 129, 0.12)",

@@ -247,7 +247,7 @@ export function ToolsPage() {
                         </div>
                       </Show>
                       <Show when={group.tool === "web_search" || group.tool === "web_fetch"}>
-                        <div class="hint" style={{ padding: "6px 16px 12px", "font-size": "12px", opacity: 0.85 }}>
+                        <div class="hint" style={{ padding: "6px 16px 12px", "font-size": "0.75rem", opacity: 0.85 }}>
                           Credentials are managed in Providers → Search &amp; Web. Use a shared default or select a named connection.
                           <button class="btn btn-sm" type="button" onClick={() => createConnection(group.tool)}>Create a separate connection</button>
                         </div>

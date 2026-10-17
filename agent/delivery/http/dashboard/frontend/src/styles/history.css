@@ -45,7 +45,7 @@
 .history-workspace-heading h2 {
   margin: 0;
   overflow: hidden;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 650;
   line-height: 1.3;
   text-overflow: ellipsis;
@@ -54,7 +54,7 @@
 
 .history-workspace-heading span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .history-select-cell {
@@ -109,7 +109,7 @@
   background: var(--surface);
   color: var(--fg);
   padding: 0 8px;
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .inline-rename-input:focus {
@@ -126,7 +126,7 @@
   color: var(--fg);
   padding: 0 8px;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .history-thread-rename-input:focus {
@@ -182,7 +182,7 @@
 
   .history-thread-rename-input {
     min-height: 42px;
-    font-size: 16px;
+    font-size: 1rem;
   }
 }
 

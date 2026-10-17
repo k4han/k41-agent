@@ -48,7 +48,7 @@ export function AgentPromptTab(props: {
         <label
           style={{
             color: "var(--muted)",
-            "font-size": "11px",
+            "font-size": "0.6875rem",
             "font-weight": "650",
             "text-transform": "uppercase",
             "letter-spacing": "0.05em",
@@ -56,7 +56,7 @@ export function AgentPromptTab(props: {
         >
           Prompt Variables
         </label>
-        <p class="hint" style="margin-bottom: 4px; font-size: 11px;">
+        <p class="hint" style="margin-bottom: 4px; font-size: 0.6875rem;">
           Click a variable to insert it at the cursor position.
         </p>
         <div
@@ -78,7 +78,7 @@ export function AgentPromptTab(props: {
                   "justify-content": "space-between",
                   "text-align": "left",
                   "font-family": "monospace",
-                  "font-size": "11px",
+                  "font-size": "0.6875rem",
                   width: "100%",
                   overflow: "hidden",
                   "text-overflow": "ellipsis",
@@ -105,7 +105,7 @@ export function AgentPromptTab(props: {
                 <Show when={variable.is_system}>
                   <span
                     style={{
-                      "font-size": "9px",
+                      "font-size": "0.5625rem",
                       opacity: "0.6",
                       "text-transform": "uppercase",
                       "font-weight": "bold",

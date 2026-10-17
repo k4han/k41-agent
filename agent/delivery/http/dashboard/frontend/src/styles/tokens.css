@@ -1,5 +1,8 @@
 :root {
   color-scheme: light;
+  --font-size-base: 0.875rem;
+  --font-size-chat: var(--font-size-base);
+  --font-size-workspace: var(--font-size-base);
   --radius-sm: 4px;
   --radius-md: 8px;
   --radius-lg: 12px;

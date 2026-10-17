@@ -103,7 +103,7 @@ async function main() {
     },
     {
       feature: 'F8: iOS Safari Auto-Zoom Prevention (16px font-size)',
-      check: () => css.hasDeclaration('.chat-prompt-input', 'font-size', /16px/),
+      check: () => css.hasDeclaration('.chat-prompt-input', 'font-size', /(?:16px|1rem)\b/),
       expected: 'chat-prompt-input has font-size: 16px on mobile',
     },
     {

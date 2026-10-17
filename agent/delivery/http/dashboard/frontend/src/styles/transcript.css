@@ -44,7 +44,7 @@
   border-radius: 999px;
   background: color-mix(in srgb, var(--surface) 82%, transparent);
   padding: 8px 12px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 600;
 }
 
@@ -101,7 +101,7 @@
   border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
   border-radius: 7px;
   padding: 3px 6px;
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .message-attachment-icon,
@@ -144,7 +144,7 @@
   cursor: pointer;
   padding: 4px 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--font-size-chat);
   list-style: none;
 }
 
@@ -187,7 +187,7 @@
   border: 0;
   background: transparent;
   white-space: pre-wrap;
-  font-size: 12px;
+  font-size: var(--font-size-chat);
 }
 
 .tool-call-body pre + pre {
@@ -201,14 +201,14 @@
 .tool-call-arguments > summary {
   padding: 8px 10px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .tool-shell-outcome {
   padding: 8px 10px;
   border-top: 1px solid var(--border);
   color: var(--success);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .tool-shell-outcome.is-error {
@@ -282,13 +282,13 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 500;
   color: var(--muted);
 }
 
 .tool-html-preview-tag {
-  font-size: 10px;
+  font-size: 0.625rem;
   padding: 1px 5px;
   border-radius: 4px;
   background: color-mix(in srgb, var(--primary) 12%, transparent);
@@ -322,7 +322,7 @@
   border-radius: 0;
   height: 100%;
   padding: 0 6px;
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 
 .tool-html-preview-btn-group .message-action-btn + .message-action-btn,
@@ -341,7 +341,7 @@
   border: 0;
   background: transparent;
   padding: 0 5px;
-  font-size: 10px;
+  font-size: 0.625rem;
   font-family: var(--font-mono, monospace);
   color: var(--muted);
   cursor: pointer;
@@ -405,7 +405,7 @@
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--primary) 8%, transparent);
   color: var(--muted);
-  font-size: 11px;
+  font-size: 0.6875rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -420,7 +420,7 @@
   border: 0;
   background: transparent;
   white-space: pre-wrap;
-  font-size: 12px;
+  font-size: var(--font-size-chat);
   box-sizing: border-box;
 }
 
@@ -431,7 +431,7 @@
   background: color-mix(in srgb, var(--danger) 8%, transparent);
   color: var(--danger);
   white-space: pre-wrap;
-  font-size: 12px;
+  font-size: var(--font-size-chat);
   overflow-wrap: anywhere;
 }
 
@@ -446,7 +446,7 @@
 }
 
 .tool-html-preview-dialog-header .tool-html-preview-title {
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--fg);
 }
 
@@ -501,7 +501,7 @@
 
 .plan-review-title {
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--font-size-chat);
   font-weight: 700;
   overflow-wrap: anywhere;
 }
@@ -509,7 +509,7 @@
 .plan-review-state {
   margin-top: 2px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 0.75rem;
   overflow-wrap: anywhere;
 }
 
@@ -532,7 +532,7 @@
   max-width: 100%;
   min-width: 0;
   color: var(--fg);
-  font-size: 14px;
+  font-size: var(--font-size-chat);
   overflow-wrap: anywhere;
   word-break: break-word;
 }

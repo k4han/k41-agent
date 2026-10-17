@@ -68,7 +68,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg);
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -122,7 +122,7 @@
 .repository-instructions-preview {
   margin: 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 0.8125rem;
   line-height: 1.55;
   white-space: pre-wrap;
 }

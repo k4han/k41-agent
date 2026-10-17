@@ -290,7 +290,7 @@ async function runM3ChallengerEmpiricalSuite() {
     const mobileInput = mobileInputRules.find((r) => r.mediaQuery);
     assert(mobileInput !== undefined, '.cron-fields-grid .input mobile styling must exist');
     assertEqual(mobileInput.declarations['min-height'], '42px !important');
-    assertEqual(mobileInput.declarations['font-size'], '16px !important');
+    assertEqual(mobileInput.declarations['font-size'], '1rem !important');
   });
 
   // =========================================================================
