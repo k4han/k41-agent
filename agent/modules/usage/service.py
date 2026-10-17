@@ -242,6 +242,25 @@ class UsageService:
 
         thread_id = resolve_thread_id(thread_id)
         payload = await self._repository.aggregate_by_thread(thread_id)
+        if payload.get("latest_provider") and payload.get("latest_model") and any(
+            type(payload.get(key)) is not int or payload[key] <= 0
+            for key in ("context_window", "reserved_tokens")
+        ):
+            try:
+                from agent.modules.providers import get_resolved_chat_model, model_response_reserve
+
+                resolved = get_resolved_chat_model(
+                    provider_name=payload["latest_provider"], model=payload["latest_model"],
+                )
+                if (resolved.provider_name, resolved.model_name) == (payload["latest_provider"], payload["latest_model"]):
+                    for key, value in {
+                        "context_window": resolved.context_window,
+                        "reserved_tokens": model_response_reserve(resolved),
+                    }.items():
+                        if type(payload.get(key)) is not int or payload[key] <= 0:
+                            payload[key] = value
+            except Exception as exc:
+                logger.debug("Could not recover context capacity for %s: %s", thread_id, exc)
         if payload.get("context_estimated") and payload.get("context_breakdown") is None:
             # Older compaction markers stored only the retained history total.
             try:

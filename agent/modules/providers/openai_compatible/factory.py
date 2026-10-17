@@ -9,10 +9,10 @@ from typing import Any
 
 import httpx
 from langchain_core.language_models import BaseChatModel
-from langchain_openai import ChatOpenAI
 
 from agent.modules.providers.models import ModelConfig
 from agent.modules.providers.provider import ProviderConfig
+from agent.modules.providers.openai_compatible.chat_model import OpenAICompatibleChatModel
 
 
 def _resolve_extra_body(
@@ -62,7 +62,7 @@ class OpenAICompatibleFactory:
         if user_extra or fallback:
             kwargs["extra_body"] = {**(fallback or {}), **(user_extra or {})}
 
-        return ChatOpenAI(**kwargs)
+        return OpenAICompatibleChatModel(**kwargs)
 
     async def list_models(
         self,

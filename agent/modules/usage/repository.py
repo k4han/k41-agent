@@ -10,6 +10,7 @@ from sqlalchemy import case, delete, distinct, func, select
 from agent.modules.usage.models import LLMUsageEvent
 from agent.modules.usage.context_breakdown import CONTEXT_CATEGORIES, include_response_in_context
 from agent.shared.infrastructure.db.session import get_async_session
+from agent.shared.timezone import ensure_aware_utc
 
 
 @dataclass(frozen=True, slots=True)
@@ -319,6 +320,7 @@ class LLMUsageRepository:
             context_estimated = compaction is not None and (
                 latest_event is None or self._is_newer(compaction, latest_event)
             )
+            context_event = compaction if context_estimated else latest_event
             retained_tokens = None
             compacted_breakdown = None
             if context_estimated:
@@ -356,12 +358,18 @@ class LLMUsageRepository:
         models.sort(key=lambda x: x["total_tokens"], reverse=True)
 
         context_metadata = _json_dict(latest_event.usage_metadata_json) if latest_event else {}
+        capacity_metadata = _json_dict(context_event.usage_metadata_json) if context_event else {}
+        has_context_usage = latest_event is not None and latest_event.has_usage_metadata and (
+            type(latest_event.input_tokens) is int and latest_event.input_tokens >= 0
+        )
+        if not has_context_usage:
+            context_metadata = {}
         input_breakdown = _sanitize_context_breakdown(context_metadata.get("context_breakdown"))
         output_breakdown = _sanitize_context_breakdown(
             context_metadata.get("context_output_breakdown")
         )
-        latest_input_tokens = max(0, int(latest_event.input_tokens or 0)) if latest_event else 0
-        latest_output_tokens = max(0, int(latest_event.output_tokens or 0)) if latest_event else 0
+        latest_input_tokens = latest_event.input_tokens if has_context_usage else 0
+        latest_output_tokens = max(0, int(latest_event.output_tokens or 0)) if has_context_usage else 0
         context_breakdown = compacted_breakdown if context_estimated else (
             include_response_in_context(input_breakdown, latest_output_tokens, output_breakdown)
             if input_breakdown is not None else None
@@ -374,13 +382,16 @@ class LLMUsageRepository:
             "output_tokens": output_tokens,
             "current_context_tokens": retained_tokens if context_estimated else latest_input_tokens + latest_output_tokens,
             "context_estimated": context_estimated,
+            "context_updated_at": ensure_aware_utc(context_event.created_at).isoformat() if context_event else None,
+            "context_window": capacity_metadata.get("context_window"),
+            "reserved_tokens": capacity_metadata.get("reserved_tokens"),
             "latest_input_tokens": latest_input_tokens,
-            "has_context_usage": latest_event is not None,
+            "has_context_usage": bool(has_context_usage),
             "context_breakdown": context_breakdown,
             "latest_output_tokens": latest_output_tokens,
-            "latest_total_tokens": int(latest_event.total_tokens or 0) if latest_event else 0,
-            "latest_model": latest_event.model_name if latest_event else "",
-            "latest_provider": latest_event.provider_name if latest_event else "",
+            "latest_total_tokens": int(latest_event.total_tokens or 0) if has_context_usage else 0,
+            "latest_model": context_event.model_name if context_event else "",
+            "latest_provider": context_event.provider_name if context_event else "",
             "latest_used_at": _iso(latest_event.created_at) if latest_event else None,
             "models": models,
         }
@@ -389,39 +400,31 @@ class LLMUsageRepository:
         """Read the latest provider input composition, including before compaction."""
         session = await get_async_session()
         async with session:
-            event = await self._latest_context_event(session, thread_id)
+            event = await self._latest_context_event(session, thread_id, require_usage=True)
         metadata = _json_dict(event.usage_metadata_json) if event else {}
         return _sanitize_context_breakdown(metadata.get("context_breakdown"))
 
-    async def _latest_context_event(self, session: Any, thread_id: str) -> LLMUsageEvent | None:
+    async def _latest_context_event(
+        self, session: Any, thread_id: str, *, require_usage: bool = False,
+    ) -> LLMUsageEvent | None:
         common_clauses = [
+            LLMUsageEvent.thread_id == thread_id,
             LLMUsageEvent.internal.is_(False),
-            LLMUsageEvent.has_usage_metadata.is_(True),
-            LLMUsageEvent.input_tokens.is_not(None),
         ]
+        if require_usage:
+            common_clauses.extend([
+                LLMUsageEvent.has_usage_metadata.is_(True),
+                LLMUsageEvent.input_tokens.is_not(None),
+            ])
         order_by = (LLMUsageEvent.created_at.desc(), LLMUsageEvent.id.desc())
 
         exact_result = await session.execute(
             select(LLMUsageEvent)
-            .where(LLMUsageEvent.thread_id == thread_id, *common_clauses)
+            .where(*common_clauses)
             .order_by(*order_by)
             .limit(1)
         )
-        exact_event = exact_result.scalars().first()
-        if exact_event is not None:
-            return exact_event
-
-        root_result = await session.execute(
-            select(LLMUsageEvent)
-            .where(
-                (LLMUsageEvent.thread_id == thread_id)
-                | (LLMUsageEvent.root_thread_id == thread_id),
-                *common_clauses,
-            )
-            .order_by(*order_by)
-            .limit(1)
-        )
-        return root_result.scalars().first()
+        return exact_result.scalars().first()
 
     async def _latest_compaction_event(
         self, session: Any, thread_id: str

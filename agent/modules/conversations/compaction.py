@@ -27,7 +27,7 @@ from agent.modules.agent_runtime import (
     ThreadMutationConflictError,
     get_active_session_registry,
 )
-from agent.modules.providers import model_input_budget
+from agent.modules.providers import DEFAULT_CONTEXT_WINDOW, model_input_budget, model_response_reserve
 
 from agent.modules.conversations.history import (
     _checkpoint_messages,
@@ -53,6 +53,7 @@ from agent.modules.workflows import (
     normalize_messages_for_chat_model,
 )
 from agent.shared.config import get_config_service
+from agent.shared.infrastructure.db.base import utcnow
 from agent.shared.infrastructure.parsing import extract_final_text_content
 from agent.shared.thread_ids import resolve_thread_id
 
@@ -655,6 +656,9 @@ async def _compact_conversation_thread_locked(
 
     context_breakdown = estimate_compacted_context_breakdown(injected_messages, previous_breakdown)
     context_tokens = sum(context_breakdown.values())
+    context_updated_at = utcnow()
+    context_window = getattr(resolved, "context_window", DEFAULT_CONTEXT_WINDOW)
+    reserved_tokens = model_response_reserve(resolved)
 
     try:
         from agent.modules.usage import UsageEventInput, get_usage_service
@@ -678,7 +682,10 @@ async def _compact_conversation_thread_locked(
             usage_metadata={
                 "retained_tokens": retained_tokens,
                 "context_breakdown": context_breakdown,
+                "context_window": context_window,
+                "reserved_tokens": reserved_tokens,
             },
+            created_at=context_updated_at,
         )
         await get_usage_service().record_event(usage_event)
     except Exception as exc:
@@ -696,6 +703,9 @@ async def _compact_conversation_thread_locked(
         "current_context_tokens": context_tokens,
         "context_breakdown": context_breakdown,
         "context_estimated": True,
+        "context_updated_at": context_updated_at.isoformat(),
+        "context_window": context_window,
+        "reserved_tokens": reserved_tokens,
     }
 
 

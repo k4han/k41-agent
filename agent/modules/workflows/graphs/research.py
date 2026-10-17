@@ -17,7 +17,7 @@ from agent.modules.workflows.model_context import emit_reported_context_usage, p
 from agent.modules.workflows.state.extensions import (
     ResearchState,
 )
-from agent.modules.providers import get_resolved_chat_model
+from agent.modules.providers import DEFAULT_CONTEXT_WINDOW, get_resolved_chat_model, model_response_reserve
 from agent.modules.workflows.model_effort import get_workflow_reasoning_effort_kwargs
 from agent.modules.usage import estimate_context_breakdown, with_usage_tracking
 from agent.shared.infrastructure.parsing import extract_final_text_content
@@ -61,6 +61,8 @@ async def _research_node(state: ResearchState, config: RunnableConfig, runtime):
             model_name=resolved.model_name,
             call_kind="research",
             context_breakdown=context_breakdown,
+            context_window=getattr(resolved, "context_window", DEFAULT_CONTEXT_WINDOW),
+            reserved_tokens=model_response_reserve(resolved),
         ),
         **model_kwargs,
     )
@@ -91,6 +93,8 @@ async def _summarize_node(state: ResearchState, config: RunnableConfig, runtime)
             model_name=resolved.model_name,
             call_kind="research_summary",
             context_breakdown=context_breakdown,
+            context_window=getattr(resolved, "context_window", DEFAULT_CONTEXT_WINDOW),
+            reserved_tokens=model_response_reserve(resolved),
         ),
         **model_kwargs,
     )

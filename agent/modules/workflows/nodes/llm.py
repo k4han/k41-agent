@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 
-from agent.modules.providers import get_resolved_chat_model
+from agent.modules.providers import DEFAULT_CONTEXT_WINDOW, get_resolved_chat_model, model_response_reserve
 from agent.modules.workflows.model_effort import get_workflow_reasoning_effort_kwargs
 from agent.modules.usage import estimate_context_breakdown, with_usage_tracking
 from agent.modules.prompt_variables import get_runtime_prompt_variable_values
@@ -137,7 +137,6 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
         tools = [tool for tool in tools if tool.name != "skill"]
     if skill_context:
         from langchain_core.messages.utils import count_tokens_approximately
-        from agent.modules.providers import DEFAULT_CONTEXT_WINDOW
         if count_tokens_approximately([system], tools=tools) >= getattr(resolved, "context_window", DEFAULT_CONTEXT_WINDOW) * 3 // 4:
             raise ValueError("Active skill instructions exceed the context budget. Unload a skill or select a larger context model.")
     history = model_skill_history(history)
@@ -159,6 +158,8 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
             model_name=resolved.model_name,
             call_kind="agent",
             context_breakdown=context_breakdown,
+            context_window=getattr(resolved, "context_window", DEFAULT_CONTEXT_WINDOW),
+            reserved_tokens=model_response_reserve(resolved),
         ),
     )
     emit_reported_context_usage(response, resolved=resolved, config=config, context_breakdown=context_breakdown)

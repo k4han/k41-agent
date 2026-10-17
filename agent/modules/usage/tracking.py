@@ -45,11 +45,18 @@ class LLMUsageCallback(BaseCallbackHandler):
         config: dict[str, Any] | None,
         tracking: UsageTrackingInfo,
         context_breakdown: dict[str, int] | None = None,
+        context_window: int | None = None,
+        reserved_tokens: int | None = None,
     ) -> None:
         super().__init__()
         self._context = usage_context_from_config(config)
         self._tracking = tracking
         self._context_breakdown = dict(context_breakdown) if context_breakdown is not None else None
+        self._context_capacity = {
+            key: value for key, value in (
+                ("context_window", context_window), ("reserved_tokens", reserved_tokens),
+            ) if type(value) is int and value > 0
+        }
 
     def on_llm_end(
         self,
@@ -61,6 +68,7 @@ class LLMUsageCallback(BaseCallbackHandler):
     ) -> Any:
         usage = extract_usage(response)
         usage_metadata = dict(usage.usage_metadata or {})
+        usage_metadata.update(self._context_capacity)
         if self._context_breakdown is not None and usage.input_tokens is not None:
             usage_metadata["context_breakdown"] = reconcile_context_breakdown(
                 self._context_breakdown, usage.input_tokens,
@@ -108,11 +116,15 @@ def with_usage_tracking(
     call_kind: str = "agent",
     internal: bool = False,
     context_breakdown: dict[str, int] | None = None,
+    context_window: int | None = None,
+    reserved_tokens: int | None = None,
 ) -> dict[str, Any]:
     next_config = dict(config or {})
     handler = LLMUsageCallback(
         config=next_config,
         context_breakdown=context_breakdown,
+        context_window=context_window,
+        reserved_tokens=reserved_tokens,
         tracking=UsageTrackingInfo(
             agent_name=agent_name,
             provider_name=provider_name,

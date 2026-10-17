@@ -762,6 +762,7 @@ async def test_first_response_context_matches_stream_after_reload(usage_db, monk
     config = with_usage_tracking(
         {"configurable": {"thread_id": "first_response"}}, agent_name="default",
         provider_name="test", model_name="test-model", context_breakdown=estimates,
+        context_window=32000, reserved_tokens=6000,
     )
     response = AIMessage(content="First answer", tool_calls=tool_calls, usage_metadata={
         "input_tokens": 123, "output_tokens": 80, "total_tokens": 203,
@@ -770,7 +771,8 @@ async def test_first_response_context_matches_stream_after_reload(usage_db, monk
         LLMResult(generations=[[ChatGeneration(message=response)]]), run_id=uuid4(),
     )
     model_context.emit_reported_context_usage(
-        response, resolved=SimpleNamespace(provider_name="test", model_name="test-model"),
+        response, resolved=SimpleNamespace(provider_name="test", model_name="test-model",
+            context_window=32000, model=SimpleNamespace(max_tokens=6000)),
         config=config, context_breakdown=estimates,
     )
     repository = LLMUsageRepository()
@@ -780,6 +782,71 @@ async def test_first_response_context_matches_stream_after_reload(usage_db, monk
     assert payload["context_breakdown"] == events[0]["context_breakdown"]
     assert payload["context_breakdown"]["agent_responses"] > 0
     assert (payload["context_breakdown"]["tool_calls"] > 0) == bool(tool_calls)
+    assert payload["context_window"] == events[0]["context_window"] == 32000
+    assert payload["reserved_tokens"] == events[0]["reserved_tokens"] == 6000
+    assert payload["context_updated_at"].endswith("+00:00")
+
+
+@pytest.mark.asyncio
+async def test_latest_call_without_usage_invalidates_previous_context_and_compaction(usage_db):
+    repository = LLMUsageRepository()
+    now = datetime.now(timezone.utc)
+    identity = {
+        "thread_id": "missing_usage", "root_thread_id": "missing_usage",
+        "platform": "dashboard", "user_id": "admin", "channel_id": "admin",
+        "provider_name": "test", "model_name": "test-model",
+    }
+    breakdown = {
+        "system_prompt": 1000, "system_tools": 500, "skills": 0, "subagents": 0,
+        "user_messages": 4000, "agent_responses": 2500, "tool_calls": 0,
+    }
+    await repository.record(UsageEventInput(
+        **identity, agent_name="default", call_kind="agent", internal=False,
+        has_usage_metadata=True, input_tokens=8000, output_tokens=100, total_tokens=8100,
+        usage_metadata={"context_breakdown": breakdown}, created_at=now,
+    ))
+    await repository.record(UsageEventInput(
+        **identity, agent_name="conversation-compactor", call_kind="compaction", internal=True,
+        has_usage_metadata=False, usage_metadata={"retained_tokens": 2000},
+        created_at=now + timedelta(seconds=1),
+    ))
+    latest = now + timedelta(seconds=2)
+    await repository.record(UsageEventInput(
+        **identity, agent_name="default", call_kind="agent", internal=False,
+        has_usage_metadata=False, created_at=latest,
+        usage_metadata={"context_window": 32000, "reserved_tokens": 6000},
+    ))
+    payload = await repository.aggregate_by_thread("missing_usage")
+    assert payload["has_context_usage"] is False
+    assert payload["context_estimated"] is False
+    assert payload["current_context_tokens"] == 0
+    assert payload["latest_input_tokens"] == payload["latest_output_tokens"] == 0
+    assert payload["context_breakdown"] is None
+    assert payload["context_updated_at"] == latest.isoformat()
+    assert payload["reserved_tokens"] == 6000
+    assert payload["total_tokens"] == 8100
+    assert await repository.latest_context_breakdown("missing_usage") == breakdown
+
+
+@pytest.mark.asyncio
+async def test_subagent_usage_never_becomes_the_parent_context(usage_db):
+    repository = LLMUsageRepository()
+    await repository.record(UsageEventInput(
+        thread_id="parent:sub:worker", root_thread_id="parent", platform="dashboard",
+        user_id="admin", channel_id="admin", agent_name="worker", provider_name="test",
+        model_name="worker-model", call_kind="agent", internal=False, has_usage_metadata=True,
+        input_tokens=50000, output_tokens=1000, total_tokens=51000,
+    ))
+    parent = await repository.aggregate_by_thread("parent")
+    assert parent["has_context_usage"] is False
+    assert parent["current_context_tokens"] == 0
+    assert parent["context_updated_at"] is None
+    assert parent["latest_model"] == ""
+    assert parent["total_tokens"] == 51000
+    assert await repository.latest_context_breakdown("parent") is None
+    child = await repository.aggregate_by_thread("parent:sub:worker")
+    assert child["has_context_usage"] is True
+    assert child["current_context_tokens"] == 51000
 
 
 @pytest.mark.asyncio
@@ -878,6 +945,42 @@ async def test_usage_service_returns_provider_tokens_without_loading_checkpoint_
     assert payload["latest_input_tokens"] == 88000
     assert "estimated_context_tokens" not in payload
     checkpointer.aget_tuple.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_usage_service_recovers_legacy_response_reservations_from_the_runtime_model(monkeypatch):
+    payload = {
+        "thread_id": "legacy_capacity", "latest_provider": "test", "latest_model": "test-model",
+        "has_context_usage": True, "current_context_tokens": 8100,
+        "context_window": None, "reserved_tokens": None,
+    }
+    repository = SimpleNamespace(aggregate_by_thread=AsyncMock(return_value=payload))
+    monkeypatch.setattr("agent.modules.providers.get_resolved_chat_model", lambda **kwargs: SimpleNamespace(
+        provider_name="test", model_name="test-model", context_window=32000,
+        model=SimpleNamespace(max_tokens=6000),
+    ))
+    result = await UsageService(repository).get_thread_usage("legacy_capacity")
+    assert result["context_window"] == 32000
+    assert result["reserved_tokens"] == 6000
+    assert result["current_context_tokens"] == 8100
+    payload.update(context_window=64000, reserved_tokens=None)
+    result = await UsageService(repository).get_thread_usage("legacy_capacity")
+    assert result["context_window"] == 64000
+    assert result["reserved_tokens"] == 6000
+
+
+@pytest.mark.asyncio
+async def test_usage_service_does_not_apply_another_models_fallback_capacity(monkeypatch):
+    repository = SimpleNamespace(aggregate_by_thread=AsyncMock(return_value={
+        "thread_id": "missing_model", "latest_provider": "test", "latest_model": "test-model",
+        "context_window": None, "reserved_tokens": None,
+    }))
+    monkeypatch.setattr("agent.modules.providers.get_resolved_chat_model", lambda **kwargs: SimpleNamespace(
+        provider_name="fallback", model_name="another-model", context_window=200000,
+    ))
+    result = await UsageService(repository).get_thread_usage("missing_model")
+    assert result["context_window"] is None
+    assert result["reserved_tokens"] is None
 
 
 @pytest.mark.asyncio

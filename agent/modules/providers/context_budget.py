@@ -5,8 +5,8 @@ from typing import Any
 from agent.modules.providers.context_window import DEFAULT_CONTEXT_WINDOW
 
 
-def model_input_budget(resolved: Any, threshold: int = 100) -> int:
-    """Return an input ceiling bounded by the compaction target and capacity.
+def model_response_reserve(resolved: Any) -> int:
+    """Return the response reservation used by runtime input budgets.
 
     Explicit output limits take precedence over a modest default reservation.
     Profile output capacity is not a requested response size.
@@ -22,9 +22,15 @@ def model_input_budget(resolved: Any, threshold: int = 100) -> int:
         output_limits.extend(model_kwargs.get(name) for name in (
             "max_tokens", "max_completion_tokens", "max_output_tokens",
         ))
-    reserve = next(
+    return next(
         (value for value in output_limits if type(value) is int and value > 0),
         min(4096, max(1, window // 8)),
     )
+
+
+def model_input_budget(resolved: Any, threshold: int = 100) -> int:
+    """Return an input ceiling bounded by the compaction target and capacity."""
+    window = getattr(resolved, "context_window", DEFAULT_CONTEXT_WINDOW)
+    reserve = model_response_reserve(resolved)
     headroom = max(1, min(2048, window // 50))
     return max(0, min(window * threshold // 100, window - reserve - headroom))

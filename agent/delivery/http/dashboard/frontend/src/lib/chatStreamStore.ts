@@ -57,6 +57,11 @@ export function createTranscriptItems(initialItems: ChatTranscriptItem[] = []): 
 export interface ContextUsage {
   current_context_tokens: number;
   context_window: number;
+  has_context_usage?: boolean;
+  context_updated_at?: string;
+  reserved_tokens?: number;
+  provider?: string;
+  model?: string;
   estimated?: boolean;
   input_tokens?: number;
   output_tokens?: number;

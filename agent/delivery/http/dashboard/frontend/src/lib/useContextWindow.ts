@@ -3,6 +3,7 @@ import { createEffect, createMemo, createSignal, untrack } from "solid-js";
 import type { ContextWindowData } from "@/components/ContextWindowIndicator";
 import { apiFetch } from "@/lib/api";
 import { getOrCreateStreamSignals, persistedStreams, type ContextUsage } from "@/lib/chatStreamStore";
+import { resolveModelAndProvider } from "@/lib/modelSelection";
 import type { AgentCard, AgentChatPayload, ThreadUsagePayload } from "@/types";
 import { CONTEXT_CATEGORIES, parseContextBreakdown, type ContextCategory } from "@/types";
 
@@ -15,6 +16,12 @@ const CATEGORY_LABELS: Record<ContextCategory, string> = {
   agent_responses: "Agent responses",
   tool_calls: "Tool calls",
 };
+
+const isTokenCount = (value: unknown): value is number =>
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+
+const contextTimestamp = (value: string | null | undefined): number =>
+  typeof value === "string" ? Date.parse(value) : NaN;
 
 export interface UseContextWindowParams {
   getCurrentThreadId: () => string;
@@ -36,6 +43,7 @@ export function useContextWindow(params: UseContextWindowParams) {
   } = params;
 
   const [threadUsage, setThreadUsage] = createSignal<ThreadUsagePayload | null>(null);
+  let usageRequestId = 0;
   const [localReportedUsage, setLocalReportedUsage] = createSignal<{
     threadId: string;
     usage: ContextUsage;
@@ -65,7 +73,10 @@ export function useContextWindow(params: UseContextWindowParams) {
     }
   };
 
-  const updateCompactedContextUsage = (tokens: number | undefined, threadId: string, breakdown?: unknown) => {
+  const updateCompactedContextUsage = (
+    tokens: number | undefined, threadId: string, breakdown?: unknown,
+    details?: Pick<ContextUsage, "context_updated_at" | "context_window" | "reserved_tokens">,
+  ) => {
     const contextWindow = contextWindowData().maxTokens;
     clearContextUsage(threadId);
     if (typeof tokens === "number" && Number.isSafeInteger(tokens) && tokens >= 0) {
@@ -74,6 +85,7 @@ export function useContextWindow(params: UseContextWindowParams) {
         context_window: contextWindow,
         estimated: true,
         context_breakdown: parseContextBreakdown(breakdown),
+        ...details,
       };
       // Creating an empty stream here would hide the loaded transcript.
       persistedStreams.get(threadId)?.reportedContextUsage[1](usage);
@@ -84,6 +96,7 @@ export function useContextWindow(params: UseContextWindowParams) {
   };
 
   const fetchThreadUsage = async (threadId: string) => {
+    const requestId = ++usageRequestId;
     if (!threadId) {
       setThreadUsage(null);
       return;
@@ -93,33 +106,42 @@ export function useContextWindow(params: UseContextWindowParams) {
       const data = await apiFetch<ThreadUsagePayload>(
         `/dashboard-api/usage/thread/${encodeURIComponent(threadId)}`,
       );
-      if (threadId !== getCurrentThreadId() || getStreaming()
+      if (requestId !== usageRequestId || data.thread_id !== threadId
+        || threadId !== getCurrentThreadId() || getStreaming()
         || getReportedUsage(threadId) !== reportAtStart) {
         return;
       }
+      const incomingTimestamp = contextTimestamp(data.context_updated_at);
+      const reportedTimestamp = contextTimestamp(reportAtStart?.context_updated_at);
+      if (reportAtStart) {
+        // Only replace a live snapshot when the server proves it is at least as recent.
+        // Older servers can still fill in an unversioned compaction estimate.
+        const versioned = Number.isFinite(incomingTimestamp) && Number.isFinite(reportedTimestamp);
+        const legacyCompaction = reportAtStart.estimated && !Number.isFinite(reportedTimestamp);
+        if (versioned ? incomingTimestamp < reportedTimestamp : !legacyCompaction) return;
+      }
       setThreadUsage(data);
-      const compactedBreakdown = parseContextBreakdown(data.context_breakdown);
-      if (reportAtStart?.estimated && data.context_estimated === true && compactedBreakdown) {
-        const usage = { ...reportAtStart, context_breakdown: compactedBreakdown };
-        if (typeof data.current_context_tokens === "number"
-          && Number.isSafeInteger(data.current_context_tokens) && data.current_context_tokens >= 0) {
-          usage.current_context_tokens = data.current_context_tokens;
-        }
-        persistedStreams.get(threadId)?.reportedContextUsage[1](usage);
-        setLocalReportedUsage({ threadId, usage });
-      }
-      if (reportAtStart?.estimated && data.has_context_usage === true
-        && typeof data.latest_input_tokens === "number") {
-        const usage: ContextUsage = {
-          current_context_tokens: data.latest_input_tokens + (data.latest_output_tokens ?? 0),
-          context_window: reportAtStart.context_window,
-          input_tokens: data.latest_input_tokens,
-          output_tokens: data.latest_output_tokens ?? 0,
-          context_breakdown: parseContextBreakdown(data.context_breakdown),
-        };
-        persistedStreams.get(threadId)?.reportedContextUsage[1](usage);
-        setLocalReportedUsage({ threadId, usage });
-      }
+      if (!reportAtStart) return;
+      const estimated = data.context_estimated === true && isTokenCount(data.current_context_tokens);
+      const hasUsage = !estimated && data.has_context_usage !== false && isTokenCount(data.latest_input_tokens);
+      const outputTokens = isTokenCount(data.latest_output_tokens) ? data.latest_output_tokens : 0;
+      const usage: ContextUsage = {
+        current_context_tokens: estimated ? data.current_context_tokens!
+          : hasUsage ? data.latest_input_tokens! + outputTokens : 0,
+        context_window: isTokenCount(data.context_window) && data.context_window > 0
+          ? data.context_window : reportAtStart.context_window,
+        has_context_usage: hasUsage,
+        estimated,
+        context_updated_at: data.context_updated_at ?? undefined,
+        reserved_tokens: isTokenCount(data.reserved_tokens) ? data.reserved_tokens : undefined,
+        provider: data.latest_provider,
+        model: data.latest_model,
+        input_tokens: hasUsage ? data.latest_input_tokens : undefined,
+        output_tokens: hasUsage ? outputTokens : undefined,
+        context_breakdown: parseContextBreakdown(data.context_breakdown),
+      };
+      persistedStreams.get(threadId)?.reportedContextUsage[1](usage);
+      setLocalReportedUsage({ threadId, usage });
     } catch (err) {
       console.error("Failed to fetch thread usage:", err);
     }
@@ -146,16 +168,16 @@ export function useContextWindow(params: UseContextWindowParams) {
 
     let maxTokens = 128000;
     let catalogMaxTokens: number | null = null;
+    let selected: { provider: string; model: string } | undefined;
     if (payload) {
       const activeProvider = getProvider() || card?.provider || "default";
       const activeModel = getModel() || card?.model || "";
-      const resolvedProv = activeProvider === "default" ? payload.default_provider : activeProvider;
-      const catalog = payload.model_catalogs?.find((c) => c.provider === resolvedProv);
-      const resolvedMod = (activeModel === "" || activeModel === "provider default")
-        ? (activeProvider === "default" ? payload.default_model : (catalog?.default_model || "default"))
-        : activeModel;
-      const modelOption = catalog?.models?.find((m) => m.id === resolvedMod);
-      if (modelOption && typeof modelOption.context_window === "number") {
+      selected = resolveModelAndProvider(
+        activeProvider, activeModel, payload.default_provider, payload.default_model, payload.model_catalogs || [],
+      );
+      const catalog = payload.model_catalogs?.find((c) => c.provider === selected?.provider);
+      const modelOption = catalog?.models?.find((m) => m.id === selected?.model);
+      if (modelOption && isTokenCount(modelOption.context_window) && modelOption.context_window > 0) {
         maxTokens = modelOption.context_window;
         catalogMaxTokens = modelOption.context_window;
       }
@@ -165,31 +187,38 @@ export function useContextWindow(params: UseContextWindowParams) {
     // carries the window of the model used for that call, which goes stale
     // as soon as the user switches models before the next call.
     if (catalogMaxTokens === null) {
-      maxTokens = reportedUsage?.context_window ?? maxTokens;
+      const window = reportedUsage ? reportedUsage.context_window : usage?.context_window;
+      if (isTokenCount(window) && window > 0) maxTokens = window;
     }
 
-    const reportedTokens = reportedUsage?.current_context_tokens
-      ?? (usage?.has_context_usage !== false
-        && typeof usage?.latest_input_tokens === "number"
-        ? usage.latest_input_tokens + (usage.latest_output_tokens ?? 0) : undefined);
-    const estimatedTokens = usage?.context_estimated === true
-      && typeof usage.current_context_tokens === "number"
-      && Number.isSafeInteger(usage.current_context_tokens) && usage.current_context_tokens >= 0
-      ? usage.current_context_tokens : undefined;
-    const estimated = reportedUsage ? reportedUsage.estimated === true
-      : typeof reportedTokens !== "number" && estimatedTokens !== undefined;
-    const hasReportedUsage = typeof reportedTokens === "number" && !estimated;
-    const inputTokens = reportedUsage
-      ? reportedUsage.input_tokens ?? reportedUsage.current_context_tokens
-      : usage?.latest_input_tokens ?? 0;
-    const outputTokens = reportedUsage
-      ? reportedUsage.output_tokens ?? 0
-      : usage?.latest_output_tokens ?? 0;
+    const estimatedTokens = reportedUsage
+      ? reportedUsage.estimated === true ? reportedUsage.current_context_tokens : undefined
+      : usage?.context_estimated === true && isTokenCount(usage.current_context_tokens)
+        ? usage.current_context_tokens : undefined;
+    const reportedTokens = reportedUsage
+      ? reportedUsage.has_context_usage !== false && !reportedUsage.estimated
+        ? reportedUsage.current_context_tokens : undefined
+      : usage?.has_context_usage !== false && !usage?.context_estimated && isTokenCount(usage?.latest_input_tokens)
+        ? usage.latest_input_tokens + (isTokenCount(usage.latest_output_tokens) ? usage.latest_output_tokens : 0) : undefined;
+    const estimated = estimatedTokens !== undefined;
+    const hasReportedUsage = reportedTokens !== undefined;
+    const inputTokens = hasReportedUsage
+      ? (reportedUsage ? reportedUsage.input_tokens ?? reportedUsage.current_context_tokens : usage?.latest_input_tokens ?? 0) : 0;
+    const outputTokens = hasReportedUsage
+      ? (reportedUsage ? reportedUsage.output_tokens ?? 0 : usage?.latest_output_tokens ?? 0) : 0;
     const totalTokens = reportedTokens ?? estimatedTokens ?? 0;
 
     const totalPercent = maxTokens > 0 ? Math.min(100, (totalTokens / maxTokens) * 100) : 0;
 
-    const reservedTokens = Math.min(8192, Math.floor(maxTokens * 0.04));
+    const capacityWindow = reportedUsage ? reportedUsage.context_window : usage?.context_window;
+    const capacityProvider = reportedUsage ? reportedUsage.provider : usage?.latest_provider;
+    const capacityModel = reportedUsage ? reportedUsage.model : usage?.latest_model;
+    const sameModel = !selected || ((!capacityProvider || selected.provider === capacityProvider)
+      && (!capacityModel || selected.model === capacityModel));
+    const reportedReserve = reportedUsage ? reportedUsage.reserved_tokens : usage?.reserved_tokens;
+    const reservedTokens = Math.min(maxTokens, sameModel && capacityWindow === maxTokens
+      && isTokenCount(reportedReserve) && reportedReserve > 0
+      ? reportedReserve : Math.min(4096, Math.max(1, Math.floor(maxTokens / 8))));
     const reservedPercent = maxTokens > 0 ? (reservedTokens / maxTokens) * 100 : 0;
 
     // The breakdown must describe the same model call or compaction snapshot.

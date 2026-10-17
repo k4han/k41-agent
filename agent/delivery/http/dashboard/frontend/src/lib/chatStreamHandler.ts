@@ -124,13 +124,20 @@ export function handleStreamEvent(
     }
     const tokens = event.current_context_tokens;
     const limit = event.context_window;
-    if (typeof tokens !== "number" || !Number.isFinite(tokens) || tokens < 0
-      || typeof limit !== "number" || !Number.isFinite(limit) || limit <= 0) {
+    if (typeof tokens !== "number" || !Number.isSafeInteger(tokens) || tokens < 0
+      || typeof limit !== "number" || !Number.isSafeInteger(limit) || limit <= 0) {
       return;
     }
     callbacks.onContextUsage?.({
       current_context_tokens: tokens,
       context_window: limit,
+      has_context_usage: event.has_context_usage !== false,
+      context_updated_at: typeof event.context_updated_at === "string"
+        && Number.isFinite(Date.parse(event.context_updated_at)) ? event.context_updated_at : undefined,
+      reserved_tokens: typeof event.reserved_tokens === "number" && Number.isSafeInteger(event.reserved_tokens)
+        && event.reserved_tokens > 0 ? event.reserved_tokens : undefined,
+      provider: typeof event.provider === "string" ? event.provider : undefined,
+      model: typeof event.model === "string" ? event.model : undefined,
       input_tokens: typeof event.input_tokens === "number" && Number.isSafeInteger(event.input_tokens)
         && event.input_tokens >= 0 ? event.input_tokens : undefined,
       output_tokens: typeof event.output_tokens === "number" && Number.isSafeInteger(event.output_tokens)

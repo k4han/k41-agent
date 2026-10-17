@@ -16,7 +16,7 @@ from agent.modules.agent_runtime.active_sessions import (
     ThreadMutationConflictError,
 )
 from agent.modules.conversations import compaction, service
-from agent.modules.providers.context_budget import model_input_budget
+from agent.modules.providers.context_budget import model_input_budget, model_response_reserve
 from agent.modules.workflows import model_context
 
 
@@ -71,12 +71,21 @@ def manual_compaction(monkeypatch):
 
 def test_response_reserve_and_headroom_apply_even_at_100_percent():
     resolved = SimpleNamespace(context_window=10_000, model=SimpleNamespace(max_tokens=2000))
+    assert model_response_reserve(resolved) == 2000
     assert model_input_budget(resolved, 100) == 7800
     assert model_input_budget(resolved, 75) == 7500
     resolved.model = SimpleNamespace(model_kwargs={"max_completion_tokens": 3000})
+    assert model_response_reserve(resolved) == 3000
     assert model_input_budget(resolved) == 6800
     resolved.model = SimpleNamespace(max_output_tokens=11_000)
     assert model_input_budget(resolved) == 0
+
+
+@pytest.mark.parametrize("window,reserve", [(32000, 4000), (128000, 4096), (200000, 4096)])
+def test_response_reserve_defaults_match_context_capacity(window, reserve):
+    resolved = SimpleNamespace(context_window=window)
+    assert model_response_reserve(resolved) == reserve
+    assert model_input_budget(resolved) == window - reserve - min(2048, window // 50)
 
 
 @pytest.mark.parametrize("provider_type, limit_key", [("google", "max_output_tokens"), ("anthropic", "max_tokens"), ("openai", "max_tokens")])

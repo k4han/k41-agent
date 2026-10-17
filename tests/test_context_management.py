@@ -578,8 +578,13 @@ async def test_research_checks_context_before_both_model_calls(monkeypatch):
     assert all(not event["estimated"] and event["current_context_tokens"] == 133 for event in events)
 
 
-def test_reported_context_usage_is_not_estimated_when_provider_usage_is_missing(monkeypatch):
+def test_missing_provider_usage_publishes_an_unavailable_context_snapshot(monkeypatch):
     events = []
     monkeypatch.setattr(model_context, "get_stream_writer", lambda: events.append)
     model_context.emit_reported_context_usage(AIMessage(content="hello"), resolved=resolved(), config={})
-    assert not events
+    assert len(events) == 1
+    assert events[0]["has_context_usage"] is False
+    assert events[0]["current_context_tokens"] == 0
+    assert events[0]["estimated"] is False
+    assert events[0]["context_updated_at"].endswith("+00:00")
+    assert "context_breakdown" not in events[0]

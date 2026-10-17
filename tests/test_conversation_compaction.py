@@ -155,9 +155,14 @@ async def test_compact_conversation_success():
             assert breakdown[key] == previous_breakdown[key]
         assert 0 < breakdown["user_messages"] < previous_breakdown["user_messages"]
         usage_service.record_event.assert_awaited_once()
-        assert usage_service.record_event.call_args.args[0].usage_metadata == {
+        usage_event = usage_service.record_event.call_args.args[0]
+        assert usage_event.usage_metadata == {
             "retained_tokens": result["retained_tokens"], "context_breakdown": breakdown,
+            "context_window": 128000, "reserved_tokens": 4096,
         }
+        assert result["context_window"] == 128000
+        assert result["reserved_tokens"] == 4096
+        assert result["context_updated_at"] == usage_event.created_at.isoformat()
 
 
 def test_is_valid_message_sequence():

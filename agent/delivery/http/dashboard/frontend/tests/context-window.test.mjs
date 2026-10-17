@@ -22,7 +22,7 @@ function loadModule(path, dependencies = {}) {
   return exports;
 }
 
-function createFixture(t, { streaming = true } = {}) {
+function createFixture(t, { streaming = true, payload, provider = '', model = '', card } = {}) {
   const utils = loadModule('../src/lib/utils.ts');
   const store = loadModule('../src/lib/chatStreamStore.ts', { 'solid-js': solid, 'solid-js/store': solidStore, '@/lib/utils': utils, '@/components/Transcript': {} });
   const types = loadModule('../src/types.ts');
@@ -30,6 +30,7 @@ function createFixture(t, { streaming = true } = {}) {
   const hookModule = loadModule('../src/lib/useContextWindow.ts', {
     'solid-js': solid,
     '@/lib/chatStreamStore': store,
+    '@/lib/modelSelection': loadModule('../src/lib/modelSelection.ts'),
     '@/types': types,
     '@/lib/api': {
       apiFetch: (url) => new Promise((resolve) => requests.push({ url, resolve })),
@@ -43,20 +44,22 @@ function createFixture(t, { streaming = true } = {}) {
     '@/types': types,
   });
   store.getOrCreateStreamSignals('thread-a');
-  let setThreadId, setStreaming, control;
+  let setThreadId, setStreaming, setModel, control;
   solid.createRoot((dispose) => {
     t.after(dispose);
     const [threadId, updateThreadId] = solid.createSignal('thread-a');
     const [isStreaming, updateStreaming] = solid.createSignal(streaming);
+    const [activeModel, updateModel] = solid.createSignal(model);
     setThreadId = updateThreadId;
     setStreaming = updateStreaming;
+    setModel = updateModel;
     control = hookModule.useContextWindow({
       getCurrentThreadId: threadId,
       getStreaming: isStreaming,
-      getSelectedCard: () => undefined,
-      getData: () => undefined,
-      getProvider: () => '',
-      getModel: () => '',
+      getSelectedCard: () => card,
+      getData: () => payload,
+      getProvider: () => provider,
+      getModel: activeModel,
     });
   });
   const dispatch = (tokens, limit = 32000, threadId = 'thread-a', estimated = false, breakdown, usage = {}) => {
@@ -69,7 +72,7 @@ function createFixture(t, { streaming = true } = {}) {
       onContextUsage: control.updateContextUsage,
     });
   };
-  return { control, dispatch, requests, setThreadId, setStreaming, store };
+  return { control, dispatch, requests, setThreadId, setStreaming, setModel, store };
 }
 
 const flushAsync = () => new Promise((resolve) => setImmediate(resolve));
@@ -458,4 +461,167 @@ test('breakdowns follow their conversation during streaming', (t) => {
   assert.equal(control.contextWindowData().categories[2].tokens, 500);
   setThreadId('thread-b');
   assert.equal(control.contextWindowData().categories[2].tokens, 1500);
+});
+
+const modelPayload = {
+  default_provider: 'test', default_model: 'model-a',
+  model_catalogs: [{ provider: 'test', default_model: 'model-a', models: [
+    { id: 'model-a', context_window: 200000 }, { id: 'model-b', context_window: 32000 },
+  ] }],
+};
+const before = '2026-10-18T01:00:00.000000+00:00';
+const after = '2026-10-18T01:00:01.000000+00:00';
+
+for (const model of ['', 'default', ' DEFAULT ', 'provider default']) {
+  test(`reloaded context resolves the default model alias ${JSON.stringify(model)}`, async (t) => {
+    const { control, requests } = createFixture(t, {
+      streaming: false, payload: modelPayload, provider: ' Default ', model,
+    });
+    requests[0].resolve({ thread_id: 'thread-a', has_context_usage: true,
+      latest_input_tokens: 50000, latest_output_tokens: 0 });
+    await flushAsync();
+    assert.equal(control.contextWindowData().maxTokens, 200000);
+    assert.equal(control.contextWindowData().totalPercent, 25);
+  });
+}
+
+test('an empty global default model uses the provider catalog default', (t) => {
+  const { control } = createFixture(t, { payload: { ...modelPayload, default_model: '' }, model: 'default' });
+  assert.equal(control.contextWindowData().maxTokens, 200000);
+});
+
+test('a newer stored snapshot replaces a completed live report', async (t) => {
+  const { control, dispatch, requests, setStreaming, store } = createFixture(t);
+  dispatch(8100, 32000, 'thread-a', false, breakdown, { context_updated_at: before });
+  setStreaming(false);
+  store.cleanupStreamSignals('thread-a');
+  requests[0].resolve({ thread_id: 'thread-a', has_context_usage: true,
+    context_updated_at: after, latest_input_tokens: 20000, latest_output_tokens: 100,
+    context_breakdown: { ...breakdown, user_messages: 13100 },
+  });
+  await flushAsync();
+  assert.equal(control.contextWindowData().totalTokens, 20100);
+  assert.equal(control.contextWindowData().categories[4].tokens, 13100);
+  assert.equal(store.hasPersistedStream('thread-a'), false);
+});
+
+test('an older stored snapshot cannot replace a completed live report', async (t) => {
+  const { control, dispatch, requests, setStreaming } = createFixture(t);
+  dispatch(20100, 32000, 'thread-a', false, undefined, { context_updated_at: after });
+  setStreaming(false);
+  requests[0].resolve({ thread_id: 'thread-a', has_context_usage: true,
+    context_updated_at: before, latest_input_tokens: 8000, latest_output_tokens: 100,
+  });
+  await flushAsync();
+  assert.equal(control.contextWindowData().totalTokens, 20100);
+});
+
+test('out of order usage requests retain the latest requested snapshot', async (t) => {
+  const { control, requests } = createFixture(t, { streaming: false });
+  const refresh = control.refreshThreadUsage('thread-a');
+  requests[1].resolve({ thread_id: 'thread-a', has_context_usage: true, latest_input_tokens: 20000 });
+  await refresh;
+  requests[0].resolve({ thread_id: 'thread-a', has_context_usage: true, latest_input_tokens: 8000 });
+  await flushAsync();
+  assert.equal(control.contextWindowData().totalTokens, 20000);
+});
+
+test('a completed call without usage clears the previous report and ignores older stored usage', async (t) => {
+  const { control, dispatch, requests, setStreaming } = createFixture(t);
+  dispatch(8100, 32000, 'thread-a', false, breakdown, { context_updated_at: before });
+  dispatch(0, 32000, 'thread-a', false, undefined, {
+    has_context_usage: false, context_updated_at: after,
+  });
+  const data = control.contextWindowData();
+  assert.equal(data.hasReportedUsage, false);
+  assert.equal(data.estimated, false);
+  assert.equal(data.formattedUsed, '—');
+  assert.equal(data.totalTokens, 0);
+  assert.ok(data.categories.every(category => category.tokens === null));
+  setStreaming(false);
+  requests[0].resolve({ thread_id: 'thread-a', has_context_usage: true,
+    context_updated_at: before, latest_input_tokens: 8000, latest_output_tokens: 100,
+  });
+  await flushAsync();
+  assert.equal(control.contextWindowData().formattedUsed, '—');
+});
+
+test('a newer stored call without usage invalidates a completed live report', async (t) => {
+  const { control, dispatch, requests, setStreaming } = createFixture(t);
+  dispatch(8100, 32000, 'thread-a', false, breakdown, { context_updated_at: before });
+  setStreaming(false);
+  requests[0].resolve({ thread_id: 'thread-a', has_context_usage: false,
+    context_updated_at: after, latest_input_tokens: 0, latest_output_tokens: 0,
+  });
+  await flushAsync();
+  assert.equal(control.contextWindowData().formattedUsed, '—');
+  assert.ok(control.contextWindowData().categories.every(category => category.tokens === null));
+});
+
+test('a versioned compaction ignores older provider usage and accepts a later model call', async (t) => {
+  const { control, dispatch, requests } = createFixture(t, { streaming: false });
+  dispatch(8100, 32000, 'thread-a', false, breakdown, { context_updated_at: before });
+  control.updateCompactedContextUsage(2000, 'thread-a', compactedBreakdown, {
+    context_window: 32000, context_updated_at: after, reserved_tokens: 6000,
+  });
+  const stale = control.refreshThreadUsage('thread-a');
+  requests[1].resolve({ thread_id: 'thread-a', has_context_usage: true,
+    context_updated_at: before, latest_input_tokens: 8000, latest_output_tokens: 100,
+  });
+  await stale;
+  assert.equal(control.contextWindowData().formattedUsed, '~2K');
+  assert.equal(control.contextWindowData().reservedPercent, 18.75);
+  const fresh = control.refreshThreadUsage('thread-a');
+  requests[2].resolve({ thread_id: 'thread-a', has_context_usage: true,
+    context_updated_at: '2026-10-18T01:00:02+00:00', latest_input_tokens: 2500, latest_output_tokens: 100,
+  });
+  await fresh;
+  assert.equal(control.contextWindowData().totalTokens, 2600);
+  assert.equal(control.contextWindowData().estimated, false);
+});
+
+test('a newer compaction from another session replaces the live report', async (t) => {
+  const { control, dispatch, requests, setStreaming } = createFixture(t);
+  dispatch(8100, 32000, 'thread-a', false, breakdown, { context_updated_at: before });
+  setStreaming(false);
+  requests[0].resolve({ thread_id: 'thread-a', has_context_usage: false,
+    context_updated_at: after, context_estimated: true, current_context_tokens: 2000,
+    context_breakdown: compactedBreakdown,
+  });
+  await flushAsync();
+  assert.equal(control.contextWindowData().formattedUsed, '~2K');
+  assert.equal(control.contextWindowData().categories[0].tokens, 600);
+});
+
+test('response reservations follow the runtime default for each context capacity', (t) => {
+  const { control, dispatch } = createFixture(t);
+  for (const [window, reserve] of [[32000, 4000], [128000, 4096], [200000, 4096]]) {
+    dispatch(1000, window);
+    assert.equal(control.contextWindowData().reservedPercent, reserve / window * 100);
+  }
+});
+
+test('explicit runtime reservations survive streaming and reloading', async (t) => {
+  const { control, dispatch } = createFixture(t);
+  dispatch(1000, 32000, 'thread-a', false, undefined, { reserved_tokens: 6000 });
+  assert.equal(control.contextWindowData().reservedPercent, 18.75);
+  const reloaded = createFixture(t, { streaming: false });
+  reloaded.requests[0].resolve({ thread_id: 'thread-a', has_context_usage: true,
+    context_window: 32000, reserved_tokens: 6000, latest_input_tokens: 1000,
+  });
+  await flushAsync();
+  assert.equal(reloaded.control.contextWindowData().maxTokens, 32000);
+  assert.equal(reloaded.control.contextWindowData().reservedPercent, 18.75);
+});
+
+test('switching models recalculates capacity and drops the previous model reservation', (t) => {
+  const { control, dispatch, setModel } = createFixture(t, { payload: modelPayload, model: 'model-a' });
+  dispatch(8000, 200000, 'thread-a', false, undefined, {
+    reserved_tokens: 12000, provider: 'test', model: 'model-a',
+  });
+  assert.equal(control.contextWindowData().reservedPercent, 6);
+  setModel('model-b');
+  assert.equal(control.contextWindowData().maxTokens, 32000);
+  assert.equal(control.contextWindowData().totalPercent, 25);
+  assert.equal(control.contextWindowData().reservedPercent, 12.5);
 });

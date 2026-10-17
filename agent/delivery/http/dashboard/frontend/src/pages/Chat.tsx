@@ -1763,6 +1763,9 @@ export function ChatPage() {
         current_context_tokens?: number;
         retained_tokens?: number;
         context_breakdown?: unknown;
+        context_updated_at?: string;
+        context_window?: number;
+        reserved_tokens?: number;
       }>(`/dashboard-api/chat-history/${encodeURIComponent(threadId)}/compact`, {});
 
       if (currentThreadId() !== threadId) {
@@ -1781,6 +1784,8 @@ export function ChatPage() {
         setItems(newTranscriptItems, threadId);
         updateCompactedContextUsage(
           payload.current_context_tokens ?? payload.retained_tokens, threadId, payload.context_breakdown,
+          payload.context_window ? { context_window: payload.context_window,
+            context_updated_at: payload.context_updated_at, reserved_tokens: payload.reserved_tokens } : undefined,
         );
         void refreshThreadUsage(threadId);
         showToast(
