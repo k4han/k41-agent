@@ -26,8 +26,14 @@ function createFixture(t) {
     cancelAnimationFrame: (id) => frames.delete(id),
   };
   const exports = {};
+  let resizeCallback;
   runInNewContext(outputText, {
     exports, window,
+    ResizeObserver: class {
+      constructor(callback) { resizeCallback = callback; }
+      observe() {}
+      disconnect() { resizeCallback = undefined; }
+    },
     require: (name) => {
       assert.equal(name, 'solid-js');
       return solid;
@@ -47,6 +53,7 @@ function createFixture(t) {
     dispose = cleanup;
     return exports.useChatScroll(() => transcript);
   });
+  scroll.observeTranscript(transcript);
   t.after(() => dispose());
   const flush = (queue) => {
     const snapshot = [...queue.values()];
@@ -57,6 +64,7 @@ function createFixture(t) {
     scroll, transcript, timers, frames, dispose,
     flushTimers: () => flush(timers),
     flushFrame: () => flush(frames),
+    resize: () => resizeCallback?.(),
   };
 }
 
@@ -167,4 +175,88 @@ test('unmounting cancels scheduled scrolling', (t) => {
   assert.equal(f.timers.size, 0);
   f.flushTimers();
   assert.equal(f.transcript.scrollTop, 100);
+});
+
+test('interacting with a short conversation does not show the bottom button', (t) => {
+  const f = createFixture(t);
+  f.transcript.scrollHeight = 500;
+  f.transcript.scrollTop = 0;
+  f.scroll.pauseAutoScroll();
+  f.flushFrame();
+  assert.equal(f.scroll.autoScroll(), false);
+  assert.equal(f.scroll.showScrollToBottom(), false);
+});
+
+test('the bottom button only appears more than 200px from the bottom', (t) => {
+  const f = createFixture(t);
+  for (const distance of [0, 60, 150, 200, 201, 400, 100, 0]) {
+    f.transcript.scrollTop = 1500 - distance;
+    f.scroll.handleTranscriptScroll();
+    assert.equal(f.scroll.showScrollToBottom(), distance > 200, `distance: ${distance}`);
+  }
+});
+
+test('blank turn anchor space does not count toward the button threshold', (t) => {
+  const f = createFixture(t);
+  f.transcript.scrollHeight = 1000;
+  f.transcript.scrollTop = 100;
+  f.scroll.setTurnAnchorSpacerHeight(350);
+  f.scroll.handleTranscriptScroll();
+  assert.equal(f.scroll.showScrollToBottom(), false);
+});
+
+test('streaming while paused updates visibility without moving the transcript', (t) => {
+  const f = createFixture(t);
+  f.transcript.scrollTop = 1500;
+  f.scroll.pauseAutoScroll();
+  f.flushFrame();
+  assert.equal(f.scroll.showScrollToBottom(), false);
+  f.transcript.scrollHeight = 2400;
+  f.scroll.scrollToBottom();
+  f.flushFrame();
+  assert.equal(f.scroll.showScrollToBottom(), true);
+  assert.equal(f.transcript.scrollTop, 1500);
+});
+
+test('clearing a conversation removes stale button visibility', (t) => {
+  const f = createFixture(t);
+  f.scroll.handleTranscriptScroll();
+  assert.equal(f.scroll.showScrollToBottom(), true);
+  f.transcript.scrollHeight = 500;
+  f.transcript.scrollTop = 0;
+  f.scroll.clearTurnAnchor();
+  f.flushFrame();
+  assert.equal(f.scroll.showScrollToBottom(), false);
+});
+
+test('resizing the viewport refreshes the bottom button', (t) => {
+  const f = createFixture(t);
+  f.transcript.scrollTop = 1200;
+  f.scroll.handleTranscriptScroll();
+  assert.equal(f.scroll.showScrollToBottom(), true);
+  f.transcript.clientHeight = 700;
+  f.resize();
+  f.flushFrame();
+  assert.equal(f.scroll.showScrollToBottom(), false);
+});
+
+test('clicking the bottom button hides it immediately and resumes following', (t) => {
+  const f = createFixture(t);
+  f.scroll.handleTranscriptScroll();
+  assert.equal(f.scroll.showScrollToBottom(), true);
+  f.scroll.handleScrollToBottomClick();
+  assert.equal(f.scroll.showScrollToBottom(), false);
+  f.flushTimers();
+  f.flushFrame();
+  assert.equal(f.scroll.showScrollToBottom(), false);
+  assert.equal(f.scroll.autoScroll(), true);
+});
+
+test('unmounting cancels visibility updates and disconnects resize observation', (t) => {
+  const f = createFixture(t);
+  f.scroll.pauseAutoScroll();
+  assert.ok(f.frames.size > 0);
+  f.dispose();
+  f.resize();
+  assert.equal(f.frames.size, 0);
 });

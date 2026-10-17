@@ -59,7 +59,7 @@ export interface ChatTranscriptProps {
   streaming: boolean;
   backgroundLive: boolean;
   compacting?: boolean;
-  autoScroll: boolean;
+  showScrollToBottom: boolean;
   turnAnchorSpacerHeight: number;
   onScrollToBottomClick: () => void;
   workingDir: string;
@@ -190,7 +190,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
           </Show>
         </Show>
       </div>
-      <Show when={!props.autoScroll}>
+      <Show when={props.items.length > 0 && props.showScrollToBottom}>
         <button
           class="scroll-to-bottom-btn"
           type="button"

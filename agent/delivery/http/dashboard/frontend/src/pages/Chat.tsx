@@ -216,7 +216,7 @@ export function ChatPage() {
 
   const scroll = useChatScroll(() => transcriptRef);
   const {
-    autoScroll,
+    showScrollToBottom,
     handleTranscriptScroll,
     handleScrollToBottomClick,
     turnAnchorSpacerHeight,
@@ -1905,7 +1905,10 @@ export function ChatPage() {
                 </div>
               </Show>
               <ChatTranscript
-                setTranscriptRef={(el) => (transcriptRef = el)}
+                setTranscriptRef={(el) => {
+                  transcriptRef = el;
+                  scroll.observeTranscript(el);
+                }}
                 onScroll={handleTranscriptScroll}
                 onUserScroll={scroll.pauseAutoScroll}
                 items={items()}
@@ -1915,7 +1918,7 @@ export function ChatPage() {
                 streaming={streaming()}
                 backgroundLive={backgroundLive()}
                 compacting={compacting()}
-                autoScroll={autoScroll()}
+                showScrollToBottom={showScrollToBottom()}
                 turnAnchorSpacerHeight={turnAnchorSpacerHeight()}
                 onScrollToBottomClick={handleScrollToBottomClick}
                 workingDir={workingDir()}

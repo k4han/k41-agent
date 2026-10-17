@@ -4,11 +4,40 @@ export function useChatScroll(
   getTranscriptRef: () => HTMLDivElement | undefined,
 ) {
   const [autoScroll, setAutoScroll] = createSignal(true);
+  const [showScrollToBottom, setShowScrollToBottom] = createSignal(false);
   const [turnAnchorItemId, setTurnAnchorItemId] = createSignal<number | null>(null);
   const [turnAnchorSpacerHeight, setTurnAnchorSpacerHeight] = createSignal(0);
   let pendingScrollTimer: number | undefined;
   let pendingAnchorFrame: number | undefined;
+  let pendingVisibilityFrame: number | undefined;
+  let resizeObserver: ResizeObserver | undefined;
   let pausedScrollTop: number | undefined;
+
+  const updateScrollToBottomVisibility = () => {
+    const ref = getTranscriptRef();
+    // The turn spacer is blank space, not unread conversation content.
+    const distanceToBottom = ref
+      ? ref.scrollHeight - turnAnchorSpacerHeight() - ref.scrollTop - ref.clientHeight
+      : 0;
+    setShowScrollToBottom(!!ref && ref.clientHeight > 0 && distanceToBottom > 200);
+  };
+
+  const scheduleVisibilityUpdate = () => {
+    if (pendingVisibilityFrame !== undefined) {
+      return;
+    }
+    pendingVisibilityFrame = window.requestAnimationFrame(() => {
+      pendingVisibilityFrame = undefined;
+      updateScrollToBottomVisibility();
+    });
+  };
+
+  const observeTranscript = (ref: HTMLDivElement) => {
+    resizeObserver?.disconnect();
+    resizeObserver = new ResizeObserver(scheduleVisibilityUpdate);
+    resizeObserver.observe(ref);
+    scheduleVisibilityUpdate();
+  };
 
   const cancelScheduledScroll = () => {
     if (pendingScrollTimer !== undefined) {
@@ -21,12 +50,19 @@ export function useChatScroll(
     }
   };
 
-  onCleanup(cancelScheduledScroll);
+  onCleanup(() => {
+    cancelScheduledScroll();
+    resizeObserver?.disconnect();
+    if (pendingVisibilityFrame !== undefined) {
+      window.cancelAnimationFrame(pendingVisibilityFrame);
+    }
+  });
 
   const clearTurnAnchor = () => {
     cancelScheduledScroll();
     setTurnAnchorItemId(null);
     setTurnAnchorSpacerHeight(0);
+    scheduleVisibilityUpdate();
   };
 
   const getTranscriptItemElement = (id: number) =>
@@ -85,11 +121,13 @@ export function useChatScroll(
           return;
         }
         ref.scrollTop = getTranscriptItemScrollTop(updatedTarget);
+        updateScrollToBottomVisibility();
       });
     });
   };
 
   const scrollToBottom = (force = false) => {
+    scheduleVisibilityUpdate();
     if (!autoScroll() && !force) {
       return;
     }
@@ -111,10 +149,12 @@ export function useChatScroll(
       if (transcriptRef) {
         transcriptRef.scrollTop = transcriptRef.scrollHeight;
       }
+      updateScrollToBottomVisibility();
     }, 0);
   };
 
   const handleTranscriptScroll = () => {
+    updateScrollToBottomVisibility();
     const transcriptRef = getTranscriptRef();
     if (!transcriptRef) {
       return;
@@ -141,6 +181,7 @@ export function useChatScroll(
   };
 
   const handleScrollToBottomClick = () => {
+    setShowScrollToBottom(false);
     pausedScrollTop = undefined;
     clearTurnAnchor();
     setAutoScroll(true);
@@ -160,6 +201,8 @@ export function useChatScroll(
 
   return {
     autoScroll,
+    showScrollToBottom,
+    observeTranscript,
     setAutoScroll,
     turnAnchorItemId,
     setTurnAnchorItemId,
