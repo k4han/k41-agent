@@ -51,6 +51,7 @@ import {
 import { useMobileDrawer } from "@/lib/useMobileDrawer";
 import { useSidebarResize } from "@/lib/useSidebarResize";
 import { useThreadWorkspaceGroups } from "@/lib/useThreadWorkspaceGroups";
+import { useVisualViewport } from "@/lib/useVisualViewport";
 import { bindWorkspaceRef } from "@/lib/workspace";
 import { cloneValue, truncateText } from "@/lib/utils";
 import { useToast } from "@/components/Toast";
@@ -142,6 +143,7 @@ export function AppShell(props: {
     handleKeydown,
   } = useMobileDrawer({ sidebarId: "app-shell-sidebar" });
   const sidebar = useSidebarResize(() => !collapsed() && !isMobileViewport());
+  const chatViewport = useVisualViewport(() => Boolean(props.noHeader) && isMobileViewport());
   let disposed = false;
   let deferredHistoryLoad: DeferredHistoryLoad | null = null;
 
@@ -777,7 +779,11 @@ export function AppShell(props: {
   return (
     <div
       class={`app-layout app-layout--resizable ${sidebar.resizing() ? "app-layout--resizing" : ""} ${collapsed() ? "sidebar-collapsed" : ""} ${isMobileViewport() && mobileDrawerOpen() ? "app-layout--drawer-open" : ""} ${props.noHeader ? "app-layout-no-header" : ""}`}
-      style={{ "--sidebar-width": `${sidebar.width()}px` }}
+      style={{
+        "--sidebar-width": `${sidebar.width()}px`,
+        "--chat-viewport-height": chatViewport() ? `${chatViewport()!.height}px` : undefined,
+        "--chat-viewport-top": chatViewport() ? `${chatViewport()!.offsetTop}px` : undefined,
+      }}
       onClick={handleAppLayoutClick}
     >
       <aside id="app-shell-sidebar" class="sidebar">
