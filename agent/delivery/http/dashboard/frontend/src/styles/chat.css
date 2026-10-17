@@ -64,7 +64,7 @@
   height: 100%;
   max-height: 100%;
   min-height: 0;
-  padding-bottom: 14px;
+  padding-bottom: calc(var(--safe-bottom) + 14px);
   box-sizing: border-box;
   overflow: hidden;
 }
@@ -637,7 +637,7 @@
   }
 
   .content-no-header .chat-panel {
-    padding-bottom: 0;
+    padding-bottom: calc(var(--safe-bottom) + 12px);
   }
 
   .message.user {

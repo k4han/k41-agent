@@ -409,9 +409,3 @@
     display: none;
   }
 }
-
-@media (max-width: 768px) {
-  .chat-composer-toolbar {
-    padding-bottom: calc(var(--safe-bottom) + 6px);
-  }
-}

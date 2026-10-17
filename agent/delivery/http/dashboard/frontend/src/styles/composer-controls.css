@@ -1098,7 +1098,7 @@
     flex-direction: row;
     align-items: center;
     gap: 6px;
-    padding: 6px 8px calc(var(--safe-bottom) + 6px);
+    padding: 6px 8px;
     width: 100%;
     flex-wrap: nowrap;
   }
