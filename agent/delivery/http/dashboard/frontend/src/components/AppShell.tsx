@@ -14,7 +14,7 @@ import {
   LogOut,
   Menu,
   MessageSquare,
-  MoreHorizontal,
+  MoreVertical,
   Pencil,
   PlaySquare,
   Plus,
@@ -530,7 +530,7 @@ export function AppShell(props: {
               aria-expanded={historyMenuThreadId() === thread.thread_id}
               onClick={(event) => toggleHistoryMenu(thread.thread_id, event)}
             >
-              <MoreHorizontal size={14} />
+              <MoreVertical size={14} />
             </button>
           </Show>
         </div>

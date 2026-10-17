@@ -481,7 +481,7 @@ body.sidebar-resizing * {
 }
 
 .nav-history-item .nav-history-link {
-  padding-right: 44px;
+  padding-right: 34px;
 }
 
 .nav-history-rename-input {
@@ -505,16 +505,16 @@ body.sidebar-resizing * {
 .nav-history-action {
   position: absolute;
   top: 50%;
-  right: 2px;
+  right: 5px;
   display: grid;
-  width: 40px;
-  height: 40px;
-  min-width: 40px;
-  min-height: 40px;
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  min-height: 24px;
   place-items: center;
   border: 0;
   border-radius: 6px;
-  background: var(--surface);
+  background: transparent;
   color: var(--muted);
   opacity: 0;
   pointer-events: none;
