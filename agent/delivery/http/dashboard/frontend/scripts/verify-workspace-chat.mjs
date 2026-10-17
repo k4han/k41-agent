@@ -387,6 +387,59 @@ try {
     const context = document.querySelector('.context-window-circle-btn').getBoundingClientRect();
     return bar.right - stop.right <= 12 && context.right <= stop.left && stop.left - context.right <= 6;
   })()`), true, 'stop stays at the right edge beside context while streaming');
+
+  const scrollMetrics = () => js(`(() => {
+    const transcript = document.querySelector('.transcript');
+    return { top: transcript.scrollTop, height: transcript.scrollHeight, viewport: transcript.clientHeight };
+  })()`);
+  const toolOutput = 'Command exited with code 0.\n' + 'Expanded tool output.\n'.repeat(40);
+  chatResponse.write(JSON.stringify({ type: 'tool_result', tool_call_id: 'write-source', name: 'shell', content: toolOutput }) + '\n');
+  await until(() => js('document.querySelector(".tool-call-body")?.textContent.includes("Expanded tool output.")'), 'tool output arrives');
+  await delay(100);
+  const collapsed = await scrollMetrics();
+  await click('.tool-call > summary');
+  await delay(100);
+  const expanded = await scrollMetrics();
+  assert.ok(expanded.height > collapsed.height, 'expanding a tool must increase the main scroll range');
+  assert.ok(Math.abs(expanded.top - collapsed.top) <= 1, 'expanding a tool must preserve the reading position');
+
+  for (let index = 0; index < 2; index++) {
+    const id = `scroll-tool-${index}`;
+    chatResponse.write(JSON.stringify({ type: 'tool_call', id, name: 'shell', args: { command: `inspect output ${index}` } }) + '\n');
+    chatResponse.write(JSON.stringify({ type: 'tool_result', tool_call_id: id, name: 'shell', content: toolOutput }) + '\n');
+  }
+  await until(() => js('document.querySelectorAll(".tool-call").length === 3'), 'more tools arrive while paused');
+  await js('document.querySelectorAll(".tool-call:not([open]) > summary").forEach(summary => summary.click())');
+  await until(() => js('!!document.querySelector(".scroll-to-bottom-btn")'), 'expanded content exposes the bottom button');
+  assert.ok(Math.abs((await scrollMetrics()).top - expanded.top) <= 1, 'more streamed tools must not move the reading position');
+  const transcriptBounds = await js(`(() => {
+    const transcript = document.querySelector('.transcript');
+    return { ...transcript.getBoundingClientRect().toJSON(), scrollbarWidth: transcript.offsetWidth - transcript.clientWidth };
+  })()`);
+  await call('Input.dispatchMouseEvent', {
+    type: 'mouseWheel', x: transcriptBounds.left + 4, y: transcriptBounds.top + 40,
+    deltaX: 0, deltaY: 100000,
+  });
+  const atBottom = async () => {
+    const metrics = await scrollMetrics();
+    return Math.abs(metrics.height - metrics.viewport - metrics.top) <= 1;
+  };
+  await until(atBottom, 'mouse wheel reaches the expanded conversation bottom');
+  assert.equal(await js('!!document.querySelector(".transcript-anchor-spacer")'), false, 'reaching the content bottom releases blank anchor space');
+
+  await js('document.querySelector(".transcript").scrollTop = 0');
+  await until(() => js('!!document.querySelector(".scroll-to-bottom-btn")'), 'scroll back through history');
+  const metrics = await scrollMetrics();
+  const thumbCenter = transcriptBounds.top + metrics.viewport * metrics.viewport / metrics.height / 2;
+  const scrollbarX = transcriptBounds.right - transcriptBounds.scrollbarWidth / 2;
+  await call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: scrollbarX, y: thumbCenter });
+  await call('Input.dispatchMouseEvent', { type: 'mousePressed', x: scrollbarX, y: thumbCenter, button: 'left', buttons: 1, clickCount: 1 });
+  await call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: scrollbarX, y: transcriptBounds.bottom - 2, button: 'left', buttons: 1 });
+  await delay(100);
+  await call('Input.dispatchMouseEvent', { type: 'mouseReleased', x: scrollbarX, y: transcriptBounds.bottom - 2, button: 'left', clickCount: 1 });
+  await until(atBottom, 'dragging the main scrollbar reaches the expanded conversation bottom');
+  console.log('PASS: expanding streamed tools updates the main scroll range, preserves position, and allows wheel and scrollbar navigation to the bottom.');
+
   await js(`window.previewNode = document.querySelector('.workspace-file-view-shiki').firstChild;
     window.backgroundMutations = [];
     window.backgroundObserver = new MutationObserver(records => backgroundMutations.push(...records));

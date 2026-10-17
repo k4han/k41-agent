@@ -11,7 +11,9 @@ export function useChatScroll(
   let pendingAnchorFrame: number | undefined;
   let pendingVisibilityFrame: number | undefined;
   let resizeObserver: ResizeObserver | undefined;
+  let mutationObserver: MutationObserver | undefined;
   let pausedScrollTop: number | undefined;
+  let previousScrollTop: number | undefined;
 
   const updateScrollToBottomVisibility = () => {
     const ref = getTranscriptRef();
@@ -34,8 +36,30 @@ export function useChatScroll(
 
   const observeTranscript = (ref: HTMLDivElement) => {
     resizeObserver?.disconnect();
+    mutationObserver?.disconnect();
     resizeObserver = new ResizeObserver(scheduleVisibilityUpdate);
     resizeObserver.observe(ref);
+    // The viewport stays the same size when a tool opens or a message grows.
+    // Observe its rows as well so layout changes refresh the scroll controls.
+    for (const child of ref.children) {
+      resizeObserver.observe(child);
+    }
+    mutationObserver = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.removedNodes) {
+          if (node.nodeType === 1) {
+            resizeObserver?.unobserve(node as Element);
+          }
+        }
+        for (const node of record.addedNodes) {
+          if (node.nodeType === 1) {
+            resizeObserver?.observe(node as Element);
+          }
+        }
+      }
+      scheduleVisibilityUpdate();
+    });
+    mutationObserver.observe(ref, { childList: true });
     scheduleVisibilityUpdate();
   };
 
@@ -53,6 +77,7 @@ export function useChatScroll(
   onCleanup(() => {
     cancelScheduledScroll();
     resizeObserver?.disconnect();
+    mutationObserver?.disconnect();
     if (pendingVisibilityFrame !== undefined) {
       window.cancelAnimationFrame(pendingVisibilityFrame);
     }
@@ -159,16 +184,20 @@ export function useChatScroll(
     if (!transcriptRef) {
       return;
     }
-    // Removing the spacer can clamp scrollTop and emit a layout-driven scroll.
-    // That event must not resume following immediately after opening a tool.
+    const scrollingDown =
+      previousScrollTop !== undefined && transcriptRef.scrollTop > previousScrollTop;
+    previousScrollTop = transcriptRef.scrollTop;
+    // Layout-driven scroll events must not resume following after opening a tool.
     if (pausedScrollTop === transcriptRef.scrollTop) {
       pausedScrollTop = undefined;
       return;
     }
     pausedScrollTop = undefined;
     const threshold = 50; // px
+    const spacerHeight = turnAnchorSpacerHeight();
     const isAtBottom =
-      transcriptRef.scrollHeight - transcriptRef.scrollTop - transcriptRef.clientHeight < threshold;
+      transcriptRef.scrollHeight - spacerHeight - transcriptRef.scrollTop - transcriptRef.clientHeight < threshold
+      && (autoScroll() || spacerHeight === 0 || scrollingDown);
     if (isAtBottom) {
       if (!autoScroll()) {
         clearTurnAnchor();
@@ -188,15 +217,17 @@ export function useChatScroll(
     scrollToBottom(true);
   };
 
-  // Stop following the stream and release the turn anchor so subsequent
-  // streamed chunks do not yank the view back to the anchor. Used when the
-  // user explicitly interacts with the transcript (for example expanding a
-  // tool call to read its arguments/result). Scrolling back to the bottom
-  // re-enables auto-scroll; the "scroll to bottom" button force-scrolls.
+  // Release the anchor without shrinking the scroll range during an interaction.
+  // Removing its spacer here can cancel out an expanded tool's height, clamp
+  // scrollTop, and change the scrollbar range while the user is dragging it.
+  // Reaching the content bottom or using the bottom button clears the spacer.
   const pauseAutoScroll = () => {
     setAutoScroll(false);
-    clearTurnAnchor();
+    cancelScheduledScroll();
+    setTurnAnchorItemId(null);
     pausedScrollTop = getTranscriptRef()?.scrollTop;
+    previousScrollTop = pausedScrollTop;
+    scheduleVisibilityUpdate();
   };
 
   return {

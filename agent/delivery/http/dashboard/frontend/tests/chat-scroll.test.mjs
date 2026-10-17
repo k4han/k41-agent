@@ -27,19 +27,29 @@ function createFixture(t) {
   };
   const exports = {};
   let resizeCallback;
+  let mutationCallback;
+  const observed = new Set();
   runInNewContext(outputText, {
     exports, window,
     ResizeObserver: class {
       constructor(callback) { resizeCallback = callback; }
+      observe(target) { observed.add(target); }
+      unobserve(target) { observed.delete(target); }
+      disconnect() { observed.clear(); resizeCallback = undefined; }
+    },
+    MutationObserver: class {
+      constructor(callback) { mutationCallback = callback; }
       observe() {}
-      disconnect() { resizeCallback = undefined; }
+      disconnect() { mutationCallback = undefined; }
     },
     require: (name) => {
       assert.equal(name, 'solid-js');
       return solid;
     },
   });
+  const row = { nodeType: 1 };
   const transcript = {
+    children: [row],
     scrollTop: 100,
     scrollHeight: 2000,
     clientHeight: 500,
@@ -61,10 +71,13 @@ function createFixture(t) {
     snapshot.forEach((callback) => callback());
   };
   return {
-    scroll, transcript, timers, frames, dispose,
+    scroll, transcript, row, timers, frames, dispose,
     flushTimers: () => flush(timers),
     flushFrame: () => flush(frames),
-    resize: () => resizeCallback?.(),
+    resize: (target = transcript) => {
+      if (observed.has(target)) resizeCallback?.();
+    },
+    mutate: (addedNodes, removedNodes = []) => mutationCallback?.([{ addedNodes, removedNodes }]),
   };
 }
 
@@ -131,6 +144,52 @@ test('the scroll event caused by pausing does not resume following', (t) => {
   f.scroll.scrollToBottom();
   f.flushTimers();
   assert.equal(f.transcript.scrollTop, 1500);
+});
+
+test('opening a tool releases the anchor without shrinking the scroll range', (t) => {
+  const f = createFixture(t);
+  f.scroll.setTurnAnchorItemId(42);
+  f.scroll.setTurnAnchorSpacerHeight(350);
+  f.scroll.pauseAutoScroll();
+  assert.equal(f.scroll.autoScroll(), false);
+  assert.equal(f.scroll.turnAnchorItemId(), null);
+  assert.equal(f.scroll.turnAnchorSpacerHeight(), 350);
+  f.scroll.scrollToBottom();
+  f.flushTimers();
+  assert.equal(f.transcript.scrollTop, 100);
+});
+
+test('scrolling down to the content bottom clears the spacer before entering blank space', (t) => {
+  const f = createFixture(t);
+  f.scroll.setTurnAnchorSpacerHeight(350);
+  f.transcript.scrollTop = 1000;
+  f.scroll.pauseAutoScroll();
+  f.transcript.scrollTop = 1150;
+  f.scroll.handleTranscriptScroll();
+  assert.equal(f.scroll.turnAnchorSpacerHeight(), 0);
+  assert.equal(f.scroll.autoScroll(), true);
+});
+
+test('scrolling up through a padded turn keeps following paused', (t) => {
+  const f = createFixture(t);
+  f.scroll.setTurnAnchorSpacerHeight(350);
+  f.transcript.scrollTop = 1200;
+  f.scroll.pauseAutoScroll();
+  f.transcript.scrollTop = 1180;
+  f.scroll.handleTranscriptScroll();
+  assert.equal(f.scroll.autoScroll(), false);
+  assert.equal(f.scroll.turnAnchorSpacerHeight(), 350);
+});
+
+test('a programmatic turn anchor scroll keeps following while its spacer is present', (t) => {
+  const f = createFixture(t);
+  f.scroll.setTurnAnchorItemId(42);
+  f.scroll.setTurnAnchorSpacerHeight(350);
+  f.transcript.scrollTop = 1150;
+  f.scroll.handleTranscriptScroll();
+  assert.equal(f.scroll.autoScroll(), true);
+  assert.equal(f.scroll.turnAnchorItemId(), 42);
+  assert.equal(f.scroll.turnAnchorSpacerHeight(), 350);
 });
 
 test('scrolling manually to the bottom releases the anchor and follows new content', (t) => {
@@ -240,6 +299,39 @@ test('resizing the viewport refreshes the bottom button', (t) => {
   assert.equal(f.scroll.showScrollToBottom(), false);
 });
 
+test('expanding a tool refreshes the bottom button without another streamed chunk', (t) => {
+  const f = createFixture(t);
+  f.transcript.scrollTop = 1500;
+  f.scroll.pauseAutoScroll();
+  f.flushFrame();
+  assert.equal(f.scroll.showScrollToBottom(), false);
+  f.transcript.scrollHeight += 300;
+  f.resize(f.row);
+  f.flushFrame();
+  assert.equal(f.scroll.showScrollToBottom(), true);
+  assert.equal(f.transcript.scrollTop, 1500);
+  assert.equal(f.scroll.autoScroll(), false);
+});
+
+test('new tool rows refresh scrolling and stop reporting size changes after removal', (t) => {
+  const f = createFixture(t);
+  const tool = { nodeType: 1 };
+  f.transcript.scrollTop = 1500;
+  f.scroll.pauseAutoScroll();
+  f.mutate([tool]);
+  f.flushFrame();
+  f.transcript.scrollHeight += 400;
+  f.resize(tool);
+  f.flushFrame();
+  assert.equal(f.scroll.showScrollToBottom(), true);
+  f.transcript.scrollHeight -= 400;
+  f.mutate([], [tool]);
+  f.flushFrame();
+  assert.equal(f.scroll.showScrollToBottom(), false);
+  f.resize(tool);
+  assert.equal(f.frames.size, 0);
+});
+
 test('clicking the bottom button hides it immediately and resumes following', (t) => {
   const f = createFixture(t);
   f.scroll.handleTranscriptScroll();
@@ -258,5 +350,6 @@ test('unmounting cancels visibility updates and disconnects resize observation',
   assert.ok(f.frames.size > 0);
   f.dispose();
   f.resize();
+  f.mutate([{ nodeType: 1 }]);
   assert.equal(f.frames.size, 0);
 });
