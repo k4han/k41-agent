@@ -3,6 +3,8 @@ import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show }
 import { Portal } from "solid-js/web";
 
 import { resolveModelAndProvider } from "@/lib/modelSelection";
+import { MOBILE_MEDIA_QUERY } from "@/lib/uiConstants";
+import { createMediaQuery } from "@/lib/useMediaQuery";
 import type { AgentCard, ModelCatalog, ModelOption } from "@/types";
 
 export interface AgentModelPickerProps {
@@ -57,6 +59,7 @@ export function formatShortModelName(provider: string, model: string): string {
 }
 
 export function AgentModelPicker(props: AgentModelPickerProps) {
+  const isMobileViewport = createMediaQuery(MOBILE_MEDIA_QUERY);
   const [open, setOpen] = createSignal(false);
   const [searchQuery, setSearchQuery] = createSignal("");
   const [activePicker, setActivePicker] = createSignal<"agent" | "model">("agent");
@@ -275,6 +278,8 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
   });
 
   createEffect(() => {
+    // Skip auto-focus on mobile so opening the picker does not pop up the on-screen keyboard.
+    if (isMobileViewport()) return;
     if (open() && activePicker() === "model" && searchInputRef) {
       queueMicrotask(() => searchInputRef?.focus());
     }
