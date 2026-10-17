@@ -7,8 +7,6 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Folder,
-  Folders,
-  FolderOpen,
   GitBranch,
   GitPullRequest,
   History,
@@ -19,6 +17,7 @@ import {
   MoreHorizontal,
   Pencil,
   PlaySquare,
+  Plus,
   RefreshCw,
   Settings,
   Sparkles,
@@ -26,21 +25,19 @@ import {
   Trash2,
   X,
 } from "lucide-solid";
-import { createEffect, createMemo, createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, JSX, on, onCleanup, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
+import { unwrap } from "solid-js/store";
 
 import { DeleteThreadDialog } from "@/components/DeleteThreadDialog";
 import { InlineRenameInput } from "@/components/InlineRenameInput";
-import { SelectControl } from "@/components/SelectControl";
 import { UpdateDialog } from "@/components/UpdateDialog";
 import { apiFetch, deleteJson, patchJson, postJson } from "@/lib/api";
 import { checkForUpdates, openUpdateDialog, versionInfo } from "@/lib/versionStore";
 import {
   chatThreadHref,
-  groupThreadsByWorkspace,
   threadApiPath,
   threadWorkspaceKey,
-  threadWorkspaceLabel,
 } from "@/lib/chatThreads";
 import type { ThreadListPayload, ThreadSummary, ThreadWorkspaceGroup } from "@/lib/chatThreads";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
@@ -52,11 +49,12 @@ import {
   STORAGE_KEYS,
 } from "@/lib/uiConstants";
 import { useMobileDrawer } from "@/lib/useMobileDrawer";
-import { ALL_WORKSPACES_KEY } from "@/lib/workspaceConstants";
+import { useSidebarResize } from "@/lib/useSidebarResize";
+import { useThreadWorkspaceGroups } from "@/lib/useThreadWorkspaceGroups";
 import { bindWorkspaceRef } from "@/lib/workspace";
-import { truncateText } from "@/lib/utils";
+import { cloneValue, truncateText } from "@/lib/utils";
 import { useToast } from "@/components/Toast";
-import type { ActiveSession, WorkspaceBinding, WorkspaceRef } from "@/types";
+import type { WorkspaceBinding, WorkspaceRef } from "@/types";
 
 type NavItem = {
   href: string;
@@ -70,8 +68,6 @@ const navItems: NavItem[] = [
   { href: "/repositories", label: "Repositories", icon: () => <GitPullRequest size={15} /> },
   { href: "/scheduler", label: "Scheduler", icon: () => <CalendarClock size={15} /> },
 ];
-
-const HISTORY_PANEL_STORAGE_KEY = STORAGE_KEYS.HISTORY_PANEL;
 
 type HistoryCache = {
   threads: ThreadSummary[];
@@ -93,7 +89,6 @@ const historyCache: HistoryCache = {
   loaded: false,
 };
 
-type HistoryLoadMode = "immediate" | "deferred" | "none";
 type DeferredHistoryLoad = {
   kind: "idle" | "timeout";
   id: number;
@@ -119,7 +114,6 @@ export function AppShell(props: {
   const { showToast } = useToast();
   const [menuOpen, setMenuOpen] = createSignal(false);
   const [collapsed, setCollapsed] = createSignal(false);
-  const [historyOpen, setHistoryOpen] = createSignal(false);
   const [historyThreads, setHistoryThreads] = createSignal<ThreadSummary[]>(historyCache.threads);
   const [historyError, setHistoryError] = createSignal("");
   const [historyHasMore, setHistoryHasMore] = createSignal(historyCache.hasMore);
@@ -147,6 +141,7 @@ export function AppShell(props: {
     handleNavClick,
     handleKeydown,
   } = useMobileDrawer({ sidebarId: "app-shell-sidebar" });
+  const sidebar = useSidebarResize(() => !collapsed() && !isMobileViewport());
   let disposed = false;
   let deferredHistoryLoad: DeferredHistoryLoad | null = null;
 
@@ -322,7 +317,7 @@ export function AppShell(props: {
       return;
     }
 
-    if ((historyOpen() && !collapsed()) || isHistoryActive()) {
+    if (!collapsed() || mobileDrawerOpen() || isHistoryActive()) {
       void loadHistory(true);
       return;
     }
@@ -334,7 +329,7 @@ export function AppShell(props: {
     setCollapsed(next);
     window.localStorage.setItem(STORAGE_KEYS.SIDEBAR_COLLAPSED, next ? "collapsed" : "expanded");
 
-    if (!next && historyOpen() && !historyLoaded()) {
+    if (!next && !historyLoaded()) {
       void loadHistory(true);
     }
   };
@@ -401,6 +396,10 @@ export function AppShell(props: {
     location.pathname.startsWith("/history") || Boolean(selectedChatThreadId())
   );
 
+  createEffect(on(mobileDrawerOpen, (open) => {
+    if (open && !historyLoaded() && !historyLoading()) void loadHistory(true);
+  }));
+
   const cancelDeferredHistoryLoad = () => {
     if (!deferredHistoryLoad) {
       return;
@@ -446,90 +445,40 @@ export function AppShell(props: {
   };
 
   const isThreadActive = (threadId: string) => selectedChatThreadId() === threadId;
-  const historyGroups = createMemo(() => groupThreadsByWorkspace(historyThreads()));
+  const historyGroups = useThreadWorkspaceGroups(historyThreads);
+  const [collapsedProjects, setCollapsedProjects] = createSignal(new Set<string>());
+  const toggleProject = (key: string) => {
+    setCollapsedProjects((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
-  const [selectedWorkspaceFilter, setSelectedWorkspaceFilter] = createSignal<string>(
-    window.localStorage.getItem(STORAGE_KEYS.WORKSPACE_FILTER) || ALL_WORKSPACES_KEY,
-  );
+  const startProjectChat = (group: ThreadWorkspaceGroup) => {
+    const workspace = group.threads.find((thread) => thread.workspace?.execution)?.workspace?.execution;
+    navigate("/chat", {
+      state: {
+        newChatId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        workspace: workspace ? cloneValue(unwrap(workspace)) : null,
+      },
+    });
+    closeMobileDrawer();
+  };
 
-  const runningThreads = createMemo(() => {
-    return historyThreads().filter((t) => runningThreadIds().has(t.thread_id));
-  });
-
-  const filteredThreads = createMemo(() => {
-    const filter = selectedWorkspaceFilter();
-    const nonRunning = historyThreads().filter((t) => !runningThreadIds().has(t.thread_id));
-    if (filter === ALL_WORKSPACES_KEY) {
-      return nonRunning;
-    }
-    return nonRunning.filter((t) => threadWorkspaceKey(t) === filter);
-  });
-
-  const availableWorkspaces = createMemo(() => {
-    return historyGroups().map((group) => {
-      const isRepo = group.threads.some((t) => t.workspace?.scope.kind === "github");
-      return {
-        key: group.key,
-        label: group.label,
-        isRepo,
-      };
+  createEffect(() => {
+    const activeThread = historyThreads().find((thread) => isThreadActive(thread.thread_id));
+    if (!activeThread) return;
+    const key = threadWorkspaceKey(activeThread);
+    setCollapsedProjects((current) => {
+      if (!current.has(key)) return current;
+      const next = new Set(current);
+      next.delete(key);
+      return next;
     });
   });
 
-  const workspaceRunningCounts = createMemo(() => {
-    const counts = new Map<string, number>();
-    for (const thread of historyThreads()) {
-      if (runningThreadIds().has(thread.thread_id)) {
-        const key = threadWorkspaceKey(thread);
-        counts.set(key, (counts.get(key) || 0) + 1);
-      }
-    }
-    return counts;
-  });
-
-  const historyWorkspaceFilterOptions = createMemo(() => [
-    {
-      value: ALL_WORKSPACES_KEY,
-      label: "All Workspaces",
-      icon: <Folders size={13} />,
-    },
-    ...availableWorkspaces().map((ws) => {
-      const runningCount = workspaceRunningCounts().get(ws.key) || 0;
-      const suffix = runningCount > 0 ? ` (${runningCount} running)` : "";
-      return {
-        value: ws.key,
-        label: `${ws.label}${suffix}`,
-        icon: ws.isRepo ? <GitBranch size={13} /> : <Folder size={13} />,
-      };
-    }),
-  ]);
-
-  const updateSelectedWorkspaceFilter = (value: string) => {
-    setSelectedWorkspaceFilter(value);
-    window.localStorage.setItem(STORAGE_KEYS.WORKSPACE_FILTER, value);
-  };
-
-  const setHistoryPanelOpen = (next: boolean, loadMode: HistoryLoadMode = "immediate") => {
-    setHistoryOpen(next);
-    window.localStorage.setItem(HISTORY_PANEL_STORAGE_KEY, next ? "open" : "closed");
-
-    if (next && !collapsed() && !historyLoaded()) {
-      if (loadMode === "immediate") {
-        cancelDeferredHistoryLoad();
-        void loadHistory(true);
-      } else if (loadMode === "deferred") {
-        scheduleDeferredHistoryLoad(true);
-      }
-    }
-  };
-
-  const toggleHistory = () => {
-    if (collapsed()) {
-      setSidebarCollapsed(false);
-    }
-
-    setHistoryPanelOpen(!historyOpen());
-  };
   const renderHistoryItem = (thread: ThreadSummary) => {
     return (
       <div class="nav-history-item-wrapper">
@@ -544,7 +493,8 @@ export function AppShell(props: {
                 activeClass=""
                 inactiveClass=""
                 class="nav-history-link"
-                title={`${thread.thread_id} - ${threadMeta(thread)}`}
+                aria-current={isThreadActive(thread.thread_id) ? "page" : undefined}
+                title={`${threadTitle(thread)}\n${threadMeta(thread)}`}
               >
                 <Show
                   when={runningThreadIds().has(thread.thread_id)}
@@ -588,7 +538,7 @@ export function AppShell(props: {
     );
   };
 
-  const threadTitle = (thread: ThreadSummary) => truncateText(thread.title || thread.thread_id, 30);
+  const threadTitle = (thread: ThreadSummary) => thread.title || thread.thread_id;
   const isBackgroundThread = (thread: ThreadSummary) => thread.kind === "background";
   const threadMeta = (thread: ThreadSummary) => {
     const owner = thread.channel_id || thread.user_id;
@@ -797,12 +747,9 @@ export function AppShell(props: {
     if (window.localStorage.getItem(STORAGE_KEYS.SIDEBAR_COLLAPSED) === "collapsed") {
       setCollapsed(true);
     }
-    const savedHistoryState = window.localStorage.getItem(HISTORY_PANEL_STORAGE_KEY);
-    const loadMode = isHistoryActive() ? "immediate" : "deferred";
-    if (savedHistoryState === "open" || isHistoryActive()) {
-      setHistoryPanelOpen(true, loadMode);
-    } else if (!collapsed() && !historyLoaded()) {
-      scheduleDeferredHistoryLoad(true);
+    if (!historyLoaded()) {
+      if (isHistoryActive()) void loadHistory(true);
+      else if (!collapsed()) scheduleDeferredHistoryLoad(true);
     }
     document.addEventListener("click", handleClickOutside);
     document.addEventListener("keydown", handleKeydown);
@@ -829,7 +776,8 @@ export function AppShell(props: {
 
   return (
     <div
-      class={`app-layout ${collapsed() ? "sidebar-collapsed" : ""} ${isMobileViewport() && mobileDrawerOpen() ? "app-layout--drawer-open" : ""} ${props.noHeader ? "app-layout-no-header" : ""}`}
+      class={`app-layout app-layout--resizable ${sidebar.resizing() ? "app-layout--resizing" : ""} ${collapsed() ? "sidebar-collapsed" : ""} ${isMobileViewport() && mobileDrawerOpen() ? "app-layout--drawer-open" : ""} ${props.noHeader ? "app-layout-no-header" : ""}`}
+      style={{ "--sidebar-width": `${sidebar.width()}px` }}
       onClick={handleAppLayoutClick}
     >
       <aside id="app-shell-sidebar" class="sidebar">
@@ -926,7 +874,7 @@ export function AppShell(props: {
             )}
           </For>
           <Show
-            when={!collapsed()}
+            when={!collapsed() || isMobileViewport()}
             fallback={
               <A
                 href="/history"
@@ -940,14 +888,8 @@ export function AppShell(props: {
             }
           >
             <div class="nav-history-group open">
-              <div class="nav-history-filter-container">
-                <SelectControl
-                  class="nav-history-filter"
-                  value={selectedWorkspaceFilter()}
-                  options={historyWorkspaceFilterOptions()}
-                  onChange={updateSelectedWorkspaceFilter}
-                  ariaLabel="Filter history by workspace"
-                />
+              <div class="nav-projects-header">
+                <span>Projects</span>
                 <A
                   href="/history"
                   class="nav-history-all-btn"
@@ -963,66 +905,60 @@ export function AppShell(props: {
                 aria-label="Chat history"
                 onScroll={handleHistoryScroll}
               >
-                {/* Global Pinned Running Tasks */}
-                <Show when={runningThreads().length > 0}>
-                  <div class="nav-history-running-section">
-                    <div class="nav-history-running-title">⚡ Running Tasks</div>
-                    <For each={runningThreads()}>
-                      {(thread) => (
-                        <div class="nav-history-item-wrapper">
-                          <div
-                            class={`nav-history-item ${isThreadActive(thread.thread_id) ? "active" : ""} running ${editingHistoryThreadId() === thread.thread_id ? "editing" : ""}`}
+                <For each={historyGroups()}>
+                  {(group) => {
+                    const open = () => !collapsedProjects().has(group.key);
+                    const previewThreads = createMemo(() => group.threads.filter((thread, index) => (
+                      index < 5 || isThreadActive(thread.thread_id) || runningThreadIds().has(thread.thread_id)
+                    )));
+                    const groupId = `nav-project-${encodeURIComponent(group.key)}`;
+                    return (
+                      <section class="nav-history-workspace" aria-label={group.label}>
+                        <div class="nav-project-heading">
+                          <button
+                            type="button"
+                            class="nav-history-workspace-toggle"
+                            aria-expanded={open()}
+                            aria-controls={groupId}
+                            title={group.label}
+                            onClick={() => toggleProject(group.key)}
                           >
-                            <Show
-                              when={editingHistoryThreadId() === thread.thread_id}
-                              fallback={
-                                <A
-                                  href={chatThreadHref(thread.thread_id)}
-                                  activeClass=""
-                                  inactiveClass=""
-                                  class="nav-history-link"
-                                  title={`${thread.thread_id} - ${threadMeta(thread)}`}
-                                >
-                                  <RefreshCw size={12} class="nav-history-kind-icon spinner-animate" />
-                                  <span class="nav-history-title">
-                                    {threadTitle(thread)}
-                                  </span>
-                                </A>
-                              }
-                            >
-                              <InlineRenameInput
-                                class="nav-history-rename-input"
-                                value={editingHistoryTitle()}
-                                onInput={setEditingHistoryTitle}
-                                onBlur={() => void finishRenameHistoryThread(thread)}
-                                onCancel={cancelRenameHistoryThread}
-                              />
+                            <Show when={group.isRepo} fallback={<Folder size={15} />}>
+                              <GitBranch size={15} />
                             </Show>
-                            <Show when={editingHistoryThreadId() !== thread.thread_id}>
-                              <button
-                                class={`nav-history-action ${historyMenuThreadId() === thread.thread_id ? "active" : ""}`}
-                                type="button"
-                                title="Thread actions"
-                                aria-label="Thread actions"
-                                aria-expanded={historyMenuThreadId() === thread.thread_id}
-                                onClick={(event) => toggleHistoryMenu(thread.thread_id, event)}
-                              >
-                                <MoreHorizontal size={14} />
-                              </button>
-                            </Show>
-                          </div>
+                            <span class="nav-history-workspace-label">{group.label}</span>
+                            <span class="nav-history-workspace-caret">
+                              <Show when={open()} fallback={<ChevronRight size={13} />}>
+                                <ChevronDown size={13} />
+                              </Show>
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            class="nav-project-add"
+                            aria-label={`New chat in ${group.label}`}
+                            title={`New chat in ${group.label}`}
+                            onClick={() => startProjectChat(group)}
+                          >
+                            <Plus size={16} />
+                          </button>
                         </div>
-                      )}
-                    </For>
-                  </div>
-                </Show>
-
-                {/* Filtered Flat History List */}
-                <div class="nav-history-flat-threads">
-                  <For each={filteredThreads()}>
-                    {(thread) => renderHistoryItem(thread)}
-                  </For>
-                </div>
+                        <div id={groupId} class="nav-history-workspace-threads" hidden={!open()}>
+                          <For each={previewThreads()}>
+                            {(thread) => renderHistoryItem(thread)}
+                          </For>
+                          <A
+                            class="nav-project-view-all"
+                            href={`/history?workspace=${encodeURIComponent(group.key)}`}
+                            aria-label={`View all chats in ${group.label}`}
+                          >
+                            View all
+                          </A>
+                        </div>
+                      </section>
+                    );
+                  }}
+                </For>
 
                 <Show when={historyThreads().length === 0 && !historyError() && (!historyLoaded() || historyLoading())}>
                   <div class="nav-history-skeleton" aria-label="Loading history">
@@ -1087,6 +1023,24 @@ export function AppShell(props: {
             </A>
           </div>
         </div>
+        <Show when={!collapsed() && !isMobileViewport()}>
+          <div
+            class="sidebar-resize-handle"
+            role="separator"
+            tabIndex={0}
+            aria-label="Resize navigation"
+            aria-orientation="vertical"
+            aria-controls="app-shell-sidebar"
+            aria-valuemin={sidebar.minWidth}
+            aria-valuemax={sidebar.maxWidth()}
+            aria-valuenow={sidebar.width()}
+            aria-valuetext={`${sidebar.width()} pixels`}
+            title="Drag to resize navigation. Double-click to reset."
+            onPointerDown={sidebar.startResize}
+            onKeyDown={sidebar.handleKeyDown}
+            onDblClick={sidebar.reset}
+          />
+        </Show>
       </aside>
       <main class={`main ${props.noHeader ? "main-no-header" : ""}`}>
         <Show when={!props.noHeader}>

@@ -11,9 +11,52 @@
   display: flex;
   height: 100vh;
   min-height: 0;
+  min-width: 0;
   flex-direction: column;
   border-right: 1px solid var(--border);
   background: var(--surface);
+}
+
+@media (min-width: 981px) {
+  .app-layout--resizable:not(.sidebar-collapsed) {
+    grid-template-columns: var(--sidebar-width, 290px) minmax(0, 1fr);
+  }
+}
+
+.app-layout--resizing {
+  transition: none;
+}
+
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  bottom: 0;
+  z-index: 2;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.sidebar-resize-handle::after {
+  content: "";
+  position: absolute;
+  inset: 0 3px;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.sidebar-resize-handle:hover::after,
+.sidebar-resize-handle:focus-visible::after,
+.app-layout--resizing .sidebar-resize-handle::after {
+  opacity: 1;
+}
+
+body.sidebar-resizing,
+body.sidebar-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 
 .brand {
@@ -163,6 +206,7 @@
   align-items: center;
   gap: 9px;
   min-height: 34px;
+  font-size: 14px;
   border: 0;
   border-radius: 8px;
   background: transparent;
@@ -242,20 +286,113 @@
 
 .nav-history-workspace {
   display: grid;
+  flex: 0 0 auto;
+  min-width: 0;
   gap: 2px;
+  margin-bottom: 12px;
+}
+
+.nav-projects-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 8px 6px;
+  color: var(--muted-2);
+  font-size: 14px;
+}
+
+.nav-projects-header .nav-history-all-btn {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
+  border: 0;
+  background: transparent;
+}
+
+.nav-project-heading {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  border-radius: 7px;
+}
+
+.nav-project-heading:hover,
+.nav-project-heading:focus-within {
+  background: var(--surface-2);
+}
+
+.nav-project-add {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  margin-right: 4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease, background-color 120ms ease;
+}
+
+.nav-project-heading:hover .nav-project-add,
+.nav-project-heading:focus-within .nav-project-add {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.nav-project-add:hover {
+  background: var(--surface-3);
+  color: var(--fg);
+}
+
+.nav-project-view-all {
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 4px 8px;
+  border-radius: 7px;
+  color: var(--muted-2);
+  font-size: 14px;
+}
+
+.nav-project-view-all:hover {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+
+@media (hover: none), (pointer: coarse) {
+  .nav-project-add {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+@media (max-width: 980px) {
+  .nav-project-add,
+  .nav-project-view-all,
+  .nav-projects-header .nav-history-all-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 
 .nav-history-workspace-toggle {
   display: grid;
-  grid-template-columns: 15px minmax(0, 1fr) auto 14px;
+  grid-template-columns: 15px minmax(0, 1fr) 14px;
   align-items: center;
-  gap: 6px;
-  min-height: 28px;
+  gap: 9px;
+  min-height: 34px;
   width: 100%;
+  min-width: 0;
+  flex: 1;
   border: 0;
   border-radius: 7px;
   background: transparent;
-  color: var(--muted);
+  color: var(--fg);
   padding: 0 8px;
   text-align: left;
 }
@@ -268,8 +405,8 @@
 .nav-history-workspace-label {
   min-width: 0;
   overflow: hidden;
-  font-size: 11px;
-  font-weight: 650;
+  font-size: 14px;
+  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -288,13 +425,20 @@
 .nav-history-workspace-threads {
   display: grid;
   gap: 2px;
-  padding-left: 10px;
+  min-width: 0;
+  margin-left: 15px;
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
+}
+
+.nav-history-workspace-threads[hidden] {
+  display: none;
 }
 
 .nav-history-link {
   display: flex;
   align-items: center;
-  min-height: 30px;
+  min-height: 34px;
   width: 100%;
   min-width: 0;
   flex: 0 0 auto;
@@ -350,7 +494,7 @@
   background: var(--surface);
   color: var(--fg);
   padding: 0 8px;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
 }
 
@@ -466,9 +610,9 @@
   display: block;
   min-width: 0;
   flex: 1 1 auto;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.2;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.4;
 }
 
 .nav-history-kind-icon {
@@ -483,7 +627,7 @@
 .nav-history-meta,
 .nav-history-status {
   color: var(--muted-2);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .nav-history-status,

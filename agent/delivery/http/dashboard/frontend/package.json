@@ -19,7 +19,8 @@
     "test:chat-scroll": "node --test tests/chat-scroll.test.mjs",
     "test:providers-ui": "node scripts/verify-provider-connections.mjs",
     "test:effort-ui": "node scripts/verify-reasoning-effort.mjs",
-    "test:mobile-ui": "node scripts/verify-mobile-layout.mjs"
+    "test:mobile-ui": "node scripts/verify-mobile-layout.mjs",
+    "test:navbar-ui": "node scripts/verify-navbar.mjs"
   },
   "dependencies": {
     "@solidjs/router": "^0.15.3",

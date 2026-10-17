@@ -1,6 +1,6 @@
-import { A } from "@solidjs/router";
+import { A, useSearchParams } from "@solidjs/router";
 import { Folder, Folders, FolderOpen, GitBranch, MessageSquare, Pencil, PlaySquare, Trash2 } from "lucide-solid";
-import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 
 import { AppShell } from "@/components/AppShell";
 import { DashboardTable } from "@/components/DashboardTable";
@@ -21,6 +21,7 @@ import { useThreadWorkspaceGroups } from "@/lib/useThreadWorkspaceGroups";
 import type { ThreadListPayload, ThreadSummary } from "@/lib/chatThreads";
 
 export function ChatHistoryListPage() {
+  const [searchParams] = useSearchParams();
   const [data, setData] = createSignal<ThreadListPayload>();
   const [error, setError] = createSignal("");
   const [editingThreadId, setEditingThreadId] = createSignal<string | null>(null);
@@ -29,8 +30,12 @@ export function ChatHistoryListPage() {
   const [bulkDeleteOpen, setBulkDeleteOpen] = createSignal(false);
   const [deleting, setDeleting] = createSignal(false);
   const [selectedThreadIds, setSelectedThreadIds] = createSignal<Set<string>>(new Set());
-  const [selectedWorkspaceKey, setSelectedWorkspaceKey] = createSignal(ALL_WORKSPACES_KEY);
+  const [selectedWorkspaceKey, setSelectedWorkspaceKey] = createSignal(String(searchParams.workspace || ALL_WORKSPACES_KEY));
   const { showToast } = useToast();
+
+  createEffect(on(() => searchParams.workspace, (key) => {
+    setSelectedWorkspaceKey(String(key || ALL_WORKSPACES_KEY));
+  }));
 
   const workspaceGroups = useThreadWorkspaceGroups(() => data()?.threads || []);
   const workspaceFilterOptions = createMemo(() => [

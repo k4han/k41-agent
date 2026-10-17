@@ -1,4 +1,4 @@
-import { useNavigate, useParams, useSearchParams } from "@solidjs/router";
+import { useLocation, useNavigate, useParams, useSearchParams } from "@solidjs/router";
 import {
   Menu,
   PanelRightClose,
@@ -28,7 +28,7 @@ import {
   threadApiPath,
   toThreadTranscript,
 } from "@/lib/chatThreads";
-import type { ThreadMessagesPayload } from "@/lib/chatThreads";
+import type { NewChatNavigationState, ThreadMessagesPayload } from "@/lib/chatThreads";
 import {
   localWorkspaceRef,
   sandboxWorkspaceRef,
@@ -168,6 +168,7 @@ function workspaceNeedsEnvironmentInitialization(
 
 export function ChatPage() {
   const navigate = useNavigate();
+  const location = useLocation<NewChatNavigationState>();
   const params = useParams<{ threadId?: string }>();
   const [searchParams] = useSearchParams();
   const routeThreadId = () => (params.threadId ? decodeURIComponent(params.threadId) : "");
@@ -208,6 +209,7 @@ export function ChatPage() {
     chatPromptRef?.focus();
   };
   let loadedThreadId: string | null = null;
+  let loadedNewChatId = "";
   let isUnmounting = false;
   let threadLoadRequestId = 0;
   let latestLocalStreamFinish: { threadId: string; finishedAt: number } | null = null;
@@ -886,11 +888,13 @@ export function ChatPage() {
 
   createEffect(() => {
     const threadId = routeThreadId();
-    if (threadId === loadedThreadId) {
+    const newChatId = !threadId ? location.state?.newChatId || "" : "";
+    if (threadId === loadedThreadId && newChatId === loadedNewChatId) {
       return;
     }
 
     loadedThreadId = threadId;
+    loadedNewChatId = newChatId;
     threadLoadRequestId += 1;
     clearAllAttachments();
     setRecursionLimitReached(false);
@@ -906,7 +910,8 @@ export function ChatPage() {
       setThreadError("");
       setThreadLoading(false);
       setItems([]);
-      setWorkspace(null);
+      setWorkspace(newChatId ? location.state?.workspace || null : null);
+      setPrompt("");
       scroll.clearTurnAnchor();
       closeBackgroundStream();
       setBackgroundTask(null);
