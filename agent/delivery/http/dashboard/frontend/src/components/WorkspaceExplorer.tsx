@@ -16,7 +16,7 @@ import {
   X,
   Zap,
 } from "lucide-solid";
-import { batch, createEffect, createMemo, createResource, createSelector, createSignal, For, on, onCleanup, Show, untrack } from "solid-js";
+import { batch, createEffect, createMemo, createResource, createSelector, createSignal, For, on, onCleanup, Show, Suspense, untrack } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 import { Portal } from "solid-js/web";
 
@@ -173,12 +173,15 @@ function FileCodeView(props: { content: string; path: string; dark: boolean }) {
 
   return (
     <div class="workspace-file-view">
-      <Show
-        when={displayHtml()}
-        fallback={<pre class="workspace-file-view-plain">{props.content}</pre>}
-      >
-        <div class="workspace-file-view-shiki" innerHTML={displayHtml()} />
-      </Show>
+      {/* Keep highlighting loads from suspending the page and resetting chat scroll. */}
+      <Suspense fallback={<pre class="workspace-file-view-plain">{props.content}</pre>}>
+        <Show
+          when={displayHtml()}
+          fallback={<pre class="workspace-file-view-plain">{props.content}</pre>}
+        >
+          <div class="workspace-file-view-shiki" innerHTML={displayHtml()} />
+        </Show>
+      </Suspense>
     </div>
   );
 }

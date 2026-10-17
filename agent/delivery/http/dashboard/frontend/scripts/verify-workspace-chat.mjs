@@ -37,7 +37,15 @@ const fixtures = {
   '/dashboard-api/workspace/browse': { path: root, parent: path.dirname(root), entries: [], roots: [], truncated: false },
   '/dashboard-api/agents/cards': { cards: [{ name: 'default', display_name: 'Default agent with a long display name', provider: 'test', model: 'demo-model', valid: true }] },
   '/dashboard-api/agents/providers': { provider_names: ['test'], default_provider: 'test', default_model: 'demo-model', model_catalogs: [{ provider: 'test', provider_type: 'openai', default_model: 'demo-model', models: [{ id: 'demo-model', label: 'Demo model', source: 'config' }] }] },
-  '/dashboard-api/chat-history/workspace-chat': { thread_id: 'workspace-chat', messages: [], platform: 'api', user_id: 'dashboard', channel_id: '', agent_name: 'default', workspace: { execution: workspace } },
+  '/dashboard-api/chat-history/workspace-chat': {
+    thread_id: 'workspace-chat',
+    messages: Array.from({ length: 30 }, (_, index) => ({
+      id: `history-${index}`,
+      role: index % 2 ? 'assistant' : 'user',
+      content: `History message ${index}\n\n${'Conversation content for scroll preservation. '.repeat(12)}`,
+    })),
+    platform: 'api', user_id: 'dashboard', channel_id: '', agent_name: 'default', workspace: { execution: workspace },
+  },
   '/dashboard-api/workspace/default': { workspace },
 };
 const server = http.createServer(async (req, res) => {
@@ -329,9 +337,33 @@ try {
   await openPicker();
   assert.equal(await js('!!document.querySelector(".workspace-selector.locked") && !document.querySelector(".workspace-tab-btn")'), true, 'existing conversation project must remain locked');
   await escape();
+  await js(`window.chatTranscript = document.querySelector('.transcript');
+    chatTranscript.scrollTop = Math.floor((chatTranscript.scrollHeight - chatTranscript.clientHeight) / 2);
+    chatTranscript.dispatchEvent(new Event('scroll'));
+    window.chatScrollTop = chatTranscript.scrollTop;
+    window.chatWasDetached = false;
+    window.chatObserver = new MutationObserver(records => {
+      if (records.some(record => Array.from(record.removedNodes).some(node => node === chatTranscript || node.contains?.(chatTranscript)))) {
+        chatWasDetached = true;
+      }
+    });
+    chatObserver.observe(document.body, { childList: true, subtree: true });`);
+  assert.ok(await js('chatScrollTop') > 0, 'history must be scrollable before opening a file');
   await js('document.querySelector(".workspace-tree-row").click();');
   await until(() => js('document.querySelector(".workspace-file-panel")?.textContent.includes("initial content")'), 'initial file preview');
   await until(() => js('!!document.querySelector(".workspace-file-view-shiki")'), 'initial code rendering');
+  assert.equal(await js('chatWasDetached'), false, 'opening a file must not detach the chat while highlighting loads');
+  assert.equal(await js('document.querySelector(".transcript") === chatTranscript && chatTranscript.scrollTop === chatScrollTop'), true, 'opening a file must preserve the chat scroll position');
+  await js('document.documentElement.classList.toggle("dark");');
+  await delay(100);
+  assert.equal(await js('!chatWasDetached && chatTranscript.scrollTop === chatScrollTop'), true, 'changing preview theme must preserve the chat scroll position');
+  await js('document.querySelector(".workspace-tab.active .workspace-tab-close").click();');
+  await until(() => js('!!document.querySelector(".workspace-tree-row")'), 'file tab closed');
+  await js('document.querySelector(".workspace-tree-row").click();');
+  await until(() => js('!!document.querySelector(".workspace-file-view-shiki")'), 'file preview reopened');
+  assert.equal(await js('!chatWasDetached && chatTranscript.scrollTop === chatScrollTop'), true, 'closing and reopening a file must preserve the chat scroll position');
+  await js('chatObserver.disconnect();');
+  console.log('PASS: opening, closing, reopening, and changing the theme of a workspace file preserve chat scroll without detaching the chat.');
   const desktopSelectors = ['.chat-header-title', '.chat-prompt-input', '.workspace-tab', '.workspace-file-view-shiki .shiki code'];
   const fontSizes = selectors => js(`(${JSON.stringify(selectors)}).map(selector => getComputedStyle(document.querySelector(selector)).fontSize)`);
   assert.deepEqual(await fontSizes(desktopSelectors), desktopSelectors.map(() => '14px'), 'chat and workspace use 14px text on desktop');
