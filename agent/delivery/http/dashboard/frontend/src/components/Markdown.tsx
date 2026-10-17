@@ -214,7 +214,11 @@ export function Markdown(props: {
   const html = createMemo(() => {
     const source = rewriteGeneratedImagePaths(props.text || "", props.threadId);
     const raw = marked.parse(source, { async: false }) as string;
-    return DOMPurify.sanitize(raw, { ADD_ATTR: ["target", "rel"] });
+    return DOMPurify.sanitize(raw, {
+      ADD_ATTR: ["target", "rel"],
+      FORBID_TAGS: ["style"],
+      FORBID_ATTR: ["style"],
+    });
   });
 
   const cleanupIcons = () => {

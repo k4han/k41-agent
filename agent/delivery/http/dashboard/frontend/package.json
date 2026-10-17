@@ -12,6 +12,7 @@
     "test:solid-ui": "node scripts/verify-solid-reactivity.mjs && node scripts/verify-solid-controls.mjs",
     "test:solid-controls": "node scripts/verify-solid-controls.mjs",
     "test:workspace-ui": "node scripts/verify-workspace.mjs",
+    "test:workspace-preview": "node --test tests/workspace-preview.test.mjs",
     "test:workspace-chat": "node scripts/verify-workspace-chat.mjs",
     "test:markdown-ui": "node scripts/verify-markdown-updates.mjs",
     "test:system-update": "node --test tests/system-update.test.mjs",

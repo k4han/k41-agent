@@ -19,6 +19,19 @@ const pending = new Map<string, (() => void)[]>();
 const nativeFetch = window.fetch.bind(window);
 let aborted = 0;
 let contentRevision = 0;
+let nestedImageRevision = 1;
+let previewEntriesAdded = false;
+const previewFiles: Record<string, { content: string; binary?: boolean }> = {
+  "readme.md": { content: '# Workspace document\n\n**Formatted text**\n\n<div><style>body { --workspace-injected-style: injected; }</style><span style="position:fixed;inset:0">Untrusted styles</span></div>' },
+  "page.html": { content: '<h1>HTML document</h1><script>parent.workspaceCompromised = true</script>' },
+  "data.csv": { content: 'name,value\n"one,two","<script>text only</script>"' },
+  "image.svg": { content: '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="40"><rect width="80" height="40" fill="green"/></svg>' },
+  "src/image.svg": { content: "", binary: true },
+  "report.pdf": { content: "", binary: true },
+  "song.mp3": { content: "", binary: true },
+  "movie.mp4": { content: "", binary: true },
+  "archive.zip": { content: "", binary: true },
+};
 let emptyWorkspace = false;
 const activeRequests = new Map<string, number>();
 const pollTimers = new Map<number, () => void>();
@@ -48,13 +61,13 @@ window.fetch = async (input, init) => {
     payload = {
       root: locator, path,
       entries: emptyWorkspace ? [] : locator === "/next" ? [entry("next.txt")]
-        : path === "src" ? [entry("src/nested.txt")] : entries,
+        : path === "src" ? [entry("src/nested.txt"), ...(previewEntriesAdded ? [{ ...entry("src/image.svg"), modified_at: nestedImageRevision }] : [])] : entries,
       truncated: false,
     };
   } else if (kind === "changes") {
     payload = { root: locator, is_git_repo: !emptyWorkspace, changes: emptyWorkspace ? [] : changes, message: emptyWorkspace ? "Workspace is not a Git repository." : "" };
   } else if (kind === "file") {
-    payload = { root: locator, path, content: `Preview of ${path} revision ${contentRevision}`, binary: false, truncated: false, size: 20, mime_type: "text/plain", message: "" };
+    payload = { root: locator, path, content: `Preview of ${path} revision ${contentRevision}`, binary: false, truncated: false, size: 20, modified_at: path === "src/image.svg" ? nestedImageRevision : 1, mime_type: "text/plain", message: "", ...previewFiles[path] };
   } else if (kind === "diff") {
     payload = { root: locator, path, diff: "", message: `Diff of ${path} revision ${contentRevision}`, truncated: false, is_git_repo: true, status: "modified" };
   } else {
@@ -93,6 +106,11 @@ function WorkspaceFixture() {
   Object.assign(window, {
     workspaceTest: {
       requests,
+      addPreviewEntries: () => {
+        previewEntriesAdded = true;
+        entries = [...entries, ...Object.keys(previewFiles).filter(path => !path.includes("/")).map(path => entry(path))];
+      },
+      updateNestedImage: () => { nestedImageRevision += 1; },
       refreshing: () => [...activeRequests].some(([key, count]) => count > 0 && (key.startsWith("tree:") || key.startsWith("changes:"))),
       emptyWorkspace: () => { emptyWorkspace = true; },
       setVisible,

@@ -4,6 +4,7 @@ from collections.abc import Callable
 import mimetypes
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
@@ -35,6 +36,49 @@ from agent.modules.workspaces import (
 
 
 router = APIRouter()
+
+INLINE_FILE_TYPES = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".gif": "image/gif", ".webp": "image/webp", ".avif": "image/avif",
+    ".bmp": "image/bmp", ".ico": "image/x-icon", ".svg": "image/svg+xml",
+    ".pdf": "application/pdf", ".mp3": "audio/mpeg", ".wav": "audio/wav",
+    ".ogg": "audio/ogg", ".oga": "audio/ogg", ".m4a": "audio/mp4",
+    ".flac": "audio/flac", ".aac": "audio/aac", ".mp4": "video/mp4",
+    ".webm": "video/webm", ".ogv": "video/ogg", ".mov": "video/quicktime",
+}
+
+
+async def _workspace_file_response(
+    workspace: WorkspaceRef, thread_id: str | None, path: str, *, inline: bool,
+) -> Response:
+    name = path.replace("\\", "/").rsplit("/", 1)[-1]
+    media_type = INLINE_FILE_TYPES.get(Path(name).suffix.lower()) if inline else (
+        mimetypes.guess_type(name)[0] or "application/octet-stream"
+    )
+    if not media_type:
+        raise HTTPException(status_code=415, detail="This file type has no inline preview.")
+    disposition = "inline" if inline else "attachment"
+    headers = {
+        "Content-Disposition": f"{disposition}; filename*=UTF-8''{quote(name, safe='')}",
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "no-store",
+    }
+    if inline and media_type == "image/svg+xml":
+        headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+    if workspace.backend == "local":
+        from agent.modules.tools import resolve_safe_path
+        from agent.modules.workspaces import resolve_workspace_root
+
+        root = resolve_workspace_root(workspace.locator)
+        full_path = Path(resolve_safe_path(str(root), path))
+        if not full_path.is_file():
+            raise FileNotFoundError(f"File not found: {path}")
+        return FileResponse(full_path, media_type=media_type, headers=headers)
+
+    from agent.modules.workspaces import get_workspace_file_io
+
+    file_io = await get_workspace_file_io(workspace, thread_id=thread_id)
+    return Response(content=await file_io.read_bytes(path), media_type=media_type, headers=headers)
 
 
 async def _run_workspace_capability_operation(
@@ -229,37 +273,29 @@ async def download_dashboard_workspace_file(
             locator=locator,
             root=root,
         )
-        if workspace.backend == "local":
-            from agent.modules.tools import resolve_safe_path
-            from agent.modules.workspaces import resolve_workspace_root
-            workspace_root = resolve_workspace_root(workspace.locator)
-            full_path = Path(resolve_safe_path(str(workspace_root), path))
-            if not full_path.is_file():
-                raise HTTPException(status_code=404, detail=f"File not found: {path}")
-            media_type = mimetypes.guess_type(full_path.name)[0] or "application/octet-stream"
-            return FileResponse(full_path, media_type=media_type, filename=full_path.name)
-        else:
-            from agent.modules.workspaces import get_workspace_file_io, resolve_remote_path
-            file_io = await get_workspace_file_io(workspace, thread_id=thread_id)
-            if hasattr(file_io, "_download_file"):
-                remote_path = resolve_remote_path(getattr(file_io, "root", ""), path)
-                raw_bytes = file_io._download_file(remote_path)
-                if isinstance(raw_bytes, str):
-                    raw_bytes = raw_bytes.encode("utf-8")
-                media_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
-                safe_name = Path(path).name
-                return Response(
-                    content=raw_bytes,
-                    media_type=media_type,
-                    headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
-                )
-            else:
-                content = await file_io.read_text(path)
-                return Response(
-                    content=content.encode("utf-8"),
-                    media_type="text/plain",
-                    headers={"Content-Disposition": f'attachment; filename="{Path(path).name}"'},
-                )
+        return await _workspace_file_response(workspace, thread_id, path, inline=False)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise workspace_http_error(exc) from exc
+
+
+@router.get("/dashboard-api/workspace/preview")
+async def preview_dashboard_workspace_file(
+    thread_id: str | None = Query(default=None),
+    backend: str | None = Query(default="local"),
+    locator: str | None = Query(default=None),
+    root: str | None = Query(default=None),
+    path: str = Query(..., min_length=1),
+) -> Response:
+    """Serve browser-supported binary formats without the text preview limit."""
+    try:
+        workspace = await workspace_ref_from_request(
+            thread_id=thread_id, backend=backend, locator=locator, root=root,
+        )
+        return await _workspace_file_response(workspace, thread_id, path, inline=True)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise workspace_http_error(exc) from exc
 

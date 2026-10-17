@@ -21,6 +21,7 @@ import { createStore, reconcile } from "solid-js/store";
 import { Portal } from "solid-js/web";
 
 import { Dialog } from "@/components/Dialog";
+import { WorkspaceFilePreview } from "@/components/WorkspaceFilePreview";
 import { useToast } from "@/components/Toast";
 import { apiFetch, postJson } from "@/lib/api";
 import { highlightCode, languageFromPath } from "@/lib/codeHighlight";
@@ -79,6 +80,7 @@ type WorkspaceFilePayload = {
   path: string;
   mime_type: string;
   size: number;
+  modified_at: number;
   content: string;
   truncated: boolean;
   binary: boolean;
@@ -318,6 +320,7 @@ export function WorkspaceExplorer(props: {
     );
   const activeFilePath = () => fileTabPath(activeTab());
   const activeFilePayload = () => filePayloads[activeFilePath()];
+  const activeFileRevision = () => `${activeFilePayload()?.modified_at || 0}:${activeFilePayload()?.size || 0}`;
   const workingDirDisplayValue = () =>
     isLocalWorkspace()
       ? props.disabled ? formatWorkspaceRoot(draftWorkingDir()) : draftWorkingDir()
@@ -474,8 +477,10 @@ export function WorkspaceExplorer(props: {
         !current
         || current.content !== payload.content
         || current.size !== payload.size
+        || current.modified_at !== payload.modified_at
         || current.truncated !== payload.truncated
         || current.binary !== payload.binary
+        || current.mime_type !== payload.mime_type
         || current.message !== payload.message
       ) {
         setFilePayloads(path, reconcile(payload));
@@ -1530,22 +1535,18 @@ export function WorkspaceExplorer(props: {
                 when={!fileErrorByPath[activeFilePath()]}
                 fallback={<div class="empty compact">{fileErrorByPath[activeFilePath()]}</div>}
               >
-                <Show
-                  when={activeFilePayload() && !activeFilePayload()?.binary}
-                  fallback={
-                    <div class="empty compact">
-                      {activeFilePayload()?.message || "File preview is not available."}
-                    </div>
-                  }
-                >
-                  <FileCodeView
-                    content={activeFilePayload()?.content || ""}
+                <Show when={activeFilePayload()}>
+                  <WorkspaceFilePreview
                     path={activeFilePath()}
-                    dark={dark()}
+                    content={activeFilePayload()?.content || ""}
+                    binary={activeFilePayload()?.binary || false}
+                    truncated={activeFilePayload()?.truncated || false}
+                    previewUrl={`/dashboard-api/workspace/preview?${workspaceQuery(props.threadId, queryWorkspace(), {
+                      path: activeFilePath(), revision: activeFileRevision(),
+                    })}`}
+                    downloadUrl={`/dashboard-api/workspace/download?${workspaceQuery(props.threadId, queryWorkspace(), { path: activeFilePath() })}`}
+                    renderSource={() => <FileCodeView content={activeFilePayload()?.content || ""} path={activeFilePath()} dark={dark()} />}
                   />
-                  <Show when={activeFilePayload()?.truncated}>
-                    <div class="hint workspace-hint">File truncated.</div>
-                  </Show>
                 </Show>
               </Show>
             </Show>

@@ -23,6 +23,19 @@ const server = await createServer({
     name: 'workspace-test-page',
     configureServer(vite) {
       vite.middlewares.use((req, res, next) => {
+        if (req.url.startsWith('/dashboard-api/workspace/preview?')) {
+          const file = new URL(req.url, 'http://localhost').searchParams.get('path');
+          if (file === 'image.svg' || file === 'src/image.svg') {
+            res.setHeader('Content-Type', 'image/svg+xml');
+            const revision = new URL(req.url, 'http://localhost').searchParams.get('revision');
+            const width = file === 'src/image.svg' && revision !== '1:20' ? 90 : 80;
+            res.end(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="40"><rect width="${width}" height="40" fill="green"/></svg>`);
+          } else {
+            res.setHeader('Content-Type', 'application/pdf');
+            res.end('%PDF-1.1\n%%EOF');
+          }
+          return;
+        }
         if (req.url !== '/__workspace') return next();
         res.setHeader('Content-Type', 'text/html');
         res.end('<!doctype html><html><body><div id="root"></div><script type="module" src="/tests/fixtures/workspace.tsx"></script></body></html>');
@@ -238,6 +251,64 @@ try {
   await until(() => js(`workspaceTest.requests.filter(request => request.kind === "tree" && !request.path).length === ${slowRoots + 1}`), 'queued follow-up refresh');
   await until(refreshDone, 'follow-up completes');
   console.log('PASS: Git changes retain their DOM and expanded diff during background refresh.');
+
+  await js(`workspaceTest.addPreviewEntries(); workspaceTest.refresh();`);
+  await until(refreshDone, 'preview entries refresh');
+  await js(`${tab('Files Explorer')}.click();`);
+  await until(() => js(`!!(${row('readme.md')})`), 'preview entries');
+  const openPreview = async (path, selector) => {
+    await js(`${tab('Files Explorer')}.click(); ${row(path)}.click();`);
+    await until(() => js(`!!document.querySelector(${JSON.stringify(selector)})`), `${path} preview`);
+    const download = await js('document.querySelector(".workspace-preview-actions a").getAttribute("href")');
+    assert.equal(new URL(download, base).searchParams.get('path'), path);
+    assert.equal(new URL(download, base).searchParams.get('locator'), '/project');
+  };
+  await openPreview('readme.md', '.workspace-rendered-preview h1');
+  assert.equal(await js('document.querySelector(".workspace-rendered-preview strong").textContent'), 'Formatted text');
+  assert.equal(await js('!!document.querySelector(".workspace-rendered-preview style, .workspace-rendered-preview [style]")'), false);
+  assert.equal(await js('getComputedStyle(document.body).getPropertyValue("--workspace-injected-style").trim()'), '');
+  await js('document.querySelector(".workspace-preview-actions button").click()');
+  await until(() => js('!!document.querySelector(".workspace-file-view")'), 'markdown source');
+  assert.ok(await js('document.querySelector(".workspace-file-view").textContent.includes("# Workspace document")'));
+  await openPreview('data.csv', '.workspace-table-preview td');
+  assert.equal(await js('document.querySelectorAll(".workspace-table-preview tr")[1].children[0].textContent'), 'one,two');
+  assert.equal(await js('!!document.querySelector(".workspace-table-preview script")'), false);
+  await openPreview('page.html', 'iframe.workspace-document-preview');
+  assert.equal(await js('document.querySelector("iframe.workspace-document-preview").getAttribute("sandbox")'), '');
+  await delay(150);
+  assert.equal(await js('!!window.workspaceCompromised'), false);
+  await openPreview('image.svg', '.workspace-media-preview img');
+  await until(() => js('document.querySelector(".workspace-media-preview img").naturalWidth === 80'), 'loaded SVG');
+  await openPreview('song.mp3', '.workspace-media-preview audio');
+  await openPreview('movie.mp4', '.workspace-media-preview video');
+  await openPreview('report.pdf', 'iframe.workspace-document-preview');
+  assert.ok(await js('document.querySelector("iframe.workspace-document-preview").src.includes("/workspace/preview?")'));
+  await openPreview('archive.zip', '.workspace-file-panel .empty');
+  assert.ok(await js('document.querySelector(".workspace-file-panel .empty").textContent.includes("No preview is available")'));
+  console.log('PASS: Markdown/source, sandboxed HTML, escaped CSV cells, SVG, PDF, media and unsupported file downloads.');
+
+  await js(`${tab('Files Explorer')}.click(); ${row('src')}.click();`);
+  await until(() => js(`!!(${row('src/image.svg')})`), 'nested preview entry');
+  await js(`${row('src/image.svg')}.click();`);
+  await until(() => js('document.querySelector(".workspace-media-preview img")?.naturalWidth === 80'), 'nested image loaded');
+  await js(`${tab('Files Explorer')}.click(); ${row('src')}.click(); ${tab('src/image.svg')}.click();`);
+  const nestedTrees = await js('workspaceTest.requests.filter(request => request.kind === "tree" && request.path === "src").length');
+  for (const manual of [false, true]) {
+    const previousUrl = await js('document.querySelector(".workspace-media-preview img").src');
+    await js('workspaceTest.updateNestedImage();');
+    await js(manual ? `document.querySelector('button[aria-label="Refresh workspace"]').click()` : 'workspaceTest.refresh();');
+    await until(() => js(`document.querySelector(".workspace-media-preview img").src !== ${JSON.stringify(previousUrl)}`), 'nested image revision refreshed');
+    await until(() => js('document.querySelector(".workspace-media-preview img").naturalWidth === 90'), 'updated image loaded');
+    await until(() => js(`!workspaceTest.refreshing() && !document.querySelector('button[aria-label="Refresh workspace"]').classList.contains("is-refreshing")`), 'nested refresh completes');
+    assert.equal(await js('workspaceTest.requests.filter(request => request.kind === "tree" && request.path === "src").length'), nestedTrees);
+  }
+  const unchangedImageUrl = await js('document.querySelector(".workspace-media-preview img").src');
+  const nestedReads = await js('workspaceTest.requests.filter(request => request.kind === "file" && request.path === "src/image.svg").length');
+  await js('workspaceTest.refresh();');
+  await until(() => js(`workspaceTest.requests.filter(request => request.kind === "file" && request.path === "src/image.svg").length > ${nestedReads}`), 'unchanged image read');
+  await until(refreshDone, 'unchanged image refresh completes');
+  assert.equal(await js('document.querySelector(".workspace-media-preview img").src'), unchangedImageUrl);
+  console.log('PASS: nested images refresh with collapsed folders on automatic and manual refresh; unchanged files keep their URL.');
 
   await js(`${tab('Files Explorer')}.click(); ${row('src')}.click();`);
   await until(() => js(`!!(${row('src/nested.txt')})`), 'expanded directory before workspace change');

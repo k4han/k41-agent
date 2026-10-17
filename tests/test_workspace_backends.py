@@ -864,6 +864,54 @@ def test_modal_workspace_backend_file_operations_and_path_guard():
     asyncio.run(_run())
 
 
+@pytest.mark.parametrize("backend_kind", ["daytona", "modal", "sandbox"])
+@pytest.mark.parametrize("content", [b"first", b"\x00first"])
+def test_remote_file_metadata_tracks_same_size_updates(monkeypatch, backend_kind, content):
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from agent.modules.workspaces.sandbox_backend import SandboxBackendBase
+
+    async def _run():
+        modified_at = 1_700_000_000
+
+        def stat_file(path):
+            return SimpleNamespace(is_dir=False, size=len(fs.files[path]), modified_time=modified_at)
+
+        workspace = WorkspaceRef(
+            backend="modal" if backend_kind == "modal" else "daytona",
+            locator="sandbox-test",
+            metadata={"root": "/workspace"},
+        )
+        if backend_kind == "modal":
+            sandbox = FakeModalSandbox()
+            fs = sandbox.filesystem
+            backend = ModalWorkspaceBackend(workspace, sandbox=sandbox, fs=fs)
+            monkeypatch.setattr(backend, "_stat", AsyncMock(side_effect=stat_file))
+        else:
+            sandbox = FakeDaytonaSandbox()
+            fs = sandbox.fs
+            backend = DaytonaWorkspaceBackend(workspace, sandbox=sandbox)
+            monkeypatch.setattr(fs, "get_file_info", stat_file)
+
+        async def read_file():
+            if backend_kind == "sandbox":
+                return await SandboxBackendBase.file(backend, "image.svg")
+            return await backend.file("image.svg")
+
+        fs.files["/workspace/image.svg"] = content
+        first = await read_file()
+        assert first["modified_at"] == modified_at
+        fs.files["/workspace/image.svg"] = content.replace(b"first", b"other")
+        modified_at += 2
+        second = await read_file()
+        assert second["size"] == first["size"]
+        assert second["modified_at"] == modified_at
+        assert second["modified_at"] != first["modified_at"]
+
+    asyncio.run(_run())
+
+
 def _count_commands(commands: list[tuple[str, str | None, int | None]], prefix: str) -> int:
     return sum(1 for command, _, _ in commands if command.startswith(prefix))
 
