@@ -79,12 +79,9 @@ export interface ChatComposerProps {
 }
 
 export function ChatComposer(props: ChatComposerProps) {
-  const effortLabel = (effort: string) => effort.charAt(0).toUpperCase() + effort.slice(1);
-
   let chatPromptRef: HTMLTextAreaElement | undefined;
   let fileInputRef: HTMLInputElement | undefined;
   let composerRef: HTMLDivElement | undefined;
-  const [compactToolbar, setCompactToolbar] = createSignal(false);
   const skillSuggestions = useSkillSuggestions(props, () => chatPromptRef);
 
   const [previewAttachment, setPreviewAttachment] = createSignal<PendingAttachment | null>(null);
@@ -167,9 +164,6 @@ export function ChatComposer(props: ChatComposerProps) {
   };
 
   onMount(() => {
-    const observer = new ResizeObserver(([entry]) => setCompactToolbar(entry.contentRect.width < 400));
-    if (composerRef) observer.observe(composerRef);
-    onCleanup(() => observer.disconnect());
     document.addEventListener("click", handleGlobalClick);
     document.addEventListener("keydown", handleGlobalKeyDown);
   });
@@ -217,24 +211,6 @@ export function ChatComposer(props: ChatComposerProps) {
       await props.onAddFiles(e.dataTransfer.files);
     }
   };
-
-  const effortSelect = (extraClass = "") => (
-    <select
-      class={`chat-effort-button ${extraClass}`}
-      value={props.reasoningEffort}
-      onChange={(event) => props.onReasoningEffortChange(event.currentTarget.value)}
-      disabled={props.composerDisabled || props.reasoningEffortLevels.length === 0}
-      title={props.reasoningEffortLevels.length
-        ? "Reasoning effort for the selected model"
-        : "No configurable effort levels available. Missing metadata can be supplied in provider settings."}
-      aria-label="Reasoning effort"
-    >
-      <option value="" selected={props.reasoningEffort === ""}>Auto{props.reasoningEffortDefault ? ` (${effortLabel(props.reasoningEffortDefault)})` : ""}</option>
-      <For each={props.reasoningEffortLevels}>
-        {(level) => <option value={level} selected={props.reasoningEffort === level}>{effortLabel(level)}</option>}
-      </For>
-    </select>
-  );
 
   return (
     <div
@@ -516,13 +492,6 @@ export function ChatComposer(props: ChatComposerProps) {
                     <span>Clear prompt</span>
                   </button>
                   <div class="chat-composer-menu-divider" />
-                  <Show when={compactToolbar()}>
-                    <label class="chat-composer-effort-menu">
-                      <span>Reasoning effort</span>
-                      {effortSelect("chat-effort-menu-select")}
-                    </label>
-                    <div class="chat-composer-menu-divider" />
-                  </Show>
                   <div class="chat-composer-menu-shortcuts">
                     <div class="chat-composer-shortcut-row">
                       <span>Send message</span>
@@ -552,9 +521,12 @@ export function ChatComposer(props: ChatComposerProps) {
             providerNames={props.payload.provider_names}
             defaultProvider={props.payload.default_provider}
             defaultModel={props.payload.default_model}
+            reasoningEffort={props.reasoningEffort}
+            reasoningEffortLevels={props.reasoningEffortLevels}
+            reasoningEffortDefault={props.reasoningEffortDefault}
+            onReasoningEffortChange={props.onReasoningEffortChange}
             disabled={props.composerDisabled}
           />
-          {effortSelect()}
           <ComposerWorkspacePicker
             workingDir={props.workingDir}
             defaultWorkingDir={props.defaultWorkingDir}

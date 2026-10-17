@@ -18,6 +18,7 @@ assert.ok(executable, 'Set BROWSER_EXECUTABLE to run browser checks.');
 const provider = { name: 'test', type: 'google', api_key: 'fake-key', default_model: 'model-a', model_profiles: {} };
 const profiles = {
   'model-a': { reasoning_effort_levels: ['low', 'high'], reasoning_effort_default: 'high' },
+  'gpt-6.1-sol': { reasoning_effort_levels: ['low', 'medium', 'high'], reasoning_effort_default: 'high' },
   'custom-model': { reasoning_effort_levels: null, reasoning_effort_default: null },
   'no-default': { reasoning_effort_levels: ['minimal', 'low', 'high'], reasoning_effort_default: null },
   'unknown-model': { reasoning_effort_levels: null, reasoning_effort_default: null },
@@ -151,7 +152,32 @@ try {
     return result.result.value;
   };
   const navigate = route => call('Page.navigate', { url: base + route });
-  const select = 'select[aria-label="Reasoning effort"]';
+  const effortBadge = '.model-picker-trigger .agent-model-badge-effort';
+  const currentEffort = () => js(`document.querySelector('${effortBadge}')?.textContent.toLowerCase() || ''`);
+  const openModels = async () => {
+    await js('document.querySelector(".model-picker-trigger").click()');
+    await until(() => js('!!document.querySelector(".model-item-row")'), 'model menu');
+    assert.equal(await js('!!document.querySelector(".model-effort-panel")'), false, 'effort submenu waits for a model row');
+    await js(`document.querySelector('.model-item-select[aria-pressed="true"]')?.closest('.model-item-row').querySelector('.model-item-effort-trigger')?.click()`);
+  };
+  const chooseEffort = async (level, modelId) => {
+    await openModels();
+    if (modelId) {
+      await js(`Array.from(document.querySelectorAll('.model-item-row')).find(row => row.querySelector('.model-item-row-name')?.textContent === ${JSON.stringify(modelId)}).querySelector('.model-item-effort-trigger').click()`);
+    }
+    await js(`(() => {
+      const button = Array.from(document.querySelectorAll('.model-effort-option')).find(button => button.textContent.toLowerCase() === ${JSON.stringify(level || 'auto')});
+      button.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+      button.click();
+    })()`);
+    await until(() => js('!document.querySelector(".agent-model-popover")'), 'effort selected');
+  };
+  const effortOptions = async () => {
+    await openModels();
+    const options = await js(`Array.from(document.querySelectorAll('.model-effort-option')).map(button => button.textContent.toLowerCase())`);
+    await js('document.querySelector(".agent-model-popover-close").click()');
+    return options;
+  };
   await navigate('/settings/providers/llm/test');
   const textarea = `Array.from(document.querySelectorAll('.setting-row')).find(row => row.textContent.includes('Model Reasoning Profiles'))?.querySelector('textarea')`;
   await until(() => js(`!!(${textarea})`), 'model profile editor');
@@ -168,56 +194,104 @@ try {
   assert.deepEqual(await js(`JSON.parse((${textarea}).value)`), configured);
   await navigate('/chat');
   try {
-    await until(() => js(`!!document.querySelector('${select}')`), 'chat effort selector');
+    await until(() => js(`!!document.querySelector('${effortBadge}')`), 'combined model and effort selector');
   } catch (error) {
     console.log(await js('document.body.textContent.slice(0, 2000)'));
     console.log(JSON.stringify(exceptions));
     throw error;
   }
-  assert.equal(await js(`document.querySelector('${select}').value`), 'high');
+  assert.equal(await currentEffort(), 'high');
   const selectModel = async modelId => {
-    await js('document.querySelector(".model-picker-trigger").click()');
-    await until(() => js('!!document.querySelector(".model-item-row")'), 'model menu');
+    await openModels();
     await js(`Array.from(document.querySelectorAll('.model-item-row')).find(row => row.querySelector('.model-item-row-name').textContent === '${modelId}').click()`);
     await until(() => js('!document.querySelector(".agent-model-popover")'), 'model selected');
   };
-  await js(`(() => { const el = document.querySelector('${select}'); el.value = 'low'; el.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  await js('document.querySelector(".model-picker-trigger").click()');
+  await until(() => js('!!document.querySelector(".model-item-select")'), 'keyboard model menu');
+  await js(`(() => {
+    const button = document.querySelector('.model-item-select[aria-pressed="true"]');
+    button.focus();
+    button.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  })()`);
+  assert.equal(await js(`document.activeElement?.matches('.model-effort-option[aria-checked="true"]')`), true, 'keyboard opens the separate effort menu');
+  await js(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  await chooseEffort('low');
   await selectModel('custom-model');
-  assert.equal(await js(`document.querySelector('${select}').value`), 'max');
-  assert.deepEqual(await js(`Array.from(document.querySelector('${select}').options).map(option => option.value)`), ['', 'low', 'medium', 'high', 'max']);
+  assert.equal(await currentEffort(), 'max');
+  assert.deepEqual(await effortOptions(), ['auto', 'low', 'medium', 'high', 'max']);
   await selectModel('no-default');
-  assert.equal(await js(`document.querySelector('${select}').value`), '');
-  assert.equal(await js(`document.querySelector('${select}').disabled`), false);
+  assert.equal(await currentEffort(), 'auto');
+  assert.deepEqual(await effortOptions(), ['auto', 'minimal', 'low', 'high']);
   for (const modelId of ['unknown-model', 'fixed-model']) {
     await selectModel(modelId);
-    assert.equal(await js(`document.querySelector('${select}').disabled`), true);
-    assert.deepEqual(await js(`Array.from(document.querySelector('${select}').options).map(option => option.value)`), ['']);
+    assert.equal(await currentEffort(), '');
+    assert.deepEqual(await effortOptions(), []);
   }
   await selectModel('model-a');
-  assert.equal(await js(`document.querySelector('${select}').value`), 'high');
-  await js(`(() => { const el = document.querySelector('${select}'); el.value = ''; el.dispatchEvent(new Event('change', { bubbles: true })); })()`);
-  assert.equal(await js(`document.querySelector('${select}').value`), '');
+  assert.equal(await currentEffort(), 'high');
+  await chooseEffort('medium', 'custom-model');
+  assert.equal(await currentEffort(), 'medium', 'effort survives switching to a different model from the submenu');
+  assert.equal(await js('document.querySelector(".model-picker-trigger .agent-model-badge-model").textContent'), 'custom-model');
+  await openModels();
+  await js(`(() => {
+    const row = Array.from(document.querySelectorAll('.model-item-row')).find(row => row.querySelector('.model-item-row-name')?.textContent === 'model-a');
+    row.dispatchEvent(new MouseEvent('mouseenter'));
+  })()`);
+  assert.deepEqual(await js(`Array.from(document.querySelectorAll('.model-effort-option')).map(button => button.textContent.toLowerCase())`), ['auto', 'low', 'high']);
+  assert.equal(await currentEffort(), 'medium', 'hovering does not change the selected model or effort');
+  await js(`(() => {
+    const input = document.querySelector('.agent-model-search-input');
+    input.value = 'gpt-6.1-sol'; input.dispatchEvent(new Event('input', { bubbles: true }));
+    const button = document.querySelector('.model-item-select');
+    button.focus(); button.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  })()`);
+  assert.equal(await js(`document.activeElement?.matches('.model-effort-option[aria-checked="true"]')`), true);
+  await js(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))`);
+  assert.equal(await js(`document.activeElement.textContent.toLowerCase()`), 'auto');
+  await js(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }))`);
+  assert.equal(await js(`document.activeElement?.matches('.model-item-select')`), true);
+  await js(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  assert.equal(await js('document.activeElement === document.querySelector(".model-picker-trigger")'), true);
+  assert.equal(await currentEffort(), 'medium', 'Escape preserves the existing selection');
+  await selectModel('gpt-6.1-sol');
+  assert.equal(await js('document.querySelector(".model-picker-trigger .agent-model-badge-model").textContent'), 'GPT-6.1 Sol');
+  assert.equal(await currentEffort(), 'high');
+  await chooseEffort('');
+  assert.equal(await currentEffort(), 'auto');
   for (const width of [320, 390, 1440]) {
     await call('Emulation.setDeviceMetricsOverride', { width, height: 844, deviceScaleFactor: 1, mobile: width < 500 });
     await delay(150);
     assert.equal(await js('document.documentElement.scrollWidth <= innerWidth'), true);
-    if (width < 400) {
-      assert.equal(await js(`getComputedStyle(document.querySelector('${select}')).display`), 'none');
-      await js('document.querySelector(".chat-composer-more-wrapper > button").click()');
-      await until(() => js('!!document.querySelector(".chat-effort-menu-select")'), 'compact effort selector');
-      assert.equal(await js('document.querySelector(".chat-effort-menu-select").value'), '');
-      assert.equal(await js('document.querySelector(".chat-effort-menu-select").getBoundingClientRect().width >= 76'), true);
-      await js('document.querySelector(".chat-composer-more-wrapper > button").click()');
-    } else {
-      assert.equal(await js(`document.querySelector('${select}').getBoundingClientRect().width >= 76`), true);
+    assert.equal(await js(`getComputedStyle(document.querySelector('${effortBadge}')).display !== 'none'`), true);
+    await openModels();
+    assert.equal(await js(`(() => { const rect = document.querySelector('.agent-model-popover').getBoundingClientRect(); return rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight; })()`), true);
+    assert.equal(await js(`(() => { const panel = document.querySelector('.model-effort-panel'); return panel.scrollWidth <= panel.clientWidth; })()`), true);
+    assert.equal(await js(`(() => {
+      const menu = document.querySelector('.agent-model-popover');
+      const panel = document.querySelector('.model-effort-panel');
+      const rect = panel.getBoundingClientRect();
+      return !menu.contains(panel) && rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight;
+    })()`), true, 'effort is a separate floating menu inside the viewport');
+    if (width === 1440) {
+      assert.equal(await js(`(() => {
+        const parent = document.querySelector('.agent-model-popover').getBoundingClientRect();
+        const panel = document.querySelector('.model-effort-panel').getBoundingClientRect();
+        return panel.left >= parent.right || panel.right <= parent.left;
+      })()`), true, 'desktop effort submenu sits beside the model menu');
     }
+    if (width === 1440) {
+      await js(`document.documentElement.classList.add('dark')`);
+      const screenshot = await call('Page.captureScreenshot', { format: 'png' });
+      fs.writeFileSync(path.join(scratchRoot, 'model-effort-desktop.png'), Buffer.from(screenshot.data, 'base64'));
+    }
+    await js('document.querySelector(".agent-model-popover-close").click()');
   }
   await js('document.querySelector(".agent-picker-trigger").click()');
   await until(() => js('!!document.querySelector(".agent-card-item")'), 'agent menu');
   await js('Array.from(document.querySelectorAll(".agent-card-item")).find(item => item.querySelector(".agent-card-item-name").textContent.trim() === "Legacy Agent").click()');
-  assert.equal(await js(`document.querySelector('${select}').value`), 'low');
+  assert.equal(await currentEffort(), 'low');
   assert.equal(await js('!!document.querySelector(".agent-model-popover")'), false, 'agent selection closes its menu');
-  await js(`(() => { const el = document.querySelector('${select}'); el.value = ''; el.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  await chooseEffort('');
   await js('(() => { const input = document.querySelector(".chat-prompt-input"); input.value = "Test automatic effort"; input.dispatchEvent(new Event("input", { bubbles: true })); })()');
   await js(`document.querySelector('button[aria-label="Send message"]').click()`);
   await until(() => sentChat !== undefined, 'explicit Auto chat request');
@@ -225,7 +299,14 @@ try {
   assert.equal(sentChat.agent_name, 'legacy-agent');
   await until(() => js(`!!document.querySelector('button[aria-label="Send message"]')`), 'mock chat completed');
   await selectModel('custom-model');
-  assert.equal(await js(`document.querySelector('${select}').value`), 'max');
+  assert.equal(await currentEffort(), 'max');
+  sentChat = undefined;
+  await chooseEffort('low', 'gpt-6.1-sol');
+  await js('(() => { const input = document.querySelector(".chat-prompt-input"); input.value = "Test explicit effort"; input.dispatchEvent(new Event("input", { bubbles: true })); })()');
+  await js(`document.querySelector('button[aria-label="Send message"]').click()`);
+  await until(() => sentChat !== undefined, 'explicit effort chat request');
+  assert.equal(sentChat.reasoning_effort, 'low');
+  assert.equal(sentChat.model, 'gpt-6.1-sol');
   await navigate('/settings/agents/effort-agent');
   const agentEffort = 'button[aria-label="Agent reasoning effort"]';
   await until(() => js(`!!document.querySelector('${agentEffort}')`), 'agent card effort editor');

@@ -1,8 +1,9 @@
-import { Bot, Check, ChevronDown, Search, Sparkles, X } from "lucide-solid";
+import { Bot, Check, ChevronDown, ChevronRight, Search, Sparkles, X } from "lucide-solid";
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 
-import type { AgentCard, ModelCatalog } from "@/types";
+import { resolveModelAndProvider } from "@/lib/modelSelection";
+import type { AgentCard, ModelCatalog, ModelOption } from "@/types";
 
 export interface AgentModelPickerProps {
   agentName: string;
@@ -15,6 +16,10 @@ export interface AgentModelPickerProps {
   providerNames: string[];
   defaultProvider: string;
   defaultModel: string;
+  reasoningEffort: string;
+  reasoningEffortLevels: string[];
+  reasoningEffortDefault?: string | null;
+  onReasoningEffortChange: (effort: string) => void;
   disabled?: boolean;
   class?: string;
 }
@@ -25,7 +30,7 @@ export function formatShortModelName(provider: string, model: string): string {
   }
   let name = model;
   if (name.includes("/")) {
-    name = name.split("/")[1] || name;
+    name = name.split("/").at(-1) || name;
   }
   if (name.includes("claude-3-7-sonnet")) return "Sonnet 3.7";
   if (name.includes("claude-3-5-sonnet")) return "Sonnet 3.5";
@@ -34,6 +39,10 @@ export function formatShortModelName(provider: string, model: string): string {
   if (name.includes("gpt-4o-mini")) return "GPT-4o Mini";
   if (name.includes("gpt-4o")) return "GPT-4o";
   if (name.includes("gpt-4-turbo")) return "GPT-4 Turbo";
+  if (/^gpt-\d/i.test(name)) {
+    return name.replace(/^gpt/i, "GPT").replace(/-(sol|astra|luna)\b/g,
+      (_, variant: string) => ` ${variant[0].toUpperCase()}${variant.slice(1)}`);
+  }
   if (name.includes("o3-mini")) return "o3-mini";
   if (name.includes("o1-mini")) return "o1-mini";
   if (name.includes("o1-preview")) return "o1";
@@ -51,11 +60,14 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
   const [open, setOpen] = createSignal(false);
   const [searchQuery, setSearchQuery] = createSignal("");
   const [activePicker, setActivePicker] = createSignal<"agent" | "model">("agent");
+  const [previewModel, setPreviewModel] = createSignal<{ provider: string; id: string }>();
   const [menuPos, setMenuPos] = createSignal({ edge: 8, left: 16, width: 360, maxHeight: 440, above: true });
+  const [effortPos, setEffortPos] = createSignal({ top: 0, left: 0, width: 160 });
   let rootRef: HTMLDivElement | undefined;
   let agentTriggerRef: HTMLButtonElement | undefined;
   let modelTriggerRef: HTMLButtonElement | undefined;
   let menuRef: HTMLDivElement | undefined;
+  let effortMenuRef: HTMLDivElement | undefined;
   let searchInputRef: HTMLInputElement | undefined;
   const triggerRef = () => activePicker() === "agent" ? agentTriggerRef : modelTriggerRef;
 
@@ -63,6 +75,7 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
     if (props.disabled) return;
     const wasOpen = open() && activePicker() === tab;
     setSearchQuery("");
+    setPreviewModel(undefined);
     setActivePicker(tab);
     setOpen(!wasOpen);
   };
@@ -82,7 +95,7 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
     const gap = 8;
-    const width = Math.min(360, viewportWidth - 32);
+    const width = Math.min(activePicker() === "model" ? 320 : 360, viewportWidth - 32);
     let left = rect.left;
     if (left + width > viewportWidth - 16) {
       left = Math.max(16, viewportWidth - width - 16);
@@ -98,6 +111,7 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
   };
 
   createEffect(() => {
+    if (props.disabled) setOpen(false);
     if (!open()) return;
     updateMenuPosition();
     const handler = () => updateMenuPosition();
@@ -119,22 +133,87 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
 
   const resolvedSelection = createMemo(() => {
     const activeProvider = props.provider || selectedAgent()?.provider || "default";
-    const prov = activeProvider === "default" ? props.defaultProvider : activeProvider;
-    let mod = props.model || selectedAgent()?.model || "";
-    if (!mod || mod === "default" || mod === "provider default") {
-      const catalog = props.catalogs.find((c) => c.provider === prov);
-      mod = activeProvider === "default" ? props.defaultModel : (catalog?.default_model || "");
-    }
-    return { provider: prov, model: mod };
+    return resolveModelAndProvider(activeProvider, props.model || selectedAgent()?.model || "",
+      props.defaultProvider, props.defaultModel, props.catalogs);
   });
 
   const shortModelLabel = createMemo(() =>
     formatShortModelName(resolvedSelection().provider, resolvedSelection().model)
   );
+  const effortLabel = (value: string) => value ? value.charAt(0).toUpperCase() + value.slice(1) : "Auto";
+  const selectedEffortLabel = createMemo(() => props.reasoningEffortLevels.length ? effortLabel(props.reasoningEffort) : "");
+  const effortTarget = createMemo(() => {
+    const preview = previewModel();
+    const current = resolvedSelection();
+    const provider = preview?.provider || current.provider;
+    const id = preview?.id || current.model;
+    const option = props.catalogs.find((catalog) => catalog.provider === provider)?.models.find((model) => model.id === id);
+    const isSelected = provider === current.provider && id === current.model;
+    return {
+      provider, id, isSelected,
+      levels: isSelected ? props.reasoningEffortLevels : option?.reasoning_effort_levels || [],
+      defaultEffort: isSelected ? props.reasoningEffortDefault : option?.reasoning_effort_default,
+      effort: isSelected ? props.reasoningEffort : option?.reasoning_effort_default || "",
+    };
+  });
+  const effortOpen = createMemo(() => open() && activePicker() === "model" && !!previewModel() && effortTarget().levels.length > 0);
+  const updateEffortPosition = () => {
+    if (!effortOpen() || !menuRef) return;
+    const target = effortTarget();
+    const row = Array.from(menuRef.querySelectorAll<HTMLElement>(".model-item-row"))
+      .find((item) => item.dataset.provider === target.provider && item.dataset.modelId === target.id);
+    if (!row) return;
+    const anchor = row.getBoundingClientRect();
+    const parent = menuRef.getBoundingClientRect();
+    const width = Math.min(160, window.innerWidth - 32);
+    const gap = 6;
+    let left = parent.right + gap;
+    if (left + width > window.innerWidth - 16) {
+      left = parent.left - width - gap;
+      if (left < 16) left = window.innerWidth - width - 16;
+    }
+    const height = effortMenuRef?.offsetHeight || (target.levels.length + 1) * 40 + 40;
+    const top = Math.max(8, Math.min(anchor.top, window.innerHeight - height - 8));
+    setEffortPos({ top, left, width });
+  };
+  createEffect(() => {
+    if (!effortOpen()) return;
+    updateEffortPosition();
+    const handler = () => updateEffortPosition();
+    const observer = new ResizeObserver(handler);
+    if (menuRef) observer.observe(menuRef);
+    if (effortMenuRef) observer.observe(effortMenuRef);
+    window.addEventListener("scroll", handler, true);
+    window.addEventListener("resize", handler);
+    onCleanup(() => {
+      observer.disconnect();
+      window.removeEventListener("scroll", handler, true);
+      window.removeEventListener("resize", handler);
+    });
+  });
+  const selectModel = (provider: string, id: string) => {
+    props.onProviderModelChange(provider, id);
+    setOpen(false);
+    modelTriggerRef?.focus();
+  };
+  const selectEffort = (effort: string) => {
+    const target = effortTarget();
+    if (!target.isSelected) props.onProviderModelChange(target.provider, target.id);
+    // Apply effort after model-change effects have reset the previous override.
+    queueMicrotask(() => props.onReasoningEffortChange(effort));
+    setOpen(false);
+    modelTriggerRef?.focus();
+  };
+  const focusEffortOption = () => {
+    queueMicrotask(() => {
+      const selected = effortMenuRef?.querySelector<HTMLButtonElement>(".model-effort-option[aria-checked='true']");
+      (selected || effortMenuRef?.querySelector<HTMLButtonElement>(".model-effort-option"))?.focus();
+    });
+  };
 
   const filteredModelGroups = createMemo(() => {
     const q = searchQuery().trim().toLowerCase();
-    const groups: Array<{ provider: string; models: Array<{ id: string; label: string; contextWindow?: number }> }> = [];
+    const groups: Array<{ provider: string; models: ModelOption[] }> = [];
 
     props.catalogs.forEach((cat) => {
       const matched = cat.models.filter((m) => {
@@ -148,11 +227,7 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
       if (matched.length > 0) {
         groups.push({
           provider: cat.provider,
-          models: matched.map((m) => ({
-            id: m.id,
-            label: m.label || m.id,
-            contextWindow: m.context_window,
-          })),
+          models: matched,
         });
       }
     });
@@ -174,6 +249,7 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
     const target = event.target as Node | null;
     if (target && rootRef?.contains(target)) return;
     if (target && menuRef?.contains(target)) return;
+    if (target && effortMenuRef?.contains(target)) return;
     if (open()) {
       setOpen(false);
       setSearchQuery("");
@@ -189,18 +265,18 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
   };
 
   onMount(() => {
-    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("pointerdown", handlePointerDown);
     document.addEventListener("keydown", handleKeyDown);
   });
 
   onCleanup(() => {
-    document.removeEventListener("mousedown", handlePointerDown);
+    document.removeEventListener("pointerdown", handlePointerDown);
     document.removeEventListener("keydown", handleKeyDown);
   });
 
   createEffect(() => {
     if (open() && activePicker() === "model" && searchInputRef) {
-      setTimeout(() => searchInputRef?.focus(), 50);
+      queueMicrotask(() => searchInputRef?.focus());
     }
   });
 
@@ -229,12 +305,15 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
         type="button"
         onClick={() => togglePicker("model")}
         disabled={props.disabled}
-        title={`Model: ${resolvedSelection().provider}/${resolvedSelection().model}`}
-        aria-label={`Select model: ${resolvedSelection().provider}/${resolvedSelection().model}`}
+        title={`Model: ${resolvedSelection().provider}/${resolvedSelection().model}${selectedEffortLabel() ? ` · ${selectedEffortLabel()}` : ""}`}
+        aria-label={`Select model: ${resolvedSelection().provider}/${resolvedSelection().model}${selectedEffortLabel() ? `, effort: ${selectedEffortLabel()}` : ""}`}
         aria-haspopup="dialog"
         aria-expanded={open() && activePicker() === "model"}
       >
         <span class="agent-model-badge-model">{shortModelLabel()}</span>
+        <Show when={selectedEffortLabel()}>
+          <span class="agent-model-badge-effort">{selectedEffortLabel()}</span>
+        </Show>
         <ChevronDown size={13} class={`agent-model-badge-caret ${open() && activePicker() === "model" ? "is-open" : ""}`} />
       </button>
 
@@ -242,7 +321,7 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
         <Portal>
         <div
           ref={menuRef}
-          class="agent-model-popover agent-model-popover--portal"
+          class={`agent-model-popover agent-model-popover--portal ${activePicker() === "model" ? "agent-model-popover--with-effort" : ""}`}
           role="dialog"
           aria-label={activePicker() === "agent" ? "Select Agent" : "Select Model"}
           style={{
@@ -256,7 +335,7 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
           <div class="agent-model-popover-header">
             <div class="agent-model-popover-title-wrap">
               <Sparkles size={14} class="agent-model-popover-title-icon" />
-              <span class="agent-model-popover-title">{activePicker() === "agent" ? "Select Agent" : "Select Model"}</span>
+              <span class="agent-model-popover-title">{activePicker() === "agent" ? "Select Agent" : "Model"}</span>
             </div>
             <button
               class="agent-model-popover-close"
@@ -327,13 +406,22 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
                     type="text"
                     placeholder="Search models..."
                     value={searchQuery()}
-                    onInput={(e) => setSearchQuery(e.currentTarget.value)}
+                    onInput={(e) => {
+                      setSearchQuery(e.currentTarget.value);
+                      const group = filteredModelGroups()[0];
+                      setPreviewModel(searchQuery().trim() && group ? { provider: group.provider, id: group.models[0].id } : undefined);
+                    }}
                   />
                   <Show when={searchQuery()}>
                     <button
                       class="agent-model-search-clear"
                       type="button"
-                      onClick={() => setSearchQuery("")}
+                      aria-label="Clear model search"
+                      onClick={() => {
+                        setSearchQuery("");
+                        setPreviewModel(undefined);
+                        searchInputRef?.focus();
+                      }}
                     >
                       <X size={12} />
                     </button>
@@ -352,34 +440,59 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
                               resolvedSelection().model === modelOption.id;
                             return (
                               <div
-                                class={`model-item-row ${isSelected() ? "selected" : ""}`}
-                                role="button"
-                                tabIndex={0}
-                                onClick={() => {
-                                  props.onProviderModelChange(group.provider, modelOption.id);
-                                  setOpen(false);
-                                }}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter" || e.key === " ") {
-                                    props.onProviderModelChange(group.provider, modelOption.id);
-                                    setOpen(false);
-                                  }
-                                }}
+                                class={`model-item-row ${isSelected() ? "selected" : ""} ${effortTarget().provider === group.provider && effortTarget().id === modelOption.id ? "is-previewed" : ""}`}
+                                role="group"
+                                data-provider={group.provider}
+                                data-model-id={modelOption.id}
+                                aria-label={modelOption.label || modelOption.id}
+                                onMouseEnter={() => setPreviewModel({ provider: group.provider, id: modelOption.id })}
+                                onClick={() => selectModel(group.provider, modelOption.id)}
                               >
-                                <div class="model-item-row-info">
-                                  <span class="model-item-row-name">
-                                    {modelOption.label || modelOption.id}
-                                  </span>
-                                  <Show when={modelOption.contextWindow}>
-                                    <span class="model-item-row-desc">
-                                      {Math.round(modelOption.contextWindow! / 1024)}k context
+                                <button
+                                  type="button"
+                                  class="model-item-select"
+                                  aria-pressed={isSelected()}
+                                  onFocus={() => setPreviewModel({ provider: group.provider, id: modelOption.id })}
+                                  title={modelOption.context_window ? `${Math.round(modelOption.context_window / 1024)}k context` : undefined}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "ArrowRight") {
+                                      e.preventDefault();
+                                      setPreviewModel({ provider: group.provider, id: modelOption.id });
+                                      focusEffortOption();
+                                    }
+                                  }}
+                                >
+                                  <div class="model-item-row-info">
+                                    <span class="model-item-row-name">
+                                      {modelOption.label || modelOption.id}
+                                    </span>
+                                    <Show when={modelOption.reasoning_effort_levels?.length}>
+                                      <span class="model-item-row-effort">
+                                        {effortLabel(isSelected() ? props.reasoningEffort : modelOption.reasoning_effort_default || "")}
+                                      </span>
+                                    </Show>
+                                  </div>
+                                  <Show when={isSelected()}>
+                                    <span class="model-item-row-check">
+                                      <Check size={14} />
                                     </span>
                                   </Show>
-                                </div>
-                                <Show when={isSelected()}>
-                                  <span class="model-item-row-check">
-                                    <Check size={14} />
-                                  </span>
+                                </button>
+                                <Show when={modelOption.reasoning_effort_levels?.length}>
+                                  <button
+                                    type="button"
+                                    class="model-item-effort-trigger"
+                                    aria-label={`Choose effort for ${modelOption.label || modelOption.id}`}
+                                    aria-haspopup="menu"
+                                    onFocus={() => setPreviewModel({ provider: group.provider, id: modelOption.id })}
+                                    aria-expanded={effortOpen() && effortTarget().provider === group.provider && effortTarget().id === modelOption.id}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      setPreviewModel({ provider: group.provider, id: modelOption.id });
+                                      focusEffortOption();
+                                    }}
+                                    onKeyDown={(event) => event.stopPropagation()}
+                                  ><ChevronRight size={13} /></button>
                                 </Show>
                               </div>
                             );
@@ -399,8 +512,13 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
                         const slashIdx = query.indexOf("/");
                         const p = slashIdx > 0 ? query.slice(0, slashIdx).trim() : resolvedSelection().provider;
                         const m = slashIdx > 0 ? query.slice(slashIdx + 1).trim() : query;
-                        props.onProviderModelChange(p, m);
-                        setOpen(false);
+                        selectModel(p, m);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          event.currentTarget.click();
+                        }
                       }}
                     >
                       <div class="model-item-row-info">
@@ -409,11 +527,48 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
                       </div>
                     </div>
                   </Show>
+                  <Show when={filteredModelGroups().length === 0 && !searchQuery().trim()}>
+                    <p class="model-effort-unavailable">No models available.</p>
+                  </Show>
                 </div>
               </div>
             </Show>
           </div>
         </div>
+        <Show when={effortOpen()}>
+          <div ref={effortMenuRef} class="model-effort-panel" role="group" aria-label="Reasoning effort"
+            style={{ top: `${effortPos().top}px`, left: `${effortPos().left}px`, width: `${effortPos().width}px` }}>
+            <div class="model-effort-heading">Effort</div>
+            <div class="model-effort-options" role="menu" aria-label="Reasoning effort"
+              onKeyDown={(event) => {
+                const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button"));
+                const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+                if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                  event.preventDefault();
+                  buttons[(index + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length]?.focus();
+                } else if (event.key === "ArrowLeft") {
+                  event.preventDefault();
+                  menuRef?.querySelector<HTMLButtonElement>(".model-item-row.is-previewed .model-item-select")?.focus();
+                }
+              }}>
+              <Show when={effortTarget().levels.length} fallback={
+                <p class="model-effort-unavailable">No configurable effort for this model.</p>
+              }>
+                <For each={["", ...effortTarget().levels]}>
+                  {(level) => (
+                    <button type="button" class="model-effort-option" role="menuitemradio"
+                      aria-checked={effortTarget().effort === level}
+                      title={!level && effortTarget().defaultEffort ? `Model default: ${effortLabel(effortTarget().defaultEffort!)}` : undefined}
+                      onClick={() => selectEffort(level)}>
+                      <span>{effortLabel(level)}</span>
+                      <Show when={effortTarget().effort === level}><Check size={13} /></Show>
+                    </button>
+                  )}
+                </For>
+              </Show>
+            </div>
+          </div>
+        </Show>
         </Portal>
       </Show>
     </div>

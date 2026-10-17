@@ -200,13 +200,13 @@ try {
         const composer = document.querySelector('.chat-composer');
         const bar = composer.querySelector('.chat-composer-toolbar');
         const outer = bar.getBoundingClientRect();
-        const controls = ['.chat-composer-more-wrapper > button', '.agent-picker-trigger', '.model-picker-trigger', '.chat-effort-button', '.composer-workspace-trigger', '.chat-composer-send'];
+        const controls = ['.chat-composer-more-wrapper > button', '.agent-picker-trigger', '.model-picker-trigger', '.composer-workspace-trigger', '.chat-composer-send'];
         const rects = controls.map(selector => composer.querySelector(selector)).filter(el => getComputedStyle(el).display !== 'none').map(el => el.getBoundingClientRect());
         return {
           fits: rects.every(r => r.left >= outer.left && r.right <= outer.right + 1 && r.width >= 40 && r.height >= 40),
           row: rects.every(r => Math.abs(r.top - rects[0].top) < 1),
           overflow: bar.scrollWidth > bar.clientWidth,
-          effort: getComputedStyle(composer.querySelector('.chat-effort-button')).display !== 'none',
+          separateEffort: !!composer.querySelector('.chat-effort-button'),
           project: getComputedStyle(composer.querySelector('.composer-workspace-label')).display !== 'none',
           contentWidth: composer.clientWidth,
           grouped: composer.querySelector('.agent-picker-trigger').parentElement === composer.querySelector('.model-picker-trigger').parentElement,
@@ -221,7 +221,7 @@ try {
       })()`);
       assert.equal(bounds.fits && bounds.row && !bounds.overflow, true, `single-row composer at ${width}px, dark=${dark}: ${JSON.stringify(bounds)}`);
       assert.equal(bounds.grouped && bounds.packed && bounds.sendRight && bounds.contextBesideSend, true, `grouped left controls and right send at ${width}px: ${JSON.stringify(bounds)}`);
-      assert.equal(bounds.effort, width - 2 >= 400);
+      assert.equal(bounds.separateEffort, false);
       assert.equal(bounds.project, width - 2 >= 560);
       await click('.agent-picker-trigger');
       await until(() => js('!!document.querySelector(".agent-card-item")'), 'independent agent menu');
