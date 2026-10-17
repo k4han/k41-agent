@@ -273,14 +273,12 @@ body.sidebar-resizing * {
 
 .nav-history-list {
   display: flex;
-  width: 100%;
   min-height: 0;
   flex: 1 1 auto;
   flex-direction: column;
   gap: 2px;
-  margin: 0;
+  margin-right: -10px;
   overflow-y: auto;
-  padding-right: 4px;
   scrollbar-gutter: stable;
 }
 
@@ -290,6 +288,7 @@ body.sidebar-resizing * {
   min-width: 0;
   gap: 2px;
   margin-bottom: 12px;
+  padding-right: 10px;
 }
 
 .nav-projects-header {
@@ -381,8 +380,7 @@ body.sidebar-resizing * {
 }
 
 .nav-history-workspace-toggle {
-  display: grid;
-  grid-template-columns: 15px minmax(0, 1fr) 14px;
+  display: flex;
   align-items: center;
   gap: 9px;
   min-height: 34px;
@@ -403,6 +401,7 @@ body.sidebar-resizing * {
 }
 
 .nav-history-workspace-label {
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   font-size: var(--font-size-base);
@@ -418,6 +417,7 @@ body.sidebar-resizing * {
 
 .nav-history-workspace-caret {
   display: grid;
+  flex-shrink: 0;
   place-items: center;
   color: var(--muted-2);
 }
@@ -634,12 +634,14 @@ body.sidebar-resizing * {
 .nav-history-retry {
   min-height: 28px;
   flex: 0 0 auto;
+  margin-right: 10px;
   padding: 6px 8px;
 }
 
 .nav-history-skeleton {
   display: grid;
   gap: 8px;
+  margin-right: 10px;
   padding: 7px 8px;
 }
 
