@@ -226,6 +226,7 @@
 }
 
 .chat-shell-resizable.workspace-open .transcript > .message,
+.chat-shell-resizable.workspace-open .transcript > .activity-group,
 .chat-shell-resizable.workspace-open .transcript > .tool-call,
 .chat-shell-resizable.workspace-open .transcript > .plan-review,
 .chat-shell-resizable.workspace-open .transcript > .tool-html-preview:not(.is-fullwidth),
@@ -233,6 +234,7 @@
 .chat-shell-resizable.workspace-open .transcript > .chat-workspace-empty,
 .chat-shell-resizable.workspace-open .transcript > .transcript-compacting-indicator,
 .chat-shell-resizable.workspace-closed .transcript > .message,
+.chat-shell-resizable.workspace-closed .transcript > .activity-group,
 .chat-shell-resizable.workspace-closed .transcript > .tool-call,
 .chat-shell-resizable.workspace-closed .transcript > .plan-review,
 .chat-shell-resizable.workspace-closed .transcript > .tool-html-preview:not(.is-fullwidth),

@@ -393,6 +393,9 @@ try {
     return { top: transcript.scrollTop, height: transcript.scrollHeight, viewport: transcript.clientHeight };
   })()`);
   const toolOutput = 'Command exited with code 0.\n' + 'Expanded tool output.\n'.repeat(40);
+  const shortToolHeight = await js('document.querySelector(".activity-group-body").getBoundingClientRect().height');
+  assert.ok(shortToolHeight > 0 && shortToolHeight < 280, 'a short tool run must only occupy the height of its content');
+  assert.equal(await js('document.querySelector(".activity-group-label").textContent'), '1 tool call · Running', 'a live tool group has its own count and running status');
   chatResponse.write(JSON.stringify({ type: 'tool_result', tool_call_id: 'write-source', name: 'shell', content: toolOutput }) + '\n');
   await until(() => js('document.querySelector(".tool-call-body")?.textContent.includes("Expanded tool output.")'), 'tool output arrives');
   await delay(100);
@@ -400,8 +403,9 @@ try {
   await click('.tool-call > summary');
   await delay(100);
   const expanded = await scrollMetrics();
-  assert.ok(expanded.height > collapsed.height, 'expanding a tool must increase the main scroll range');
+  assert.ok(expanded.height >= collapsed.height, 'tool content can grow until reaching the height cap');
   assert.ok(Math.abs(expanded.top - collapsed.top) <= 1, 'expanding a tool must preserve the reading position');
+  assert.equal(await js('document.querySelector(".activity-group-body").getBoundingClientRect().height'), 280, 'long tool output stops growing at the height cap');
 
   for (let index = 0; index < 2; index++) {
     const id = `scroll-tool-${index}`;
@@ -410,8 +414,51 @@ try {
   }
   await until(() => js('document.querySelectorAll(".tool-call").length === 3'), 'more tools arrive while paused');
   await js('document.querySelectorAll(".tool-call:not([open]) > summary").forEach(summary => summary.click())');
-  await until(() => js('!!document.querySelector(".scroll-to-bottom-btn")'), 'expanded content exposes the bottom button');
+  await until(() => js('document.querySelectorAll(".tool-call[open]").length === 3'), 'expanded tool rows');
+  assert.equal((await scrollMetrics()).height, expanded.height, 'new tools must only grow the inner scroll range');
   assert.ok(Math.abs((await scrollMetrics()).top - expanded.top) <= 1, 'more streamed tools must not move the reading position');
+  const toolsAtBottom = () => js(`(() => {
+    const body = document.querySelector('.activity-group-body');
+    return body.scrollTop > 0 && Math.abs(body.scrollHeight - body.clientHeight - body.scrollTop) <= 1;
+  })()`);
+  await until(toolsAtBottom, 'new tools and expanded results automatically scroll the tool viewport to the bottom');
+  const toolBounds = await js(`(() => {
+    const body = document.querySelector('.activity-group-body');
+    window.firstToolRow = body.querySelector('.tool-call');
+    return body.getBoundingClientRect().toJSON();
+  })()`);
+  await call('Input.dispatchMouseEvent', {
+    type: 'mouseWheel', x: toolBounds.left + 4, y: toolBounds.top + 40,
+    deltaX: 0, deltaY: -160,
+  });
+  await until(async () => !await toolsAtBottom(), 'scrolling up leaves the bottom of the tool viewport');
+  await delay(150);
+  const pausedToolTop = await js('document.querySelector(".activity-group-body").scrollTop');
+  chatResponse.write(JSON.stringify({ type: 'tool_call', id: 'scroll-paused', name: 'read', args: { path: 'paused.txt' } }) + '\n');
+  await until(() => js('document.querySelectorAll(".tool-call").length === 4'), 'a new tool arrives while the user reads earlier output');
+  await delay(150);
+  assert.equal(await js('document.querySelector(".activity-group-body").scrollTop'), pausedToolTop, 'new tools must preserve the inner reading position after scrolling up');
+  const beforeInnerScroll = await scrollMetrics();
+  for (let index = 0; index < 2; index++) {
+    await call('Input.dispatchMouseEvent', {
+      type: 'mouseWheel', x: toolBounds.left + 4, y: toolBounds.top + 40,
+      deltaX: 0, deltaY: 100000,
+    });
+    await delay(150);
+  }
+  assert.equal(await js(`(() => {
+    const body = document.querySelector('.activity-group-body');
+    return body.scrollTop > 0 && Math.abs(body.scrollHeight - body.clientHeight - body.scrollTop) <= 1;
+  })()`), true, 'the tool viewport scrolls independently to its bottom');
+  assert.equal((await scrollMetrics()).top, beforeInnerScroll.top, 'inner wheel scrolling must not chain to the main transcript at its boundary');
+  const resumedToolTop = await js('document.querySelector(".activity-group-body").scrollTop');
+  chatResponse.write(JSON.stringify({ type: 'tool_call', id: 'scroll-resumed', name: 'read', args: { path: 'resumed.txt' } }) + '\n');
+  await until(() => js('document.querySelectorAll(".tool-call").length === 5'), 'a new tool arrives after returning to the bottom');
+  await until(async () => await toolsAtBottom()
+    && await js('document.querySelector(".activity-group-body").scrollTop') > resumedToolTop, 'returning to the bottom resumes automatic following for new tools');
+  assert.equal((await scrollMetrics()).height, expanded.height, 'automatic inner scrolling keeps the main scroll range unchanged once capped');
+  await js('document.querySelector(".transcript").scrollTop = 0');
+  await until(() => js('!!document.querySelector(".scroll-to-bottom-btn")'), 'scroll back through history before checking main wheel navigation');
   const transcriptBounds = await js(`(() => {
     const transcript = document.querySelector('.transcript');
     return { ...transcript.getBoundingClientRect().toJSON(), scrollbarWidth: transcript.offsetWidth - transcript.clientWidth };
@@ -438,7 +485,42 @@ try {
   await delay(100);
   await call('Input.dispatchMouseEvent', { type: 'mouseReleased', x: scrollbarX, y: transcriptBounds.bottom - 2, button: 'left', clickCount: 1 });
   await until(atBottom, 'dragging the main scrollbar reaches the expanded conversation bottom');
-  console.log('PASS: expanding streamed tools updates the main scroll range, preserves position, and allows wheel and scrollbar navigation to the bottom.');
+  console.log('PASS: tool runs grow up to their height cap, follow new tools, pause when scrolling up, and resume at the bottom without chaining to the main transcript.');
+
+  chatResponse.write(JSON.stringify({ type: 'message', content: 'I wrote and read the files.' }) + '\n');
+  await until(() => js('document.querySelector(".activity-group + .message.assistant")?.textContent.includes("I wrote and read the files.")'), 'narration stays after its preceding tools');
+  assert.equal(await js('document.querySelector(".activity-group-body").hidden'), true, 'narration automatically collapses the preceding tools');
+  assert.equal(await js('document.querySelector(".activity-group-label").textContent'), '5 tool calls · Finished', 'the settled group retains its own count and status');
+  assert.equal(await js('document.querySelectorAll(".activity-group .message").length'), 0, 'assistant text is never nested inside a tool group');
+  assert.equal(await js('document.querySelector(".activity-group-body .tool-call") === firstToolRow'), true, 'receiving narration preserves the existing tool DOM');
+  await click('.activity-group + .message.assistant .message-markdown p');
+  assert.equal(await js('document.querySelector(".activity-group-body").hidden'), true, 'clicking standalone narration must not toggle a tool group');
+  await click('.activity-group-toggle');
+  assert.equal(await js('document.querySelector(".activity-group-body").hidden'), false, 'clicking the group header expands its tools below it');
+  assert.equal(await js(`(() => {
+    const group = document.querySelector('.activity-group');
+    return group.querySelector('.activity-group-body').getBoundingClientRect().top
+      >= group.querySelector('.activity-group-summary').getBoundingClientRect().bottom;
+  })()`), true, 'expanded tools appear below their own header');
+  await click('.activity-group-toggle');
+  assert.equal(await js('document.querySelector(".activity-group-body").hidden'), true, 'the chevron collapses the same tools');
+  await js('document.querySelector(".activity-group-toggle").focus()');
+  await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' });
+  await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+  assert.equal(await js('document.querySelector(".activity-group-toggle").getAttribute("aria-expanded")'), 'true', 'the collapse control supports the keyboard');
+  chatResponse.write(JSON.stringify({ type: 'tool_call', id: 'verify-source', name: 'read', args: { path: 'source.txt' } }) + '\n');
+  await until(() => js('document.querySelectorAll(".activity-group").length === 2'), 'a new tool run starts after narration');
+  assert.equal(await js('document.querySelectorAll(".activity-group.is-open").length'), 2, 'a new tool group preserves the manual state of the earlier group');
+  assert.equal(await js(`(() => {
+    const firstGroup = document.querySelector('.activity-group');
+    const narration = firstGroup.nextElementSibling;
+    return narration.classList.contains('message')
+      && narration.textContent.includes('I wrote and read the files.')
+      && narration.nextElementSibling.classList.contains('activity-group');
+  })()`), true, 'the transcript preserves tools, narration, then the next tool run in chronological order');
+  const nextToolHeight = await js('document.querySelectorAll(".activity-group-body")[1].getBoundingClientRect().height');
+  assert.ok(nextToolHeight > 0 && nextToolHeight < 280, 'a new short tool run starts at its natural content height');
+  console.log('PASS: tool groups have independent count and status headers, open downward with mouse and keyboard, and preserve narration between runs.');
 
   await js(`window.previewNode = document.querySelector('.workspace-file-view-shiki').firstChild;
     window.backgroundMutations = [];
@@ -466,15 +548,46 @@ try {
   await until(() => js('document.querySelector(".workspace-file-panel")?.textContent.includes("written at tool completion")'), 'tool_result updates preview during the stream');
   await js('Array.from(document.querySelectorAll(".workspace-tab")).find(tab => tab.title === "Files Explorer").click();');
   assert.equal(await js('Array.from(document.querySelectorAll(".workspace-tree-row")).some(row => row.textContent.includes("created.txt"))'), true, 'newly written files appear during chat');
-  chatResponse.write(JSON.stringify({ type: 'final', content: 'Done.\n\n```text\nUpdated files\n```\n\n| File | Status |\n| --- | --- |\n| source.txt | Updated |' }) + '\n');
+  const finalAnswer = 'Done.\n\n```text\nUpdated files\n```\n\n| File | Status |\n| --- | --- |\n| source.txt | Updated |';
+  chatResponse.write(JSON.stringify({ type: 'final', content: finalAnswer }) + '\n');
   await until(() => js('!!document.querySelector(".message-markdown .markdown-code-frame pre code") && !!document.querySelector(".message-markdown td")'), 'formatted assistant response');
+  assert.equal(await js('document.querySelectorAll(".activity-group-body")[1].hidden'), true, 'the final answer collapses its own preceding tool run');
+  assert.equal(await js(`(() => {
+    const groups = document.querySelectorAll('.activity-group');
+    const answer = groups[groups.length - 1].nextElementSibling;
+    return answer.classList.contains('message') && answer.textContent.includes('Done.');
+  })()`), true, 'the final answer is an independent message after the tools');
   const messageSelectors = ['.message.user .message-text', '.message-markdown', '.message-markdown .markdown-code-frame pre code', '.message-markdown td', '.workspace-tree-row'];
   assert.deepEqual(await fontSizes(messageSelectors), messageSelectors.map(() => '14px'), 'messages, code, tables, and file rows use 14px text');
   await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   assert.deepEqual(await fontSizes(messageSelectors), messageSelectors.map(() => '14px'), 'mobile retains readable message and workspace text');
   assert.deepEqual(await fontSizes(['.chat-prompt-input']), ['16px'], 'mobile input prevents automatic zoom');
+  fixtures['/dashboard-api/chat-history/workspace-chat'].messages.push(
+    { role: 'user', content: 'Update source.txt' },
+    { role: 'assistant', content: '', tool_calls: [
+      { id: 'write-source', name: 'shell', args: { command: 'write source.txt' } },
+      { id: 'scroll-tool-0', name: 'shell', args: { command: 'inspect output 0' } },
+      { id: 'scroll-tool-1', name: 'shell', args: { command: 'inspect output 1' } },
+      { id: 'scroll-paused', name: 'read', args: { path: 'paused.txt' } },
+      { id: 'scroll-resumed', name: 'read', args: { path: 'resumed.txt' } },
+    ] },
+    { role: 'tool', tool_call_id: 'write-source', name: 'shell', content: toolOutput },
+    { role: 'assistant', content: 'I wrote and read the files.', tool_calls: [
+      { id: 'verify-source', name: 'read', args: { path: 'source.txt' } },
+    ] },
+    { role: 'assistant', content: finalAnswer },
+  );
   chatResponse.end();
   await until(() => js(`!!document.querySelector('button[aria-label="Send message"]')`), 'chat completes');
+  await until(() => js('document.querySelectorAll(".transcript > .message.assistant .assistant-actions").length === 1'), 'the standalone final answer exposes its actions after streaming and history refresh');
+  assert.equal(await js('document.querySelectorAll(".transcript > .message.assistant .assistant-actions").length'), 1, 'only the final message has answer actions');
+  assert.equal(await js(`(() => {
+    const groups = document.querySelectorAll('.activity-group');
+    return groups.length === 2
+      && groups[0].nextElementSibling.textContent.includes('I wrote and read the files.')
+      && groups[0].nextElementSibling.nextElementSibling === groups[1]
+      && groups[1].nextElementSibling.textContent.includes('Done.');
+  })()`), true, 'history refresh preserves chronological groups and independent assistant messages');
   await js(`document.querySelector('button[aria-label="Close workspace explorer"]')?.click()`);
   await delay(300);
   for (const width of [320, 375, 480, 560, 960]) {
@@ -498,6 +611,8 @@ try {
     await escape();
     if (width === 375 || width === 960) await screenshot(`composer-${width}`);
   }
+  await js('document.querySelector(".transcript > .message.assistant .assistant-actions .message-action-btn").click()');
+  assert.equal(await js('document.querySelectorAll(".activity-group-body")[1].hidden'), true, 'copying the closing answer must not toggle tools');
   assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
   console.log('PASS: production Chat refreshes real local files and previews while tools run and on streamed tool results.');
 } finally {

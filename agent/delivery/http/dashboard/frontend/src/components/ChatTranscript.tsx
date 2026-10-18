@@ -1,8 +1,10 @@
 import { ArrowDown, Loader2, Sparkles } from "lucide-solid";
-import { For, Show } from "solid-js";
+import { createMemo, For, Show } from "solid-js";
 
+import { TranscriptActivityGroup } from "@/components/TranscriptActivityGroup";
 import { TranscriptItemView, type TranscriptAttachment, type TranscriptRole } from "@/components/Transcript";
 import type { ChatTranscriptItem } from "@/lib/chatStreamStore";
+import { buildTranscriptActivityView, findTranscriptAnswerId } from "@/lib/transcriptActivity";
 import { useStreamingTranscriptItem } from "@/lib/useStreamingTranscriptItem";
 import type { AgentCard } from "@/types";
 
@@ -68,10 +70,19 @@ export interface ChatTranscriptProps {
 }
 
 export function ChatTranscript(props: ChatTranscriptProps) {
+  const streamActive = () => props.streaming || props.backgroundLive;
   const isStreamingItem = useStreamingTranscriptItem(
     () => props.items,
-    () => props.streaming || props.backgroundLive,
+    streamActive,
   );
+  const activityView = createMemo(() =>
+    buildTranscriptActivityView(props.filteredItems, streamActive()),
+  );
+  const answerItemId = createMemo(() => findTranscriptAnswerId(props.filteredItems));
+  // Answer actions stay hidden while the agent runs and then belong only to
+  // the final answer of the thread.
+  const showAssistantActions = (itemId: number) =>
+    !streamActive() && answerItemId() === itemId;
 
   return (
     <div class="transcript-container">
@@ -114,25 +125,70 @@ export function ChatTranscript(props: ChatTranscriptProps) {
             </Show>
           }
         >
-          <For each={props.filteredItems}>
-            {(item) => (
-              <TranscriptItemView
-                item={item}
-                itemId={item.id}
-                deferMermaid={isStreamingItem(item.id)}
-                deferHighlight={isStreamingItem(item.id)}
-                agents={props.agents}
-                activeAgentName={props.activeAgentName}
-                actionsDisabled={props.conversationBusy}
-                threadId={props.currentThreadId}
-                onEditMessage={props.onEditMessage}
-                onRegenerateMessage={props.onRegenerateMessage}
-                onBranchSelect={props.onBranchSelect}
-                onApprovePlanReview={props.onApprovePlanReview}
-                onRevisePlanReview={props.onRevisePlanReview}
-                onMessageClick={props.onMessageClick}
-              />
-            )}
+          <For each={activityView().keys}>
+            {(key) => {
+              const entry = () => activityView().entries.get(key);
+              const item = () => {
+                const current = entry();
+                if (!current || current.kind !== "item") {
+                  return null;
+                }
+                return current.item;
+              };
+              const rows = () => {
+                const current = entry();
+                if (!current || current.kind !== "activity") {
+                  return null;
+                }
+                return current.items;
+              };
+              return (
+                <Show
+                  when={item()}
+                  fallback={
+                    <Show when={rows()}>
+                      {(groupRows) => (
+                        <TranscriptActivityGroup
+                          rows={groupRows()}
+                          live={activityView().liveKey === key}
+                          isItemStreaming={isStreamingItem}
+                          agents={props.agents}
+                          activeAgentName={props.activeAgentName}
+                          actionsDisabled={props.conversationBusy}
+                          threadId={props.currentThreadId}
+                          onEditMessage={props.onEditMessage}
+                          onRegenerateMessage={props.onRegenerateMessage}
+                          onBranchSelect={props.onBranchSelect}
+                          onApprovePlanReview={props.onApprovePlanReview}
+                          onRevisePlanReview={props.onRevisePlanReview}
+                          onMessageClick={props.onMessageClick}
+                        />
+                      )}
+                    </Show>
+                  }
+                >
+                  {(row) => (
+                    <TranscriptItemView
+                      item={row()}
+                      itemId={row().id}
+                      deferMermaid={isStreamingItem(row().id)}
+                      deferHighlight={isStreamingItem(row().id)}
+                      showAssistantActions={showAssistantActions(row().id)}
+                      agents={props.agents}
+                      activeAgentName={props.activeAgentName}
+                      actionsDisabled={props.conversationBusy}
+                      threadId={props.currentThreadId}
+                      onEditMessage={props.onEditMessage}
+                      onRegenerateMessage={props.onRegenerateMessage}
+                      onBranchSelect={props.onBranchSelect}
+                      onApprovePlanReview={props.onApprovePlanReview}
+                      onRevisePlanReview={props.onRevisePlanReview}
+                      onMessageClick={props.onMessageClick}
+                    />
+                  )}
+                </Show>
+              );
+            }}
           </For>
           <Show when={props.compacting}>
             <div class="transcript-compacting-indicator" role="status" aria-live="polite">

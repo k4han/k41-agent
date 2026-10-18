@@ -343,6 +343,8 @@ export function TranscriptMessageView(props: {
   deferHighlight?: boolean;
   itemId?: number;
   actionsDisabled?: boolean;
+  /** Show the answer actions (copy, regenerate); hidden while the run streams. */
+  showAssistantActions?: boolean;
   onEdit?: (payload: {
     itemId?: number;
     messageIndex: number;
@@ -621,33 +623,35 @@ export function TranscriptMessageView(props: {
           </div>
         </Show>
         <Show when={props.role === "assistant" && props.text && !isChatStatusText(props.text)}>
-          <div class="message-actions assistant-actions" aria-label="Message actions" onClick={(e) => e.stopPropagation()}>
-            <CopyButton
-              value={props.text}
-              class="message-action-btn"
-              title="Copy response"
-              ariaLabel="Copy response"
-              copiedTitle="Copied!"
-              successMessage="Response copied."
-              iconSize={15}
-            />
-            <button
-              class="message-action-btn"
-              type="button"
-              onClick={() => {
-                props.onRegenerateMessage?.({
-                  itemId: props.itemId,
-                  messageIndex: props.messageIndex,
-                  sourceCheckpointId: props.sourceCheckpointId,
-                });
-              }}
-              disabled={props.actionsDisabled}
-              title="Regenerate response"
-              aria-label="Regenerate response"
-            >
-              <RotateCcw size={15} />
-            </button>
-          </div>
+          <Show when={props.showAssistantActions ?? true}>
+            <div class="message-actions assistant-actions" aria-label="Message actions" onClick={(e) => e.stopPropagation()}>
+              <CopyButton
+                value={props.text}
+                class="message-action-btn"
+                title="Copy response"
+                ariaLabel="Copy response"
+                copiedTitle="Copied!"
+                successMessage="Response copied."
+                iconSize={15}
+              />
+              <button
+                class="message-action-btn"
+                type="button"
+                onClick={() => {
+                  props.onRegenerateMessage?.({
+                    itemId: props.itemId,
+                    messageIndex: props.messageIndex,
+                    sourceCheckpointId: props.sourceCheckpointId,
+                  });
+                }}
+                disabled={props.actionsDisabled}
+                title="Regenerate response"
+                aria-label="Regenerate response"
+              >
+                <RotateCcw size={15} />
+              </button>
+            </div>
+          </Show>
         </Show>
       </div>
     </div>
@@ -1607,7 +1611,7 @@ function HtmlPreviewToolbar(props: {
   );
 }
 
-export function TranscriptItemView(props: {
+export interface TranscriptItemViewProps {
   item: TranscriptItem;
   deferMermaid?: boolean;
   deferHighlight?: boolean;
@@ -1615,6 +1619,8 @@ export function TranscriptItemView(props: {
   agents?: AgentCard[];
   activeAgentName?: string;
   actionsDisabled?: boolean;
+  /** Show the answer actions (copy, regenerate); hidden while the run streams. */
+  showAssistantActions?: boolean;
   onEditMessage?: (payload: {
     itemId?: number;
     messageIndex: number;
@@ -1641,7 +1647,9 @@ export function TranscriptItemView(props: {
   }) => void;
   onMessageClick?: (payload: { text: string; role: TranscriptRole; attachments?: TranscriptAttachment[] }) => void;
   threadId?: string | null;
-}) {
+}
+
+export function TranscriptItemView(props: TranscriptItemViewProps) {
   if (props.item.type === "message") {
     return (
     <TranscriptMessageView
@@ -1657,6 +1665,7 @@ export function TranscriptItemView(props: {
       deferHighlight={props.deferHighlight}
       itemId={props.itemId}
       actionsDisabled={props.actionsDisabled}
+      showAssistantActions={props.showAssistantActions}
       onEdit={props.onEditMessage}
       onRegenerateMessage={props.onRegenerateMessage}
       onBranchSelect={props.onBranchSelect}
