@@ -198,7 +198,7 @@ class OutputStore:
                 if {"path", "line", "text"}.issubset(value) and isinstance(value["text"], str):
                     marker = "[output truncated]"
                     if result.output_paths:
-                        marker = f"[output truncated; read file_path={result.output_paths[0]} byte_offset=0]"
+                        marker = f"[output truncated; read path={result.output_paths[0]} byte_offset=0]"
                     value["text"], cut = bounded_text(value["text"], marker, tail=tail)
                     if cut:
                         value["text_truncated"] = True
@@ -219,7 +219,7 @@ class OutputStore:
             result.output_refs.append(reference)
             relative = output_relative_path(context, reference)
             result.output_paths.append(relative)
-            marker = f"[output truncated; read file_path={relative}; use byte_offset=0 for long lines]"
+            marker = f"[output truncated; read path={relative}; use byte_offset=0 for long lines]"
             if result.capture_truncated:
                 marker += " [capture quota exceeded; some output was lost]"
         except (CodingError, OSError, ValueError) as exc:

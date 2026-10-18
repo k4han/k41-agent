@@ -54,12 +54,12 @@ async def test_read_pages_version_and_stale_edit(coding):
     service, context, workspace = coding
     path = workspace / "source.txt"
     path.write_text("one\ntwo\nthree\n", encoding="utf-8")
-    page = await invoke(service, context, "read", file_path="source.txt", limit=2)
+    page = await invoke(service, context, "read", path="source.txt", limit=2)
     assert page.content.startswith("1: one\n2: two\n[version=")
     assert "next_offset=3" in page.content
     assert page.data["version"] == hashlib.sha256(path.read_bytes()).hexdigest()
     path.write_text("changed\n", encoding="utf-8")
-    result = await invoke(service, context, "edit", file_path="source.txt", old_string="changed", new_string="next", expected_version=page.data["version"])
+    result = await invoke(service, context, "edit", path="source.txt", old_string="changed", new_string="next", expected_version=page.data["version"])
     assert result.error.code == "stale_content"
     assert path.read_text() == "changed\n"
 
@@ -71,7 +71,7 @@ async def test_edit_preserves_bom_crlf_and_mode(coding):
     path.write_bytes(b"\xef\xbb\xbfone\r\ntwo\r\n")
     path.chmod(0o640)
     before_mode = path.stat().st_mode
-    result = await invoke(service, context, "edit", file_path="source.txt", old_string="one\ntwo", new_string="first\nsecond")
+    result = await invoke(service, context, "edit", path="source.txt", old_string="one\ntwo", new_string="first\nsecond")
     assert result.status == "success"
     assert path.read_bytes() == b"\xef\xbb\xbffirst\r\nsecond\r\n"
     assert path.stat().st_mode == before_mode
@@ -85,7 +85,7 @@ async def test_concurrent_versioned_edits_do_not_overwrite(coding):
     path.write_text("original", encoding="utf-8")
     version = hashlib.sha256(path.read_bytes()).hexdigest()
     results = await asyncio.gather(*(invoke(service, replace(context, tool_call_id=f"call-{index}"), "edit",
-        file_path="source.txt", old_string="original", new_string=str(index), expected_version=version) for index in range(2)))
+        path="source.txt", old_string="original", new_string=str(index), expected_version=version) for index in range(2)))
     assert sorted(result.status for result in results) == ["error", "success"]
     assert next(result.error.code for result in results if result.error) == "stale_content"
 
@@ -93,10 +93,10 @@ async def test_concurrent_versioned_edits_do_not_overwrite(coding):
 @pytest.mark.asyncio
 async def test_write_append_and_no_op(coding):
     service, context, workspace = coding
-    assert (await invoke(service, context, "write", file_path="new.txt", content="one\n")).status == "success"
-    assert (await invoke(service, context, "write", file_path="new.txt", content="two\n", append=True)).status == "success"
+    assert (await invoke(service, context, "write", path="new.txt", content="one\n")).status == "success"
+    assert (await invoke(service, context, "write", path="new.txt", content="two\n", append=True)).status == "success"
     assert (workspace / "new.txt").read_text() == "one\ntwo\n"
-    result = await invoke(service, context, "edit", file_path="new.txt", old_string="one", new_string="one")
+    result = await invoke(service, context, "edit", path="new.txt", old_string="one", new_string="one")
     assert result.error.code == "invalid_input"
 
 
@@ -105,10 +105,10 @@ async def test_large_line_and_many_lines_are_bounded(coding):
     service, context, workspace = coding
     path = workspace / "large.txt"
     path.write_text("x" * (3 * MAX_MODEL_BYTES) + "\n" + "next\n" * 3000, encoding="utf-8")
-    first = await invoke(service, context, "read", file_path="large.txt", limit=1)
+    first = await invoke(service, context, "read", path="large.txt", limit=1)
     assert len(first.content.encode()) <= MAX_MODEL_BYTES
     assert first.data["next_offset"] == 2
-    second = await invoke(service, context, "read", file_path="large.txt", offset=2)
+    second = await invoke(service, context, "read", path="large.txt", offset=2)
     assert second.content.startswith("2: next")
     assert len(second.content.splitlines()) <= MAX_MODEL_LINES
 
@@ -139,7 +139,7 @@ async def test_external_symlink_is_not_searched(coding, tmp_path):
         (workspace / "link.txt").symlink_to(outside)
     except OSError:
         pytest.skip("Symlink privilege is unavailable.")
-    read = await invoke(service, context, "read", file_path="link.txt")
+    read = await invoke(service, context, "read", path="link.txt")
     assert read.error.code == "permission_denied"
     search = await invoke(service, context, "grep", pattern="secret")
     assert not search.data["matches"]
@@ -149,20 +149,20 @@ async def test_external_symlink_is_not_searched(coding, tmp_path):
 async def test_permission_denial_and_unavailable_channel(coding):
     service, context, workspace = coding
     denied = replace(context, permission_rules=(PermissionRule(action="edit", effect="deny"),))
-    result = await invoke(service, denied, "write", file_path="new.txt", content="new")
+    result = await invoke(service, denied, "write", path="new.txt", content="new")
     assert result.error.code == "permission_denied"
     assert not (workspace / "new.txt").exists()
     asked = replace(context, permission_rules=(PermissionRule(action="edit", effect="ask"),))
-    result = await invoke(service, asked, "write", file_path="new.txt", content="new")
+    result = await invoke(service, asked, "write", path="new.txt", content="new")
     assert result.error.code == "approval_unavailable"
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("name", "args", "initial"), [
-    ("write", {"file_path": "source.txt", "content": "submitted-content\n"}, None),
-    ("write", {"file_path": "source.txt", "content": "submitted-content\n"}, "previous-content\n"),
-    ("write", {"file_path": "source.txt", "content": "submitted-content\n", "append": True}, "previous-content\n"),
-    ("edit", {"file_path": "source.txt", "old_string": "previous-content", "new_string": "submitted-content"}, "previous-content\n"),
+    ("write", {"path": "source.txt", "content": "submitted-content\n"}, None),
+    ("write", {"path": "source.txt", "content": "submitted-content\n"}, "previous-content\n"),
+    ("write", {"path": "source.txt", "content": "submitted-content\n", "append": True}, "previous-content\n"),
+    ("edit", {"path": "source.txt", "old_string": "previous-content", "new_string": "submitted-content"}, "previous-content\n"),
 ])
 async def test_mutation_diffs_are_ui_only_in_tool_node_and_history(coding, monkeypatch, name, args, initial):
     from agent.modules.conversations.history import _serialize_thread_messages
@@ -199,7 +199,7 @@ async def test_mutation_diffs_are_ui_only_in_tool_node_and_history(coding, monke
 async def test_large_mutation_diff_bounds_ui_without_inflating_model_content(coding):
     service, context, workspace = coding
     called = replace(context, tool_call_id="large-write")
-    args = {"file_path": "large.txt", "content": "submitted-content\n" * 8000}
+    args = {"path": "large.txt", "content": "submitted-content\n" * 8000}
     result = await invoke(service, called, "write", **args)
     assert result.status == "success"
     assert "submitted-content" not in result.content and len(result.content.encode()) < 1024
@@ -207,7 +207,7 @@ async def test_large_mutation_diff_bounds_ui_without_inflating_model_content(cod
     assert len(result.display_content.encode()) <= MAX_MODEL_BYTES
     assert len(result.display_content.splitlines()) <= MAX_MODEL_LINES
     assert result.data["diff_truncated"] and result.data["diff_output_refs"] == result.output_refs
-    retained = await invoke(service, context, "read", file_path=result.output_paths[0])
+    retained = await invoke(service, context, "read", path=result.output_paths[0])
     assert "+submitted-content" in retained.content
     assert (await invoke(service, called, "write", **args)) == result
 
@@ -217,7 +217,7 @@ async def test_large_mutation_diff_bounds_ui_without_inflating_model_content(cod
 async def test_direct_tool_invocation_without_runtime_call_id_excludes_diff(coding, monkeypatch, as_tool_call):
     service, context, workspace = coding
     monkeypatch.setattr("agent.modules.tools.coding.adapter.invocation_context", lambda runtime: context)
-    args = {"file_path": "direct.txt", "content": "submitted-content\n", "runtime": SimpleNamespace(tool_call_id=None)}
+    args = {"path": "direct.txt", "content": "submitted-content\n", "runtime": SimpleNamespace(tool_call_id=None)}
     tool = make_coding_tool("write")
     payload = {"type": "tool_call", "name": tool.name, "id": "direct-call", "args": args} if as_tool_call else args
     result = await tool.ainvoke(payload)
@@ -235,7 +235,7 @@ async def test_legacy_journal_replay_removes_diff_without_repeating_mutation(cod
 
     service, context, workspace = coding
     called = replace(context, tool_call_id="legacy-write")
-    args = {"file_path": "old.txt", "content": "submitted-content\n", "append": True}
+    args = {"path": "old.txt", "content": "submitted-content\n", "append": True}
     first = await invoke(service, called, "write", **args)
     legacy = first.model_copy(update={"content": first.display_content, "display_content": None})
     fingerprint = json.loads(service.storage.journal_path(called).read_text(encoding="utf-8"))["fingerprint"]
@@ -250,15 +250,15 @@ async def test_legacy_journal_replay_removes_diff_without_repeating_mutation(cod
 async def test_journal_prevents_reexecution_and_unknown_outcomes(coding):
     service, context, workspace = coding
     called = replace(context, tool_call_id="write-1")
-    first = await invoke(service, called, "write", file_path="a.txt", content="once", append=True)
-    second = await invoke(service, called, "write", file_path="a.txt", content="once", append=True)
+    first = await invoke(service, called, "write", path="a.txt", content="once", append=True)
+    second = await invoke(service, called, "write", path="a.txt", content="once", append=True)
     assert first == second and (workspace / "a.txt").read_text() == "once"
-    changed = await invoke(service, called, "write", file_path="a.txt", content="different")
+    changed = await invoke(service, called, "write", path="a.txt", content="different")
     assert changed.error.code == "invalid_input"
     uncertain = replace(context, tool_call_id="unknown")
     import json
     from agent.modules.tools.coding.storage import digest
-    args = {"file_path": "a.txt", "content": "must not append", "append": True}
+    args = {"path": "a.txt", "content": "must not append", "append": True}
     values = SCHEMAS["write"].model_validate(args).model_dump()
     fingerprint = digest(json.dumps(["write", values], sort_keys=True, ensure_ascii=True))
     service.storage.begin(uncertain, fingerprint)
@@ -314,7 +314,7 @@ async def test_process_large_output_has_bounded_capture_and_shared_artifact(codi
     assert len(job.head) + len(job.tail) <= MAX_CAPTURE_BYTES
     assert observed.capture_truncated and observed.output_truncated
     assert len(observed.content.encode()) <= MAX_MODEL_BYTES
-    read = await invoke(service, replace(context, thread_id="foreign"), "read", file_path=observed.output_paths[0])
+    read = await invoke(service, replace(context, thread_id="foreign"), "read", path=observed.output_paths[0])
     assert read.status == "success"
     assert read.content
 
@@ -331,7 +331,7 @@ async def test_real_tool_node_permission_resume_and_error_status(coding, monkeyp
     compiled = graph.compile(checkpointer=InMemorySaver())
     config = {"configurable": {"thread_id": "graph-thread", "approval_supported": True}}
     raw_context = {"working_dir": str(workspace)}
-    message = AIMessage(content="", tool_calls=[{"name": "write", "args": {"file_path": "approved.txt", "content": "once", "append": True}, "id": "approved-call"}])
+    message = AIMessage(content="", tool_calls=[{"name": "write", "args": {"path": "approved.txt", "content": "once", "append": True}, "id": "approved-call"}])
     first = await compiled.ainvoke({"messages": [message]}, config, context=raw_context)
     assert "__interrupt__" in first, first["messages"][-1].content
     request = first["__interrupt__"][0].value
@@ -352,11 +352,11 @@ def test_bounding_is_utf8_safe_and_limits_lines():
 async def test_image_limit_and_binary_detection(coding):
     service, context, workspace = coding
     (workspace / "large.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"x" * (5 * 1024 * 1024))
-    assert (await invoke(service, context, "read", file_path="large.png")).error.code == "invalid_input"
+    assert (await invoke(service, context, "read", path="large.png")).error.code == "invalid_input"
     (workspace / "binary.bin").write_bytes(b"abc\0def")
-    assert (await invoke(service, context, "read", file_path="binary.bin")).error.code == "invalid_input"
+    assert (await invoke(service, context, "read", path="binary.bin")).error.code == "invalid_input"
     (workspace / "small.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"small")
-    result = await invoke(service, context, "read", file_path="small.png")
+    result = await invoke(service, context, "read", path="small.png")
     assert result.content[1]["type"] == "image"
 
 
@@ -379,8 +379,8 @@ async def test_permission_last_match_and_agent_override(coding, monkeypatch, iso
     service, context, workspace = coding
     allowed = replace(context, permission_rules=(PermissionRule(action="edit", effect="deny"),
                       PermissionRule(action="edit", resource="*allowed.txt", effect="allow")))
-    assert (await invoke(service, allowed, "write", file_path="allowed.txt", content="allowed")).status == "success"
-    assert (await invoke(service, allowed, "write", file_path="denied.txt", content="denied")).error.code == "permission_denied"
+    assert (await invoke(service, allowed, "write", path="allowed.txt", content="allowed")).status == "success"
+    assert (await invoke(service, allowed, "write", path="denied.txt", content="denied")).error.code == "permission_denied"
     original_get = isolated_container.config_service.get
     monkeypatch.setattr(isolated_container.config_service, "get", lambda key, default=None:
         [{"action": "edit", "effect": "deny"}] if key == "tools.permissions" else original_get(key, default))
@@ -399,7 +399,7 @@ async def test_permission_thread_grant_and_denial(coding, decision):
                       permission_rules=(PermissionRule(action="edit", effect="ask"),))
     graph = StateGraph(dict)
     async def node(state):
-        result = await invoke(service, context, "write", file_path="approved.txt", content="approved")
+        result = await invoke(service, context, "write", path="approved.txt", content="approved")
         return {"status": result.status}
     graph.add_node("write", node)
     graph.add_edge(START, "write")
@@ -413,11 +413,11 @@ async def test_permission_thread_grant_and_denial(coding, decision):
     assert (workspace / "approved.txt").exists() == (decision == "allow_thread")
     if decision == "allow_thread":
         granted = replace(context, tool_call_id="next-call")
-        assert (await invoke(service, granted, "write", file_path="approved.txt", content="next")).status == "success"
+        assert (await invoke(service, granted, "write", path="approved.txt", content="next")).status == "success"
         other_thread = replace(granted, thread_id="other", approval_supported=False)
-        assert (await invoke(service, other_thread, "write", file_path="approved.txt", content="forbidden")).error.code == "approval_unavailable"
+        assert (await invoke(service, other_thread, "write", path="approved.txt", content="forbidden")).error.code == "approval_unavailable"
         service.storage.clear_thread_grants(context.thread_id)
-        assert (await invoke(service, replace(granted, tool_call_id="after-cleanup", approval_supported=False), "write", file_path="approved.txt", content="forbidden")).error.code == "approval_unavailable"
+        assert (await invoke(service, replace(granted, tool_call_id="after-cleanup", approval_supported=False), "write", path="approved.txt", content="forbidden")).error.code == "approval_unavailable"
 
 
 @pytest.mark.asyncio
@@ -437,7 +437,7 @@ async def test_batch_approval_before_any_effect_and_multiple_resumes(coding, mon
     compiled = graph.compile(checkpointer=InMemorySaver())
     config = {"configurable": {"thread_id": "batch", "approval_supported": True}}
     raw_context = {"working_dir": str(workspace)}
-    message = AIMessage(content="", tool_calls=[{"name": "write", "args": {"file_path": f"{index}.txt", "content": "once", "append": True}, "id": f"batch-{index}"} for index in range(2)])
+    message = AIMessage(content="", tool_calls=[{"name": "write", "args": {"path": f"{index}.txt", "content": "once", "append": True}, "id": f"batch-{index}"} for index in range(2)])
     result = await compiled.ainvoke({"messages": [message]}, config, context=raw_context)
     for index in range(2):
         assert not list(workspace.glob("*.txt"))
@@ -457,7 +457,7 @@ async def test_new_file_race_and_replaced_symlink_refuse_commit(coding, monkeypa
         Path(destination).write_text("concurrent", encoding="utf-8")
         return original_link(source, destination)
     monkeypatch.setattr(os, "link", create_before_link)
-    result = await invoke(service, context, "write", file_path="created.txt", content="overwrite")
+    result = await invoke(service, context, "write", path="created.txt", content="overwrite")
     assert result.error.code == "stale_content" and target.read_text() == "concurrent"
 
 

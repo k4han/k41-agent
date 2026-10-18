@@ -171,7 +171,7 @@ def test_parent_search_excludes_inactive_skill_resources(tmp_path, monkeypatch, 
         skill_cache_root=str(cache), permission_rules=(PermissionRule(action="external_directory", resource="*", effect="allow"),))
     files = FileService(Permissions(OutputStore(tmp_path / "outputs")))
     with pytest.raises(CodingError, match="not active"):
-        files._execute("read", {"file_path": str(private)}, context)
+        files._execute("read", {"path": str(private)}, context)
     values = {"path": str(parent), "pattern": "**/*.md" if tool_name == "glob" else "VISIBLE|SECRET"}
     result = files._execute(tool_name, values, context)
     assert "public.md" in result.content
@@ -218,7 +218,7 @@ async def test_actual_graph_script_uses_environment_variable_and_protects_source
     assert result["messages"][-1].status == "success", result["messages"][-1].content
     assert (workspace / "result.bin").read_bytes() == b"\x00\xff"
     assert not list(Path(entry["skill_root"]).glob(".skill-lease-*"))
-    read = await call("read", {"file_path": str(Path(entry["skill_root"]) / "SKILL.md")}, "read")
+    read = await call("read", {"path": str(Path(entry["skill_root"]) / "SKILL.md")}, "read")
     assert read["messages"][-1].status == "success", read["messages"][-1].content
     assert (await service.inventory(str(workspace)))[0].version == original_version
     assert not list(source.rglob("__pycache__"))

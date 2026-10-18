@@ -28,7 +28,7 @@ class ProcessWriteInput(ProcessReadInput):
 
 
 class ReadInput(Input):
-    file_path: str
+    path: str
     offset: int = Field(default=1, ge=1)
     limit: int = Field(default=2000, ge=1, le=2000)
     byte_offset: int | None = Field(default=None, ge=0, description="Read an exact UTF-8 byte page instead of a line page. Continue with next_byte_offset; useful for very long lines.")
@@ -41,7 +41,7 @@ class ListInput(Input):
 
 
 class EditInput(Input):
-    file_path: str
+    path: str
     old_string: str = Field(min_length=1)
     new_string: str
     replace_all: bool = False
@@ -49,7 +49,7 @@ class EditInput(Input):
 
 
 class WriteInput(Input):
-    file_path: str
+    path: str
     content: str
     append: bool = False
     expected_version: str | None = None

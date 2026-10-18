@@ -5,6 +5,11 @@ input/result contracts. There is no agent tool profile selector. The catalog,
 capabilities, agent allow lists, MCP tools, images, scheduling and agent control
 tools retain their existing interfaces.
 
+All file tools (`read`, `write`, `edit`, `list_dir`, `glob`, `grep`) use `path`
+for their target. `read`, `write` and `edit` require it; directory and search
+tools default to the workspace root. Input schemas reject unknown fields,
+including `file_path`; parameter aliases are not supported.
+
 ## Runtime boundary
 
 `agent/modules/tools/coding` owns Pydantic input/result contracts, invocation
@@ -176,7 +181,7 @@ independently of capture loss. Ordinary nonzero exits are reported in
 Retained text lives in `.k41-agent/outputs/<output-id>.txt` inside
 its workspace and is readable by all conversations in that workspace. Tool
 results expose `output_paths`; read them with the existing
-`read(file_path=..., offset=1, limit=2000)` tool. For JSON or other very long
+`read(path=..., offset=1, limit=2000)` tool. For JSON or other very long
 lines, use `byte_offset=0` and continue with `next_byte_offset`; byte pages
 preserve exact UTF-8 text, including newline sequences. `read_tool_output` is
 retired. Serialized legacy checkpoints and retired output references are not

@@ -418,7 +418,7 @@ class ProcessManager:
         data["output_paths"] = output_paths
         marker = f"\n[more output; read_process_output process_id={job.id} cursor={data['cursor']}" if more else ""
         if more:
-            marker += f"; read file_path={relative} byte_offset=0]" if relative is not None else "]"
+            marker += f"; read path={relative} byte_offset=0]" if relative is not None else "]"
         loss_marker = "\n[capture quota exceeded or pipe drain incomplete; some output was lost]" if job.capture_truncated else ""
         body = (clean_terminal_output(output) or "(no output)") + tail_preview
         content, cut = bounded_text(body + footer + marker + loss_marker)

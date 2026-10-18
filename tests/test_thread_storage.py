@@ -64,16 +64,16 @@ async def test_filesystem_tools_read_write_edit_search_workspace_storage(
     runtime = _runtime(str(workspace), "chat_user:sub:worker:abcd1234")
 
     write_result = await _invoke("write",
-        file_path=".k41-agent/assets/note.txt",
+        path=".k41-agent/assets/note.txt",
         content="hello needle\n",
         runtime=runtime,
     )
     read_result = await _invoke("read",
-        file_path=".k41-agent/assets/note.txt",
+        path=".k41-agent/assets/note.txt",
         runtime=runtime,
     )
     edit_result = await _invoke("edit",
-        file_path=".k41-agent/assets/note.txt",
+        path=".k41-agent/assets/note.txt",
         old_string="hello",
         new_string="updated",
         runtime=runtime,
@@ -107,12 +107,12 @@ async def test_workspace_storage_is_shared_by_workspace_not_thread(
     workspace.mkdir()
 
     await _invoke("write",
-        file_path=".k41-agent/memory/note.txt",
+        path=".k41-agent/memory/note.txt",
         content="shared",
         runtime=_runtime(str(workspace), "thread-one"),
     )
     read_result = await _invoke("read",
-        file_path=".k41-agent/memory/note.txt",
+        path=".k41-agent/memory/note.txt",
         runtime=_runtime(str(workspace), "thread-two"),
     )
 
@@ -131,12 +131,12 @@ async def test_workspace_storage_is_isolated_between_workspaces(
     second_workspace.mkdir()
 
     await _invoke("write",
-        file_path=".k41-agent/memory/note.txt",
+        path=".k41-agent/memory/note.txt",
         content="first",
         runtime=_runtime(str(first_workspace), "same-thread"),
     )
     read_result = await _invoke("read",
-        file_path=".k41-agent/memory/note.txt",
+        path=".k41-agent/memory/note.txt",
         runtime=_runtime(str(second_workspace), "same-thread"),
     )
 
@@ -155,7 +155,7 @@ async def test_workspace_storage_mount_blocks_path_traversal(
     runtime = _runtime(str(workspace))
 
     result = await _invoke("write",
-        file_path=".k41-agent/../../outside.txt",
+        path=".k41-agent/../../outside.txt",
         content="secret",
         runtime=runtime,
     )

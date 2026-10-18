@@ -112,14 +112,14 @@ class FileService:
         return self.locks.setdefault(os.path.normcase(str(path)), RLock())
 
     def prepare(self, name: str, values: dict[str, Any], context: InvocationContext) -> None:
-        value = values.get("file_path", values.get("path", ""))
+        value = values.get("path", "")
         self.permissions.resolve_path(context, value, "edit" if name in {"edit", "write"} else "read")
 
     async def execute(self, name: str, values: dict[str, Any], context: InvocationContext) -> ToolResult:
         return await asyncio.to_thread(self._execute, name, values, context)
 
     def _execute(self, name: str, values: dict[str, Any], context: InvocationContext) -> ToolResult:
-        path = self.permissions.resolve_path(context, values.get("file_path", values.get("path", "")),
+        path = self.permissions.resolve_path(context, values.get("path", ""),
                     "edit" if name in {"edit", "write"} else "read", allow_interrupt=False)
         if name == "read":
             with path.open("rb") as handle:

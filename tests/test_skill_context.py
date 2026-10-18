@@ -173,11 +173,11 @@ async def test_coding_read_can_access_activated_snapshot_and_enforces_thread_sco
 
     definition = ToolDefinition("read", "read", SCHEMAS["read"], execute)
     context = InvocationContext("default", options["workspace"], "thread", skill_roots=(loaded.skill_root,), skill_cache_root=str(service.cache_root))
-    result = await coding.invoke(definition, {"file_path": str(Path(loaded.skill_root) / "SKILL.md")}, context)
+    result = await coding.invoke(definition, {"path": str(Path(loaded.skill_root) / "SKILL.md")}, context)
     assert result.status == "success", result.content
     assert "Retain these durable instructions." in result.content
     other_context = InvocationContext("default", options["workspace"], "other-thread", skill_cache_root=str(service.cache_root))
-    result = await coding.invoke(definition, {"file_path": str(Path(loaded.skill_root) / "SKILL.md")}, other_context)
+    result = await coding.invoke(definition, {"path": str(Path(loaded.skill_root) / "SKILL.md")}, other_context)
     assert result.status == "error" and result.error.code == "not_found"
 
 
@@ -238,7 +238,7 @@ async def test_skill_load_requires_a_subsequent_resource_batch(setup):
     graph = builder.compile(checkpointer=InMemorySaver())
     config = {"configurable": {"thread_id": "thread"}}
     context = WorkflowContext(workspace=options["workspace"], allowed_tool_names=["skill", "read"])
-    read_args = {"file_path": str(Path(loaded.skill_root) / "SKILL.md")}
+    read_args = {"path": str(Path(loaded.skill_root) / "SKILL.md")}
 
     async def invoke(calls):
         return await graph.ainvoke({"messages": [AIMessage(content="", tool_calls=calls)]}, config, context=context)

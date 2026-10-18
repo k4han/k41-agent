@@ -81,18 +81,18 @@ async def test_remote_versioned_edits_write_search_and_replay(remote_coding):
     service, context, workspace, _ = remote_coding
     source = workspace / "source.py"
     source.write_bytes(b"\xef\xbb\xbfone\r\ntwo\r\n")
-    page = await invoke(service, context, "read", file_path="source.py", limit=1)
+    page = await invoke(service, context, "read", path="source.py", limit=1)
     assert page.data["next_offset"] == 2
     assert page.data["version"] == hashlib.sha256(source.read_bytes()).hexdigest()
-    edited = await invoke(service, context, "edit", file_path="source.py", old_string="one", new_string="first",
+    edited = await invoke(service, context, "edit", path="source.py", old_string="one", new_string="first",
                           expected_version=page.data["version"])
     assert edited.status == "success"
     assert source.read_bytes() == b"\xef\xbb\xbffirst\r\ntwo\r\n"
-    stale = await invoke(service, context, "write", file_path="source.py", content="lost",
+    stale = await invoke(service, context, "write", path="source.py", content="lost",
                          expected_version=page.data["version"])
     assert stale.error.code == "stale_content"
     call = replace(context, tool_call_id="write", message_id="message")
-    args = {"file_path": "new.py", "content": "first\n"}
+    args = {"path": "new.py", "content": "first\n"}
     applied = await invoke(service, call, "write", **args)
     assert applied.status == "success"
     (workspace / "new.py").write_text("outside change")
@@ -111,14 +111,14 @@ async def test_remote_versioned_edits_write_search_and_replay(remote_coding):
 async def test_remote_permissions_are_checked_before_mutation(remote_coding):
     service, context, workspace, _ = remote_coding
     denied = replace(context, permission_rules=(PermissionRule(action="edit", resource="*", effect="deny"),))
-    result = await invoke(service, denied, "write", file_path="blocked.txt", content="secret")
+    result = await invoke(service, denied, "write", path="blocked.txt", content="secret")
     assert result.error.code == "permission_denied"
     assert not (workspace / "blocked.txt").exists()
     asked = replace(context, permission_rules=(PermissionRule(action="edit", resource="*", effect="ask"),))
-    result = await invoke(service, asked, "write", file_path="pending.txt", content="secret")
+    result = await invoke(service, asked, "write", path="pending.txt", content="secret")
     assert result.error.code == "approval_unavailable"
     assert not (workspace / "pending.txt").exists()
-    escape = await invoke(service, context, "read", file_path="../outside.txt")
+    escape = await invoke(service, context, "read", path="../outside.txt")
     assert escape.error.code == "permission_denied"
 
 
@@ -133,7 +133,7 @@ async def test_remote_parent_search_excludes_inactive_skill_snapshots(remote_cod
     (active / "guide.md").write_text("VISIBLE active instructions", encoding="utf-8")
     (inactive / "private.md").write_text("SECRET inactive instructions", encoding="utf-8")
     context = replace(context, skill_roots=(str(active),))
-    direct = await invoke(service, context, "read", file_path=".k41-agent/s/sk-inactive/private.md")
+    direct = await invoke(service, context, "read", path=".k41-agent/s/sk-inactive/private.md")
     assert direct.error.code == "not_found"
     for name, pattern in (("glob", "**/*.md"), ("grep", "VISIBLE|SECRET")):
         result = await invoke(service, context, name, path=".k41-agent", pattern=pattern)
@@ -157,10 +157,10 @@ async def test_migrated_remote_conversation_keeps_existing_outputs(remote_coding
     isolated_container._conversation_thread_aliases = {old: new}
     isolated_container._conversation_thread_storage_ids = {new: old}
     migrated = replace(context, thread_id=new)
-    request = service.remote.request("prepare", "read", {"file_path": output_relative_path(legacy_context, reference)}, migrated)
+    request = service.remote.request("prepare", "read", {"path": output_relative_path(legacy_context, reference)}, migrated)
     assert request["context"]["thread_id"] == new
     assert request["thread_aliases"] == {old: new}
-    result = await invoke(service, migrated, "read", file_path=output_relative_path(legacy_context, reference))
+    result = await invoke(service, migrated, "read", path=output_relative_path(legacy_context, reference))
     assert result.status == "success"
     assert "Saved output" in result.content
     assert thread_id_aliases_var.get() is None
@@ -171,10 +171,10 @@ async def test_remote_skill_mutations_invalidate_discovery_only_after_commit(rem
     from agent.shared.infrastructure.revisions import SKILLS_REVISION, get_revision
     service, context, _, _ = remote_coding
     before = get_revision(SKILLS_REVISION)
-    changed = await invoke(service, context, "write", file_path=".agent/skills/demo/SKILL.md", content="skill")
+    changed = await invoke(service, context, "write", path=".agent/skills/demo/SKILL.md", content="skill")
     assert changed.status == "success" and get_revision(SKILLS_REVISION) > before
     committed = get_revision(SKILLS_REVISION)
-    rejected = await invoke(service, context, "write", file_path=".agent/skills/demo/SKILL.md",
+    rejected = await invoke(service, context, "write", path=".agent/skills/demo/SKILL.md",
                             content="stale", expected_version="stale")
     assert rejected.error.code == "stale_content"
     assert get_revision(SKILLS_REVISION) == committed
@@ -208,7 +208,7 @@ async def test_remote_process_stdin_cursor_output_ownership_and_cleanup(remote_c
 @pytest.mark.asyncio
 async def test_worker_rejects_resources_that_changed_after_authorization(remote_coding):
     service, context, workspace, worker = remote_coding
-    payload = service.remote.request("prepare", "write", {"file_path": "target.txt", "content": "new"}, context)
+    payload = service.remote.request("prepare", "write", {"path": "target.txt", "content": "new"}, context)
     await worker.dispatch(payload)
     payload["operation"] = "execute"
     payload["authorized"] = []
@@ -269,7 +269,7 @@ async def test_remote_relative_root_hint_uses_backend_canonical_root(remote_codi
     original = service.remote.clients[(context.backend, context.locator, context.workspace)]
     hinted = replace(context, workspace="workspace")
     service.remote.clients[(hinted.backend, hinted.locator, hinted.workspace)] = original
-    result = await invoke(service, hinted, "write", file_path="canonical.txt", content="correct")
+    result = await invoke(service, hinted, "write", path="canonical.txt", content="correct")
     assert result.status == "success"
     assert (workspace / "canonical.txt").read_text() == "correct"
 
@@ -281,7 +281,7 @@ async def test_remote_structured_tool_adapter_preserves_artifacts(remote_coding)
     runtime = SimpleNamespace(context={"workspace": WorkspaceRef(backend=context.backend, locator=context.locator,
                                                                   metadata={"root": str(workspace)})},
                               config={"configurable": {"thread_id": context.thread_id}}, tool_call_id="remote-call")
-    message = await make_coding_tool("write").coroutine(runtime=runtime, file_path="artifact.txt", content="content")
+    message = await make_coding_tool("write").coroutine(runtime=runtime, path="artifact.txt", content="content")
     assert message.status == "success"
     assert "version=" in message.content
     assert "+content" in message.artifact["display_content"]
@@ -313,7 +313,7 @@ def test_bundle_imports_without_application_dependencies(tmp_path):
 async def test_cancelled_call_cannot_start_after_its_cancel_request(remote_coding):
     service, context, workspace, worker = remote_coding
     await worker.dispatch({"operation": "cancel_call", "request_id": "cancelled"})
-    request = service.remote.request("execute", "write", {"file_path": "late.txt", "content": "late"}, context)
+    request = service.remote.request("execute", "write", {"path": "late.txt", "content": "late"}, context)
     request["request_id"] = "cancelled"
     with pytest.raises(CodingError, match="cancelled"):
         await worker.dispatch(request)
@@ -366,12 +366,12 @@ async def test_real_bundle_daemon_and_file_rpc_transport(tmp_path):
         return await client.call(request)
 
     try:
-        written = await call("write", file_path="source.txt", content="hello\n")
+        written = await call("write", path="source.txt", content="hello\n")
         assert written["status"] == "success"
         assert (workspace / "source.txt").read_text() == "hello\n"
         image = b"\x89PNG\r\n\x1a\n" + b"image payload" * 50000
         (workspace / "image.png").write_bytes(image)
-        viewed = await call("read", file_path="image.png")
+        viewed = await call("read", path="image.png")
         assert base64.b64decode(viewed["content"][1]["base64"]) == image
         job = await call("bash", command=python_command("import sys; print(sys.stdin.readline(),flush=True)"), yield_time_ms=0)
         observed = await call("write_process_input", process_id=job["data"]["process_id"], text="through RPC\n", yield_time_ms=3000)

@@ -171,7 +171,7 @@ async def test_process_spill_failure_keeps_output_without_a_broken_path(output_e
         result = await invoke(service, context, "read_process_output", process_id=job.id)
         assert result.capture_truncated and result.output_truncated
         assert not result.output_paths and not result.output_refs
-        assert "some output was lost" in result.content and "file_path=" not in result.content
+        assert "some output was lost" in result.content and "path=" not in result.content
         assert len(result.content.encode()) <= MAX_MODEL_BYTES
         assert not (workspace / ".k41-agent" / "outputs").exists()
     finally:
@@ -184,14 +184,14 @@ async def test_read_retains_complete_long_lines_at_the_shared_output_layer(outpu
     line = "x" * (MAX_MODEL_BYTES + 1024) + "\U0001f600 end"
     (workspace / "long.txt").write_bytes((line + "\nnext\n").encode("utf-8"))
     try:
-        result = await invoke(service, context, "read", file_path="long.txt", limit=1)
+        result = await invoke(service, context, "read", path="long.txt", limit=1)
         assert result.output_truncated and not result.capture_truncated
         assert result.data["next_offset"] == 2 and not result.data["line_truncated"]
         assert len(result.content.encode("utf-8")) <= MAX_MODEL_BYTES
         retained = (workspace / result.output_paths[0]).read_text(encoding="utf-8")
         assert retained.startswith(f"1: {line}\n[version=")
         assert "[line truncated]" not in retained
-        next_page = await invoke(service, context, "read", file_path="long.txt", offset=2)
+        next_page = await invoke(service, context, "read", path="long.txt", offset=2)
         assert next_page.content.startswith("2: next") and not next_page.output_paths
     finally:
         await service.processes.close()
@@ -258,14 +258,14 @@ async def test_generic_output_preserves_media_errors_and_exact_long_lines(output
     assert not (workspace / ".k41-agent" / "uploads").exists()
     cursor, recovered = 0, []
     while cursor is not None:
-        page = await invoke(service, context, "read", file_path=path, byte_offset=cursor)
+        page = await invoke(service, context, "read", path=path, byte_offset=cursor)
         assert page.status == "success" and not page.output_paths
         recovered.append(page.content.rsplit("\n[version=", 1)[0])
         cursor = page.data["next_byte_offset"]
     assert "".join(recovered) == text
     repeated = await output_retention.retain_message(retained, runtime)
     assert repeated is retained
-    foreign = await invoke(service, replace(context, thread_id="other"), "read", file_path=path)
+    foreign = await invoke(service, replace(context, thread_id="other"), "read", path=path)
     assert foreign.status == "success" and foreign.content
     await service.processes.close()
 
@@ -354,21 +354,21 @@ async def test_conversations_share_notes_outputs_and_search(output_environment):
     other = replace(context, thread_id="other-conversation")
     try:
         note_path = ".k41-agent/scratchpad/project.md"
-        written = await invoke(service, context, "write", file_path=note_path, content="Shared project decision")
+        written = await invoke(service, context, "write", path=note_path, content="Shared project decision")
         assert written.status == "success"
-        read = await invoke(service, other, "read", file_path=note_path)
+        read = await invoke(service, other, "read", path=note_path)
         assert read.status == "success" and "Shared project decision" in read.content
-        changed = await invoke(service, other, "write", file_path=note_path, content="Updated project decision",
+        changed = await invoke(service, other, "write", path=note_path, content="Updated project decision",
                                expected_version=written.data["version"])
         assert changed.status == "success"
-        original = await invoke(service, context, "read", file_path=note_path)
+        original = await invoke(service, context, "read", path=note_path)
         assert "Updated project decision" in original.content
 
         store = worker.storage if worker else service.storage
         result = store.bound(ToolResult(content="Shared retained output\n" * 5000), context)
         output_path = result.output_paths[0]
         assert Path(output_path).parent.as_posix() == ".k41-agent/outputs"
-        read = await invoke(service, other, "read", file_path=output_path)
+        read = await invoke(service, other, "read", path=output_path)
         assert read.status == "success" and "Shared retained output" in read.content
         for name, pattern in (("glob", "**/*.txt"), ("grep", "Shared retained output")):
             filters = {"include": Path(output_path).name} if name == "grep" else {}
@@ -424,7 +424,7 @@ async def test_automatic_output_reader_cannot_read_project_source(output_environ
     import agent.modules.tools.coding.adapter as adapter
     monkeypatch.setattr(adapter, "invocation_context", lambda runtime: context)
     tool = make_coding_tool("read", retained_only=True)
-    result = await tool.coroutine(runtime=SimpleNamespace(tool_call_id=None), file_path="source.py")
+    result = await tool.coroutine(runtime=SimpleNamespace(tool_call_id=None), path="source.py")
     assert "only read retained" in result
     await service.processes.close()
 
@@ -474,7 +474,7 @@ async def test_byte_pages_with_many_lines_do_not_offload_again(output_environmen
     path.write_bytes(text.encode())
     cursor, recovered = 0, []
     while cursor is not None:
-        result = await invoke(service, context, "read", file_path="lines.txt", byte_offset=cursor)
+        result = await invoke(service, context, "read", path="lines.txt", byte_offset=cursor)
         assert not result.output_paths and len(result.content.splitlines()) <= 2000
         recovered.append(result.content.rsplit("\n[version=", 1)[0])
         cursor = result.data["next_byte_offset"]
@@ -513,7 +513,7 @@ async def test_read_reusing_call_id_observes_current_content(output_environment,
     context = replace(context, tool_call_id="read", message_id="message")
     path = workspace / "source.txt"
     path.write_text("old content\nsecond line\n", encoding="utf-8")
-    args = {"file_path": "source.txt", "byte_offset": byte_offset}
+    args = {"path": "source.txt", "byte_offset": byte_offset}
     first = await invoke(service, context, "read", **args)
     assert first.status == "success" and "old content" in first.content
     path.write_text("updated content\nsecond line\n", encoding="utf-8")
@@ -522,7 +522,7 @@ async def test_read_reusing_call_id_observes_current_content(output_environment,
     assert "old content" not in refreshed.content
     assert refreshed.data["version"] != first.data["version"]
     assert refreshed.data["version"] == hashlib.sha256(path.read_bytes()).hexdigest()
-    page = await invoke(service, context, "read", file_path="source.txt", offset=2, limit=1)
+    page = await invoke(service, context, "read", path="source.txt", offset=2, limit=1)
     assert page.status == "success" and page.content.startswith("2: second line\n")
     await service.processes.close()
 
@@ -531,7 +531,7 @@ async def test_read_reusing_call_id_observes_current_content(output_environment,
 async def test_read_reusing_call_id_observes_creation_and_deletion(output_environment):
     service, context, workspace, _ = output_environment
     context = replace(context, tool_call_id="read", message_id="message")
-    args = {"file_path": "source.txt"}
+    args = {"path": "source.txt"}
     missing = await invoke(service, context, "read", **args)
     assert missing.status == "error" and missing.error.code == "not_found"
     path = workspace / "source.txt"
@@ -549,10 +549,10 @@ async def test_read_reusing_call_id_checks_current_permissions(output_environmen
     service, context, workspace, _ = output_environment
     context = replace(context, tool_call_id="read", message_id="message")
     (workspace / "source.txt").write_text("private content\n", encoding="utf-8")
-    first = await invoke(service, context, "read", file_path="source.txt")
+    first = await invoke(service, context, "read", path="source.txt")
     assert first.status == "success"
     denied = replace(context, permission_rules=(PermissionRule(action="read", effect="deny"),))
-    result = await invoke(service, denied, "read", file_path="source.txt")
+    result = await invoke(service, denied, "read", path="source.txt")
     assert result.status == "error" and result.error.code == "permission_denied"
     assert "private content" not in result.content
     await service.processes.close()

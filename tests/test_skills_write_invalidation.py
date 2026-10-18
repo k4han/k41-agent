@@ -101,7 +101,7 @@ async def test_write_file_refreshes_skills_when_writing_a_skill(tmp_path) -> Non
     before = get_revision(SKILLS_REVISION)
 
     result = await _invoke("write",
-        file_path=".agent/skills/demo/SKILL.md",
+        path=".agent/skills/demo/SKILL.md",
         content=SKILL_MD,
         runtime=_runtime(str(sandbox)),
     )
@@ -120,7 +120,7 @@ async def test_write_file_outside_the_skills_dir_leaves_the_revision_alone(
     before = get_revision(SKILLS_REVISION)
 
     result = await _invoke("write",
-        file_path="notes.md",
+        path="notes.md",
         content="Nothing to do with skills.\n",
         runtime=_runtime(str(sandbox)),
     )
@@ -136,7 +136,7 @@ async def test_write_file_does_not_refresh_when_the_write_fails(tmp_path) -> Non
     before = get_revision(SKILLS_REVISION)
 
     result = await _invoke("write",
-        file_path="../.agent/skills/demo/SKILL.md",
+        path="../.agent/skills/demo/SKILL.md",
         content=SKILL_MD,
         runtime=_runtime(str(sandbox)),
     )
@@ -154,7 +154,7 @@ async def test_edit_file_refreshes_skills_when_editing_a_skill(tmp_path) -> None
     before = get_revision(SKILLS_REVISION)
 
     result = await _invoke("edit",
-        file_path=".agent/skills/demo/SKILL.md",
+        path=".agent/skills/demo/SKILL.md",
         old_string="Body.",
         new_string="Updated body.",
         runtime=_runtime(str(sandbox)),
@@ -174,7 +174,7 @@ async def test_edit_file_does_not_refresh_when_the_edit_fails(tmp_path) -> None:
     before = get_revision(SKILLS_REVISION)
 
     result = await _invoke("edit",
-        file_path=".agent/skills/demo/SKILL.md",
+        path=".agent/skills/demo/SKILL.md",
         old_string="absent marker",
         new_string="whatever",
         runtime=_runtime(str(sandbox)),

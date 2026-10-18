@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 from langchain_core.tools import StructuredTool, ToolException, tool
 from langgraph.errors import GraphInterrupt
+from pydantic import ValidationError
 
 from agent.modules.tools import ToolCategory, ToolDescriptor, ToolError, ToolErrorCode, ToolPolicy, ToolResolver, ToolSource
 from agent.modules.tools.coding.adapter import SCHEMAS, make_coding_tool, prepare_tool_batch
@@ -266,7 +267,7 @@ async def test_mcp_outage_preserves_only_failed_server_tools_and_retries(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("name, args, normalized", [
     ("bash", {"command": "echo probe", "timeout_seconds": 60}, {"timeout_seconds": 60.0}),
-    ("write", {"file_path": "probe.txt", "content": "text", "append": "false"}, {"append": False}),
+    ("write", {"path": "probe.txt", "content": "text", "append": "false"}, {"append": False}),
 ])
 async def test_batch_replay_uses_the_same_validated_arguments_as_native_tools(
     tmp_path, monkeypatch, name, args, normalized,
@@ -301,6 +302,79 @@ async def test_batch_replay_uses_the_same_validated_arguments_as_native_tools(
 
 
 @pytest.mark.asyncio
+async def test_read_path_works_in_batches_and_native_calls(tmp_path, monkeypatch):
+    service = CodingService(tmp_path / "runtime")
+    context = InvocationContext("default", str(tmp_path), "thread", tool_call_id="read-call")
+    runtime = SimpleNamespace(context={}, state={}, config={}, tool_call_id=context.tool_call_id)
+    target = tmp_path / ".k41-agent" / "scratchpad" / "tool-test.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("tool read probe\n", encoding="utf-8")
+    coding_tool = make_coding_tool("read")
+    monkeypatch.setattr("agent.modules.tools.coding.adapter.get_coding_service", lambda: service)
+    monkeypatch.setattr("agent.modules.tools.coding.adapter.invocation_context", lambda runtime: context)
+    args = {"path": ".k41-agent/scratchpad/tool-test.md"}
+    call = {"type": "tool_call", "name": "read", "id": context.tool_call_id, "args": args}
+    try:
+        schema = coding_tool.tool_call_schema.model_json_schema()
+        assert "path" in schema["required"] and "file_path" not in schema["properties"]
+        assert await prepare_tool_batch([coding_tool], [call], runtime) is None
+        message = await coding_tool.ainvoke({**call, "args": {**args, "runtime": runtime}})
+        assert message.status == "success"
+        assert message.content.startswith("1: tool read probe\n[version=")
+        result = await service.invoke(coding_tool.coding_definition, args, context)
+        assert result.status == "success" and result.content == message.content
+        assert args == {"path": ".k41-agent/scratchpad/tool-test.md"}
+    finally:
+        await service.processes.close()
+        await service.storage.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name, args", [
+    ("read", {}),
+    ("write", {"content": "replacement"}),
+    ("edit", {"old_string": "original", "new_string": "replacement"}),
+    ("list_dir", {}),
+    ("glob", {"pattern": "*.txt"}),
+    ("grep", {"pattern": "original"}),
+])
+@pytest.mark.parametrize("invalid_path", [
+    {"file_path": "probe.txt"},
+    {"path": "probe.txt", "file_path": "probe.txt"},
+    {"path": "probe.txt", "unexpected": True},
+], ids=["file-path", "both-path-fields", "unknown-field"])
+async def test_file_tools_reject_non_schema_fields_before_execution(
+    tmp_path, monkeypatch, name, args, invalid_path,
+):
+    service = CodingService(tmp_path / "runtime")
+    context = InvocationContext("default", str(tmp_path), "thread", tool_call_id="invalid-call")
+    runtime = SimpleNamespace(context={}, state={}, config={}, tool_call_id=context.tool_call_id)
+    coding_tool = make_coding_tool(name)
+    monkeypatch.setattr("agent.modules.tools.coding.adapter.get_coding_service", lambda: service)
+    monkeypatch.setattr("agent.modules.tools.coding.adapter.invocation_context", lambda runtime: context)
+
+    async def unexpected_execution(*args):
+        pytest.fail("Invalid input reached preparation or execution.")
+
+    monkeypatch.setattr(service, "prepare", unexpected_execution)
+    monkeypatch.setattr(service, "execute", unexpected_execution)
+    call = {"type": "tool_call", "name": name, "id": context.tool_call_id, "args": {**args, **invalid_path}}
+    try:
+        schema = coding_tool.tool_call_schema.model_json_schema()
+        assert "path" in schema["properties"] and "file_path" not in schema["properties"]
+        failure = await prepare_tool_batch([coding_tool], [call], runtime)
+        assert failure.status == "error" and failure.error.code == "invalid_input"
+        assert failure.data["batch_stopped_before_execution"]
+        with pytest.raises(ValidationError):
+            await coding_tool.ainvoke({**call, "args": {**call["args"], "runtime": runtime}})
+        result = await service.invoke(coding_tool.coding_definition, call["args"], context)
+        assert result.status == "error" and result.error.code == "invalid_input"
+    finally:
+        await service.processes.close()
+        await service.storage.close()
+
+
+@pytest.mark.asyncio
 async def test_batch_denial_precedes_every_mutation(tmp_path):
     service = CodingService(tmp_path / "runtime")
     context = InvocationContext("restricted", str(tmp_path), "thread", permission_rules=(
@@ -308,7 +382,7 @@ async def test_batch_denial_precedes_every_mutation(tmp_path):
     async def execute(params, ctx, runtime):
         return await runtime.execute("write", params.model_dump(), ctx)
     definition = ToolDefinition("write", "Write", SCHEMAS["write"], execute)
-    invocations = [CodingInvocation(definition, {"file_path": path, "content": "text"},
+    invocations = [CodingInvocation(definition, {"path": path, "content": "text"},
                                     replace(context, tool_call_id=path)) for path in ("allowed.txt", "blocked.txt")]
     try:
         failure = await service.prepare_batch(invocations)
@@ -325,11 +399,11 @@ async def test_batch_rejects_reused_call_ids_before_any_new_effect(tmp_path):
     async def execute(params, ctx, runtime):
         return await runtime.execute("write", params.model_dump(), ctx)
     definition = ToolDefinition("write", "Write", SCHEMAS["write"], execute)
-    args = {"file_path": "settled.txt", "content": "original"}
+    args = {"path": "settled.txt", "content": "original"}
     try:
         await service.invoke(definition, args, context)
         invocations = [
-            CodingInvocation(definition, {"file_path": "fresh.txt", "content": "new"},
+            CodingInvocation(definition, {"path": "fresh.txt", "content": "new"},
                              replace(context, tool_call_id="fresh")),
             CodingInvocation(definition, {**args, "content": "changed"}, context),
         ]

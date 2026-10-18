@@ -143,7 +143,7 @@ def make_coding_tool(name: str, *, retained_only: bool = False) -> StructuredToo
         if retained_only:
             import posixpath
             from agent.modules.tools.coding.models import CodingError
-            path = posixpath.normpath(params.file_path.replace("\\", "/"))
+            path = posixpath.normpath(params.path.replace("\\", "/"))
             if not path.startswith(".k41-agent/outputs/"):
                 raise CodingError("permission_denied", "This read tool can only read retained tool output.")
         return await service.execute(name, params.model_dump(), context)
