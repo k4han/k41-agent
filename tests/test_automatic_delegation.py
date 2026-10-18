@@ -128,6 +128,7 @@ async def test_llm_binding_and_tool_execution_share_delegation_policy(
     class Model:
         def bind_tools(self, tools, **kwargs):
             captured["bound"] = {item.name for item in tools}
+            captured["tools"] = {item.name: item for item in tools}
             return self
 
         async def ainvoke(self, messages, config=None):
@@ -150,7 +151,10 @@ async def test_llm_binding_and_tool_execution_share_delegation_policy(
     await llm_module.llm_node({"messages": [HumanMessage(content="Delegate research.")]}, config, runtime)
 
     assert ("delegate_task" in captured["bound"]) is enabled
-    assert ("- child: child specialist" in captured["prompt"]) is enabled
+    if enabled:
+        assert "- child: child specialist" in captured["tools"]["delegate_task"].description
+    else:
+        assert "delegate_task" not in captured["bound"]
 
     state = {"messages": [AIMessage(content="", tool_calls=[{
         "name": "delegate_task", "args": {"task": "Research.", "sub_agent": "child"}, "id": "delegate-1",

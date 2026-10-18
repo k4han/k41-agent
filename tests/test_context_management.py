@@ -128,7 +128,7 @@ def test_legacy_override_is_invalid_instead_of_falling_back_to_builtin(tmp_path)
     assert "default" not in repository.load()
     card = next(item for item in repository.list_cards() if item.name == "default")
     assert not card.valid
-    assert "Replace them with context_compact_threshold" in card.error
+    assert "Replace token budgets with context_compact_threshold" in card.error
 
 
 @pytest.mark.parametrize("value", [0, 101, 50_000, True, 75.5, "75"])
@@ -145,13 +145,13 @@ def test_old_card_keys_require_explicit_migration(key, has_new_key):
     values = {key: 50_000}
     if has_new_key:
         values["context_compact_threshold"] = 75
-    with pytest.raises(ValidationError, match="Replace them with context_compact_threshold"):
+    with pytest.raises(ValidationError, match="Replace token budgets with context_compact_threshold"):
         agent(**values)
     markdown = f"---\nname: sample\nprovider: test\n{key}: 50000\n---\nPrompt"
-    with pytest.raises(AgentMarkdownError, match="Replace them with context_compact_threshold"):
+    with pytest.raises(AgentMarkdownError, match="Replace token budgets with context_compact_threshold"):
         parse_agent_markdown_content(markdown)
     from agent.delivery.http.dashboard.routes.agents import AgentCardBody
-    with pytest.raises(ValidationError, match="Replace them"):
+    with pytest.raises(ValidationError, match="Replace token budgets"):
         AgentCardBody(name="sample", **values)
 
 
