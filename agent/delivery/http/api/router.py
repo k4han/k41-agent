@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from agent.modules.admin_auth import get_current_admin
+from agent.modules.agents import get_catalog_service
 from agent.delivery.http.api.schemas import (
     ChatRequest,
     ChatResponse,
@@ -178,7 +179,14 @@ async def _apply_workspace_to_run_params(
         )
 
 
+def _ensure_chat_agent_available(agent_name: str | None) -> None:
+    agent = get_catalog_service().get_agent_card(agent_name or "default")
+    if agent is not None and agent.internal:
+        raise HTTPException(status_code=403, detail="Internal agents can only be used by the system.")
+
+
 async def prepare_run_params(request: ChatRequest) -> dict[str, object]:
+    _ensure_chat_agent_available(request.agent_name)
     if request.thread_id:
         request = request.model_copy(update={"thread_id": resolve_thread_id(request.thread_id)})
     params = _request_to_run_params(request)
@@ -243,6 +251,7 @@ async def chat_events_edit(request: EditChatRequest):
     if not request.message.strip():
         raise HTTPException(status_code=400, detail="Edited message cannot be empty.")
 
+    _ensure_chat_agent_available(request.agent_name)
     request = request.model_copy(update={"thread_id": resolve_thread_id(request.thread_id)})
     params = build_run_params(
         platform=Platform.API,

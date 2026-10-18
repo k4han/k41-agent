@@ -689,7 +689,7 @@ export function PlanReviewView(props: {
     const sourceAgentName = sourceAgent?.name || props.activeAgentName || "";
     const allowedNames = new Set(sourceAgent?.plan_approval_targets || []);
     const candidates = agents().filter((agent) => (
-      agent.name !== sourceAgentName && agent.valid && !agent.hidden
+      agent.name !== sourceAgentName && agent.valid && !agent.internal
     ));
     if (allowedNames.size === 0) {
       return candidates;

@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field, model_validator
 
-from agent.modules.agents import normalize_agent_model, reject_legacy_context_settings
+from agent.modules.agents import normalize_agent_model, reject_legacy_agent_settings
 from agent.modules.providers import EFFORT_PATTERN
 
 from agent.modules.workflows import REACT_AGENT_GRAPH_TYPE
@@ -46,14 +46,14 @@ class AgentCardBody(BaseModel):
     tool_configs: dict[str, dict[str, Any]] = Field(default_factory=dict, description="Per-tool config overrides keyed by tool name.")
     sub_agents: list[str] | None = Field(default=None, description="List of sub-agent names for delegation.")
     plan_approval_targets: list[str] = Field(default_factory=list, description="Plan step types requiring human approval.")
-    hidden: bool = Field(default=False, description="Whether to hide this agent from the UI.")
+    internal: bool = Field(default=False, description="Whether this is a system-only internal agent. Fixed for existing cards.")
     context_compact_threshold: int = Field(default=75, ge=1, le=100, strict=True, description="Context usage percentage triggering compaction.")
     system_prompt: str = Field(default="", description="Custom system prompt for this agent.")
 
     @model_validator(mode="before")
     @classmethod
     def _normalize_model(cls, data: Any) -> Any:
-        return normalize_agent_model(reject_legacy_context_settings(data))
+        return normalize_agent_model(reject_legacy_agent_settings(data))
 
 
 @router.get("/agents/cards")

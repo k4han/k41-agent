@@ -50,8 +50,8 @@ class AgentCatalogService:
         # If sub_agents is a list (even empty), target must be in it
         if target_name not in config.sub_agents:
             return False
-        # Target must also exist
-        return self.get_agent(target_name) is not None
+        target = self.get_agent(target_name)
+        return target is not None and not target.internal
 
     def reload_agents(self) -> list[AgentConfig]:
         """Re-scan directory and update cache."""
@@ -68,6 +68,9 @@ class AgentCatalogService:
 
     def create_agent_card(self, config: AgentConfig) -> AgentCard:
         """Create a new user-editable agent card."""
+        builtin = self._repository.get_builtin_card(config.name)
+        if config.internal or (builtin is not None and builtin.internal):
+            raise ValueError("Internal agents can only be customized by cloning a built-in agent.")
         self._validate_for_save(config)
         return self._repository.create_user_agent(config)
 
@@ -76,12 +79,22 @@ class AgentCatalogService:
         normalized_name = self._validate_agent_name(name)
         if config.name != normalized_name:
             raise ValueError("Agent name cannot be changed.")
+        existing = self.get_agent_card(normalized_name)
+        if existing is not None and config.internal != existing.internal:
+            raise ValueError("Agent type cannot be changed.")
+        builtin = self._repository.get_builtin_card(normalized_name)
+        if builtin is not None and builtin.internal and not config.internal:
+            raise ValueError("Internal agents must remain system-only.")
         self._validate_for_save(config)
         return self._repository.update_user_agent(normalized_name, config)
 
     def delete_agent_card(self, name: str) -> None:
         """Delete a user-editable agent card."""
         normalized_name = self._validate_agent_name(name)
+        card = self.get_agent_card(normalized_name)
+        builtin = self._repository.get_builtin_card(normalized_name)
+        if (card is not None and card.internal) or (builtin is not None and builtin.internal):
+            raise ValueError("Internal agents can only be cloned and configured.")
         self._repository.delete_user_agent(normalized_name)
 
     def clone_builtin_agent(self, name: str) -> AgentCard:
@@ -139,7 +152,7 @@ class AgentCatalogService:
                 invalid.append(target_name or "<empty>")
                 continue
             target_card = cards.get(target_name)
-            if target_card is None or target_card.hidden:
+            if target_card is None or target_card.internal:
                 invalid.append(target_name)
         if invalid:
             joined = ", ".join(sorted(set(invalid)))

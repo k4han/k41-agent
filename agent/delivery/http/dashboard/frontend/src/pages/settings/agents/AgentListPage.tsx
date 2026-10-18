@@ -1,6 +1,6 @@
 import { createMemo, createSignal, onMount, Show } from "solid-js";
-import { A, useNavigate } from "@solidjs/router";
-import { Copy, Edit3, Eye, Loader2, Plus, RefreshCw, Trash2 } from "lucide-solid";
+import { A, useNavigate, useSearchParams } from "@solidjs/router";
+import { Bot, Copy, Edit3, Eye, Loader2, MessageSquare, Plus, RefreshCw, Trash2 } from "lucide-solid";
 
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DashboardTable } from "@/components/DashboardTable";
@@ -10,11 +10,13 @@ import { deleteJson, postJson } from "@/lib/api";
 import { useDashboardData } from "@/lib/dashboardData";
 import { API_PATHS } from "@/lib/endpoints";
 import { SettingsLayout } from "@/pages/settings/SettingsLayout";
+import { SettingsTabBar } from "@/pages/settings/shared";
 import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import type { AgentCard, AgentCardsPayload } from "@/types";
 
 export function AgentListPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams<{ tab?: string }>();
   const { data, error, load, setData } = useDashboardData<AgentCardsPayload>(API_PATHS.agentCards, { defer: true });
   const [query, setQuery] = createSignal("");
   const [deleteTarget, setDeleteTarget] = createSignal<AgentCard | null>(null);
@@ -23,16 +25,24 @@ export function AgentListPage() {
   const [reloading, setReloading] = createSignal(false);
   const { showToast } = useToast();
 
+  const category = () => searchParams.tab === "internal" ? "internal" : "chat";
+  const categoryLabel = () => category() === "internal" ? "Internal Agents" : "Chat Agents";
+  const categoryTabs = createMemo(() => {
+    const cards = data()?.cards || [];
+    const internalCount = cards.filter((card) => card.internal).length;
+    return [
+      { value: "chat", label: `Chat Agents (${cards.length - internalCount})`, icon: () => <MessageSquare size={13} /> },
+      { value: "internal", label: `Internal Agents (${internalCount})`, icon: () => <Bot size={13} /> },
+    ];
+  });
+
   const filteredCards = createMemo(() => {
-    const payload = data();
-    if (!payload) {
-      return [];
-    }
+    const cards = (data()?.cards || []).filter((card) => Boolean(card.internal) === (category() === "internal"));
     const needle = query().trim().toLowerCase();
     if (!needle) {
-      return payload.cards;
+      return cards;
     }
-    return payload.cards.filter((card) =>
+    return cards.filter((card) =>
       [
         card.name,
         card.display_name,
@@ -74,7 +84,7 @@ export function AgentListPage() {
 
   const confirmDeleteAgent = async () => {
     const card = deleteTarget();
-    if (!card || card.source !== "user" || !card.editable || deleting()) {
+    if (!card || card.internal || card.source !== "user" || !card.editable || deleting()) {
       return;
     }
     setDeleting(true);
@@ -117,9 +127,23 @@ export function AgentListPage() {
       <DataGate data={data()} error={error()} onRetry={load}>
         {() => (
           <div class="stack agent-list">
+            <div class="agent-list-category">
+              <SettingsTabBar
+                items={categoryTabs()}
+                value={category()}
+                ariaLabel="Agent category"
+                onChange={(value) => setSearchParams({ tab: value })}
+              />
+              <p class="hint">
+                {category() === "internal"
+                  ? "System-only agents. Clone a built-in agent to customize its configuration."
+                  : "Agents available in the chat agent picker. They can also be used by other agents and workflows."}
+              </p>
+            </div>
+
             <SettingsResourceToolbar
               searchValue={query()}
-              searchPlaceholder="Search agents..."
+              searchPlaceholder={`Search ${categoryLabel().toLowerCase()}...`}
               onSearchInput={setQuery}
               actions={
                 <>
@@ -127,15 +151,17 @@ export function AgentListPage() {
                     <RefreshCw size={14} class={reloading() ? "spin-icon" : undefined} />
                     {reloading() ? "Reloading..." : "Reload"}
                   </button>
-                  <button class="btn btn-primary" type="button" onClick={openCreate}>
-                    <Plus size={14} />
-                    New Agent
-                  </button>
+                  <Show when={category() === "chat"}>
+                    <button class="btn btn-primary" type="button" onClick={openCreate}>
+                      <Plus size={14} />
+                      New Chat Agent
+                    </button>
+                  </Show>
                 </>
               }
             />
 
-            <section class="panel">
+            <section class="panel" aria-label={categoryLabel()}>
               <DashboardTable
                 tableClass="agent-list-table"
                 columns={[
@@ -145,7 +171,9 @@ export function AgentListPage() {
                   { header: "Actions", class: "agent-list-actions-column" },
                 ]}
                 rows={filteredCards()}
-                emptyMessage="No agent cards found."
+                emptyMessage={query().trim()
+                  ? `No ${categoryLabel().toLowerCase()} match your search.`
+                  : `No ${categoryLabel().toLowerCase()} yet.`}
               >
                 {(card) => (
                   <tr>
@@ -214,7 +242,7 @@ export function AgentListPage() {
                             </Show>
                           </button>
                         </Show>
-                        <Show when={card.source === "user" && card.editable}>
+                        <Show when={!card.internal && card.source === "user" && card.editable}>
                           <button
                             class="btn btn-sm btn-icon btn-danger"
                             type="button"

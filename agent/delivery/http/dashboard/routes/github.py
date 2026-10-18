@@ -79,7 +79,7 @@ async def get_dashboard_github(request: Request) -> dict[str, Any]:
     service = get_github_automation_service()
     cards = get_catalog_service().list_agent_cards()
     agent_names = sorted(
-        card.name for card in cards if card.valid and not getattr(card, "hidden", False)
+        card.name for card in cards if card.valid and not getattr(card, "internal", False)
     )
     webhook_url = f"{str(request.base_url).rstrip('/')}/channels/github/webhook"
     install_url = (

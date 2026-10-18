@@ -1,7 +1,9 @@
 from pathlib import Path
 
 import pytest
+import yaml
 
+from agent.delivery.http.dashboard.routes.agents import AgentCardBody
 from agent.modules.agents.models import AgentCard, AgentConfig
 from agent.modules.agents.parser import AgentMarkdownError, parse_agent_file, parse_agent_markdown_content, serialize_agent_config
 from agent.modules.agents.repository import FilesystemAgentRepository
@@ -35,6 +37,52 @@ def _config(
         context_compact_threshold=75,
         system_prompt="You are a sample agent.",
     )
+
+
+@pytest.mark.parametrize("fields", [
+    {"hidden": True},
+    {"hidden": False},
+    {"hidden": True, "internal": True},
+    {"hidden": True, "internal": False},
+])
+def test_removed_hidden_field_is_rejected(fields) -> None:
+    from pydantic import ValidationError
+
+    data = {
+        "name": "unsupported-agent", "graph_type": "react_agent", **fields,
+        "source": "user", "path": "unsupported-agent.md",
+    }
+    for model_class in (AgentConfig, AgentCard, AgentCardBody):
+        with pytest.raises(ValidationError, match="Unsupported agent card settings: hidden"):
+            model_class.model_validate(data)
+    content = "---\n" + yaml.safe_dump(data) + "---\nPrompt\n"
+    with pytest.raises(AgentMarkdownError, match="Unsupported agent card settings: hidden"):
+        parse_agent_markdown_content(content)
+
+
+def test_removed_hidden_override_requires_explicit_repair(tmp_path: Path) -> None:
+    agents_dir = tmp_path / "agents"
+    agents_dir.mkdir()
+    path = agents_dir / "custom-title.md"
+    legacy_content = "---\nname: conversation-title\nhidden: true\ntools: []\n---\nLegacy prompt.\n"
+    path.write_text(legacy_content, encoding="utf-8")
+    service, _ = _make_service(agents_dir)
+
+    assert service.get_agent("conversation-title") is None
+    assert service.get_agent_card("conversation-title") is None
+    invalid = next(card for card in service.list_agent_cards() if card.name == "conversation-title")
+    assert invalid.valid is False
+    assert "Replace hidden with internal" in invalid.error
+    assert path.read_text(encoding="utf-8") == legacy_content
+
+    path.write_text(legacy_content.replace("hidden: true", "internal: true"), encoding="utf-8")
+    service.reload_agents()
+    card = service.get_agent_card("conversation-title")
+    assert card.internal is True
+    assert card.source == "user"
+    frontmatter = yaml.safe_load(path.read_text(encoding="utf-8").split("---")[1])
+    assert frontmatter["internal"] is True
+    assert "hidden" not in frontmatter
 
 
 @pytest.mark.parametrize("model", [
@@ -150,20 +198,20 @@ User default prompt.
     assert cards["default"].overrides_builtin is True
     assert cards["conversation-title"].source == "builtin"
     assert cards["conversation-title"].editable is False
-    assert cards["conversation-title"].hidden is True
+    assert cards["conversation-title"].internal is True
     assert cards["conversation-compactor"].source == "builtin"
     assert cards["conversation-compactor"].editable is False
-    assert cards["conversation-compactor"].hidden is True
+    assert cards["conversation-compactor"].internal is True
     assert cards["conversation-compactor"].tools == []
     assert cards["scheduler-executor"].source == "builtin"
     assert cards["scheduler-executor"].editable is False
-    assert cards["scheduler-executor"].hidden is True
+    assert cards["scheduler-executor"].internal is True
     assert cards["channel-agent"].source == "builtin"
     assert cards["channel-agent"].editable is False
-    assert cards["channel-agent"].hidden is False
+    assert cards["channel-agent"].internal is False
     assert cards["router"].source == "builtin"
     assert cards["router"].editable is False
-    assert cards["router"].hidden is False
+    assert cards["router"].internal is False
     assert cards["router"].graph_type == "router"
     assert cards["router"].sub_agents == ["default", "channel-agent", "github-issue-fixer"]
 
@@ -242,21 +290,21 @@ def test_clone_builtin_agent_creates_user_override_and_rejects_collision(
 
 
 @pytest.mark.parametrize("name", ["conversation-title", "conversation-compactor"])
-def test_clone_hidden_builtin_agent_preserves_hidden_flag(tmp_path: Path, name: str) -> None:
+def test_clone_internal_builtin_agent_preserves_internal_flag(tmp_path: Path, name: str) -> None:
     service, _ = _make_service(tmp_path / "agents")
 
     cloned = service.clone_builtin_agent(name)
 
     assert cloned.source == "user"
     assert cloned.overrides_builtin is True
-    assert cloned.hidden is True
+    assert cloned.internal is True
 
-    # Verify the hidden flag is persisted in the file
+    # Verify the internal flag is persisted in the file
     from agent.modules.agents.parser import parse_agent_file
 
     parsed = parse_agent_file(Path(cloned.path))
     assert parsed is not None
-    assert parsed.hidden is True
+    assert parsed.internal is True
 
 
 def test_clone_builtin_router_agent_preserves_router_contract(tmp_path: Path) -> None:
@@ -276,6 +324,17 @@ def test_clone_builtin_router_agent_preserves_router_contract(tmp_path: Path) ->
     assert parsed.graph_type == "router"
     assert "{agent_options}" in parsed.system_prompt
     assert "{user_input}" in parsed.system_prompt
+
+
+def test_internal_agents_remain_available_to_system_but_not_delegation(tmp_path: Path) -> None:
+    service, _ = _make_service(tmp_path / "agents")
+    service.create_agent_card(_config("worker"))
+    service.create_agent_card(_config("parent", sub_agents=["worker", "conversation-title"]))
+    service.clone_builtin_agent("conversation-title")
+
+    assert service.get_agent("conversation-title").internal is True
+    assert service.validate_call("parent", "conversation-title") is False
+    assert service.get_callable_agents("parent") == ["worker"]
 
 
 @pytest.mark.parametrize(

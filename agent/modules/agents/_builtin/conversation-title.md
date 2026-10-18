@@ -5,7 +5,7 @@ description: "Generates concise names for conversation threads"
 graph_type: "react_agent"
 provider: "default"
 model: ""
-hidden: true
+internal: true
 tools: []
 context_compact_threshold: 75
 ---

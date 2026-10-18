@@ -48,7 +48,7 @@ const effortAgent = {
   name: 'effort-agent', display_name: 'Effort Agent', description: '', graph_type: 'react_agent',
   provider: 'test', model: 'claude-opus-5-5', reasoning_effort: 'low',
   tools: [], mcp_servers: [], sub_agents: null, plan_approval_targets: [],
-  context_compact_threshold: 75, system_prompt: '', hidden: false,
+  context_compact_threshold: 75, system_prompt: '', internal: false,
   source: 'user', path: 'effort-agent.md', editable: true, valid: true,
 };
 fixtures['/dashboard-api/agents/cards'].cards.push(effortAgent);

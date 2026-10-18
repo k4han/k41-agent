@@ -207,7 +207,7 @@ async def _generate_context_summary(
     timeout_seconds: float = COMPACTION_TIMEOUT_SECONDS,
     max_summary_tokens: int | None = None,
 ) -> str:
-    """Generate a summary using the hidden conversation compactor agent card."""
+    """Generate a summary using the internal conversation compactor agent card."""
     agent_config = get_catalog_service().get_agent(CONVERSATION_COMPACTOR_AGENT_NAME)
     if agent_config is None:
         raise CompactionSummaryError(

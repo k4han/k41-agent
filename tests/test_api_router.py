@@ -1,6 +1,7 @@
 import importlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -59,6 +60,28 @@ def _create_client() -> TestClient:
 
     app.dependency_overrides[get_current_admin] = mock_admin
     return TestClient(app)
+
+
+@pytest.mark.parametrize("path", ["/api/chat", "/api/chat/stream", "/api/chat/events", "/api/chat/events/edit"])
+def test_chat_endpoints_reject_system_only_agents(monkeypatch, path):
+    monkeypatch.setattr(
+        router_module, "get_catalog_service",
+        lambda: SimpleNamespace(get_agent_card=lambda name: SimpleNamespace(internal=True)),
+    )
+
+    def unexpected_run(**params):
+        pytest.fail("Internal chat requests must be rejected before preparing a run.")
+
+    monkeypatch.setattr(router_module, "build_run_params", unexpected_run)
+    payload = {
+        "message": "Generate a title.", "agent_name": "conversation-title",
+        "thread_id": "api_test", "message_index": 0, "source_checkpoint_id": "checkpoint-1",
+    }
+
+    response = _create_client().post(path, json=payload)
+
+    assert response.status_code == 403
+    assert "only be used by the system" in response.json()["detail"]
 
 
 def test_chat_request_validates_plan_resume_payload() -> None:

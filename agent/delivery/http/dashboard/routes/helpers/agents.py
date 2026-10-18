@@ -153,7 +153,7 @@ async def agent_cards_payload() -> dict[str, Any]:
         cache_version = _agent_cards_cache_version
         started = time.perf_counter()
         cards = get_catalog_service().list_agent_cards()
-        agent_names = sorted(card.name for card in cards if card.valid)
+        agent_names = sorted(card.name for card in cards if card.valid and not card.internal)
         payload = {
             "cards": [serialize_agent_card(card) for card in cards],
             "agent_names": agent_names,
@@ -392,7 +392,7 @@ def agent_config_from_body(body: "AgentCardBody") -> AgentConfig:
         },
         sub_agents=list(body.sub_agents) if body.sub_agents is not None else None,
         plan_approval_targets=list(body.plan_approval_targets),
-        hidden=body.hidden,
+        internal=body.internal,
         context_compact_threshold=body.context_compact_threshold,
         system_prompt=body.system_prompt.strip(),
     )

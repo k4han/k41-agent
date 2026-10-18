@@ -61,6 +61,7 @@ export function AgentEditPage(props: { agentName?: string }) {
   let pendingRetry: (() => void) | null = null;
 
   const readOnly = () => mode() === "view";
+  const listHref = () => initialForm().internal ? `${AGENTS_LIST_HREF}?tab=internal` : AGENTS_LIST_HREF;
 
   const updateForm = <K extends keyof AgentForm>(key: K, value: AgentForm[K]) => {
     setFormState("value", key, () => cloneValue(unwrap(value)));
@@ -144,7 +145,12 @@ export function AgentEditPage(props: { agentName?: string }) {
       if (isCreate) {
         setPayload(data);
         const saved = takeSettingsDraft<{ form: AgentForm; initial: AgentForm }>("agent:new");
-        if (saved) { setForm(saved.form); setInitialForm(saved.initial); setCreateInitialized(true); setActiveTab("tools"); }
+        if (saved) {
+          setForm({ ...saved.form, internal: false });
+          setInitialForm({ ...saved.initial, internal: false });
+          setCreateInitialized(true);
+          setActiveTab("tools");
+        }
         return;
       }
 
@@ -157,8 +163,8 @@ export function AgentEditPage(props: { agentName?: string }) {
       const initial = cardToForm(target);
       const saved = takeSettingsDraft<{ form: AgentForm; initial: AgentForm }>(`agent:${props.agentName}`);
       batch(() => {
-        setForm(saved?.form || initial);
-        setInitialForm(saved?.initial || initial);
+        setForm(saved ? { ...saved.form, internal: initial.internal } : initial);
+        setInitialForm(saved ? { ...saved.initial, internal: initial.internal } : initial);
         if (saved) setActiveTab("tools");
         setPayload(data);
         setMode(target.editable ? "edit" : "view");
@@ -179,16 +185,17 @@ export function AgentEditPage(props: { agentName?: string }) {
 
   const isDirty = createMemo(() => isFormDirty(form(), initialForm()));
 
-  const subAgentOptions = createMemo(() =>
-    uniqueSorted([
+  const subAgentOptions = createMemo(() => {
+    const internalNames = new Set((payload()?.cards || []).filter((card) => card.internal).map((card) => card.name));
+    return uniqueSorted([
       ...(payload()?.agent_names || []).filter((name) => name !== (props.agentName || form().name)),
       ...initialForm().sub_agents,
-    ]),
-  );
+    ]).filter((name) => !internalNames.has(name));
+  });
   const planApprovalTargetOptions = createMemo(() =>
     uniqueSorted([
       ...(payload()?.cards || [])
-        .filter((card) => card.valid && !card.hidden && card.name !== (props.agentName || form().name))
+        .filter((card) => card.valid && !card.internal && card.name !== (props.agentName || form().name))
         .map((card) => card.name),
       ...initialForm().plan_approval_targets.filter((name) => name !== (props.agentName || form().name)),
     ]),
@@ -260,7 +267,7 @@ export function AgentEditPage(props: { agentName?: string }) {
 
   const tryNavigateBack = () => {
     if (!isDirty()) {
-      navigate(AGENTS_LIST_HREF);
+      navigate(listHref());
       return;
     }
     setConfirmDiscardOpen(true);
@@ -287,7 +294,7 @@ export function AgentEditPage(props: { agentName?: string }) {
         showToast("Agent updated.");
       }
       setSavedRef(true);
-      navigate(AGENTS_LIST_HREF, { replace: true });
+      navigate(current.internal ? `${AGENTS_LIST_HREF}?tab=internal` : AGENTS_LIST_HREF, { replace: true });
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to save agent", "error");
     } finally {
@@ -360,7 +367,7 @@ export function AgentEditPage(props: { agentName?: string }) {
 
   const title = () => {
     if (isCreate) {
-      return "New Agent";
+      return "New Chat Agent";
     }
     const p = payload();
     const card = p?.cards.find((c) => c.name === props.agentName);
@@ -370,12 +377,12 @@ export function AgentEditPage(props: { agentName?: string }) {
   const breadcrumbSegments = createMemo(() => {
     if (isCreate) {
       return [
-        { label: "Agents", href: AGENTS_LIST_HREF },
+        { label: "Agents", href: listHref() },
         { label: "New" },
       ];
     }
     return [
-      { label: "Agents", href: AGENTS_LIST_HREF },
+      { label: "Agents", href: listHref() },
       { label: props.agentName || title() },
     ];
   });
@@ -416,7 +423,7 @@ export function AgentEditPage(props: { agentName?: string }) {
                 title={`Agent "${props.agentName}" was not found`}
                 description="The agent may have been deleted or renamed."
                 actions={
-                  <button class="btn" type="button" onClick={() => navigate(AGENTS_LIST_HREF)}>
+                  <button class="btn" type="button" onClick={() => navigate(listHref())}>
                     <ArrowLeft size={14} />
                     Back to agents
                   </button>
@@ -468,7 +475,7 @@ export function AgentEditPage(props: { agentName?: string }) {
             pendingRetry = null;
             retry();
           } else {
-            navigate(AGENTS_LIST_HREF);
+            navigate(listHref());
           }
         }}
       />

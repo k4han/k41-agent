@@ -1258,12 +1258,12 @@ async def test_run_agent_stream_resume_payload_switches_agent(monkeypatch):
         def get_agent_card(self, name: str):
             if name == "planner":
                 return SimpleNamespace(
-                    hidden=False,
+                    internal=False,
                     valid=True,
                     plan_approval_targets=["worker"],
                 )
             if name == "worker":
-                return SimpleNamespace(hidden=False, valid=True)
+                return SimpleNamespace(internal=False, valid=True)
             return None
 
     class _FakeGraph:
@@ -1344,12 +1344,12 @@ async def test_run_agent_stream_resume_payload_rejects_disallowed_plan_target(
         def get_agent_card(self, name: str):
             if name == "planner":
                 return SimpleNamespace(
-                    hidden=False,
+                    internal=False,
                     valid=True,
                     plan_approval_targets=["reviewer"],
                 )
             if name in {"worker", "reviewer"}:
-                return SimpleNamespace(hidden=False, valid=True)
+                return SimpleNamespace(internal=False, valid=True)
             return None
 
     monkeypatch.setattr(
@@ -1382,7 +1382,7 @@ def test_plan_resume_rejects_missing_source_agent_card():
 
         def get_agent_card(self, name: str):
             if name == "worker":
-                return SimpleNamespace(hidden=False, valid=True)
+                return SimpleNamespace(internal=False, valid=True)
             return None
 
     resume_payload = runner_module._normalize_plan_resume_payload(

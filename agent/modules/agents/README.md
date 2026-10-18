@@ -57,6 +57,7 @@ Can use {working_dir} placeholder.
   - `[]` (empty list): delegation is disabled
   - `["agent1", "agent2"]`: chỉ có thể call các agents trong list
 - **context_compact_threshold**: Integer percentage (1-100) of the model context window that triggers automatic compaction before each model call; default 75.
+- **internal**: Boolean, defaults to `false`. Set to `true` for system-only agents. These agents cannot be selected for chat, delegation, or plan approval; settings only allow cloning and configuring their built-in cards. The removed `hidden` key is rejected in agent files and API requests, including when `internal` is also provided. Rename it to `internal` before loading or saving the card; no automatic conversion is performed.
 - **system_prompt**: Nội dung sau frontmatter, là system prompt của agent
 
 ## Context settings migration
@@ -90,7 +91,7 @@ system/tool/skill prompt estimates. Those estimates are not a freshly rendered
 prompt. Both manual and automatic compaction enforce the same history budget,
 with up to three summary generations and no partial tool groups.
 
-Both manual and automatic summaries use the hidden `conversation-compactor`
+Both manual and automatic summaries use the internal `conversation-compactor`
 agent card for their system prompt, provider, and model, just as conversation
 titles use `conversation-title`. Clone the builtin card to customize these
 settings. The retained history budget still follows the conversation's model.

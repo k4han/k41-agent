@@ -734,7 +734,7 @@ def _resolve_agent_name_for_resume(
     target_card = catalog.get_agent_card(target_agent)
     if target_config is None or target_card is None:
         raise ValueError(f"Agent '{target_agent}' not found in catalog.")
-    if target_card.hidden or not target_card.valid:
+    if target_card.internal or not target_card.valid:
         raise ValueError(f"Agent '{target_agent}' cannot be selected for plan approval.")
     source_agent = str(source_agent_name or "").strip()
     if source_agent:

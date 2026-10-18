@@ -10,7 +10,7 @@ from pathlib import Path
 from agent.modules.agents.models import (
     AgentConfig,
     coerce_agent_text,
-    reject_legacy_context_settings,
+    reject_legacy_agent_settings,
 )
 from agent.shared.infrastructure.parsing import parse_string_or_list
 from agent.modules.workflows import (
@@ -155,8 +155,8 @@ def serialize_agent_config(config: AgentConfig) -> str:
         data["sub_agents"] = list(config.sub_agents)
     if config.plan_approval_targets:
         data["plan_approval_targets"] = list(config.plan_approval_targets)
-    if config.hidden:
-        data["hidden"] = True
+    if config.internal:
+        data["internal"] = True
 
     yaml_block = yaml.safe_dump(
         data,
@@ -196,7 +196,7 @@ def _build_agent_config(
     model = raw_model if isinstance(raw_model, dict) else coerce_agent_text(raw_model)
 
     try:
-        reject_legacy_context_settings(data)
+        reject_legacy_agent_settings(data)
     except ValueError as exc:
         raise AgentMarkdownError(f"Agent file {source_label}: {exc}") from exc
     context_compact_threshold = data.get("context_compact_threshold")
@@ -227,7 +227,7 @@ def _build_agent_config(
     plan_approval_targets = parse_string_or_list(
         data.get("plan_approval_targets", [])
     )
-    hidden = bool(data.get("hidden", False))
+    internal = data.get("internal", False)
 
     # Validate router agent template at parse time
     if graph_type == ROUTER_GRAPH_TYPE and body:
@@ -251,7 +251,7 @@ def _build_agent_config(
             tool_configs=tool_configs,
             sub_agents=sub_agents,
             plan_approval_targets=plan_approval_targets,
-            hidden=hidden,
+            internal=internal,
             context_compact_threshold=context_compact_threshold,
             system_prompt=body,
         )

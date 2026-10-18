@@ -123,7 +123,7 @@ export type AgentCard = {
   tool_configs?: Record<string, Record<string, unknown>>;
   sub_agents: string[] | null;
   plan_approval_targets: string[];
-  hidden: boolean;
+  internal: boolean;
   context_compact_threshold: number;
   system_prompt: string;
   source: "builtin" | "user";
@@ -146,7 +146,7 @@ export type AgentConfig = {
   tool_configs?: Record<string, Record<string, unknown>>;
   sub_agents: string[] | null;
   plan_approval_targets: string[];
-  hidden: boolean;
+  internal: boolean;
   context_compact_threshold: number;
   system_prompt: string;
 };

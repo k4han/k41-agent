@@ -196,16 +196,86 @@ def test_clone_builtin_rejects_existing_user_override(dashboard_agent_client) ->
     assert second.status_code == 409
 
 
-def test_clone_hidden_builtin_preserves_hidden(dashboard_agent_client) -> None:
+def test_clone_internal_builtin_preserves_internal(dashboard_agent_client) -> None:
     client, _ = dashboard_agent_client
 
     response = client.post("/agents/cards/conversation-title/clone")
 
     assert response.status_code == 200
     card = response.json()["card"]
-    assert card["hidden"] is True
+    assert card["internal"] is True
+    assert "hidden" not in card
     assert card["source"] == "user"
     assert card["overrides_builtin"] is True
+
+
+@pytest.mark.parametrize("name, internal", [
+    ("custom-internal", True),
+    ("conversation-title", True),
+    ("conversation-title", False),
+])
+def test_internal_agents_cannot_be_created(dashboard_agent_client, name, internal) -> None:
+    client, repo = dashboard_agent_client
+
+    response = client.post("/agents/cards", json={**_payload(name), "internal": internal})
+
+    assert response.status_code == 400
+    assert "cloning" in response.json()["detail"]
+    assert not (repo.user_dir / f"{name}.md").exists()
+
+
+def test_internal_clone_can_be_configured_but_not_retyped_or_deleted(dashboard_agent_client) -> None:
+    from agent.modules.agents.parser import parse_agent_file
+
+    client, repo = dashboard_agent_client
+    clone = client.post("/agents/cards/conversation-title/clone")
+    assert clone.status_code == 200
+    payload = {**clone.json()["card"], "system_prompt": "Generate a concise conversation title."}
+
+    updated = client.put("/agents/cards/conversation-title", json=payload)
+    assert updated.status_code == 200
+    assert updated.json()["card"]["internal"] is True
+    assert updated.json()["card"]["system_prompt"] == payload["system_prompt"]
+
+    retyped = client.put("/agents/cards/conversation-title", json={**payload, "internal": False})
+    assert retyped.status_code == 400
+    deleted = client.delete("/agents/cards/conversation-title")
+    assert deleted.status_code == 400
+    persisted = parse_agent_file(repo.user_dir / "conversation-title.md")
+    assert persisted.internal is True
+    assert persisted.system_prompt == payload["system_prompt"]
+
+
+def test_chat_agent_cannot_be_converted_to_internal(dashboard_agent_client) -> None:
+    client, _ = dashboard_agent_client
+    payload = _payload("chat-agent")
+    assert client.post("/agents/cards", json=payload).status_code == 200
+
+    response = client.put("/agents/cards/chat-agent", json={**payload, "internal": True})
+
+    assert response.status_code == 400
+    assert "Agent type cannot be changed" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("fields", [
+    {"hidden": True},
+    {"hidden": False},
+    {"hidden": True, "internal": True},
+    {"hidden": True, "internal": False},
+])
+def test_agent_card_api_rejects_removed_hidden_field(dashboard_agent_client, fields) -> None:
+    client, repo = dashboard_agent_client
+    payload = _payload("unsupported-agent")
+
+    created = client.post("/agents/cards", json={**payload, **fields})
+    assert created.status_code == 422
+    assert "Replace hidden with internal" in str(created.json()["detail"])
+    assert not (repo.user_dir / "unsupported-agent.md").exists()
+
+    assert client.post("/agents/cards", json=payload).status_code == 200
+    updated = client.put("/agents/cards/unsupported-agent", json={**payload, **fields})
+    assert updated.status_code == 422
+    assert "Replace hidden with internal" in str(updated.json()["detail"])
 
 
 def test_agent_card_endpoint_rejects_invalid_router_prompt(

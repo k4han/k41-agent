@@ -406,7 +406,7 @@ async def get_dashboard_channels(request: Request) -> dict[str, Any]:
         from agent.modules.agents import get_catalog_service
 
         agent_names = sorted(
-            card.name for card in get_catalog_service().list_agent_cards() if card.valid
+            card.name for card in get_catalog_service().list_agent_cards() if card.valid and not card.internal
         )
         for key, info in list(settings.items()):
             suffix = key.rsplit(".", 1)[-1] if "." in key else ""

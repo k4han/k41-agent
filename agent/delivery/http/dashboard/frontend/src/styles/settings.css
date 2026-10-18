@@ -1452,6 +1452,16 @@
 }
 
 /* Agent list */
+.agent-list-category {
+  display: grid;
+  gap: 8px;
+}
+
+.agent-list-category .settings-tabs,
+.agent-list-category .hint {
+  margin: 0;
+}
+
 .agent-list .settings-resource-search input {
   padding-left: 34px;
 }

@@ -2,7 +2,7 @@
 name: context-file-selector
 description: Selects relevant workspace files for context preparation
 graph_type: react_agent
-hidden: true
+internal: true
 tools: []
 ---
 

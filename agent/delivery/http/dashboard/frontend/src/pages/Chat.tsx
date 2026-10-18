@@ -224,7 +224,7 @@ export function ChatPage() {
 
   const explorer = useWorkspaceExplorer(() => chatShellRef);
 
-  const validCards = createMemo(() => (data()?.cards || []).filter((card) => card.valid && !card.hidden));
+  const validCards = createMemo(() => (data()?.cards || []).filter((card) => card.valid && !card.internal));
   const agentOptions = createMemo(() =>
     validCards().map((card) => ({
       value: card.name,

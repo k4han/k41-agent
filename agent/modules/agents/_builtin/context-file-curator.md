@@ -2,7 +2,7 @@
 name: context-file-curator
 description: Evaluates file relevance and selects full content or a focused excerpt
 graph_type: react_agent
-hidden: true
+internal: true
 tools: []
 ---
 

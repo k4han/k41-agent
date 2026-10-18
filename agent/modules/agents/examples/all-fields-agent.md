@@ -118,15 +118,16 @@ sub_agents:
   - researcher
 
 # Agents whose plan steps require human approval before execution. Targets must
-# reference existing, non-hidden agent cards and cannot include this agent.
+# reference existing, non-internal agent cards and cannot include this agent.
 # Empty list = no plan approvals required.
 plan_approval_targets:
   - reviewer
 
-# --- Visibility -------------------------------------------------------------
-# When true the card is hidden from the UI and cannot be used as a plan
-# approval target. Optional; defaults to false.
-hidden: false
+# --- System use ------------------------------------------------------------
+# When true the agent is reserved for system use. It cannot be selected for
+# chat, delegation, or plan approval. Internal agents can only be cloned and
+# configured in settings. Optional; defaults to false.
+internal: false
 
 # --- Context management -----------------------------------------------------
 # Integer percentage (1-100, strict) of the model context window that triggers

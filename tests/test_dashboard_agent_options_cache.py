@@ -29,6 +29,21 @@ def _clear_agent_option_caches():
 
 
 @pytest.mark.asyncio
+async def test_internal_cards_are_listed_without_becoming_selectable_agents(monkeypatch):
+    internal = _card("conversation-title")
+    internal.internal = True
+    monkeypatch.setattr(
+        agent_helpers, "get_catalog_service",
+        lambda: SimpleNamespace(list_agent_cards=lambda: [_card("chat-agent"), internal]),
+    )
+
+    payload = await agent_helpers.agent_cards_payload()
+
+    assert payload["agent_names"] == ["chat-agent"]
+    assert [card["name"] for card in payload["cards"]] == ["chat-agent", "conversation-title"]
+
+
+@pytest.mark.asyncio
 async def test_manual_tool_options_exclude_automatic_delegation(monkeypatch):
     monkeypatch.setattr(
         agent_helpers, "get_catalog_service",

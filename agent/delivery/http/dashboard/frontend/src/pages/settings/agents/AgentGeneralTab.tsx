@@ -37,6 +37,20 @@ export function AgentGeneralTab(props: {
 
   return (
     <div class="stack" style="gap: 16px; padding: 4px 2px;">
+      <div class="field">
+        <label>Agent Type</label>
+        <input
+          class="input"
+          value={props.form.internal ? "Internal Agent" : "Chat Agent"}
+          readOnly
+          aria-label="Agent type"
+        />
+        <p class="hint">
+          {props.form.internal
+            ? "Used only by the system. Clone the built-in agent to customize its configuration."
+            : "Available in the chat agent picker. Can also be used by other agents and workflows."}
+        </p>
+      </div>
       <div class="grid-2">
         <div class="field">
           <label>Name</label>
@@ -145,18 +159,6 @@ export function AgentGeneralTab(props: {
           }
         />
         <p class="hint">Automatically summarize older context before each model call when this percentage of the model context window is reached. Default: 75%.</p>
-      </div>
-      <div class="field">
-        <label class="checkbox-row">
-          <input
-            type="checkbox"
-            checked={props.form.hidden}
-            disabled={props.readOnly}
-            onChange={(event) => props.onUpdate("hidden", event.currentTarget.checked)}
-          />
-          <span>Hidden from chat picker</span>
-        </label>
-        <p class="hint">Hidden agents are not shown in the chat agent dropdown but can still be used internally.</p>
       </div>
     </div>
   );

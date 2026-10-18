@@ -27,7 +27,7 @@ its tokens. Active skill instructions continue to be supplied in system context.
 
 ## Internal agent cards
 
-The following hidden cards own instructions for existing workflow steps:
+The following internal cards own instructions for existing workflow steps:
 
 | Card | Consumer |
 | --- | --- |

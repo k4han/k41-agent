@@ -2,7 +2,7 @@
 name: github-automation-policy
 description: Shared execution rules for backend-managed GitHub issue and review tasks
 graph_type: react_agent
-hidden: true
+internal: true
 tools: []
 ---
 

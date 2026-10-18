@@ -22,7 +22,7 @@ export type AgentForm = {
   tool_configs: ToolConfigs;
   sub_agents: string[];
   plan_approval_targets: string[];
-  hidden: boolean;
+  internal: boolean;
   context_compact_threshold: number;
   system_prompt: string;
 };
@@ -85,7 +85,7 @@ export function blankForm(workflow: string): AgentForm {
     tool_configs: {},
     sub_agents: [],
     plan_approval_targets: [],
-    hidden: false,
+    internal: false,
     context_compact_threshold: DEFAULT_CONTEXT_COMPACT_THRESHOLD,
     system_prompt: "",
   };
@@ -105,7 +105,7 @@ export function cardToForm(card: AgentCard): AgentForm {
     tool_configs: normalizeToolConfigs(card.tool_configs),
     sub_agents: card.sub_agents || [],
     plan_approval_targets: card.plan_approval_targets || [],
-    hidden: card.hidden || false,
+    internal: card.internal || false,
     context_compact_threshold: card.context_compact_threshold || DEFAULT_CONTEXT_COMPACT_THRESHOLD,
     system_prompt: card.system_prompt || "",
   };

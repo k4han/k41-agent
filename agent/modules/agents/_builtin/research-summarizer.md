@@ -2,7 +2,7 @@
 name: research-summarizer
 description: Synthesizes collected research into a concise report
 graph_type: react_agent
-hidden: true
+internal: true
 tools: []
 ---
 

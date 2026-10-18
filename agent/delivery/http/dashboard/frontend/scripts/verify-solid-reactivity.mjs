@@ -19,7 +19,7 @@ const agent = {
   name: 'default', display_name: 'Default', description: '', graph_type: 'react_agent',
   provider: 'test', model: 'model-a', valid: true, editable: true, source: 'user',
   tools: ['delegate_task', 'read'], sub_agents: ['child'], mcp_servers: [], plan_approval_targets: [],
-  context_compact_threshold: 75, system_prompt: '', hidden: false,
+  context_compact_threshold: 75, system_prompt: '', internal: false,
 };
 const models = {
   provider_names: ['test'], default_provider: 'test', default_model: 'model-a',

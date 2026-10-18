@@ -54,15 +54,22 @@ def normalize_agent_model(data: Any) -> Any:
     return data
 
 
-def reject_legacy_context_settings(data: Any) -> Any:
-    """Reject token budgets on agent cards instead of interpreting them as percentages."""
+def reject_legacy_agent_settings(data: Any) -> Any:
+    """Reject removed agent fields instead of silently ignoring them."""
     if isinstance(data, dict):
-        legacy = sorted(set(data) & {"context_trim_threshold", "max_context_tokens"})
+        legacy = sorted(set(data) & {"hidden", "context_trim_threshold", "max_context_tokens"})
         if legacy:
+            instructions = []
+            if "hidden" in legacy:
+                instructions.append("Replace hidden with internal (true for system-only agents, false for chat agents).")
+            if set(legacy) & {"context_trim_threshold", "max_context_tokens"}:
+                instructions.append(
+                    "Replace token budgets with context_compact_threshold (1-100 percent, default 75). "
+                    "Configure channel trimming in dashboard channel settings."
+                )
             raise ValueError(
                 f"Unsupported agent card settings: {', '.join(legacy)}. "
-                "Replace them with context_compact_threshold (1-100 percent, default 75). "
-                "Configure channel trimming in dashboard channel settings."
+                + " ".join(instructions)
             )
     return data
 
@@ -82,7 +89,7 @@ class AgentConfig(BaseModel):
     tool_configs: dict[str, dict[str, Any]] = Field(default_factory=dict)
     sub_agents: Optional[list[str]] = None  # Callable targets automatically enable delegate_task.
     plan_approval_targets: list[str] = Field(default_factory=list)
-    hidden: bool = False
+    internal: bool = Field(default=False, description="Whether this agent is reserved for system use.")
     context_compact_threshold: int = Field(default=75, ge=1, le=100, strict=True)
     system_prompt: str = ""  # Markdown body content (after frontmatter)
 
@@ -101,7 +108,7 @@ class AgentConfig(BaseModel):
     @classmethod
     def _normalize(cls, data: Any) -> Any:
         data = normalize_agent_defaults(
-            normalize_agent_model(reject_legacy_context_settings(data))
+            normalize_agent_model(reject_legacy_agent_settings(data))
         )
         if isinstance(data, dict):
             from agent.modules.tools import TOOL_ALIASES, canonical_tool_names
@@ -135,7 +142,7 @@ class AgentCard(BaseModel):
     tool_configs: dict[str, dict[str, Any]] = Field(default_factory=dict)
     sub_agents: Optional[list[str]] = None
     plan_approval_targets: list[str] = Field(default_factory=list)
-    hidden: bool = False
+    internal: bool = Field(default=False, description="Whether this agent is reserved for system use.")
     context_compact_threshold: int = Field(default=75, ge=1, le=100, strict=True)
     system_prompt: str = ""
     source: Literal["builtin", "user"]
@@ -149,7 +156,7 @@ class AgentCard(BaseModel):
     @classmethod
     def _normalize(cls, data: Any) -> Any:
         data = normalize_agent_defaults(
-            normalize_agent_model(reject_legacy_context_settings(data))
+            normalize_agent_model(reject_legacy_agent_settings(data))
         )
         if isinstance(data, dict):
             from agent.modules.tools import TOOL_ALIASES, canonical_tool_names
@@ -194,7 +201,7 @@ class AgentCard(BaseModel):
             },
             sub_agents=list(config.sub_agents) if config.sub_agents is not None else None,
             plan_approval_targets=list(config.plan_approval_targets),
-            hidden=config.hidden,
+            internal=config.internal,
             context_compact_threshold=config.context_compact_threshold,
             system_prompt=config.system_prompt,
             source=source,
@@ -245,7 +252,7 @@ class AgentCard(BaseModel):
             },
             sub_agents=list(self.sub_agents) if self.sub_agents is not None else None,
             plan_approval_targets=list(self.plan_approval_targets),
-            hidden=self.hidden,
+            internal=self.internal,
             context_compact_threshold=self.context_compact_threshold,
             system_prompt=self.system_prompt,
         )
