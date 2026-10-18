@@ -6,6 +6,7 @@ import { render } from "solid-js/web";
 
 import { highlightCode, languageFromName } from "@/lib/codeHighlight";
 import { rewriteGeneratedImagePaths } from "@/lib/generatedImages";
+import { createMarkdownBlocks } from "@/lib/markdownBlocks";
 import { createDarkMode } from "@/lib/theme";
 
 marked.setOptions({
@@ -210,15 +211,12 @@ export function Markdown(props: {
   const highlightInFlight = new WeakMap<HTMLPreElement, symbol>();
   const pendingMermaidFrames = new WeakSet<HTMLElement>();
   const dark = createDarkMode();
+  const renderBlocks = createMarkdownBlocks();
+  let parsedBlocks: { html: string; nodes: { node: Node; markup: string }[] }[] = [];
 
   const html = createMemo(() => {
     const source = rewriteGeneratedImagePaths(props.text || "", props.threadId);
-    const raw = marked.parse(source, { async: false }) as string;
-    return DOMPurify.sanitize(raw, {
-      ADD_ATTR: ["target", "rel"],
-      FORBID_TAGS: ["style"],
-      FORBID_ATTR: ["style"],
-    });
+    return renderBlocks(source);
   });
 
   const cleanupIcons = () => {
@@ -331,16 +329,27 @@ export function Markdown(props: {
     return true;
   };
 
-  const updateHtml = (value: string) => {
+  const updateHtml = (blocks: string[]) => {
     if (!containerRef) return;
-    const template = document.createElement("template");
-    template.innerHTML = value;
-    const nextNodes = Array.from(template.content.childNodes);
+    parsedBlocks = blocks.map((html, index) => {
+      const cached = parsedBlocks[index];
+      if (cached?.html === html) return cached;
+      const template = document.createElement("template");
+      template.innerHTML = html;
+      return {
+        html,
+        nodes: Array.from(template.content.childNodes, (node) => ({
+          node,
+          markup: node instanceof Element ? node.outerHTML : node.textContent || "",
+        })),
+      };
+    });
+    const nextNodes = parsedBlocks.flatMap((block) => block.nodes);
     for (let index = 0; index < nextNodes.length; index += 1) {
-      const next = nextNodes[index];
-      const markup = next instanceof Element ? next.outerHTML : next.textContent || "";
+      const { node, markup } = nextNodes[index];
       const current = containerRef.childNodes[index];
       if (current && sourceMarkup.get(current) === markup) continue;
+      const next = node.cloneNode(true);
       if (
         current instanceof HTMLElement &&
         next instanceof Element &&

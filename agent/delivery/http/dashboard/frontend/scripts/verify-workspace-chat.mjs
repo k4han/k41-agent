@@ -47,6 +47,14 @@ const fixtures = {
     platform: 'api', user_id: 'dashboard', channel_id: '', agent_name: 'default', workspace: { execution: workspace },
   },
   '/dashboard-api/workspace/default': { workspace },
+  '/dashboard-api/chat-history/lazy-tools': {
+    thread_id: 'lazy-tools', platform: 'api', user_id: 'dashboard', agent_name: 'default',
+    messages: [
+      { id: 'call', role: 'assistant', content: '', tool_calls: [{ id: 'history-tool', name: 'read', args: { path: 'source.txt' } }] },
+      { id: 'result', role: 'tool', tool_call_id: 'history-tool', name: 'read', content: 'Historical result' },
+      { id: 'answer', role: 'assistant', content: 'Historical answer' },
+    ],
+  },
 };
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
@@ -397,10 +405,12 @@ try {
   assert.ok(shortToolHeight > 0 && shortToolHeight < 280, 'a short tool run must only occupy the height of its content');
   assert.equal(await js('document.querySelector(".activity-group-label").textContent'), '1 tool call · Running', 'a live tool group has its own count and running status');
   chatResponse.write(JSON.stringify({ type: 'tool_result', tool_call_id: 'write-source', name: 'shell', content: toolOutput }) + '\n');
-  await until(() => js('document.querySelector(".tool-call-body")?.textContent.includes("Expanded tool output.")'), 'tool output arrives');
+  await until(() => requests.some(request => request.kind === 'tree'), 'workspace refresh after tool output');
+  assert.equal(await js('document.querySelector(".tool-call-body")'), null, 'closed tool details are not mounted');
   await delay(100);
   const collapsed = await scrollMetrics();
   await click('.tool-call > summary');
+  await until(() => js('document.querySelector(".tool-call-body")?.textContent.includes("Expanded tool output.")'), 'opening a tool mounts its latest output');
   await delay(100);
   const expanded = await scrollMetrics();
   assert.ok(expanded.height >= collapsed.height, 'tool content can grow until reaching the height cap');
@@ -613,6 +623,18 @@ try {
   }
   await js('document.querySelector(".transcript > .message.assistant .assistant-actions .message-action-btn").click()');
   assert.equal(await js('document.querySelectorAll(".activity-group-body")[1].hidden'), true, 'copying the closing answer must not toggle tools');
+  await call('Page.navigate', { url: base + '/c/lazy-tools' });
+  await until(() => js('document.body.textContent.includes("Historical answer")'), 'historical tool group');
+  assert.equal(await js('document.querySelectorAll(".activity-group .tool-call").length'), 0, 'unvisited historical groups do not mount tool rows');
+  await click('.activity-group-toggle');
+  await until(() => js('!!document.querySelector(".tool-call")'), 'historical group expanded');
+  assert.equal(await js('document.querySelector(".tool-call-body")'), null, 'historical tool output stays deferred until its own details open');
+  await click('.tool-call > summary');
+  await until(() => js('document.querySelector(".tool-call-body")?.textContent.includes("Historical result")'), 'historical result mounted');
+  await js('window.historicalTool = document.querySelector(".tool-call")');
+  await click('.activity-group-toggle');
+  await click('.activity-group-toggle');
+  assert.equal(await js('historicalTool === document.querySelector(".tool-call") && historicalTool.open'), true, 'group toggles preserve visited tool state');
   assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
   console.log('PASS: production Chat refreshes real local files and previews while tools run and on streamed tool results.');
 } finally {

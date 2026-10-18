@@ -17,15 +17,25 @@ export function createTranscriptItems(initialItems: ChatTranscriptItem[] = []): 
   appendChunks: (chunks: ReadonlyMap<number, string>) => void,
   appendItem: (item: ChatTranscriptItem) => void,
   replaceMessage: (id: number, text: string) => void,
+  setToolResult: (toolCallId: string, name: string, result: unknown) => boolean,
 ] {
   const [state, setState] = createStore({ items: cloneValue(unwrap(initialItems)) });
-  const indices = new Map(initialItems.map((item, index) => [item.id, index]));
+  const indices = new Map<number, number>();
+  const toolIndices = new Map<string, number>();
+  const indexItem = (item: ChatTranscriptItem, index: number) => {
+    indices.set(item.id, index);
+    if (item.type === "tool" && item.tool_call_id && !toolIndices.has(item.tool_call_id)) {
+      toolIndices.set(item.tool_call_id, index);
+    }
+  };
+  initialItems.forEach(indexItem);
   return [
     () => state.items,
     (update) => {
       const next = untrack(() => typeof update === "function" ? update(unwrap(state.items)) : update);
       indices.clear();
-      next.forEach((item, index) => indices.set(item.id, index));
+      toolIndices.clear();
+      next.forEach(indexItem);
       setState("items", reconcile(next, { key: "id" }));
       return state.items;
     },
@@ -40,7 +50,7 @@ export function createTranscriptItems(initialItems: ChatTranscriptItem[] = []): 
     })),
     (item) => untrack(() => {
       const index = state.items.length;
-      indices.set(item.id, index);
+      indexItem(item, index);
       // Append through the store path without copying or reconciling history.
       setState("items", index, cloneValue(unwrap(item)));
     }),
@@ -50,6 +60,26 @@ export function createTranscriptItems(initialItems: ChatTranscriptItem[] = []): 
       setState("items", index, produce((item) => {
         if (item.type === "message") item.text = text;
       }));
+    }),
+    (toolCallId, name, result) => untrack(() => {
+      let index = toolCallId ? toolIndices.get(toolCallId) : undefined;
+      if (index === undefined && name) {
+        // Legacy results without a matching call ID target the last pending
+        // tool of that name, preserving the existing stream behavior.
+        for (let cursor = state.items.length - 1; cursor >= 0; cursor -= 1) {
+          const item = state.items[cursor];
+          if (item.type === "tool" && item.name === name && item.result === null) {
+            index = cursor;
+            break;
+          }
+        }
+      }
+      if (index === undefined) return false;
+      const nextResult = cloneValue(unwrap(result));
+      setState("items", index, produce((item) => {
+        if (item.type === "tool") item.result = nextResult;
+      }));
+      return true;
     }),
   ];
 }

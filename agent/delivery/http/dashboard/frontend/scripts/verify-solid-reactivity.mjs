@@ -260,9 +260,11 @@ try {
   await until(() => js('document.querySelector("details.tool-call").textContent.includes("completed result")'), 'tool result');
   assert.equal(await js('toolDetails.isConnected && toolDetails.open && document.querySelector("details.tool-call") === toolDetails'), true);
   send({ type: 'tool_call', id: 'shell-1', name: 'bash', args: { command: 'git status --short', workdir: '.' } });
+  await until(() => js('document.querySelectorAll("details.tool-call").length === 2'), 'shell summary');
+  assert.equal(await js('document.querySelectorAll("details.tool-call")[1].querySelector(".tool-call-body")'), null);
+  await js('window.shellDetails = document.querySelectorAll("details.tool-call")[1]; shellDetails.open = true;');
   await until(() => js('!!document.querySelector(".tool-call-arguments")'), 'shell parameters');
   assert.equal(await js('document.querySelector(".tool-call-arguments").open'), false);
-  await js('window.shellDetails = document.querySelector(".tool-call-arguments").closest("details.tool-call"); shellDetails.open = true;');
   send({ type: 'tool_result', tool_call_id: 'shell-1', name: 'bash', content: 'ready\n\nProcess is still running.' });
   await until(() => js('!!document.querySelector(".tool-shell-outcome.is-running")'), 'running shell outcome');
   send({ type: 'tool_result', tool_call_id: 'shell-1', name: 'bash', content: 'failure detail\n\nCommand exited with code 2.' });

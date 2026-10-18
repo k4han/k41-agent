@@ -1276,6 +1276,9 @@ export function ChatPage() {
         );
       }
       window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.THREADS_CHANGED));
+      if (finishedTid && !isUnmounting && currentThreadId() === finishedTid) {
+        void refreshThread(finishedTid);
+      }
     }
   };
 

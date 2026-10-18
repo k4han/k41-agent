@@ -38,6 +38,139 @@ function mount(t, callback) {
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
+function loadActivityView() {
+  const activity = loadModule('../src/lib/transcriptActivity.ts', {
+    '@/lib/htmlPreview': { HTML_PREVIEW_TOOL_NAME: 'html_preview' },
+  });
+  return loadModule('../src/lib/useTranscriptActivityView.ts', {
+    '@/lib/transcriptActivity': activity,
+  }).useTranscriptActivityView;
+}
+
+test('streamed text does not rebuild activity entries in a long transcript', t => {
+  const { createTranscriptItems } = loadModule('../src/lib/chatStreamStore.ts', {
+    '@/lib/utils': loadModule('../src/lib/utils.ts'),
+  });
+  const useTranscriptActivityView = loadActivityView();
+  mount(t, () => {
+    const history = Array.from({ length: 1000 }, (_, index) => ({
+      id: index, type: 'message', role: 'assistant', text: 'history',
+    }));
+    const [items, , appendChunks, appendItem, replaceMessage] = createTranscriptItems(history);
+    const [streaming, setStreaming] = solid.createSignal(true);
+    const view = useTranscriptActivityView(items, streaming);
+    let builds = 0;
+    solid.createComputed(() => { view(); builds++; });
+    const firstView = view();
+    for (let index = 0; index < 100; index++) appendChunks(new Map([[999, 'delta']]));
+    assert.equal(builds, 1);
+    assert.equal(view(), firstView);
+    assert.equal(view().entries.get('item-999').item.text, 'history' + 'delta'.repeat(100));
+
+    appendItem({ id: 1000, type: 'tool', name: 'read', result: null });
+    assert.equal(view().liveKey, 'activity-1000');
+    appendItem({ id: 1001, type: 'message', role: 'assistant', text: '' });
+    assert.equal(view().liveKey, 'activity-1000');
+    appendChunks(new Map([[1001, '   ']]));
+    assert.equal(view().keys.at(-1), 'activity-1000');
+    appendChunks(new Map([[1001, 'answer']]));
+    assert.equal(view().keys.at(-1), 'item-1001');
+    assert.equal(view().liveKey, null);
+    const visibleView = view();
+    appendChunks(new Map([[1001, ' more']]));
+    assert.equal(view(), visibleView);
+    replaceMessage(1001, '');
+    assert.equal(view().liveKey, 'activity-1000');
+    setStreaming(false);
+    assert.equal(view().liveKey, null);
+  });
+});
+
+test('activity classification tracks attachments, replacements, and rich tool boundaries', t => {
+  const { createTranscriptItems } = loadModule('../src/lib/chatStreamStore.ts', {
+    '@/lib/utils': loadModule('../src/lib/utils.ts'),
+  });
+  const useTranscriptActivityView = loadActivityView();
+  mount(t, () => {
+    const [items, setItems] = createTranscriptItems([
+      { id: 1, type: 'tool', name: 'read', result: null },
+      { id: 2, type: 'message', role: 'assistant', text: '' },
+    ]);
+    const view = useTranscriptActivityView(items, () => false);
+    assert.equal(view().keys.join(','), 'activity-1');
+    setItems(current => current.map(item => item.id === 2 ? { ...item, attachments: [{ kind: 'image' }] } : item));
+    assert.equal(view().keys.join(','), 'activity-1,item-2');
+    setItems(current => current.map(item => item.id === 1 ? { ...item, name: 'html_preview' } : item));
+    assert.equal(view().keys.join(','), 'item-1,item-2');
+    setItems([]);
+    assert.equal(view().keys.length, 0);
+  });
+});
+
+test('indexed tool results retain row identity and work after snapshots and legacy matching', t => {
+  const { createTranscriptItems } = loadModule('../src/lib/chatStreamStore.ts', {
+    '@/lib/utils': loadModule('../src/lib/utils.ts'),
+  });
+  mount(t, () => {
+    const first = { id: 1, type: 'tool', name: 'read', tool_call_id: 'first', result: null };
+    const second = { id: 2, type: 'tool', name: 'read', tool_call_id: 'second', result: null };
+    const [items, setItems, , appendItem, , setToolResult] = createTranscriptItems([first, second]);
+    const row = items()[0];
+    const payload = { output: ['done'] };
+    assert.equal(setToolResult('first', 'read', payload), true);
+    payload.output.push('external mutation');
+    assert.equal(items()[0], row);
+    assert.equal(row.result.output.length, 1);
+    assert.equal(items()[1].result, null);
+    assert.equal(setToolResult('', 'read', 'legacy result'), true);
+    assert.equal(items()[1].result, 'legacy result');
+    setItems([{ ...second, result: null }, { ...first, result: null }]);
+    assert.equal(setToolResult('first', 'read', 'after reorder'), true);
+    assert.equal(items()[1], row);
+    assert.equal(row.result, 'after reorder');
+    appendItem({ id: 3, type: 'tool', name: 'shell', tool_call_id: 'third', result: null });
+    assert.equal(setToolResult('third', 'shell', 'appended'), true);
+    assert.equal(items()[2].result, 'appended');
+    setItems([]);
+    assert.equal(setToolResult('third', 'shell', 'removed'), false);
+  });
+});
+
+test('tool results update only their target thread and append missing calls', t => {
+  const streams = loadModule('../src/lib/chatStreamStore.ts', {
+    '@/lib/utils': loadModule('../src/lib/utils.ts'),
+  });
+  const { useChatStreams } = loadModule('../src/lib/useChatStreams.ts', {
+    '@/components/Transcript': {
+      createTranscriptTool: ({ toolCallId, name, result }) => ({ type: 'tool', tool_call_id: toolCallId, name, result }),
+    },
+    '@/lib/chatStreamStore': streams,
+    '@/lib/generatedImages': { GENERATE_IMAGE_TOOL_NAME: 'generate_image' },
+  });
+  mount(t, () => {
+    let scrolls = 0;
+    const chat = useChatStreams({
+      scroll: { scrollToBottom: () => scrolls++ },
+      getCurrentThreadId: () => 'first',
+      getIsUnmounting: () => false,
+    });
+    const first = streams.getOrCreateStreamSignals('first', [{ id: 10, type: 'tool', tool_call_id: 'call', name: 'read', result: null }]);
+    const second = streams.getOrCreateStreamSignals('second', [{ id: 20, type: 'tool', tool_call_id: 'call', name: 'read', result: null }]);
+    chat.setCurrentStreamThreadId('first');
+    chat.updateToolResult('call', 'read', 'background', 'second');
+    assert.equal(first.items[0]()[0].result, null);
+    assert.equal(second.items[0]()[0].result, 'background');
+    assert.equal(scrolls, 0);
+    chat.updateToolResult('call', 'read', 'visible', 'first');
+    assert.equal(first.items[0]()[0].result, 'visible');
+    assert.equal(scrolls, 1);
+    chat.updateToolResult('missing', 'shell', 'new call', 'second');
+    assert.equal(second.items[0]().length, 2);
+    assert.equal(second.items[0]()[1].result, 'new call');
+    assert.equal(scrolls, 1);
+  });
+});
+
 test('stream updates keep message and tool rows mounted and track only changed fields', t => {
   const utils = loadModule('../src/lib/utils.ts');
   const { createTranscriptItems } = loadModule('../src/lib/chatStreamStore.ts', { '@/lib/utils': utils });

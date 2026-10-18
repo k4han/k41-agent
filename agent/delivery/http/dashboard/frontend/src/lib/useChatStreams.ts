@@ -4,7 +4,6 @@ import {
   createTranscriptTool,
   createTranscriptUserInputRequest,
   findTranscriptPlanReviewTarget,
-  findTranscriptToolTarget,
   findTranscriptUserInputRequestTarget,
   parsePlanReviewToolResult,
   parseUserInputRequestToolResult,
@@ -206,83 +205,79 @@ export function useChatStreams(params: UseChatStreamsParams) {
     result: unknown,
     targetThreadId?: string,
   ) => {
+    if (name !== GENERATE_IMAGE_TOOL_NAME) {
+      const transcript = transcriptFor(targetThreadId);
+      if (!transcript[5](toolCallId, name, result)) {
+        transcript[3]({
+          id: allocItemId(),
+          ...createTranscriptTool({ toolCallId, name, result }),
+        } as ChatTranscriptItem);
+      }
+      const isCurrent = !getIsUnmounting() && (!targetThreadId || targetThreadId === getCurrentThreadId());
+      if (isCurrent) scroll.scrollToBottom();
+      return;
+    }
     setItems((current) => {
-      if (name === GENERATE_IMAGE_TOOL_NAME) {
-        const attachment = generatedImageAttachmentFromToolResult(
-          result,
-          targetThreadId || getCurrentThreadId(),
-        );
-        const pendingTarget = current.find(
-          (item) =>
-            item.type === "message" &&
-            item.generatedImagePending &&
-            (
-              item.generatedImageToolCallId === toolCallId ||
-              !item.generatedImageToolCallId
-            ),
-        );
-        if (!attachment) {
-          if (!pendingTarget) {
-            return current;
-          }
-          return current.map((item) =>
-            item.id === pendingTarget.id && item.type === "message"
-              ? {
-                  ...item,
-                  generatedImagePending: false,
-                  text: "Image generation did not return an image.",
-                }
-              : item,
-          );
-        }
-        const exists = current.some(
-          (item) =>
-            item.type === "message" &&
-            item.attachments?.some(
-              (existing) => existing.preview_url === attachment.preview_url,
-            ),
-        );
-        if (exists) {
-          return pendingTarget
-            ? current.filter((item) => item.id !== pendingTarget.id)
-            : current;
-        }
-        if (pendingTarget) {
-          return current.map((item) =>
-            item.id === pendingTarget.id && item.type === "message"
-              ? {
-                  ...item,
-                  generatedImagePending: false,
-                  attachments: [attachment],
-                }
-              : item,
-          );
-        }
-        return [
-          ...current,
-          {
-            id: allocItemId(),
-            type: "message",
-            role: "assistant",
-            text: "",
-            attachments: [attachment],
-          } satisfies ChatTranscriptItem,
-        ];
-      }
-
-      const target = findTranscriptToolTarget(current, toolCallId, name);
-      if (!target) {
-        return [
-          ...current,
-          {
-            id: allocItemId(),
-            ...createTranscriptTool({ toolCallId, name, result }),
-          } satisfies ChatTranscriptItem,
-        ];
-      }
-      return current.map((item) =>
-        item.id === target.id && item.type === "tool" ? { ...item, result } : item,
+      const attachment = generatedImageAttachmentFromToolResult(
+        result,
+        targetThreadId || getCurrentThreadId(),
       );
+      const pendingTarget = current.find(
+        (item) =>
+          item.type === "message" &&
+          item.generatedImagePending &&
+          (
+            item.generatedImageToolCallId === toolCallId ||
+            !item.generatedImageToolCallId
+          ),
+      );
+      if (!attachment) {
+        if (!pendingTarget) {
+          return current;
+        }
+        return current.map((item) =>
+          item.id === pendingTarget.id && item.type === "message"
+            ? {
+                ...item,
+                generatedImagePending: false,
+                text: "Image generation did not return an image.",
+              }
+            : item,
+        );
+      }
+      const exists = current.some(
+        (item) =>
+          item.type === "message" &&
+          item.attachments?.some(
+            (existing) => existing.preview_url === attachment.preview_url,
+          ),
+      );
+      if (exists) {
+        return pendingTarget
+          ? current.filter((item) => item.id !== pendingTarget.id)
+          : current;
+      }
+      if (pendingTarget) {
+        return current.map((item) =>
+          item.id === pendingTarget.id && item.type === "message"
+            ? {
+                ...item,
+                generatedImagePending: false,
+                attachments: [attachment],
+              }
+            : item,
+        );
+      }
+      return [
+        ...current,
+        {
+          id: allocItemId(),
+          type: "message",
+          role: "assistant",
+          text: "",
+          attachments: [attachment],
+        } satisfies ChatTranscriptItem,
+      ];
     }, targetThreadId);
 
     const isCurrent = !getIsUnmounting() && (!targetThreadId || targetThreadId === getCurrentThreadId());

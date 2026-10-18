@@ -20,7 +20,7 @@ export type TranscriptActivityView<T extends TranscriptActivitySource> = {
 };
 
 /** Ignore assistant placeholders with no visible text or rich content. */
-function isEmptyAssistantMessage(item: TranscriptItem): boolean {
+export function isEmptyAssistantMessage(item: TranscriptItem): boolean {
   return item.type === "message"
     && item.role === "assistant"
     && !item.text.trim()

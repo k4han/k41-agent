@@ -4,8 +4,9 @@ import { createMemo, For, Show } from "solid-js";
 import { TranscriptActivityGroup } from "@/components/TranscriptActivityGroup";
 import { TranscriptItemView, type TranscriptAttachment, type TranscriptRole } from "@/components/Transcript";
 import type { ChatTranscriptItem } from "@/lib/chatStreamStore";
-import { buildTranscriptActivityView, findTranscriptAnswerId } from "@/lib/transcriptActivity";
+import { findTranscriptAnswerId } from "@/lib/transcriptActivity";
 import { useStreamingTranscriptItem } from "@/lib/useStreamingTranscriptItem";
+import { useTranscriptActivityView } from "@/lib/useTranscriptActivityView";
 import type { AgentCard } from "@/types";
 
 export function ChatWelcomeHero() {
@@ -75,8 +76,9 @@ export function ChatTranscript(props: ChatTranscriptProps) {
     () => props.items,
     streamActive,
   );
-  const activityView = createMemo(() =>
-    buildTranscriptActivityView(props.filteredItems, streamActive()),
+  const activityView = useTranscriptActivityView(
+    () => props.filteredItems,
+    streamActive,
   );
   const answerItemId = createMemo(() => findTranscriptAnswerId(props.filteredItems));
   // Answer actions stay hidden while the agent runs and then belong only to

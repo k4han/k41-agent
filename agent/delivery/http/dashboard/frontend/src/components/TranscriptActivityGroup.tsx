@@ -1,5 +1,5 @@
 import { Check, ChevronRight, Loader2 } from "lucide-solid";
-import { createEffect, createSignal, createUniqueId, For, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createSignal, createUniqueId, For, onCleanup, Show } from "solid-js";
 
 import { TranscriptItemView, type TranscriptItemViewProps } from "@/components/Transcript";
 import type { ChatTranscriptItem } from "@/lib/chatStreamStore";
@@ -27,6 +27,8 @@ export function TranscriptActivityGroup(props: TranscriptActivityGroupProps) {
   // null means "follow the automatic state".
   const [userOpen, setUserOpen] = createSignal<boolean | null>(null);
   const open = () => userOpen() ?? props.live;
+  const [visited, setVisited] = createSignal(open());
+  const mounted = () => visited() || open();
   const bodyId = createUniqueId();
   let groupRef: HTMLDivElement | undefined;
   let bodyRef: HTMLDivElement | undefined;
@@ -68,9 +70,11 @@ export function TranscriptActivityGroup(props: TranscriptActivityGroupProps) {
   };
 
   createEffect(() => {
+    if (open()) setVisited(true);
     if (props.live && open()) scheduleFollow();
   });
-  onMount(() => {
+  createEffect(() => {
+    if (!mounted()) return;
     // Observe the content, since the viewport stops growing at its height cap.
     const observer = new ResizeObserver(scheduleFollow);
     if (contentRef) observer.observe(contentRef);
@@ -159,28 +163,30 @@ export function TranscriptActivityGroup(props: TranscriptActivityGroupProps) {
         }}
         onScroll={handleBodyScroll}
       >
-        <div class="activity-group-content" ref={contentRef}>
-          <For each={props.rows}>
-            {(row) => (
-              <TranscriptItemView
-                item={row}
-                itemId={row.id}
-                deferMermaid={props.isItemStreaming?.(row.id)}
-                deferHighlight={props.isItemStreaming?.(row.id)}
-                agents={props.agents}
-                activeAgentName={props.activeAgentName}
-                actionsDisabled={props.actionsDisabled}
-                onEditMessage={props.onEditMessage}
-                onRegenerateMessage={props.onRegenerateMessage}
-                onBranchSelect={props.onBranchSelect}
-                onApprovePlanReview={props.onApprovePlanReview}
-                onRevisePlanReview={props.onRevisePlanReview}
-                onMessageClick={props.onMessageClick}
-                threadId={props.threadId}
-              />
-            )}
-          </For>
-        </div>
+        <Show when={mounted()}>
+          <div class="activity-group-content" ref={contentRef}>
+            <For each={props.rows}>
+              {(row) => (
+                <TranscriptItemView
+                  item={row}
+                  itemId={row.id}
+                  deferMermaid={props.isItemStreaming?.(row.id)}
+                  deferHighlight={props.isItemStreaming?.(row.id)}
+                  agents={props.agents}
+                  activeAgentName={props.activeAgentName}
+                  actionsDisabled={props.actionsDisabled}
+                  onEditMessage={props.onEditMessage}
+                  onRegenerateMessage={props.onRegenerateMessage}
+                  onBranchSelect={props.onBranchSelect}
+                  onApprovePlanReview={props.onApprovePlanReview}
+                  onRevisePlanReview={props.onRevisePlanReview}
+                  onMessageClick={props.onMessageClick}
+                  threadId={props.threadId}
+                />
+              )}
+            </For>
+          </div>
+        </Show>
       </div>
     </div>
   );

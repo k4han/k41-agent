@@ -46,8 +46,12 @@ try {
         if (id === '\0markdown-harness') return `
           import { createSignal } from 'solid-js';
           import { render } from 'solid-js/web';
+          import DOMPurify from 'dompurify';
           import { Markdown } from '@/components/Markdown';
           window.highlightRequests = []; window.mermaidRequests = [];
+          window.sanitizedInputs = [];
+          const sanitize = DOMPurify.sanitize.bind(DOMPurify);
+          DOMPurify.sanitize = (...args) => { window.sanitizedInputs.push(String(args[0])); return sanitize(...args); };
           window.escapeHtml = value => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
           const [text, setText] = createSignal('');
           const [deferHighlight, setDeferHighlight] = createSignal(false);
@@ -199,6 +203,23 @@ try {
   await setText(fence('js', 'const afterDiagram = true;'));
   await waitRequests('highlightRequests', 6);
   assert.equal(await js('document.querySelectorAll(".markdown-mermaid-frame").length'), 0);
+
+  await js('setDeferHighlight(true)');
+  const prefix = '# Stable heading\n\nCompleted **paragraph**.\n\n';
+  await setText(prefix + 'Tail');
+  await js('window.stableHeading = document.querySelector(".markdown h1"); sanitizedInputs.length = 0');
+  for (const tail of ['Tail grows', 'Tail grows again', 'Tail grows **again**']) await setText(prefix + tail);
+  assert.equal(await js('sanitizedInputs.length'), 3, 'only the changing block is sanitized during streaming');
+  assert.equal(await js('stableHeading === document.querySelector(".markdown h1")'), true, 'completed blocks retain their DOM');
+  await setText('[reference][target]\n\nParagraph');
+  assert.equal(await js('document.querySelector(".markdown a")'), null);
+  await setText('[reference][target]\n\nParagraph\n\n[target]: https://example.com');
+  assert.equal(await js('document.querySelector(".markdown a").href'), 'https://example.com/');
+  await setText('<div class="outer">\n\n**Nested content**\n\n<img src="x" onerror="window.unsafeMarkdown = true">\n\n</div>');
+  assert.equal(await js('document.querySelector(".markdown .outer strong").textContent'), 'Nested content');
+  assert.equal(await js('document.querySelector(".markdown img").hasAttribute("onerror")'), false);
+  console.log('PASS: streamed blocks reuse sanitized output and DOM, late references update, and raw HTML retains nesting with unsafe attributes removed.');
+
   await js('disposeMarkdown(); highlightRequests[5].resolve()');
   assert.equal(await js('document.getElementById("app").childNodes.length'), 0);
   assert.equal(exceptions.length, 0, JSON.stringify(exceptions));

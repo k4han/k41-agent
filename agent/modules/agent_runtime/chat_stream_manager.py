@@ -7,7 +7,9 @@ while buffering generated stream events for client reconnection.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import tempfile
 from typing import Any, AsyncGenerator
 
 from langgraph.errors import GraphRecursionError
@@ -19,8 +21,8 @@ from agent.shared.infrastructure.errors import (
 
 logger = logging.getLogger(__name__)
 
-# Maximum number of events to buffer per session to prevent unbounded memory growth.
-MAX_BUFFER_SIZE = 10_000
+# Larger replay logs spill to disk without discarding any events.
+MAX_BUFFER_BYTES = 1_048_576
 
 # Grace period (in seconds) after stream completes before removing the session.
 # This gives reconnecting clients time to subscribe and consume buffered events.
@@ -34,8 +36,10 @@ class ChatStreamSession:
         self.thread_id = thread_id
         self.params = params
         self.run_fn = run_fn
-        self.events_buffer: list[dict[str, Any]] = []
-        self.queues: set[asyncio.Queue[dict[str, Any]]] = set()
+        self._event_log = tempfile.SpooledTemporaryFile(max_size=MAX_BUFFER_BYTES, mode="w+b")
+        self._closed = False
+        # Subscribers retain only a cursor and a single coalesced wakeup.
+        self.queues: set[asyncio.Queue[None]] = set()
         self.task: asyncio.Task[None] | None = None
         self.lock = asyncio.Lock()
         self.done = False
@@ -101,37 +105,51 @@ class ChatStreamSession:
             await manager.remove_session(self.thread_id, self)
 
     async def push_event(self, event: dict[str, Any]) -> None:
-        """Push a generated stream event to the buffer and all subscribed queues."""
+        """Append an event to the replay log and wake subscribers."""
+        payload = (json.dumps(event, ensure_ascii=False) + "\n").encode("utf-8")
         async with self.lock:
-            if len(self.events_buffer) < MAX_BUFFER_SIZE:
-                self.events_buffer.append(event)
+            self._event_log.seek(0, 2)
+            self._event_log.write(payload)
             for q in self.queues:
-                q.put_nowait(event)
+                if q.empty():
+                    q.put_nowait(None)
 
     async def subscribe(self) -> AsyncGenerator[dict[str, Any], None]:
         """Subscribe to stream events. Yields buffered events first, then new ones."""
-        q: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        q: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
         async with self.lock:
-            # Replay all buffered events to the new subscriber
-            for event in self.events_buffer:
-                q.put_nowait(event)
+            if self._closed:
+                return
             self.queues.add(q)
-            is_done = self.done
+        position = 0
 
         try:
             while True:
-                if is_done and q.empty():
+                async with self.lock:
+                    self._event_log.seek(position)
+                    line = self._event_log.readline()
+                    position = self._event_log.tell()
+                    is_done = self.done
+                if line:
+                    yield json.loads(line)
+                    continue
+                if is_done:
                     break
                 try:
-                    event = await asyncio.wait_for(q.get(), timeout=0.5)
-                    yield event
+                    await asyncio.wait_for(q.get(), timeout=0.5)
                 except asyncio.TimeoutError:
                     pass
-                async with self.lock:
-                    is_done = self.done
         finally:
             async with self.lock:
                 self.queues.discard(q)
+                if self._closed and not self.queues:
+                    self._event_log.close()
+
+    def close(self) -> None:
+        """Release the replay log after the last existing subscriber leaves."""
+        self._closed = True
+        if not self.queues:
+            self._event_log.close()
 
     def cancel(self) -> None:
         """Cancel the background task execution."""
@@ -184,8 +202,11 @@ class ChatStreamManager:
             if session is not None:
                 existing = self._sessions.get(thread_id)
                 if existing is not session:
+                    session.close()
                     return
-            self._sessions.pop(thread_id, None)
+            removed = self._sessions.pop(thread_id, None)
+            if removed is not None:
+                removed.close()
 
 
 def get_chat_stream_manager(container=None) -> ChatStreamManager:

@@ -873,8 +873,9 @@ export function ToolCallDetail(props: {
   threadId?: string | null;
 }) {
   const summary = createMemo(() => toolCallSummary(props.name, props.args));
+  const [visited, setVisited] = createSignal(props.defaultOpen ?? false);
   const shell = createMemo(() => isShellTool(props.name));
-  const shellResult = createMemo(() => shell() ? shellToolResult(props.result) : null);
+  const shellResult = createMemo(() => visited() && shell() ? shellToolResult(props.result) : null);
   const generatedImage = () =>
     props.name === GENERATE_IMAGE_TOOL_NAME
       ? generatedImageFromToolResult(props.result, props.threadId)
@@ -897,6 +898,7 @@ export function ToolCallDetail(props: {
     if (!details.open) {
       return;
     }
+    setVisited(true);
     details.dispatchEvent(
       new CustomEvent(CUSTOM_DOM_EVENTS.TRANSCRIPT_TOOL_TOGGLE, { bubbles: true }),
     );
@@ -915,36 +917,38 @@ export function ToolCallDetail(props: {
           <summary title={summary()}>
             <span class="mono tool-call-summary">{summary()}</span>
           </summary>
-          <div class="tool-call-body">
-            <Show when={shell()} fallback={<pre>{formatValue(props.args)}</pre>}>
-              <details class="tool-call-arguments">
-                <summary>Parameters</summary>
-                <pre>{formatValue(props.args)}</pre>
-              </details>
-            </Show>
-            <Show when={generatedImage()}>
-              {(image) => (
-                <a
-                  class="tool-generated-image"
-                  href={image().url}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  <img src={image().url} alt={image().filename} />
-                </a>
-              )}
-            </Show>
-            <Show when={shellResult()} fallback={
-              <pre>{props.result === null ? (props.name === "skill" ? "Preparing skill resources and runtimes in the workspace..." : "Waiting for tool result...") : formatValue(props.result)}</pre>
-            }>
-              {(result) => <>
-                <pre>{result().output}</pre>
-                <div class="tool-shell-outcome" classList={{ "is-error": result().failed, "is-running": result().running }} role="status">
-                  {result().outcome}
-                </div>
-              </>}
-            </Show>
-          </div>
+          <Show when={visited()}>
+            <div class="tool-call-body">
+              <Show when={shell()} fallback={<pre>{formatValue(props.args)}</pre>}>
+                <details class="tool-call-arguments">
+                  <summary>Parameters</summary>
+                  <pre>{formatValue(props.args)}</pre>
+                </details>
+              </Show>
+              <Show when={generatedImage()}>
+                {(image) => (
+                  <a
+                    class="tool-generated-image"
+                    href={image().url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <img src={image().url} alt={image().filename} />
+                  </a>
+                )}
+              </Show>
+              <Show when={shellResult()} fallback={
+                <pre>{props.result === null ? (props.name === "skill" ? "Preparing skill resources and runtimes in the workspace..." : "Waiting for tool result...") : formatValue(props.result)}</pre>
+              }>
+                {(result) => <>
+                  <pre>{result().output}</pre>
+                  <div class="tool-shell-outcome" classList={{ "is-error": result().failed, "is-running": result().running }} role="status">
+                    {result().outcome}
+                  </div>
+                </>}
+              </Show>
+            </div>
+          </Show>
         </details>
       }
     >
