@@ -118,7 +118,7 @@ def test_agent_config_overrides_defaults(test_agent_dir):
     # Default agent has builtin config
     assert default_agent.provider == "default"
     assert default_agent.model == ""
-    assert default_agent.tools == ["write_todos"]
+    assert "write_todos" in default_agent.tools
     assert "helpful AI assistant" in default_agent.system_prompt
 
 

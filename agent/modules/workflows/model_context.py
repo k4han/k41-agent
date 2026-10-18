@@ -21,11 +21,11 @@ from agent.modules.workflows.run_config import DEFAULT_CONTEXT_COMPACT_THRESHOLD
 from agent.modules.providers import DEFAULT_CONTEXT_WINDOW, model_input_budget, model_response_reserve
 from agent.shared.infrastructure.db.base import utcnow
 from agent.modules.usage import (
+    cache_read_tokens,
     estimate_response_breakdown,
     include_response_in_context,
     reconcile_context_breakdown,
 )
-from agent.modules.usage.cache import cache_read_tokens
 
 logger = logging.getLogger(__name__)
 

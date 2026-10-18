@@ -20,6 +20,7 @@ from agent.modules.usage.tracking import (
     extract_usage,
     with_usage_tracking,
 )
+from agent.modules.usage.cache import cache_read_tokens
 from agent.modules.usage.context_breakdown import (
     CONTEXT_CATEGORIES,
     estimate_compacted_context_breakdown,
@@ -33,6 +34,7 @@ __all__ = [
     "DEFAULT_USAGE_LIMIT",
     "ExtractedUsage",
     "CONTEXT_CATEGORIES",
+    "cache_read_tokens",
     "estimate_compacted_context_breakdown",
     "estimate_context_breakdown",
     "estimate_response_breakdown",
