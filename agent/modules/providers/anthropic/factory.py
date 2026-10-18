@@ -1,8 +1,8 @@
 """Factory for creating ChatAnthropic instances."""
 
-from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
 
+from agent.modules.providers.anthropic.chat_model import AnthropicChatModel
 from agent.modules.providers.models import ModelConfig
 from agent.modules.providers.provider import ProviderConfig
 
@@ -14,7 +14,7 @@ class AnthropicFactory:
         self, provider_config: ProviderConfig, model_config: ModelConfig, api_key: str
     ) -> BaseChatModel:
         _ = provider_config  # Anthropic client does not use provider base_url.
-        return ChatAnthropic(
+        return AnthropicChatModel(
             model_name=model_config.model_name,
             api_key=api_key,
             temperature=model_config.temperature,

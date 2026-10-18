@@ -95,6 +95,18 @@
   border-color: #18181b transparent transparent transparent;
 }
 
+/* Invisible hover bridge: keeps the wrapper hovered while the pointer travels
+   across the 12px gap between the trigger and the popover, otherwise the
+   popover would close before reaching the "Compact Conversation" button. */
+.context-window-popover::before {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  height: 14px;
+}
+
 /* Layout Popover */
 .cw-title {
   font-size: 0.8125rem;
@@ -152,28 +164,9 @@
   transition: width 200ms ease;
 }
 
-/* Legend */
-.cw-legend {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.75rem;
-  color: var(--fg-muted);
+/* Cache usage */
+.cw-cache-hit {
   margin-bottom: 16px;
-}
-
-.cw-legend-stripe {
-  width: 14px;
-  height: 14px;
-  border-radius: 3px;
-  background: repeating-linear-gradient(
-    -45deg,
-    #2563eb,
-    #2563eb 2px,
-    rgba(255, 255, 255, 0.18) 2px,
-    rgba(255, 255, 255, 0.18) 7px
-  );
-  flex-shrink: 0;
 }
 
 /* Sections */
@@ -236,8 +229,7 @@
   color: #a1a1aa;
 }
 
-.dark .cw-label,
-.dark .cw-legend {
+.dark .cw-label {
   color: #a1a1aa;
 }
 

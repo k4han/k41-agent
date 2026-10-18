@@ -14,6 +14,8 @@ export interface ContextWindowData {
   totalTokens: number;
   inputTokens: number;
   outputTokens: number;
+  cacheReadTokens: number | null;
+  formattedCacheHit: string;
   totalPercent: number;
   reservedPercent: number;
   categories: ContextWindowCategory[];
@@ -117,9 +119,9 @@ export function ContextWindowIndicator(props: ContextWindowIndicatorProps) {
           <div class="cw-progress-reserved" style={{ width: `${Math.min(100 - props.data.totalPercent, props.data.reservedPercent)}%` }} />
         </div>
 
-        <div class="cw-legend">
-          <div class="cw-legend-stripe" />
-          <span>Reserved for response</span>
+        <div class="cw-row cw-cache-hit" title="Cached input tokens reported by the provider for the last completed model call. The percentage is relative to input tokens; cached tokens are already included in context usage.">
+          <span class="cw-label">Cache hit</span>
+          <span class="cw-value">{props.data.formattedCacheHit}</span>
         </div>
 
         <div class="cw-section-title" title={props.data.estimated

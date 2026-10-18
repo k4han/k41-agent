@@ -225,6 +225,20 @@ def _usage_from_dict(usage: dict[str, Any]) -> ExtractedUsage:
 
     input_details = _usage_dict(usage.get("input_token_details")) or None
     output_details = _usage_dict(usage.get("output_token_details")) or None
+    if input_details is None:
+        raw_details = _usage_dict(usage.get("prompt_tokens_details") or usage.get("input_tokens_details"))
+        cached = raw_details.get("cached_tokens")
+        if cached is None:
+            cached = usage.get("prompt_cache_hit_tokens")
+        input_details = {key: value for key, value in (
+            ("cache_read", cached), ("cache_creation", raw_details.get("cache_write_tokens")),
+            ("audio", raw_details.get("audio_tokens")),
+        ) if type(value) is int and value >= 0} or None
+    if output_details is None:
+        raw_details = _usage_dict(usage.get("completion_tokens_details") or usage.get("output_tokens_details"))
+        output_details = {key: value for key, value in (
+            ("reasoning", raw_details.get("reasoning_tokens")), ("audio", raw_details.get("audio_tokens")),
+        ) if type(value) is int and value >= 0} or None
     normalized = {
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,

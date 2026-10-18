@@ -25,6 +25,7 @@ from agent.modules.usage import (
     include_response_in_context,
     reconcile_context_breakdown,
 )
+from agent.modules.usage.cache import cache_read_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,7 @@ def emit_reported_context_usage(
         "context_updated_at": utcnow().isoformat(),
         "input_tokens": tokens,
         "output_tokens": output_tokens,
+        "cache_read_tokens": cache_read_tokens(usage.get("input_token_details"), tokens),
         "context_window": getattr(resolved, "context_window", DEFAULT_CONTEXT_WINDOW),
         "reserved_tokens": model_response_reserve(resolved),
         "provider": resolved.provider_name,

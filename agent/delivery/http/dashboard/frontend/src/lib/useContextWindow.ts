@@ -138,6 +138,8 @@ export function useContextWindow(params: UseContextWindowParams) {
         model: data.latest_model,
         input_tokens: hasUsage ? data.latest_input_tokens : undefined,
         output_tokens: hasUsage ? outputTokens : undefined,
+        cache_read_tokens: hasUsage && isTokenCount(data.latest_cache_read_tokens)
+          ? data.latest_cache_read_tokens : undefined,
         context_breakdown: parseContextBreakdown(data.context_breakdown),
       };
       persistedStreams.get(threadId)?.reportedContextUsage[1](usage);
@@ -206,6 +208,9 @@ export function useContextWindow(params: UseContextWindowParams) {
       ? (reportedUsage ? reportedUsage.input_tokens ?? reportedUsage.current_context_tokens : usage?.latest_input_tokens ?? 0) : 0;
     const outputTokens = hasReportedUsage
       ? (reportedUsage ? reportedUsage.output_tokens ?? 0 : usage?.latest_output_tokens ?? 0) : 0;
+    const reportedCacheRead = reportedUsage ? reportedUsage.cache_read_tokens : usage?.latest_cache_read_tokens;
+    const cacheReadTokens = hasReportedUsage && isTokenCount(reportedCacheRead) && reportedCacheRead <= inputTokens
+      ? reportedCacheRead : null;
     const totalTokens = reportedTokens ?? estimatedTokens ?? 0;
 
     const totalPercent = maxTokens > 0 ? Math.min(100, (totalTokens / maxTokens) * 100) : 0;
@@ -252,6 +257,9 @@ export function useContextWindow(params: UseContextWindowParams) {
       totalTokens,
       inputTokens,
       outputTokens,
+      cacheReadTokens,
+      formattedCacheHit: cacheReadTokens === null ? "—"
+        : `${formatNumber(cacheReadTokens)} tokens (${(inputTokens > 0 ? cacheReadTokens / inputTokens * 100 : 0).toFixed(1)}%)`,
       totalPercent,
       reservedPercent,
       categories,

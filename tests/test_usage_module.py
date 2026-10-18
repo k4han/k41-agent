@@ -741,10 +741,11 @@ async def test_usage_repository_thread_current_context_includes_latest_external_
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("cache_read", [None, 0, 100, 124, -1])
 @pytest.mark.parametrize("tool_calls", [[], [{
     "name": "read", "args": {"path": "source.py"}, "id": "read-1",
 }]])
-async def test_first_response_context_matches_stream_after_reload(usage_db, monkeypatch, tool_calls):
+async def test_first_response_context_matches_stream_after_reload(usage_db, monkeypatch, tool_calls, cache_read):
     from uuid import uuid4
 
     from langchain_core.messages import HumanMessage, SystemMessage
@@ -766,6 +767,7 @@ async def test_first_response_context_matches_stream_after_reload(usage_db, monk
     )
     response = AIMessage(content="First answer", tool_calls=tool_calls, usage_metadata={
         "input_tokens": 123, "output_tokens": 80, "total_tokens": 203,
+        **({"input_token_details": {"cache_read": cache_read}} if cache_read is not None else {}),
     })
     config["callbacks"][-1].on_llm_end(
         LLMResult(generations=[[ChatGeneration(message=response)]]), run_id=uuid4(),
@@ -779,6 +781,9 @@ async def test_first_response_context_matches_stream_after_reload(usage_db, monk
     await repository.record(records[0])
     payload = await repository.aggregate_by_thread("first_response")
     assert payload["current_context_tokens"] == events[0]["current_context_tokens"] == 203
+    assert payload["latest_cache_read_tokens"] == events[0]["cache_read_tokens"] == (
+        cache_read if cache_read is not None and 0 <= cache_read <= 123 else None
+    )
     assert payload["context_breakdown"] == events[0]["context_breakdown"]
     assert payload["context_breakdown"]["agent_responses"] > 0
     assert (payload["context_breakdown"]["tool_calls"] > 0) == bool(tool_calls)
@@ -826,6 +831,26 @@ async def test_latest_call_without_usage_invalidates_previous_context_and_compac
     assert payload["reserved_tokens"] == 6000
     assert payload["total_tokens"] == 8100
     assert await repository.latest_context_breakdown("missing_usage") == breakdown
+
+
+@pytest.mark.asyncio
+async def test_reloaded_cache_usage_uses_latest_call_and_all_service_tiers(usage_db):
+    repository = LLMUsageRepository()
+    now = datetime.now(timezone.utc)
+    cases = [({"cache_read": 600}, 600), ({"priority_cache_read": 800}, 800),
+             ({"flex_cache_read": 900}, 900), ({"cache_read": 0, "cache_creation": 1000}, 0),
+             ({"cache_creation": 1000}, None), (None, None)]
+    for index, (details, expected) in enumerate(cases):
+        await repository.record(UsageEventInput(
+            thread_id="cache_thread", root_thread_id="cache_thread", platform="dashboard",
+            user_id="admin", channel_id="admin", agent_name="default", provider_name="test",
+            model_name="test-model", call_kind="agent", internal=False, has_usage_metadata=True,
+            input_tokens=1000, output_tokens=40, total_tokens=1040, input_token_details=details,
+            created_at=now + timedelta(seconds=index),
+        ))
+        payload = await repository.aggregate_by_thread("cache_thread")
+        assert payload["latest_cache_read_tokens"] == expected
+        assert payload["current_context_tokens"] == 1040
 
 
 @pytest.mark.asyncio

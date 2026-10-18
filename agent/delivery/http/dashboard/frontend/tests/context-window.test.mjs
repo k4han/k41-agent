@@ -76,6 +76,69 @@ function createFixture(t, { streaming = true, payload, provider = '', model = ''
 }
 
 const flushAsync = () => new Promise((resolve) => setImmediate(resolve));
+
+test('cache hits are a share of input tokens and do not add to context usage', (t) => {
+  const { control, dispatch } = createFixture(t);
+  dispatch(8500, 32000, 'thread-a', false, undefined, {
+    input_tokens: 8000, output_tokens: 500, cache_read_tokens: 6000,
+  });
+  assert.equal(control.contextWindowData().cacheReadTokens, 6000);
+  assert.equal(control.contextWindowData().formattedCacheHit, '6.00K tokens (75.0%)');
+  assert.equal(control.contextWindowData().totalTokens, 8500);
+  assert.equal(control.contextWindowData().totalPercent, 8500 / 32000 * 100);
+  dispatch(1000);
+  assert.equal(control.contextWindowData().formattedCacheHit, '—');
+});
+
+test('cache hits distinguish reported zero from missing or invalid usage', (t) => {
+  const { control, dispatch } = createFixture(t);
+  assert.equal(control.contextWindowData().formattedCacheHit, '—');
+  for (const value of [undefined, null, -1, NaN, Infinity, '100', 1.5, 1001]) {
+    dispatch(1100, 32000, 'thread-a', false, undefined, {
+      input_tokens: 1000, output_tokens: 100, cache_read_tokens: value,
+    });
+    assert.equal(control.contextWindowData().cacheReadTokens, null);
+    assert.equal(control.contextWindowData().formattedCacheHit, '—');
+  }
+  dispatch(1100, 32000, 'thread-a', false, undefined, {
+    input_tokens: 1000, output_tokens: 100, cache_read_tokens: 0,
+  });
+  assert.equal(control.contextWindowData().formattedCacheHit, '0 tokens (0.0%)');
+  dispatch(0, 32000, 'thread-a', false, undefined, { input_tokens: 0, cache_read_tokens: 0 });
+  assert.equal(control.contextWindowData().formattedCacheHit, '0 tokens (0.0%)');
+  dispatch(0, 32000, 'thread-a', false, undefined, { has_context_usage: false, cache_read_tokens: 0 });
+  assert.equal(control.contextWindowData().formattedCacheHit, '—');
+});
+
+test('cache hits follow the conversation and are cleared by compaction', (t) => {
+  const { control, dispatch, setThreadId, store } = createFixture(t);
+  store.getOrCreateStreamSignals('thread-b');
+  dispatch(8000, 32000, 'thread-a', false, undefined, { cache_read_tokens: 6000 });
+  dispatch(2000, 32000, 'thread-b', false, undefined, { cache_read_tokens: 1000 });
+  assert.equal(control.contextWindowData().formattedCacheHit, '6.00K tokens (75.0%)');
+  setThreadId('thread-b');
+  assert.equal(control.contextWindowData().formattedCacheHit, '1.00K tokens (50.0%)');
+  control.updateCompactedContextUsage(500, 'thread-b');
+  assert.equal(control.contextWindowData().formattedCacheHit, '—');
+});
+
+test('cache hits survive reloading and replacement by a newer stored snapshot', async (t) => {
+  const { control, dispatch, requests, setStreaming } = createFixture(t, { streaming: false });
+  requests[0].resolve({ thread_id: 'thread-a', has_context_usage: true,
+    latest_input_tokens: 8000, latest_output_tokens: 500, latest_cache_read_tokens: 6000 });
+  await flushAsync();
+  assert.equal(control.contextWindowData().formattedCacheHit, '6.00K tokens (75.0%)');
+  setStreaming(true);
+  dispatch(8500, 32000, 'thread-a', false, undefined, {
+    input_tokens: 8000, output_tokens: 500, cache_read_tokens: 6000, context_updated_at: before,
+  });
+  setStreaming(false);
+  requests[1].resolve({ thread_id: 'thread-a', has_context_usage: true, context_updated_at: after,
+    latest_input_tokens: 10000, latest_output_tokens: 500, latest_cache_read_tokens: 8000 });
+  await flushAsync();
+  assert.equal(control.contextWindowData().formattedCacheHit, '8.00K tokens (80.0%)');
+});
+
 const compactedBreakdown = {
   system_prompt: 600, system_tools: 400, skills: 200, subagents: 100,
   user_messages: 300, agent_responses: 300, tool_calls: 100,

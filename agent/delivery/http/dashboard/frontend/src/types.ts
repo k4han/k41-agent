@@ -834,6 +834,7 @@ export interface ThreadUsagePayload {
   has_context_usage?: boolean;
   context_breakdown?: ContextBreakdown | null;
   latest_input_tokens?: number;
+  latest_cache_read_tokens?: number | null;
   latest_output_tokens?: number;
   latest_total_tokens?: number;
   latest_model?: string;

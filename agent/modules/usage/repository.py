@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import case, delete, distinct, func, select
 
 from agent.modules.usage.models import LLMUsageEvent
+from agent.modules.usage.cache import cache_read_tokens
 from agent.modules.usage.context_breakdown import CONTEXT_CATEGORIES, include_response_in_context
 from agent.shared.infrastructure.db.session import get_async_session
 from agent.shared.timezone import ensure_aware_utc
@@ -370,6 +371,7 @@ class LLMUsageRepository:
         )
         latest_input_tokens = latest_event.input_tokens if has_context_usage else 0
         latest_output_tokens = max(0, int(latest_event.output_tokens or 0)) if has_context_usage else 0
+        input_details = _json_dict(latest_event.input_token_details_json) if has_context_usage else {}
         context_breakdown = compacted_breakdown if context_estimated else (
             include_response_in_context(input_breakdown, latest_output_tokens, output_breakdown)
             if input_breakdown is not None else None
@@ -386,6 +388,7 @@ class LLMUsageRepository:
             "context_window": capacity_metadata.get("context_window"),
             "reserved_tokens": capacity_metadata.get("reserved_tokens"),
             "latest_input_tokens": latest_input_tokens,
+            "latest_cache_read_tokens": cache_read_tokens(input_details, latest_input_tokens),
             "has_context_usage": bool(has_context_usage),
             "context_breakdown": context_breakdown,
             "latest_output_tokens": latest_output_tokens,

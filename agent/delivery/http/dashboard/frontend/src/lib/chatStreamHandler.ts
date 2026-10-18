@@ -142,6 +142,8 @@ export function handleStreamEvent(
         && event.input_tokens >= 0 ? event.input_tokens : undefined,
       output_tokens: typeof event.output_tokens === "number" && Number.isSafeInteger(event.output_tokens)
         && event.output_tokens >= 0 ? event.output_tokens : undefined,
+      cache_read_tokens: typeof event.cache_read_tokens === "number" && Number.isSafeInteger(event.cache_read_tokens)
+        && event.cache_read_tokens >= 0 ? event.cache_read_tokens : undefined,
       context_breakdown: parseContextBreakdown(event.context_breakdown),
     }, streamThreadIdRef.id);
     return;

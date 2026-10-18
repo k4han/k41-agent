@@ -25,7 +25,7 @@ def usage(prompt=3371, completion=40, cached=3328):
     }
 
 
-def stream_body(snapshots, *, tool_call=False):
+def stream_body(snapshots, *, tool_call=False, service_tier=None):
     chunks = [
         {"choices": [{"index": 0, "delta": {"role": "assistant", "content": "OK"}, "finish_reason": None}]},
     ]
@@ -45,6 +45,7 @@ def stream_body(snapshots, *, tool_call=False):
     frames = ["data: " + json.dumps({
         "id": "test-completion", "object": "chat.completion.chunk", "created": 1,
         "model": "oc/deepseek-v4.1-flash-free", **chunk,
+        **({"service_tier": service_tier} if service_tier else {}),
     }) + "\n\n" for chunk in chunks]
     return "".join(frames) + "data: [DONE]\n\n"
 
@@ -53,7 +54,7 @@ def stream_body(snapshots, *, tool_call=False):
 def gateway_model():
     models = []
 
-    def create(snapshots, *, tool_call=False):
+    def create(snapshots, *, tool_call=False, service_tier=None):
         requests = []
 
         def handle(request):
@@ -63,11 +64,12 @@ def gateway_model():
                 return httpx.Response(200, json={
                     "id": "test-completion", "object": "chat.completion", "created": 1,
                     "model": "test-model", "usage": snapshots[-1],
+                    **({"service_tier": service_tier} if service_tier else {}),
                     "choices": [{"index": 0, "message": {"role": "assistant", "content": "OK"},
                         "finish_reason": "stop"}],
                 })
             return httpx.Response(200, headers={"content-type": "text/event-stream"},
-                text=stream_body(snapshots, tool_call=tool_call))
+                text=stream_body(snapshots, tool_call=tool_call, service_tier=service_tier))
 
         transport = httpx.MockTransport(handle)
         provider = ProviderConfig(name="gateway", provider_type=ProviderType.OPENAI_COMPATIBLE,
@@ -88,6 +90,40 @@ def gateway_model():
 
 
 MESSAGES = [SystemMessage(content="Reply OK"), HumanMessage(content="Check usage")]
+
+
+@pytest.mark.parametrize("service_tier", [None, "priority", "flex"])
+@pytest.mark.parametrize("mode", ["invoke", "stream", "ainvoke", "astream"])
+@pytest.mark.parametrize("cache_fields, expected", [
+    ({"prompt_tokens_details": {"cached_tokens": 3000, "cache_write_tokens": 100}}, 3000),
+    ({"prompt_cache_hit_tokens": 3000, "prompt_cache_miss_tokens": 371}, 3000),
+    ({"prompt_tokens_details": {"cached_tokens": 0}, "prompt_cache_hit_tokens": 3000}, 0),
+    ({"prompt_tokens_details": {"cache_write_tokens": 3000}}, None),
+])
+@pytest.mark.asyncio
+async def test_cache_usage_survives_endpoint_aliases_and_service_tiers(
+    gateway_model, monkeypatch, service_tier, mode, cache_fields, expected,
+):
+    snapshot = {**usage(), **cache_fields}
+    if "prompt_tokens_details" not in cache_fields:
+        snapshot.pop("prompt_tokens_details")
+    model, _ = gateway_model([snapshot, snapshot], service_tier=service_tier)
+    if mode == "invoke":
+        response = model.invoke(MESSAGES)
+    elif mode == "ainvoke":
+        response = await model.ainvoke(MESSAGES)
+    else:
+        chunks = list(model.stream(MESSAGES)) if mode == "stream" else [
+            chunk async for chunk in model.astream(MESSAGES)
+        ]
+        response = reduce(lambda left, right: left + right, chunks)
+    events = []
+    monkeypatch.setattr(model_context, "get_stream_writer", lambda: events.append)
+    model_context.emit_reported_context_usage(response, resolved=SimpleNamespace(
+        provider_name="gateway", model_name=model.model_name), config={})
+    assert events[0]["cache_read_tokens"] == expected
+    assert events[0]["input_tokens"] == 3371
+    assert events[0]["current_context_tokens"] == 3411
 
 
 @pytest.mark.asyncio
@@ -114,6 +150,7 @@ async def test_async_stream_uses_the_final_usage_snapshot(gateway_model, snapsho
     assert response.usage_metadata["input_token_details"]["cache_read"] == 3328
     assert response.usage_metadata["output_token_details"]["reasoning"] == 10
     assert events[0]["current_context_tokens"] == 3411
+    assert events[0]["cache_read_tokens"] == records[0].input_token_details["cache_read"] == 3328
     assert requests[0]["stream_options"]["include_usage"] is True
 
 
@@ -123,6 +160,19 @@ def test_sync_stream_uses_the_final_usage_snapshot(gateway_model):
     assert response.content == "OK"
     assert response.usage_metadata["input_tokens"] == 3371
     assert response.usage_metadata["total_tokens"] == 3411
+
+
+def test_final_snapshot_without_cache_details_does_not_reuse_an_earlier_hit(gateway_model, monkeypatch):
+    final_usage = usage()
+    final_usage.pop("prompt_tokens_details")
+    model, _ = gateway_model([usage(), final_usage])
+    response = reduce(lambda left, right: left + right, model.stream(MESSAGES))
+    events = []
+    monkeypatch.setattr(model_context, "get_stream_writer", lambda: events.append)
+    model_context.emit_reported_context_usage(response, resolved=SimpleNamespace(
+        provider_name="gateway", model_name=model.model_name), config={})
+    assert events[0]["input_tokens"] == 3371
+    assert events[0]["cache_read_tokens"] is None
 
 
 @pytest.mark.asyncio

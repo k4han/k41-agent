@@ -64,6 +64,7 @@ export interface ContextUsage {
   model?: string;
   estimated?: boolean;
   input_tokens?: number;
+  cache_read_tokens?: number;
   output_tokens?: number;
   context_breakdown?: ContextBreakdown;
 }
