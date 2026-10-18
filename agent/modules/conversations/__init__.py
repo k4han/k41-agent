@@ -1,4 +1,4 @@
-from agent.modules.conversations.models import ConversationThread
+from agent.modules.conversations.models import ConversationRunError, ConversationThread
 from agent.modules.conversations.migrations import migrate_conversation_ids, migrate_conversation_tables
 from agent.modules.conversations import history
 from agent.modules.conversations.history import (
@@ -8,6 +8,8 @@ from agent.modules.conversations.history import (
     get_checkpoint_stats,
     get_thread_messages,
     get_thread_messages_payload,
+    get_thread_resume_error,
+    record_thread_run_error,
     list_background_threads_with_stats,
     list_user_threads_with_stats,
 )
@@ -61,6 +63,7 @@ __all__ = [
     "CheckpointNotFoundError",
     "ConversationHistoryUnavailableError",
     "ConversationThread",
+    "ConversationRunError",
     "checkpoint_messages",
     "get_history_checkpointer",
     "ConversationThreadRepository",
@@ -84,6 +87,8 @@ __all__ = [
     "get_default_keep_recent_messages",
     "get_thread_messages",
     "get_thread_messages_payload",
+    "get_thread_resume_error",
+    "record_thread_run_error",
     "has_pending_interrupt",
     "infer_thread_kind",
     "inject_agent_message_pair",

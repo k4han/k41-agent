@@ -5,7 +5,7 @@ import { TranscriptActivityGroup } from "@/components/TranscriptActivityGroup";
 import { StatusIndicator } from "@/components/StatusIndicator";
 import { TranscriptItemView, type TranscriptAttachment, type TranscriptRole } from "@/components/Transcript";
 import type { ChatTranscriptItem } from "@/lib/chatStreamStore";
-import { findTranscriptAnswerId, isTranscriptWaitingForModel } from "@/lib/transcriptActivity";
+import { findTranscriptAnswerId, findTranscriptResumeId, isTranscriptWaitingForModel } from "@/lib/transcriptActivity";
 import { THINKING_TEXT } from "@/lib/chatStatus";
 import { useStreamingTranscriptItem } from "@/lib/useStreamingTranscriptItem";
 import { useTranscriptActivityView } from "@/lib/useTranscriptActivityView";
@@ -45,6 +45,7 @@ export interface ChatTranscriptProps {
   agents: AgentCard[];
   activeAgentName: string;
   onSelectPrompt?: (promptText: string) => void;
+  onResume?: () => void;
   onEditMessage: (payload: {
     itemId?: number;
     messageIndex: number;
@@ -83,6 +84,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
     streamActive,
   );
   const answerItemId = createMemo(() => findTranscriptAnswerId(props.filteredItems));
+  const resumeItemId = createMemo(() => findTranscriptResumeId(props.items));
   const waitingForModel = createMemo(() => !props.compacting
     && isTranscriptWaitingForModel(props.items, streamActive()));
   // Answer actions stay hidden while the agent runs and then belong only to
@@ -180,9 +182,10 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                       deferMermaid={isStreamingItem(row().id)}
                       deferHighlight={isStreamingItem(row().id)}
                       showAssistantActions={showAssistantActions(row().id)}
+                      onResume={props.currentThreadId && resumeItemId() === row().id ? props.onResume : undefined}
                       agents={props.agents}
                       activeAgentName={props.activeAgentName}
-                      actionsDisabled={props.conversationBusy}
+                      actionsDisabled={props.conversationBusy || props.compacting || props.threadLoading}
                       threadId={props.currentThreadId}
                       onEditMessage={props.onEditMessage}
                       onRegenerateMessage={props.onRegenerateMessage}

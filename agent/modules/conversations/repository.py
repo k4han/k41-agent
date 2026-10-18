@@ -7,7 +7,7 @@ from agent.shared.thread_ids import resolve_thread_id
 
 from sqlalchemy import func, select, update
 
-from agent.modules.conversations.models import ConversationThread
+from agent.modules.conversations.models import ConversationRunError, ConversationThread
 from agent.shared.infrastructure.db.base import utcnow
 from agent.shared.infrastructure.db.session import get_async_session
 
@@ -53,6 +53,34 @@ def _normalize_kind_filters(
 
 
 class ConversationThreadRepository:
+    async def record_run_error(
+        self, *, thread_id: str, checkpoint_id: str, code: str, content: str, message: str = "",
+    ) -> None:
+        session = await get_async_session()
+        async with session:
+            session.add(ConversationRunError(
+                thread_id=resolve_thread_id(thread_id), checkpoint_id=checkpoint_id,
+                code=code, content=content, message=message,
+            ))
+            await session.commit()
+
+    async def get_run_error(self, thread_id: str, checkpoint_id: str) -> dict[str, str] | None:
+        session = await get_async_session()
+        async with session:
+            result = await session.execute(
+                select(ConversationRunError).where(
+                    ConversationRunError.thread_id == resolve_thread_id(thread_id),
+                    ConversationRunError.checkpoint_id == checkpoint_id,
+                ).order_by(ConversationRunError.id.desc()).limit(1)
+            )
+            error = result.scalar_one_or_none()
+            if error is None:
+                return None
+            return {
+                "checkpoint_id": error.checkpoint_id, "code": error.code,
+                "content": error.content, "message": error.message,
+            }
+
     async def upsert(
         self,
         *,

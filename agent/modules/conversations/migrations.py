@@ -27,6 +27,9 @@ def migrate_conversation_tables(database_url: str) -> None:
     try:
         with engine.begin() as conn:
             inspector = inspect(conn)
+            if "conversation_run_errors" in inspector.get_table_names():
+                if "message" not in _column_names(inspector, "conversation_run_errors"):
+                    conn.execute(text("ALTER TABLE conversation_run_errors ADD COLUMN message TEXT NOT NULL DEFAULT ''"))
             if "conversation_threads" not in inspector.get_table_names():
                 return
             existing = _column_names(inspector, "conversation_threads")
@@ -101,7 +104,7 @@ def migrate_conversation_ids(database_url: str) -> dict[str, str]:
             tables = [
                 Table(name, metadata, autoload_with=conn)
                 for name in (
-                    "conversation_threads", "thread_workspaces", "background_tasks",
+                    "conversation_threads", "conversation_run_errors", "thread_workspaces", "background_tasks",
                     "llm_usage_events", "checkpoints", "writes", "checkpoint_writes",
                     "checkpoint_blobs",
                 )

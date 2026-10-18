@@ -293,7 +293,7 @@ export function handleStreamEvent(
   }
 
   if (event.type === STREAM_EVENTS.ERROR) {
-    const errorMessage = String(event.content || event.message || "Chat failed");
+    const errorMessage = String(event.message || event.content || "Chat failed");
     const errorCode = typeof event.code === "string" ? event.code : undefined;
     if (assistantIdRef.id !== null && !streamedRef.received) {
       callbacks.removeItem?.(assistantIdRef.id, streamThreadIdRef.id);
@@ -304,6 +304,7 @@ export function handleStreamEvent(
         type: "message",
         role: "error",
         text: errorMessage,
+        resumable: true,
       },
       "bottom",
       streamThreadIdRef.id,

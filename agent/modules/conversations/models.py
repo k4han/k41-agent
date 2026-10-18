@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, String, UniqueConstraint
+from sqlalchemy import Column, DateTime, Index, String, Text, UniqueConstraint
 
 from agent.shared.infrastructure.db import BaseModel, utcnow
 
@@ -37,4 +37,19 @@ class ConversationThreadAlias(BaseModel):
     canonical_id = Column(String(512), nullable=False, unique=True)
 
 
-__all__ = ["ConversationThread", "ConversationThreadAlias"]
+class ConversationRunError(BaseModel):
+    __tablename__ = "conversation_run_errors"
+
+    thread_id = Column(String(512), nullable=False)
+    checkpoint_id = Column(String(255), nullable=False)
+    code = Column(String(64), nullable=False, default="unknown")
+    content = Column(Text, nullable=False)
+    message = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_conversation_run_errors_thread_checkpoint", "thread_id", "checkpoint_id"),
+    )
+
+
+__all__ = ["ConversationThread", "ConversationThreadAlias", "ConversationRunError"]

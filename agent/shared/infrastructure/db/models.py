@@ -8,7 +8,7 @@ def load_orm_models() -> tuple[type[object], ...]:
     from agent.modules.admin_auth import AdminCredential
     from agent.modules.agent_runtime import BackgroundTaskRecord
     from agent.modules.channels import BotSettings
-    from agent.modules.conversations import ConversationThread
+    from agent.modules.conversations import ConversationRunError, ConversationThread
     from agent.modules.github import (
         GitHubInstallation,
         GitHubIssueTaskClaim,
@@ -32,6 +32,7 @@ def load_orm_models() -> tuple[type[object], ...]:
         AdminCredential,
         BackgroundTaskRecord,
         ConversationThread,
+        ConversationRunError,
         User,
         BotSettings,
         UserPreferences,

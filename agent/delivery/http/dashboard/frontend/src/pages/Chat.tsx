@@ -578,7 +578,11 @@ export function ChatPage() {
     }
   };
 
-  const applyThreadPayload = (payload: ThreadMessagesPayload) => batch(() => {
+  const applyThreadPayload = (payload: ThreadMessagesPayload, preserveStreamError = false) => batch(() => {
+    const lastItem = preserveStreamError ? items().at(-1) : undefined;
+    const streamErrors = lastItem?.type === "message" && lastItem.role === "error"
+      ? [lastItem]
+      : [];
     scroll.clearTurnAnchor();
     setThreadData(payload);
     setThreadTitleOverride(payload.title || "");
@@ -586,16 +590,24 @@ export function ChatPage() {
     setActiveCheckpointId(payload.active_checkpoint_id || "");
     setWorkspace(workspaceExecution(payload.workspace) || null);
     if (!persistedStreams.has(payload.thread_id)) {
-      setItems(
-        [...toThreadTranscript(payload.messages, payload.thread_id), ...(payload.pending_requests || []).map((value) => {
+      const historyItems = [
+        ...toThreadTranscript(payload.messages, payload.thread_id),
+        ...(payload.pending_requests || []).map((value) => {
           const request = normalizeUserInputRequest(value);
           return createTranscriptUserInputRequest({ toolCallId: request.tool_call_id, interruptId: request.interrupt_id,
             title: request.title, questions: request.questions, submitLabel: request.submit_label });
-        })].map((item) => ({
-          ...item,
-          id: allocItemId(),
-        })),
-      );
+        }),
+      ].map((item) => ({ ...item, id: allocItemId() }));
+      // Restore continuation from the saved graph state on every thread load.
+      // Keep a local transport error only when there is no checkpoint error.
+      const savedErrors = payload.resume_error ? [{
+        id: allocItemId(),
+        type: "message" as const,
+        role: "error" as const,
+        text: payload.resume_error.message || payload.resume_error.content,
+        resumable: true,
+      }] : streamErrors;
+      setItems([...historyItems, ...savedErrors]);
     }
     scroll.setAutoScroll(true);
     scroll.scrollToBottom(true);
@@ -779,7 +791,7 @@ export function ChatPage() {
         threadApiPath(threadId, checkpointId),
       );
       if (payload.thread_id === currentThreadId()) {
-        applyThreadPayload(payload);
+        applyThreadPayload(payload, true);
       }
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to refresh thread", "error");
@@ -1161,6 +1173,7 @@ export function ChatPage() {
           type: "message",
           role: "error",
           text: err instanceof Error ? err.message : "Chat failed",
+          resumable: resume,
         }, "bottom", streamThreadIdRef.id);
       }
     } finally {
@@ -1329,6 +1342,9 @@ export function ChatPage() {
     }
   };
   const handleResume = () => {
+    if (!currentThreadId() || conversationBusy() || compacting()) {
+      return;
+    }
     void sendMessage(true);
   };
   const handlePasteAsAttachment = (text: string) => {
@@ -1933,6 +1949,7 @@ export function ChatPage() {
                 agents={validCards()}
                 activeAgentName={agentName()}
                 onSelectPrompt={handleSelectPrompt}
+                onResume={handleResume}
                 onEditMessage={(payload) => void handleEditMessage(payload)}
                 onRegenerateMessage={handleRegenerateMessage}
                 onBranchSelect={handleBranchSelect}

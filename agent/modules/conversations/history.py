@@ -17,6 +17,7 @@ from agent.modules.conversations.service import (
     parse_thread_metadata,
 )
 from agent.shared.infrastructure.parsing import extract_final_text_content, extract_tool_display_content
+from agent.shared.infrastructure.errors import friendly_agent_error_message
 from agent.shared.thread_ids import resolve_thread_id
 
 logger = logging.getLogger(__name__)
@@ -646,3 +647,78 @@ async def get_thread_messages(thread_id: str) -> list[dict[str, Any]]:
     thread_id = resolve_thread_id(thread_id)
     messages, _ = await get_thread_messages_payload(thread_id)
     return messages
+
+
+async def get_thread_resume_error(
+    thread_id: str,
+    *,
+    agent_name: str = "default",
+    checkpoint_id: str | None = None,
+) -> dict[str, str] | None:
+    """Restore the original error for an unfinished latest checkpoint."""
+    from agent.modules.agent_runtime import get_active_session_registry
+    from agent.modules.agents import get_catalog_service
+    from agent.modules.workflows import get_workflow_graph, make_run_config
+
+    thread_id = resolve_thread_id(thread_id)
+    if any(session["thread_id"] == thread_id for session in get_active_session_registry().list_active()):
+        return None
+    try:
+        agent = get_catalog_service().get_agent(agent_name)
+        if agent is None:
+            return None
+        graph = get_workflow_graph(agent.graph_type)
+        state = await graph.aget_state(make_run_config(thread_id=thread_id))
+        latest_checkpoint_id = str(_checkpoint_configurable(state.config).get("checkpoint_id") or "")
+        # Continuation uses the latest checkpoint, so historical branches must
+        # not offer an action that would resume a different branch.
+        if checkpoint_id and checkpoint_id != latest_checkpoint_id:
+            return None
+        if not state.next or not state.values.get("messages"):
+            return None
+        if getattr(state, "interrupts", ()) or any(task.interrupts for task in state.tasks):
+            return None
+        task_errors = [str(task.error) for task in state.tasks if task.error]
+    except Exception as exc:
+        logger.debug("Failed to read continuation state for thread %s: %s", thread_id, exc)
+        return None
+    from agent.modules.conversations.repository import get_conversation_thread_repository
+
+    try:
+        saved_error = await get_conversation_thread_repository().get_run_error(thread_id, latest_checkpoint_id)
+        if saved_error is not None:
+            return {**saved_error, "message": friendly_agent_error_message(
+                saved_error.get("message") or saved_error["content"], code=saved_error["code"],
+            )}
+    except Exception as exc:
+        logger.debug("Failed to load saved error for thread %s: %s", thread_id, exc)
+    code = "execution_failed" if task_errors else "execution_incomplete"
+    content = "\n\n".join(task_errors) if task_errors else "The previous response stopped before finishing. Continue from the last saved step."
+    return {
+        "checkpoint_id": latest_checkpoint_id,
+        "code": code,
+        "content": content,
+        "message": friendly_agent_error_message(content, code=code),
+    }
+
+
+async def record_thread_run_error(thread_id: str, event: dict[str, Any]) -> None:
+    """Persist the displayed stream error against its failed checkpoint."""
+    from agent.modules.conversations.repository import get_conversation_thread_repository
+
+    thread_id = resolve_thread_id(thread_id)
+    checkpoint = await get_history_checkpointer().aget_tuple({
+        "configurable": {"thread_id": thread_id, "checkpoint_ns": ""},
+    })
+    if checkpoint is None:
+        return
+    checkpoint_id = _checkpoint_id_from_tuple(checkpoint)
+    if not checkpoint_id:
+        return
+    await get_conversation_thread_repository().record_run_error(
+        thread_id=thread_id,
+        checkpoint_id=checkpoint_id,
+        code=str(event.get("code") or "unknown"),
+        content=str(event.get("content") or event.get("message") or "Chat failed"),
+        message=friendly_agent_error_message(event.get("message") or event.get("content"), code=str(event.get("code") or "unknown")),
+    )

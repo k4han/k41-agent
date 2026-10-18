@@ -1575,6 +1575,13 @@ def test_dashboard_chat_thread_messages_include_agent_and_model_metadata(
         assert include_default is False
         return None
 
+    async def fake_get_thread_resume_error(thread_id: str, *, agent_name: str, checkpoint_id: str):
+        assert thread_id == "api_dashboard_123"
+        assert agent_name == "reviewer"
+        assert checkpoint_id == "checkpoint-1"
+        return {"checkpoint_id": checkpoint_id, "code": "execution_failed", "content": "Response failed."}
+
+    _patch_dashboard_attr(monkeypatch, "get_thread_resume_error", fake_get_thread_resume_error)
     _patch_dashboard_attr(
         monkeypatch,
         "get_thread_messages_payload",
@@ -1600,6 +1607,9 @@ def test_dashboard_chat_thread_messages_include_agent_and_model_metadata(
     assert payload["provider"] == "anthropic-main"
     assert payload["model"] == "claude-sonnet"
     assert payload["active_checkpoint_id"] == "checkpoint-1"
+    assert payload["resume_error"] == {
+        "checkpoint_id": "checkpoint-1", "code": "execution_failed", "content": "Response failed.",
+    }
 
 
 def test_dashboard_api_renames_chat_thread(monkeypatch: pytest.MonkeyPatch) -> None:

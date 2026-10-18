@@ -83,6 +83,20 @@ export function findTranscriptAnswerId<T extends TranscriptActivitySource>(
   return null;
 }
 
+/** Only the failed run at the end of the transcript can resume its checkpoint. */
+export function findTranscriptResumeId<T extends TranscriptActivitySource>(
+  items: readonly T[],
+): number | null {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (isEmptyAssistantMessage(item)) continue;
+    return item.type === "message" && item.role === "error" && item.resumable
+      ? item.id
+      : null;
+  }
+  return null;
+}
+
 /**
  * Split a flat transcript into visible rows and collapsible tool groups.
  *

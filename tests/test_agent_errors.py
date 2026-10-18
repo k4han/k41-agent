@@ -1,3 +1,5 @@
+import pytest
+
 from agent.shared.infrastructure.errors import (
     ERROR_CODE_AUTH,
     ERROR_CODE_CONNECTION,
@@ -6,6 +8,7 @@ from agent.shared.infrastructure.errors import (
     ERROR_CODE_UNKNOWN,
     ERROR_CODE_UPSTREAM,
     classify_agent_error,
+    friendly_agent_error_message,
 )
 
 
@@ -89,3 +92,18 @@ def test_classify_unknown_has_message() -> None:
     result = classify_agent_error(ValueError("boom"))
     assert result.code == ERROR_CODE_UNKNOWN
     assert result.message
+
+
+@pytest.mark.parametrize(("raw", "code", "expected"), [
+    ("The request failed.\nRequest ID: raw-diagnostic", "unknown", "The request failed."),
+    ('{"error":{"message":"The selected model is unavailable.","type":"invalid_request"}}', "unknown", "The selected model is unavailable."),
+    ("Error code: 400 - {'error': {'message': 'Please choose another model.', 'code': 'model_missing'}}", "unknown", "Please choose another model."),
+    ('''BadRequestError("Error code: 400 - {'error': {'message': 'The model cannot read images.'}}")''', "execution_failed", "The model cannot read images."),
+    ("TimeoutError('raw provider request ID')", "execution_failed", "The AI provider took too long to respond. Please try again."),
+    ("ValueError('The selected model is unavailable.')", "execution_failed", "The selected model is unavailable."),
+    ("RuntimeError()", "unknown", "Something went wrong while generating a response. Please try again."),
+    ("Traceback (most recent call last):\n  File 'internal.py', line 12", "upstream", "The AI provider returned an error. Please try again shortly."),
+    ("Recursion limit reached.\nFor troubleshooting, visit internal docs.", "recursion_limit_reached", "The agent reached its step limit. Continue to keep working on this task."),
+])
+def test_friendly_error_message_omits_raw_diagnostics(raw, code, expected):
+    assert friendly_agent_error_message(raw, code=code) == expected

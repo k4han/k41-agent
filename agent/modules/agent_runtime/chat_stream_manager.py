@@ -16,6 +16,7 @@ from langgraph.errors import GraphRecursionError
 
 from agent.shared.infrastructure.errors import (
     classify_agent_error,
+    friendly_agent_error_message,
     find_exception as _find_exception,
 )
 
@@ -43,6 +44,7 @@ class ChatStreamSession:
         self.task: asyncio.Task[None] | None = None
         self.lock = asyncio.Lock()
         self.done = False
+        self._superseded = False
 
     def start(self) -> None:
         """Start the agent stream execution in a background task."""
@@ -60,16 +62,19 @@ class ChatStreamSession:
         logger.info("Starting background chat stream task for thread %s", self.thread_id)
         try:
             async for event in run_fn(**self.params):
-                await self.push_event(event)
+                if event.get("type") == "error":
+                    await self._push_error_event(event)
+                else:
+                    await self.push_event(event)
         except asyncio.CancelledError:
             logger.info("Background chat stream task cancelled for thread %s", self.thread_id)
-            await self.push_event({"type": "error", "content": "Chat execution stopped."})
+            await self._push_error_event({"type": "error", "content": "Chat execution stopped."})
             raise
         except BaseException as exc:
             recursion_exc = _find_exception(exc, GraphRecursionError)
             if recursion_exc is not None:
                 logger.warning("Recursion limit reached for thread %s", self.thread_id)
-                await self.push_event({
+                await self._push_error_event({
                     "type": "error",
                     "code": "recursion_limit_reached",
                     "content": str(recursion_exc),
@@ -79,7 +84,7 @@ class ChatStreamSession:
                     "Error running background agent stream for thread %s", self.thread_id
                 )
                 agent_error = classify_agent_error(exc)
-                await self.push_event({
+                await self._push_error_event({
                     "type": "error",
                     "code": agent_error.code,
                     "content": agent_error.message,
@@ -103,6 +108,20 @@ class ChatStreamSession:
 
             manager = get_chat_stream_manager()
             await manager.remove_session(self.thread_id, self)
+
+    async def _push_error_event(self, event: dict[str, Any]) -> None:
+        """Save an error before delivering it so history can restore identical text."""
+        from agent.modules.conversations import record_thread_run_error
+
+        event = {**event, "message": friendly_agent_error_message(
+            event.get("message") or event.get("content"), code=event.get("code"),
+        )}
+        try:
+            if not self._superseded:
+                await record_thread_run_error(self.thread_id, event)
+        except Exception:
+            logger.warning("Failed to persist chat error for thread %s", self.thread_id, exc_info=True)
+        await self.push_event(event)
 
     async def push_event(self, event: dict[str, Any]) -> None:
         """Append an event to the replay log and wake subscribers."""
@@ -151,8 +170,9 @@ class ChatStreamSession:
         if not self.queues:
             self._event_log.close()
 
-    def cancel(self) -> None:
+    def cancel(self, *, superseded: bool = False) -> None:
         """Cancel the background task execution."""
+        self._superseded = self._superseded or superseded
         if self.task and not self.task.done():
             self.task.cancel()
 
@@ -176,7 +196,7 @@ class ChatStreamManager:
             existing = self._sessions.get(thread_id)
             if existing and not existing.done:
                 logger.info("Cancelling existing stream session for thread %s to start new message", thread_id)
-                existing.cancel()
+                existing.cancel(superseded=True)
                 # Give it a brief moment to cancel/clean up
                 await asyncio.sleep(0.05)
 

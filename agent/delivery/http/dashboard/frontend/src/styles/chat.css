@@ -319,6 +319,13 @@
   color: var(--danger);
 }
 
+.message-resume-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+
 .message-text {
   white-space: pre-wrap;
   word-break: break-word;

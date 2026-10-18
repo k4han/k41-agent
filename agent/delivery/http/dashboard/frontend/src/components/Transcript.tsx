@@ -103,6 +103,7 @@ export type TranscriptMessage = {
   type: "message";
   role: TranscriptRole;
   text: string;
+  resumable?: boolean;
   generatedImagePending?: boolean;
   generatedImageToolCallId?: string | null;
   messageIndex?: number;
@@ -348,6 +349,7 @@ export function TranscriptMessageView(props: {
   actionsDisabled?: boolean;
   /** Show the answer actions (copy, regenerate); hidden while the run streams. */
   showAssistantActions?: boolean;
+  onResume?: () => void;
   onEdit?: (payload: {
     itemId?: number;
     messageIndex: number;
@@ -567,6 +569,22 @@ export function TranscriptMessageView(props: {
               )}
             </For>
           </div>
+        </Show>
+        <Show when={props.role === "error" && props.onResume}>
+          <button
+            class="btn btn-sm message-resume-btn"
+            type="button"
+            disabled={props.actionsDisabled}
+            onClick={(event) => {
+              event.stopPropagation();
+              props.onResume?.();
+            }}
+            title="Continue from the last saved step"
+            aria-label="Continue response"
+          >
+            <RotateCcw size={15} />
+            Continue
+          </button>
         </Show>
         <Show when={props.role === "user"}>
           <div class="message-actions" aria-label="Message actions" onClick={(e) => e.stopPropagation()}>
@@ -1629,6 +1647,7 @@ export interface TranscriptItemViewProps {
   actionsDisabled?: boolean;
   /** Show the answer actions (copy, regenerate); hidden while the run streams. */
   showAssistantActions?: boolean;
+  onResume?: () => void;
   onEditMessage?: (payload: {
     itemId?: number;
     messageIndex: number;
@@ -1674,6 +1693,7 @@ export function TranscriptItemView(props: TranscriptItemViewProps) {
       itemId={props.itemId}
       actionsDisabled={props.actionsDisabled}
       showAssistantActions={props.showAssistantActions}
+      onResume={props.onResume}
       onEdit={props.onEditMessage}
       onRegenerateMessage={props.onRegenerateMessage}
       onBranchSelect={props.onBranchSelect}

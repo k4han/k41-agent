@@ -993,6 +993,74 @@ async def test_run_agent_stream_resume(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_agent_stream_resumes_failed_checkpoint_without_repeating_completed_work(
+    monkeypatch, isolated_container,
+):
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.graph import END, START, MessagesState, StateGraph
+
+    calls = {"read": 0, "respond": 0}
+
+    async def read_file(state):
+        calls["read"] += 1
+        return {"messages": [
+            AIMessage(content="", id="read-call", tool_calls=[{
+                "id": "read-tool", "name": "read", "args": {"path": "source.txt"},
+            }]),
+            ToolMessage(content="File contents", id="read-result", tool_call_id="read-tool", name="read"),
+        ]}
+
+    async def respond(state):
+        calls["respond"] += 1
+        if calls["respond"] == 1:
+            raise TimeoutError("Provider timed out")
+        return {"messages": [AIMessage(content="Recovered answer", id="recovered")]}
+
+    builder = StateGraph(MessagesState)
+    builder.add_node("read_file", read_file)
+    builder.add_node("respond", respond)
+    builder.add_edge(START, "read_file")
+    builder.add_edge("read_file", "respond")
+    builder.add_edge("respond", END)
+    graph = builder.compile(checkpointer=InMemorySaver())
+
+    agent_config = SimpleNamespace(
+        graph_type="react_agent", context_compact_threshold=75, tools=["read"],
+    )
+    monkeypatch.setattr(
+        "agent.modules.agents.get_catalog_service",
+        lambda: SimpleNamespace(get_agent=lambda name: agent_config),
+    )
+    monkeypatch.setattr(runner_module, "get_workflow_graph", lambda name: graph)
+    monkeypatch.setattr(runner_module, "make_run_context", lambda **kwargs: kwargs)
+    monkeypatch.setattr(
+        runner_module, "make_run_config",
+        lambda **kwargs: {"configurable": {"thread_id": kwargs["thread_id"]}},
+    )
+
+    async def skip_title(**kwargs):
+        return None
+
+    monkeypatch.setattr(runner_module, "_record_conversation_thread", skip_title)
+    with pytest.raises(TimeoutError, match="Provider timed out"):
+        async for _ in runner_module.run_agent_stream(
+            user_input="Read the file and answer", thread_id="failed-turn", agent_name="default",
+        ):
+            pass
+
+    events = [event async for event in runner_module.run_agent_stream(
+        user_input="", thread_id="failed-turn", agent_name="default", resume=True,
+    )]
+    state = await graph.aget_state({"configurable": {"thread_id": "failed-turn"}})
+    assert calls == {"read": 1, "respond": 2}
+    assert [msg.content for msg in state.values["messages"] if isinstance(msg, HumanMessage)] == [
+        "Read the file and answer",
+    ]
+    assert any(event == {"type": "final", "content": "Recovered answer"} for event in events)
+    assert not any(event["type"] in {"tool_call", "tool_result"} for event in events)
+
+
+@pytest.mark.asyncio
 async def test_run_agent_stream_emits_plan_review_interrupt(monkeypatch):
     plan = "1. Inspect\n2. Implement"
 

@@ -10,7 +10,16 @@ class FakeRateLimitError(Exception):
 
 
 @pytest.mark.asyncio
-async def test_chat_stream_session_emits_classified_error() -> None:
+@pytest.mark.parametrize("persist_fails", [False, True])
+async def test_chat_stream_session_emits_classified_error(monkeypatch, persist_fails) -> None:
+    recorded = []
+
+    async def record_error(thread_id, event):
+        recorded.append((thread_id, event))
+        if persist_fails:
+            raise OSError("Database unavailable")
+
+    monkeypatch.setattr("agent.modules.conversations.record_thread_run_error", record_error)
     async def failing_run_fn(**_params):
         raise FakeRateLimitError("429 too many requests")
         yield  # pragma: no cover - makes this an async generator
@@ -27,11 +36,59 @@ async def test_chat_stream_session_emits_classified_error() -> None:
     assert error_event is not None
     assert error_event["code"] == "rate_limit"
     assert "rate limiting" in error_event["content"].lower()
+    assert recorded == [("thread-1", error_event)]
 
     if session.task is not None:
         session.task.cancel()
         await asyncio.gather(session.task, return_exceptions=True)
     session.close()
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_session_saves_custom_error_before_delivery(monkeypatch) -> None:
+    recorded = []
+    original_error = {
+        "type": "error", "code": "tool_failure",
+        "content": "Tool execution failed.\nCommand returned exit code 17.",
+        "message": "The tool could not complete this request.",
+    }
+
+    async def record_error(thread_id, event):
+        recorded.append((thread_id, event))
+
+    async def run_fn(**params):
+        yield original_error
+
+    monkeypatch.setattr("agent.modules.conversations.record_thread_run_error", record_error)
+    session = ChatStreamSession("custom-error", {}, run_fn)
+    session.start()
+    try:
+        async for event in session.subscribe():
+            assert event == original_error
+            assert recorded == [("custom-error", event)]
+            break
+    finally:
+        session.task.cancel()
+        await asyncio.gather(session.task, return_exceptions=True)
+        session.close()
+
+
+@pytest.mark.asyncio
+async def test_superseded_stream_does_not_replace_saved_error(monkeypatch) -> None:
+    async def record_error(thread_id, event):
+        pytest.fail("Superseded streams must not overwrite the new run's error")
+
+    monkeypatch.setattr("agent.modules.conversations.record_thread_run_error", record_error)
+    session = ChatStreamSession("superseded-run", {})
+    session.cancel(superseded=True)
+    try:
+        await session._push_error_event({"type": "error", "content": "Chat execution stopped."})
+        session.done = True
+        assert [event async for event in session.subscribe()] == [
+            {"type": "error", "content": "Chat execution stopped.", "message": "Chat execution stopped."},
+        ]
+    finally:
+        session.close()
 
 
 @pytest.mark.asyncio

@@ -21,7 +21,7 @@ function loadModule(path, dependencies = {}) {
 }
 
 const toolCallStatus = loadModule('../src/lib/toolCallStatus.ts');
-const { buildTranscriptActivityView, findTranscriptAnswerId, isTranscriptActivityBoundary, isTranscriptWaitingForModel } = loadModule(
+const { buildTranscriptActivityView, findTranscriptAnswerId, findTranscriptResumeId, isTranscriptActivityBoundary, isTranscriptWaitingForModel } = loadModule(
   '../src/lib/transcriptActivity.ts',
   {
     '@/lib/htmlPreview': { HTML_PREVIEW_TOOL_NAME: 'html_preview' },
@@ -291,4 +291,16 @@ test('boundary classification keeps messages, interactions and rich results visi
   assert.equal(isTranscriptActivityBoundary(toolCall(9)), false);
   assert.equal(isTranscriptActivityBoundary(assistantMessage(10, '')), false);
   assert.equal(isTranscriptActivityBoundary(assistantMessage(11, ' \n ')), false);
+});
+
+test('only the latest failed run offers checkpoint continuation', () => {
+  const failure = { id: 2, type: 'message', role: 'error', text: 'Provider timed out', resumable: true };
+  assert.equal(findTranscriptResumeId([]), null);
+  assert.equal(findTranscriptResumeId([userMessage(1), failure]), 2);
+  assert.equal(findTranscriptResumeId([failure, assistantMessage(3, '')]), 2);
+  assert.equal(findTranscriptResumeId([{ ...failure, resumable: false }]), null);
+  for (const next of [userMessage(3), assistantMessage(3), toolCall(3), planReview(3), userInputRequest(3)]) {
+    assert.equal(findTranscriptResumeId([failure, next]), null);
+  }
+  assert.equal(findTranscriptResumeId([failure, { ...failure, id: 3 }]), 3);
 });

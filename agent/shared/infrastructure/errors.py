@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import ast
+import json
+import re
 from dataclasses import dataclass
 
 ERROR_CODE_RATE_LIMIT = "rate_limit"
@@ -34,7 +37,77 @@ _ERROR_MESSAGES: dict[str, str] = {
     ERROR_CODE_UNKNOWN: (
         "Something went wrong while generating a response. Please try again."
     ),
+    "recursion_limit_reached": "The agent reached its step limit. Continue to keep working on this task.",
+    "execution_incomplete": "The previous response stopped before finishing. Continue from the last saved step.",
 }
+
+
+def _error_message_text(value: object, depth: int = 0) -> str | None:
+    """Extract a provider's message field from JSON, Python repr, or an exception wrapper."""
+    if depth > 5:
+        return None
+    if isinstance(value, dict):
+        for key in ("message", "error", "detail", "body"):
+            nested = value.get(key)
+            if isinstance(nested, str):
+                return _error_message_text(nested, depth + 1) or nested.strip() or None
+            message = _error_message_text(nested, depth + 1)
+            if message:
+                return message
+        return None
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    candidates = [text]
+    start, end = text.find("{"), text.rfind("}")
+    if start >= 0 and end > start:
+        candidates.append(text[start:end + 1])
+    wrapper = re.fullmatch(r"[\w.]+(?:Error|Exception|ExceptionGroup)\((.*)\)", text, re.DOTALL)
+    if wrapper:
+        candidates.append(wrapper.group(1))
+    for candidate in candidates:
+        for parse in (json.loads, ast.literal_eval):
+            try:
+                parsed = parse(candidate)
+            except (ValueError, SyntaxError, TypeError, RecursionError):
+                continue
+            if isinstance(parsed, dict) or isinstance(parsed, str) and parsed != text:
+                message = _error_message_text(parsed, depth + 1)
+                if message:
+                    return message
+    return None
+
+
+def friendly_agent_error_message(value: object, *, code: str | None = None) -> str:
+    """Return one readable message while keeping serialized diagnostics out of the UI."""
+    message = _error_message_text(value)
+    if code in {"recursion_limit_reached", "execution_incomplete"}:
+        return _ERROR_MESSAGES[code]
+    text = message or str(value or "").strip()
+    wrapper = re.fullmatch(r"([\w.]+(?:Error|Exception|ExceptionGroup))\((.*)\)", text, re.DOTALL)
+    if wrapper:
+        name = wrapper.group(1).lower()
+        for token, error_code in (
+            ("timeout", ERROR_CODE_TIMEOUT), ("ratelimit", ERROR_CODE_RATE_LIMIT),
+            ("authentication", ERROR_CODE_AUTH), ("permissiondenied", ERROR_CODE_AUTH),
+            ("connection", ERROR_CODE_CONNECTION),
+        ):
+            if token in name:
+                return _ERROR_MESSAGES[error_code]
+        try:
+            detail = ast.literal_eval(wrapper.group(2))
+        except (ValueError, SyntaxError, TypeError, RecursionError):
+            detail = None
+        if isinstance(detail, str):
+            text = detail.strip()
+        else:
+            return _ERROR_MESSAGES.get(code, _ERROR_MESSAGES[ERROR_CODE_UNKNOWN])
+    prefixed_error = re.fullmatch(r"[\w.]+(?:Error|Exception|ExceptionGroup):\s*(.*)", text, re.DOTALL)
+    if prefixed_error:
+        text = prefixed_error.group(1).strip()
+    if not text or any(marker in text for marker in ("Traceback (", "Error code:")) or not message and any(marker in text for marker in ("{", "}")):
+        return _ERROR_MESSAGES.get(code, _ERROR_MESSAGES[ERROR_CODE_UNKNOWN])
+    return next((line.strip() for line in text.splitlines() if line.strip()), _ERROR_MESSAGES[ERROR_CODE_UNKNOWN])
 
 
 @dataclass(frozen=True, slots=True)

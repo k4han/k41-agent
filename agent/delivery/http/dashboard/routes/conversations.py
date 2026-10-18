@@ -36,6 +36,7 @@ from agent.modules.conversations import (
     get_conversation_thread,
     get_thread_messages,
     get_thread_messages_payload,
+    get_thread_resume_error,
     has_pending_interrupt,
     list_background_threads_with_stats,
     list_user_threads_with_stats,
@@ -211,10 +212,16 @@ async def get_chat_thread_messages(
     workspace = await workspace_ref_for_thread(thread_id, include_default=False)
     from agent.modules.tools import pending_permission_requests
     pending_requests = await pending_permission_requests(thread_id, checkpoint_id=active_checkpoint_id)
+    resume_error = await get_thread_resume_error(
+        thread_id,
+        agent_name=str(parsed.get("agent_name") or "default"),
+        checkpoint_id=active_checkpoint_id,
+    )
     return {
         "thread_id": thread_id,
         "active_checkpoint_id": active_checkpoint_id,
         "pending_requests": pending_requests,
+        "resume_error": resume_error,
         "messages": messages,
         "workspace": workspace.model_dump() if workspace else None,
         **parsed,

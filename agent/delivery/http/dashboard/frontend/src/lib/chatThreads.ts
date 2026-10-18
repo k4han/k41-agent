@@ -87,6 +87,7 @@ export type ThreadMessagesPayload = {
   active_checkpoint_id?: string;
   messages: ThreadMessage[];
   pending_requests?: Record<string, unknown>[];
+  resume_error?: { checkpoint_id: string; code: string; content: string; message?: string } | null;
   platform: string;
   user_id: string;
   channel_id: string;
