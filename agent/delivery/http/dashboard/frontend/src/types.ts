@@ -381,9 +381,17 @@ export type SourceValue = {
   source: string;
 };
 
+export type ChatGPTSession = {
+  connected: boolean;
+  sharing: boolean;
+  email: string;
+  usage_url?: string;
+};
+
 export type ProviderRow = {
   name: string;
   catalog_id?: string;
+  chatgpt_session?: ChatGPTSession;
   fields: Record<string, { key: string; info: SettingInfo }>;
   type: string;
   type_label: string;

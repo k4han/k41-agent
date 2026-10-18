@@ -159,9 +159,11 @@ def delete_config_tree(service: ConfigService, key: str) -> bool:
     return deleted
 
 
-def validate_default_model_update(
+async def validate_default_model_update(
     service: ConfigService,
     values: dict[str, Any | None],
+    *,
+    request: Request,
 ) -> None:
     configured_default_model = str(service.get("llm.default_model", "") or "").strip()
     default_model_val = str(values.get("llm.default_model", configured_default_model) or "").strip()
@@ -199,7 +201,14 @@ def validate_default_model_update(
             status_code=400,
             detail="Default provider must be enabled.",
         )
-    if not str(provider.get("api_key") or "").strip():
+    if str(provider.get("type") or "").strip() == "chatgpt":
+        import asyncio
+        from agent.delivery.http.dashboard.routes.helpers.deps import get_app_container
+
+        session = await asyncio.to_thread(get_app_container(request).chatgpt_auth_manager.session, provider["name"])
+        if not session["sharing"]:
+            raise HTTPException(status_code=400, detail="Sign in with ChatGPT and enable ChatGPT plan usage before making this provider default.")
+    elif not str(provider.get("api_key") or "").strip():
         raise HTTPException(
             status_code=400,
             detail="Default provider must have an API key.",
@@ -406,6 +415,20 @@ async def settings_payload(request: Request, *, include_provider_settings: bool)
         PROVIDER_SETTING_FIELD_ORDER,
         default_provider,
     )
+    for row in provider_rows:
+        if row["type"] == "chatgpt":
+            import asyncio
+            from agent.delivery.http.dashboard.routes.helpers.deps import get_app_container
+
+            session = await asyncio.to_thread(get_app_container(request).chatgpt_auth_manager.session, row["name"])
+            row["chatgpt_session"] = session
+            default_model_value = row["fields"]["default_model"]["info"]["value"]
+            row["ready"] = row["enabled"] and session["sharing"] and bool(default_model_value)
+            row["can_set_default"] = row["ready"] and not row["is_default"]
+            if not session["sharing"]:
+                row["default_block_reason"] = "Sign in with ChatGPT and enable ChatGPT plan usage first."
+            elif row["ready"] and not row["is_default"]:
+                row["default_block_reason"] = ""
 
     catalog = load_providers_catalog()
     catalog_serialized = {}

@@ -11,7 +11,8 @@ import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
 import { getProviderTypes } from "@/lib/catalogStore";
 import { useCatalogAndLoad } from "@/lib/useCatalogAndLoad";
 import { parseModelList } from "@/lib/utils";
-import type { ProviderRow, ProviderTypeOption, SettingInfo } from "@/types";
+import type { ChatGPTSession, ProviderRow, ProviderTypeOption, SettingInfo } from "@/types";
+import { ChatGPTConnectionPanel } from "./ChatGPTConnectionPanel";
 
 import { ProviderSettingsLayout as SettingsLayout } from "./ProviderSettingsLayout";
 import { ProviderConnectionList, ProviderPicker, ProviderFormPanel } from "./ProviderConnections";
@@ -33,6 +34,7 @@ type ProviderFieldEntry = {
 };
 
 type ProviderView = {
+  chatgptSession?: ChatGPTSession;
   name: string;
   catalogId: string;
   fields: ProviderFieldEntry[];
@@ -146,6 +148,7 @@ function buildProviderView(
       if (name === "provider" || name === "type" || name === "catalog_id") {
         return false;
       }
+      if (provider.type === "chatgpt" && (name === "api_key" || name === "extra_body" || name === "temperature")) return false;
       return name !== "base_url" || provider.requires_base_url;
     });
   const providerTypeField = fieldMap.type || fieldMap.provider;
@@ -155,6 +158,7 @@ function buildProviderView(
   const searchable = provider.name.toLowerCase();
 
   return {
+    chatgptSession: provider.chatgpt_session,
     name: provider.name,
     catalogId: provider.catalog_id || "",
     fields: orderedFields,
@@ -330,8 +334,8 @@ export function ProvidersPage() {
       return;
     }
     try {
-      await deleteJson(`/dashboard-api/providers/${encodeURIComponent(provider.name)}`);
-      showToast("Provider deleted.");
+      const result = await deleteJson<{ message?: string }>(`/dashboard-api/providers/${encodeURIComponent(provider.name)}`);
+      showToast(result.message || "Provider deleted.", result.message ? "warning" : "success");
       setDeleteTarget(null);
       await load();
       if (params.providerName) {
@@ -421,6 +425,7 @@ export function ProvidersPage() {
               >
                 {(provider) => (
                   <ProviderDetailPage
+                    onReload={load}
                     provider={provider()}
                     drafts={drafts()}
                     dirtyKeys={dirtyKeys()}
@@ -471,6 +476,7 @@ export function ProvidersPage() {
 }
 
 function ProviderDetailPage(props: {
+  onReload: () => Promise<unknown>;
   provider: ProviderView;
   drafts: Record<string, unknown>;
   dirtyKeys: Set<string>;
@@ -688,6 +694,11 @@ function ProviderDetailPage(props: {
       }
     >
       <div class="stack provider-detail-stack">
+        <Show when={props.provider.providerType === "chatgpt"}>
+          <ChatGPTConnectionPanel name={props.provider.name} session={props.provider.chatgptSession}
+            configuredModels={parseModelList(textValue(draftValue(props.drafts, props.provider.fieldMap.models)))}
+            defaultModel={props.provider.defaultModel} onReload={props.onReload} />
+        </Show>
         <div class="panel provider-detail-panel">
           <div class="row-wrap provider-header-row">
             <div class="row-wrap provider-identity-row">
@@ -979,7 +990,7 @@ function AIProviderCreatePage(props: {
     if (busy()) return;
     // Verification is optional: allow offline save or custom endpoints
     // that cannot list models. Backend does not require verify.
-    if (!selectedDefaultModel() && discoveredModels().length === 0) {
+    if (form().type !== "chatgpt" && !selectedDefaultModel() && discoveredModels().length === 0) {
       showToast("Saving without verified models. You can set the default model manually.", "warning");
     }
     setBusy(true);
@@ -997,7 +1008,7 @@ function AIProviderCreatePage(props: {
       setInitial(form());
       await props.onCreated();
       showToast("Provider configuration saved.");
-      navigate("/settings/providers?tab=llm");
+      navigate(type === "chatgpt" ? `/settings/providers/llm/${encodeURIComponent(name)}` : "/settings/providers?tab=llm");
     } catch (err) { showToast(err instanceof Error ? err.message : "Failed to save provider.", "error"); }
     finally { setBusy(false); }
   };
@@ -1016,6 +1027,10 @@ function AIProviderCreatePage(props: {
           <Show when={isCustom()}>
             <label class="stack">Provider type<select class="input" value={form().type} onChange={(event) => patch({ type: event.currentTarget.value, base_url: "" })}><For each={props.typeOptions}>{(option) => <option value={option.value}>{option.label}</option>}</For></select></label>
           </Show>
+          <Show when={form().type === "chatgpt"}>
+            <p class="hint">Save this configuration, then Continue with ChatGPT to connect your plan and discover models.</p>
+          </Show>
+          <Show when={form().type !== "chatgpt"}>
           <label class="stack">API key<input class="input" type="password" required autocomplete="new-password" value={form().api_key} onInput={(event) => patch({ api_key: event.currentTarget.value })} /></label>
           <Show when={form().type === "openai_compatible" || form().base_url}>
             <label class="stack">Base URL<input class="input" type="url" required={form().type === "openai_compatible"} value={form().base_url} onInput={(event) => patch({ base_url: event.currentTarget.value })} /></label>
@@ -1095,6 +1110,7 @@ function AIProviderCreatePage(props: {
               />
               <span class="hint">You can save without verification (offline or custom endpoint). Set the model manually if known.</span>
             </label>
+          </Show>
           </Show>
         </ProviderFormPanel>
       </Show>

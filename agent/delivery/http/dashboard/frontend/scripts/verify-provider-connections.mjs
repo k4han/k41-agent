@@ -43,13 +43,17 @@ const fieldLabels = { type: 'Type', api_key: 'API Key', default_model: 'Default 
 const aiPayload = () => ({ settings: {}, by_category: {}, settings_sources: {}, default_provider: aiDefault.split('/')[0], default_model: aiDefault,
   provider_names: aiConnections.map(item => item.name), provider_field_order: fieldOrder,
   provider_type_options: [{ value: 'google', label: 'Google', requires_base_url: false }],
-  providers_catalog: { google: { id: 'google', name: 'Google', provider_type: 'google', models: [{ id: 'gemini-test', name: 'Gemini Test' }] } },
+  providers_catalog: {
+    google: { id: 'google', name: 'Google', provider_type: 'google', models: [{ id: 'gemini-test', name: 'Gemini Test' }] },
+    chatgpt: { id: 'chatgpt', name: 'ChatGPT', provider_type: 'chatgpt', models: [] },
+  },
   provider_rows: aiConnections.map(item => ({
-    name: item.name, type: item.type, type_label: 'Google', catalog_id: item.catalog_id,
+    name: item.name, type: item.type, type_label: item.type === 'chatgpt' ? 'ChatGPT' : 'Google', catalog_id: item.catalog_id,
+    chatgpt_session: item.session,
     fields: Object.fromEntries(fieldOrder.map(field => [field, { key: `llm.providers.${item.name}.${field}`,
       info: { value: item[field], input_type: field === 'api_key' ? 'password' : field === 'enabled' ? 'boolean' : 'text', label: fieldLabels[field], source: 'database' } }])),
-    ready: !!item.default_model, enabled: true, is_default: aiDefault.startsWith(item.name + '/'),
-    can_set_default: !!item.default_model && !aiDefault.startsWith(item.name + '/'),
+    ready: !!item.default_model && (item.type !== 'chatgpt' || !!item.session?.sharing), enabled: true, is_default: aiDefault.startsWith(item.name + '/'),
+    can_set_default: !!item.default_model && (item.type !== 'chatgpt' || !!item.session?.sharing) && !aiDefault.startsWith(item.name + '/'),
     can_delete: !aiDefault.startsWith(item.name + '/'), requires_base_url: false,
   })),
 });
@@ -64,6 +68,23 @@ const server = http.createServer(async (req, res) => {
     });
     if (req.method !== 'GET') writes.push({ path: url.pathname, body: JSON.parse(body || '{}') });
     const submitted = JSON.parse(body || '{}');
+    if (url.pathname === '/dashboard-api/providers/verify' && submitted.type === 'chatgpt') {
+      res.end(JSON.stringify({ ok: true, models: ['account-model', 'second-model'], message: 'Connected' })); return;
+    }
+    const chatgptRoute = url.pathname.match(/^\/dashboard-api\/providers\/([^/]+)\/chatgpt\/(.+)$/);
+    if (chatgptRoute) {
+      const entry = aiConnections.find(item => item.name === decodeURIComponent(chatgptRoute[1]));
+      if (chatgptRoute[2] === 'sign-in') {
+        res.end(JSON.stringify({ attempt_id: 'test-attempt', authorization_url: `/dashboard-api/providers/${chatgptRoute[1]}/chatgpt/authorize/test-attempt` }));
+      } else if (chatgptRoute[2] === 'sign-out') {
+        entry.session = { connected: false, sharing: false, email: 'user@example.com' };
+        res.end(JSON.stringify({ revocation_confirmed: true, message: 'Signed out of ChatGPT.' }));
+      } else {
+        entry.session = { connected: true, sharing: true, email: 'user@example.com' };
+        res.end(JSON.stringify({ ...entry.session, status: 'completed', message: 'ChatGPT connected.' }));
+      }
+      return;
+    }
     if (url.pathname === '/dashboard-api/providers') {
       if (req.method === 'POST') {
         if (aiConnections.some(item => item.name.toLowerCase() === submitted.name.toLowerCase())) { res.statusCode = 409; res.end('{"detail":"Provider already exists."}'); return; }
@@ -276,6 +297,25 @@ try {
   await js(`document.querySelector('button[aria-label="Set google-2 as default"]').click()`);
   await until(() => js(`document.querySelector('button[aria-label="Set google-2 as default"]')?.getAttribute('aria-pressed') === 'true'`), 'AI default selected');
   assert.equal(aiDefault, 'google-2/gemini-test');
+  await navigate('/settings/providers?tab=llm');
+  await until(() => js('!!document.querySelector("[data-provider-id=chatgpt]")'), 'ChatGPT picker');
+  await js('document.querySelector("[data-provider-id=chatgpt]").click()');
+  await until(() => js('document.querySelector("form input.input")?.value === "chatgpt"'), 'ChatGPT create form');
+  assert.equal(await js('!!document.querySelector("form input[type=password]")'), false);
+  await js('document.querySelector("form").requestSubmit()');
+  await until(() => js(`!!document.querySelector('[aria-label="ChatGPT connection"]')`), 'ChatGPT sign-in panel');
+  assert.equal(await js('!!Array.from(document.querySelectorAll(".setting-row")).find(row => row.textContent.includes("API Key"))'), false);
+  await js('window.open = () => ({ opener: null, location: {}, close() {} }); Array.from(document.querySelectorAll("button")).find(button => button.textContent === "Continue with ChatGPT").click()');
+  await until(() => js('document.body.textContent.includes("Using ChatGPT plan") && !!document.querySelector("select option[value=account-model]")'), 'ChatGPT sign-in and model discovery');
+  await until(() => js('!!Array.from(document.querySelectorAll("button")).find(button => button.textContent === "Got it")'), 'ChatGPT first-use notice');
+  await js('Array.from(document.querySelectorAll("button")).find(button => button.textContent === "Got it").click()');
+  assert.equal(aiConnections.find(item => item.name === 'chatgpt').default_model, 'account-model');
+  assert.equal(await js(`document.querySelector('a[href="https://chatgpt.com/settings/usage"]').textContent`), 'Manage usage');
+  await js('const picker = Array.from(document.querySelectorAll("select")).find(select => select.querySelector("option[value=second-model]")); picker.value = "second-model"; picker.dispatchEvent(new Event("change", { bubbles: true }));');
+  await until(() => aiConnections.find(item => item.name === 'chatgpt').default_model === 'second-model', 'ChatGPT model selection');
+  await until(() => js('Array.from(document.querySelectorAll("button")).find(button => button.textContent === "Sign out")?.disabled === false'), 'ChatGPT model saved');
+  await js('Array.from(document.querySelectorAll("button")).find(button => button.textContent === "Sign out").click()');
+  await until(() => js('document.body.textContent.includes("ChatGPT is not connected.")'), 'ChatGPT sign-out');
   await navigate('/settings/providers/web');
   await until(() => js('location.pathname === "/settings/providers/llm/web"'), 'legacy provider named web');
   await navigate('/settings/backends/local');
@@ -302,7 +342,7 @@ try {
     assert.equal(await js('document.documentElement.scrollWidth <= window.innerWidth'), true);
   }
   assert.deepEqual(exceptions, []);
-  console.log('PASS: repeat creation in all three groups, suggested names, separate rows, defaults, token editing, errors, drafts, legacy redirects, mobile width.');
+  console.log('PASS: provider creation, defaults, token editing, ChatGPT sign-in/models/sign-out, errors, drafts, legacy redirects, mobile width.');
 } finally {
   await closeBrowser?.();
   ws?.close(); browser.kill();

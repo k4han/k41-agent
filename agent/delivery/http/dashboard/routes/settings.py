@@ -130,7 +130,7 @@ async def update_setting(
         ensure_runtime_keys([key])
         value = normalize_setting_value(key, body.value)
 
-    validate_default_model_update(service, {key: value})
+    await validate_default_model_update(service, {key: value}, request=request)
     if key.startswith("decision.providers.") or key in {"decision.default_provider", "decision.migration_version"}:
         from fastapi import HTTPException
         raise HTTPException(400, "Manage decision providers through the decision-providers API.")
@@ -174,7 +174,7 @@ async def update_settings(body: UpdateSettingsBody, request: Request) -> dict[st
 
     values = normalize_setting_updates(raw_values)
     service = get_request_config_service(request)
-    validate_default_model_update(service, values)
+    await validate_default_model_update(service, values, request=request)
     if any(key.startswith("decision.providers.") or key in {"decision.default_provider", "decision.migration_version"} for key in values):
         from fastapi import HTTPException
         raise HTTPException(400, "Manage decision providers through the decision-providers API.")

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
+from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
 from agent.delivery.http.dashboard.routes.helpers.agents import (
     invalidate_agent_provider_options_cache,
@@ -137,7 +140,7 @@ async def verify_dashboard_provider(
         if not base_url:
             base_url = "https://api.openai.com/v1"
 
-    if norm_type not in ("google", "anthropic", "openai_compatible"):
+    if norm_type not in ("google", "anthropic", "openai_compatible", "chatgpt"):
         return ProviderVerificationResponse(
             ok=False,
             message=f"Unsupported provider type: {provider_type}.",
@@ -145,7 +148,10 @@ async def verify_dashboard_provider(
             latency_ms=0,
         )
 
-    if not api_key:
+    if norm_type == "chatgpt" and (not provider_name or not same_type_for_verify or existing_name is None):
+        return ProviderVerificationResponse(ok=False, message="Save a ChatGPT provider and sign in first.", error_code="INVALID_CONFIG")
+
+    if not api_key and norm_type != "chatgpt":
         return ProviderVerificationResponse(
             ok=False,
             message="API key is required.",
@@ -192,7 +198,7 @@ async def verify_dashboard_provider(
 class CreateProviderBody(BaseModel):
     name: str = Field(..., min_length=1)
     type: str = Field(..., min_length=1)
-    api_key: str = Field(..., min_length=1)
+    api_key: str = ""
     base_url: str = ""
     catalog_id: str | None = None
     default_model: str = ""
@@ -216,8 +222,11 @@ async def create_dashboard_provider(
         )
 
     api_key = body.api_key.strip()
-    if not api_key:
+    if not api_key and provider_type != "chatgpt":
         raise HTTPException(status_code=400, detail="API key is required.")
+
+    if provider_type == "chatgpt" and (api_key or body.base_url.strip()):
+        raise HTTPException(status_code=400, detail="ChatGPT uses browser sign-in and the public Responses API; omit API key and base URL.")
 
     base_url = body.base_url.strip()
     if provider_type == "openai_compatible" and not base_url:
@@ -280,12 +289,21 @@ async def delete_dashboard_provider(
     if configured_default and normalize_provider_name(configured_default) == normalize_provider_name(existing_name):
         raise HTTPException(status_code=400, detail="Default provider cannot be deleted.")
 
+    if service.get(f"llm.providers.{existing_name}.type") == "chatgpt":
+        from agent.delivery.http.dashboard.routes.helpers.deps import get_app_container
+        result = await asyncio.to_thread(get_app_container(request).chatgpt_auth_manager.remove_connection, existing_name)
+    else:
+        result = None
+
     deleted = delete_config_tree(service, f"llm.providers.{existing_name}")
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Provider not found: {provider_name}.")
 
     invalidate_agent_provider_options_cache()
-    return {"status": "deleted", "name": existing_name}
+    response = {"status": "deleted", "name": existing_name}
+    if result and not result["revocation_confirmed"]:
+        response["message"] = result["message"]
+    return response
 
 @router.get("/providers/models")
 async def list_dashboard_provider_models(
@@ -322,3 +340,68 @@ async def update_providers_catalog() -> dict[str, str]:
         raise HTTPException(status_code=500, detail=message)
     invalidate_agent_provider_options_cache()
     return {"status": "success", "message": message}
+
+
+def _chatgpt_connection(request: Request, provider_name: str):
+    from agent.delivery.http.dashboard.routes.helpers.deps import get_app_container
+
+    service = get_request_config_service(request)
+    name = provider_config_name(service, provider_name)
+    if name is None or service.get(f"llm.providers.{name}.type") != "chatgpt":
+        raise HTTPException(status_code=404, detail="ChatGPT provider not found.")
+    return get_app_container(request).chatgpt_auth_manager, name
+
+
+@router.get("/dashboard-api/providers/{provider_name}/chatgpt/session")
+async def get_chatgpt_session(provider_name: str, request: Request, response: Response) -> dict[str, Any]:
+    response.headers["Cache-Control"] = "no-store"
+    auth, name = _chatgpt_connection(request, provider_name)
+    return await asyncio.to_thread(auth.session, name)
+
+
+@router.post("/dashboard-api/providers/{provider_name}/chatgpt/sign-in")
+async def start_chatgpt_sign_in(provider_name: str, request: Request, response: Response) -> dict[str, str]:
+    response.headers["Cache-Control"] = "no-store"
+    from agent.modules.providers.chatgpt.auth import ChatGPTAuthError
+
+    auth, name = _chatgpt_connection(request, provider_name)
+    try:
+        result = await asyncio.to_thread(auth.start_sign_in, name)
+        attempt_id = result["attempt_id"]
+        return {"attempt_id": attempt_id,
+                "authorization_url": f"/dashboard-api/providers/{quote(name, safe='')}/chatgpt/authorize/{attempt_id}"}
+    except ChatGPTAuthError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+
+
+@router.get("/dashboard-api/providers/{provider_name}/chatgpt/authorize/{attempt_id}")
+async def open_chatgpt_authorization(provider_name: str, attempt_id: str, request: Request) -> RedirectResponse:
+    from agent.modules.providers.chatgpt.auth import ChatGPTAuthError
+
+    auth, name = _chatgpt_connection(request, provider_name)
+    try:
+        url = await asyncio.to_thread(auth.authorization_url, name, attempt_id)
+        return RedirectResponse(url, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+    except ChatGPTAuthError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+
+
+@router.get("/dashboard-api/providers/{provider_name}/chatgpt/sign-in/{attempt_id}")
+async def get_chatgpt_sign_in(provider_name: str, attempt_id: str, request: Request, response: Response) -> dict[str, Any]:
+    response.headers["Cache-Control"] = "no-store"
+    from agent.modules.providers.chatgpt.auth import ChatGPTAuthError
+
+    auth, name = _chatgpt_connection(request, provider_name)
+    try:
+        return await asyncio.to_thread(auth.attempt_status, name, attempt_id)
+    except ChatGPTAuthError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+
+
+@router.post("/dashboard-api/providers/{provider_name}/chatgpt/sign-out")
+async def sign_out_chatgpt(provider_name: str, request: Request, response: Response) -> dict[str, Any]:
+    response.headers["Cache-Control"] = "no-store"
+    auth, name = _chatgpt_connection(request, provider_name)
+    result = await asyncio.to_thread(auth.sign_out, name)
+    invalidate_agent_provider_options_cache()
+    return result

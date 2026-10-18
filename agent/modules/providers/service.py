@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from agent.modules.providers.models import ModelOption, ProviderModelCatalog
@@ -130,19 +131,25 @@ class ProviderService:
             except Exception as exc:
                 error = str(exc)
 
+        account_catalog = provider.provider_type == ProviderType.CHATGPT and include_remote and error is None
+        options = _merge_model_options(
+            provider_name=provider.catalog_id or provider.name,
+            remote_models=remote_models,
+            configured_models=[] if account_catalog else list(provider.models),
+            default_model=provider.default_model if not account_catalog or provider.default_model in remote_models else "",
+            provider_type=str(provider.provider_type),
+            model_profiles=({name: profile for name, profile in provider.model_profiles.items() if name in remote_models}
+                            if account_catalog else provider.model_profiles),
+        )
+        if provider.provider_type == ProviderType.CHATGPT:
+            labels = getattr(factory, "model_labels", {}).get(provider.name, {})
+            options = tuple(replace(option, label=labels.get(option.id, option.label)) for option in options)
         return ProviderModelCatalog(
             provider=provider.name,
             provider_type=str(provider.provider_type),
             default_model=provider.default_model,
             can_list_models=can_list_models,
-            models=_merge_model_options(
-                provider_name=provider.catalog_id or provider.name,
-                remote_models=remote_models,
-                configured_models=list(provider.models),
-                default_model=provider.default_model,
-                provider_type=str(provider.provider_type),
-                model_profiles=provider.model_profiles,
-            ),
+            models=options,
             error=error,
         )
 

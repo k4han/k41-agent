@@ -35,7 +35,7 @@ class ModelCatalogEntry:
 class ProviderCatalogEntry:
     id: str
     name: str
-    provider_type: str  # google, anthropic, openai_compatible
+    provider_type: str  # google, anthropic, openai_compatible, chatgpt
     base_url: str
     env_vars: tuple[str, ...]
     doc_url: str | None
@@ -46,7 +46,13 @@ class ProviderCatalogEntry:
 
 # --- In-memory Cache & Dynamic Extensions ---
 _catalog_cache: dict[str, ProviderCatalogEntry] | None = None
-_custom_catalog_entries: dict[str, ProviderCatalogEntry] = {}
+_custom_catalog_entries: dict[str, ProviderCatalogEntry] = {
+    "chatgpt": ProviderCatalogEntry(
+        id="chatgpt", name="ChatGPT", provider_type="chatgpt", base_url="",
+        env_vars=(), doc_url="https://developers.openai.com/siwc/token-sharing-open-source",
+        models=(), default_model="", logo_url=_build_default_logo_url("openai"),
+    ),
+}
 
 
 def normalize_provider_key(provider_id: str) -> str:

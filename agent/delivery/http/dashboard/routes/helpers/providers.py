@@ -40,6 +40,12 @@ PROVIDER_TYPE_OPTIONS: list[dict[str, Any]] = [
         "description": "Custom endpoint that implements the OpenAI chat API",
         "requires_base_url": True,
     },
+    {
+        "value": "chatgpt",
+        "label": "ChatGPT",
+        "description": "Use an eligible ChatGPT plan through Sign in with ChatGPT",
+        "requires_base_url": False,
+    },
 ]
 SUPPORTED_PROVIDER_TYPES = {option["value"] for option in PROVIDER_TYPE_OPTIONS}
 

@@ -21,6 +21,7 @@ DEFAULT_BASE_URL = ""
 DEFAULT_PROVIDER_NAME = "default"
 
 _PROVIDER_ALIASES: dict[str, ProviderType] = {
+    "chatgpt": ProviderType.CHATGPT,
     "anthropic": ProviderType.ANTHROPIC,
     "openai_compatible": ProviderType.OPENAI_COMPATIBLE,
     "google": ProviderType.GOOGLE,
@@ -141,12 +142,18 @@ def _build_provider_config(
 
     catalog_id = str(provider_values.get("catalog_id") or "").strip()
     catalog_entry = get_provider_catalog_entry(catalog_id or provider_key)
+    if (catalog_entry and catalog_entry.provider_type == "chatgpt" and not catalog_id
+            and provider_values.get("type") not in (None, "", "chatgpt")):
+        # Preserve existing API-key providers that happen to be named chatgpt.
+        catalog_entry = None
     provider_name = str(provider_values.get("_provider_name", provider_key)).strip() or provider_key
     enabled = coerce_bool(provider_values.get("enabled", True))
 
     if catalog_entry:
         type_str = catalog_entry.provider_type
-        if type_str == "google":
+        if type_str == "chatgpt":
+            provider_type = ProviderType.CHATGPT
+        elif type_str == "google":
             provider_type = ProviderType.GOOGLE
         elif type_str == "anthropic":
             provider_type = ProviderType.ANTHROPIC
@@ -183,7 +190,7 @@ def _build_provider_config(
         name=provider_name,
         provider_type=provider_type,
         base_url=base_url,
-        api_key=_resolve_api_key(
+        api_key="" if provider_type == ProviderType.CHATGPT else _resolve_api_key(
             provider_name,
             provider_values,
             enabled=enabled,

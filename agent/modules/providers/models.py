@@ -31,7 +31,7 @@ def get_reasoning_effort_kwargs(
         return {}
     if effort not in levels:
         raise ValueError(f"Unsupported reasoning effort {effort!r} for model {model_name!r}. Allowed: {', '.join(levels)}.")
-    if provider_type in {"openai", "openai_compatible"} and model_name.rsplit("/", 1)[-1].lower().startswith("gpt-6"):
+    if provider_type == "chatgpt" or (provider_type in {"openai", "openai_compatible"} and model_name.rsplit("/", 1)[-1].lower().startswith("gpt-6")):
         # Preserve Responses API routing for GPT-6 tool calls.
         return {"reasoning": {"effort": effort}}
     return {"reasoning_effort": effort}

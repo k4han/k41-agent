@@ -175,6 +175,101 @@ def test_channel_trim_setting_saves_and_resets_default(make_dashboard_client, ch
     assert service.get_int(key) == 50_000
 
 
+def test_chatgpt_create_connect_select_default_and_sign_out(make_dashboard_client, tmp_path, monkeypatch):
+    import time
+    from unittest.mock import AsyncMock
+    from agent.bootstrap.container import create_app_container
+    from agent.modules.providers.chatgpt.auth import ChatGPTAuthManager, PLAN_SCOPE
+    from agent.modules.providers.chatgpt.storage import ChatGPTCredentialStore
+    from agent.modules.providers.provider import ProviderType
+    from agent.modules.providers.resolve_chat_model import resolve_chat_model_info
+
+    service, _ = _db_config_service("llm: {default_model: ''}")
+    auth = ChatGPTAuthManager(ChatGPTCredentialStore(tmp_path / "chatgpt"))
+    container = create_app_container(config_service=service)
+    container._chatgpt_auth_manager = auth
+    previous = container.activate()
+    client = make_dashboard_client(service)
+    client.app.state.container = container
+    try:
+        created = client.post("/dashboard-api/providers", json={"name": "personal", "type": "chatgpt"})
+        assert created.status_code == 200, created.text
+        row = client.get("/dashboard-api/providers").json()["provider_rows"][0]
+        assert row["ready"] is False
+        assert row["chatgpt_session"]["connected"] is False
+        assert client.put("/settings", json={"values": {"llm.default_model": "personal/account-model"}}).status_code == 400
+        with auth.store.transaction() as transaction:
+            auth.store.write(transaction, "personal", {"client_id": "oaiapp_test", "access_token": "private-oauth-access",
+                             "scopes": [PLAN_SCOPE], "expires_at": time.time() + 3600, "email": "user@example.com"})
+        factory = container.provider_service.get_factory(ProviderType.CHATGPT)
+        monkeypatch.setattr(factory, "list_models", AsyncMock(return_value=["account-model"]))
+        verified = client.post("/dashboard-api/providers/verify", json={"name": "personal", "type": "chatgpt"})
+        assert verified.status_code == 200 and verified.json()["ok"], verified.text
+        response = client.put("/settings", json={"values": {
+            "llm.providers.personal.default_model": "account-model",
+            "llm.providers.personal.models": ["account-model"], "llm.default_model": "personal/account-model",
+        }})
+        assert response.status_code == 200, response.text
+        payload = client.get("/dashboard-api/providers")
+        assert payload.json()["provider_rows"][0]["ready"] is True
+        assert payload.json()["provider_rows"][0]["is_default"] is True
+        assert "private-oauth-access" not in payload.text
+        assert "private-oauth-access" not in client.get("/settings").text
+        resolved = resolve_chat_model_info(container.provider_service)
+        assert resolved.provider_type == "chatgpt"
+        assert resolved.model.use_responses_api is True
+        assert resolved.model.root_client._api_key_provider() == "private-oauth-access"
+        signed_out = client.post("/dashboard-api/providers/personal/chatgpt/sign-out", json={})
+        assert signed_out.status_code == 200
+        assert signed_out.json()["revocation_confirmed"] is True
+        assert client.get("/dashboard-api/providers/personal/chatgpt/session").json()["connected"] is False
+        assert client.get("/dashboard-api/providers").json()["provider_rows"][0]["ready"] is False
+        with pytest.raises(RuntimeError, match="Continue with ChatGPT"):
+            resolved.model.root_client._api_key_provider()
+        assert client.delete("/dashboard-api/providers/personal").status_code == 400
+        assert client.put("/settings/llm.default_model", json={"value": ""}).status_code == 200
+        assert client.delete("/dashboard-api/providers/personal").status_code == 200
+        assert auth.store.get("personal") == {}
+    finally:
+        auth.close()
+        container.deactivate(previous)
+
+
+def test_chatgpt_oauth_routes_keep_attempts_separate(make_dashboard_client, tmp_path):
+    from agent.bootstrap.container import create_app_container
+    from agent.modules.providers.chatgpt.auth import ChatGPTAuthManager
+    from agent.modules.providers.chatgpt.storage import ChatGPTCredentialStore
+
+    service, _ = _db_config_service("llm: {default_model: ''}")
+    auth = ChatGPTAuthManager(ChatGPTCredentialStore(tmp_path / "chatgpt"))
+    container = create_app_container(config_service=service)
+    container._chatgpt_auth_manager = auth
+    client = make_dashboard_client(service)
+    client.app.state.container = container
+    try:
+        for name in ("first", "second"):
+            assert client.post("/dashboard-api/providers", json={"name": name, "type": "chatgpt"}).status_code == 200
+        assert client.post("/dashboard-api/providers", json={"name": "google-test", "type": "google", "api_key": "key"}).status_code == 200
+        assert client.post("/dashboard-api/providers/google-test/chatgpt/sign-in", json={}).status_code == 404
+        attempt = client.post("/dashboard-api/providers/first/chatgpt/sign-in", json={})
+        assert attempt.status_code == 200
+        attempt_id = attempt.json()["attempt_id"]
+        assert attempt.headers["cache-control"] == "no-store"
+        redirect = client.get(attempt.json()["authorization_url"], follow_redirects=False)
+        assert redirect.status_code == 307
+        assert redirect.headers["location"].startswith("https://auth.openai.com/api/accounts/authorize?")
+        assert client.get(f"/dashboard-api/providers/second/chatgpt/sign-in/{attempt_id}").status_code == 404
+        assert client.get(f"/dashboard-api/providers/first/chatgpt/sign-in/{attempt_id}").json()["status"] == "pending"
+        assert client.post("/dashboard-api/providers/first/chatgpt/sign-in", json={}).status_code == 409
+        assert client.post("/dashboard-api/providers/first/chatgpt/sign-out", json={}).status_code == 200
+        assert client.get(f"/dashboard-api/providers/first/chatgpt/sign-in/{attempt_id}").json()["status"] == "failed"
+        assert client.get(attempt.json()["authorization_url"], follow_redirects=False).status_code == 404
+        bad = client.post("/dashboard-api/providers", json={"name": "bad", "type": "chatgpt", "base_url": "https://invalid.example"})
+        assert bad.status_code == 400
+    finally:
+        auth.close()
+
+
 class TestDashboardSettingsEndpoints:
     def test_get_config_api_includes_bootstrap_and_excludes_dedicated_settings(self, dashboard_client) -> None:
         resp = dashboard_client.get("/dashboard-api/config")

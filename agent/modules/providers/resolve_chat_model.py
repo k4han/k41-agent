@@ -10,7 +10,7 @@ from agent.modules.providers.service import ProviderService
 from agent.modules.providers.models import ModelConfig, ResolvedChatModel
 from agent.modules.providers.profiles import get_model_profile
 from agent.modules.providers.context_window import resolve_context_window
-from agent.modules.providers.provider import ProviderConfig
+from agent.modules.providers.provider import ProviderConfig, ProviderType
 from agent.shared.config import get_config_service
 
 
@@ -111,7 +111,7 @@ def _resolve_chat_model_info_impl(
     )
 
     resolved_api_key = api_key or provider_config.api_key
-    if not resolved_api_key:
+    if not resolved_api_key and provider_config.provider_type != ProviderType.CHATGPT:
         raise RuntimeError(
             "API key not configured. "
             f"Set 'llm.providers.{provider_config.name}.api_key' "

@@ -94,7 +94,7 @@ async def verify_provider_connection(
         if not base_url:
             base_url = "https://api.openai.com/v1"
 
-    if norm_type_str not in ("google", "anthropic", "openai_compatible"):
+    if norm_type_str not in ("google", "anthropic", "openai_compatible", "chatgpt"):
         return ProviderVerificationResult(
             ok=False,
             message=f"Unsupported provider type: {provider_type}.",
@@ -103,7 +103,7 @@ async def verify_provider_connection(
         )
 
     clean_key = str(api_key or "").strip()
-    if not clean_key:
+    if not clean_key and norm_type_str != "chatgpt":
         return ProviderVerificationResult(
             ok=False,
             message="API key is required.",
@@ -183,7 +183,8 @@ async def verify_provider_connection(
         if exc.response.status_code in (401, 403):
             return ProviderVerificationResult(
                 ok=False,
-                message="Authentication failed: Invalid API key",
+                message=("ChatGPT session expired or access was denied. Continue with ChatGPT in provider settings."
+                         if norm_type_str == "chatgpt" else "Authentication failed: Invalid API key"),
                 latency_ms=latency_ms,
                 error_code="AUTH_FAILED",
                 details={"status_code": exc.response.status_code},
@@ -332,5 +333,8 @@ async def verify_provider_connection(
         models=discovered_models,
         suggested_default_model=suggested_default,
         error_code=None,
-        details={"model_count": len(discovered_models)},
+        details={"model_count": len(discovered_models), **(
+            {"model_labels": getattr(factory, "model_labels", {}).get(provider_name, {})}
+            if norm_type_str == "chatgpt" else {}
+        )},
     )

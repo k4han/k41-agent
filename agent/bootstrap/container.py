@@ -205,6 +205,7 @@ class AppContainer:
     _scheduler: Any = field(default=None, repr=False)
     _scheduler_sync_engine: Any = field(default=None, repr=False)
     _provider_service: Any = field(default=None, repr=False)
+    _chatgpt_auth_manager: Any = field(default=None, repr=False)
     _decision_service: Any = field(default=None, repr=False)
     _persistence_ready: bool = field(default=False, repr=False)
     _conversation_thread_aliases: dict[str, str] = field(default_factory=dict, repr=False)
@@ -551,6 +552,15 @@ class AppContainer:
 
     @property
     @_locked_lazy
+    def chatgpt_auth_manager(self) -> Any:
+        """Own local ChatGPT registrations and OAuth callback listeners."""
+        if self._chatgpt_auth_manager is None:
+            from agent.modules.providers.chatgpt.auth import ChatGPTAuthManager
+            self._chatgpt_auth_manager = ChatGPTAuthManager()
+        return self._chatgpt_auth_manager
+
+    @property
+    @_locked_lazy
     def provider_service(self) -> Any:
         """Lazily owned ProviderService scoped to this container."""
         if self._provider_service is None:
@@ -565,7 +575,10 @@ class AppContainer:
             )
 
             repo = ConfigProviderRepository()
+            from agent.modules.providers.chatgpt.factory import ChatGPTFactory
+
             service = ProviderService(repository=repo)
+            service.register_factory(ProviderType.CHATGPT, ChatGPTFactory(self.chatgpt_auth_manager))
             service.register_factory(ProviderType.OPENAI_COMPATIBLE, OpenAICompatibleFactory())
             service.register_factory(ProviderType.GOOGLE, GoogleFactory())
             service.register_factory(ProviderType.ANTHROPIC, AnthropicFactory())
@@ -661,6 +674,8 @@ class AppContainer:
         from agent.shared.config.service import detach_database_config_source
         from agent.shared.infrastructure.db.engine import close_async_engine
 
+        if self._chatgpt_auth_manager is not None:
+            await asyncio.to_thread(self._chatgpt_auth_manager.close)
         if self._mcp_load_task is not None:
             self._mcp_load_task.cancel()
             await asyncio.gather(self._mcp_load_task, return_exceptions=True)

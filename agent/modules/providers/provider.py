@@ -11,6 +11,7 @@ class ProviderType(StrEnum):
     """Supported LLM provider types."""
 
     OPENAI = "openai"
+    CHATGPT = "chatgpt"
     ANTHROPIC = "anthropic"
     GOOGLE = "google"
     OPENAI_COMPATIBLE = "openai_compatible"

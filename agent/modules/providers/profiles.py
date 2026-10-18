@@ -59,6 +59,7 @@ def _langchain_profile(provider_type: str, model_name: str) -> dict[str, Any]:
     """
     package = {
         "openai": "langchain_openai",
+        "chatgpt": "langchain_openai",
         "openai_compatible": "langchain_openai",
         "anthropic": "langchain_anthropic",
         "google": "langchain_google_genai",
