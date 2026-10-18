@@ -27,8 +27,8 @@ Agent được định nghĩa trong file `.md` với cấu trúc:
 name: "agent-name"
 description: "Agent description"
 graph_type: "react_agent"  # workflow template to use
-provider: "default"  # required; "default" follows llm.default_provider
-model: ""  # optional override; empty = use provider default model
+provider: "default"  # optional; missing/null defaults to "default" (follows llm.default_model)
+model: ""  # optional override; missing/null/empty = use provider default model
 tools:
   - "tool1"
   - "tool2"
@@ -49,8 +49,8 @@ Can use {working_dir} placeholder.
 - **name** (required): Unique identifier cho agent
 - **description**: Mô tả ngắn gọn về agent
 - **graph_type**: Workflow template (default: `react_agent`)
-- **provider**: Provider name. Use `default` to follow `llm.default_provider`
-- **model**: Model ID override (default: empty, so runtime uses provider default)
+- **provider**: Provider name. Missing/null defaults to `default`, which follows `llm.default_model`
+- **model**: Model ID override. Missing/null/empty defaults to `""`, so runtime uses the provider default model
 - **tools**: Explicit tool allow-list; an empty list — including a missing field which defaults to `[]` — disables tools (deny-all, fail-closed)
 - **sub_agents**:
   - `null` (không có field): leaf agent, không thể call sub-agents

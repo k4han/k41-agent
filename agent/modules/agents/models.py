@@ -9,6 +9,35 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from agent.modules.providers import EFFORT_PATTERN
 
 
+# Text values that mean "not configured" when they appear in agent cards.
+_NULL_LIKE_TEXT = {"", "none", "null", "~"}
+
+
+def coerce_agent_text(value: Any, default: str = "") -> str:
+    """Coerce a nullable scalar to a trimmed string, falling back to ``default``.
+
+    Empty strings, Python ``None``, and the literal texts ``None``, ``null`` and
+    ``~`` are treated as missing so agent cards can omit optional settings
+    instead of failing validation.
+    """
+    if value is None:
+        return default
+    text = str(value).strip()
+    if text.lower() in _NULL_LIKE_TEXT:
+        return default
+    return text
+
+
+def normalize_agent_defaults(data: Any) -> Any:
+    """Fill nullable provider/model settings with their runtime defaults."""
+    if isinstance(data, dict):
+        model = data.get("model")
+        if not isinstance(model, dict):
+            data = {**data, "model": coerce_agent_text(model)}
+        data = {**data, "provider": coerce_agent_text(data.get("provider"), "default")}
+    return data
+
+
 def normalize_agent_model(data: Any) -> Any:
     """Accept structured model settings while retaining the flat runtime fields."""
     if isinstance(data, dict) and isinstance(data.get("model"), dict):
@@ -45,7 +74,7 @@ class AgentConfig(BaseModel):
     display_name: str = ""
     description: str = ""
     graph_type: str  # Registered workflow name
-    provider: str
+    provider: str = "default"
     model: str = ""
     reasoning_effort: str | None = Field(default=None, pattern=EFFORT_PATTERN)
     tools: list[str] = Field(default_factory=list)
@@ -71,7 +100,9 @@ class AgentConfig(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _normalize(cls, data: Any) -> Any:
-        data = normalize_agent_model(reject_legacy_context_settings(data))
+        data = normalize_agent_defaults(
+            normalize_agent_model(reject_legacy_context_settings(data))
+        )
         if isinstance(data, dict):
             from agent.modules.tools import TOOL_ALIASES, canonical_tool_names
             if "tools" in data and data["tools"] is not None:
@@ -87,6 +118,7 @@ class AgentConfig(BaseModel):
                     },
                 }
         return data
+
 
 class AgentCard(BaseModel):
     """Dashboard-facing view of an agent card file."""
@@ -116,7 +148,9 @@ class AgentCard(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _normalize(cls, data: Any) -> Any:
-        data = normalize_agent_model(reject_legacy_context_settings(data))
+        data = normalize_agent_defaults(
+            normalize_agent_model(reject_legacy_context_settings(data))
+        )
         if isinstance(data, dict):
             from agent.modules.tools import TOOL_ALIASES, canonical_tool_names
             if "tools" in data and data["tools"] is not None:

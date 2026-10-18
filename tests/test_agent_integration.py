@@ -83,7 +83,7 @@ def test_default_agent_always_available():
         repo = FilesystemAgentRepository(empty_dir)
         agents = repo.load()
 
-        assert len(agents) == 6
+        assert len(agents) == 7
         assert "channel-agent" in agents
         assert "scheduler-executor" in agents
         assert "conversation-title" in agents
@@ -95,7 +95,8 @@ def test_default_agent_always_available():
         assert default.name == "default"
         assert default.display_name == "kaka"
         assert default.graph_type == "react_agent"
-        assert default.model == "gemini-3.1-flash-lite-preview"
+        assert default.provider == "default"
+        assert default.model == ""
         assert "helpful AI assistant" in default.system_prompt
     finally:
         os.rmdir(empty_dir)
@@ -115,7 +116,8 @@ def test_agent_config_overrides_defaults(test_agent_dir):
     assert "Test response" in test_agent.system_prompt
 
     # Default agent has builtin config
-    assert default_agent.model == "gemini-3.1-flash-lite-preview"
+    assert default_agent.provider == "default"
+    assert default_agent.model == ""
     assert default_agent.tools == ["write_todos"]
     assert "helpful AI assistant" in default_agent.system_prompt
 

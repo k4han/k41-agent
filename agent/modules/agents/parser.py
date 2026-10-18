@@ -7,7 +7,11 @@ import re
 import yaml
 from pathlib import Path
 
-from agent.modules.agents.models import AgentConfig, reject_legacy_context_settings
+from agent.modules.agents.models import (
+    AgentConfig,
+    coerce_agent_text,
+    reject_legacy_context_settings,
+)
 from agent.shared.infrastructure.parsing import parse_string_or_list
 from agent.modules.workflows import (
     ROUTER_GRAPH_TYPE,
@@ -182,24 +186,22 @@ def _build_agent_config(
     name = str(name).strip()
     graph_type = str(graph_type).strip() or REACT_AGENT_GRAPH_TYPE
 
-    provider = str(data.get("provider", "")).strip()
-    if not provider:
-        raise AgentMarkdownError(
-            f"Agent file {source_label} is missing required 'provider'. "
-            'Use provider: "default" to use llm.default_provider.'
-        )
-
-    # Optional fields with defaults
-    display_name = str(data.get("display_name", ""))
-    description = str(data.get("description", ""))
+    # Optional fields with defaults. Missing or null-like provider/model values
+    # fall back to the runtime defaults instead of failing validation:
+    # provider follows llm.default_model and an empty model uses the provider default.
+    provider = coerce_agent_text(data.get("provider"), "default")
+    display_name = coerce_agent_text(data.get("display_name"))
+    description = coerce_agent_text(data.get("description"))
     raw_model = data.get("model", "")
-    model = raw_model if isinstance(raw_model, dict) else str(raw_model).strip()
+    model = raw_model if isinstance(raw_model, dict) else coerce_agent_text(raw_model)
 
     try:
         reject_legacy_context_settings(data)
     except ValueError as exc:
         raise AgentMarkdownError(f"Agent file {source_label}: {exc}") from exc
-    context_compact_threshold = data.get("context_compact_threshold", 75)
+    context_compact_threshold = data.get("context_compact_threshold")
+    if context_compact_threshold is None:
+        context_compact_threshold = 75
     if "tools" not in data:
         logger.warning(
             "Agent file %s has no 'tools' field; defaulting to deny-all (no tools). "

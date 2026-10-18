@@ -105,12 +105,14 @@ class TestParseAgentFile:
         os.unlink(p)
         os.rmdir(d)
 
-    def test_parse_file_missing_provider(self):
+    def test_parse_file_missing_provider_defaults(self):
         d = tempfile.mkdtemp()
-        p = Path(d, "bad.md")
+        p = Path(d, "default_provider.md")
         p.write_text("---\nname: test\n---\nBody.", encoding="utf-8")
         config = parse_agent_file(p)
-        assert config is None
+        assert config is not None
+        assert config.provider == "default"
+        assert config.model == ""
         os.unlink(p)
         os.rmdir(d)
 
@@ -237,9 +239,10 @@ class TestFilesystemAgentRepository:
     def test_load_from_directory(self, agents_dir):
         repo = FilesystemAgentRepository(agents_dir)
         agents = repo.load()
-        assert len(agents) == 8
+        assert len(agents) == 9
         assert "researcher" in agents
         assert "coder" in agents
+        assert "kode" in agents
         assert "default" in agents
         assert "scheduler-executor" in agents
         assert "conversation-title" in agents
@@ -253,30 +256,32 @@ class TestFilesystemAgentRepository:
         d = tempfile.mkdtemp()
         repo = FilesystemAgentRepository(d)
         agents = repo.load()
-        assert len(agents) == 6
+        assert len(agents) == 7
         assert "default" in agents
         assert "conversation-title" in agents
         assert "github-issue-fixer" in agents
         assert "channel-agent" in agents
         assert "router" in agents
+        assert "kode" in agents
         assert agents["default"].display_name == "kaka"
         os.rmdir(d)
 
     def test_load_nonexistent_directory(self):
         repo = FilesystemAgentRepository("/nonexistent/path/12345")
         agents = repo.load()
-        assert len(agents) == 6
+        assert len(agents) == 7
         assert "default" in agents
         assert "conversation-title" in agents
         assert "github-issue-fixer" in agents
         assert "channel-agent" in agents
         assert "router" in agents
+        assert "kode" in agents
 
     def test_reload(self, agents_dir):
         repo = FilesystemAgentRepository(agents_dir)
         repo.load()
         agents2 = repo.reload()
-        assert len(agents2) == 8
+        assert len(agents2) == 9
 
 
 # --- service tests ---
@@ -311,6 +316,7 @@ class TestAgentCatalogService:
         assert names == {
             "researcher",
             "coder",
+            "kode",
             "default",
             "scheduler-executor",
             "conversation-title",
@@ -356,4 +362,4 @@ class TestAgentCatalogService:
 
     def test_reload(self):
         agents = self.service.reload_agents()
-        assert len(agents) == 8
+        assert len(agents) == 9
