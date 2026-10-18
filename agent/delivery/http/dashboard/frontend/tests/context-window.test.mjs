@@ -83,7 +83,7 @@ test('cache hits are a share of input tokens and do not add to context usage', (
     input_tokens: 8000, output_tokens: 500, cache_read_tokens: 6000,
   });
   assert.equal(control.contextWindowData().cacheReadTokens, 6000);
-  assert.equal(control.contextWindowData().formattedCacheHit, '6.00K tokens (75.0%)');
+  assert.equal(control.contextWindowData().formattedCacheHit, '6K tokens (75.0%)');
   assert.equal(control.contextWindowData().totalTokens, 8500);
   assert.equal(control.contextWindowData().totalPercent, 8500 / 32000 * 100);
   dispatch(1000);
@@ -115,9 +115,9 @@ test('cache hits follow the conversation and are cleared by compaction', (t) => 
   store.getOrCreateStreamSignals('thread-b');
   dispatch(8000, 32000, 'thread-a', false, undefined, { cache_read_tokens: 6000 });
   dispatch(2000, 32000, 'thread-b', false, undefined, { cache_read_tokens: 1000 });
-  assert.equal(control.contextWindowData().formattedCacheHit, '6.00K tokens (75.0%)');
+  assert.equal(control.contextWindowData().formattedCacheHit, '6K tokens (75.0%)');
   setThreadId('thread-b');
-  assert.equal(control.contextWindowData().formattedCacheHit, '1.00K tokens (50.0%)');
+  assert.equal(control.contextWindowData().formattedCacheHit, '1K tokens (50.0%)');
   control.updateCompactedContextUsage(500, 'thread-b');
   assert.equal(control.contextWindowData().formattedCacheHit, '—');
 });
@@ -127,7 +127,7 @@ test('cache hits survive reloading and replacement by a newer stored snapshot', 
   requests[0].resolve({ thread_id: 'thread-a', has_context_usage: true,
     latest_input_tokens: 8000, latest_output_tokens: 500, latest_cache_read_tokens: 6000 });
   await flushAsync();
-  assert.equal(control.contextWindowData().formattedCacheHit, '6.00K tokens (75.0%)');
+  assert.equal(control.contextWindowData().formattedCacheHit, '6K tokens (75.0%)');
   setStreaming(true);
   dispatch(8500, 32000, 'thread-a', false, undefined, {
     input_tokens: 8000, output_tokens: 500, cache_read_tokens: 6000, context_updated_at: before,
@@ -136,7 +136,7 @@ test('cache hits survive reloading and replacement by a newer stored snapshot', 
   requests[1].resolve({ thread_id: 'thread-a', has_context_usage: true, context_updated_at: after,
     latest_input_tokens: 10000, latest_output_tokens: 500, latest_cache_read_tokens: 8000 });
   await flushAsync();
-  assert.equal(control.contextWindowData().formattedCacheHit, '8.00K tokens (80.0%)');
+  assert.equal(control.contextWindowData().formattedCacheHit, '8K tokens (80.0%)');
 });
 
 const compactedBreakdown = {
@@ -152,7 +152,7 @@ test('only provider reports update the indicator after each model call', (t) => 
   assert.equal(control.contextWindowData().formattedUsed, '—');
   dispatch(7900);
   assert.equal(control.contextWindowData().totalTokens, 7900);
-  assert.equal(control.contextWindowData().formattedUsed, '7.90K');
+  assert.equal(control.contextWindowData().formattedUsed, '7.9K');
   assert.equal(control.contextWindowData().hasReportedUsage, true);
   assert.equal(control.contextWindowData().maxTokens, 32000);
   dispatch(19000, 32000, 'thread-a', true);
@@ -214,7 +214,7 @@ test('finished streams retain the latest provider report while stored usage catc
   requests[0].resolve({ thread_id: 'thread-a', latest_input_tokens: 100 });
   await flushAsync();
   assert.equal(control.contextWindowData().totalTokens, 8100);
-  assert.equal(control.contextWindowData().formattedUsed, '8.10K');
+  assert.equal(control.contextWindowData().formattedUsed, '8.1K');
 });
 
 test('compacted context and history persist when revisiting the conversation', async (t) => {
@@ -245,7 +245,7 @@ test('compacted context and history persist when revisiting the conversation', a
   assert.equal(control.contextWindowData().hasReportedUsage, false);
   assert.equal(control.contextWindowData().estimated, true);
   assert.equal(control.contextWindowData().totalTokens, 2000);
-  assert.equal(control.contextWindowData().formattedUsed, '~2.00K');
+  assert.equal(control.contextWindowData().formattedUsed, '~2K');
   assert.equal(control.contextWindowData().maxTokens, 32000);
   assert.equal(control.contextWindowData().totalPercent, 6.25);
   assert.equal(control.contextWindowData().categories[0].formattedValue, '600 tokens (1.9%)');
@@ -278,7 +278,7 @@ test('compaction replaces the old report and ignores delayed pre-compaction usag
     context_estimated: true, current_context_tokens: 2000, latest_input_tokens: 0,
   });
   await refresh;
-  assert.equal(control.contextWindowData().formattedUsed, '~2.00K');
+  assert.equal(control.contextWindowData().formattedUsed, '~2K');
   dispatch(2600, 32000, 'thread-a', false, undefined, { input_tokens: 2500, output_tokens: 100 });
   assert.equal(control.contextWindowData().totalTokens, 2600);
   assert.equal(control.contextWindowData().estimated, false);
@@ -295,7 +295,7 @@ test('reloaded conversations display the persisted compaction estimate', async (
   });
   await flushAsync();
   assert.equal(control.contextWindowData().totalTokens, 2000);
-  assert.equal(control.contextWindowData().formattedUsed, '~2.00K');
+  assert.equal(control.contextWindowData().formattedUsed, '~2K');
   assert.equal(control.contextWindowData().estimated, true);
   assert.equal(control.contextWindowData().categories[0].tokens, 600);
   assert.equal(control.contextWindowData().categories[4].tokens, 300);
@@ -318,7 +318,7 @@ test('refresh fills in a missing legacy compaction breakdown', async (t) => {
   await refresh;
   const data = control.contextWindowData();
   assert.equal(data.totalTokens, 2000);
-  assert.equal(data.formattedUsed, '~2.00K');
+  assert.equal(data.formattedUsed, '~2K');
   assert.equal(data.categories[0].tokens, 600);
   assert.equal(data.categories[4].tokens, 300);
   assert.equal(data.categories[5].tokens, 300);
@@ -352,7 +352,7 @@ test('a refreshed provider report supersedes the local compaction estimate', asy
   });
   await refresh;
   assert.equal(control.contextWindowData().totalTokens, 2600);
-  assert.equal(control.contextWindowData().formattedUsed, '2.60K');
+  assert.equal(control.contextWindowData().formattedUsed, '2.6K');
   assert.equal(control.contextWindowData().estimated, false);
   assert.equal(control.contextWindowData().maxTokens, 32000);
   assert.equal(store.hasPersistedStream('thread-a'), false);
@@ -434,7 +434,7 @@ test('all seven categories show tokens and percentage of context capacity', (t) 
     'System prompt', 'System tools', 'Skills', 'Subagents',
     'User messages', 'Agent responses', 'Tool calls',
   ]);
-  assert.equal(categories[0].formattedValue, '2.00k tokens (6.3%)');
+  assert.equal(categories[0].formattedValue, '2k tokens (6.3%)');
   assert.equal(categories[2].formattedValue, '500 tokens (1.6%)');
   assert.equal(categories.reduce((sum, category) => sum + category.tokens, 0), 8000);
 });
@@ -632,7 +632,7 @@ test('a versioned compaction ignores older provider usage and accepts a later mo
     context_updated_at: before, latest_input_tokens: 8000, latest_output_tokens: 100,
   });
   await stale;
-  assert.equal(control.contextWindowData().formattedUsed, '~2.00K');
+  assert.equal(control.contextWindowData().formattedUsed, '~2K');
   assert.equal(control.contextWindowData().reservedPercent, 18.75);
   const fresh = control.refreshThreadUsage('thread-a');
   requests[2].resolve({ thread_id: 'thread-a', has_context_usage: true,
@@ -652,7 +652,7 @@ test('a newer compaction from another session replaces the live report', async (
     context_breakdown: compactedBreakdown,
   });
   await flushAsync();
-  assert.equal(control.contextWindowData().formattedUsed, '~2.00K');
+  assert.equal(control.contextWindowData().formattedUsed, '~2K');
   assert.equal(control.contextWindowData().categories[0].tokens, 600);
 });
 

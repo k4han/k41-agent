@@ -231,12 +231,14 @@ export function useContextWindow(params: UseContextWindowParams) {
       reportedUsage ? reportedUsage.context_breakdown : usage?.context_breakdown,
     ) : undefined;
 
+    const trimDecimals = (num: number): string => num.toFixed(2).replace(/\.?0+$/, "");
+
     const formatNumber = (num: number): string => {
       if (num >= 1000000) {
-        return (num / 1000000).toFixed(2) + "M";
+        return trimDecimals(num / 1000000) + "M";
       }
       if (num >= 1000) {
-        return (num / 1000).toFixed(2) + "K";
+        return trimDecimals(num / 1000) + "K";
       }
       return num.toString();
     };
@@ -248,7 +250,7 @@ export function useContextWindow(params: UseContextWindowParams) {
         key,
         label: CATEGORY_LABELS[key],
         tokens,
-        formattedValue: tokens === null ? "—" : `${tokens < 1000 ? tokens.toString() : `${(tokens / 1000).toFixed(2)}k`} tokens (${percent.toFixed(1)}%)`,
+        formattedValue: tokens === null ? "—" : `${tokens < 1000 ? tokens.toString() : `${trimDecimals(tokens / 1000)}k`} tokens (${percent.toFixed(1)}%)`,
       };
     });
 
