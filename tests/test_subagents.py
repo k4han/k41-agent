@@ -1,4 +1,4 @@
-"""Unit tests for the agents module — parser, repository, service, and call_agent."""
+"""Unit tests for the agents module — parser, repository, service, and delegate_task."""
 
 import os
 import pytest
@@ -23,7 +23,7 @@ name: researcher
 display_name: Research Agent
 graph_type: react_agent
 provider: default
-tools: [read, list_dir, call_agent]
+tools: [read, list_dir, delegate_task]
 sub_agents: []
 context_compact_threshold: 75
 ---
@@ -40,7 +40,7 @@ name: coder
 display_name: Coder Agent
 graph_type: react_agent
 provider: default
-tools: [read, write, bash, list_dir, call_agent]
+tools: [read, write, bash, list_dir, delegate_task]
 sub_agents: [researcher]
 context_compact_threshold: 75
 ---
@@ -82,7 +82,7 @@ class TestParseAgentFile:
         assert config.name == "researcher"
         assert config.display_name == "Research Agent"
         assert config.graph_type == "react_agent"
-        assert config.tools == ["read", "list_dir", "call_agent"]
+        assert config.tools == ["read", "list_dir", "delegate_task"]
         assert config.sub_agents == []
         assert config.context_compact_threshold == 75
         assert "research assistant" in config.system_prompt

@@ -134,7 +134,7 @@ name: "parent"
 graph_type: "react_agent"
 provider: "default"
 tools:
-  - "call_agent"
+  - "delegate_task"
 sub_agents:
   - "child"
 ---

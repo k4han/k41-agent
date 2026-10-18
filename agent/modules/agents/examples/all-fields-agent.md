@@ -52,8 +52,9 @@ model: ""
 reasoning_effort: high
 
 # --- Tools ------------------------------------------------------------------
-# Explicit tool allow-list. Fail-closed: an empty list (or a missing field,
-# which defaults to []) disables ALL tools. Names are canonicalized, so legacy
+# Manual tool allow-list. An empty list (or a missing field, which defaults
+# to []) disables manual tools. Callable sub-agents enable delegate_task separately.
+# Names are canonicalized, so legacy
 # aliases like read_file/write_file/edit_file map to read/write/edit.
 tools:
   - ask_user
@@ -106,9 +107,10 @@ tool_permissions:
     effect: ask
 
 # --- Delegation -------------------------------------------------------------
-# Sub-agents this agent may call through the `call_agent` tool.
+# Sub-agents this agent may call through the `delegate_task` tool.
+# The tool is enabled automatically when at least one target is callable.
 #   (field omitted / null) -> leaf agent, cannot call anyone
-#   []                     -> may call sub-agents, but none are configured yet
+#   []                     -> delegation is disabled
 #   ["a", "b"]             -> may call only the listed agents
 # Self-calls are blocked; targets are validated at runtime.
 sub_agents:

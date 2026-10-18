@@ -18,7 +18,7 @@ assert.ok(executable, 'Set BROWSER_EXECUTABLE to run browser checks.');
 const agent = {
   name: 'default', display_name: 'Default', description: '', graph_type: 'react_agent',
   provider: 'test', model: 'model-a', valid: true, editable: true, source: 'user',
-  tools: [], sub_agents: [], mcp_servers: [], plan_approval_targets: [],
+  tools: ['delegate_task', 'read'], sub_agents: ['child'], mcp_servers: [], plan_approval_targets: [],
   context_compact_threshold: 75, system_prompt: '', hidden: false,
 };
 const models = {
@@ -53,10 +53,12 @@ const homePayload = () => ({
 });
 const fixtures = {
   '/dashboard-api/catalog': { backends: [{ name: 'local', title: 'Local', enabled: true }] },
-  '/dashboard-api/agents/cards': { cards: [agent], agent_names: ['default'] },
+  '/dashboard-api/agents/cards': { cards: [agent], agent_names: ['default', 'child'] },
   '/dashboard-api/agents/providers': models,
   '/dashboard-api/agents/workflows': { workflows: ['react_agent'] },
-  '/dashboard-api/agents/tools': { tools: [], tool_groups: [] },
+  '/dashboard-api/agents/tools': { tools: ['delegate_task', 'read'], tool_groups: [
+    { category: 'agent', tools: ['delegate_task'] }, { category: 'coding', tools: ['read'] },
+  ] },
   '/dashboard-api/agents/mcp': { mcp_server_options: [], mcp_installs: {} },
   '/dashboard-api/sessions': { sessions: [] },
   '/dashboard-api/chat-history': { threads: [
@@ -231,9 +233,23 @@ try {
   await until(() => js('!!document.querySelector(".agent-list-name")'), 'cached agent list');
   await js('document.querySelector(".agent-list-name").click()');
   await until(() => js(`!!document.querySelector('input[placeholder="My Agent"]')`), 'agent editor');
+  assert.equal(await js(`Array.from(document.querySelectorAll('button')).find(button => button.textContent.trim() === 'Save').disabled`), true);
+  await clickText('Capabilities & Tools');
+  await until(() => js('!!document.querySelector(".agent-config-stat")'), 'agent capabilities');
+  assert.equal(await js('document.querySelector(".agent-config-stat strong").textContent'), '1/1');
+  assert.equal(await js('Array.from(document.querySelectorAll(".agent-config-option-text")).some(item => item.textContent === "delegate_task")'), false);
+  const subagentCheckbox = `Array.from(document.querySelectorAll('.agent-config-option')).find(item => item.textContent.trim() === 'child').querySelector('input')`;
+  assert.equal(await js(`(${subagentCheckbox}).checked`), true);
+  await js(`(${subagentCheckbox}).click()`);
+  await until(() => js('document.querySelectorAll(".agent-config-stat strong")[2].textContent === "0/1"'), 'sub-agent deselection');
+  await js(`(${subagentCheckbox}).click()`);
+  await clickText('General Config');
   await js(`const input = document.querySelector('input[placeholder="My Agent"]'); input.value = 'Updated default'; input.dispatchEvent(new Event('input', { bubbles: true }));`);
   await clickText('Save');
   await until(() => js('location.pathname === "/settings/agents" && document.querySelector(".agent-list-name")?.textContent === "Updated default"'), 'agent list after mutation');
+  assert.deepEqual(agent.tools, ['read']);
+  assert.deepEqual(agent.sub_agents, ['child']);
+  console.log('PASS: legacy delegation is automatic, hidden from tool choices and omitted from saved tools.');
   console.log('PASS: agent edits invalidate cached list data before SPA navigation.');
 
   await navigate('/chat');

@@ -15,15 +15,15 @@ SKILLS_DISCLOSURE_PROMPT = (
 )
 
 SUB_AGENT_DISCLOSURE_PROMPT = (
-    "The call_agent tool can delegate work to the following specialized "
+    "The delegate_task tool can delegate work to the following specialized "
     "sub-agents.\n"
     "Use the exact sub_agent name when delegating:"
 )
 
 SUB_AGENT_EMPTY_PROMPT = (
-    "The call_agent tool is available, but this agent has no callable "
+    "The delegate_task tool is available, but this agent has no callable "
     "sub-agents configured.\n"
-    "Do not call call_agent unless a callable sub-agent is listed."
+    "Do not call delegate_task unless a callable sub-agent is listed."
 )
 
 WRITE_TODOS_PROMPT = (
@@ -214,7 +214,7 @@ def build_llm_system_prompt(
         },
     )
 
-    if _has_tool(tools, "call_agent"):
+    if _has_tool(tools, "delegate_task"):
         section = _build_sub_agents_prompt_section(agent_name, catalog)
         system_prompt += section
         if sections is not None:

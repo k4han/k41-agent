@@ -187,7 +187,7 @@ class TestBuiltinToolSource:
             "write_todos",
             "ask_user",
             "request_plan_review",
-            "call_agent",
+            "delegate_task",
             "schedule_task",
             "list_scheduled_tasks",
             "delete_scheduled_task",
@@ -195,7 +195,7 @@ class TestBuiltinToolSource:
             "web_fetch",
         }
         assert expected_names.issubset(names)
-        assert names.isdisjoint({"read_file", "write_file", "edit_file", "exec_command", "run_bash", "apply_patch"})
+        assert names.isdisjoint({"call_agent", "read_file", "write_file", "edit_file", "exec_command", "run_bash", "apply_patch"})
         assert not any(name.startswith("bash_") for name in names)
         assert all(id_.startswith("builtin.") for id_ in ids)
 
@@ -207,7 +207,7 @@ class TestBuiltinToolSource:
         assert by_name["grep"].category is ToolCategory.FILE
         assert by_name["bash"].category is ToolCategory.SHELL
         assert by_name["web_fetch"].category is ToolCategory.WEB
-        assert by_name["call_agent"].category is ToolCategory.AGENT
+        assert by_name["delegate_task"].category is ToolCategory.AGENT
         assert by_name["schedule_task"].category is ToolCategory.SCHEDULE
         assert by_name["skill"].category is ToolCategory.SKILL
 

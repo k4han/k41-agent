@@ -67,8 +67,7 @@ Working directory: {working_dir}
 ```markdown
 ---
 name: "orchestrator"
-tools:
-  - "call_agent"
+tools: []
 sub_agents:
   - "research"
   - "backend"
@@ -77,12 +76,18 @@ sub_agents:
 You can delegate tasks to research or backend agents.
 ```
 
-### Sử dụng call_agent tool
+`delegate_task` is enabled automatically when at least one listed sub-agent exists
+and is not the parent itself. No manual tool selection is required. An empty or
+missing `sub_agents` list disables delegation, including in legacy cards that
+still list `delegate_task` under `tools`. The old name `call_agent` is accepted
+in saved configuration and per-run tool restrictions as an alias for `delegate_task`.
+
+### Sử dụng delegate_task tool
 
 LLM sẽ tự động gọi:
 ```json
 {
-  "tool": "call_agent",
+  "tool": "delegate_task",
   "args": {
     "task": "Research about Python async",
     "sub_agent": "research"
@@ -112,7 +117,7 @@ Commands have isolated cwd and environment state. Long-running commands return
 `process_id`; process controls require that identifier and enforce ownership.
 
 ### Agent
-- `call_agent` - Call sub-agents
+- `delegate_task` - Call sub-agents
 
 ## Graph Types
 
@@ -196,7 +201,7 @@ tools: ["list_dir", "read", "write", "run_command"]
 ### Orchestrator
 ```yaml
 name: "orchestrator"
-tools: ["call_agent"]
+tools: []
 sub_agents: ["researcher", "coder"]
 ```
 
@@ -210,7 +215,7 @@ sub_agents: ["researcher", "coder"]
 ### Tool not available
 - Check tool name spelling
 - Verify tool is registered in registry
-- An empty tools list disables tools
+- An empty tools list disables manually selected tools; valid sub-agents still enable `delegate_task`
 
 ### Sub-agent call denied
 - Check sub_agents list includes target

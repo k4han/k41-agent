@@ -80,7 +80,7 @@ class AgentConfig(BaseModel):
     tools: list[str] = Field(default_factory=list)
     tool_permissions: list[dict[str, Any]] | None = None
     tool_configs: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    sub_agents: Optional[list[str]] = None  # None = leaf (no call_agent), list = allowed targets
+    sub_agents: Optional[list[str]] = None  # Callable targets automatically enable delegate_task.
     plan_approval_targets: list[str] = Field(default_factory=list)
     hidden: bool = False
     context_compact_threshold: int = Field(default=75, ge=1, le=100, strict=True)

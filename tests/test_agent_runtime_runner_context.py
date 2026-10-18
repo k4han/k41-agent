@@ -263,7 +263,8 @@ async def test_run_agent_omits_context_for_graph_without_context_schema(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_run_agent_passes_model_override_to_context(monkeypatch):
+@pytest.mark.parametrize("allowed_tools", [None, [], ["read"]])
+async def test_run_agent_passes_model_override_to_context(monkeypatch, allowed_tools):
     captured: dict = {}
 
     class _FakeCatalog:
@@ -301,6 +302,7 @@ async def test_run_agent_passes_model_override_to_context(monkeypatch):
             provider="openai-main",
             model="direct-model",
             reasoning_effort="high",
+            allowed_tool_names=allowed_tools,
         )
     ]
 
@@ -308,6 +310,7 @@ async def test_run_agent_passes_model_override_to_context(monkeypatch):
     assert captured["kwargs"]["context"]["provider"] == "openai-main"
     assert captured["kwargs"]["context"]["model"] == "direct-model"
     assert captured["kwargs"]["context"]["reasoning_effort"] == "high"
+    assert captured["kwargs"]["context"]["allowed_tool_names"] == allowed_tools
 
 
 @pytest.mark.asyncio
@@ -369,7 +372,8 @@ async def test_run_agent_resume_payload_marks_run_as_resume(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_run_agent_stream_builds_multimodal_user_message(monkeypatch):
+@pytest.mark.parametrize("allowed_tools", [None, [], ["read"]])
+async def test_run_agent_stream_builds_multimodal_user_message(monkeypatch, allowed_tools):
     captured: dict = {}
 
     class _FakeCatalog:
@@ -422,10 +426,12 @@ async def test_run_agent_stream_builds_multimodal_user_message(monkeypatch):
             thread_id="thread-1",
             agent_name="default",
             attachments=attachments,
+            allowed_tool_names=allowed_tools,
         )
     ]
 
     assert events == [{"type": "final", "content": "done"}]
+    assert captured["kwargs"]["context"]["allowed_tool_names"] == allowed_tools
     user_message = captured["payload"]["messages"][0]
     assert isinstance(user_message, HumanMessage)
     assert user_message.content == [
@@ -1393,8 +1399,10 @@ def test_plan_resume_rejects_missing_source_agent_card():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("allowed_tools", [None, [], ["read"]])
 async def test_run_agent_edit_stream_forks_from_parent_and_preserves_attachments(
     monkeypatch,
+    allowed_tools,
 ):
     captured: dict = {}
     original_message = HumanMessage(
@@ -1472,6 +1480,7 @@ async def test_run_agent_edit_stream_forks_from_parent_and_preserves_attachments
             agent_name="default",
             message_index=0,
             source_checkpoint_id="source-1",
+            allowed_tool_names=allowed_tools,
         )
     ]
 
@@ -1480,6 +1489,7 @@ async def test_run_agent_edit_stream_forks_from_parent_and_preserves_attachments
         {"type": "final", "content": "edited response"},
     ]
     assert captured["kwargs"]["stream_mode"] == ["messages", "values", "custom"]
+    assert captured["kwargs"]["context"]["allowed_tool_names"] == allowed_tools
     assert captured["kwargs"]["config"]["configurable"]["checkpoint_id"] == "parent-1"
     edited_message = captured["payload"]["messages"][0]
     assert edited_message.id == "user-1"

@@ -19,12 +19,14 @@ import {
   type AgentForm,
   type AgentTab,
   type ToolConfigValue,
+  agentFormPayload,
   blankForm,
+  buildToolGroups,
   cardToForm,
   defaultWorkflow,
   isFormDirty,
+  manualToolNames,
 } from "./agentForm";
-import { buildToolGroups } from "./AgentToolsTab";
 import { keepSettingsDraft, takeSettingsDraft } from "@/lib/settingsDrafts";
 
 type Mode = "create" | "edit" | "view";
@@ -43,9 +45,11 @@ export function AgentEditPage(props: { agentName?: string }) {
   const form = () => formState.value;
   const setForm = (update: AgentForm | ((current: AgentForm) => AgentForm)) => {
     const next = untrack(() => typeof update === "function" ? update(unwrap(formState.value)) : update);
-    setFormState("value", reconcile(cloneValue(unwrap(next))));
+    setFormState("value", reconcile(cloneValue({ ...unwrap(next), tools: manualToolNames(next.tools) })));
   };
-  const [initialForm, setInitialForm] = createSignal<AgentForm>(blankForm(""));
+  const [initialForm, setInitialFormValue] = createSignal<AgentForm>(blankForm(""));
+  const setInitialForm = (next: AgentForm) =>
+    setInitialFormValue({ ...next, tools: manualToolNames(next.tools) });
   const [mode, setMode] = createSignal<Mode>(isCreate ? "create" : "view");
   const [saving, setSaving] = createSignal(false);
   const [promptVariables, setPromptVariables] = createSignal<PromptVariable[]>([]);
@@ -263,15 +267,7 @@ export function AgentEditPage(props: { agentName?: string }) {
   };
 
   const saveAgent = async () => {
-    const currentForm = form();
-    const current: AgentForm = {
-      ...currentForm,
-      tool_configs: Object.fromEntries(
-        Object.entries(currentForm.tool_configs).filter(
-          ([toolName, fields]) => currentForm.tools.includes(toolName) && Object.keys(fields).length > 0,
-        ),
-      ),
-    };
+    const current = agentFormPayload(form());
     if (mode() === "create" && !current.name.trim()) {
       showToast("Agent name is required.", "error");
       return;

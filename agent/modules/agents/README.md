@@ -51,10 +51,10 @@ Can use {working_dir} placeholder.
 - **graph_type**: Workflow template (default: `react_agent`)
 - **provider**: Provider name. Missing/null defaults to `default`, which follows `llm.default_model`
 - **model**: Model ID override. Missing/null/empty defaults to `""`, so runtime uses the provider default model
-- **tools**: Explicit tool allow-list; an empty list — including a missing field which defaults to `[]` — disables tools (deny-all, fail-closed)
+- **tools**: Explicit allow-list for manually selected tools. An empty or missing list enables no manual tools; callable sub-agents automatically enable `delegate_task`.
 - **sub_agents**:
   - `null` (không có field): leaf agent, không thể call sub-agents
-  - `[]` (empty list): có thể call sub-agents nhưng chưa config
+  - `[]` (empty list): delegation is disabled
   - `["agent1", "agent2"]`: chỉ có thể call các agents trong list
 - **context_compact_threshold**: Integer percentage (1-100) of the model context window that triggers automatic compaction before each model call; default 75.
 - **system_prompt**: Nội dung sau frontmatter, là system prompt của agent
@@ -151,13 +151,12 @@ catalog.reload_agents()
 
 ## Sub-Agent Hierarchy
 
-Agents có thể gọi sub-agents thông qua `call_agent` tool:
+Agents có thể gọi sub-agents thông qua `delegate_task` tool:
 
 ```markdown
 ---
 name: "orchestrator"
-tools:
-  - "call_agent"
+tools: []
 sub_agents:
   - "researcher"
   - "coder"
@@ -168,10 +167,21 @@ You can delegate tasks to researcher or coder agents.
 
 Rules:
 - `sub_agents: null` → leaf agent, không thể call ai
-- `sub_agents: []` → có thể call nhưng chưa config
+- `sub_agents: []` → delegation is disabled
 - `sub_agents: ["a", "b"]` → chỉ call được a và b
 - Self-calls bị block
 - Validation xảy ra tại runtime
+
+`delegate_task` is enabled automatically only when at least one allowed target
+exists and is not the caller. It does not need to be listed in `tools` and is
+hidden from the dashboard's manual tool picker. Legacy `tools: ["call_agent"]`
+cards are normalized to `delegate_task`, but the entry does not enable delegation
+by itself.
+
+Per-run `allowed_tool_names` restrictions still apply: `None` follows the agent
+configuration, `[]` disables every tool, and `["read"]` disables delegation for
+that run. Explicitly listing `delegate_task` cannot enable it without a callable
+target. The same restriction is preserved when routing to another agent.
 
 ### Router opt-in via card
 

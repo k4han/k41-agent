@@ -28,7 +28,7 @@ from agent.shared.config.models import SettingsSource, SettingsValue
 
 
 @tool
-def _t_call_agent_stub(task: str) -> str:
+def _t_delegate_task_stub(task: str) -> str:
     """stub."""
     return task
 
@@ -116,7 +116,7 @@ class TestToolPolicy:
     def test_allow_all_default(self) -> None:
         policy = ToolPolicy.allow_all()
         d_read = _builtin_descriptor("read", _t_read_stub)
-        d_call = _builtin_descriptor("call_agent", _t_call_agent_stub)
+        d_call = _builtin_descriptor("delegate_task", _t_delegate_task_stub)
         assert policy.is_allowed(d_read)
         assert policy.is_allowed(d_call)
 
@@ -128,7 +128,7 @@ class TestToolPolicy:
         assert policy.is_allowed(_builtin_descriptor("read", _t_read_stub))
         assert not policy.is_allowed(_builtin_descriptor("write", _t_read_stub))
 
-    def test_disallow_call_agent_when_sub_agents_none(self) -> None:
+    def test_disallow_delegate_task_when_sub_agents_none(self) -> None:
         config = SimpleNamespace(
             name="leaf",
             tools=None,
@@ -136,10 +136,10 @@ class TestToolPolicy:
             sub_agents=None,
         )
         policy = ToolPolicy.from_agent_config(config)
-        assert not policy.is_allowed(_builtin_descriptor("call_agent", _t_call_agent_stub))
+        assert not policy.is_allowed(_builtin_descriptor("delegate_task", _t_delegate_task_stub))
         assert policy.is_allowed(_builtin_descriptor("read", _t_read_stub))
 
-    def test_allow_call_agent_when_sub_agents_list(self) -> None:
+    def test_allow_delegate_task_when_sub_agents_list(self) -> None:
         config = SimpleNamespace(
             name="parent",
             tools=None,
@@ -147,7 +147,7 @@ class TestToolPolicy:
             sub_agents=["child"],
         )
         policy = ToolPolicy.from_agent_config(config)
-        assert policy.is_allowed(_builtin_descriptor("call_agent", _t_call_agent_stub))
+        assert policy.is_allowed(_builtin_descriptor("delegate_task", _t_delegate_task_stub))
 
     def test_default_agent_does_not_include_unbound_mcp(self, monkeypatch) -> None:
         monkeypatch.setattr(
@@ -244,7 +244,10 @@ class TestToolResolver:
         load_agents_from_dir()
         config = get_catalog_service().get_agent("default")
         tools = resolve_tools_for_agent("default")
-        assert {tool.name for tool in tools} == set(config.tools)
+        expected = set(config.tools) - {"delegate_task"}
+        if get_catalog_service().get_callable_agents("default"):
+            expected.add("delegate_task")
+        assert {tool.name for tool in tools} == expected
 
     def test_resolver_uses_policy_for_filtering(self, monkeypatch) -> None:
         fake_config = SimpleNamespace(

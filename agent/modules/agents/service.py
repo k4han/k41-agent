@@ -11,7 +11,7 @@ from agent.modules.workflows import ROUTER_GRAPH_TYPE
 
 
 class AgentCatalogService:
-    """Manages agent configs loaded from MD files and enforces call_agent rules."""
+    """Manages agent configs loaded from MD files and enforces delegate_task rules."""
 
     def __init__(self, repository: FilesystemAgentRepository | None = None):
         self._repository = repository if repository is not None else get_repository()
@@ -36,9 +36,7 @@ class AgentCatalogService:
             return []
         if config.sub_agents is None:
             return []
-        # Validate that listed sub_agents actually exist
-        loaded = set(self._repository.get_cached().keys())
-        return [s for s in config.sub_agents if s in loaded]
+        return [s for s in config.sub_agents if self.validate_call(for_agent_name, s)]
 
     def validate_call(self, caller_name: str, target_name: str) -> bool:
         """Check whether `caller_name` is allowed to call `target_name`."""

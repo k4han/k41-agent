@@ -11,8 +11,8 @@ import pytest
 import agent.modules.workflows.nodes.tool as tool_node_module
 import agent.modules.workflows.prompt_builders as prompt_builders
 from agent.modules.tools import get_default_tool_names
-from agent.modules.tools.builtin.delegation.call_agent import (
-    call_agent,
+from agent.modules.tools.builtin.delegation.delegate_task import (
+    delegate_task,
 )
 from agent.modules.tools.builtin.utility.write_todos import write_todos
 from agent.modules.tools.builtin.utility.ask_user import (
@@ -35,7 +35,7 @@ from agent.modules.workflows.state.base import BaseState
 
 
 @pytest.mark.asyncio
-async def test_call_agent_inherits_parent_runtime_context(monkeypatch):
+async def test_delegate_task_inherits_parent_runtime_context(monkeypatch):
     captured: dict = {}
 
     class _FakeCatalog:
@@ -81,7 +81,7 @@ async def test_call_agent_inherits_parent_runtime_context(monkeypatch):
         },
     )
 
-    result = await call_agent.coroutine(
+    result = await delegate_task.coroutine(
         task="delegate this",
         sub_agent="child-agent",
         runtime=runtime,
@@ -100,7 +100,7 @@ async def test_call_agent_inherits_parent_runtime_context(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_call_agent_passes_none_workspace_when_unset(monkeypatch):
+async def test_delegate_task_passes_none_workspace_when_unset(monkeypatch):
     captured: dict = {}
 
     class _FakeCatalog:
@@ -141,7 +141,7 @@ async def test_call_agent_passes_none_workspace_when_unset(monkeypatch):
         },
     )
 
-    result = await call_agent.coroutine(
+    result = await delegate_task.coroutine(
         task="delegate this",
         sub_agent="child-agent",
         runtime=runtime,
@@ -152,7 +152,7 @@ async def test_call_agent_passes_none_workspace_when_unset(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_call_agent_returns_empty_response_placeholder(monkeypatch):
+async def test_delegate_task_returns_empty_response_placeholder(monkeypatch):
     class _FakeCatalog:
         def validate_call(self, caller_name: str, target_name: str) -> bool:
             return True
@@ -184,7 +184,7 @@ async def test_call_agent_returns_empty_response_placeholder(monkeypatch):
         config={"configurable": {"thread_id": "parent-thread"}},
     )
 
-    result = await call_agent.coroutine(
+    result = await delegate_task.coroutine(
         task="delegate this",
         sub_agent="child-agent",
         runtime=runtime,
@@ -194,7 +194,7 @@ async def test_call_agent_returns_empty_response_placeholder(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_call_agent_blocks_when_validate_call_fails(monkeypatch):
+async def test_delegate_task_blocks_when_validate_call_fails(monkeypatch):
     class _FakeCatalog:
         def validate_call(self, caller_name: str, target_name: str) -> bool:
             return False
@@ -230,7 +230,7 @@ async def test_call_agent_blocks_when_validate_call_fails(monkeypatch):
 
     from agent.modules.tools import ToolError, format_tool_error
     with pytest.raises(ToolError) as caught:
-        await call_agent.coroutine(
+        await delegate_task.coroutine(
             task="delegate this",
             sub_agent="child-agent",
             runtime=runtime,
@@ -242,7 +242,7 @@ async def test_call_agent_blocks_when_validate_call_fails(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_call_agent_reports_runner_failure(monkeypatch):
+async def test_delegate_task_reports_runner_failure(monkeypatch):
     class _FakeCatalog:
         def validate_call(self, caller_name: str, target_name: str) -> bool:
             return True
@@ -274,7 +274,7 @@ async def test_call_agent_reports_runner_failure(monkeypatch):
 
     from agent.modules.tools import ToolError, format_tool_error
     with pytest.raises(ToolError) as caught:
-        await call_agent.coroutine(
+        await delegate_task.coroutine(
             task="delegate this",
             sub_agent="child-agent",
             runtime=runtime,
@@ -310,7 +310,7 @@ async def test_tool_node_resolves_runtime_allowed_tools(monkeypatch):
     )
 
     runtime = SimpleNamespace(
-        context={"allowed_tool_names": ["echo", "call_agent"]},
+        context={"allowed_tool_names": ["echo", "delegate_task"]},
     )
     config = {"configurable": {"thread_id": "thread-1"}}
     state = {"messages": ["ignored"]}
@@ -318,7 +318,7 @@ async def test_tool_node_resolves_runtime_allowed_tools(monkeypatch):
     result = await tool_node_module.tool_node(state, config=config, runtime=runtime)
 
     assert result == {"messages": []}
-    assert captured["tool_names"] == ["echo", "call_agent"]
+    assert captured["tool_names"] == ["echo", "delegate_task"]
     assert captured["state"] == state
     assert captured["config"] == config
 
@@ -440,7 +440,7 @@ async def test_tool_node_allows_pending_ask_user_tool_after_agent_switch(monkeyp
 
 
 def test_default_tool_registry_includes_runtime_tools():
-    assert "call_agent" in get_default_tool_names()
+    assert "delegate_task" in get_default_tool_names()
     assert "write_todos" in get_default_tool_names()
     assert ASK_USER_TOOL_NAME in get_default_tool_names()
     assert REQUEST_PLAN_REVIEW_TOOL_NAME in get_default_tool_names()

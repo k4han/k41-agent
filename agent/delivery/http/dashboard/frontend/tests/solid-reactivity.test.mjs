@@ -848,3 +848,58 @@ test('writes invalidate dashboard queries without clearing unrelated router cach
   cache.invalidateDashboardCache();
   assert.deepEqual([...keys], ['unrelated']);
 });
+
+function loadAgentForm() {
+  return loadModule('../src/pages/settings/agents/agentForm.ts', {
+    '@/lib/utils': loadModule('../src/lib/utils.ts'),
+  });
+}
+
+test('legacy delegation tools are hidden without making a newly opened agent dirty', () => {
+  const { cardToForm, isFormDirty, buildToolGroups } = loadAgentForm();
+  const card = { name: 'parent', tools: ['delegate_task', 'read'], sub_agents: ['child'] };
+  const current = cardToForm(card);
+  const initial = cardToForm(card);
+  assert.deepEqual(current.tools, ['read']);
+  assert.deepEqual(current.sub_agents, ['child']);
+  assert.equal(isFormDirty(current, initial), false);
+  const payload = { tool_groups: [
+    { category: 'agent', tools: ['delegate_task'] },
+    { category: 'coding', tools: ['read', 'delegate_task'] },
+  ] };
+  assert.deepEqual(buildToolGroups(payload, [...card.tools, 'custom', 'mcp__test__read']), [
+    { category: 'coding', tools: ['read'] },
+    { category: 'unknown', tools: ['custom'] },
+  ]);
+  assert.deepEqual(card.tools, ['delegate_task', 'read']);
+  assert.deepEqual(payload.tool_groups[0].tools, ['delegate_task']);
+});
+
+test('agent save payload removes automatic delegation even from an older draft', () => {
+  const { blankForm, agentFormPayload } = loadAgentForm();
+  const form = {
+    ...blankForm('react_agent'), tools: ['read', 'delegate_task'], sub_agents: ['child'],
+    tool_configs: { read: { setting: true }, delegate_task: { legacy: true }, write: { setting: false } },
+  };
+  const payload = agentFormPayload(form);
+  assert.deepEqual(payload.tools, ['read']);
+  assert.deepEqual(payload.sub_agents, ['child']);
+  assert.deepEqual(payload.tool_configs, { read: { setting: true } });
+  assert.deepEqual(form.tools, ['read', 'delegate_task']);
+  form.sub_agents = [];
+  assert.deepEqual(agentFormPayload(form).tools, ['read']);
+  assert.deepEqual(agentFormPayload(form).sub_agents, []);
+});
+
+test('old call_agent configurations and drafts keep delegation hidden after the rename', () => {
+  const { cardToForm, buildToolGroups, agentFormPayload } = loadAgentForm();
+  const card = { name: 'parent', tools: ['read', 'call_agent', 'delegate_task'], sub_agents: ['child'] };
+  const form = cardToForm(card);
+  assert.deepEqual(form.tools, ['read']);
+  assert.deepEqual(buildToolGroups({ tool_groups: [
+    { category: 'agent', tools: ['call_agent', 'delegate_task'] },
+    { category: 'coding', tools: ['read'] },
+  ] }, card.tools), [{ category: 'coding', tools: ['read'] }]);
+  form.tools = ['call_agent', 'delegate_task', 'read'];
+  assert.deepEqual(agentFormPayload(form).tools, ['read']);
+});

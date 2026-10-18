@@ -201,7 +201,10 @@ async def agent_tools_payload() -> dict[str, Any]:
         cache_version = _agent_tools_cache_version
         started = time.perf_counter()
         cards = await agent_cards_payload()
-        builtin_descriptors = find_descriptors(source=ToolSource.BUILTIN)
+        builtin_descriptors = [
+            descriptor for descriptor in find_descriptors(source=ToolSource.BUILTIN)
+            if descriptor.name not in {"delegate_task", "call_agent"}
+        ]
         tool_categories = {desc.name: desc.category.value for desc in builtin_descriptors}
         tool_config_schemas = serialize_tool_config_schemas(builtin_descriptors)
         tool_names = set(tool_categories)
@@ -211,7 +214,7 @@ async def agent_tools_payload() -> dict[str, Any]:
             tool_names.update(
                 name
                 for name in card.get("tools", [])
-                if not str(name).startswith("mcp__")
+                if name not in {"delegate_task", "call_agent"} and not str(name).startswith("mcp__")
             )
 
         payload = {

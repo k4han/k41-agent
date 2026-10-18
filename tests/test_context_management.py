@@ -470,7 +470,7 @@ async def test_router_replacement_does_not_restore_compacted_messages(monkeypatc
 
 @pytest.mark.asyncio
 async def test_subagent_does_not_inherit_parent_channel_trim_or_percentage(monkeypatch):
-    from agent.modules.tools.builtin.delegation.call_agent import call_agent
+    from agent.modules.tools.builtin.delegation.delegate_task import delegate_task
     captured = {}
     async def run(**kwargs):
         captured.update(kwargs)
@@ -479,7 +479,7 @@ async def test_subagent_does_not_inherit_parent_channel_trim_or_percentage(monke
     monkeypatch.setattr("agent.modules.agents.get_catalog_service", lambda: SimpleNamespace(validate_call=lambda caller, child: True, get_agent=lambda name: agent(context_compact_threshold=85)))
     parent = WorkflowContext(agent_name="parent", context_compact_threshold=60, channel_context_trim_threshold=12345)
     runtime = SimpleNamespace(context=parent, config={"configurable": {"thread_id": "telegram_user"}})
-    await call_agent.coroutine(task="research", sub_agent="sample", runtime=runtime)
+    await delegate_task.coroutine(task="research", sub_agent="sample", runtime=runtime)
     assert "channel_context_trim_threshold" not in captured
     assert "context_compact_threshold" not in captured
     assert ":sub:sample:" in captured["thread_id"]

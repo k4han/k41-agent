@@ -2,10 +2,10 @@ import { Show } from "solid-js";
 
 import type { AgentMcpInstall, AgentsPayload, PromptVariable } from "@/types";
 
-import { type AgentForm, type AgentTab, type ToolConfigValue } from "./agentForm";
+import { type AgentForm, type AgentTab, type AgentToolGroup, type ToolConfigValue } from "./agentForm";
 import { AgentGeneralTab } from "./AgentGeneralTab";
 import { AgentPromptTab } from "./AgentPromptTab";
-import { AgentToolsTab, type AgentToolGroup } from "./AgentToolsTab";
+import { AgentToolsTab } from "./AgentToolsTab";
 
 export function AgentEditTabs(props: {
   form: AgentForm;

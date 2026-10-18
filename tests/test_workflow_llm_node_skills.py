@@ -376,13 +376,13 @@ async def test_llm_node_prefers_runtime_allowed_tool_names_before_building_promp
                 agent_name="override-agent",
                 working_dir="D:/repo",
                 context_compact_threshold=75,
-                allowed_tool_names=["call_agent", "skill"],
+                allowed_tool_names=["delegate_task", "skill"],
             )
         ),
     )
 
-    assert [tool.name for tool in captured["tools"]] == ["call_agent", "read"]
-    assert [tool.name for tool in builder_calls["tools"]] == ["call_agent", "skill", "read"]
+    assert [tool.name for tool in captured["tools"]] == ["delegate_task", "read"]
+    assert [tool.name for tool in builder_calls["tools"]] == ["delegate_task", "skill", "read"]
     assert "retained tool output" in captured["tools"][-1].description
 
 

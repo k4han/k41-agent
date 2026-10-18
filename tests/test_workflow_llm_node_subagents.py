@@ -124,7 +124,7 @@ def test_build_llm_system_prompt_injects_callable_subagents_with_descriptions():
         system_prompt_template="Base prompt",
         working_dir="",
         agent_name="orchestrator",
-        tools=[SimpleNamespace(name="call_agent")],
+        tools=[SimpleNamespace(name="delegate_task")],
         catalog=_FakeCatalog(
             callable_agents=["research", "backend"],
             configs={
@@ -148,7 +148,7 @@ def test_build_llm_system_prompt_uses_fallback_for_missing_subagent_description(
         system_prompt_template="Base prompt",
         working_dir="",
         agent_name="orchestrator",
-        tools=[SimpleNamespace(name="call_agent")],
+        tools=[SimpleNamespace(name="delegate_task")],
         catalog=_FakeCatalog(
             callable_agents=["mystery-agent"],
             configs={"mystery-agent": SimpleNamespace(description="")},
@@ -163,14 +163,14 @@ def test_build_llm_system_prompt_injects_empty_subagent_notice_when_none_are_cal
         system_prompt_template="Base prompt",
         working_dir="",
         agent_name="solo",
-        tools=[SimpleNamespace(name="call_agent")],
+        tools=[SimpleNamespace(name="delegate_task")],
         catalog=_FakeCatalog(callable_agents=[]),
     )
 
     assert prompt_builders.SUB_AGENT_EMPTY_PROMPT in prompt
 
 
-def test_build_llm_system_prompt_skips_subagent_section_when_call_agent_tool_is_not_bound():
+def test_build_llm_system_prompt_skips_subagent_section_when_delegate_task_tool_is_not_bound():
     prompt = prompt_builders.build_llm_system_prompt(
         system_prompt_template="Base prompt",
         working_dir="",
@@ -202,7 +202,7 @@ def test_build_llm_system_prompt_appends_subagents_before_skills(monkeypatch):
         system_prompt_template="Base prompt",
         working_dir="",
         agent_name="orchestrator",
-        tools=[SimpleNamespace(name="call_agent"), SimpleNamespace(name="skill")],
+        tools=[SimpleNamespace(name="delegate_task"), SimpleNamespace(name="skill")],
         catalog=_FakeCatalog(
             callable_agents=["research"],
             configs={

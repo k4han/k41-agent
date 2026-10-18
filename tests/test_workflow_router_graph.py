@@ -140,10 +140,12 @@ def isolated_registry(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("reasoning_effort", [None, "low", "medium", "high"])
+@pytest.mark.parametrize("allowed_tools", [None, [], ["read"]])
 async def test_router_node_routes_to_selected_sub_agent(
     monkeypatch: pytest.MonkeyPatch,
     isolated_registry,
     reasoning_effort,
+    allowed_tools,
 ):
     captured: dict = {}
     target_graph = _FakeGraph("planned-result")
@@ -203,7 +205,7 @@ async def test_router_node_routes_to_selected_sub_agent(
     runtime = SimpleNamespace(
         context=_runtime_context(
             context_compact_threshold=75,
-            allowed_tool_names=["call_agent"],
+            allowed_tool_names=allowed_tools,
             reasoning_effort=reasoning_effort,
         )
     )
@@ -221,7 +223,7 @@ async def test_router_node_routes_to_selected_sub_agent(
     assert target_context.agent_name == "researcher"
     assert target_context.workspace.locator == str(Path("D:/repo").resolve())
     assert target_context.context_compact_threshold == 75
-    assert target_context.allowed_tool_names == ["websearch", "webfetch"]
+    assert target_context.allowed_tool_names == allowed_tools
     assert target_context.provider is None
     assert target_context.model is None
     assert target_context.reasoning_effort == reasoning_effort

@@ -6,10 +6,10 @@ mirrors :class:`AgentConfig`:
 - ``tools``: explicit allow-list of tool names. ``None`` (only for ad-hoc
   configs, never for a parsed ``AgentConfig`` whose default is ``[]``)
   leaves names unrestricted; an empty list — including a missing ``tools``
-  field which the parser defaults to ``[]`` — disables all tools.
+  field which the parser defaults to ``[]`` — disables manually selected tools.
 - ``agent_mcp_installs``: DB allow-list of MCP server names for the agent.
-- ``sub_agents``: ``None`` disables ``call_agent``; otherwise the listed
-  agents are permitted (validation happens inside ``call_agent`` itself).
+- ``sub_agents``: automatically enables ``delegate_task`` for configured targets.
+  The resolver checks availability and ``delegate_task`` validates each invocation.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ class ToolPolicy:
     agent_name: str
     allowed_tool_names: frozenset[str] | None = None
     allowed_mcp_servers: frozenset[str] | None = None
-    allow_call_agent: bool = True
+    allow_delegate_task: bool = True
     deny_tool_names: frozenset[str] = field(default_factory=frozenset)
 
     @classmethod
@@ -42,6 +42,8 @@ class ToolPolicy:
             from agent.modules.tools.coding.names import canonical_tool_names
             tools = canonical_tool_names(list(tools))
         sub_agents = getattr(config, "sub_agents", None)
+        if tools is not None and sub_agents:
+            tools = list(dict.fromkeys([*tools, "delegate_task"]))
         name = getattr(config, "name", "default")
         mcp_servers: list[str]
         try:
@@ -59,7 +61,7 @@ class ToolPolicy:
             agent_name=name,
             allowed_tool_names=frozenset(tools) if tools is not None else None,
             allowed_mcp_servers=frozenset(mcp_servers),
-            allow_call_agent=sub_agents is not None,
+            allow_delegate_task=bool(sub_agents),
         )
 
     @classmethod
@@ -73,7 +75,7 @@ class ToolPolicy:
         name = descriptor.name
         if name in self.deny_tool_names:
             return False
-        if not self.allow_call_agent and name == "call_agent":
+        if not self.allow_delegate_task and name == "delegate_task":
             return False
         if self.allowed_tool_names is not None and name not in self.allowed_tool_names:
             return False

@@ -48,7 +48,7 @@ def test_compacted_breakdown_without_previous_usage_counts_absent_categories_as_
 
 def test_prompt_sections_and_tool_history_are_counted_separately():
     sections = {}
-    tools = [SimpleNamespace(name=name) for name in ("call_agent", "skill", "read")]
+    tools = [SimpleNamespace(name=name) for name in ("delegate_task", "skill", "read")]
     catalog = SimpleNamespace(
         get_callable_agents=lambda name: ["researcher"],
         get_agent=lambda name: SimpleNamespace(description="Find reliable sources."),

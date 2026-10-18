@@ -102,6 +102,13 @@ class ToolResolver:
             if config is not None
             else ToolPolicy(agent_name=agent_name or "default", allowed_tool_names=frozenset())
         )
+        if config is not None and policy.allow_delegate_task:
+            from agent.modules.agents import get_catalog_service
+
+            policy = replace(
+                policy,
+                allow_delegate_task=bool(get_catalog_service().get_callable_agents(agent_name)),
+            )
         if override_tool_names is not None:
             from agent.modules.tools.coding.names import canonical_tool_names
             override_set = frozenset(canonical_tool_names(list(override_tool_names)))

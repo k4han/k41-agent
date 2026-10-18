@@ -736,13 +736,12 @@ def _build_target_context(runtime_context: WorkflowContext, target_agent: AgentC
         return runtime_context
 
     workspace = runtime_context.get_workspace()
-    allowed_tool_names = target_agent.tools if target_agent.tools else None
     target_context = make_context(
         workspace=workspace,
         context_compact_threshold=runtime_context.context_compact_threshold,
         channel_context_trim_threshold=runtime_context.channel_context_trim_threshold,
         agent_name=target_agent.name,
-        allowed_tool_names=allowed_tool_names,
+        allowed_tool_names=runtime_context.get_allowed_tool_names(),
         allowed_skill_names=runtime_context.get_allowed_skill_names(),
         provider=runtime_context.get_provider(),
         model=runtime_context.get_model(),

@@ -1,4 +1,4 @@
-"""call_agent tool — enables sub-agent invocation within workflow graphs."""
+"""delegate_task tool — enables sub-agent invocation within workflow graphs."""
 
 from __future__ import annotations
 
@@ -39,12 +39,12 @@ def _make_subagent_thread_id(runtime: ToolRuntime[Any, Any], sub_agent: str) -> 
     tags=["subagent", "delegation"],
 )
 @tool
-async def call_agent(
+async def delegate_task(
     task: str,
     sub_agent: str,
     runtime: Annotated[ToolRuntime[Any, Any], InjectedToolArg],
 ) -> str:
-    """Invoke a sub-agent to handle a specific task."""
+    """Delegate a task to a sub-agent and return its result."""
     from agent.modules.agent_runtime import run_agent_full
     from agent.modules.agents import get_catalog_service
 

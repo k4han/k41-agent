@@ -204,8 +204,8 @@ def _build_agent_config(
         context_compact_threshold = 75
     if "tools" not in data:
         logger.warning(
-            "Agent file %s has no 'tools' field; defaulting to deny-all (no tools). "
-            "Add an explicit 'tools' list to allow tools.",
+            "Agent file %s has no 'tools' field; no manual tools are enabled. "
+            "Add an explicit 'tools' list to allow manual tools.",
             source_label,
         )
     tools = parse_string_or_list(data.get("tools", []))

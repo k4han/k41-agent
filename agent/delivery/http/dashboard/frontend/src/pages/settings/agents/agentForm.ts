@@ -1,8 +1,13 @@
-import type { AgentCard } from "@/types";
-import { sameJsonValue } from "@/lib/utils";
+import type { AgentCard, AgentsPayload } from "@/types";
+import { sameJsonValue, uniqueSorted } from "@/lib/utils";
 
 export type ToolConfigValue = string | number | boolean | null;
 export type ToolConfigs = Record<string, Record<string, ToolConfigValue>>;
+
+export type AgentToolGroup = {
+  category: string;
+  tools: string[];
+};
 
 export type AgentForm = {
   name: string;
@@ -30,6 +35,41 @@ export function isAgentTab(value: string | undefined): value is AgentTab {
 }
 
 export const DEFAULT_CONTEXT_COMPACT_THRESHOLD = 75;
+
+export function manualToolNames(tools: readonly string[]): string[] {
+  return tools.filter((name) => name !== "delegate_task" && name !== "call_agent");
+}
+
+export function buildToolGroups(payload: AgentsPayload, initialTools: string[]): AgentToolGroup[] {
+  const groups = (payload.tool_groups || []).map((group) => ({
+    category: group.category,
+    tools: manualToolNames(group.tools),
+  })).filter((group) => group.tools.length > 0);
+  const known = new Set(groups.flatMap((group) => group.tools));
+  const extras = manualToolNames(initialTools).filter((tool) => !known.has(tool) && !tool.startsWith("mcp__"));
+  if (extras.length > 0) {
+    const other = groups.find((group) => group.category === "unknown");
+    if (other) {
+      other.tools = uniqueSorted([...other.tools, ...extras]);
+    } else {
+      groups.push({ category: "unknown", tools: uniqueSorted(extras) });
+    }
+  }
+  return groups;
+}
+
+export function agentFormPayload(form: AgentForm): AgentForm {
+  const tools = manualToolNames(form.tools);
+  return {
+    ...form,
+    tools,
+    tool_configs: Object.fromEntries(
+      Object.entries(form.tool_configs).filter(
+        ([name, fields]) => tools.includes(name) && Object.keys(fields).length > 0,
+      ),
+    ),
+  };
+}
 
 export function blankForm(workflow: string): AgentForm {
   return {
@@ -60,7 +100,7 @@ export function cardToForm(card: AgentCard): AgentForm {
     provider: card.provider || "default",
     model: card.model || "",
     reasoning_effort: card.reasoning_effort ?? null,
-    tools: card.tools || [],
+    tools: manualToolNames(card.tools || []),
     tool_permissions: card.tool_permissions ?? null,
     tool_configs: normalizeToolConfigs(card.tool_configs),
     sub_agents: card.sub_agents || [],

@@ -3,15 +3,10 @@ import { RotateCcw } from "lucide-solid";
 import { useLocation, useNavigate } from "@solidjs/router";
 
 import { ModelPicker } from "@/components/ModelPicker";
-import { uniqueSorted } from "@/lib/utils";
 import type { AgentMcpInstall, AgentsPayload, ToolConfigField, ToolConfigSchema } from "@/types";
 
-import type { AgentForm, ToolConfigValue } from "./agentForm";
-
-export type AgentToolGroup = {
-  category: string;
-  tools: string[];
-};
+import type { AgentForm, AgentToolGroup, ToolConfigValue } from "./agentForm";
+import { manualToolNames } from "./agentForm";
 
 function formatToolCategory(category: string) {
   return category === "unknown"
@@ -193,7 +188,7 @@ export function AgentToolsTab(props: {
       <div class="agent-config-summary">
         <div class="agent-config-stat">
           <span>Built-in tools</span>
-          <strong>{`${props.form.tools.filter((tool) => !tool.startsWith("mcp__")).length}/${props.totalBuiltInTools}`}</strong>
+          <strong>{`${manualToolNames(props.form.tools).filter((tool) => !tool.startsWith("mcp__")).length}/${props.totalBuiltInTools}`}</strong>
         </div>
         <div class="agent-config-stat">
           <span>MCP servers</span>
@@ -517,6 +512,7 @@ export function AgentToolsTab(props: {
           <div>
             <div class="agent-config-eyebrow">Delegation</div>
             <h3>Sub-agents</h3>
+            <p class="hint">Delegation is enabled automatically when at least one selected sub-agent is available.</p>
           </div>
         </div>
         <div class="agent-config-section-body">
@@ -589,22 +585,4 @@ export function AgentToolsTab(props: {
       </section>
     </div>
   );
-}
-
-export function buildToolGroups(payload: AgentsPayload, initialTools: string[]): AgentToolGroup[] {
-  const groups = (payload.tool_groups || []).map((group) => ({
-    category: group.category,
-    tools: [...group.tools],
-  }));
-  const known = new Set(groups.flatMap((group) => group.tools));
-  const extras = initialTools.filter((tool) => !known.has(tool) && !tool.startsWith("mcp__"));
-  if (extras.length > 0) {
-    const other = groups.find((group) => group.category === "unknown");
-    if (other) {
-      other.tools = uniqueSorted([...other.tools, ...extras]);
-    } else {
-      groups.push({ category: "unknown", tools: uniqueSorted(extras) });
-    }
-  }
-  return groups;
 }

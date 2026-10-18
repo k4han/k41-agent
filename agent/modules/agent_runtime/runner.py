@@ -1093,7 +1093,6 @@ async def run_agent(
 
     # Resolve: explicit params > agent config
     resolved_workflow = workflow or agent_config.graph_type
-    resolved_tools = allowed_tool_names if allowed_tool_names is not None else agent_config.tools
 
     thread_id = resolve_thread_id(thread_id)
     approval_supported = str((usage_context or {}).get("platform", "")) == "api"
@@ -1112,7 +1111,7 @@ async def run_agent(
         context_compact_threshold=context_compact_threshold,
         channel_context_trim_threshold=channel_context_trim_threshold,
         agent_name=agent_name,
-        allowed_tool_names=resolved_tools,
+        allowed_tool_names=allowed_tool_names,
         allowed_skill_names=allowed_skill_names,
         provider=provider,
         model=model,
@@ -1238,7 +1237,6 @@ async def run_agent_stream(
 
     # Resolve: explicit params > agent config
     resolved_workflow = workflow or agent_config.graph_type
-    resolved_tools = allowed_tool_names if allowed_tool_names is not None else agent_config.tools
 
     thread_id = resolve_thread_id(thread_id)
     approval_supported = str((usage_context or {}).get("platform", "")) == "api"
@@ -1257,7 +1255,7 @@ async def run_agent_stream(
         context_compact_threshold=context_compact_threshold,
         channel_context_trim_threshold=channel_context_trim_threshold,
         agent_name=agent_name,
-        allowed_tool_names=resolved_tools,
+        allowed_tool_names=allowed_tool_names,
         allowed_skill_names=allowed_skill_names,
         provider=provider,
         model=model,
@@ -1519,7 +1517,6 @@ async def run_agent_edit_stream(
         raise ValueError(f"Agent '{agent_name}' not found in catalog")
 
     resolved_workflow = workflow or agent_config.graph_type
-    resolved_tools = allowed_tool_names if allowed_tool_names is not None else agent_config.tools
 
     thread_id = resolve_thread_id(thread_id)
     approval_supported = str((usage_context or {}).get("platform", "")) == "api"
@@ -1550,7 +1547,7 @@ async def run_agent_edit_stream(
         context_compact_threshold=context_compact_threshold,
         channel_context_trim_threshold=channel_context_trim_threshold,
         agent_name=agent_name,
-        allowed_tool_names=resolved_tools,
+        allowed_tool_names=allowed_tool_names,
         allowed_skill_names=allowed_skill_names,
         provider=provider,
         model=model,

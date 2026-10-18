@@ -1,9 +1,10 @@
-"""Canonical coding tool names used by catalogs and agent allow lists."""
+"""Canonical tool names used by catalogs and agent allow lists."""
 
 FILE_TOOLS = frozenset({"read", "list_dir", "edit", "write", "glob", "grep"})
 PROCESS_TOOLS = frozenset({"bash", "read_process_output", "write_process_input", "stop_process"})
 CODING_TOOLS = FILE_TOOLS | PROCESS_TOOLS
-TOOL_ALIASES = {"read_file": "read", "write_file": "write", "edit_file": "edit",
+TOOL_ALIASES = {"call_agent": "delegate_task",
+                "read_file": "read", "write_file": "write", "edit_file": "edit",
                 "exec_command": "bash", "run_bash": "bash",
                 "bash_read_output": "read_process_output", "bash_send_input": "write_process_input",
                 "bash_interrupt": "stop_process", "bash_close": "stop_process"}
