@@ -1,10 +1,11 @@
 import { Check, ChevronRight, Loader2 } from "lucide-solid";
-import { createEffect, createSignal, createUniqueId, For, onCleanup, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, createUniqueId, For, onCleanup, Show } from "solid-js";
 
 import { TranscriptItemView, type TranscriptItemViewProps } from "@/components/Transcript";
 import type { ChatTranscriptItem } from "@/lib/chatStreamStore";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
 import { toolCallSummary } from "@/lib/toolCallSummary";
+import { hasToolCallResult } from "@/lib/toolCallStatus";
 
 export interface TranscriptActivityGroupProps
   extends Omit<
@@ -13,7 +14,7 @@ export interface TranscriptActivityGroupProps
   > {
   /** Folded process rows, in transcript order. */
   rows: ChatTranscriptItem[];
-  /** True while this group is still receiving updates from the running turn. */
+  /** True while this group may receive more calls from the running turn. */
   live: boolean;
   isItemStreaming?: (id: number) => boolean;
 }
@@ -94,16 +95,20 @@ export function TranscriptActivityGroup(props: TranscriptActivityGroupProps) {
 
   const toolCount = () =>
     props.rows.reduce((count, row) => (row.type === "tool" ? count + 1 : count), 0);
+  const runningTool = createMemo(() => props.live
+    ? props.rows.find((row) => row.type === "tool" && !hasToolCallResult(row))
+    : undefined);
+  const running = () => !!runningTool();
   const liveDetail = () => {
-    const last = props.rows[props.rows.length - 1];
-    if (!last || last.type !== "tool") {
+    const tool = runningTool();
+    if (!tool || tool.type !== "tool") {
       return "";
     }
-    return toolCallSummary(last.name, last.args);
+    return toolCallSummary(tool.name, tool.args);
   };
   const label = () => {
     const tools = toolCount();
-    return `${tools} tool call${tools === 1 ? "" : "s"} · ${props.live ? "Running" : "Finished"}`;
+    return `${tools} tool call${tools === 1 ? "" : "s"} · ${running() ? "Running" : "Finished"}`;
   };
 
   return (
@@ -122,12 +127,12 @@ export function TranscriptActivityGroup(props: TranscriptActivityGroupProps) {
       >
         <ChevronRight size={16} class="activity-group-chevron" />
         <span class="activity-group-icon">
-          <Show when={props.live} fallback={<Check size={14} />}>
+          <Show when={running()} fallback={<Check size={14} />}>
             <Loader2 size={14} class="spin-icon" />
           </Show>
         </span>
         <span class="activity-group-label">{label()}</span>
-        <Show when={props.live && liveDetail()}>
+        <Show when={running() && liveDetail()}>
           {(detail) => <span class="activity-group-detail">{detail()}</span>}
         </Show>
       </button>

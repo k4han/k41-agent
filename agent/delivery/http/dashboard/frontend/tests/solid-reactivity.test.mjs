@@ -17,6 +17,7 @@ function loadModule(path, dependencies = {}, globals = {}) {
     require: name => {
       if (name === 'solid-js') return solid;
       if (name === 'solid-js/store') return store;
+      if (name === '@/lib/toolCallStatus') return toolCallStatus;
       assert.ok(name in dependencies, `Unexpected dependency: ${name}`);
       return dependencies[name];
     },
@@ -25,6 +26,8 @@ function loadModule(path, dependencies = {}, globals = {}) {
   compileFunction(outputText, Object.keys(context))(...Object.values(context));
   return exports;
 }
+
+const toolCallStatus = loadModule('../src/lib/toolCallStatus.ts');
 
 function mount(t, callback) {
   let dispose;
@@ -133,6 +136,50 @@ test('indexed tool results retain row identity and work after snapshots and lega
     assert.equal(items()[2].result, 'appended');
     setItems([]);
     assert.equal(setToolResult('third', 'shell', 'removed'), false);
+  });
+});
+
+test('tool completion updates waiting state without rebuilding groups or rematching empty results', t => {
+  const { createTranscriptItems } = loadModule('../src/lib/chatStreamStore.ts', {
+    '@/lib/utils': loadModule('../src/lib/utils.ts'),
+  });
+  const { isTranscriptWaitingForModel } = loadModule('../src/lib/transcriptActivity.ts', {
+    '@/lib/htmlPreview': { HTML_PREVIEW_TOOL_NAME: 'html_preview' },
+  });
+  const useTranscriptActivityView = loadActivityView();
+  mount(t, () => {
+    const [items, , , appendItem, , setToolResult] = createTranscriptItems([
+      { id: 1, type: 'tool', name: 'read', tool_call_id: 'first', result: null },
+      { id: 2, type: 'tool', name: 'read', tool_call_id: 'second', result: null },
+    ]);
+    const [streaming, setStreaming] = solid.createSignal(true);
+    const view = useTranscriptActivityView(items, streaming);
+    const waiting = solid.createMemo(() => isTranscriptWaitingForModel(items(), streaming()));
+    const pendingTool = solid.createMemo(() => view().entries.get('activity-1').items
+      .find(item => !toolCallStatus.hasToolCallResult(item)));
+    const groupView = view();
+    const firstRow = items()[0];
+    assert.equal(waiting(), false);
+    assert.equal(pendingTool(), firstRow);
+    setToolResult('second', 'read', null);
+    assert.equal(items()[1].resultReceived, true);
+    assert.equal(waiting(), false);
+    assert.equal(pendingTool(), firstRow);
+    setToolResult('', 'read', 'legacy first result');
+    assert.equal(firstRow.result, 'legacy first result');
+    assert.equal(items()[1].result, null);
+    assert.equal(waiting(), true);
+    assert.equal(pendingTool(), undefined);
+    assert.equal(view(), groupView);
+    appendItem({ id: 3, type: 'tool', name: 'read', tool_call_id: 'third', result: null });
+    assert.equal(waiting(), false);
+    assert.equal(view().liveKey, 'activity-1');
+    assert.equal(items()[0], firstRow);
+    setToolResult('third', 'read', undefined);
+    assert.equal(waiting(), true);
+    assert.equal(items()[2].resultReceived, true);
+    setStreaming(false);
+    assert.equal(waiting(), false);
   });
 });
 

@@ -1,5 +1,6 @@
 import type { TranscriptItem } from "@/components/Transcript";
 import { HTML_PREVIEW_TOOL_NAME } from "@/lib/htmlPreview";
+import { hasToolCallResult } from "@/lib/toolCallStatus";
 
 /**
  * Transcript rows always carry a numeric id, both for streamed and history
@@ -15,7 +16,7 @@ export type TranscriptActivityView<T extends TranscriptActivitySource> = {
   /** Ordered row keys. A key stays stable while its row keeps its identity. */
   keys: string[];
   entries: Map<string, TranscriptActivityEntry<T>>;
-  /** Key of the group that is still receiving updates from the running turn. */
+  /** Key of the group that may receive more calls, even after results arrive. */
   liveKey: string | null;
 };
 
@@ -26,6 +27,23 @@ export function isEmptyAssistantMessage(item: TranscriptItem): boolean {
     && !item.text.trim()
     && !item.attachments?.length
     && !item.generatedImagePending;
+}
+
+/** Completed tools leave the agent waiting for its next visible response. */
+export function isTranscriptWaitingForModel(
+  items: readonly TranscriptItem[],
+  streaming: boolean,
+): boolean {
+  if (!streaming) return false;
+  let hasTools = false;
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (isEmptyAssistantMessage(item)) continue;
+    if (item.type !== "tool") break;
+    hasTools = true;
+    if (!hasToolCallResult(item)) return false;
+  }
+  return hasTools;
 }
 
 /**
@@ -113,7 +131,7 @@ export function buildTranscriptActivityView<T extends TranscriptActivitySource>(
 
   let liveKey: string | null = null;
   if (streaming && keys.length > 0) {
-    // Only the trailing group may still receive tool results.
+    // Keep the trailing group available for follow-up calls between results.
     const lastEntry = entries.get(keys[keys.length - 1]);
     if (lastEntry?.kind === "activity") {
       liveKey = lastEntry.key;

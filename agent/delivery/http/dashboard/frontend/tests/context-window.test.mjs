@@ -24,7 +24,11 @@ function loadModule(path, dependencies = {}) {
 
 function createFixture(t, { streaming = true, payload, provider = '', model = '', card } = {}) {
   const utils = loadModule('../src/lib/utils.ts');
-  const store = loadModule('../src/lib/chatStreamStore.ts', { 'solid-js': solid, 'solid-js/store': solidStore, '@/lib/utils': utils, '@/components/Transcript': {} });
+  const store = loadModule('../src/lib/chatStreamStore.ts', {
+    'solid-js': solid, 'solid-js/store': solidStore, '@/lib/utils': utils,
+    '@/lib/toolCallStatus': loadModule('../src/lib/toolCallStatus.ts'),
+    '@/components/Transcript': {},
+  });
   const types = loadModule('../src/types.ts');
   const requests = [];
   const hookModule = loadModule('../src/lib/useContextWindow.ts', {

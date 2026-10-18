@@ -229,6 +229,7 @@ export function toThreadTranscript(
 
       if (target) {
         target.result = msg.content;
+        target.resultReceived = true;
         target.tool_call_id = target.tool_call_id || msg.tool_call_id || null;
         target.name = target.name || msg.name || "unknown";
         return;

@@ -2,9 +2,11 @@ import { ArrowDown, Loader2, Sparkles } from "lucide-solid";
 import { createMemo, For, Show } from "solid-js";
 
 import { TranscriptActivityGroup } from "@/components/TranscriptActivityGroup";
+import { StatusIndicator } from "@/components/StatusIndicator";
 import { TranscriptItemView, type TranscriptAttachment, type TranscriptRole } from "@/components/Transcript";
 import type { ChatTranscriptItem } from "@/lib/chatStreamStore";
-import { findTranscriptAnswerId } from "@/lib/transcriptActivity";
+import { findTranscriptAnswerId, isTranscriptWaitingForModel } from "@/lib/transcriptActivity";
+import { THINKING_TEXT } from "@/lib/chatStatus";
 import { useStreamingTranscriptItem } from "@/lib/useStreamingTranscriptItem";
 import { useTranscriptActivityView } from "@/lib/useTranscriptActivityView";
 import type { AgentCard } from "@/types";
@@ -81,6 +83,8 @@ export function ChatTranscript(props: ChatTranscriptProps) {
     streamActive,
   );
   const answerItemId = createMemo(() => findTranscriptAnswerId(props.filteredItems));
+  const waitingForModel = createMemo(() => !props.compacting
+    && isTranscriptWaitingForModel(props.items, streamActive()));
   // Answer actions stay hidden while the agent runs and then belong only to
   // the final answer of the thread.
   const showAssistantActions = (itemId: number) =>
@@ -192,6 +196,13 @@ export function ChatTranscript(props: ChatTranscriptProps) {
               );
             }}
           </For>
+          <Show when={waitingForModel()}>
+            <div class="message assistant transcript-thinking-indicator">
+              <div class="message-bubble">
+                <StatusIndicator text={THINKING_TEXT} />
+              </div>
+            </div>
+          </Show>
           <Show when={props.compacting}>
             <div class="transcript-compacting-indicator" role="status" aria-live="polite">
               <div class="transcript-compacting-indicator-inner">

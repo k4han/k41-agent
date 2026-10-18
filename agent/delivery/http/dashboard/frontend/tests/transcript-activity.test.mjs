@@ -20,9 +20,13 @@ function loadModule(path, dependencies = {}) {
   return exports;
 }
 
-const { buildTranscriptActivityView, findTranscriptAnswerId, isTranscriptActivityBoundary } = loadModule(
+const toolCallStatus = loadModule('../src/lib/toolCallStatus.ts');
+const { buildTranscriptActivityView, findTranscriptAnswerId, isTranscriptActivityBoundary, isTranscriptWaitingForModel } = loadModule(
   '../src/lib/transcriptActivity.ts',
-  { '@/lib/htmlPreview': { HTML_PREVIEW_TOOL_NAME: 'html_preview' } },
+  {
+    '@/lib/htmlPreview': { HTML_PREVIEW_TOOL_NAME: 'html_preview' },
+    '@/lib/toolCallStatus': toolCallStatus,
+  },
 );
 
 const userMessage = (id, text = 'hello') => ({ id, type: 'message', role: 'user', text });
@@ -185,6 +189,55 @@ test('appending a follow-up tool keeps the same group key', () => {
   assert.deepEqual(rowKeys(second), ['item-1', 'activity-2']);
   assert.deepEqual(groupIds(second, 'activity-2'), [2, 3]);
   assert.equal(second.liveKey, 'activity-2');
+});
+
+test('completed tools wait for the model while their group stays available for follow-up calls', () => {
+  const items = [userMessage(1), toolCall(2, 'read', {}, 'contents')];
+  const view = buildTranscriptActivityView(items, true);
+  assert.equal(view.liveKey, 'activity-2');
+  assert.equal(isTranscriptWaitingForModel(items, true), true);
+  assert.equal(isTranscriptWaitingForModel([...items, assistantMessage(3, ' \n ')], true), true);
+  const withNextTool = [...items, toolCall(3, 'read')];
+  assert.equal(buildTranscriptActivityView(withNextTool, true).liveKey, view.liveKey);
+  assert.equal(isTranscriptWaitingForModel(withNextTool, true), false);
+  assert.equal(isTranscriptWaitingForModel([...items, assistantMessage(3, 'Answer')], true), false);
+  assert.equal(isTranscriptWaitingForModel(items, false), false);
+});
+
+test('parallel tools must all return results before the model waiting indicator appears', () => {
+  const first = toolCall(1, 'read');
+  const second = toolCall(2, 'read', {}, 'second result');
+  assert.equal(isTranscriptWaitingForModel([first, second], true), false);
+  first.result = 'first result';
+  assert.equal(isTranscriptWaitingForModel([first, second], true), true);
+});
+
+test('empty results are completed only after a result event has been received', () => {
+  const tool = toolCall(1);
+  assert.equal(toolCallStatus.hasToolCallResult(tool), false);
+  assert.equal(isTranscriptWaitingForModel([tool], true), false);
+  tool.resultReceived = true;
+  assert.equal(toolCallStatus.hasToolCallResult(tool), true);
+  assert.equal(isTranscriptWaitingForModel([tool], true), true);
+  for (const result of ['', false, 0, {}]) {
+    assert.equal(isTranscriptWaitingForModel([toolCall(1, 'read', {}, result)], true), true);
+  }
+});
+
+test('waiting uses the full transcript and respects interactive and rich boundaries', () => {
+  const completed = toolCall(1, 'read', {}, 'done');
+  for (const boundary of [
+    userMessage(2), assistantMessage(2), planReview(2), userInputRequest(2),
+    assistantMessage(2, '', { generatedImagePending: true }),
+    assistantMessage(2, '', { attachments: [{ name: 'image.png' }] }),
+    { id: 2, type: 'message', role: 'error', text: 'Failed' },
+  ]) {
+    assert.equal(isTranscriptWaitingForModel([completed, boundary], true), false);
+  }
+  assert.equal(isTranscriptWaitingForModel([completed, toolCall(2, 'write_todos')], true), false);
+  assert.equal(isTranscriptWaitingForModel([toolCall(1, 'html_preview', {}, '')], true), true);
+  assert.equal(isTranscriptWaitingForModel([], true), false);
+  assert.equal(isTranscriptWaitingForModel([assistantMessage(1, 'Thinking...')], true), false);
 });
 
 test('empty transcripts produce an empty view', () => {

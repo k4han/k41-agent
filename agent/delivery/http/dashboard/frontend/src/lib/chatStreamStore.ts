@@ -3,6 +3,7 @@ import { createStore, produce, reconcile, unwrap } from "solid-js/store";
 import type { TranscriptItem } from "@/components/Transcript";
 import type { ContextBreakdown } from "@/types";
 import { cloneValue } from "@/lib/utils";
+import { hasToolCallResult } from "@/lib/toolCallStatus";
 
 export type ChatTranscriptItem = TranscriptItem & { id: number; key?: string };
 
@@ -68,7 +69,7 @@ export function createTranscriptItems(initialItems: ChatTranscriptItem[] = []): 
         // tool of that name, preserving the existing stream behavior.
         for (let cursor = state.items.length - 1; cursor >= 0; cursor -= 1) {
           const item = state.items[cursor];
-          if (item.type === "tool" && item.name === name && item.result === null) {
+          if (item.type === "tool" && item.name === name && !hasToolCallResult(item)) {
             index = cursor;
             break;
           }
@@ -77,7 +78,10 @@ export function createTranscriptItems(initialItems: ChatTranscriptItem[] = []): 
       if (index === undefined) return false;
       const nextResult = cloneValue(unwrap(result));
       setState("items", index, produce((item) => {
-        if (item.type === "tool") item.result = nextResult;
+        if (item.type === "tool") {
+          item.result = nextResult;
+          item.resultReceived = true;
+        }
       }));
       return true;
     }),

@@ -41,6 +41,7 @@ import { useToast } from "@/components/Toast";
 import { isChatStatusText } from "@/lib/chatStatus";
 import { getSharedDarkMode } from "@/lib/theme";
 import { toolCallSummary } from "@/lib/toolCallSummary";
+import { hasToolCallResult } from "@/lib/toolCallStatus";
 import { isShellTool, shellToolResult } from "@/lib/shellToolResult";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
 import {
@@ -117,6 +118,7 @@ export type TranscriptTool = {
   name?: string | null;
   args: unknown;
   result: unknown;
+  resultReceived?: boolean;
 };
 
 export type TranscriptPlanReviewStatus = "pending" | "approved" | "revision_requested";
@@ -170,6 +172,7 @@ export function createTranscriptTool(options: {
     name: options.name || "unknown",
     args: options.args ?? null,
     result: options.result ?? null,
+    resultReceived: "result" in options,
   };
 }
 
@@ -239,7 +242,7 @@ export function findTranscriptToolTarget<T extends TranscriptItem>(
 
   for (let index = items.length - 1; index >= 0; index -= 1) {
     const item = items[index];
-    if (item.type === "tool" && item.name === name && item.result === null) {
+    if (item.type === "tool" && item.name === name && !hasToolCallResult(item)) {
       return item as TranscriptToolTarget<T>;
     }
   }
@@ -868,6 +871,7 @@ export function ToolCallDetail(props: {
   name?: string | null;
   args: unknown;
   result: unknown;
+  resultReceived?: boolean;
   defaultOpen?: boolean;
   itemId?: number;
   threadId?: string | null;
@@ -938,7 +942,7 @@ export function ToolCallDetail(props: {
                 )}
               </Show>
               <Show when={shellResult()} fallback={
-                <pre>{props.result === null ? (props.name === "skill" ? "Preparing skill resources and runtimes in the workspace..." : "Waiting for tool result...") : formatValue(props.result)}</pre>
+                <pre>{!hasToolCallResult(props) ? (props.name === "skill" ? "Preparing skill resources and runtimes in the workspace..." : "Waiting for tool result...") : formatValue(props.result)}</pre>
               }>
                 {(result) => <>
                   <pre>{result().output}</pre>
@@ -1704,6 +1708,7 @@ export function TranscriptItemView(props: TranscriptItemViewProps) {
       name={props.item.name}
       args={props.item.args}
       result={props.item.result}
+      resultReceived={props.item.resultReceived}
       itemId={props.itemId}
       threadId={props.threadId}
     />
