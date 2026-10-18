@@ -3,9 +3,21 @@ name: default
 display_name: kaka
 description: Default general-purpose assistant
 graph_type: react_agent
-provider: Google
-model: gemini-3.1-flash-lite-preview
+provider:
+model:
 tools:
+- ask_user
+- bash
+- edit
+- get_current_time
+- list_dir
+- read
+- read_process_output
+- stop_process
+- web_fetch
+- web_search
+- write
+- write_process_input
 - write_todos
 context_compact_threshold: 75
 sub_agents:

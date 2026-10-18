@@ -204,6 +204,7 @@ Xem `agent/modules/agents/examples/` cho các agent mẫu:
 - `frontend-agent.md`: React/TypeScript engineer
 - `devops-agent.md`: DevOps engineer
 - `router-orchestrator-agent.md`: Router orchestrator (opt-in with `graph_type: router`)
+- `all-fields-agent.md`: Mẫu tham chiếu liệt kê đầy đủ mọi trường có thể có kèm comment
 
 ## Module Structure
 
