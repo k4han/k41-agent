@@ -23,10 +23,10 @@ export function ComposerWorkspacePicker(props: WorkspaceSelectorProps) {
     if (props.selection?.source === "temp" || isTempWorkspace(props.workspace)) return "Temporary";
     if (props.selection) {
       return props.selection.label || props.selection.repositoryFullName
-        || workspaceDisplayLabelFromValues("", props.selection.localPath) || "Select project";
+        || workspaceDisplayLabelFromValues("", props.selection.localPath) || "Temporary";
     }
     return workspaceDisplayLabel(props.workspace)
-      || workspaceDisplayLabelFromValues("", props.workingDir) || "Select project";
+      || workspaceDisplayLabelFromValues("", props.workingDir) || "Temporary";
   });
   const description = () => `${projectLabel()} · ${backendLabel()}${props.locked ? " · Workspace locked" : ""}`;
 

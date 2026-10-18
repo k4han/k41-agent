@@ -160,7 +160,7 @@ try {
   await until(() => js('!!document.querySelector(".composer-workspace-trigger")'), 'composer project picker');
   await js(`document.querySelector('button[aria-label="Close workspace explorer"]')?.click()`);
   await delay(300);
-  assert.equal(await js('document.querySelector(".composer-workspace-label").textContent'), 'Select project');
+  assert.equal(await js('document.querySelector(".composer-workspace-label").textContent'), 'Temporary');
   assert.equal(await js('!!document.querySelector(".chat-welcome-hero .workspace-selector")'), false, 'welcome must not duplicate project selection');
   const click = async selector => {
     await js('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
