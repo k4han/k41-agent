@@ -4,6 +4,8 @@ import logging
 from collections.abc import Sequence
 from typing import Any
 
+from agent.modules.agent_runtime.input_messages import DEFAULT_IMAGE_PROMPT, MISSING_IMAGE_PROMPT
+
 from agent.modules.channels.commands import CommandSpec
 from agent.modules.channels.contracts import (
     ChannelSettingField,
@@ -156,10 +158,7 @@ async def handle_zalo_update(payload: dict[str, Any]) -> None:
         # If the user sent an image but download failed, give a helpful prompt
         # instead of silently ignoring. The agent can then explain the failure.
         if photo_url:
-            text = (
-                "I received an image but couldn't download it. "
-                "Please try sending it again or add a description."
-            )
+            text = MISSING_IMAGE_PROMPT
         else:
             # Ignore non-text events unless they carry a downloadable image
             # For unsupported or sticker/voice without text, skip
@@ -171,7 +170,7 @@ async def handle_zalo_update(payload: dict[str, Any]) -> None:
     # Image-only message (no caption): give the model a prompt so the vision
     # attachment is not orphaned. The pipeline requires non-empty text.
     if not text and attachments:
-        text = "Please describe this image."
+        text = DEFAULT_IMAGE_PROMPT
 
     from_info = message.get("from") or {}
     chat_info = message.get("chat") or {}

@@ -166,6 +166,10 @@ async def test_workflows_send_agent_effort(monkeypatch, node):
                 return SimpleNamespace(selected_agent="worker")
             return AIMessage(content="Summary")
 
+    async def research_prompt(*args, **kwargs):
+        return "Research stage instructions."
+
+    monkeypatch.setattr(research, "render_agent_prompt", research_prompt)
     agent = _agent()
     resolved = _resolved(model=Model())
     context = WorkflowContext(agent_name=agent.name)

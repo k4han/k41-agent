@@ -11,6 +11,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from agent.modules.agent_runtime import SessionManager
 from agent.modules.agents import get_catalog_service
+from agent.modules.conversations.prompts import TITLE_INPUT_TEMPLATE
 from agent.modules.conversations.repository import (
     ConversationThreadRepository,
     get_conversation_thread_repository,
@@ -95,10 +96,7 @@ def _build_title_user_prompt(
     first_user_message: str,
     attachments: list[Any] | None = None,
 ) -> str:
-    prompt = (
-        "Create a title for this conversation from the first user message.\n\n"
-        f"User message:\n{first_user_message.strip() or '[empty]'}"
-    )
+    prompt = TITLE_INPUT_TEMPLATE.format(message=first_user_message.strip() or "[empty]")
     attachment_context = _attachment_title_context(attachments)
     if attachment_context:
         prompt = f"{prompt}\n\nAttachments:\n{attachment_context}"

@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import asdict, replace
+from dataclasses import asdict
 import hashlib
 import io
 import json
 import logging
 from pathlib import Path
 import re
-import shlex
 import tempfile
 import time
 from typing import Any
@@ -25,27 +24,14 @@ from agent.modules.skills.package_io import WorkspacePackageIO
 from agent.modules.skills.package_worker import native_path, pack_directory, unpack_archive, safe_path
 from agent.modules.skills.parser import parse_skill_md
 from agent.modules.skills.repository import normalize_skill_name
-from agent.modules.skills.rendering import skill_content_xml
 from agent.modules.skills.sources import global_repositories, package_id, repository_roots, workspace_key
-from agent.modules.skills.execution import CACHE_LAYOUT, cache_path, environment_variable, execution_path, shell_guidance
+from agent.modules.skills.execution import CACHE_LAYOUT, cache_path, environment_variable, execution_path
+from agent.modules.skills.prompts import build_skill_instructions
 from agent.modules.workspaces import resolve_workspace_ref
 from agent.shared.infrastructure.revisions import SKILLS_REVISION, get_revision
 
 logger = logging.getLogger(__name__)
 DISABLED_STATE_TTL_SECONDS = 1.0
-
-RUNTIME_GUIDANCE = """Use read for supporting text or images, and bash for scripts.
-Resolve skill resource paths against skill_root; resolve task input/output paths against workspace_root.
-Python: prefer uv run --no-project --script PATH (PEP 723). Use --with PACKAGE or
---with-requirements FILE only for dependencies explicitly declared by the skill.
-For a bundled pyproject.toml use uv run --project SKILL_ROOT, respecting existing lockfiles.
-JavaScript: node for plain scripts, pnpm dlx for package CLIs, or pnpm --ignore-workspace install
-in skill_root for a bundled package.json; use --frozen-lockfile when a pnpm lockfile is provided.
-Only omit --ignore-workspace when the skill itself bundles pnpm-workspace.yaml.
-Use cached isolated dependencies. Do not infer package names from imports, alter the source
-skill or workspace dependency files, or automatically retry a script after side effects.
-Set bash workdir explicitly. Other runtimes and system packages must already be available."""
-
 
 def validate_document(content: str, *, name: str | None = None, strict: bool = False) -> dict:
     directory = Path(name or "skill")
@@ -147,13 +133,7 @@ class SkillPackages:
         return runtime
 
     def _instructions(self, parsed, skill_root, workspace_root, resources, runtime, mode, variable):
-        parsed = replace(parsed, path=Path(skill_root), resources=resources)
-        content = skill_content_xml(parsed) + f"\n<skill_root>{skill_root}</skill_root>\n<workspace_root>{workspace_root}</workspace_root>\n" + RUNTIME_GUIDANCE
-        content += "\n" + shell_guidance(runtime["shell"], variable, direct=mode == "source")
-        content += "\nAvailable runtime executables: " + json.dumps(runtime["tools"])
-        if runtime.get("bin_directory"):
-            content += "\nFor sandbox shell commands prepend: export PATH=" + shlex.quote(runtime["bin_directory"]) + ":$PATH"
-        return content + "\n" + "\n".join(runtime.get("errors", []))
+        return build_skill_instructions(parsed, skill_root, workspace_root, resources, runtime, mode, variable)
 
     def _disabled(self) -> set[str]:
         from agent.shared.config import get_config_service

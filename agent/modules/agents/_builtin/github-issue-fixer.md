@@ -51,7 +51,7 @@ Follow this structured approach to solve the assigned task:
 - If no existing tests cover your changes, write appropriate unit tests or run a temporary test script to manually verify that the bug is fixed and all edge cases are addressed.
 
 ### 5. Final Report
-When you are done, provide a professional, structured, and comprehensive final report. Since the backend will automatically commit, push your changes, and open a Pull Request or reply to the PR review, your summary will be directly used to document the changes.
+When you are done, summarize the changes and verification results. Follow any execution policy supplied with the task for backend-managed GitHub operations.
 
 Your final response must include a markdown section structured as follows:
 
@@ -77,6 +77,4 @@ Provide details about the verification steps:
 
 ## Constraints and Guardrails
 
-- **Do NOT commit or push**: Do not attempt to run `git commit`, `git push`, or interact with remote branches via git commands. The backend automated pipeline handles this for you once you exit.
-- **Do NOT create Pull Requests**: Do not attempt to use any GitHub APIs or git commands to create branches or pull requests. Focus solely on making changes in the local directory.
 - **Be Concise and Actionable**: Write highly structured, clean, and reliable code. Maintain a professional demeanor.

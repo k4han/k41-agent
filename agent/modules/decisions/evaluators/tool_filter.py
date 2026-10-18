@@ -7,6 +7,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent.modules.decisions.evaluator import BaseDecisionEvaluator
+from agent.modules.decisions.instructions import TOOL_FILTER_INSTRUCTIONS
 from agent.modules.decisions.models import BaseAnswer, ChoiceAnswer, ChoiceQuestion
 
 DEFAULT_TOOL_CATEGORIES: dict[str, str] = {
@@ -43,10 +44,7 @@ class ToolPreFilterEvaluator(BaseDecisionEvaluator[ToolFilterContext, ToolFilter
     """Selects relevant tool domain capabilities to prune prompt token usage."""
 
     def build_question(self, context: ToolFilterContext) -> ChoiceQuestion:
-        instructions = (
-            f"Determine the primary tool capability domain required to fulfill the user request.\n"
-            f"User Query:\n{context.user_query}"
-        )
+        instructions = TOOL_FILTER_INSTRUCTIONS
         return ChoiceQuestion(instructions=instructions, criteria=context.categories)
 
     def build_state(self, context: ToolFilterContext) -> str:

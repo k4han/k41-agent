@@ -7,76 +7,8 @@ from collections.abc import Sequence
 from typing import Any
 
 from agent.modules.skills import get_skills_catalog_xml
-
-SKILLS_DISCLOSURE_PROMPT = (
-    "The following skills provide specialized instructions for specific tasks.\n"
-    "When a task matches a skill description, call the skill tool with the skill "
-    "name to load full instructions before proceeding."
-)
-
-SUB_AGENT_DISCLOSURE_PROMPT = (
-    "The delegate_task tool can delegate work to the following specialized "
-    "sub-agents.\n"
-    "Use the exact sub_agent name when delegating:"
-)
-
-SUB_AGENT_EMPTY_PROMPT = (
-    "The delegate_task tool is available, but this agent has no callable "
-    "sub-agents configured.\n"
-    "Do not call delegate_task unless a callable sub-agent is listed."
-)
-
-WRITE_TODOS_PROMPT = (
-    "The write_todos tool can manage a structured todo list for complex, "
-    "multi-step work.\n"
-    "Use it when tracking progress is useful, especially for tasks with three "
-    "or more meaningful steps, explicit todo requests, or plans that may change "
-    "as you learn more.\n"
-    "Do not use it for trivial or purely conversational requests. When you use "
-    "it, keep exactly the current useful todo list, update statuses as soon as "
-    "work changes, and do not call write_todos multiple times in parallel.\n"
-    "Valid statuses are pending, in_progress, and completed."
-)
-
-PLAN_MODE_PROMPT = (
-    "The request_plan_review tool can present an implementation plan to the user "
-    "and pause execution for human review.\n"
-    "Use it when the user asks to review or approve a plan before work proceeds, "
-    "or when a task needs an explicit handoff decision before implementation.\n"
-    "The plan must be complete enough for another agent to execute without "
-    "guessing. After the user approves, continue from the tool response and "
-    "execute the approved plan. If the user provides feedback, revise the plan "
-    "and call request_plan_review again."
-)
-REQUEST_PLAN_REVIEW_PROMPT = PLAN_MODE_PROMPT
-
-ASK_USER_PROMPT = (
-    "The ask_user tool can ask the user one or more structured questions and "
-    "pause execution until the user answers.\n"
-    "Use it only when the task requires a user decision, preference, or missing "
-    "information that cannot be discovered from the available context.\n"
-    "When multiple questions are needed, ask them in one ask_user call. Do not "
-    "call ask_user multiple times in parallel. Use single selection for mutually "
-    "exclusive choices, multiple selection when several choices can apply, and "
-    "free text when the user may need to provide a custom answer. Every question "
-    "has a free-text answer field by default unless you explicitly disable it."
-)
-
-WORKSPACE_STORAGE_PROMPT = (
-    "The working directory is the project workspace. Create project folders, source code, "
-    "dependencies, and deliverables there. Keep shell workdir at the workspace or a project subdirectory.\n"
-    "Use .k41-agent/ only for internal supporting files, never as the project workspace:\n"
-    "- scratchpad/ holds project-shared drafts, notes, and temporary helper scripts. "
-    "All conversations and sub-agents in this workspace share these files. Reuse existing project notes, "
-    "and use distinct filenames for independent tasks. Notes survive turns, restarts, and conversation reset or deletion.\n"
-    "- outputs/ holds project-shared retained tool output for seven days. When a result is shortened, "
-    "read its returned file path in pages using read; use byte_offset=0 and next_byte_offset for long lines.\n"
-    "- uploads/ holds user attachments; generated-images/ holds generated images. "
-    "Create directories only when writing files. Do not create assets/ or memory/.\n"
-    "These are real files accessible to filesystem tools and shell commands from the workspace. "
-    "The directory is excluded from Git. The generate_image tool returns a path under "
-    ".k41-agent/generated-images/ which the UI renders automatically; do not relay raw image bytes."
-)
+from agent.modules.tools.catalog_context import build_tool_catalogs
+from agent.modules.workspaces.prompt_context import build_workspace_context
 
 _WORKSPACE_STORAGE_TOOL_NAMES = frozenset(
     {"list_dir", "read", "write", "edit", "glob", "grep", "generate_image", "bash"}
@@ -126,35 +58,6 @@ def replace_known_prompt_placeholders(
     return resolved
 
 
-def _build_skills_prompt_section(catalog_xml: str | None = None) -> str:
-    catalog_xml = (catalog_xml if catalog_xml is not None else get_skills_catalog_xml()).strip()
-    if catalog_xml == "<available_skills/>":
-        return ""
-    return f"\n\n{SKILLS_DISCLOSURE_PROMPT}\n{catalog_xml}"
-
-
-def _build_sub_agents_prompt_section(agent_name: str, catalog: Any) -> str:
-    get_callable_agents = getattr(catalog, "get_callable_agents", None)
-    if not callable(get_callable_agents):
-        return ""
-
-    callable_agents = list(get_callable_agents(agent_name) or [])
-    if not callable_agents:
-        return f"\n\n{SUB_AGENT_EMPTY_PROMPT}"
-
-    lines = [SUB_AGENT_DISCLOSURE_PROMPT]
-    for sub_agent_name in callable_agents:
-        sub_agent_config = catalog.get_agent(sub_agent_name)
-        description = ""
-        if sub_agent_config is not None:
-            description = str(getattr(sub_agent_config, "description", "") or "").strip()
-        if not description:
-            description = "No description provided."
-        lines.append(f"- {sub_agent_name}: {description}")
-    section = "\n".join(lines)
-    return f"\n\n{section}"
-
-
 def get_system_default_variables(working_dir: str = "", workspace: str = "") -> dict[str, str]:
     import getpass
 
@@ -195,7 +98,7 @@ def build_llm_system_prompt(
     scratchpad_path: str | None = None,
     sections: dict[str, str] | None = None,
 ) -> str:
-    """Build the final system prompt for llm_node from runtime state."""
+    """Render agent/workspace context and collect catalogs for tool descriptions."""
     system_defaults = get_system_default_variables(
         working_dir=working_dir,
         workspace=workspace or working_dir,
@@ -214,44 +117,22 @@ def build_llm_system_prompt(
         },
     )
 
-    if _has_tool(tools, "delegate_task"):
-        section = _build_sub_agents_prompt_section(agent_name, catalog)
-        system_prompt += section
-        if sections is not None:
-            sections["subagents"] = section
-
-    if _has_tool(tools, "skill"):
-        section = _build_skills_prompt_section(skills_catalog_xml)
-        system_prompt += section
-        if sections is not None:
-            sections["skills"] = section
-
-    if _has_tool(tools, "write_todos"):
-        system_prompt = f"{system_prompt}\n\n{WRITE_TODOS_PROMPT}"
-
-    if _has_tool(tools, "request_plan_review") or _has_tool(tools, "plan_mode_respond"):
-        system_prompt = f"{system_prompt}\n\n{PLAN_MODE_PROMPT}"
-
-    if _has_tool(tools, "ask_user"):
-        system_prompt = f"{system_prompt}\n\n{ASK_USER_PROMPT}"
+    if sections is not None:
+        skills_xml = skills_catalog_xml
+        if skills_xml is None and _has_tool(tools, "skill"):
+            skills_xml = get_skills_catalog_xml()
+        sections.update(build_tool_catalogs(
+            tools=tools, agent_name=agent_name, catalog=catalog,
+            skills_catalog_xml=skills_xml or "<available_skills/>",
+        ))
 
     if _has_workspace_storage_tool(tools):
-        system_prompt = f"{system_prompt}\n\n{WORKSPACE_STORAGE_PROMPT}"
-        if scratchpad_path:
-            system_prompt += f"\nThe shared project draft directory is {scratchpad_path}. Read existing notes and use distinct filenames for independent tasks."
+        system_prompt += "\n\n" + build_workspace_context(scratchpad_path)
 
     return system_prompt
 
 
 __all__ = [
-    "SKILLS_DISCLOSURE_PROMPT",
-    "ASK_USER_PROMPT",
-    "PLAN_MODE_PROMPT",
-    "REQUEST_PLAN_REVIEW_PROMPT",
-    "SUB_AGENT_DISCLOSURE_PROMPT",
-    "SUB_AGENT_EMPTY_PROMPT",
-    "WRITE_TODOS_PROMPT",
-    "WORKSPACE_STORAGE_PROMPT",
     "build_llm_system_prompt",
     "replace_known_prompt_placeholders",
     "resolve_prompt_variables",

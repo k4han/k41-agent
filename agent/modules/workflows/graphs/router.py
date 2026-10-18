@@ -44,6 +44,7 @@ from agent.modules.providers import get_resolved_chat_model
 from agent.modules.workflows.model_effort import get_workflow_reasoning_effort_kwargs
 from agent.modules.usage import with_usage_tracking
 from agent.modules.prompt_variables import get_runtime_prompt_variable_values
+from agent.modules.decisions import ROUTING_INSTRUCTIONS
 from agent.modules.workflows.prompt_builders import (
     replace_known_prompt_placeholders,
     resolve_prompt_variables,
@@ -376,10 +377,7 @@ async def _route_with_clef(
         raise DecisionError("No decision client configured or available for Clef routing.")
 
     criteria = {name: _agent_description(cfg) for name, cfg in candidates.items()}
-    instructions = (
-        f"Select the most appropriate agent to handle the user request. "
-        f"Candidates available: {', '.join(candidates.keys())}."
-    )
+    instructions = ROUTING_INSTRUCTIONS
 
     if hasattr(client, "evaluate_choice") and callable(client.evaluate_choice):
         return await client.evaluate_choice(

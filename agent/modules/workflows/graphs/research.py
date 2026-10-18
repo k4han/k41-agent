@@ -2,6 +2,9 @@ from langchain_core.messages import SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
+from agent.modules.agents import render_agent_prompt
+from agent.modules.workflows.prompt_builders import build_llm_system_prompt
+
 from agent.modules.workflows.checkpoint import (
     get_checkpointer,
 )
@@ -23,6 +26,26 @@ from agent.modules.usage import estimate_context_breakdown, with_usage_tracking
 from agent.shared.infrastructure.parsing import extract_final_text_content
 
 
+async def _research_system(name, runtime, agent_config):
+    from agent.modules.prompt_variables import get_runtime_prompt_variable_values
+
+    ctx = runtime.context
+    working_dir = ctx.get_working_dir()
+    workspace = ctx.get_workspace().display_label()
+    prompt_variables = await get_runtime_prompt_variable_values()
+    instructions = await render_agent_prompt(
+        name, working_dir=working_dir, workspace=workspace, prompt_variables=prompt_variables,
+    )
+    caller_instructions = build_llm_system_prompt(
+        system_prompt_template=agent_config.system_prompt, working_dir=working_dir,
+        workspace=workspace, agent_name=ctx.get_agent_name(), tools=[], catalog=None,
+        prompt_variables=prompt_variables,
+    )
+    if caller_instructions.strip():
+        instructions += f"\n\n<agent_instructions>\n{caller_instructions}\n</agent_instructions>"
+    return SystemMessage(content=instructions)
+
+
 def _resolve_runtime_model(runtime):
     from agent.modules.agents import get_catalog_service
 
@@ -42,10 +65,7 @@ async def _research_node(state: ResearchState, config: RunnableConfig, runtime):
     """Collect research directions for the request."""
     resolved, model_kwargs, agent_config = _resolve_runtime_model(runtime)
     llm = resolved.model
-    system = SystemMessage(content=(
-        "You are a research assistant. "
-        "Analyze the request and list the information sources to investigate."
-    ))
+    system = await _research_system("research-planner", runtime, agent_config)
     history, history_updates = await prepare_model_context(
         state["messages"], system=system, context=runtime.context,
         agent_config=agent_config, resolved=resolved, config=config,
@@ -74,10 +94,7 @@ async def _summarize_node(state: ResearchState, config: RunnableConfig, runtime)
     """Summarize the collected research context."""
     resolved, model_kwargs, agent_config = _resolve_runtime_model(runtime)
     llm = resolved.model
-    system = SystemMessage(content=(
-        "Based on the collected information, write a concise report with "
-        "clear sections: Summary, Key Points, and Conclusion."
-    ))
+    system = await _research_system("research-summarizer", runtime, agent_config)
     history, history_updates = await prepare_model_context(
         state["messages"], system=system, context=runtime.context,
         agent_config=agent_config, resolved=resolved, config=config,

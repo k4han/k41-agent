@@ -85,7 +85,10 @@ HumanResumePayload: TypeAlias = PlanResumePayload | AskUserAnswerResumePayload |
 ASK_USER_DESCRIPTION = (
     "Ask the user one or more structured questions and pause execution until "
     "the user answers. Use this only when the user must make a choice or "
-    "provide information that cannot be inferred from available context."
+    "provide information that cannot be inferred from available context. "
+    "Group related questions into one call; do not call this tool multiple times in parallel. "
+    "Use single selection for mutually exclusive choices, multiple selection when several choices apply, "
+    "and free text for custom answers. Every question includes free text unless explicitly disabled."
 )
 
 

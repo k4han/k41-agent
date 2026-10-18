@@ -149,7 +149,8 @@ async def test_llm_node_keeps_skill_tool_for_nested_global_package(monkeypatch, 
         {"configurable": {"thread_id": "nested-skill-thread"}},
         SimpleNamespace(context=WorkflowContext(workspace=str(workspace), allowed_tool_names=["skill"])),
     )
-    assert "<name>demo</name>" in captured["messages"][0].content
+    assert "<name>demo</name>" not in captured["messages"][0].content
+    assert "<name>demo</name>" in next(tool.description for tool in captured["tools"] if tool.name == "skill")
     assert "skill" in [tool.name for tool in captured["tools"]]
 
 
@@ -381,7 +382,7 @@ async def test_llm_node_prefers_runtime_allowed_tool_names_before_building_promp
         ),
     )
 
-    assert [tool.name for tool in captured["tools"]] == ["delegate_task", "read"]
+    assert [tool.name for tool in captured["tools"]] == ["read"]
     assert [tool.name for tool in builder_calls["tools"]] == ["delegate_task", "skill", "read"]
     assert "retained tool output" in captured["tools"][-1].description
 

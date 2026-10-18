@@ -90,6 +90,7 @@ include = ["agent*"]
 exclude = ["tests*", "tmp*", "data*"]
 
 [tool.setuptools.package-data]
+"agent.modules.agents" = ["_builtin/*.md", "examples/*.md"]
 "agent.bootstrap" = ["resources/*"]
 "agent.delivery.http.dashboard" = ["static/**/*"]
 

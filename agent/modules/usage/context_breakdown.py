@@ -1,6 +1,7 @@
 """Estimate the composition of the actual input to a model call."""
 
 from collections.abc import Sequence
+from copy import copy
 from math import floor
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
@@ -26,14 +27,14 @@ def estimate_context_breakdown(
             content = message.content
             if isinstance(content, str):
                 for category, section_key in (("skills", "skills"), ("skills", "active_skills"), ("subagents", "subagents")):
-                    section = sections.pop(section_key, "")
-                    if not section:
+                    section = sections.get(section_key, "")
+                    if not section or section not in content:
                         continue
+                    sections.pop(section_key)
                     result[category] += count_tokens_approximately(
                         [SystemMessage(content=section)], extra_tokens_per_message=0,
                     )
-                    if section in content:
-                        content = content.replace(section, "", 1)
+                    content = content.replace(section, "", 1)
                 message = message.model_copy(update={"content": content})
             result["system_prompt"] += count_tokens_approximately([message])
         elif isinstance(message, HumanMessage):
@@ -50,7 +51,23 @@ def estimate_context_breakdown(
             result["tool_calls"] += max(0, count_tokens_approximately([message]) - response_tokens)
         else:
             result["system_prompt"] += count_tokens_approximately([message])
-    result["system_tools"] = count_tokens_approximately([], tools=tools) if tools else 0
+    remaining_tools = list(tools or ())
+    tool_tokens = count_tokens_approximately([], tools=remaining_tools) if remaining_tools else 0
+    for category in ("skills", "subagents"):
+        section = sections.get(category, "")
+        if not section:
+            continue
+        stripped = []
+        for tool in remaining_tools:
+            description = getattr(tool, "description", "")
+            if section in description:
+                tool = copy(tool)
+                tool.description = description.replace(section, "", 1)
+            stripped.append(tool)
+        remaining_tokens = count_tokens_approximately([], tools=stripped) if stripped else 0
+        result[category] += max(0, tool_tokens - remaining_tokens)
+        remaining_tools, tool_tokens = stripped, remaining_tokens
+    result["system_tools"] = tool_tokens
     return result
 
 

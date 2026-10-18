@@ -7,6 +7,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent.modules.decisions.evaluator import BaseDecisionEvaluator
+from agent.modules.decisions.instructions import RESEARCH_STOPPING_INSTRUCTIONS
 from agent.modules.decisions.models import BaseAnswer, NoulAnswer, NoulQuestion
 
 
@@ -38,20 +39,15 @@ class ResearchStoppingEvaluator(
     """Determines whether accumulated research findings are sufficient to terminate search loops."""
 
     def build_question(self, context: ResearchStoppingContext) -> NoulQuestion:
-        findings = (
-            "\n".join(f"- {note}" for note in context.notes)
-            if context.notes
-            else "No findings collected yet."
-        )
-        instructions = (
-            f"Has the accumulated research sufficiently and reliably answered the research query?\n"
-            f"Query: {context.query}\n"
-            f"Findings so far:\n{findings}"
-        )
+        instructions = RESEARCH_STOPPING_INSTRUCTIONS
         return NoulQuestion(instructions=instructions, threshold=self.confidence_threshold)
 
     def build_state(self, context: ResearchStoppingContext) -> str:
-        return f"Query: {context.query}\nIteration: {context.iteration} of {context.max_iterations}"
+        findings = "\n".join(f"- {note}" for note in context.notes) or "No findings collected yet."
+        return (
+            f"Query: {context.query}\nIteration: {context.iteration} of {context.max_iterations}"
+            f"\nFindings so far:\n{findings}"
+        )
 
     def parse_result(
         self,

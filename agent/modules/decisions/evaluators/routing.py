@@ -7,6 +7,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent.modules.decisions.evaluator import BaseDecisionEvaluator
+from agent.modules.decisions.instructions import ROUTING_INSTRUCTIONS
 from agent.modules.decisions.models import BaseAnswer, ChoiceAnswer, ChoiceQuestion
 
 
@@ -39,11 +40,7 @@ class AgentRoutingEvaluator(BaseDecisionEvaluator[RoutingContext, RoutingDecisio
 
     def build_question(self, context: RoutingContext) -> ChoiceQuestion:
         criteria = context.candidates if context.candidates else {"default": "Default general assistant"}
-        instructions = (
-            f"Select the most appropriate specialist agent to handle the user request.\n"
-            f"Caller agent: {context.caller_agent_name or 'user'}\n"
-            f"User request: {context.user_input}"
-        )
+        instructions = ROUTING_INSTRUCTIONS
         return ChoiceQuestion(instructions=instructions, criteria=criteria)
 
     def build_state(self, context: RoutingContext) -> str:

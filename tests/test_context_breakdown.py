@@ -8,6 +8,8 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.messages.utils import count_tokens_approximately
 from langchain_core.outputs import ChatGeneration, LLMResult
+from langchain_core.tools import StructuredTool
+from agent.modules.tools.catalog_context import bind_tool_catalogs
 
 from agent.modules.usage.context_breakdown import (
     estimate_compacted_context_breakdown,
@@ -66,10 +68,16 @@ def test_prompt_sections_and_tool_history_are_counted_separately():
         "name": "read", "args": {"path": "source.py"}, "id": "read-1",
     }])
     tool = ToolMessage(content="File contents", tool_call_id="read-1", name="read")
-    schemas = [{"name": "read", "parameters": {"path": {"type": "string"}}}]
+    schemas = bind_tool_catalogs([
+        StructuredTool.from_function(lambda query="": query, name=name, description=f"Use {name}.")
+        for name in ("read", "skill", "delegate_task")
+    ], sections)
     estimates = estimate_context_breakdown([system, user, assistant, tool], tools=schemas, prompt_sections=sections)
     assert all(value > 0 for value in estimates.values())
-    assert estimates["system_tools"] == count_tokens_approximately([], tools=schemas)
+    assert estimates["system_tools"] + estimates["subagents"] + estimates["skills"] == (
+        count_tokens_approximately([], tools=schemas)
+        + count_tokens_approximately([SystemMessage(content=sections["active_skills"])], extra_tokens_per_message=0)
+    )
     assert estimates["user_messages"] == count_tokens_approximately([user])
     plain_prompt = system.content
     for section in sections.values():
@@ -80,7 +88,7 @@ def test_prompt_sections_and_tool_history_are_counted_separately():
     assert estimates["tool_calls"] == (
         count_tokens_approximately([assistant, tool]) - estimates["agent_responses"]
     )
-    assert sections["skills"] in prompt
+    assert sections["skills"] not in prompt
 
 
 def test_breakdown_retains_only_the_history_sent_to_the_model():

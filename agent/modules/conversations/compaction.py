@@ -28,6 +28,10 @@ from agent.modules.agent_runtime import (
     get_active_session_registry,
 )
 from agent.modules.agents import get_catalog_service
+from agent.modules.conversations.prompts import (
+    COMPACTION_BUDGET_TEMPLATE, COMPACTION_INPUT_TEMPLATE,
+    COMPACTED_CONTEXT_TEMPLATE, COMPACTED_CONTEXT_ACKNOWLEDGEMENT,
+)
 from agent.modules.providers import DEFAULT_CONTEXT_WINDOW, model_input_budget, model_response_reserve
 
 from agent.modules.conversations.history import (
@@ -212,8 +216,8 @@ async def _generate_context_summary(
     formatted_history = _format_messages_for_summary(messages)
     system_prompt = agent_config.system_prompt
     if max_summary_tokens is not None:
-        system_prompt += f" Keep the summary within {max_summary_tokens} tokens; prioritize constraints, pending work, errors, and recovery references."
-    user_prompt = f"Earlier Conversation History to Summarize:\n\n{formatted_history}"
+        system_prompt += COMPACTION_BUDGET_TEMPLATE.format(tokens=max_summary_tokens)
+    user_prompt = COMPACTION_INPUT_TEMPLATE.format(history=formatted_history)
 
     resolved = get_resolved_chat_model(
         provider_name=agent_config.provider,
@@ -267,17 +271,12 @@ def _build_summary_message_pair(summary_text: str) -> tuple[HumanMessage, AIMess
     summary_id = f"compact-{uuid.uuid4().hex[:12]}"
     ack_id = f"compact-ack-{uuid.uuid4().hex[:12]}"
     human_msg = HumanMessage(
-        content=(
-            "[Conversation Context Summary]\n"
-            "The earlier conversation before this point was compacted to conserve context:\n\n"
-            f"{summary_text}\n\n"
-            "Please acknowledge and continue assisting based on this context."
-        ),
+        content=COMPACTED_CONTEXT_TEMPLATE.format(summary=summary_text),
         id=summary_id,
         additional_kwargs={"is_compact_summary": True},
     )
     ai_msg = AIMessage(
-        content="Understood. I have reviewed the summary of our previous conversation and will continue seamlessly.",
+        content=COMPACTED_CONTEXT_ACKNOWLEDGEMENT,
         id=ack_id,
         additional_kwargs={"is_compact_summary": True},
     )

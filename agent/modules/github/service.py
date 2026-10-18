@@ -11,6 +11,11 @@ from typing import Any, Awaitable, Callable
 from agent.modules.agent_runtime import BackgroundTask, NotifyChannel, get_background_task_manager
 from agent.modules.agents import resolve_catalog_agent_name
 from agent.modules.github.client import GitHubAppClient
+from agent.modules.github.prompts import (
+    build_agent_prompt as _build_agent_prompt,
+    build_manual_task_prompt as _build_manual_task_prompt,
+    build_review_comment_prompt as _build_review_comment_prompt,
+)
 from agent.modules.github.config import (
     DEFAULT_TRIGGER_LABEL,
     get_github_settings,
@@ -884,164 +889,6 @@ class GitHubAutomationService:
             issue_number=context.issue_number,
             body=body,
         )
-
-
-def _build_agent_prompt(
-    *,
-    event: str,
-    payload: dict[str, Any],
-    context: GitHubTaskContext,
-    issue_context: dict[str, Any] | None = None,
-) -> str:
-    if event == "pull_request_review_comment":
-        return _build_review_comment_prompt(payload=payload, context=context)
-
-    issue = payload["issue"]
-    comment = payload.get("comment") or {}
-    comment_body = str(comment.get("body") or "").strip()
-    issue_body = str(issue.get("body") or "").strip()
-
-    lines = [
-        f"You are working on GitHub repository {context.repository_full_name}.",
-        f"The local checkout is already on branch {context.branch}.",
-        "Modify files in the current working directory to address the issue.",
-        "Do not commit, push, or open the pull request yourself; the backend will do that after you finish.",
-        "",
-        "CRITICAL INSTRUCTION:",
-        "Check if any existing open Pull Request or recent comments indicate that the issue has already been resolved or is being handled.",
-        "If you confirm that the issue is already addressed and no further changes are needed, DO NOT modify any files in the workspace.",
-        "Instead, immediately finish the task and write a summary explaining that the issue has already been addressed (mentioning the specific PR number or user comment).",
-        "",
-        f"Issue: #{context.issue_number} {context.issue_title}",
-        f"Issue URL: {context.issue_url}",
-        "",
-        "Issue body:",
-        issue_body or "(empty)",
-    ]
-
-    if issue_context:
-        linked_prs = issue_context.get("linked_pull_requests") or []
-        if linked_prs:
-            lines.extend(["", "Existing pull requests linked to this issue:"])
-            for pr in linked_prs:
-                pr_state = pr.get("state", "unknown")
-                pr_number = pr.get("number", "?")
-                pr_title = pr.get("title", "")
-                pr_url = pr.get("url", "")
-                pr_branch = pr.get("head_branch", "")
-                lines.append(
-                    f"- PR #{pr_number} [{pr_state}]: {pr_title} "
-                    f"(branch: {pr_branch}) {pr_url}"
-                )
-            lines.append(
-                "Check if any existing PR already addresses this issue before making changes. "
-                "If an open PR already addresses this issue and you do not need to make additional changes, "
-                "do not modify any files, and finish immediately with a summary stating that the issue is already addressed."
-            )
-            lines.append(
-                "If you need more details about a linked PR, use the github_get_pull_request or "
-                "github_get_pull_request_diff tools; they authenticate with the GitHub App installation "
-                "token and work for private repositories."
-            )
-
-        comments = issue_context.get("comments") or []
-        if comments:
-            recent_comments = comments[-10:]
-            lines.extend(["", "Recent issue comments:"])
-            for c in recent_comments:
-                author = c.get("author", "unknown")
-                body = c.get("body", "")
-                if body:
-                    lines.append(f"- @{author}: {body[:500]}")
-
-    if context.repository_instructions:
-        lines.extend(
-            [
-                "",
-                "Repository instructions:",
-                context.repository_instructions,
-            ]
-        )
-    if event == "issue_comment" and comment_body:
-        lines.extend(["", "Trigger comment:", comment_body])
-    lines.extend([
-        "",
-        "When you are done, summarize the implementation and any tests you ran.",
-    ])
-    return "\n".join(lines)
-
-
-def _build_review_comment_prompt(
-    *,
-    payload: dict[str, Any],
-    context: GitHubTaskContext,
-) -> str:
-    comment = payload.get("comment") or {}
-    comment_body = str(comment.get("body") or "").strip()
-    comment_path = str(comment.get("path") or "").strip()
-    comment_line = _optional_int(comment.get("line")) or _optional_int(
-        comment.get("original_line")
-    )
-    diff_hunk = str(comment.get("diff_hunk") or "").strip()
-
-    lines = [
-        f"You are working on GitHub repository {context.repository_full_name}.",
-        f"The local checkout is already on pull request branch {context.branch}.",
-        "Modify files in the current working directory to address the review feedback.",
-        "Do not commit, push, or update the pull request yourself; the backend will do that after you finish.",
-        "",
-        f"Pull request: #{context.issue_number} {context.issue_title}",
-        f"Pull request URL: {context.issue_url}",
-        "",
-        "Review comment:",
-        comment_body or "(empty)",
-        "",
-        "Comment location:",
-        f"File: {comment_path or '(unknown)'}",
-        f"Line: {comment_line if comment_line is not None else '(unknown)'}",
-    ]
-    if diff_hunk:
-        lines.extend(["", "Diff hunk:", diff_hunk])
-    if context.repository_instructions:
-        lines.extend(
-            [
-                "",
-                "Repository instructions:",
-                context.repository_instructions,
-            ]
-        )
-    lines.extend(
-        [
-            "",
-            "Before editing, inspect the commented file and nearby code in the checkout.",
-            "When you are done, summarize the implementation and any tests you ran.",
-        ]
-    )
-    return "\n".join(lines)
-
-
-def _build_manual_task_prompt(
-    *,
-    request: str,
-    repository_full_name: str,
-    repository_instructions: str,
-) -> str:
-    lines = [
-        f"You are working on GitHub repository {repository_full_name}.",
-        "Modify files in the current working directory to satisfy the request.",
-        "",
-        "Request:",
-        request,
-    ]
-    if repository_instructions:
-        lines.extend(["", "Repository instructions:", repository_instructions])
-    lines.extend(
-        [
-            "",
-            "When you are done, summarize the implementation and any tests you ran.",
-        ]
-    )
-    return "\n".join(lines)
 
 
 def _pr_title(issue_number: int, issue_title: str) -> str:

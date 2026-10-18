@@ -23,6 +23,7 @@ from agent.modules.workflows.system_prompt_cache import (
     store_system_prompt,
 )
 from agent.modules.tools import ToolResolver, get_thread_id
+from agent.modules.tools.catalog_context import bind_tool_catalogs
 
 if TYPE_CHECKING:
     from langgraph.runtime import Runtime
@@ -89,7 +90,6 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
     )
     prompt_sections: dict[str, str] = {}
     system_prompt = get_cached_system_prompt(cache_key, sections=prompt_sections)
-    catalog_has_skills = None
 
     if system_prompt is None:
         prompt_variables = await get_runtime_prompt_variable_values()
@@ -103,7 +103,6 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
                 repository_dir=repository_skill_dir,
                 thread_id=thread_id,
             )
-            catalog_has_skills = skills_catalog_xml != "<available_skills/>"
         system_prompt = build_llm_system_prompt(
             system_prompt_template=system_prompt_template,
             working_dir=working_dir,
@@ -133,8 +132,7 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
         }
     resolved = get_resolved_chat_model(provider_name=provider, model=model)
     system = SystemMessage(content=system_prompt + skill_context)
-    if not skill_context and (catalog_has_skills is False or (catalog_has_skills is None and "<available_skills>" not in system_prompt)):
-        tools = [tool for tool in tools if tool.name != "skill"]
+    tools = bind_tool_catalogs(tools, prompt_sections, keep_skill=bool(skill_context))
     if skill_context:
         from langchain_core.messages.utils import count_tokens_approximately
         if count_tokens_approximately([system], tools=tools) >= getattr(resolved, "context_window", DEFAULT_CONTEXT_WINDOW) * 3 // 4:

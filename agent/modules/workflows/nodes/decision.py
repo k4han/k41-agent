@@ -22,6 +22,8 @@ from agent.modules.decisions import (
     NoulQuestion,
 )
 from agent.modules.providers import get_resolved_chat_model
+from agent.modules.agents import render_agent_prompt
+from agent.modules.decisions import FILE_SELECTION_INSTRUCTIONS, FILE_INCLUSION_INSTRUCTIONS
 from agent.modules.usage import with_usage_tracking
 from agent.modules.workflows.model_effort import get_workflow_reasoning_effort_kwargs
 from agent.shared.infrastructure.parsing import safe_str_strip
@@ -337,7 +339,7 @@ async def _decide_candidate_files_clef(
     for p in file_paths[:35]:
         criteria[p] = f"Source file: {p}"
 
-    instructions = "Select the most relevant file to inspect to answer or solve the user request."
+    instructions = FILE_SELECTION_INSTRUCTIONS
     state = f"User Request: {user_input}\nWorkspace Directory Tree:\n{directory_tree}"
 
     answer = await client.evaluate_choice(
@@ -370,10 +372,7 @@ async def _decide_file_inclusion_clef(
     file_content: str,
 ) -> FileInclusionDecision:
     """Use Cloudflare Clef evaluate_noul to decide whether to include a file."""
-    instructions = (
-        f"Based on the user request and the file content of '{file_path}', "
-        "does this file provide necessary, relevant context to fulfill the user request?"
-    )
+    instructions = FILE_INCLUSION_INSTRUCTIONS
     state = (
         f"User Request: {user_input}\n"
         f"Inspected File: {file_path}\n"
@@ -404,17 +403,7 @@ async def _decide_candidate_files_llm(
     config: RunnableConfig | None = None,
 ) -> FileCandidateSelection:
     """Fallback: invoke LLM chat model to select candidate files."""
-    system_prompt = (
-        "You are an expert codebase navigation and context preparation assistant.\n"
-        "Your task is to analyze the user's request and the workspace directory tree, "
-        "and select which files are most relevant to inspect.\n\n"
-        "Guidelines:\n"
-        "1. Select ONLY files that are likely to contain information or code directly relevant to the user request.\n"
-        "2. Do not select binary files, lock files, or irrelevant directories.\n"
-        "3. If the user request is a general question, greeting, or does not require reading files, return an empty list.\n"
-        f"4. Select at most {max_candidates} candidate files.\n"
-        "Respond with structured output containing `candidate_files` and `reasoning`."
-    )
+    system_prompt = await render_agent_prompt("context-file-selector", values={"max_candidates": max_candidates})
 
     user_prompt = (
         f"User Request:\n{user_input}\n\n"
@@ -470,18 +459,10 @@ async def _decide_file_inclusion_llm(
     model_name: str,
     model_kwargs: dict[str, Any],
     config: RunnableConfig | None = None,
+    system_prompt: str | None = None,
 ) -> FileInclusionDecision:
     """Fallback: invoke LLM chat model to evaluate whether a file should be included."""
-    system_prompt = (
-        "You are an expert context curator assistant.\n"
-        "Your task is to inspect the contents of a specific file and decide whether it provides "
-        "valuable, necessary context for fulfilling the user's request.\n\n"
-        "Guidelines:\n"
-        "1. Set `should_include` to True if this file contains code, definitions, or information directly relevant to the user's request.\n"
-        "2. Set `should_include` to False if the file turns out to be irrelevant, empty, boilerplate, or unnecessary.\n"
-        "3. Set `use_full_content` to True if the main model needs the complete file content, or False if a focused summary/excerpt is sufficient.\n"
-        "4. Provide a brief `reasoning` and optional `relevant_summary_or_excerpt`."
-    )
+    system_prompt = system_prompt or await render_agent_prompt("context-file-curator")
 
     user_prompt = (
         f"User Request:\n{user_input}\n\n"
@@ -599,11 +580,13 @@ async def decision_node(
     llm = None
     resolved = None
     agent_config = None
+    inclusion_prompt = None
     model_kwargs: dict[str, Any] = {}
     if decision_client is None:
         try:
             resolved, agent_config = _resolve_decision_model(runtime, config)
             llm = resolved.model
+            inclusion_prompt = await render_agent_prompt("context-file-curator")
             model_kwargs = (
                 get_workflow_reasoning_effort_kwargs(
                     getattr(runtime, "context", None),
@@ -661,6 +644,7 @@ async def decision_node(
                 model_name=resolved.model_name,
                 model_kwargs=model_kwargs,
                 config=config,
+                system_prompt=inclusion_prompt,
             )
 
         if inclusion is None:

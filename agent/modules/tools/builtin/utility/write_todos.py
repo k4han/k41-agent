@@ -39,7 +39,10 @@ class WriteTodosInput(BaseModel):
 WRITE_TODOS_TOOL_DESCRIPTION = (
     "Create and manage a structured todo list for the current work session. "
     "Use this for complex multi-step tasks where progress tracking helps, and "
-    "replace the entire list with the current set of useful todos."
+    "replace the entire list with the current set of useful todos. "
+    "Use it for three or more meaningful steps, explicit todo requests, or evolving plans; "
+    "skip trivial and purely conversational requests. Update statuses as work changes. "
+    "Valid statuses are pending, in_progress, and completed. Do not call this tool multiple times in parallel."
 )
 
 

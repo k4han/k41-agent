@@ -36,7 +36,11 @@ PlanModeResumePayload = PlanResumePayload
 
 REQUEST_PLAN_REVIEW_DESCRIPTION = (
     "Show an implementation plan to the user and pause execution until the "
-    "user either approves it with a target agent or provides feedback to revise it."
+    "user either approves it with a target agent or provides feedback to revise it. "
+    "Use when the user requests plan review before implementation or an explicit handoff decision is needed. "
+    "Provide a complete plan that another agent can execute without guessing. "
+    "After approval, continue with the approved plan. If the user requests changes, "
+    "revise the plan and call request_plan_review again."
 )
 PLAN_MODE_RESPOND_DESCRIPTION = REQUEST_PLAN_REVIEW_DESCRIPTION
 

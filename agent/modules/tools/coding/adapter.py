@@ -24,7 +24,7 @@ DESCRIPTIONS = {
     "read_process_output": "Observe a workspace process using its explicit byte cursor. Returns next cursor, state and exit code; no implicit output consumption.",
     "write_process_input": "Send exact stdin text to an owned workspace process. Include newline explicitly when required. Returns process state and new output.",
     "stop_process": "Stop an owned workspace process and its descendants; wait for bounded pipe cleanup.",
-    "read": "Read a bounded UTF-8 text page with line numbers, next_offset and content version, or view a supported image. Use byte_offset=0 and next_byte_offset to read long lines without loss. Pass the returned version as expected_version when editing.",
+    "read": "Read a bounded UTF-8 text page with line numbers, next_offset and content version, or view a supported image. When a tool result is shortened, read its returned output path in pages. Use byte_offset=0 and next_byte_offset to read long lines without loss. Pass the returned version as expected_version when editing.",
     "list_dir": "List a bounded page of workspace directory entries with next_offset.",
     "edit": "Replace exact text in an existing file. Read the file first and pass its version as expected_version. Copy old_string from the file without line-number prefixes; preserve whitespace and include enough context for a unique match. Set replace_all=True only to replace every exact occurrence. Empty matches and unchanged replacements are rejected. Returns change counts and a new version; diffs are displayed in the UI.",
     "write": "Create or rewrite a text file, optionally append. Existing BOM, newline style and mode are preserved. Use expected_version to reject stale overwrites.",

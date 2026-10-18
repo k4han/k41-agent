@@ -21,6 +21,7 @@ from agent.shared.infrastructure.thinking_parser import (
     strip_thinking_tags,
 )
 
+from agent.modules.agent_runtime.input_messages import DEFAULT_ATTACHMENT_PROMPT
 from agent.modules.agent_runtime.active_sessions import (
     ActiveSession,
     SESSION_STEP_RESPONDING,
@@ -55,7 +56,6 @@ MAX_FILE_ATTACHMENT_BYTES = 30 * 1024 * 1024
 MAX_TEXT_ATTACHMENT_BYTES = 30 * 1024 * 1024
 MAX_IMAGE_ATTACHMENT_BYTES = 30 * 1024 * 1024
 MAX_TOTAL_ATTACHMENT_BYTES = 60 * 1024 * 1024
-DEFAULT_ATTACHMENT_PROMPT = "Please review the attached file(s)."
 
 
 def build_run_params(

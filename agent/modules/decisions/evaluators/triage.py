@@ -7,6 +7,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent.modules.decisions.evaluator import BaseDecisionEvaluator
+from agent.modules.decisions.instructions import TRIAGE_INSTRUCTIONS
 from agent.modules.decisions.models import BaseAnswer, ChoiceAnswer, ChoiceQuestion
 
 DEFAULT_TRIAGE_OPTIONS: dict[str, str] = {
@@ -45,11 +46,7 @@ class ChannelInboundTriageEvaluator(BaseDecisionEvaluator[TriageContext, TriageD
 
     def build_question(self, context: TriageContext) -> ChoiceQuestion:
         criteria = context.custom_options or DEFAULT_TRIAGE_OPTIONS
-        instructions = (
-            f"Triage the inbound message from channel '{context.channel or 'chat'}' "
-            f"(group_chat={context.is_group}) into the appropriate handling action category.\n"
-            f"Message text:\n{context.message_text}"
-        )
+        instructions = TRIAGE_INSTRUCTIONS
         return ChoiceQuestion(instructions=instructions, criteria=criteria)
 
     def build_state(self, context: TriageContext) -> str:

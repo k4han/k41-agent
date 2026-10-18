@@ -7,6 +7,7 @@ import pytest
 
 import agent.modules.workflows.nodes.llm as llm_node_module
 from agent.modules.skills import get_effective_skills_catalog_xml as real_skills_catalog_xml
+from agent.modules.tools.catalog_context import build_tool_catalogs
 from agent.modules.workflows.run_config import WorkflowContext
 from agent.shared.infrastructure.revisions import (
     PROMPT_VARIABLES_REVISION,
@@ -20,6 +21,7 @@ class _FakeChatModel:
 
     def bind_tools(self, tools, **kwargs):
         self._captured["model_kwargs"] = kwargs
+        self._captured.setdefault("bound_tools", []).append(tools)
         return self
 
     async def ainvoke(self, messages, config=None):
@@ -59,6 +61,10 @@ def cached_llm_node(monkeypatch):
     def _fake_builder(**kwargs):
         calls["builder"] += 1
         captured["skills_catalog_xml"] = kwargs["skills_catalog_xml"]
+        kwargs["sections"].update(build_tool_catalogs(
+            tools=kwargs["tools"], agent_name=kwargs["agent_name"], catalog=kwargs["catalog"],
+            skills_catalog_xml=kwargs["skills_catalog_xml"] or "<available_skills/>",
+        ))
         return f"Prompt build #{calls['builder']}"
 
     async def _fake_prompt_variables():
@@ -343,4 +349,29 @@ async def test_cache_disabled_rebuilds_every_turn(cached_llm_node, monkeypatch) 
     await cached_llm_node.run()
     await cached_llm_node.run()
 
+    assert cached_llm_node.calls["builder"] == 2
+
+
+@pytest.mark.asyncio
+async def test_cached_catalogs_reach_tool_descriptions_once_and_refresh_after_revision(cached_llm_node, monkeypatch):
+    from agent.shared.infrastructure.revisions import SKILLS_REVISION
+
+    current = ["<available_skills><skill><name>first</name></skill></available_skills>"]
+
+    async def catalog(**kwargs):
+        return current[0]
+
+    monkeypatch.setattr("agent.modules.skills.get_effective_skills_catalog_xml", catalog)
+    await cached_llm_node.run()
+    await cached_llm_node.run()
+    assert cached_llm_node.calls["builder"] == 1
+    for tools in cached_llm_node.captured["bound_tools"]:
+        description = next(tool.description for tool in tools if tool.name == "skill")
+        assert description.count("<available_skills>") == 1
+        assert "<name>first</name>" in description
+    current[0] = current[0].replace("first", "second")
+    bump_revision(SKILLS_REVISION)
+    await cached_llm_node.run()
+    latest = next(tool.description for tool in cached_llm_node.captured["bound_tools"][-1] if tool.name == "skill")
+    assert "<name>second</name>" in latest and "<name>first</name>" not in latest
     assert cached_llm_node.calls["builder"] == 2

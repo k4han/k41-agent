@@ -1,5 +1,9 @@
 from types import SimpleNamespace
 
+import pytest
+from langchain_core.tools import StructuredTool
+from agent.modules.tools.catalog_context import bind_tool_catalogs
+
 import agent.modules.workflows.prompt_builders as prompt_builders
 
 
@@ -79,140 +83,52 @@ def test_build_llm_system_prompt_resolves_workspace_and_working_dir_independentl
     assert "Cwd: /workspace/facebook/react" in prompt
 
 
-def test_build_llm_system_prompt_injects_skills_section_when_skill_tool_exists(monkeypatch):
-    monkeypatch.setattr(
-        prompt_builders,
-        "get_skills_catalog_xml",
-        lambda: (
-            "<available_skills><skill><name>sql-assistant</name>"
-            "</skill></available_skills>"
-        ),
-    )
+def _tool(name):
+    return StructuredTool.from_function(lambda query="": query, name=name, description=f"Use {name}.")
 
+
+def test_catalogs_are_bound_to_request_scoped_tool_copies():
+    tools = [_tool("delegate_task"), _tool("skill")]
+    sections = {}
     prompt = prompt_builders.build_llm_system_prompt(
-        system_prompt_template="Base prompt",
-        working_dir="",
-        agent_name="default",
-        tools=[SimpleNamespace(name="skill")],
-        catalog=_FakeCatalog(),
+        system_prompt_template="Base prompt", working_dir="", agent_name="orchestrator",
+        tools=tools, catalog=_FakeCatalog(["research"], {"research": SimpleNamespace(description="Find sources.")}),
+        skills_catalog_xml="<available_skills><skill><name>sql</name></skill></available_skills>",
+        sections=sections,
     )
-
-    assert prompt_builders.SKILLS_DISCLOSURE_PROMPT in prompt
-    assert "<available_skills>" in prompt
-
-
-def test_build_llm_system_prompt_skips_skills_section_when_catalog_is_empty(monkeypatch):
-    monkeypatch.setattr(
-        prompt_builders,
-        "get_skills_catalog_xml",
-        lambda: "<available_skills/>",
-    )
-
-    prompt = prompt_builders.build_llm_system_prompt(
-        system_prompt_template="Base prompt",
-        working_dir="",
-        agent_name="default",
-        tools=[SimpleNamespace(name="skill")],
-        catalog=_FakeCatalog(),
-    )
-
+    bound = bind_tool_catalogs(tools, sections)
     assert prompt == "Base prompt"
+    assert "- research: Find sources." in bound[0].description
+    assert "<name>sql</name>" in bound[1].description
+    assert "research" not in tools[0].description
+    assert "<available_skills>" not in tools[1].description
+    other = bind_tool_catalogs(tools, {"subagents": "- coder: Write code."})
+    assert [tool.name for tool in other] == ["delegate_task"]
+    assert "research" not in other[0].description
+    assert "coder" in other[0].description
 
 
-def test_build_llm_system_prompt_injects_callable_subagents_with_descriptions():
-    prompt = prompt_builders.build_llm_system_prompt(
-        system_prompt_template="Base prompt",
-        working_dir="",
-        agent_name="orchestrator",
-        tools=[SimpleNamespace(name="delegate_task")],
-        catalog=_FakeCatalog(
-            callable_agents=["research", "backend"],
-            configs={
-                "research": SimpleNamespace(
-                    description="Research specialist for in-depth information gathering",
-                ),
-                "backend": SimpleNamespace(
-                    description="Python/backend engineer assistant",
-                ),
-            },
-        ),
+@pytest.mark.parametrize("keep_skill,expected", [(False, []), (True, ["skill"])])
+def test_empty_catalogs_disable_unusable_tools_but_allow_unloading_active_skills(keep_skill, expected):
+    result = bind_tool_catalogs([_tool("skill"), _tool("delegate_task")], {}, keep_skill=keep_skill)
+    assert [tool.name for tool in result] == expected
+
+
+def test_catalogs_use_only_callable_agents_and_preserve_missing_description_fallback():
+    sections = {}
+    prompt_builders.build_llm_system_prompt(
+        system_prompt_template="Base", working_dir="", agent_name="caller",
+        tools=[_tool("delegate_task")], catalog=_FakeCatalog(["mystery"], {}), sections=sections,
     )
-
-    assert prompt_builders.SUB_AGENT_DISCLOSURE_PROMPT in prompt
-    assert "- research: Research specialist for in-depth information gathering" in prompt
-    assert "- backend: Python/backend engineer assistant" in prompt
+    assert "- mystery: No description provided." in sections["subagents"]
+    assert "skills" not in sections
 
 
-def test_build_llm_system_prompt_uses_fallback_for_missing_subagent_description():
-    prompt = prompt_builders.build_llm_system_prompt(
-        system_prompt_template="Base prompt",
-        working_dir="",
-        agent_name="orchestrator",
-        tools=[SimpleNamespace(name="delegate_task")],
-        catalog=_FakeCatalog(
-            callable_agents=["mystery-agent"],
-            configs={"mystery-agent": SimpleNamespace(description="")},
-        ),
+def test_catalogs_are_absent_when_discovery_tools_are_not_enabled():
+    sections = {}
+    prompt_builders.build_llm_system_prompt(
+        system_prompt_template="Base", working_dir="", agent_name="caller", tools=[],
+        catalog=_FakeCatalog(["research"]), sections=sections,
+        skills_catalog_xml="<available_skills><skill>Hidden</skill></available_skills>",
     )
-
-    assert "- mystery-agent: No description provided." in prompt
-
-
-def test_build_llm_system_prompt_injects_empty_subagent_notice_when_none_are_callable():
-    prompt = prompt_builders.build_llm_system_prompt(
-        system_prompt_template="Base prompt",
-        working_dir="",
-        agent_name="solo",
-        tools=[SimpleNamespace(name="delegate_task")],
-        catalog=_FakeCatalog(callable_agents=[]),
-    )
-
-    assert prompt_builders.SUB_AGENT_EMPTY_PROMPT in prompt
-
-
-def test_build_llm_system_prompt_skips_subagent_section_when_delegate_task_tool_is_not_bound():
-    prompt = prompt_builders.build_llm_system_prompt(
-        system_prompt_template="Base prompt",
-        working_dir="",
-        agent_name="writer",
-        tools=[SimpleNamespace(name="read")],
-        catalog=_FakeCatalog(
-            callable_agents=["research"],
-            configs={
-                "research": SimpleNamespace(
-                    description="Research specialist for in-depth information gathering",
-                )
-            },
-        ),
-    )
-
-    assert prompt_builders.SUB_AGENT_DISCLOSURE_PROMPT not in prompt
-    assert prompt_builders.SUB_AGENT_EMPTY_PROMPT not in prompt
-    assert "- research:" not in prompt
-
-
-def test_build_llm_system_prompt_appends_subagents_before_skills(monkeypatch):
-    monkeypatch.setattr(
-        prompt_builders,
-        "get_skills_catalog_xml",
-        lambda: "<available_skills><skill><name>x</name></skill></available_skills>",
-    )
-
-    prompt = prompt_builders.build_llm_system_prompt(
-        system_prompt_template="Base prompt",
-        working_dir="",
-        agent_name="orchestrator",
-        tools=[SimpleNamespace(name="delegate_task"), SimpleNamespace(name="skill")],
-        catalog=_FakeCatalog(
-            callable_agents=["research"],
-            configs={
-                "research": SimpleNamespace(
-                    description="Research specialist for in-depth information gathering",
-                )
-            },
-        ),
-    )
-
-    assert prompt.index(prompt_builders.SUB_AGENT_DISCLOSURE_PROMPT) < prompt.index(
-        prompt_builders.SKILLS_DISCLOSURE_PROMPT
-    )
+    assert sections == {}

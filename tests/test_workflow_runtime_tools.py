@@ -773,7 +773,7 @@ def test_write_todos_tool_updates_graph_state() -> None:
     assert result["messages"][-1].name == "write_todos"
 
 
-def test_build_llm_system_prompt_injects_write_todos_section_only_when_bound() -> None:
+def test_write_todos_guidance_is_owned_by_the_tool() -> None:
     prompt = prompt_builders.build_llm_system_prompt(
         system_prompt_template="Base prompt",
         working_dir="",
@@ -790,11 +790,12 @@ def test_build_llm_system_prompt_injects_write_todos_section_only_when_bound() -
         catalog=SimpleNamespace(),
     )
 
-    assert prompt_builders.WRITE_TODOS_PROMPT in prompt
-    assert prompt_builders.WRITE_TODOS_PROMPT not in without_tool
+    assert prompt == "Base prompt"
+    assert "todo" not in without_tool
+    assert "Do not call this tool multiple times in parallel" in write_todos.description
 
 
-def test_build_llm_system_prompt_injects_ask_user_section_only_when_bound() -> None:
+def test_ask_user_guidance_is_owned_by_the_tool() -> None:
     prompt = prompt_builders.build_llm_system_prompt(
         system_prompt_template="Base prompt",
         working_dir="",
@@ -811,8 +812,9 @@ def test_build_llm_system_prompt_injects_ask_user_section_only_when_bound() -> N
         catalog=SimpleNamespace(),
     )
 
-    assert prompt_builders.ASK_USER_PROMPT in prompt
-    assert prompt_builders.ASK_USER_PROMPT not in without_tool
+    assert prompt == "Base prompt"
+    assert "structured questions" not in without_tool
+    assert "Group related questions into one call" in ask_user.description
 
 
 @pytest.mark.asyncio

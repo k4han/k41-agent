@@ -44,7 +44,11 @@ async def delegate_task(
     sub_agent: str,
     runtime: Annotated[ToolRuntime[Any, Any], InjectedToolArg],
 ) -> str:
-    """Delegate a task to a sub-agent and return its result."""
+    """Delegate a task to a specialized sub-agent and return its result.
+
+    Use the exact sub_agent name from the callable agents catalog in this tool description.
+    Provide a self-contained task with the context and expected result the sub-agent needs.
+    """
     from agent.modules.agent_runtime import run_agent_full
     from agent.modules.agents import get_catalog_service
 

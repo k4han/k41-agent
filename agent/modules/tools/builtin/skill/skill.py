@@ -22,6 +22,8 @@ async def skill(
 ) -> Any:
     """
     Load or unload a skill by name. Use refresh=True to load its current version.
+    When a task matches an available skill description, load its full instructions before proceeding.
+    Use the exact name from the available skills catalog in this tool description.
     Resources are made available to read and bash tools; task outputs use the workspace.
     Wait for loading to complete before accessing its resources in a subsequent tool batch.
     Coding tools in the same batch use the previously active skills for authorization.
