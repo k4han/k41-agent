@@ -151,6 +151,10 @@ User default prompt.
     assert cards["conversation-title"].source == "builtin"
     assert cards["conversation-title"].editable is False
     assert cards["conversation-title"].hidden is True
+    assert cards["conversation-compactor"].source == "builtin"
+    assert cards["conversation-compactor"].editable is False
+    assert cards["conversation-compactor"].hidden is True
+    assert cards["conversation-compactor"].tools == []
     assert cards["scheduler-executor"].source == "builtin"
     assert cards["scheduler-executor"].editable is False
     assert cards["scheduler-executor"].hidden is True
@@ -237,10 +241,11 @@ def test_clone_builtin_agent_creates_user_override_and_rejects_collision(
         service.clone_builtin_agent("default")
 
 
-def test_clone_hidden_builtin_agent_preserves_hidden_flag(tmp_path: Path) -> None:
+@pytest.mark.parametrize("name", ["conversation-title", "conversation-compactor"])
+def test_clone_hidden_builtin_agent_preserves_hidden_flag(tmp_path: Path, name: str) -> None:
     service, _ = _make_service(tmp_path / "agents")
 
-    cloned = service.clone_builtin_agent("conversation-title")
+    cloned = service.clone_builtin_agent(name)
 
     assert cloned.source == "user"
     assert cloned.overrides_builtin is True

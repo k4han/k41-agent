@@ -239,13 +239,14 @@ class TestFilesystemAgentRepository:
     def test_load_from_directory(self, agents_dir):
         repo = FilesystemAgentRepository(agents_dir)
         agents = repo.load()
-        assert len(agents) == 9
+        assert len(agents) == 10
         assert "researcher" in agents
         assert "coder" in agents
         assert "kode" in agents
         assert "default" in agents
         assert "scheduler-executor" in agents
         assert "conversation-title" in agents
+        assert "conversation-compactor" in agents
         assert "github-issue-fixer" in agents
         assert "channel-agent" in agents
         assert "router" in agents
@@ -256,9 +257,10 @@ class TestFilesystemAgentRepository:
         d = tempfile.mkdtemp()
         repo = FilesystemAgentRepository(d)
         agents = repo.load()
-        assert len(agents) == 7
+        assert len(agents) == 8
         assert "default" in agents
         assert "conversation-title" in agents
+        assert "conversation-compactor" in agents
         assert "github-issue-fixer" in agents
         assert "channel-agent" in agents
         assert "router" in agents
@@ -269,9 +271,10 @@ class TestFilesystemAgentRepository:
     def test_load_nonexistent_directory(self):
         repo = FilesystemAgentRepository("/nonexistent/path/12345")
         agents = repo.load()
-        assert len(agents) == 7
+        assert len(agents) == 8
         assert "default" in agents
         assert "conversation-title" in agents
+        assert "conversation-compactor" in agents
         assert "github-issue-fixer" in agents
         assert "channel-agent" in agents
         assert "router" in agents
@@ -281,7 +284,7 @@ class TestFilesystemAgentRepository:
         repo = FilesystemAgentRepository(agents_dir)
         repo.load()
         agents2 = repo.reload()
-        assert len(agents2) == 9
+        assert len(agents2) == 10
 
 
 # --- service tests ---
@@ -320,6 +323,7 @@ class TestAgentCatalogService:
             "default",
             "scheduler-executor",
             "conversation-title",
+            "conversation-compactor",
             "github-issue-fixer",
             "channel-agent",
             "router",
@@ -362,4 +366,4 @@ class TestAgentCatalogService:
 
     def test_reload(self):
         agents = self.service.reload_agents()
-        assert len(agents) == 9
+        assert len(agents) == 10

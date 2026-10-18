@@ -3,7 +3,7 @@
 import asyncio
 import copy
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 import pytest_asyncio
@@ -15,6 +15,7 @@ from agent.modules.agent_runtime.active_sessions import (
     ActiveSessionRegistry,
     ThreadMutationConflictError,
 )
+from agent.modules.agents import AgentCatalogService, FilesystemAgentRepository
 from agent.modules.conversations import compaction, service
 from agent.modules.providers.context_budget import model_input_budget, model_response_reserve
 from agent.modules.workflows import model_context
@@ -32,6 +33,15 @@ def large_history():
 
 def session(thread_id="test-thread"):
     return ActiveSession(thread_id=thread_id, platform="test", user_id="test", channel_id="test", agent_name="default")
+
+
+@pytest.fixture
+def compactor_catalog(monkeypatch, tmp_path):
+    repository = FilesystemAgentRepository(tmp_path)
+    repository.load()
+    catalog = AgentCatalogService(repository)
+    monkeypatch.setattr(compaction, "get_catalog_service", lambda: catalog)
+    return catalog
 
 
 @pytest_asyncio.fixture(params=["memory", "sqlite"])
@@ -90,7 +100,7 @@ def test_response_reserve_defaults_match_context_capacity(window, reserve):
 
 @pytest.mark.parametrize("provider_type, limit_key", [("google", "max_output_tokens"), ("anthropic", "max_tokens"), ("openai", "max_tokens")])
 @pytest.mark.asyncio
-async def test_summary_output_limit_uses_provider_request_parameter(monkeypatch, provider_type, limit_key):
+async def test_summary_output_limit_uses_provider_request_parameter(monkeypatch, compactor_catalog, provider_type, limit_key):
     invoke = AsyncMock(return_value=AIMessage(content="Preserved constraints"))
     monkeypatch.setattr(compaction, "get_resolved_chat_model", lambda **kwargs: SimpleNamespace(
         model=SimpleNamespace(ainvoke=invoke), provider_type=provider_type, provider_name="test", model_name="test-model"))
@@ -100,6 +110,59 @@ async def test_summary_output_limit_uses_provider_request_parameter(monkeypatch,
     assert invoke.await_args.kwargs[limit_key] == 200
     assert invoke.await_args.kwargs["config"]["metadata"]["context_compaction"]
     assert "Keep the summary within 200 tokens" in invoke.await_args.args[0][0].content
+
+
+@pytest.mark.parametrize("override", [False, True])
+@pytest.mark.asyncio
+async def test_summary_uses_compactor_agent_card(monkeypatch, compactor_catalog, override):
+    catalog = compactor_catalog
+    if override:
+        card = catalog.clone_builtin_agent(compaction.CONVERSATION_COMPACTOR_AGENT_NAME)
+        catalog.update_agent_card(card.name, card.to_agent_config().model_copy(update={
+            "provider": "summary-provider", "model": "summary-model",
+            "system_prompt": "Preserve user constraints and pending work.",
+        }))
+    agent_config = catalog.get_agent(compaction.CONVERSATION_COMPACTOR_AGENT_NAME)
+    invoke = AsyncMock(return_value=AIMessage(content="  Preserved constraints  "))
+    resolve = Mock(return_value=SimpleNamespace(
+        model=SimpleNamespace(ainvoke=invoke), provider_name="resolved-provider", model_name="resolved-model",
+    ))
+    track_usage = Mock(wraps=compaction.with_usage_tracking)
+    monkeypatch.setattr(compaction, "get_resolved_chat_model", resolve)
+    monkeypatch.setattr(compaction, "with_usage_tracking", track_usage)
+    monkeypatch.setattr(compaction, "load_usage_context", AsyncMock(return_value=SimpleNamespace()))
+    monkeypatch.setattr(compaction, "attach_usage_context", lambda config, identity: config)
+
+    summary = await compaction._generate_context_summary(large_history(), thread_id="summary-thread")
+
+    assert summary == "Preserved constraints"
+    resolve.assert_called_once_with(provider_name=agent_config.provider, model=agent_config.model or None)
+    messages = invoke.await_args.args[0]
+    assert messages[0].content == agent_config.system_prompt
+    assert "Keep all constraints." in messages[1].content
+    config = invoke.await_args.kwargs["config"]
+    assert config["configurable"]["thread_id"] == "summary-thread"
+    assert config["metadata"]["context_compaction"] is True
+    assert track_usage.call_args.kwargs == {
+        "agent_name": compaction.CONVERSATION_COMPACTOR_AGENT_NAME,
+        "provider_name": "resolved-provider", "model_name": "resolved-model",
+        "call_kind": "compaction", "internal": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_missing_compactor_card_aborts_before_model_invocation(monkeypatch):
+    monkeypatch.setattr(compaction, "get_catalog_service", lambda: SimpleNamespace(get_agent=lambda name: None))
+    resolve = Mock()
+    monkeypatch.setattr(compaction, "get_resolved_chat_model", resolve)
+    messages = large_history()
+    original = copy.deepcopy(messages)
+
+    with pytest.raises(compaction.CompactionSummaryError, match="conversation-compactor.*unavailable"):
+        await compaction.compact_message_history(messages, keep_recent_messages=2)
+
+    resolve.assert_not_called()
+    assert messages == original
 
 
 @pytest.mark.asyncio

@@ -90,6 +90,11 @@ system/tool/skill prompt estimates. Those estimates are not a freshly rendered
 prompt. Both manual and automatic compaction enforce the same history budget,
 with up to three summary generations and no partial tool groups.
 
+Both manual and automatic summaries use the hidden `conversation-compactor`
+agent card for their system prompt, provider, and model, just as conversation
+titles use `conversation-title`. Clone the builtin card to customize these
+settings. The retained history budget still follows the conversation's model.
+
 Summaries receive tool arguments, result statuses, error diagnostics, attachment
 references, and retained output paths. Oversized tool text keeps its beginning,
 ending, and selected diagnostics rather than only a short leading preview.

@@ -113,8 +113,6 @@ async def prepare_model_context(
             compacted = await compact_message_history(
                 current,
                 thread_id=str(config.get("configurable", {}).get("thread_id", "")),
-                provider_name=resolved.provider_name,
-                model_name=resolved.model_name,
                 max_retained_tokens=target_budget - count([]),
             )
             after = count(compacted.messages)

@@ -370,6 +370,7 @@ async def test_summarizer_failures_are_wrapped_without_modifying_history(monkeyp
         if failure == "timeout":
             await asyncio.sleep(1)
         return AIMessage(content="")
+    monkeypatch.setattr(compaction, "get_catalog_service", lambda: SimpleNamespace(get_agent=lambda name: agent(system_prompt="Summarize the conversation.")))
     monkeypatch.setattr(compaction, "get_resolved_chat_model", lambda **kwargs: SimpleNamespace(model=SimpleNamespace(ainvoke=invoke), provider_name="test", model_name="model"))
     monkeypatch.setattr(compaction, "load_usage_context", AsyncMock(return_value=SimpleNamespace()))
     monkeypatch.setattr(compaction, "attach_usage_context", lambda config, identity: config)
