@@ -22,8 +22,7 @@ from agent.modules.workflows.system_prompt_cache import (
     get_cached_system_prompt,
     store_system_prompt,
 )
-from agent.modules.tools import ToolResolver, get_thread_id
-from agent.modules.tools.catalog_context import bind_tool_catalogs
+from agent.modules.tools import ToolResolver, bind_tool_catalogs, get_thread_id
 
 if TYPE_CHECKING:
     from langgraph.runtime import Runtime

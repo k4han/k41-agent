@@ -39,6 +39,10 @@ from agent.modules.agent_runtime.chat_stream_manager import (
     ChatStreamSession,
     get_chat_stream_manager,
 )
+from agent.modules.agent_runtime.input_messages import (
+    DEFAULT_IMAGE_PROMPT,
+    MISSING_IMAGE_PROMPT,
+)
 
 __all__ = [
     "ActiveSession",
@@ -48,7 +52,9 @@ __all__ = [
     "BackgroundTaskManager",
     "BackgroundTaskRecord",
     "BackgroundTaskRepository",
+    "DEFAULT_IMAGE_PROMPT",
     "MAX_COMPLETED_TASKS",
+    "MISSING_IMAGE_PROMPT",
     "NotifyChannel",
     "SessionManager",
     "TaskStatus",

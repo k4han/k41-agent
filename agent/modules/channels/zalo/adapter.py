@@ -4,7 +4,7 @@ import logging
 from collections.abc import Sequence
 from typing import Any
 
-from agent.modules.agent_runtime.input_messages import DEFAULT_IMAGE_PROMPT, MISSING_IMAGE_PROMPT
+from agent.modules.agent_runtime import DEFAULT_IMAGE_PROMPT, MISSING_IMAGE_PROMPT
 
 from agent.modules.channels.commands import CommandSpec
 from agent.modules.channels.contracts import (

@@ -26,7 +26,7 @@ async def render_agent_prompt(
 ) -> str:
     """Use runtime values in preference to configured variables and host defaults."""
     from agent.modules.prompt_variables import get_runtime_prompt_variable_values
-    from agent.modules.workflows.prompt_builders import (
+    from agent.modules.workflows import (
         get_system_default_variables, replace_known_prompt_placeholders, resolve_prompt_variables,
     )
 

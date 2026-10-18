@@ -7,8 +7,8 @@ from collections.abc import Sequence
 from typing import Any
 
 from agent.modules.skills import get_skills_catalog_xml
-from agent.modules.tools.catalog_context import build_tool_catalogs
-from agent.modules.workspaces.prompt_context import build_workspace_context
+from agent.modules.tools import build_tool_catalogs
+from agent.modules.workspaces import build_workspace_context
 
 _WORKSPACE_STORAGE_TOOL_NAMES = frozenset(
     {"list_dir", "read", "write", "edit", "glob", "grep", "generate_image", "bash"}

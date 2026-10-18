@@ -362,7 +362,7 @@ async def get_chatgpt_session(provider_name: str, request: Request, response: Re
 @router.post("/dashboard-api/providers/{provider_name}/chatgpt/sign-in")
 async def start_chatgpt_sign_in(provider_name: str, request: Request, response: Response) -> dict[str, str]:
     response.headers["Cache-Control"] = "no-store"
-    from agent.modules.providers.chatgpt.auth import ChatGPTAuthError
+    from agent.modules.providers import ChatGPTAuthError
 
     auth, name = _chatgpt_connection(request, provider_name)
     try:
@@ -376,7 +376,7 @@ async def start_chatgpt_sign_in(provider_name: str, request: Request, response: 
 
 @router.get("/dashboard-api/providers/{provider_name}/chatgpt/authorize/{attempt_id}")
 async def open_chatgpt_authorization(provider_name: str, attempt_id: str, request: Request) -> RedirectResponse:
-    from agent.modules.providers.chatgpt.auth import ChatGPTAuthError
+    from agent.modules.providers import ChatGPTAuthError
 
     auth, name = _chatgpt_connection(request, provider_name)
     try:
@@ -389,7 +389,7 @@ async def open_chatgpt_authorization(provider_name: str, attempt_id: str, reques
 @router.get("/dashboard-api/providers/{provider_name}/chatgpt/sign-in/{attempt_id}")
 async def get_chatgpt_sign_in(provider_name: str, attempt_id: str, request: Request, response: Response) -> dict[str, Any]:
     response.headers["Cache-Control"] = "no-store"
-    from agent.modules.providers.chatgpt.auth import ChatGPTAuthError
+    from agent.modules.providers import ChatGPTAuthError
 
     auth, name = _chatgpt_connection(request, provider_name)
     try:

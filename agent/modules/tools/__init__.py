@@ -38,6 +38,7 @@ from agent.modules.tools.registry_service import (
     reload_mcp_descriptors,
 )
 from agent.modules.tools.resolver import ToolResolver
+from agent.modules.tools.catalog_context import bind_tool_catalogs, build_tool_catalogs
 from agent.modules.tools.result import (
     ToolError,
     ToolErrorCode,
@@ -243,6 +244,8 @@ __all__ = [
     "PlanResumePayload",
     "UserQuestionAnswer",
     "aresolve_tools_for_agent",
+    "bind_tool_catalogs",
+    "build_tool_catalogs",
     "stop_thread_processes",
     "ensure_mcp_loaded",
     "reload_mcp_descriptors",

@@ -555,7 +555,7 @@ class AppContainer:
     def chatgpt_auth_manager(self) -> Any:
         """Own local ChatGPT registrations and OAuth callback listeners."""
         if self._chatgpt_auth_manager is None:
-            from agent.modules.providers.chatgpt.auth import ChatGPTAuthManager
+            from agent.modules.providers import ChatGPTAuthManager
             self._chatgpt_auth_manager = ChatGPTAuthManager()
         return self._chatgpt_auth_manager
 
@@ -566,6 +566,7 @@ class AppContainer:
         if self._provider_service is None:
             from agent.modules.providers import (
                 AnthropicFactory,
+                ChatGPTFactory,
                 ConfigProviderRepository,
                 GoogleFactory,
                 OpenAICompatibleFactory,
@@ -575,7 +576,6 @@ class AppContainer:
             )
 
             repo = ConfigProviderRepository()
-            from agent.modules.providers.chatgpt.factory import ChatGPTFactory
 
             service = ProviderService(repository=repo)
             service.register_factory(ProviderType.CHATGPT, ChatGPTFactory(self.chatgpt_auth_manager))

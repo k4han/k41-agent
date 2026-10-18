@@ -13,6 +13,12 @@ from agent.modules.workflows.constants import (
     REACT_AGENT_GRAPH_TYPE,
     ROUTER_GRAPH_TYPE,
 )
+from agent.modules.workflows.prompt_builders import (
+    build_llm_system_prompt,
+    get_system_default_variables,
+    replace_known_prompt_placeholders,
+    resolve_prompt_variables,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -162,4 +168,8 @@ __all__ = [
     "close_checkpointer",
     "REACT_AGENT_GRAPH_TYPE",
     "ROUTER_GRAPH_TYPE",
+    "build_llm_system_prompt",
+    "get_system_default_variables",
+    "replace_known_prompt_placeholders",
+    "resolve_prompt_variables",
 ]

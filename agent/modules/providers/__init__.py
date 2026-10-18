@@ -10,6 +10,8 @@ from agent.modules.providers.google.factory import GoogleFactory
 from agent.modules.providers.models import ProviderModelCatalog, ResolvedChatModel
 from agent.modules.providers.models import get_reasoning_effort_kwargs
 from agent.modules.providers.openai_compatible.factory import OpenAICompatibleFactory
+from agent.modules.providers.chatgpt.auth import ChatGPTAuthError, ChatGPTAuthManager
+from agent.modules.providers.chatgpt.factory import ChatGPTFactory
 from agent.modules.providers.provider import ProviderConfig, ProviderType
 from agent.modules.providers.profiles import EFFORT_PATTERN, parse_model_profiles
 from agent.modules.providers.context_window import DEFAULT_CONTEXT_WINDOW
@@ -138,6 +140,9 @@ __all__ = [
     "model_response_reserve",
     "parse_model_profiles",
     "AnthropicFactory",
+    "ChatGPTAuthError",
+    "ChatGPTAuthManager",
+    "ChatGPTFactory",
     "ConfigProviderRepository",
     "GoogleFactory",
     "OpenAICompatibleFactory",

@@ -37,6 +37,7 @@ from agent.modules.workspaces.search_utils import (
 )
 from agent.modules.workspaces.posix_utils import resolve_remote_path
 from agent.modules.workspaces.git_utils import WORKSPACE_STORAGE_EXCLUDE_COMMAND
+from agent.modules.workspaces.prompt_context import build_workspace_context
 from agent.modules.workspaces.migrations import migrate_workspace_tables
 from agent.modules.workspaces.metadata_cache import invalidate_workspace_metadata_cache
 from agent.modules.workspaces.models import ThreadWorkspace
@@ -178,6 +179,7 @@ __all__ = [
     "attach_github_repository_to_workspace",
     "attach_workspace_backend",
     "bind_workspace_ref",
+    "build_workspace_context",
     "cleanup_orphaned_temp_workspaces",
     "create_temp_workspace",
     "create_workspace_backend",
