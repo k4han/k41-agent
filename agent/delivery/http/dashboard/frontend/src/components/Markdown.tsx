@@ -17,7 +17,6 @@ marked.setOptions({
   breaks: true,
 });
 
-type MermaidApi = typeof import("mermaid").default;
 type PeleApi = typeof import("pele/lazy");
 
 interface MarkdownBlockState {
@@ -40,7 +39,6 @@ interface MarkdownDomBlock {
 const DIAGRAM_FONT_FAMILY =
   'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 
-let mermaidPromise: Promise<MermaidApi> | null = null;
 let pelePromise: Promise<PeleApi> | null = null;
 let nextMermaidRenderId = 1;
 
@@ -52,13 +50,6 @@ function getPele(): Promise<PeleApi> {
     });
   }
   return pelePromise;
-}
-
-function getMermaid(): Promise<MermaidApi> {
-  if (!mermaidPromise) {
-    mermaidPromise = import("mermaid").then((module) => module.default);
-  }
-  return mermaidPromise;
 }
 
 function codeBlockLanguage(pre: HTMLPreElement): string {
@@ -91,54 +82,6 @@ function formatCodeLanguage(language: string): string {
     return "Code";
   }
   return labels[normalized] || normalized.charAt(0).toUpperCase() + normalized.slice(1);
-}
-
-function mermaidConfig(dark: boolean): Parameters<MermaidApi["initialize"]>[0] {
-  const fontFamily = DIAGRAM_FONT_FAMILY;
-
-  return {
-    htmlLabels: false,
-    startOnLoad: false,
-    suppressErrorRendering: true,
-    securityLevel: "strict",
-    theme: "base",
-    flowchart: {
-      htmlLabels: false,
-    },
-    themeVariables: dark
-      ? {
-          background: "transparent",
-          fontFamily,
-          lineColor: "#a3a3a3",
-          mainBkg: "#171717",
-          primaryBorderColor: "rgba(255, 255, 255, 0.28)",
-          primaryColor: "#171717",
-          primaryTextColor: "#fafafa",
-          secondaryBorderColor: "rgba(255, 255, 255, 0.2)",
-          secondaryColor: "#111111",
-          secondaryTextColor: "#fafafa",
-          tertiaryBorderColor: "rgba(255, 255, 255, 0.16)",
-          tertiaryColor: "#262626",
-          tertiaryTextColor: "#fafafa",
-          textColor: "#fafafa",
-        }
-      : {
-          background: "transparent",
-          fontFamily,
-          lineColor: "#737373",
-          mainBkg: "#ffffff",
-          primaryBorderColor: "#d4d4d4",
-          primaryColor: "#ffffff",
-          primaryTextColor: "#0a0a0a",
-          secondaryBorderColor: "#d4d4d4",
-          secondaryColor: "#f5f5f5",
-          secondaryTextColor: "#0a0a0a",
-          tertiaryBorderColor: "#e5e5e5",
-          tertiaryColor: "#ededed",
-          tertiaryTextColor: "#0a0a0a",
-          textColor: "#0a0a0a",
-        },
-  };
 }
 
 async function writeToClipboard(text: string): Promise<void> {
@@ -551,7 +494,7 @@ export function Markdown(props: {
     mountIcon(titleIcon, "diagram");
 
     const titleLabel = document.createElement("span");
-    titleLabel.textContent = "Mermaid";
+    titleLabel.textContent = "Pele";
     title.append(titleIcon, titleLabel);
 
     const actions = document.createElement("div");
@@ -591,7 +534,7 @@ export function Markdown(props: {
     return frame;
   };
 
-  const renderMermaidFallback = (frame: HTMLElement, source: string) => {
+  const renderDiagramError = (frame: HTMLElement, source: string) => {
     frame.classList.add("markdown-mermaid-frame-error");
     frame.dataset.mermaidSource = source;
     const diagram = frame.querySelector<HTMLElement>(".markdown-mermaid");
@@ -604,7 +547,7 @@ export function Markdown(props: {
 
     const message = document.createElement("div");
     message.className = "markdown-mermaid-error-message";
-    message.textContent = "Unable to render Mermaid diagram.";
+    message.textContent = "Unable to render diagram with Pele.";
     diagram.appendChild(message);
     setMermaidFrameView(frame, "source");
   };
@@ -639,39 +582,18 @@ export function Markdown(props: {
       !disposed && frame.isConnected && frame.dataset.mermaidRenderKey === renderKey;
 
     try {
-      let result: { svg: string; bindFunctions?: (element: Element) => void };
-      let renderer: "pele" | "mermaid" = "pele";
-      try {
-        const pele = await getPele();
-        if (!isCurrentRender()) return;
-        result = await pele.renderAsync(source, {
-          fontFamily: DIAGRAM_FONT_FAMILY,
-          idPrefix: renderId,
-          links: false,
-          images: false,
-          maxEdges: 500,
-        });
-      } catch {
-        if (!isCurrentRender()) return;
-        const mermaid = await getMermaid();
-        if (!isCurrentRender()) return;
-        mermaid.initialize(mermaidConfig(darkMode));
-        // Keep Mermaid's temporary SVGs measurable without affecting the chat layout.
-        const renderTarget = document.createElement("div");
-        renderTarget.setAttribute("aria-hidden", "true");
-        renderTarget.style.cssText =
-          "position: fixed; inset: 0; visibility: hidden; pointer-events: none; overflow: hidden;";
-        document.body.appendChild(renderTarget);
-        try {
-          result = await mermaid.render(renderId, source, renderTarget);
-        } finally {
-          renderTarget.remove();
-        }
-        renderer = "mermaid";
-      }
+      const pele = await getPele();
+      if (!isCurrentRender()) return;
+      const result = await pele.renderAsync(source, {
+        fontFamily: DIAGRAM_FONT_FAMILY,
+        idPrefix: renderId,
+        links: false,
+        images: false,
+        maxEdges: 500,
+      });
       if (!isCurrentRender()) return;
 
-      frame.dataset.diagramRenderer = renderer;
+      frame.dataset.diagramRenderer = "pele";
       diagram.className = "markdown-mermaid";
       diagram.removeAttribute("aria-busy");
       diagram.innerHTML = DOMPurify.sanitize(result.svg);
@@ -679,10 +601,9 @@ export function Markdown(props: {
         frame,
         frame.dataset.mermaidView === "source" ? "source" : "diagram",
       );
-      result.bindFunctions?.(diagram);
     } catch {
       if (isCurrentRender()) {
-        renderMermaidFallback(frame, source);
+        renderDiagramError(frame, source);
       }
     }
   };

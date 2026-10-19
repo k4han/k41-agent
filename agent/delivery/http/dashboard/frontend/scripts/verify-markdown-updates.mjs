@@ -41,7 +41,8 @@ try {
       name: 'markdown-test-harness',
       enforce: 'pre',
       resolveId(id) {
-        if (['markdown-harness', 'pele/lazy'].includes(id) || (!realDiagrams && id === 'mermaid')) return `\0${id}`;
+        if (id === 'mermaid') throw new Error('Mermaid must not be loaded; Pele is the only diagram renderer.');
+        if (id === 'markdown-harness' || (!realDiagrams && id === 'pele/lazy')) return `\0${id}`;
       },
       load(id) {
         if (id === '\0markdown-harness') return `
@@ -55,8 +56,7 @@ try {
           const style = document.createElement('style');
           style.textContent = tokenStyles + '\\n' + markdownStyles;
           document.head.appendChild(style);
-          window.highlightRequests = []; window.mermaidRequests = []; window.peleRequests = [];
-          window.mermaidLoads = 0;
+          window.highlightRequests = []; window.peleRequests = [];
           window.sanitizedInputs = [];
           window.lexedLengths = []; window.markdownRootQueries = [];
           const lex = marked.lexer;
@@ -87,37 +87,11 @@ try {
               resolve: () => resolve('<pre><code><span class="token">' + window.escapeHtml(source) + '</span></code></pre>') });
           });
         `;
-        if (id === '\0pele/lazy' && realDiagrams) return `
-          import { renderAsync as renderPele } from ${JSON.stringify(fileURLToPath(import.meta.resolve('pele/lazy')).replaceAll('\\', '/'))};
-          export const renderAsync = (source, options) => window.forceMermaid
-            ? Promise.reject(new Error('Simulated Pele failure')) : renderPele(source, options);
-        `;
         if (id === '\0pele/lazy') return `
           export const renderAsync = (source, options) => new Promise((resolve, reject) => {
             window.peleRequests.push({ source, options, reject,
               resolve: (svg = '<svg class="pele"><text fill="var(--pele-fg)">' + window.escapeHtml(source) + '</text></svg>') => resolve({ svg }) });
           });
-        `;
-        if (id === '\0mermaid') return `
-          window.mermaidLoads += 1;
-          let config;
-          export default {
-            initialize(options) { config = options; },
-            render: (id, source, container) => new Promise((resolve, reject) => {
-              const temporary = document.createElement('div');
-              temporary.id = 'd' + id;
-              (container || document.body).appendChild(temporary);
-              window.mermaidRequests.push({ source, container, config,
-                reject: error => {
-                  temporary.innerHTML = '<svg><text>Syntax error in text</text></svg>';
-                  reject(error);
-                },
-                resolve: () => {
-                  temporary.remove();
-                  resolve({ svg: '<svg><text>' + window.escapeHtml(source) + '</text></svg>' });
-                } });
-            }),
-          };
         `;
       },
     }],
@@ -172,13 +146,13 @@ try {
   };
   const setText = text => js(`setText(${JSON.stringify(text)})`);
   const assertNoDiagramArtifacts = async () => {
-    assert.deepEqual(await js('Array.from(document.querySelectorAll("body > :not(#app):not(script):not(.mermaidTooltip)"), element => element.outerHTML.slice(0, 500))'), [],
+    assert.deepEqual(await js('Array.from(document.querySelectorAll("body > :not(#app):not(script)"), element => element.outerHTML.slice(0, 500))'), [],
       'diagram rendering must not leave temporary containers or error SVGs outside the chat');
   };
   const waitRequests = async (name, count) => {
     try { await until(() => js(`${name}.length === ${count}`), `${name}: ${count}`); }
     catch (error) {
-      console.error(await js('({ text: document.getElementById("app").textContent, highlights: highlightRequests.length, pele: peleRequests.length, mermaid: mermaidRequests.length })'), exceptions);
+      console.error(await js('({ text: document.getElementById("app").textContent, highlights: highlightRequests.length, pele: peleRequests.length })'), exceptions);
       throw error;
     }
   };
@@ -241,13 +215,6 @@ try {
     assert.equal(await js('peleSvg === mermaidFrame.querySelector(".markdown-mermaid svg")'), true);
     assert.equal(await js('getComputedStyle(peleSvg.querySelector(\'[data-id="B"] text\')).fill'), 'rgb(250, 250, 250)');
     await js('document.documentElement.classList.remove("dark"); mermaidFrame.querySelector(".markdown-mermaid-toggle").click()');
-    await js('window.forceMermaid = true');
-    await setText(fence('mermaid', 'flowchart LR\nA[Mermaid] --> B[Fallback]'));
-    await until(() => js('mermaidFrame.dataset.diagramRenderer === "mermaid"'), 'real Mermaid fallback');
-    assert.equal(await js('mermaidFrame.querySelector(".markdown-mermaid svg").viewBox.baseVal.width > 0 && mermaidFrame.querySelector(".markdown-mermaid svg").viewBox.baseVal.height > 0'), true,
-      'hidden rendering must preserve diagram measurements');
-    await assertNoDiagramArtifacts();
-    await js('window.forceMermaid = false');
     await setText(fence('mermaid', 'flowchart LR\nA[Updated] --> B[Answer]'));
     await until(() => js('!!mermaidFrame.querySelector(".markdown-mermaid svg")?.textContent.includes("Updated")'), 'real source update');
     assert.equal(await js('mermaidFrame.dataset.mermaidView'), 'source');
@@ -263,11 +230,11 @@ try {
     await assertNoDiagramArtifacts();
     await setText(fence('mermaid', 'flowchart LR\nA[Recovered] --> B[Answer]'));
     await until(() => js('!!mermaidFrame.querySelector("svg.pele")?.textContent.includes("Recovered")'), 'real diagram recovery');
-    console.log('PASS: real renderers preserve diagram measurements and themes, isolate simultaneous syntax errors without leaking SVGs, and recover after invalid source.');
+    console.log('PASS: Pele preserves diagram themes, isolates simultaneous syntax errors without leaking SVGs, and recovers after invalid source.');
   } else {
     await setText(fence('mermaid', 'graph TD\nA-->B'));
     await waitRequests('peleRequests', 1);
-    assert.equal(await js('mermaidLoads'), 0);
+    assert.equal(await js('document.querySelector(".markdown-mermaid-title").textContent'), 'Pele');
     assert.equal(await js('peleRequests[0].options.links'), false);
     assert.equal(await js('peleRequests[0].options.images'), false);
     assert.equal(await js('peleRequests[0].options.maxEdges'), 500);
@@ -310,7 +277,7 @@ try {
     await setText(fence('mermaid', 'graph TD\nA-->G'));
     await js('peleRequests[4].reject(new Error("stale Pele failure"))');
     await waitRequests('peleRequests', 6);
-    assert.equal(await js('mermaidLoads'), 0, 'stale Pele failures must not load Mermaid');
+    assert.equal(await js('mermaidFrame.classList.contains("markdown-mermaid-frame-error")'), false, 'stale Pele failures must not show an error');
     await js('peleRequests[5].resolve()');
     await until(() => js('mermaidFrame.querySelector(".markdown-mermaid svg")?.textContent.includes("A-->G")'), 'current Pele diagram');
     assert.equal(await js('new Set(peleRequests.map(request => request.options.idPrefix)).size'), 6);
@@ -318,41 +285,32 @@ try {
     await setText(fence('mermaid', 'graph TD\nA-->H'));
     await waitRequests('peleRequests', 7);
     await js('peleRequests[6].reject(new Error("Pele unsupported syntax"))');
-    await waitRequests('mermaidRequests', 1);
-    assert.equal(await js('mermaidLoads'), 1);
-    assert.equal(await js('mermaidRequests[0].config.suppressErrorRendering'), true);
-    assert.equal(await js('mermaidRequests[0].container?.isConnected && getComputedStyle(mermaidRequests[0].container).visibility === "hidden" && getComputedStyle(mermaidRequests[0].container).position === "fixed"'), true,
-      'Mermaid must render inside a hidden container outside the chat layout');
-    await js('mermaidRequests[0].resolve()');
-    await until(() => js('mermaidFrame.dataset.diagramRenderer === "mermaid"'), 'Mermaid fallback');
+    await until(() => js('mermaidFrame.classList.contains("markdown-mermaid-frame-error")'), 'Pele unsupported syntax error');
+    assert.equal(await js('mermaidFrame.dataset.diagramRenderer'), undefined);
+    assert.equal(await js('!!mermaidFrame.querySelector(".markdown-mermaid svg")'), false);
+    assert.equal(await js('mermaidFrame.querySelector(".markdown-mermaid-error-message").textContent'), 'Unable to render diagram with Pele.');
     await assertNoDiagramArtifacts();
     assert.equal(await js('mermaidFrame.dataset.mermaidView'), 'source');
 
     await js('document.documentElement.classList.add("dark")');
     await waitRequests('peleRequests', 8);
     await js('peleRequests[7].reject(new Error("Pele unsupported syntax"))');
-    await waitRequests('mermaidRequests', 2);
-    await js('mermaidRequests[1].resolve()');
-    await until(() => js('mermaidFrame.dataset.diagramRenderer === "mermaid" && mermaidFrame.dataset.mermaidTheme === "dark"'), 'fallback dark theme');
+    await until(() => js('mermaidFrame.classList.contains("markdown-mermaid-frame-error") && mermaidFrame.dataset.mermaidTheme === "dark"'), 'Pele error in dark theme');
 
     await setText(fence('mermaid', 'graph TD\nA-->I'));
     await waitRequests('peleRequests', 9);
-    await js('peleRequests[8].reject(new Error("Pele failure"))');
-    await waitRequests('mermaidRequests', 3);
     await setText(fence('mermaid', 'graph TD\nA-->J'));
-    await js('mermaidRequests[2].resolve()');
-    assert.equal(await js('!!mermaidFrame.querySelector(".markdown-mermaid svg")'), false, 'stale Mermaid results must be ignored');
+    await js('peleRequests[8].reject(new Error("stale Pele failure"))');
+    assert.equal(await js('mermaidFrame.classList.contains("markdown-mermaid-frame-error")'), false, 'stale Pele errors must be ignored');
     await assertNoDiagramArtifacts();
     await waitRequests('peleRequests', 10);
     await js('peleRequests[9].resolve()');
-    await until(() => js('mermaidFrame.querySelector(".markdown-mermaid svg")?.textContent.includes("A-->J")'), 'Pele after stale fallback');
+    await until(() => js('mermaidFrame.querySelector(".markdown-mermaid svg")?.textContent.includes("A-->J")'), 'Pele after stale error');
 
     await setText(fence('mermaid', 'invalid diagram'));
     await waitRequests('peleRequests', 11);
     await js('peleRequests[10].reject(new Error("Pele syntax error"))');
-    await waitRequests('mermaidRequests', 4);
-    await js('mermaidRequests[3].reject(new Error("Mermaid syntax error"))');
-    await until(() => js('mermaidFrame.classList.contains("markdown-mermaid-frame-error")'), 'both renderers failed');
+    await until(() => js('mermaidFrame.classList.contains("markdown-mermaid-frame-error")'), 'Pele syntax error');
     assert.equal(await js('mermaidFrame.dataset.mermaidView'), 'source');
     assert.equal(await js('mermaidFrame.querySelector(".markdown-mermaid-raw code").textContent'), 'invalid diagram');
     await assertNoDiagramArtifacts();
@@ -365,7 +323,7 @@ try {
     assert.equal(await js('!!mermaidFrame.querySelector("svg[onload], svg script") || window.unsafeDiagram === true'), false);
     await js('document.documentElement.classList.remove("dark")');
     await until(() => js('mermaidFrame.dataset.mermaidTheme === "light"'), 'recovered diagram light theme');
-    console.log('PASS: Pele is the default, Mermaid loads only on failure, stale results and failures are ignored, and SVG output is sanitized.');
+    console.log('PASS: Pele is the only renderer, failures show source, stale results and failures are ignored, and SVG output is sanitized.');
   }
 
   await js('setDeferHighlight(true)');
@@ -562,13 +520,10 @@ try {
 
   if (!realDiagrams) {
     const peleCount = await js('peleRequests.length');
-    const mermaidCount = await js('mermaidRequests.length');
     await setText(fence('mermaid', 'invalid diagram after unmount'));
     await waitRequests('peleRequests', peleCount + 1);
-    await js(`peleRequests[${peleCount}].reject(new Error("Pele failure"))`);
-    await waitRequests('mermaidRequests', mermaidCount + 1);
     await js('disposeMarkdown(); highlightRequests[5].resolve()');
-    await js(`mermaidRequests[${mermaidCount}].reject(new Error("Mermaid failure after unmount"))`);
+    await js(`peleRequests[${peleCount}].reject(new Error("Pele failure after unmount"))`);
   } else {
     await js('disposeMarkdown(); highlightRequests[5].resolve()');
   }
