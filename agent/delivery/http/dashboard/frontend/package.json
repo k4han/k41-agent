@@ -15,7 +15,7 @@
     "test:workspace-preview": "node --test tests/workspace-preview.test.mjs",
     "test:workspace-chat": "node scripts/verify-workspace-chat.mjs",
     "test:chat-resume": "node scripts/verify-chat-resume.mjs",
-    "test:markdown-ui": "node scripts/verify-markdown-updates.mjs",
+    "test:markdown-ui": "node scripts/verify-markdown-updates.mjs && node scripts/verify-markdown-updates.mjs --real-diagrams",
     "test:system-update": "node --test tests/system-update.test.mjs",
     "test:system-update-ui": "node scripts/verify-system-update.mjs",
     "test:chat-scroll": "node --test tests/chat-scroll.test.mjs",
@@ -31,6 +31,7 @@
     "lucide-solid": "^0.562.0",
     "marked": "^18.0.4",
     "mermaid": "^11.15.0",
+    "pele": "1.6.0",
     "shiki": "^4.1.0",
     "solid-js": "^1.9.10"
   },

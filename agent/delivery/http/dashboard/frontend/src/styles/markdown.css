@@ -279,6 +279,19 @@
   color: #ff8f8f;
 }
 
+.markdown-mermaid {
+  --pele-bg: var(--bg);
+  --pele-fg: var(--fg);
+  --pele-muted: var(--muted);
+  --pele-line: var(--muted);
+  --pele-surface: var(--surface);
+  --pele-surface-alt: var(--surface-2);
+  --pele-border: var(--border-strong);
+  --pele-accent: var(--accent);
+  --pele-critical: var(--danger);
+  --pele-error: var(--danger);
+}
+
 .message-markdown .markdown-mermaid {
   display: flex;
   max-width: 100%;
@@ -293,8 +306,8 @@
   height: auto;
 }
 
-.message-markdown .markdown-mermaid text,
-.message-markdown .markdown-mermaid tspan {
+.message-markdown .markdown-mermaid svg:not(.pele) text,
+.message-markdown .markdown-mermaid svg:not(.pele) tspan {
   fill: var(--fg) !important;
 }
 

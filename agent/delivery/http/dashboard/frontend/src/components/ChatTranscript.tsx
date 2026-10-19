@@ -179,7 +179,6 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                     <TranscriptItemView
                       item={row()}
                       itemId={row().id}
-                      deferMermaid={isStreamingItem(row().id)}
                       deferHighlight={isStreamingItem(row().id)}
                       showAssistantActions={showAssistantActions(row().id)}
                       onResume={props.currentThreadId && resumeItemId() === row().id ? props.onResume : undefined}

@@ -1,12 +1,15 @@
 import DOMPurify from "dompurify";
 import { Check, Code2, Copy, Eye } from "lucide-solid";
 import { marked } from "marked";
-import { createEffect, createMemo, onCleanup, onMount, untrack } from "solid-js";
+import {
+  batch, createEffect, createMemo, createSignal, For, onCleanup, onMount, untrack,
+  type Accessor, type Setter,
+} from "solid-js";
 import { render } from "solid-js/web";
 
 import { highlightCode, languageFromName } from "@/lib/codeHighlight";
 import { rewriteGeneratedImagePaths } from "@/lib/generatedImages";
-import { createMarkdownBlocks } from "@/lib/markdownBlocks";
+import { createMarkdownBlocks, type MarkdownBlock, type MarkdownMermaidBlock } from "@/lib/markdownBlocks";
 import { createDarkMode } from "@/lib/theme";
 
 marked.setOptions({
@@ -15,11 +18,41 @@ marked.setOptions({
 });
 
 type MermaidApi = typeof import("mermaid").default;
+type PeleApi = typeof import("pele/lazy");
 
-const MERMAID_RENDER_DELAY_MS = 700;
+interface MarkdownBlockState {
+  content: Accessor<MarkdownBlock>;
+  setContent: Setter<MarkdownBlock>;
+}
+
+interface MarkdownNode {
+  node: Node;
+}
+
+interface MarkdownDomBlock {
+  anchor: Text;
+  nodes: MarkdownNode[];
+  sources: Set<HTMLPreElement>;
+  frames: Set<HTMLElement>;
+  mermaidBlocks: readonly MarkdownMermaidBlock[];
+}
+
+const DIAGRAM_FONT_FAMILY =
+  'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 
 let mermaidPromise: Promise<MermaidApi> | null = null;
+let pelePromise: Promise<PeleApi> | null = null;
 let nextMermaidRenderId = 1;
+
+function getPele(): Promise<PeleApi> {
+  if (!pelePromise) {
+    pelePromise = import("pele/lazy").catch((error) => {
+      pelePromise = null;
+      throw error;
+    });
+  }
+  return pelePromise;
+}
 
 function getMermaid(): Promise<MermaidApi> {
   if (!mermaidPromise) {
@@ -45,72 +78,6 @@ function normalizeMermaidSource(source: string): string {
   return source.trim();
 }
 
-function collectCompleteMermaidBlocks(markdown: string): Map<string, number> {
-  const blocks = new Map<string, number>();
-  const lines = markdown.split(/\r?\n/);
-  let openFence:
-    | {
-        char: "`" | "~";
-        content: string[];
-        length: number;
-        mermaid: boolean;
-      }
-    | null = null;
-
-  for (const line of lines) {
-    if (openFence) {
-      const closeMatch = line.match(/^ {0,3}(`{3,}|~{3,})\s*$/);
-      const closeFence = closeMatch?.[1] || "";
-      if (
-        closeFence &&
-        closeFence[0] === openFence.char &&
-        closeFence.length >= openFence.length
-      ) {
-        if (openFence.mermaid) {
-          const source = normalizeMermaidSource(openFence.content.join("\n"));
-          if (source) {
-            blocks.set(source, (blocks.get(source) || 0) + 1);
-          }
-        }
-        openFence = null;
-        continue;
-      }
-
-      openFence.content.push(line);
-      continue;
-    }
-
-    const openMatch = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
-    const fence = openMatch?.[1] || "";
-    if (!fence) {
-      continue;
-    }
-
-    const language = (openMatch?.[2] || "").trim().split(/\s+/)[0] || "";
-    openFence = {
-      char: fence[0] as "`" | "~",
-      content: [],
-      length: fence.length,
-      mermaid: isMermaidLanguage(language),
-    };
-  }
-
-  return blocks;
-}
-
-function consumeMermaidBlock(blocks: Map<string, number>, source: string): boolean {
-  const count = blocks.get(source) || 0;
-  if (count <= 0) {
-    return false;
-  }
-  if (count === 1) {
-    blocks.delete(source);
-  } else {
-    blocks.set(source, count - 1);
-  }
-  return true;
-}
-
 function formatCodeLanguage(language: string): string {
   const normalized = language.trim().toLowerCase();
   const labels: Record<string, string> = {
@@ -127,12 +94,12 @@ function formatCodeLanguage(language: string): string {
 }
 
 function mermaidConfig(dark: boolean): Parameters<MermaidApi["initialize"]>[0] {
-  const fontFamily =
-    'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  const fontFamily = DIAGRAM_FONT_FAMILY;
 
   return {
     htmlLabels: false,
     startOnLoad: false,
+    suppressErrorRendering: true,
     securityLevel: "strict",
     theme: "base",
     flowchart: {
@@ -203,18 +170,23 @@ export function Markdown(props: {
 }) {
   let containerRef: HTMLDivElement | undefined;
   let disposed = false;
-  let mermaidRenderTimer: number | undefined;
+  let mermaidRenderFrame: number | undefined;
   let iconDisposers = new Set<() => void>();
   let iconDisposerByElement = new WeakMap<Element, () => void>();
-  const iconElements = new Map<() => void, Element>();
   const sourceMarkup = new WeakMap<Node, string>();
+  const nodeSlots = new WeakMap<Node, MarkdownNode>();
   const highlightInFlight = new WeakMap<HTMLPreElement, symbol>();
-  const pendingMermaidFrames = new WeakSet<HTMLElement>();
+  const pendingHighlights = new Set<HTMLPreElement>();
+  const pendingMermaidFrames = new Set<HTMLElement>();
+  const mermaidFrames = new Set<HTMLElement>();
+  const mermaidOwners = new WeakMap<Element, MarkdownDomBlock>();
+  const dirtyMermaidBlocks = new Set<MarkdownDomBlock>();
   const dark = createDarkMode();
   const renderBlocks = createMarkdownBlocks();
-  let parsedBlocks: { html: string; nodes: { node: Node; markup: string }[] }[] = [];
+  let blockStates: (MarkdownBlockState | undefined)[] = [];
+  const [blockRows, setBlockRows] = createSignal<MarkdownBlockState[]>([]);
 
-  const html = createMemo(() => {
+  const blockUpdate = createMemo(() => {
     const source = rewriteGeneratedImagePaths(props.text || "", props.threadId);
     return renderBlocks(source);
   });
@@ -222,8 +194,35 @@ export function Markdown(props: {
   const cleanupIcons = () => {
     iconDisposers.forEach((dispose) => dispose());
     iconDisposers.clear();
-    iconElements.clear();
     iconDisposerByElement = new WeakMap<Element, () => void>();
+  };
+
+  const cleanupNode = (node: Node) => {
+    nodeSlots.delete(node);
+    if (!(node instanceof Element)) return;
+    const elements = [node, ...node.querySelectorAll("button, pre, .markdown-code-title-icon, .markdown-mermaid-title-icon, .markdown-mermaid-frame")];
+    for (const element of elements) {
+      const dispose = iconDisposerByElement.get(element);
+      if (dispose) {
+        dispose();
+        iconDisposers.delete(dispose);
+        iconDisposerByElement.delete(element);
+      }
+      if (element instanceof HTMLPreElement) {
+        pendingHighlights.delete(element);
+        highlightInFlight.delete(element);
+      }
+      const owner = mermaidOwners.get(element);
+      if (owner) {
+        if (element instanceof HTMLPreElement) owner.sources.delete(element);
+        else if (element instanceof HTMLElement) {
+          owner.frames.delete(element);
+          pendingMermaidFrames.delete(element);
+          mermaidFrames.delete(element);
+        }
+        mermaidOwners.delete(element);
+      }
+    }
   };
 
   const mountIcon = (element: Element, icon: "check" | "code" | "copy" | "diagram") => {
@@ -231,7 +230,6 @@ export function Markdown(props: {
     if (currentDispose) {
       currentDispose();
       iconDisposers.delete(currentDispose);
-      iconElements.delete(currentDispose);
       iconDisposerByElement.delete(element);
     }
     element.replaceChildren();
@@ -253,7 +251,6 @@ export function Markdown(props: {
     );
     iconDisposerByElement.set(element, dispose);
     iconDisposers.add(dispose);
-    iconElements.set(dispose, element);
   };
 
   // Preserve completed blocks and their controls as the trailing Markdown grows.
@@ -287,6 +284,7 @@ export function Markdown(props: {
       currentPre.textContent = nextPre.textContent;
     }
     currentPre.classList.remove("markdown-code-highlighted", "markdown-code-plain");
+    pendingHighlights.add(currentPre);
     const label = frame.querySelector(".markdown-code-language");
     if (label) {
       label.textContent = formatCodeLanguage(language);
@@ -312,6 +310,7 @@ export function Markdown(props: {
     }
     frame.dataset.mermaidSource = newSource;
     delete frame.dataset.mermaidRenderKey;
+    delete frame.dataset.diagramRenderer;
     pendingMermaidFrames.add(frame);
     const rawCode = frame.querySelector(".markdown-mermaid-raw code");
     if (rawCode) {
@@ -329,25 +328,99 @@ export function Markdown(props: {
     return true;
   };
 
-  const updateHtml = (blocks: string[]) => {
+  const mermaidSourceFor = (element: Element): string => {
+    if (element instanceof HTMLPreElement) {
+      const code = element.querySelector("code");
+      return normalizeMermaidSource(code?.textContent || element.textContent || "");
+    }
+    return normalizeMermaidSource((element as HTMLElement).dataset.mermaidSource || "");
+  };
+
+  const collectBlockMermaidElements = (block: MarkdownDomBlock): HTMLElement[] => {
+    const elements: HTMLElement[] = [];
+    for (const { node } of block.nodes) {
+      if (!(node instanceof Element)) continue;
+      if (
+        node instanceof HTMLElement
+        && (node.classList.contains("markdown-mermaid-frame")
+          || (node instanceof HTMLPreElement && node.classList.contains("markdown-mermaid-source")))
+      ) {
+        elements.push(node);
+      }
+      elements.push(...node.querySelectorAll<HTMLElement>(".markdown-mermaid-frame, pre.markdown-mermaid-source"));
+    }
+    return elements;
+  };
+
+  // A growing list or blockquote replaces its whole top-level node. Detach the
+  // rendered diagrams first so they can be restored in place instead of
+  // re-rendering and losing their selected view on every streamed update.
+  const detachMermaidFrames = (root: Node): HTMLElement[] => {
+    if (!(root instanceof Element) || root.classList.contains("markdown-mermaid-frame")) {
+      return [];
+    }
+    const frames = Array.from(root.querySelectorAll<HTMLElement>(".markdown-mermaid-frame"));
+    for (const frame of frames) frame.remove();
+    return frames;
+  };
+
+  const restoreMermaidFrames = (root: Node, frames: HTMLElement[], block: MarkdownDomBlock) => {
+    if (frames.length === 0) return;
+    if (!(root instanceof Element)) {
+      for (const frame of frames) {
+        cleanupNode(frame);
+        frame.remove();
+      }
+      return;
+    }
+
+    const bySource = new Map<string, HTMLElement[]>();
+    for (const frame of frames) {
+      const source = normalizeMermaidSource(frame.dataset.mermaidSource || "");
+      const queue = bySource.get(source);
+      if (queue) queue.push(frame);
+      else bySource.set(source, [frame]);
+    }
+
+    const pres: HTMLPreElement[] = [];
+    if (root instanceof HTMLPreElement && root.classList.contains("markdown-mermaid-source")) {
+      pres.push(root);
+    }
+    pres.push(...root.querySelectorAll<HTMLPreElement>("pre.markdown-mermaid-source"));
+    for (const pre of pres) {
+      const source = mermaidSourceFor(pre);
+      const frame = bySource.get(source)?.shift();
+      if (!frame) continue;
+      block.sources.delete(pre);
+      mermaidOwners.delete(pre);
+      preserveMarkup(pre, frame);
+      pre.replaceWith(frame);
+      block.frames.add(frame);
+      mermaidFrames.add(frame);
+      mermaidOwners.set(frame, block);
+    }
+
+    for (const queue of bySource.values()) {
+      for (const frame of queue) {
+        cleanupNode(frame);
+        frame.remove();
+      }
+    }
+  };
+
+  const updateHtml = (block: MarkdownDomBlock, html: string) => {
     if (!containerRef) return;
-    parsedBlocks = blocks.map((html, index) => {
-      const cached = parsedBlocks[index];
-      if (cached?.html === html) return cached;
-      const template = document.createElement("template");
-      template.innerHTML = html;
-      return {
-        html,
-        nodes: Array.from(template.content.childNodes, (node) => ({
-          node,
-          markup: node instanceof Element ? node.outerHTML : node.textContent || "",
-        })),
-      };
-    });
-    const nextNodes = parsedBlocks.flatMap((block) => block.nodes);
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    const nextNodes = Array.from(template.content.childNodes, (node) => ({
+      node,
+      markup: node instanceof Element ? node.outerHTML : node.textContent || "",
+    }));
+    const addedNodes: Node[] = [];
+    const preservedFrames: { root: Node; frames: HTMLElement[] }[] = [];
     for (let index = 0; index < nextNodes.length; index += 1) {
       const { node, markup } = nextNodes[index];
-      const current = containerRef.childNodes[index];
+      const current = block.nodes[index]?.node;
       if (current && sourceMarkup.get(current) === markup) continue;
       const next = node.cloneNode(true);
       if (
@@ -359,23 +432,35 @@ export function Markdown(props: {
         if (updateFramedMermaid(current, next as HTMLPreElement, markup)) continue;
       }
       sourceMarkup.set(next, markup);
-      if (current) current.replaceWith(next);
-      else containerRef.appendChild(next);
+      if (current) {
+        const frames = detachMermaidFrames(current);
+        cleanupNode(current);
+        current.parentNode?.replaceChild(next, current);
+        if (frames.length > 0) preservedFrames.push({ root: next, frames });
+      } else block.anchor.before(next);
+      const slot = { node: next };
+      block.nodes[index] = slot;
+      nodeSlots.set(next, slot);
+      addedNodes.push(next);
     }
-    while (containerRef.childNodes.length > nextNodes.length) containerRef.lastChild?.remove();
-    for (const [dispose, element] of iconElements) {
-      if (!containerRef.contains(element)) {
-        dispose();
-        iconDisposers.delete(dispose);
-        iconElements.delete(dispose);
-        iconDisposerByElement.delete(element);
-      }
+    while (block.nodes.length > nextNodes.length) {
+      const removed = block.nodes.pop()!.node;
+      cleanupNode(removed);
+      removed.parentNode?.removeChild(removed);
     }
+    enhanceCodeBlocks(block, addedNodes);
+    for (const { root, frames } of preservedFrames) restoreMermaidFrames(root, frames, block);
   };
 
   const preserveMarkup = (source: Node, target: Node) => {
     const markup = sourceMarkup.get(source);
     if (markup !== undefined) sourceMarkup.set(target, markup);
+    const slot = nodeSlots.get(source);
+    if (slot) {
+      slot.node = target;
+      nodeSlots.delete(source);
+      nodeSlots.set(target, slot);
+    }
   };
 
   const highlightBlock = async (pre: HTMLPreElement, language: string) => {
@@ -403,10 +488,12 @@ export function Markdown(props: {
       if (highlightedCode && code) {
         code.innerHTML = highlightedCode.innerHTML;
         pre.classList.add("markdown-code-highlighted");
+        pendingHighlights.delete(pre);
       }
     } catch {
       if (isCurrent()) {
         pre.classList.add("markdown-code-plain");
+        pendingHighlights.delete(pre);
       }
     } finally {
       if (highlightInFlight.get(pre) === request) {
@@ -418,16 +505,7 @@ export function Markdown(props: {
   // Highlight framed code blocks that were skipped while deferHighlight was on
   // (e.g. during streaming, to avoid re-running Shiki on every batched update).
   const highlightPendingBlocks = () => {
-    if (!containerRef) {
-      return;
-    }
-    containerRef
-      .querySelectorAll<HTMLPreElement>(
-        ".markdown-code-frame pre:not(.markdown-code-highlighted):not(.markdown-code-plain)",
-      )
-      .forEach((pre) => {
-        void highlightBlock(pre, codeBlockLanguage(pre));
-      });
+    for (const pre of pendingHighlights) void highlightBlock(pre, codeBlockLanguage(pre));
   };
 
   const updateMermaidToggleButton = (button: HTMLButtonElement, view: "diagram" | "source") => {
@@ -549,6 +627,7 @@ export function Markdown(props: {
     frame.dataset.mermaidRenderKey = renderKey;
     frame.dataset.mermaidSource = source;
     frame.dataset.mermaidTheme = darkMode ? "dark" : "light";
+    delete frame.dataset.diagramRenderer;
     diagram.className = "markdown-mermaid is-loading";
     if (frame.dataset.mermaidView === "source") {
       diagram.classList.add("is-hidden");
@@ -556,36 +635,53 @@ export function Markdown(props: {
     diagram.setAttribute("aria-busy", "true");
     diagram.textContent = "Rendering diagram...";
 
+    const isCurrentRender = () =>
+      !disposed && frame.isConnected && frame.dataset.mermaidRenderKey === renderKey;
+
     try {
-      const mermaid = await getMermaid();
-      if (
-        disposed ||
-        !frame.isConnected ||
-        frame.dataset.mermaidRenderKey !== renderKey
-      ) {
-        return;
+      let result: { svg: string; bindFunctions?: (element: Element) => void };
+      let renderer: "pele" | "mermaid" = "pele";
+      try {
+        const pele = await getPele();
+        if (!isCurrentRender()) return;
+        result = await pele.renderAsync(source, {
+          fontFamily: DIAGRAM_FONT_FAMILY,
+          idPrefix: renderId,
+          links: false,
+          images: false,
+          maxEdges: 500,
+        });
+      } catch {
+        if (!isCurrentRender()) return;
+        const mermaid = await getMermaid();
+        if (!isCurrentRender()) return;
+        mermaid.initialize(mermaidConfig(darkMode));
+        // Keep Mermaid's temporary SVGs measurable without affecting the chat layout.
+        const renderTarget = document.createElement("div");
+        renderTarget.setAttribute("aria-hidden", "true");
+        renderTarget.style.cssText =
+          "position: fixed; inset: 0; visibility: hidden; pointer-events: none; overflow: hidden;";
+        document.body.appendChild(renderTarget);
+        try {
+          result = await mermaid.render(renderId, source, renderTarget);
+        } finally {
+          renderTarget.remove();
+        }
+        renderer = "mermaid";
       }
+      if (!isCurrentRender()) return;
 
-      mermaid.initialize(mermaidConfig(darkMode));
-      const { svg, bindFunctions } = await mermaid.render(renderId, source);
-      if (
-        disposed ||
-        !frame.isConnected ||
-        frame.dataset.mermaidRenderKey !== renderKey
-      ) {
-        return;
-      }
-
+      frame.dataset.diagramRenderer = renderer;
       diagram.className = "markdown-mermaid";
       diagram.removeAttribute("aria-busy");
-      diagram.innerHTML = DOMPurify.sanitize(svg);
+      diagram.innerHTML = DOMPurify.sanitize(result.svg);
       setMermaidFrameView(
         frame,
         frame.dataset.mermaidView === "source" ? "source" : "diagram",
       );
-      bindFunctions?.(diagram);
+      result.bindFunctions?.(diagram);
     } catch {
-      if (!disposed && frame.isConnected && frame.dataset.mermaidRenderKey === renderKey) {
+      if (isCurrentRender()) {
         renderMermaidFallback(frame, source);
       }
     }
@@ -595,20 +691,27 @@ export function Markdown(props: {
     pre: HTMLPreElement,
     source: string,
     darkMode: boolean,
+    block: MarkdownDomBlock,
   ) => {
     const frame = createMermaidFrame(source, darkMode);
+    block.sources.delete(pre);
+    mermaidOwners.delete(pre);
+    block.frames.add(frame);
+    mermaidFrames.add(frame);
+    mermaidOwners.set(frame, block);
     pre.classList.add("is-rendering");
     preserveMarkup(pre, frame);
     pre.replaceWith(frame);
     await renderMermaidFrame(frame, source, darkMode);
   };
 
-  const enhanceCodeBlocks = () => {
-    if (!containerRef) {
-      return;
+  const enhanceCodeBlocks = (block: MarkdownDomBlock, nodes: Node[]) => {
+    const pres: HTMLPreElement[] = [];
+    for (const node of nodes) {
+      if (node instanceof HTMLPreElement) pres.push(node);
+      else if (node instanceof Element) pres.push(...node.querySelectorAll<HTMLPreElement>("pre"));
     }
-
-    containerRef.querySelectorAll<HTMLPreElement>("pre").forEach((pre) => {
+    pres.forEach((pre) => {
       if (pre.closest(".markdown-code-frame, .markdown-mermaid-frame, .markdown-mermaid-raw")) {
         return;
       }
@@ -616,6 +719,8 @@ export function Markdown(props: {
       const language = codeBlockLanguage(pre);
       if (isMermaidLanguage(language)) {
         pre.classList.add("markdown-mermaid-source");
+        block.sources.add(pre);
+        mermaidOwners.set(pre, block);
         return;
       }
 
@@ -650,80 +755,67 @@ export function Markdown(props: {
       preserveMarkup(pre, frame);
       pre.replaceWith(frame);
       frame.append(header, pre);
+      pendingHighlights.add(pre);
       if (!props.deferHighlight) {
         void highlightBlock(pre, language);
       }
     });
   };
 
-  const renderReadyMermaidCodeBlocks = (
-    darkMode: boolean,
-    completeMermaidBlocks: Map<string, number>,
-  ) => {
-    if (!containerRef) {
-      return;
-    }
-
-    containerRef
-      .querySelectorAll<HTMLElement>(".markdown-mermaid-frame[data-mermaid-source]")
-      .forEach((frame) => {
-        const source = normalizeMermaidSource(frame.dataset.mermaidSource || "");
-        const complete = consumeMermaidBlock(completeMermaidBlocks, source);
-        if (complete && pendingMermaidFrames.has(frame)) {
-          pendingMermaidFrames.delete(frame);
-          void renderMermaidFrame(frame, source, darkMode);
+  const renderReadyMermaidCodeBlocks = (darkMode: boolean) => {
+    for (const block of dirtyMermaidBlocks) {
+      const elements = collectBlockMermaidElements(block);
+      const expected = block.mermaidBlocks;
+      let expectedIndex = 0;
+      for (const element of elements) {
+        if (expectedIndex >= expected.length) break;
+        const expectedBlock = expected[expectedIndex];
+        const source = mermaidSourceFor(element);
+        if (source !== expectedBlock.source) continue;
+        expectedIndex += 1;
+        if (!expectedBlock.complete || !source) continue;
+        if (element instanceof HTMLPreElement) {
+          if (block.sources.has(element)) {
+            void renderMermaidPre(element, source, darkMode, block);
+          }
+        } else if (pendingMermaidFrames.has(element)) {
+          pendingMermaidFrames.delete(element);
+          void renderMermaidFrame(element, source, darkMode);
         }
-      });
-
-    containerRef.querySelectorAll<HTMLPreElement>("pre").forEach((pre) => {
-      const language = codeBlockLanguage(pre);
-      if (!isMermaidLanguage(language)) {
-        return;
       }
-
-      const code = pre.querySelector("code");
-      const source = normalizeMermaidSource(code?.textContent || pre.textContent || "");
-      if (!source || !consumeMermaidBlock(completeMermaidBlocks, source)) {
-        return;
-      }
-
-      void renderMermaidPre(pre, source, darkMode);
-    });
+    }
+    dirtyMermaidBlocks.clear();
   };
 
   const rerenderMermaidDiagrams = (darkMode: boolean) => {
-    if (!containerRef) {
-      return;
-    }
-
     const theme = darkMode ? "dark" : "light";
-    containerRef
-      .querySelectorAll<HTMLElement>(".markdown-mermaid-frame[data-mermaid-source]")
-      .forEach((frame) => {
-        if (pendingMermaidFrames.has(frame) || frame.dataset.mermaidTheme === theme) {
-          return;
-        }
-        const source = frame.dataset.mermaidSource || "";
-        if (source.trim()) {
-          void renderMermaidFrame(frame, source, darkMode);
-        }
-      });
+    mermaidFrames.forEach((frame) => {
+      if (pendingMermaidFrames.has(frame) || frame.dataset.mermaidTheme === theme) return;
+      if (frame.dataset.diagramRenderer === "pele") {
+        frame.dataset.mermaidTheme = theme;
+        return;
+      }
+      const source = frame.dataset.mermaidSource || "";
+      if (source.trim()) void renderMermaidFrame(frame, source, darkMode);
+    });
   };
 
-  const clearMermaidRenderTimer = () => {
-    if (mermaidRenderTimer !== undefined) {
-      window.clearTimeout(mermaidRenderTimer);
-      mermaidRenderTimer = undefined;
+  const clearMermaidRenderFrame = () => {
+    if (mermaidRenderFrame !== undefined) {
+      window.cancelAnimationFrame(mermaidRenderFrame);
+      mermaidRenderFrame = undefined;
     }
   };
 
-  const scheduleMermaidRender = (source: string) => {
-    clearMermaidRenderTimer();
-    mermaidRenderTimer = window.setTimeout(() => {
-      if (!disposed && props.text === source && !props.deferMermaid) {
-        renderReadyMermaidCodeBlocks(dark(), collectCompleteMermaidBlocks(source));
+  const scheduleMermaidRender = () => {
+    // Later prose must not postpone a completed diagram or request another render.
+    if (dirtyMermaidBlocks.size === 0 || mermaidRenderFrame !== undefined) return;
+    mermaidRenderFrame = window.requestAnimationFrame(() => {
+      mermaidRenderFrame = undefined;
+      if (!disposed && !props.deferMermaid) {
+        renderReadyMermaidCodeBlocks(dark());
       }
-    }, MERMAID_RENDER_DELAY_MS);
+    });
   };
 
   const handleCopyClick = async (event: MouseEvent) => {
@@ -821,18 +913,66 @@ export function Markdown(props: {
     }
   };
 
-  createEffect(() => {
-    const source = props.text || "";
-    updateHtml(html());
-    clearMermaidRenderTimer();
-    queueMicrotask(() => {
-      if (!disposed) {
-        enhanceCodeBlocks();
+  const mountMarkdownBlock = (state: MarkdownBlockState) => {
+    // Keep Solid's insertion point before the manually managed block content.
+    const start = document.createTextNode("");
+    const block: MarkdownDomBlock = {
+      anchor: document.createTextNode(""),
+      nodes: [],
+      sources: new Set(),
+      frames: new Set(),
+      mermaidBlocks: [],
+    };
+    let previousHtml: string | undefined;
+    createEffect(() => {
+      const content = state.content();
+      untrack(() => {
+        block.mermaidBlocks = content.mermaidBlocks;
+        if (content.html !== previousHtml) {
+          updateHtml(block, content.html);
+          previousHtml = content.html;
+        }
+        if (block.sources.size > 0 || Array.from(block.frames).some((frame) => pendingMermaidFrames.has(frame))) {
+          dirtyMermaidBlocks.add(block);
+          if (!props.deferMermaid) scheduleMermaidRender();
+        }
+      });
+    });
+    onCleanup(() => {
+      dirtyMermaidBlocks.delete(block);
+      for (const { node } of block.nodes) {
+        cleanupNode(node);
+        node.parentNode?.removeChild(node);
       }
     });
-    if (!untrack(() => Boolean(props.deferMermaid))) {
-      scheduleMermaidRender(source);
-    }
+    return [start, block.anchor];
+  };
+
+  createEffect(() => {
+    const update = blockUpdate();
+    untrack(() => batch(() => {
+      let rowsChanged = blockStates.length !== update.length;
+      const next = rowsChanged ? blockStates.slice(0, update.length) : blockStates;
+      next.length = update.length;
+      update.blocks.forEach((content, index) => {
+        const position = update.start + index;
+        const current = next[position];
+        // Whitespace and reference definitions have no DOM to mount.
+        if (!content.html) {
+          if (current) {
+            next[position] = undefined;
+            rowsChanged = true;
+          }
+        } else if (current) current.setContent(content);
+        else {
+          const [value, setValue] = createSignal(content);
+          next[position] = { content: value, setContent: setValue };
+          rowsChanged = true;
+        }
+      });
+      blockStates = next;
+      if (rowsChanged) setBlockRows(next.filter((state): state is MarkdownBlockState => state !== undefined));
+    }));
   });
 
   let previousDeferMermaid = Boolean(props.deferMermaid);
@@ -843,10 +983,10 @@ export function Markdown(props: {
     }
     previousDeferMermaid = deferMermaid;
     if (deferMermaid) {
-      clearMermaidRenderTimer();
+      clearMermaidRenderFrame();
       return;
     }
-    scheduleMermaidRender(untrack(() => props.text || ""));
+    scheduleMermaidRender();
   });
 
   let previousDeferHighlight = Boolean(props.deferHighlight);
@@ -889,8 +1029,12 @@ export function Markdown(props: {
 
   onCleanup(() => {
     disposed = true;
-    clearMermaidRenderTimer();
+    clearMermaidRenderFrame();
     cleanupIcons();
+    pendingHighlights.clear();
+    pendingMermaidFrames.clear();
+    mermaidFrames.clear();
+    dirtyMermaidBlocks.clear();
     containerRef?.removeEventListener("click", handleCopyClick);
   });
 
@@ -898,6 +1042,8 @@ export function Markdown(props: {
     <div
       ref={containerRef}
       class={`markdown ${props.class || ""}`}
-    />
+    >
+      <For each={blockRows()}>{mountMarkdownBlock}</For>
+    </div>
   );
 }

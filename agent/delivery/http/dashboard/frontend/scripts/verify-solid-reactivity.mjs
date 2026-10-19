@@ -267,6 +267,19 @@ try {
   }
   assert.equal(await js('messageRow.isConnected && codeFrame.isConnected && document.querySelector(".markdown-code-frame") === codeFrame'), true);
   assert.equal(await js('messageRow.textContent.includes("chunk-4")'), true);
+  send({ type: 'message', content: '\n\n```mermaid\nflowchart LR\n  A[Ready] --> B[Streaming]' });
+  await until(() => js('!!document.querySelector("pre.markdown-mermaid-source")'), 'unfinished streamed diagram');
+  assert.equal(await js('document.querySelector(".markdown-mermaid svg")'), null);
+  send({ type: 'message', content: '\n```\n\nContinued narration' });
+  await until(() => js('!!document.querySelector(".markdown-mermaid svg.pele")'), 'completed diagram while streaming');
+  assert.equal(await js('!!document.querySelector(\'button[aria-label="Stop generating"]\')'), true);
+  await js('window.streamingSvg = document.querySelector(".markdown-mermaid svg")');
+  for (let index = 0; index < 5; index++) {
+    send({ type: 'message', content: ` diagram-tail-${index}` });
+    await delay(80);
+  }
+  assert.equal(await js('streamingSvg === document.querySelector(".markdown-mermaid svg") && messageRow.isConnected && codeFrame.isConnected'), true);
+  console.log('PASS: a completed Mermaid fence renders with Pele before the response ends and retains its SVG during subsequent chunks.');
   send({ type: 'tool_call', id: 'tool-1', name: 'read_file', args: { path: 'example.txt' } });
   await until(() => js('!!document.querySelector("details.tool-call")'), 'streamed tool call');
   assert.equal(await js('document.querySelector(".activity-group-label").textContent'), '1 tool call · Running');

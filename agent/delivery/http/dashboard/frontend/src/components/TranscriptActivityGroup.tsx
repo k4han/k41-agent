@@ -175,7 +175,6 @@ export function TranscriptActivityGroup(props: TranscriptActivityGroupProps) {
                 <TranscriptItemView
                   item={row}
                   itemId={row.id}
-                  deferMermaid={props.isItemStreaming?.(row.id)}
                   deferHighlight={props.isItemStreaming?.(row.id)}
                   agents={props.agents}
                   activeAgentName={props.activeAgentName}
