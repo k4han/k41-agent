@@ -53,7 +53,7 @@ export function WorkspaceFilePreview(props: {
               <div class="workspace-media-preview"><video controls preload="metadata" src={props.previewUrl} onError={() => setFailed(true)} /></div>
             </Match>
             <Match when={kind() === "markdown"}>
-              <div class="workspace-rendered-preview"><Markdown text={props.content} /></div>
+              <div class="workspace-rendered-preview"><Markdown text={props.content} class="message-markdown" /></div>
             </Match>
             <Match when={kind() === "html"}>
               <iframe class="workspace-document-preview" title={`HTML preview: ${props.path}`} sandbox="" referrerpolicy="no-referrer" srcdoc={sandboxedWorkspaceHtml(props.content)} />
