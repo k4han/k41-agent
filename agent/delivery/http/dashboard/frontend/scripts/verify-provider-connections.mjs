@@ -29,6 +29,7 @@ const connections = [{ name: 'team', type: 'tavily', fields: {}, has_api_key: tr
 const defaults = { tavily: 'team' };
 const aiConnections = [];
 let aiDefault = '';
+let chatgptManualMode = false;
 const decisionConnections = [];
 let decisionDefault = '';
 const decisionServices = [{ type: 'cloudflare', label: 'Cloudflare', fields: [
@@ -75,10 +76,24 @@ const server = http.createServer(async (req, res) => {
     if (chatgptRoute) {
       const entry = aiConnections.find(item => item.name === decodeURIComponent(chatgptRoute[1]));
       if (chatgptRoute[2] === 'sign-in') {
+        entry.signInStatus = chatgptManualMode ? 'pending' : 'completed';
         res.end(JSON.stringify({ attempt_id: 'test-attempt', authorization_url: `/dashboard-api/providers/${chatgptRoute[1]}/chatgpt/authorize/test-attempt` }));
       } else if (chatgptRoute[2] === 'sign-out') {
         entry.session = { connected: false, sharing: false, email: 'user@example.com' };
         res.end(JSON.stringify({ revocation_confirmed: true, message: 'Signed out of ChatGPT.' }));
+      } else if (chatgptRoute[2] === 'sign-in/test-attempt/complete') {
+        if (submitted.callback_url !== 'http://127.0.0.1:43925/auth/callback?code=test-code&state=test-state&client_id=oaiapp_test') {
+          res.statusCode = 400; res.end(JSON.stringify({ detail: 'Invalid callback URL.' })); return;
+        }
+        entry.signInStatus = 'completed';
+        entry.session = { connected: true, sharing: true, email: 'user@example.com' };
+        res.end(JSON.stringify({ ...entry.session, status: 'completed', message: 'ChatGPT connected.' }));
+      } else if (chatgptRoute[2] === 'sign-in/test-attempt/cancel') {
+        entry.signInStatus = 'failed';
+        res.end(JSON.stringify({ ...entry.session, status: 'failed', message: 'ChatGPT sign-in cancelled.' }));
+      } else if (entry.signInStatus === 'pending' || entry.signInStatus === 'failed') {
+        res.end(JSON.stringify({ connected: false, sharing: false, email: '', ...entry.session,
+          status: entry.signInStatus, message: 'Waiting for ChatGPT sign-in.' }));
       } else {
         entry.session = { connected: true, sharing: true, email: 'user@example.com' };
         res.end(JSON.stringify({ ...entry.session, status: 'completed', message: 'ChatGPT connected.' }));
@@ -316,6 +331,26 @@ try {
   await until(() => js('Array.from(document.querySelectorAll("button")).find(button => button.textContent === "Sign out")?.disabled === false'), 'ChatGPT model saved');
   await js('Array.from(document.querySelectorAll("button")).find(button => button.textContent === "Sign out").click()');
   await until(() => js('document.body.textContent.includes("ChatGPT is not connected.")'), 'ChatGPT sign-out');
+  chatgptManualMode = true;
+  await js('Array.from(document.querySelectorAll("button")).find(button => button.textContent === "Continue with ChatGPT").click()');
+  await until(() => js(`!!document.querySelector('textarea[aria-label="ChatGPT callback URL"]')`), 'remote ChatGPT callback input');
+  assert.equal(await js('document.body.textContent.includes("copy the entire URL")'), true);
+  await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  assert.equal(await js('document.documentElement.scrollWidth <= window.innerWidth'), true);
+  await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+  await js(`(() => { const input = document.querySelector('textarea[aria-label="ChatGPT callback URL"]'); input.value = 'http://127.0.0.1:43925/auth/callback?code=test-code&state=wrong'; input.dispatchEvent(new Event('input', { bubbles: true })); Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Complete sign-in').click(); })()`);
+  await until(() => js(`document.querySelector('textarea[aria-label="ChatGPT callback URL"]')?.disabled === false && document.querySelector('textarea[aria-label="ChatGPT callback URL"]')?.value === ''`), 'invalid remote callback can be retried');
+  assert.equal(aiConnections.find(item => item.name === 'chatgpt').session.connected, false);
+  await js(`(() => { const input = document.querySelector('textarea[aria-label="ChatGPT callback URL"]'); input.value = 'http://127.0.0.1:43925/auth/callback?code=test-code&state=test-state&client_id=oaiapp_test'; input.dispatchEvent(new Event('input', { bubbles: true })); Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Complete sign-in').click(); })()`);
+  await until(() => js(`document.body.textContent.includes('Using ChatGPT plan') && !document.querySelector('textarea[aria-label="ChatGPT callback URL"]')`), 'remote ChatGPT callback completed');
+  assert.equal(await js(`Object.values(localStorage).some(value => value.includes('test-code')) || Object.values(sessionStorage).some(value => value.includes('test-code'))`), false);
+  await until(() => js('Array.from(document.querySelectorAll("button")).find(button => button.textContent === "Sign out")?.disabled === false'), 'remote ChatGPT models saved');
+  await js('Array.from(document.querySelectorAll("button")).find(button => button.textContent === "Sign out").click()');
+  await until(() => js('document.body.textContent.includes("ChatGPT is not connected.")'), 'remote ChatGPT signed out');
+  await js('Array.from(document.querySelectorAll("button")).find(button => button.textContent === "Continue with ChatGPT").click()');
+  await until(() => js(`!!document.querySelector('textarea[aria-label="ChatGPT callback URL"]')`), 'remote ChatGPT cancellation input');
+  await js('Array.from(document.querySelectorAll("button")).find(button => button.textContent === "Cancel sign-in").click()');
+  await until(() => js(`!document.querySelector('textarea[aria-label="ChatGPT callback URL"]') && Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Continue with ChatGPT')?.disabled === false`), 'remote ChatGPT sign-in cancelled');
   await navigate('/settings/providers/web');
   await until(() => js('location.pathname === "/settings/providers/llm/web"'), 'legacy provider named web');
   await navigate('/settings/backends/local');
@@ -342,7 +377,7 @@ try {
     assert.equal(await js('document.documentElement.scrollWidth <= window.innerWidth'), true);
   }
   assert.deepEqual(exceptions, []);
-  console.log('PASS: provider creation, defaults, token editing, ChatGPT sign-in/models/sign-out, errors, drafts, legacy redirects, mobile width.');
+  console.log('PASS: provider creation, defaults, token editing, ChatGPT local/remote sign-in/models/sign-out/cancellation, errors, drafts, legacy redirects, mobile width.');
 } finally {
   await closeBrowser?.();
   ws?.close(); browser.kill();

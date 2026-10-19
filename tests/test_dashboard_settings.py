@@ -254,6 +254,8 @@ def test_chatgpt_oauth_routes_keep_attempts_separate(make_dashboard_client, tmp_
         attempt = client.post("/dashboard-api/providers/first/chatgpt/sign-in", json={})
         assert attempt.status_code == 200
         attempt_id = attempt.json()["attempt_id"]
+        resumed = client.post("/dashboard-api/providers/first/chatgpt/sign-in", json={"resume": True})
+        assert resumed.json()["attempt_id"] == attempt_id
         assert attempt.headers["cache-control"] == "no-store"
         redirect = client.get(attempt.json()["authorization_url"], follow_redirects=False)
         assert redirect.status_code == 307
@@ -266,6 +268,54 @@ def test_chatgpt_oauth_routes_keep_attempts_separate(make_dashboard_client, tmp_
         assert client.get(attempt.json()["authorization_url"], follow_redirects=False).status_code == 404
         bad = client.post("/dashboard-api/providers", json={"name": "bad", "type": "chatgpt", "base_url": "https://invalid.example"})
         assert bad.status_code == 400
+    finally:
+        auth.close()
+
+
+def test_chatgpt_remote_callback_api_validates_and_completes(make_dashboard_client, tmp_path, monkeypatch):
+    from urllib.parse import urlencode
+    from agent.bootstrap.container import create_app_container
+    from agent.modules.providers.chatgpt.auth import ChatGPTAuthManager, ISSUER, PLAN_SCOPE
+    from agent.modules.providers.chatgpt.storage import ChatGPTCredentialStore
+
+    service, _ = _db_config_service("llm: {default_model: ''}")
+    auth = ChatGPTAuthManager(ChatGPTCredentialStore(tmp_path / "chatgpt"))
+    container = create_app_container(config_service=service)
+    container._chatgpt_auth_manager = auth
+    client = make_dashboard_client(service)
+    client.app.state.container = container
+    try:
+        assert client.post("/dashboard-api/providers", json={"name": "remote", "type": "chatgpt"}).status_code == 200
+        result = client.post("/dashboard-api/providers/remote/chatgpt/sign-in", json={}).json()
+        attempt_id = result["attempt_id"]
+        attempt = auth._attempts[attempt_id]
+        endpoint = f"/dashboard-api/providers/remote/chatgpt/sign-in/{attempt_id}/complete"
+        exchanges = []
+
+        def exchange(data):
+            exchanges.append(data)
+            return {"access_token": "private-access", "refresh_token": "private-refresh", "id_token": "private-id",
+                    "scope": PLAN_SCOPE, "expires_in": 3600}
+
+        monkeypatch.setattr(auth, "_token_request", exchange)
+        monkeypatch.setattr(auth, "_verify_identity", lambda *_args: {"iss": ISSUER, "sub": "test-sub", "email": "test@example.com"})
+        invalid = client.post(endpoint, json={"callback_url": f"{attempt.redirect_uri}?code=test-code&state=wrong"})
+        assert invalid.status_code == 400
+        assert not exchanges and "test-code" not in invalid.text
+        url = f"{attempt.redirect_uri}?{urlencode({'code': 'test-code', 'state': attempt.state, 'client_id': 'oaiapp_test'})}"
+        completed = client.post(endpoint, json={"callback_url": url})
+        assert completed.status_code == 200, completed.text
+        assert completed.headers["cache-control"] == "no-store"
+        assert completed.json()["status"] == "completed" and completed.json()["sharing"] is True
+        assert "private-access" not in completed.text and "test-code" not in completed.text
+        assert exchanges[0]["redirect_uri"] == attempt.redirect_uri
+        assert exchanges[0]["code_verifier"] == attempt.verifier
+        assert client.post(endpoint, json={"callback_url": url}).status_code == 400
+        assert len(exchanges) == 1
+        next_attempt = client.post("/dashboard-api/providers/remote/chatgpt/sign-in", json={}).json()["attempt_id"]
+        cancelled = client.post(f"/dashboard-api/providers/remote/chatgpt/sign-in/{next_attempt}/cancel", json={})
+        assert cancelled.status_code == 200 and cancelled.json()["status"] == "failed"
+        assert cancelled.json()["connected"] is True
     finally:
         auth.close()
 

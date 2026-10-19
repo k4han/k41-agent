@@ -15,6 +15,9 @@ wheels/
 !.env.example
 !.env.sample
 
+# Protected ChatGPT session transfers
+chatgpt-session*.k41
+
 # Node dependencies
 node_modules/
 

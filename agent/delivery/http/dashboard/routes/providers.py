@@ -359,14 +359,27 @@ async def get_chatgpt_session(provider_name: str, request: Request, response: Re
     return await asyncio.to_thread(auth.session, name)
 
 
+class StartChatGPTSignInBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    resume: bool = False
+
+
+class CompleteChatGPTSignInBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    callback_url: str = Field(..., min_length=1, max_length=16384, repr=False)
+
+
 @router.post("/dashboard-api/providers/{provider_name}/chatgpt/sign-in")
-async def start_chatgpt_sign_in(provider_name: str, request: Request, response: Response) -> dict[str, str]:
+async def start_chatgpt_sign_in(provider_name: str, request: Request, response: Response,
+                               body: StartChatGPTSignInBody | None = None) -> dict[str, str]:
     response.headers["Cache-Control"] = "no-store"
     from agent.modules.providers import ChatGPTAuthError
 
     auth, name = _chatgpt_connection(request, provider_name)
     try:
-        result = await asyncio.to_thread(auth.start_sign_in, name)
+        result = await asyncio.to_thread(auth.start_sign_in, name, resume=bool(body and body.resume))
         attempt_id = result["attempt_id"]
         return {"attempt_id": attempt_id,
                 "authorization_url": f"/dashboard-api/providers/{quote(name, safe='')}/chatgpt/authorize/{attempt_id}"}
@@ -394,6 +407,34 @@ async def get_chatgpt_sign_in(provider_name: str, attempt_id: str, request: Requ
     auth, name = _chatgpt_connection(request, provider_name)
     try:
         return await asyncio.to_thread(auth.attempt_status, name, attempt_id)
+    except ChatGPTAuthError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+
+
+@router.post("/dashboard-api/providers/{provider_name}/chatgpt/sign-in/{attempt_id}/complete")
+async def complete_chatgpt_sign_in(provider_name: str, attempt_id: str, body: CompleteChatGPTSignInBody,
+                                   request: Request, response: Response) -> dict[str, Any]:
+    from agent.modules.providers import ChatGPTAuthError
+
+    response.headers["Cache-Control"] = "no-store"
+    auth, name = _chatgpt_connection(request, provider_name)
+    try:
+        result = await asyncio.to_thread(auth.complete_callback, name, attempt_id, body.callback_url)
+        invalidate_agent_provider_options_cache()
+        return result
+    except ChatGPTAuthError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
+
+@router.post("/dashboard-api/providers/{provider_name}/chatgpt/sign-in/{attempt_id}/cancel")
+async def cancel_chatgpt_sign_in(provider_name: str, attempt_id: str,
+                                 request: Request, response: Response) -> dict[str, Any]:
+    from agent.modules.providers import ChatGPTAuthError
+
+    response.headers["Cache-Control"] = "no-store"
+    auth, name = _chatgpt_connection(request, provider_name)
+    try:
+        return await asyncio.to_thread(auth.cancel_sign_in, name, attempt_id)
     except ChatGPTAuthError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from None
 

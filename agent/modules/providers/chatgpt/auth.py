@@ -72,12 +72,14 @@ class ChatGPTAuthManager:
             "usage_url": USAGE_URL,
         }
 
-    def start_sign_in(self, provider_name: str) -> dict[str, str]:
+    def start_sign_in(self, provider_name: str, *, resume: bool = False) -> dict[str, str]:
         with self._lock:
             for attempt_id, pending in list(self._attempts.items()):
                 if pending.expires_at < time.time():
                     del self._attempts[attempt_id]
                 elif pending.provider_name == provider_name and pending.status == "pending":
+                    if resume:
+                        return {"attempt_id": attempt_id, "authorization_url": pending.authorization_url}
                     raise ChatGPTAuthError("A ChatGPT sign-in is already in progress. Wait for it to finish or expire.")
             profile = self.store.get(provider_name)
             host_id = self.store.host_id()
@@ -90,23 +92,17 @@ class ChatGPTAuthManager:
 
                 def do_GET(self) -> None:
                     parsed = urlsplit(self.path)
-                    params = parse_qs(parsed.query, keep_blank_values=True)
-                    state = params.get("state", [""])
-                    if parsed.path != "/auth/callback" or len(state) != 1 or not secrets.compare_digest(state[0], attempt.state):
-                        self.send_error(400, "Invalid OAuth callback.")
-                        return
-                    if any(len(values) != 1 for values in params.values()) or attempt.status != "pending":
+                    if parsed.path != "/auth/callback":
                         self.send_error(400, "Invalid OAuth callback.")
                         return
                     try:
-                        manager.complete_sign_in(attempt, {key: values[0] for key, values in params.items()})
-                        attempt.status = "completed"
-                        attempt.message = "ChatGPT connected. Return to k41."
-                    except Exception:
-                        attempt.status = "failed"
-                        attempt.message = "ChatGPT sign-in failed. Check plan permission and try signing in again."
-                    body = attempt.message.encode("utf-8")
-                    self.send_response(200 if attempt.status == "completed" else 400)
+                        result = manager.complete_callback(attempt.provider_name, attempt_id,
+                                                           f"{attempt.redirect_uri}?{parsed.query}")
+                        message, status_code = result["message"], 200
+                    except ChatGPTAuthError as exc:
+                        message, status_code = str(exc), 400
+                    body = message.encode("utf-8")
+                    self.send_response(status_code)
                     self.send_header("Content-Type", "text/plain; charset=utf-8")
                     self.send_header("Cache-Control", "no-store")
                     self.send_header("Referrer-Policy", "no-referrer")
@@ -139,9 +135,10 @@ class ChatGPTAuthManager:
                 try:
                     while attempt.status == "pending" and time.time() < attempt.expires_at:
                         server.handle_request()
-                    if attempt.status == "pending":
-                        attempt.status = "failed"
-                        attempt.message = "ChatGPT sign-in expired. Please try again."
+                    with manager._lock:
+                        if attempt.status == "pending":
+                            attempt.status = "failed"
+                            attempt.message = "ChatGPT sign-in expired. Please try again."
                 finally:
                     server.server_close()
 
@@ -163,6 +160,47 @@ class ChatGPTAuthManager:
             if attempt is None or attempt.provider_name != provider_name:
                 raise ChatGPTAuthError("ChatGPT sign-in attempt not found or expired.")
             return {"status": attempt.status, "message": attempt.message, **self.session(provider_name)}
+
+    def complete_callback(self, provider_name: str, attempt_id: str, callback_url: str) -> dict[str, Any]:
+        """Accept a loopback callback directly or relay it from an authenticated dashboard."""
+        with self._lock:
+            attempt = self._attempts.get(attempt_id)
+            if (attempt is None or attempt.provider_name != provider_name
+                    or attempt.status != "pending" or attempt.expires_at <= time.time()):
+                raise ChatGPTAuthError("ChatGPT sign-in attempt not found, already completed, or expired.")
+            try:
+                if len(callback_url) > 16384:
+                    raise ValueError("Callback too long")
+                parsed = urlsplit(callback_url.strip())
+                if parsed.fragment or parsed._replace(query="", fragment="").geturl() != attempt.redirect_uri:
+                    raise ValueError("Callback URI mismatch")
+                values = parse_qs(parsed.query, keep_blank_values=True, max_num_fields=20)
+                if any(len(items) != 1 for items in values.values()):
+                    raise ValueError("Duplicate callback parameter")
+                params = {key: items[0] for key, items in values.items()}
+                if not secrets.compare_digest(params.get("state", "").encode("utf-8"), attempt.state.encode("utf-8")):
+                    raise ValueError("Callback state mismatch")
+            except (ValueError, UnicodeError):
+                raise ChatGPTAuthError("Invalid callback URL. Paste the complete 127.0.0.1 URL from this sign-in attempt.") from None
+            try:
+                self.complete_sign_in(attempt, params)
+            except Exception as exc:
+                attempt.status = "failed"
+                attempt.message = (str(exc) if isinstance(exc, ChatGPTAuthError) else
+                                   "ChatGPT identity could not be verified. Start a new sign-in attempt.")
+                raise ChatGPTAuthError(attempt.message) from None
+            return self.attempt_status(provider_name, attempt_id)
+
+    def cancel_sign_in(self, provider_name: str, attempt_id: str) -> dict[str, Any]:
+        """Cancel authorization without signing out an existing connection."""
+        with self._lock:
+            attempt = self._attempts.get(attempt_id)
+            if attempt is None or attempt.provider_name != provider_name:
+                raise ChatGPTAuthError("ChatGPT sign-in attempt not found.")
+            if attempt.status == "pending":
+                attempt.status = "failed"
+                attempt.message = "ChatGPT sign-in cancelled."
+            return self.attempt_status(provider_name, attempt_id)
 
     def _token_request(self, data: dict[str, str]) -> dict[str, Any]:
         try:
@@ -193,9 +231,10 @@ class ChatGPTAuthManager:
         with self._lock:
             self._complete_sign_in(attempt, params)
             attempt.status = "completed"
+            attempt.message = "ChatGPT connected. Return to k41."
 
     def _complete_sign_in(self, attempt: SignInAttempt, params: dict[str, str]) -> None:
-        if attempt.status != "pending" or time.time() >= attempt.expires_at or not secrets.compare_digest(params.get("state", ""), attempt.state):
+        if attempt.status != "pending" or time.time() >= attempt.expires_at or not secrets.compare_digest(params.get("state", "").encode("utf-8"), attempt.state.encode("utf-8")):
             raise ChatGPTAuthError("Invalid or expired ChatGPT authorization state.")
         if params.get("error") or not params.get("code"):
             raise ChatGPTAuthError("ChatGPT sign-in was not authorized.")

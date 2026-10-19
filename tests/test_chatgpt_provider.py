@@ -5,7 +5,7 @@ from copy import deepcopy
 import json
 from types import SimpleNamespace
 import time
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 from cryptography.hazmat.primitives.asymmetric import rsa
 import httpx
@@ -119,6 +119,114 @@ def test_loopback_callback_completes_verified_sign_in(auth, monkeypatch, signing
     assert exchanges[0]["client_id"] == "oaiapp_test"
     assert exchanges[0]["redirect_uri"] == attempt.redirect_uri
     assert exchanges[0]["code_verifier"] == attempt.verifier
+
+
+def test_remote_callback_completes_without_browser_reaching_listener(auth, monkeypatch, signing_key):
+    host_id = auth.store.host_id()
+    result = auth.start_sign_in("chatgpt")
+    attempt = auth._attempts[result["attempt_id"]]
+    exchanges = configure_tokens(monkeypatch, auth, signing_key, attempt)
+    callback_url = f"{attempt.redirect_uri}?{urlencode(callback(attempt))}"
+    state = auth.complete_callback("chatgpt", result["attempt_id"], callback_url)
+    assert state["status"] == "completed" and state["sharing"] is True
+    assert state["message"] == "ChatGPT connected. Return to k41."
+    assert auth.access_token("chatgpt") == "new-access"
+    assert exchanges[0]["redirect_uri"] == attempt.redirect_uri
+    assert exchanges[0]["code_verifier"] == attempt.verifier
+    assert auth.store.host_id() == host_id
+    assert "auth-code" not in json.dumps(state)
+    with pytest.raises(ChatGPTAuthError, match="already completed"):
+        auth.complete_callback("chatgpt", result["attempt_id"], callback_url)
+    assert len(exchanges) == 1
+
+
+@pytest.mark.parametrize("invalid", ["host", "port", "path", "fragment", "userinfo", "state", "unicode_state",
+                                    "missing_state", "duplicate_state", "duplicate_code", "query_only"])
+def test_invalid_remote_callback_never_exchanges_or_consumes_attempt(auth, monkeypatch, invalid):
+    result = auth.start_sign_in("chatgpt")
+    attempt = auth._attempts[result["attempt_id"]]
+    parts = urlsplit(attempt.redirect_uri)
+    params = callback(attempt)
+    target = attempt.redirect_uri
+    if invalid == "host":
+        target = target.replace("127.0.0.1", "example.com")
+    elif invalid == "port":
+        target = f"http://127.0.0.1:{parts.port + 1}/auth/callback"
+    elif invalid == "path":
+        target = target.replace("/auth/callback", "/callback")
+    elif invalid == "userinfo":
+        target = target.replace("127.0.0.1", "user@127.0.0.1")
+    elif invalid in {"state", "unicode_state"}:
+        params["state"] = "wrong" if invalid == "state" else "\u2603"
+    elif invalid == "missing_state":
+        params.pop("state")
+    url = f"{target}?{urlencode(params)}"
+    if invalid == "fragment":
+        url += "#fragment"
+    elif invalid == "duplicate_state":
+        url += f"&state={attempt.state}"
+    elif invalid == "duplicate_code":
+        url += "&code=another-code"
+    elif invalid == "query_only":
+        url = urlencode(params)
+    monkeypatch.setattr(auth, "_token_request", lambda _data: pytest.fail("Invalid callback exchanged tokens"))
+    with pytest.raises(ChatGPTAuthError, match="Invalid callback URL"):
+        auth.complete_callback("chatgpt", result["attempt_id"], url)
+    assert auth.attempt_status("chatgpt", result["attempt_id"])["status"] == "pending"
+
+
+def test_remote_callback_is_bound_to_provider_and_deadline(auth, monkeypatch):
+    result = auth.start_sign_in("chatgpt")
+    attempt = auth._attempts[result["attempt_id"]]
+    url = f"{attempt.redirect_uri}?{urlencode(callback(attempt))}"
+    monkeypatch.setattr(auth, "_token_request", lambda _data: pytest.fail("Invalid attempt exchanged tokens"))
+    with pytest.raises(ChatGPTAuthError, match="not found"):
+        auth.complete_callback("another-provider", result["attempt_id"], url)
+    attempt.expires_at = 0
+    with pytest.raises(ChatGPTAuthError, match="expired"):
+        auth.complete_callback("chatgpt", result["attempt_id"], url)
+
+
+def test_parallel_callbacks_redeem_authorization_code_once(auth, monkeypatch, signing_key):
+    result = auth.start_sign_in("chatgpt")
+    attempt = auth._attempts[result["attempt_id"]]
+    exchanges = configure_tokens(monkeypatch, auth, signing_key, attempt)
+    url = f"{attempt.redirect_uri}?{urlencode(callback(attempt))}"
+
+    def complete(_index):
+        try:
+            return auth.complete_callback("chatgpt", result["attempt_id"], url)["status"]
+        except ChatGPTAuthError:
+            return "rejected"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        statuses = list(pool.map(complete, range(2)))
+    assert sorted(statuses) == ["completed", "rejected"]
+    assert len(exchanges) == 1
+    assert auth.attempt_status("chatgpt", result["attempt_id"])["status"] == "completed"
+
+
+def test_resume_and_cancel_keep_existing_connection(auth):
+    old = save_profile(auth)
+    result = auth.start_sign_in("chatgpt")
+    assert auth.start_sign_in("chatgpt", resume=True) == result
+    state = auth.cancel_sign_in("chatgpt", result["attempt_id"])
+    assert state["status"] == "failed" and state["sharing"] is True
+    assert auth.store.get("chatgpt") == old
+    replacement = auth.start_sign_in("chatgpt")
+    assert replacement["attempt_id"] != result["attempt_id"]
+    with pytest.raises(ChatGPTAuthError):
+        auth.complete_callback("chatgpt", result["attempt_id"], "http://127.0.0.1/auth/callback")
+
+
+def test_remote_callback_denial_does_not_exchange_tokens(auth, monkeypatch):
+    result = auth.start_sign_in("chatgpt")
+    attempt = auth._attempts[result["attempt_id"]]
+    monkeypatch.setattr(auth, "_token_request", lambda _data: pytest.fail("Declined authorization exchanged tokens"))
+    url = f"{attempt.redirect_uri}?{urlencode({'state': attempt.state, 'error': 'access_denied'})}"
+    with pytest.raises(ChatGPTAuthError, match="not authorized"):
+        auth.complete_callback("chatgpt", result["attempt_id"], url)
+    assert auth.attempt_status("chatgpt", result["attempt_id"])["status"] == "failed"
 
 
 @pytest.mark.parametrize("changes", [{"state": "wrong"}, {"error": "access_denied"}, {"client_id": ""},

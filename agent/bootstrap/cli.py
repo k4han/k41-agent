@@ -12,6 +12,7 @@ from typing import Any
 import typer
 
 from agent.bootstrap import ui
+from agent.bootstrap.chatgpt import app as chatgpt_app
 from agent.bootstrap.version import APP_VERSION
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,8 @@ app = typer.Typer(
     rich_markup_mode="rich",
     pretty_exceptions_show_locals=False,
 )
+
+app.add_typer(chatgpt_app, name="chatgpt")
 
 PID_FILE = Path.home() / ".k41-agent" / "server.pid"
 SHUTDOWN_SIGNAL = Path.home() / ".k41-agent" / "shutdown.signal"
