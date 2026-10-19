@@ -19,9 +19,11 @@ def export_session(
     directory: Path | None = typer.Option(None, "--directory", help="Credential directory used by this k41 runtime."),
 ) -> None:
     """Export one session and remove its local tokens without revoking them."""
-    from agent.modules.providers.chatgpt.auth import ChatGPTAuthError
-    from agent.modules.providers.chatgpt.storage import ChatGPTCredentialStore
-    from agent.modules.providers.chatgpt.transfer import ChatGPTSessionTransfer
+    from agent.modules.providers import (
+        ChatGPTAuthError,
+        ChatGPTCredentialStore,
+        ChatGPTSessionTransfer,
+    )
 
     passphrase = typer.prompt("Session-file passphrase (at least 12 characters)", hide_input=True, confirmation_prompt=True)
     try:
@@ -40,9 +42,11 @@ def import_session(
     directory: Path | None = typer.Option(None, "--directory", help="Credential directory used by this k41 runtime."),
 ) -> None:
     """Import credentials while keeping this server's host ID and encryption key."""
-    from agent.modules.providers.chatgpt.auth import ChatGPTAuthError
-    from agent.modules.providers.chatgpt.storage import ChatGPTCredentialStore
-    from agent.modules.providers.chatgpt.transfer import ChatGPTSessionTransfer
+    from agent.modules.providers import (
+        ChatGPTAuthError,
+        ChatGPTCredentialStore,
+        ChatGPTSessionTransfer,
+    )
 
     passphrase = typer.prompt("Session-file passphrase", hide_input=True)
     try:

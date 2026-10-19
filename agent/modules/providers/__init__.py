@@ -12,6 +12,8 @@ from agent.modules.providers.models import get_reasoning_effort_kwargs
 from agent.modules.providers.openai_compatible.factory import OpenAICompatibleFactory
 from agent.modules.providers.chatgpt.auth import ChatGPTAuthError, ChatGPTAuthManager
 from agent.modules.providers.chatgpt.factory import ChatGPTFactory
+from agent.modules.providers.chatgpt.storage import ChatGPTCredentialStore
+from agent.modules.providers.chatgpt.transfer import ChatGPTSessionTransfer
 from agent.modules.providers.provider import ProviderConfig, ProviderType
 from agent.modules.providers.profiles import EFFORT_PATTERN, parse_model_profiles
 from agent.modules.providers.context_window import DEFAULT_CONTEXT_WINDOW
@@ -142,7 +144,9 @@ __all__ = [
     "AnthropicFactory",
     "ChatGPTAuthError",
     "ChatGPTAuthManager",
+    "ChatGPTCredentialStore",
     "ChatGPTFactory",
+    "ChatGPTSessionTransfer",
     "ConfigProviderRepository",
     "GoogleFactory",
     "OpenAICompatibleFactory",
