@@ -842,4 +842,23 @@ export function registerTier1Tests(harness, ctx) {
       assertLessThanOrEqual(res.scrollWidth, vp.width, `Onboarding item on ${vp.width}px must fit without overflow`);
     });
   }
+
+  // -------------------------------------------------------------
+  // Feature 26: Touch Hover Contrast Safety
+  // -------------------------------------------------------------
+  harness.setFeature('F26: Touch Hover Contrast Safety');
+
+  harness.test('T1-F26-01: touch hover rules do not inherit parent backgrounds', () => {
+    ctx.css.load();
+    const unsafeRules = ctx.css.rules.filter((rule) => {
+      if (!rule.mediaQuery?.includes('hover: none') || !rule.selector.includes(':hover')) return false;
+      const background = rule.declarations['background'] ?? rule.declarations['background-color'] ?? '';
+      return background.includes('inherit');
+    });
+    assertEqual(
+      unsafeRules.length,
+      0,
+      `Touch hover rules must keep their own background: ${unsafeRules.map((rule) => rule.selector).join(', ')}`,
+    );
+  });
 }

@@ -766,7 +766,7 @@
   }
 }
 
-/* --- Touch devices: disable hover-only affordances ------------------- */
+/* --- Touch devices: reveal hover-only affordances --------------------- */
 @media (hover: none) and (pointer: coarse) {
   /* The .nav-history-action and similar are revealed only on hover. */
   .nav-history-action,
@@ -775,18 +775,10 @@
     pointer-events: auto;
   }
 
-  /* .select-control-trigger:hover background change becomes confusing
-     on touch — keep the resting state. */
-  .select-control-trigger:hover,
-  .btn:hover,
-  .model-picker-star:hover,
-  .brand-collapse-btn:hover,
-  .nav-history-all-btn:hover,
-  .settings-tab:hover,
-  .topbar .topbar-menu-toggle:hover,
-  .agent-config-option:hover {
-    background: inherit;
-  }
+  /* Do not reset hover backgrounds here. Touch devices keep :hover active
+     after a tap, and `background: inherit` resolves against the parent
+     element. In the dark theme that turns primary buttons black while
+     their label stays black. */
 }
 
 /* --- Tablet: settings tab pills scroll like on mobile ------------------ */
