@@ -157,6 +157,27 @@ def test_normalize_assistant_blocks_still_strips_non_text_blocks():
     assert normalized[0].content == "Visible answer"
 
 
+@pytest.mark.parametrize("signed_block", [
+    {"type": "text", "text": "", "extras": {"signature": "c2lnbmF0dXJl"}},
+    {"type": "thinking", "thinking": "hidden", "signature": "c2lnbmF0dXJl"},
+    {"type": "function_call_signature", "signature": "c2lnbmF0dXJl", "index": 0},
+    {"text": "", "thought_signature": "c2lnbmF0dXJl"},
+])
+def test_normalize_preserves_signed_assistant_blocks(signed_block):
+    message = AIMessage(
+        content=[{"type": "text", "text": "Calling echo."}, signed_block],
+        tool_calls=[{"name": "echo", "args": {}, "id": "echo-call"}],
+        response_metadata={"model_provider": "google_genai"},
+    )
+    original = message.model_dump()
+    restored = AIMessage.model_validate_json(message.model_dump_json())
+
+    normalized = normalize_messages_for_chat_model([restored])[0]
+
+    assert normalized.model_dump() == original
+    assert message.model_dump() == original
+
+
 def test_normalize_tool_mixed_image_and_file_omits_non_text():
     message = ToolMessage(
         content=[

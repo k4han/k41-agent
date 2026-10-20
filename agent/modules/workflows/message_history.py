@@ -53,6 +53,20 @@ def _assistant_text_from_content_list(content: list[Any]) -> tuple[str, bool]:
     return "".join(text_parts), saw_text_or_skipped_block
 
 
+def _has_assistant_signature(content: list[Any]) -> bool:
+    """Keep signed blocks intact so providers can replay their original state."""
+    for part in content:
+        if isinstance(part, dict):
+            extras = part.get("extras")
+            if (
+                part.get("signature")
+                or part.get("thought_signature")
+                or (isinstance(extras, dict) and extras.get("signature"))
+            ):
+                return True
+    return False
+
+
 def _human_text_from_part(part: Any) -> tuple[str, bool]:
     if isinstance(part, str):
         return part, True
@@ -233,6 +247,9 @@ def normalize_messages_for_chat_model(messages: list[BaseMessage]) -> list[BaseM
             continue
 
         if isinstance(message, AIMessage) and isinstance(content, list):
+            if _has_assistant_signature(content):
+                normalized_messages.append(message)
+                continue
             text_content, handled = _assistant_text_from_content_list(content)
             if handled:
                 normalized_messages.append(

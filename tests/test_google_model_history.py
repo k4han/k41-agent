@@ -40,11 +40,14 @@ def signed_history():
     ]
 
 
-@pytest.mark.parametrize("model_name", ["gemma-4-26b-a4b-it", "gemini-3-flash-preview"])
+@pytest.mark.parametrize("model_name", [
+    "gemma-4-26b-a4b-it", "gemini-3-flash-preview", "gemini-flash-lite-latest",
+])
 @pytest.mark.parametrize("mode", ["invoke", "ainvoke", "stream", "astream"])
 @pytest.mark.parametrize("normalize", [False, True])
+@pytest.mark.parametrize("signature_source", ["metadata", "content", "missing"])
 @pytest.mark.asyncio
-async def test_signed_history_at_google_http_boundary(monkeypatch, model_name, mode, normalize):
+async def test_signed_history_at_google_http_boundary(monkeypatch, model_name, mode, normalize, signature_source):
     calls = []
 
     def handle(request):
@@ -66,9 +69,9 @@ async def test_signed_history_at_google_http_boundary(monkeypatch, model_name, m
                     "code": 400, "message": "Request contains an invalid argument.", "status": "INVALID_ARGUMENT",
                 }})
         else:
-            assert parts[1]["thoughtSignature"] == SIGNATURE
-            if not normalize:
-                assert parts[0]["thoughtSignature"] == SIGNATURE
+            expected_signature = "skip_thought_signature_validator" if signature_source == "missing" else SIGNATURE
+            assert parts[1]["thoughtSignature"] == expected_signature
+            assert parts[0]["thoughtSignature"] == SIGNATURE
         response = {"candidates": [{"content": {"role": "model", "parts": [{"text": "Done."}]},
                                      "finishReason": "STOP"}], "modelVersion": model_name}
         if mode in ("stream", "astream"):
@@ -83,6 +86,10 @@ async def test_signed_history_at_google_http_boundary(monkeypatch, model_name, m
                               base_url="", api_key="test-key", default_model=model_name)
     model = GoogleFactory().create(provider, ModelConfig(model_name=model_name, disable_retries=True), "test-key")
     history = signed_history()
+    if signature_source != "metadata":
+        history[2].additional_kwargs = {}
+    if signature_source == "content":
+        history[2].content.append({"type": "function_call_signature", "signature": SIGNATURE, "index": 0})
     original = [message.model_dump() for message in history]
     messages = normalize_messages_for_chat_model(history) if normalize else history
     try:
@@ -98,6 +105,41 @@ async def test_signed_history_at_google_http_boundary(monkeypatch, model_name, m
             response = reduce(lambda left, right: left + right, chunks)
         assert response.text == "Done."
         assert len(calls) == 1
+        assert [message.model_dump() for message in history] == original
+    finally:
+        await model.aclose()
+
+
+@pytest.mark.parametrize("model_name", [
+    "gemini-flash-lite-latest", "models/gemini-flash-latest", "gemini-pro-latest",
+])
+@pytest.mark.asyncio
+async def test_latest_alias_repairs_only_active_steps_and_first_parallel_call(model_name):
+    history = [
+        HumanMessage(content="Previous turn"),
+        AIMessage(content="", tool_calls=[{"name": "echo", "args": {}, "id": "old"}]),
+        ToolMessage(content="old result", tool_call_id="old"),
+        HumanMessage(content=[{"type": "image", "base64": "YWJjZA==", "mime_type": "image/png"}]),
+        AIMessage(content="", tool_calls=[
+            {"name": "echo", "args": {}, "id": "first"},
+            {"name": "echo", "args": {}, "id": "parallel"},
+        ]),
+        ToolMessage(content="first result", tool_call_id="first"),
+        ToolMessage(content="parallel result", tool_call_id="parallel"),
+        AIMessage(content="", tool_calls=[{"name": "echo", "args": {}, "id": "second"}]),
+        ToolMessage(content="second result", tool_call_id="second"),
+        AIMessage(content="", tool_calls=[{"name": "echo", "args": {}, "id": "signed"}],
+                  additional_kwargs={SIGNATURES_KEY: {"signed": SIGNATURE}}),
+        ToolMessage(content="signed result", tool_call_id="signed"),
+    ]
+    original = [message.model_dump() for message in history]
+    model = GoogleChatModel(model=model_name, google_api_key="test-key")
+    try:
+        request = model._prepare_request(normalize_messages_for_chat_model(history), tools=[ECHO_TOOL])
+        signatures = [part.thought_signature for content in request["contents"]
+                      for part in content.parts or [] if part.function_call]
+        assert signatures == [None, "skip_thought_signature_validator", None,
+                              "skip_thought_signature_validator", base64.b64decode(SIGNATURE)]
         assert [message.model_dump() for message in history] == original
     finally:
         await model.aclose()
