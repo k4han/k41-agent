@@ -95,7 +95,7 @@ class AgentConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate_pool_effort(self):
-        from agent.modules.providers.model_pools import validate_pool_effort
+        from agent.modules.providers import validate_pool_effort
 
         validate_pool_effort(self.provider, self.reasoning_effort)
         return self

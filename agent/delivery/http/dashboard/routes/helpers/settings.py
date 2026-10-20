@@ -189,7 +189,7 @@ async def validate_default_model_update(
         return
 
     if default_provider == "@pool":
-        from agent.modules.providers.model_pools import ModelPoolConfig, POOL_PREFIX
+        from agent.modules.providers import ModelPoolConfig, POOL_PREFIX
 
         name = default_model_val.partition("/")[2]
         value = service.get(POOL_PREFIX + name)

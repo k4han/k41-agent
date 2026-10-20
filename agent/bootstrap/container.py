@@ -239,7 +239,7 @@ class AppContainer:
     def model_pool_service(self) -> Any:
         """Own model availability state for this process lifetime."""
         if self._model_pool_service is None:
-            from agent.modules.providers.model_pools import ModelPoolService
+            from agent.modules.providers import ModelPoolService
 
             self._model_pool_service = ModelPoolService(self.config_service, self.provider_service)
         return self._model_pool_service

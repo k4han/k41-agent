@@ -196,7 +196,7 @@ async def prepare_run_params(request: ChatRequest) -> dict[str, object]:
 
 
 def _validate_pool_request(request: ChatRequest | EditChatRequest) -> None:
-    from agent.modules.providers.model_pools import get_model_pool_service, selected_pool_name, validate_pool_effort
+    from agent.modules.providers import get_model_pool_service, selected_pool_name, validate_pool_effort
 
     card = get_catalog_service().get_agent_card(request.agent_name or "default")
     provider = request.provider or getattr(card, "provider", None)
@@ -214,7 +214,7 @@ def _validate_pool_request(request: ChatRequest | EditChatRequest) -> None:
 async def chat_sync(request: ChatRequest):
     """Send a chat message and return the full agent response synchronously."""
     params = await prepare_run_params(request)
-    from agent.modules.providers.model_pools import ModelPoolExhausted
+    from agent.modules.providers import ModelPoolExhausted
 
     try:
         response = await run_agent_full(**params)

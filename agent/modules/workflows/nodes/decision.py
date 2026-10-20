@@ -22,7 +22,7 @@ from agent.modules.decisions import (
     NoulQuestion,
 )
 from agent.modules.providers import get_resolved_chat_model, execute_model_call
-from agent.modules.providers.model_pools import should_propagate_pool_error
+from agent.modules.providers import should_propagate_pool_error
 from agent.modules.agents import render_agent_prompt
 from agent.modules.decisions import FILE_SELECTION_INSTRUCTIONS, FILE_INCLUSION_INSTRUCTIONS
 from agent.modules.usage import with_usage_tracking

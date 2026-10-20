@@ -14,12 +14,13 @@ def get_workflow_reasoning_effort_kwargs(
     context: "WorkflowContext | None", agent_config: "AgentConfig", resolved: "ResolvedChatModel",
 ) -> dict[str, Any]:
     """Apply card effort only to its model and reset overrides on fallback."""
+    provider_type = getattr(resolved, "provider_type", getattr(resolved, "provider_name", ""))
     card_effort = getattr(agent_config, "reasoning_effort", None)
     effort = getattr(context, "reasoning_effort", None)
     if getattr(resolved, "pool_name", None):
         if effort not in (None, "auto"):
             raise ValueError("Model pools only support automatic reasoning effort.")
-        return get_reasoning_effort_kwargs(resolved.provider_type, resolved.model_name, None,
+        return get_reasoning_effort_kwargs(provider_type, resolved.model_name, None,
                                           profile=getattr(resolved, "profile", None))
     if getattr(resolved, "used_fallback", False):
         effort = None
@@ -37,6 +38,6 @@ def get_workflow_reasoning_effort_kwargs(
         if card_selection == (resolved.provider_name, resolved.model_name):
             effort = card_effort
     return get_reasoning_effort_kwargs(
-        resolved.provider_type, resolved.model_name, effort,
+        provider_type, resolved.model_name, effort,
         profile=getattr(resolved, "profile", None),
     )

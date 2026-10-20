@@ -123,7 +123,7 @@ def with_usage_tracking(
     context_window: int | None = None,
     reserved_tokens: int | None = None,
 ) -> dict[str, Any]:
-    from agent.modules.providers.model_pools import pool_call_config
+    from agent.modules.providers import pool_call_config
 
     next_config = pool_call_config(config)
     handler = LLMUsageCallback(

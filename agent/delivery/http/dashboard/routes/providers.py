@@ -278,7 +278,7 @@ async def delete_dashboard_provider(
     if existing_name is None:
         raise HTTPException(status_code=404, detail=f"Provider not found: {provider_name}.")
 
-    from agent.modules.providers.model_pools import ModelPoolConfig, POOL_PREFIX
+    from agent.modules.providers import ModelPoolConfig, POOL_PREFIX
 
     for key, value in service.get_all().items():
         if key.startswith(POOL_PREFIX) and any(

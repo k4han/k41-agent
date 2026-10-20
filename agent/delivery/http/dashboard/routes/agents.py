@@ -32,7 +32,7 @@ router = APIRouter()
 
 
 def _validate_pool_reference(body, service) -> None:
-    from agent.modules.providers.model_pools import ModelPoolConfig, POOL_PREFIX
+    from agent.modules.providers import ModelPoolConfig, POOL_PREFIX
 
     if body.provider.strip() == "@pool":
         value = service.get(POOL_PREFIX + body.model.strip())

@@ -18,7 +18,21 @@ from agent.modules.providers.provider import ProviderConfig, ProviderType
 from agent.modules.providers.profiles import EFFORT_PATTERN, parse_model_profiles
 from agent.modules.providers.context_window import DEFAULT_CONTEXT_WINDOW
 from agent.modules.providers.context_budget import model_input_budget, model_response_reserve
-from agent.modules.providers.model_pools import execute_model_call, get_model_pool_service, selected_pool_name
+from agent.modules.providers.model_pools import (
+    ModelPoolConfig,
+    ModelPoolExhausted,
+    ModelPoolService,
+    POOL_NAME_PATTERN,
+    POOL_PREFIX,
+    POOL_PROVIDER,
+    PoolMember,
+    execute_model_call,
+    get_model_pool_service,
+    pool_call_config,
+    selected_pool_name,
+    should_propagate_pool_error,
+    validate_pool_effort,
+)
 from agent.modules.providers.repository import ConfigProviderRepository
 from agent.modules.providers.service import ProviderService
 from agent.modules.providers.internal_loader import load_internal_providers
@@ -174,6 +188,17 @@ __all__ = [
     "get_resolved_chat_model",
     "execute_model_call",
     "get_model_pool_service",
+    "selected_pool_name",
+    "validate_pool_effort",
+    "pool_call_config",
+    "should_propagate_pool_error",
+    "ModelPoolConfig",
+    "ModelPoolExhausted",
+    "ModelPoolService",
+    "PoolMember",
+    "POOL_NAME_PATTERN",
+    "POOL_PREFIX",
+    "POOL_PROVIDER",
     "list_provider_model_catalog",
     "list_provider_model_catalogs",
     "list_providers",

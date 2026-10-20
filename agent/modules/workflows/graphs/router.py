@@ -41,7 +41,7 @@ from agent.modules.workflows.constants import (
     STRIP_QUOTES,
 )
 from agent.modules.providers import get_resolved_chat_model, execute_model_call
-from agent.modules.providers.model_pools import should_propagate_pool_error
+from agent.modules.providers import should_propagate_pool_error
 from agent.modules.workflows.model_effort import get_workflow_reasoning_effort_kwargs
 from agent.modules.usage import with_usage_tracking
 from agent.modules.prompt_variables import get_runtime_prompt_variable_values

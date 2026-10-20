@@ -9,7 +9,7 @@ from agent.delivery.http.dashboard.routes.helpers.agents import invalidate_agent
 from agent.delivery.http.dashboard.routes.helpers.deps import get_app_container, get_request_config_service
 from agent.delivery.http.dashboard.routes.helpers.providers import normalize_provider_name, provider_entries_from_flat_config
 from agent.delivery.http.dashboard.routes.helpers.settings import delete_config_tree, update_config_settings
-from agent.modules.providers.model_pools import ModelPoolConfig, POOL_NAME_PATTERN, POOL_PREFIX
+from agent.modules.providers import ModelPoolConfig, POOL_NAME_PATTERN, POOL_PREFIX
 
 router = APIRouter(prefix="/dashboard-api/model-pools")
 
