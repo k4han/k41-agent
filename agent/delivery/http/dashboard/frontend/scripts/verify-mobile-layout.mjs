@@ -199,6 +199,16 @@ try {
         assert.equal(await js('getComputedStyle(document.querySelector(".sidebar")).visibility'), 'visible');
         assert.equal(await js(`Array.from(document.querySelectorAll('.sidebar .nav-link .nav-label')).every(el =>
           getComputedStyle(el).display !== 'none' && el.getBoundingClientRect().width > 0)`), true, 'Drawer labels must remain visible');
+        assert.equal(await js(`(() => {
+          const gear = document.querySelector('.sidebar-footer .btn-icon');
+          const footer = document.querySelector('.sidebar-footer');
+          // Settings pages use a different sidebar footer without the gear.
+          if (!gear || !footer) return true;
+          const gearRect = gear.getBoundingClientRect();
+          const footerRect = footer.getBoundingClientRect();
+          return gearRect.right <= footerRect.right + 1
+            && gearRect.left >= footerRect.left + footerRect.width / 2;
+        })()`), true, 'Settings button must stay on the right edge of the drawer footer');
         await tap('.sidebar a.nav-link');
         await until(() => js('!document.querySelector(".app-layout--drawer-open")'), 'navigation closes drawer');
         await tap('.topbar-menu-toggle');

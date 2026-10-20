@@ -389,7 +389,11 @@
     flex-direction: column;
   }
 
+  /* The footer is a flex container on mobile, so its row becomes a flex
+     item and would shrink to its content width. Stretch it so
+     `space-between` keeps the settings button on the right edge. */
   .app-layout .sidebar .sidebar-footer-row {
+    width: 100%;
     flex-direction: row;
   }
 
