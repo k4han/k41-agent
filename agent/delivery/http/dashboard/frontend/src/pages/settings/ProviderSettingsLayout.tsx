@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from "@solidjs/router";
-import { BrainCircuit, Globe, ServerCog, Workflow } from "lucide-solid";
+import { BrainCircuit, Globe, Layers, ServerCog, Workflow } from "lucide-solid";
 import { SettingsLayout } from "./SettingsLayout";
 import { SettingsTabBar, type SettingsTabItem } from "./shared";
 
@@ -8,7 +8,7 @@ export { currentProviderTab } from "@/lib/providerRoutes";
 
 const TABS: ReadonlyArray<SettingsTabItem<ProviderTab>> = [
   { value: "llm", label: "Models", icon: () => <Workflow size={13} /> },
-  { value: "pools", label: "Model Pools", icon: () => <Workflow size={13} /> },
+  { value: "pools", label: "Model Pools", icon: () => <Layers size={13} /> },
   { value: "web", label: "Search & Web", icon: () => <Globe size={13} /> },
   { value: "workspace", label: "Execution Environments", icon: () => <ServerCog size={13} /> },
   { value: "decision", label: "Decision Model", icon: () => <BrainCircuit size={13} /> },
