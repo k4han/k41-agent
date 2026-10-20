@@ -2,7 +2,8 @@
   --chat-composer-action-gap: 6px;
   gap: 6px;
   padding: 6px 10px;
-  border-top-color: color-mix(in srgb, var(--border) 65%, transparent);
+  border-top: 0;
+  font-size: 12px;
   box-sizing: border-box;
 }
 
@@ -29,6 +30,8 @@
   flex: 0 1 auto;
   min-width: 0;
   width: auto;
+  padding: 0;
+  gap: 8px;
 }
 
 .chat-composer .agent-model-badge {
@@ -41,18 +44,35 @@
   background: transparent;
   border: 0;
   box-shadow: none;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.agent-model-divider {
+  flex: 0 0 1px;
+  height: 16px;
+  background: var(--border-strong);
+}
+
+.chat-composer .agent-model-badge-icon {
+  display: grid;
+  color: var(--muted);
 }
 
 .chat-composer .agent-model-badge-agent,
 .chat-composer .agent-model-badge-model {
   min-width: 0;
+  max-width: none;
   flex: 0 1 auto;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--fg);
 }
 
 .agent-model-badge-effort {
   flex: 0 0 auto;
   color: var(--muted);
-  font-size: var(--font-size-chat);
+  font-size: 10px;
   font-weight: 400;
   white-space: nowrap;
 }
@@ -244,6 +264,14 @@
   max-width: 240px;
 }
 
+.chat-header-right .composer-workspace-picker {
+  max-width: min(240px, 36vw);
+}
+
+.chat-header-right .composer-workspace-backend {
+  flex: 0 0 auto;
+}
+
 .composer-workspace-trigger {
   display: inline-flex;
   align-items: center;
@@ -298,6 +326,7 @@
 
 .composer-workspace-popover {
   position: fixed;
+  transform: translate(-50%, -50%);
   z-index: var(--z-composer-menu);
   display: flex;
   flex-direction: column;
@@ -377,32 +406,23 @@
     gap: 4px;
   }
 
-  .composer-workspace-picker {
-    flex: 0 0 40px;
-  }
-
-  .composer-workspace-trigger {
-    width: 40px;
-    padding: 0;
-    justify-content: center;
-  }
-
-  .composer-workspace-label,
-  .composer-workspace-backend,
-  .composer-workspace-lock,
-  .composer-workspace-caret,
-  .chat-composer .agent-model-badge-icon {
-    display: none;
-  }
-
-  .chat-composer .agent-model-badge-agent,
-  .chat-composer .agent-model-badge-model {
-    max-width: none;
-    color: var(--fg);
+  .chat-composer-tier-selectors > .agent-model-picker-wrapper {
+    gap: 4px;
   }
 
   .chat-composer .agent-model-badge {
     padding-inline: 4px;
+  }
+}
+
+@media (max-width: 640px) {
+  .chat-header-right .composer-workspace-picker {
+    max-width: min(180px, 40vw);
+  }
+
+  .chat-header-right .composer-workspace-backend,
+  .chat-header-right .composer-workspace-lock {
+    display: none;
   }
 }
 

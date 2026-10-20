@@ -1,9 +1,9 @@
 import {
+  ArrowUp,
   FileText,
   Image as ImageIcon,
   Plus,
   Paperclip,
-  Send,
   Square,
   Trash2,
   Upload,
@@ -13,8 +13,6 @@ import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid
 import { Portal } from "solid-js/web";
 
 import { AgentModelPicker } from "@/components/AgentModelPicker";
-import { ComposerWorkspacePicker } from "@/components/ComposerWorkspacePicker";
-import type { WorkspaceSelectionDraft } from "@/components/WorkspaceSelector";
 import { ChatTodos, type TodoProgress } from "@/components/ChatTodos";
 import { ContextWindowIndicator, type ContextWindowData } from "@/components/ContextWindowIndicator";
 import { Dialog } from "@/components/Dialog";
@@ -30,13 +28,6 @@ import type { AgentCard, AgentChatPayload, WorkspaceRef } from "@/types";
 
 export interface ChatComposerProps {
   workspace?: WorkspaceRef | null;
-  projectWorkspace: WorkspaceRef | null;
-  workingDir: string;
-  defaultWorkingDir: string;
-  workspaceSelection: WorkspaceSelectionDraft | null;
-  workspaceLocked: boolean;
-  workspaceDisabled: boolean;
-  onWorkspaceSelectionChange: (selection: WorkspaceSelectionDraft) => void;
   prompt: string;
   onPromptChange: (value: string) => void;
   onSend: () => void;
@@ -527,15 +518,6 @@ export function ChatComposer(props: ChatComposerProps) {
             onReasoningEffortChange={props.onReasoningEffortChange}
             disabled={props.composerDisabled}
           />
-          <ComposerWorkspacePicker
-            workingDir={props.workingDir}
-            defaultWorkingDir={props.defaultWorkingDir}
-            workspace={props.projectWorkspace}
-            selection={props.workspaceSelection}
-            locked={props.workspaceLocked}
-            disabled={props.workspaceDisabled}
-            onSelectionChange={props.onWorkspaceSelectionChange}
-          />
         </div>
         <div class="chat-composer-actions">
           <Show when={props.currentThreadId}>
@@ -557,7 +539,7 @@ export function ChatComposer(props: ChatComposerProps) {
                   title="Send message (Enter)"
                   aria-label="Send message"
                 >
-                  <Send size={15} />
+                  <ArrowUp size={16} />
                 </button>
               }
             >

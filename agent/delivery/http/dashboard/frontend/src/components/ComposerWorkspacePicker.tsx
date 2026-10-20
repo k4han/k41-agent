@@ -9,7 +9,7 @@ import { isTempWorkspace, workspaceDisplayLabel, workspaceDisplayLabelFromValues
 export function ComposerWorkspacePicker(props: WorkspaceSelectorProps) {
   const [open, setOpen] = createSignal(false);
   const [nestedDialogOpen, setNestedDialogOpen] = createSignal(false);
-  const [position, setPosition] = createSignal({ left: 8, edge: 8, width: 540, maxHeight: 480, above: true });
+  const [position, setPosition] = createSignal({ left: 0, top: 0, width: 540, maxHeight: 480 });
   const panelId = createUniqueId();
   let triggerRef: HTMLButtonElement | undefined;
   let panelRef: HTMLDivElement | undefined;
@@ -36,29 +36,22 @@ export function ComposerWorkspacePicker(props: WorkspaceSelectorProps) {
   };
 
   const updatePosition = () => {
-    if (!triggerRef) return;
-    const rect = triggerRef.getBoundingClientRect();
     const viewport = window.visualViewport;
     const viewportTop = viewport?.offsetTop || 0;
     const viewportLeft = viewport?.offsetLeft || 0;
     const viewportWidth = viewport?.width || window.innerWidth;
-    const viewportBottom = viewportTop + (viewport?.height || window.innerHeight);
-    const width = Math.min(540, viewportWidth - 16);
-    const above = rect.top - viewportTop >= viewportBottom - rect.bottom;
+    const viewportHeight = viewport?.height || window.innerHeight;
     setPosition({
-      left: Math.max(viewportLeft + 8, Math.min(rect.left, viewportLeft + viewportWidth - width - 8)),
-      edge: above ? window.innerHeight - rect.top + 6 : rect.bottom + 6,
-      width,
-      maxHeight: Math.max(0, Math.min(480, above ? rect.top - viewportTop - 14 : viewportBottom - rect.bottom - 14)),
-      above,
+      left: viewportLeft + viewportWidth / 2,
+      top: viewportTop + viewportHeight / 2,
+      width: Math.max(0, Math.min(540, viewportWidth - 16)),
+      maxHeight: Math.max(0, Math.min(480, viewportHeight - 16)),
     });
   };
 
   createEffect(() => {
     if (!open()) return;
     updatePosition();
-    const observer = new ResizeObserver(updatePosition);
-    if (triggerRef) observer.observe(triggerRef);
     const onPointerDown = (event: PointerEvent) => {
       if (nestedDialogOpen()) return;
       const target = event.target as Node | null;
@@ -95,7 +88,6 @@ export function ComposerWorkspacePicker(props: WorkspaceSelectorProps) {
     window.visualViewport?.addEventListener("scroll", updatePosition);
     onCleanup(() => {
       window.clearTimeout(focusTimer);
-      observer.disconnect();
       document.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("resize", updatePosition);
@@ -103,13 +95,6 @@ export function ComposerWorkspacePicker(props: WorkspaceSelectorProps) {
       window.visualViewport?.removeEventListener("resize", updatePosition);
       window.visualViewport?.removeEventListener("scroll", updatePosition);
     });
-  });
-
-  createEffect(() => {
-    props.workspace;
-    props.selection;
-    props.locked;
-    if (open()) updatePosition();
   });
 
   return (
@@ -142,8 +127,7 @@ export function ComposerWorkspacePicker(props: WorkspaceSelectorProps) {
             aria-label="Project and backend"
             style={{
               left: `${position().left}px`,
-              top: position().above ? "auto" : `${position().edge}px`,
-              bottom: position().above ? `${position().edge}px` : "auto",
+              top: `${position().top}px`,
               width: `${position().width}px`,
               "max-height": `${position().maxHeight}px`,
             }}

@@ -26,6 +26,7 @@ const workspaceResolutions = [];
 let composerScenario = false;
 let failRepositories = false;
 let chatResponse;
+const modelName = 'demo-model-with-a-long-unabridged-name';
 const fixtures = {
   '/dashboard-api/catalog': { backends: [
     { name: 'local', title: 'Local', enabled: true },
@@ -35,8 +36,8 @@ const fixtures = {
   '/dashboard-api/github': { repositories: [{ repository_id: 42, full_name: 'team/composer-project', default_branch: 'main' }] },
   '/dashboard-api/sandboxes': { sandboxes: [{ sandbox_id: 'composer-sandbox', label: 'Composer sandbox', backend: 'daytona', root: '/workspace' }] },
   '/dashboard-api/workspace/browse': { path: root, parent: path.dirname(root), entries: [], roots: [], truncated: false },
-  '/dashboard-api/agents/cards': { cards: [{ name: 'default', display_name: 'Default agent with a long display name', provider: 'test', model: 'demo-model', valid: true }] },
-  '/dashboard-api/agents/providers': { provider_names: ['test'], default_provider: 'test', default_model: 'demo-model', model_catalogs: [{ provider: 'test', provider_type: 'openai', default_model: 'demo-model', models: [{ id: 'demo-model', label: 'Demo model', source: 'config' }] }] },
+  '/dashboard-api/agents/cards': { cards: [{ name: 'default', display_name: 'Default agent with a long display name', provider: 'test', model: modelName, valid: true }] },
+  '/dashboard-api/agents/providers': { provider_names: ['test'], default_provider: 'test', default_model: modelName, model_catalogs: [{ provider: 'test', provider_type: 'openai', default_model: modelName, models: [{ id: modelName, label: 'Demo model', source: 'config' }] }] },
   '/dashboard-api/chat-history/workspace-chat': {
     thread_id: 'workspace-chat',
     messages: Array.from({ length: 30 }, (_, index) => ({
@@ -216,17 +217,29 @@ try {
         const composer = document.querySelector('.chat-composer');
         const bar = composer.querySelector('.chat-composer-toolbar');
         const outer = bar.getBoundingClientRect();
-        const controls = ['.chat-composer-more-wrapper > button', '.agent-picker-trigger', '.model-picker-trigger', '.composer-workspace-trigger', '.chat-composer-send'];
+        const controls = ['.chat-composer-more-wrapper > button', '.agent-picker-trigger', '.model-picker-trigger', '.chat-composer-send'];
         const rects = controls.map(selector => composer.querySelector(selector)).filter(el => getComputedStyle(el).display !== 'none').map(el => el.getBoundingClientRect());
         return {
           fits: rects.every(r => r.left >= outer.left && r.right <= outer.right + 1 && r.width >= 40 && r.height >= 40),
           row: rects.every(r => Math.abs(r.top - rects[0].top) < 1),
           overflow: bar.scrollWidth > bar.clientWidth,
           separateEffort: !!composer.querySelector('.chat-effort-button'),
-          project: getComputedStyle(composer.querySelector('.composer-workspace-label')).display !== 'none',
+          namesClipped: ['.agent-model-badge-agent', '.agent-model-badge-model'].map(selector => {
+            const label = composer.querySelector(selector);
+            return label.scrollWidth > label.clientWidth;
+          }),
+          projectInHeader: !!document.querySelector('.chat-header-right .composer-workspace-trigger') && !composer.querySelector('.composer-workspace-trigger'),
+          settingsFontSize: ['.agent-picker-trigger', '.agent-model-badge-agent', '.agent-model-badge-model', '.agent-model-badge-effort'].every(selector => {
+            const element = composer.querySelector(selector);
+            return !element || getComputedStyle(element).fontSize === (selector === '.agent-model-badge-effort' ? '10px' : '12px');
+          }),
+          divider: (() => {
+            const divider = composer.querySelector('.agent-model-divider').getBoundingClientRect();
+            return divider.width === 1 && divider.height === 16 && divider.left >= rects[1].right && divider.right <= rects[2].left;
+          })(),
           contentWidth: composer.clientWidth,
           grouped: composer.querySelector('.agent-picker-trigger').parentElement === composer.querySelector('.model-picker-trigger').parentElement,
-          packed: rects.slice(1, -1).every((r, index) => r.left >= rects[index].right && r.left - rects[index].right <= 12),
+          packed: rects.slice(1, -1).every((r, index) => r.left >= rects[index].right && r.left - rects[index].right <= 20),
           sendRight: outer.right - rects.at(-1).right <= 12,
           contextBesideSend: (() => {
             const context = composer.querySelector('.context-window-circle-btn')?.getBoundingClientRect();
@@ -238,7 +251,10 @@ try {
       assert.equal(bounds.fits && bounds.row && !bounds.overflow, true, `single-row composer at ${width}px, dark=${dark}: ${JSON.stringify(bounds)}`);
       assert.equal(bounds.grouped && bounds.packed && bounds.sendRight && bounds.contextBesideSend, true, `grouped left controls and right send at ${width}px: ${JSON.stringify(bounds)}`);
       assert.equal(bounds.separateEffort, false);
-      assert.equal(bounds.project, width - 2 >= 560);
+      assert.equal(await js('document.querySelector(".agent-model-badge-model").textContent'), modelName, 'model name must not be shortened before layout');
+      if (width === 960) assert.deepEqual(bounds.namesClipped, [false, false], 'wide composer shows full agent and model names');
+      if (width === 320) assert.ok(bounds.namesClipped.some(Boolean), 'narrow composer truncates names to keep controls visible');
+      assert.equal(bounds.projectInHeader && bounds.settingsFontSize && bounds.divider, true, `header project and compact settings at ${width}px: ${JSON.stringify(bounds)}`);
       await click('.agent-picker-trigger');
       await until(() => js('!!document.querySelector(".agent-card-item")'), 'independent agent menu');
       assert.equal(await js('!!document.querySelector(".model-item-row")'), false);
@@ -250,8 +266,10 @@ try {
       await openPicker();
       assert.equal(await js(`(() => {
         const r = document.querySelector('.composer-workspace-popover').getBoundingClientRect();
-        return r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight;
-      })()`), true, 'project popover stays within the viewport');
+        return r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight
+          && Math.abs(r.left + r.width / 2 - innerWidth / 2) <= 1
+          && Math.abs(r.top + r.height / 2 - innerHeight / 2) <= 1;
+      })()`), true, 'project dialog stays centered within the viewport');
       await escape();
       await until(() => js('!document.querySelector(".composer-workspace-popover")'), 'Escape closes project popover');
       assert.equal(await js('document.activeElement === document.querySelector(".composer-workspace-trigger")'), true, 'Escape restores project trigger focus');

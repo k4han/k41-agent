@@ -514,9 +514,9 @@
 
 /* Stop Button */
 .chat-composer-stop {
-  background: color-mix(in srgb, var(--danger, #dc2626) 12%, var(--surface-2));
-  color: var(--danger, #dc2626);
-  border: 1px solid color-mix(in srgb, var(--danger, #dc2626) 35%, transparent);
+  background: var(--fg);
+  color: var(--bg);
+  border: 1px solid var(--fg);
   border-radius: 6px;
   width: 40px;
   height: 40px;
@@ -526,16 +526,16 @@
 }
 
 .chat-composer-stop:hover {
-  background: color-mix(in srgb, var(--danger, #dc2626) 22%, var(--surface-2));
-  color: var(--danger, #dc2626);
+  background: var(--fg);
+  color: var(--bg);
 }
 
 @keyframes stopPulse {
   0%, 100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger, #dc2626) 30%, transparent);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--fg) 30%, transparent);
   }
   50% {
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger, #dc2626) 0%, transparent);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--fg) 0%, transparent);
   }
 }
 

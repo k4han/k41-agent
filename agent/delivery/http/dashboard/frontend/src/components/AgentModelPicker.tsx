@@ -57,9 +57,6 @@ export function formatShortModelName(provider: string, model: string): string {
   if (name.includes("gemini-2.0-flash")) return "Gemini 2.0 Flash";
   if (name.includes("gemini-1.5-pro")) return "Gemini 1.5 Pro";
   if (name.includes("gemini-1.5-flash")) return "Gemini 1.5 Flash";
-  if (name.length > 20) {
-    return name.slice(0, 18) + "...";
-  }
   return name;
 }
 
@@ -327,6 +324,7 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
         <span class="agent-model-badge-agent">{currentAgentName()}</span>
         <ChevronDown size={13} class={`agent-model-badge-caret ${open() && activePicker() === "agent" ? "is-open" : ""}`} />
       </button>
+      <span class="agent-model-divider" aria-hidden="true" />
       <button
         ref={modelTriggerRef}
         class={`agent-model-badge model-picker-trigger ${open() && activePicker() === "model" ? "is-open" : ""}`}
@@ -338,6 +336,9 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
         aria-haspopup="dialog"
         aria-expanded={open() && activePicker() === "model"}
       >
+        <span class="agent-model-badge-icon">
+          <Sparkles size={14} />
+        </span>
         <span class="agent-model-badge-model">{shortModelLabel()}</span>
         <Show when={selectedEffortLabel()}>
           <span class="agent-model-badge-effort">{selectedEffortLabel()}</span>

@@ -9,6 +9,7 @@ import { batch, createEffect, createMemo, createSignal, For, onCleanup, onMount,
 
 import { AppShell } from "@/components/AppShell";
 import { ChatComposer } from "@/components/ChatComposer";
+import { ComposerWorkspacePicker } from "@/components/ComposerWorkspacePicker";
 import { Dialog } from "@/components/Dialog";
 import { Markdown } from "@/components/Markdown";
 import { ChatThreadBadges } from "@/components/ChatThreadBadges";
@@ -1905,6 +1906,15 @@ export function ChatPage() {
                   </div>
                 </div>
                 <div class="chat-header-right">
+                  <ComposerWorkspacePicker
+                    workingDir={workingDir()}
+                    defaultWorkingDir={defaultWorkingDir()}
+                    workspace={workspaceRef()}
+                    selection={workspaceSelection()}
+                    locked={workspaceLocked()}
+                    disabled={conversationBusy()}
+                    onSelectionChange={setWorkspaceDraft}
+                  />
                   <Show when={!explorer.open()}>
                     <button
                       class="chat-header-workspace-btn"
@@ -1959,13 +1969,6 @@ export function ChatPage() {
               />
               <ChatComposer
                 workspace={workspaceRef() || localWorkspaceRef(workingDir())}
-                projectWorkspace={workspaceRef()}
-                workingDir={workingDir()}
-                defaultWorkingDir={defaultWorkingDir()}
-                workspaceSelection={workspaceSelection()}
-                workspaceLocked={workspaceLocked()}
-                workspaceDisabled={conversationBusy()}
-                onWorkspaceSelectionChange={setWorkspaceDraft}
                 setChatPromptRef={(el) => (chatPromptRef = el)}
                 chatPromptRef={(el) => (chatPromptRef = el)}
                 prompt={prompt()}
