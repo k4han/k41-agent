@@ -192,6 +192,24 @@
   gap: 8px;
   margin-top: 10px;
   padding-left: 22px;
+  max-height: 220px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.chat-todos-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.chat-todos-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-todos-list::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
 }
 
 .chat-todo-item {

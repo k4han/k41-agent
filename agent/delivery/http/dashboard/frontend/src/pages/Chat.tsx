@@ -194,7 +194,7 @@ export function ChatPage() {
   const [workspaceSelection, setWorkspaceSelection] = createSignal<WorkspaceSelectionDraft | null>(null);
   const [defaultWorkingDir, setDefaultWorkingDir] = createSignal("");
   const [prompt, setPrompt] = createSignal("");
-  const [todosExpanded, setTodosExpanded] = createSignal(true);
+  const [todosExpanded, setTodosExpanded] = createSignal(false);
   const [recursionLimitReached, setRecursionLimitReached] = createSignal(false);
   const [activeSession, setActiveSession] = createSignal<ActiveSession | null>(null);
   const [initializedWorkspaces, setInitializedWorkspaces] = createSignal(new Set<string>());
