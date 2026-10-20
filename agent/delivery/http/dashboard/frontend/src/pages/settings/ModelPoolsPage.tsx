@@ -166,6 +166,14 @@ export function ModelPoolsPage() {
     setDirty(true);
   };
 
+  const addMember = () => {
+    const catalog = catalogs()[0];
+    if (!catalog) return;
+    update({
+      members: [...form().members, { provider: catalog.provider, model: catalog.default_model || "" }],
+    });
+  };
+
   const move = (index: number, direction: number) => {
     const members = [...form().members];
     const next = index + direction;
@@ -452,11 +460,7 @@ export function ModelPoolsPage() {
                     class="btn btn-sm"
                     type="button"
                     disabled={busy() || !catalogs().length}
-                    onClick={() =>
-                      update({
-                        members: [...form().members, { provider: catalogs()[0]?.provider || "", model: "" }],
-                      })
-                    }
+                    onClick={addMember}
                   >
                     <Plus size={14} /> Add Model
                   </button>
@@ -472,11 +476,7 @@ export function ModelPoolsPage() {
                           class="btn btn-sm btn-primary"
                           type="button"
                           disabled={busy() || !catalogs().length}
-                          onClick={() =>
-                            update({
-                              members: [{ provider: catalogs()[0]?.provider || "", model: "" }],
-                            })
-                          }
+                          onClick={addMember}
                         >
                           <Plus size={14} /> Add Model
                         </button>
