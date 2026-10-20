@@ -231,6 +231,11 @@
   }
 
   .chat-shell-resizable.workspace-open .workspace-drawer {
+    left: 0;
+    width: 100%;
+    max-width: 100%;
+    border-left: 0;
+    box-shadow: none;
     transform: translate3d(0, 0, 0);
     visibility: visible;
   }
@@ -239,6 +244,16 @@
     display: block;
     transform: translate3d(100%, 0, 0);
     visibility: hidden;
+  }
+
+  /* Full-screen workspace sheet: respect device safe areas so the
+     directory controls and tabs stay reachable on notched phones. */
+  .chat-shell-resizable.workspace-open .workspace-explorer {
+    padding-top: var(--safe-top);
+    padding-right: var(--safe-right);
+    padding-bottom: var(--safe-bottom);
+    padding-left: var(--safe-left);
+    box-sizing: border-box;
   }
 
   .workspace-resize-handle {

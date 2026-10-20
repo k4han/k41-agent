@@ -570,6 +570,16 @@ try {
   const messageSelectors = ['.message.user .message-text', '.message-markdown', '.message-markdown .markdown-code-frame pre code', '.message-markdown td', '.workspace-tree-row'];
   assert.deepEqual(await fontSizes(messageSelectors), messageSelectors.map(() => '14px'), 'messages, code, tables, and file rows use 14px text');
   await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await delay(300);
+  const mobileDrawerBounds = await js(`(() => {
+    const drawer = document.querySelector('.workspace-drawer').getBoundingClientRect();
+    return { left: drawer.left, width: drawer.width, viewport: innerWidth };
+  })()`);
+  assert.equal(
+    mobileDrawerBounds.left <= 1 && Math.abs(mobileDrawerBounds.width - mobileDrawerBounds.viewport) <= 1,
+    true,
+    `workspace drawer fills the mobile viewport: ${JSON.stringify(mobileDrawerBounds)}`,
+  );
   assert.deepEqual(await fontSizes(messageSelectors), messageSelectors.map(() => '14px'), 'mobile retains readable message and workspace text');
   assert.deepEqual(await fontSizes(['.chat-prompt-input']), ['16px'], 'mobile input prevents automatic zoom');
   fixtures['/dashboard-api/chat-history/workspace-chat'].messages.push(
