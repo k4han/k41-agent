@@ -205,6 +205,7 @@ class AppContainer:
     _scheduler: Any = field(default=None, repr=False)
     _scheduler_sync_engine: Any = field(default=None, repr=False)
     _provider_service: Any = field(default=None, repr=False)
+    _model_pool_service: Any = field(default=None, repr=False)
     _chatgpt_auth_manager: Any = field(default=None, repr=False)
     _decision_service: Any = field(default=None, repr=False)
     _persistence_ready: bool = field(default=False, repr=False)
@@ -232,6 +233,16 @@ class AppContainer:
     def runtime_settings(self) -> Any:
         """Live RuntimeSettings derived on each access, never snapshotted."""
         return self.config_service.get_runtime_settings()
+
+    @property
+    @_locked_lazy
+    def model_pool_service(self) -> Any:
+        """Own model availability state for this process lifetime."""
+        if self._model_pool_service is None:
+            from agent.modules.providers.model_pools import ModelPoolService
+
+            self._model_pool_service = ModelPoolService(self.config_service, self.provider_service)
+        return self._model_pool_service
 
     @property
     @_locked_lazy

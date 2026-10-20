@@ -128,6 +128,61 @@ def cached_llm_node(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_pool_rebuilds_context_and_effort_and_commits_only_successful_history(cached_llm_node, monkeypatch):
+    from agent.modules.providers.model_pools import ModelPoolService
+    from agent.modules.providers.models import ResolvedChatModel
+    from agent.modules.providers.provider import ProviderConfig, ProviderType
+    from langchain_core.messages import RemoveMessage
+
+    pool_value = {"members": [{"provider": "primary", "model": "first"}, {"provider": "backup", "model": "second"}], "retry_count": 0}
+    service = ModelPoolService(
+        SimpleNamespace(get=lambda key: pool_value, get_all=lambda: {"llm.model_pools.small": pool_value}),
+        SimpleNamespace(get_provider=lambda name: ProviderConfig(name=name, provider_type=ProviderType.OPENAI_COMPATIBLE,
+                                                                 base_url="", api_key="test", default_model="m")),
+    )
+    prepared, calls = [], []
+
+    class Model:
+        def __init__(self, name):
+            self.name = name
+
+        def bind_tools(self, tools, **kwargs):
+            calls.append((self.name, kwargs))
+            return self
+
+        async def ainvoke(self, messages, config=None):
+            if self.name == "primary":
+                raise TimeoutError("Unavailable")
+            assert messages[-1].content == "prepared-backup"
+            assert config["metadata"]["pool_name"] == "small"
+            return AIMessage(content="success")
+
+    def resolve(name, member, temperature=None):
+        effort = "low" if member.provider == "primary" else "high"
+        return ResolvedChatModel(model=Model(member.provider), provider_name=member.provider,
+                                 provider_type="openai_compatible", model_name=member.model, pool_name=name,
+                                 context_window=200000 if effort == "low" else 32000,
+                                 profile={"reasoning_effort_levels": [effort], "reasoning_effort_default": effort})
+
+    async def prepare(history, *, resolved, context, **kwargs):
+        assert history[0].content == "original"
+        assert not context.channel_trim_applied
+        context.channel_trim_applied = True
+        prepared.append((resolved.provider_name, resolved.context_window))
+        return [HumanMessage(content="prepared-" + resolved.provider_name)], [RemoveMessage(id="old-" + resolved.provider_name)]
+
+    monkeypatch.setattr(service, "_resolve", resolve)
+    monkeypatch.setattr("agent.modules.providers.model_pools.get_model_pool_service", lambda: service)
+    monkeypatch.setattr(llm_node_module, "get_resolved_chat_model", lambda **kwargs: service.preview("small"))
+    monkeypatch.setattr(llm_node_module, "prepare_model_context", prepare)
+    result = await cached_llm_node.run(messages=[HumanMessage(content="original")], allowed_tool_names=["read"])
+    assert prepared == [("primary", 200000), ("backup", 32000)]
+    assert calls == [("primary", {"reasoning_effort": "low"}), ("backup", {"reasoning_effort": "high"})]
+    assert [message.id for message in result["messages"][:-1]] == ["old-backup"]
+    assert result["messages"][-1].content == "success"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("tool_names", [["skill", "read"], ["read"]])
 async def test_invalid_skill_directory_does_not_block_llm_turns(
     cached_llm_node, isolated_container, tmp_path, monkeypatch, tool_names,

@@ -55,6 +55,7 @@ function modelLabel(model: string): string {
 }
 
 function selectionLabel(provider: string, model: string, resolveDefault?: boolean, defaultModel?: string): string {
+  if (provider === "@pool") return model || "Select a model pool";
   if (resolveDefault && (!model || model === "provider default")) {
     return `${provider}/${defaultModel || "default model"}`;
   }
@@ -539,7 +540,7 @@ export function ModelPicker(props: ModelPickerProps) {
             <For each={renderGroups()}>
               {(group) => (
                 <div class="model-picker-group">
-                  <div class="model-picker-group-title">{group.provider}</div>
+                  <div class="model-picker-group-title">{group.provider === "@pool" ? "Model Pools" : group.provider}</div>
                   <For each={group.choices}>
                     {(choice) => (
                       <div

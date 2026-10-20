@@ -136,6 +136,7 @@ export function useContextWindow(params: UseContextWindowParams) {
         reserved_tokens: isTokenCount(data.reserved_tokens) ? data.reserved_tokens : undefined,
         provider: data.latest_provider,
         model: data.latest_model,
+        pool_name: data.pool_name,
         input_tokens: hasUsage ? data.latest_input_tokens : undefined,
         output_tokens: hasUsage ? outputTokens : undefined,
         cache_read_tokens: hasUsage && isTokenCount(data.latest_cache_read_tokens)
@@ -188,7 +189,9 @@ export function useContextWindow(params: UseContextWindowParams) {
     // Prefer the catalog for the currently selected model. A stream report
     // carries the window of the model used for that call, which goes stale
     // as soon as the user switches models before the next call.
-    if (catalogMaxTokens === null) {
+    const matchesPool = selected?.provider === "@pool"
+      && selected.model === (reportedUsage ? reportedUsage.pool_name : usage?.pool_name);
+    if (catalogMaxTokens === null || matchesPool) {
       const window = reportedUsage ? reportedUsage.context_window : usage?.context_window;
       if (isTokenCount(window) && window > 0) maxTokens = window;
     }
@@ -218,7 +221,7 @@ export function useContextWindow(params: UseContextWindowParams) {
     const capacityWindow = reportedUsage ? reportedUsage.context_window : usage?.context_window;
     const capacityProvider = reportedUsage ? reportedUsage.provider : usage?.latest_provider;
     const capacityModel = reportedUsage ? reportedUsage.model : usage?.latest_model;
-    const sameModel = !selected || ((!capacityProvider || selected.provider === capacityProvider)
+    const sameModel = matchesPool || !selected || ((!capacityProvider || selected.provider === capacityProvider)
       && (!capacityModel || selected.model === capacityModel));
     const reportedReserve = reportedUsage ? reportedUsage.reserved_tokens : usage?.reserved_tokens;
     const reservedTokens = Math.min(maxTokens, sameModel && capacityWindow === maxTokens

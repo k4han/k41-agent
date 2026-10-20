@@ -89,6 +89,7 @@ export function createTranscriptItems(initialItems: ChatTranscriptItem[] = []): 
 }
 
 export interface ContextUsage {
+  pool_name?: string | null;
   current_context_tokens: number;
   context_window: number;
   has_context_usage?: boolean;

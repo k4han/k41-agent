@@ -76,6 +76,7 @@ def emit_reported_context_usage(
         "reserved_tokens": model_response_reserve(resolved),
         "provider": resolved.provider_name,
         "model": resolved.model_name,
+        "pool_name": getattr(resolved, "pool_name", None),
         "estimated": False,
     }
     if context_breakdown is not None and tokens is not None:

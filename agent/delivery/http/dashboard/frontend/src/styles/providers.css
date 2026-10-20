@@ -406,3 +406,12 @@
   border-radius: var(--radius-sm);
 }
 
+/* Named priority model pools. */
+.model-pools-layout { display: grid; grid-template-columns: minmax(180px, 260px) minmax(0, 1fr); gap: 20px; align-items: start; }
+.model-pool-card { display: flex; flex-direction: column; gap: 6px; text-align: left; width: 100%; cursor: pointer; color: inherit; }
+.model-pool-card.is-selected { border-color: var(--accent); }
+.model-pool-card strong { display: flex; align-items: center; gap: 8px; }
+.model-pool-member { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.model-pool-member-picker { flex: 1; min-width: 0; }
+.model-pool-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+@media (max-width: 720px) { .model-pools-layout { grid-template-columns: minmax(0, 1fr); } }

@@ -47,6 +47,8 @@ class OpenAICompatibleFactory:
             "temperature": model_config.temperature,
             "stream_usage": True,
         }
+        if model_config.disable_retries:
+            kwargs["max_retries"] = 0
         if provider_config.base_url:
             kwargs["base_url"] = provider_config.base_url
         if model_config.profile:

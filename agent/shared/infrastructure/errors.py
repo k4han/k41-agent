@@ -225,6 +225,11 @@ def classify_agent_error(exc: BaseException) -> AgentError:
     sub-exceptions (``ExceptionGroup``) so wrapped provider errors are still
     recognized.
     """
+    from agent.modules.providers.model_pools import ModelPoolExhausted
+
+    exhausted = find_exception(exc, ModelPoolExhausted)
+    if exhausted is not None:
+        return AgentError(code="model_pool_exhausted", message=str(exhausted))
     code = _find_code(exc, set())
     if code is None:
         code = ERROR_CODE_UNKNOWN

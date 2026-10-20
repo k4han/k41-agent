@@ -227,7 +227,7 @@ try {
   };
   const navigate = async suffix => {
     await call('Page.navigate', { url: base + suffix });
-    await until(() => js('document.querySelectorAll("[role=tab]").length === 4'), 'provider tabs');
+    await until(() => js('document.querySelectorAll("[role=tab]").length === 5'), 'provider tabs');
   };
   await navigate('/settings/providers?tab=web');
   await until(() => js('document.body.textContent.includes("team")'), 'web connections');

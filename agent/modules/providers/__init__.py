@@ -18,6 +18,7 @@ from agent.modules.providers.provider import ProviderConfig, ProviderType
 from agent.modules.providers.profiles import EFFORT_PATTERN, parse_model_profiles
 from agent.modules.providers.context_window import DEFAULT_CONTEXT_WINDOW
 from agent.modules.providers.context_budget import model_input_budget, model_response_reserve
+from agent.modules.providers.model_pools import execute_model_call, get_model_pool_service, selected_pool_name
 from agent.modules.providers.repository import ConfigProviderRepository
 from agent.modules.providers.service import ProviderService
 from agent.modules.providers.internal_loader import load_internal_providers
@@ -87,6 +88,10 @@ def get_resolved_chat_model(
 
 def get_chat_model_selection(*, provider_name: str | None = None, model: str | None = None) -> tuple[str, str]:
     """Return the configured provider/model identity without API clients or fallback."""
+    pool = selected_pool_name(provider_name, model)
+    if pool is not None:
+        get_model_pool_service().get(pool)
+        return "@pool", pool
     provider, model_name = resolve_chat_model_selection(
         _get_provider_service(), provider_name=provider_name, model=model,
     )
@@ -104,6 +109,11 @@ async def list_provider_model_catalog(
     include_remote: bool = False,
 ) -> ProviderModelCatalog:
     service = _get_provider_service()
+    if provider_name == "@pool":
+        catalog = get_model_pool_service().catalog()
+        if catalog is None:
+            raise ValueError("No model pools are configured.")
+        return catalog
     return await service.list_model_catalog(
         provider_name,
         include_remote=include_remote,
@@ -115,7 +125,11 @@ async def list_provider_model_catalogs(
     include_remote: bool = False,
 ) -> list[ProviderModelCatalog]:
     service = _get_provider_service()
-    return await service.list_model_catalogs(include_remote=include_remote)
+    catalogs = list(await service.list_model_catalogs(include_remote=include_remote))
+    pool_catalog = get_model_pool_service().catalog()
+    if pool_catalog is not None:
+        catalogs.append(pool_catalog)
+    return catalogs
 
 
 from agent.modules.providers.catalog import (
@@ -158,6 +172,8 @@ __all__ = [
     "get_chat_model_selection",
     "get_default_llm_settings",
     "get_resolved_chat_model",
+    "execute_model_call",
+    "get_model_pool_service",
     "list_provider_model_catalog",
     "list_provider_model_catalogs",
     "list_providers",

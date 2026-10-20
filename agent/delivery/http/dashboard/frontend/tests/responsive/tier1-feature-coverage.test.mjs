@@ -416,15 +416,15 @@ export function registerTier1Tests(harness, ctx) {
     });
   }
 
-  harness.test('T1-F9-03: ChatComposer implements 2-tier toolbar structure in source and CSS', () => {
+  harness.test('T1-F9-03: ChatComposer implements selector and action groups in source and CSS', () => {
     const code = ctx.ast.readSrcFile('components/ChatComposer.tsx');
     assert(code.includes('chat-composer-tier-selectors'), 'ChatComposer must have chat-composer-tier-selectors');
-    assert(code.includes('chat-composer-tier-actions'), 'ChatComposer must have chat-composer-tier-actions');
+    assert(code.includes('chat-composer-actions'), 'ChatComposer must have chat-composer-actions');
 
     const selectorRules = ctx.css.findRules('.chat-composer-tier-selectors');
     assert(selectorRules.length > 0, '.chat-composer-tier-selectors rules must exist in CSS');
-    const actionRules = ctx.css.findRules('.chat-composer-tier-actions');
-    assert(actionRules.length > 0, '.chat-composer-tier-actions rules must exist in CSS');
+    const actionRules = ctx.css.findRules('.chat-composer-actions');
+    assert(actionRules.length > 0, '.chat-composer-actions rules must exist in CSS');
   });
 
   // -------------------------------------------------------------

@@ -1,6 +1,6 @@
 from typing import Annotated, Literal, Optional
 
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, Field, StringConstraints, model_validator
 
 from agent.modules.providers import EFFORT_PATTERN
 
@@ -8,6 +8,15 @@ from agent.modules.tools import HumanResumePayload, PlanResumePayload
 from agent.modules.workspaces import WorkspaceBinding, WorkspaceRef
 
 ReasoningEffort = Annotated[str, StringConstraints(pattern=EFFORT_PATTERN)]
+
+
+class PoolSelectionValidation(BaseModel):
+    @model_validator(mode="after")
+    def _validate_pool_effort(self):
+        from agent.modules.providers.model_pools import validate_pool_effort
+
+        validate_pool_effort(self.provider, self.reasoning_effort)
+        return self
 
 
 class ChatAttachment(BaseModel):
@@ -21,7 +30,7 @@ class ChatAttachment(BaseModel):
     base64: Optional[str] = Field(default=None, description="Base64-encoded content when kind is 'image' or 'file'.")
 
 
-class ChatRequest(BaseModel):
+class ChatRequest(PoolSelectionValidation):
     """Request body for sending a chat message to the agent."""
 
     message: str = Field(..., description="The user message to send to the agent.")
@@ -120,7 +129,7 @@ class ReconnectRequest(BaseModel):
     thread_id: str = Field(..., description="The thread ID to reconnect to.")
 
 
-class EditChatRequest(BaseModel):
+class EditChatRequest(PoolSelectionValidation):
     """Request body for editing a previous message and re-running from that point."""
 
     message: str = Field(..., min_length=1, description="The edited user message content.")

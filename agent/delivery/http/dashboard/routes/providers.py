@@ -278,6 +278,15 @@ async def delete_dashboard_provider(
     if existing_name is None:
         raise HTTPException(status_code=404, detail=f"Provider not found: {provider_name}.")
 
+    from agent.modules.providers.model_pools import ModelPoolConfig, POOL_PREFIX
+
+    for key, value in service.get_all().items():
+        if key.startswith(POOL_PREFIX) and any(
+            normalize_provider_name(member.provider) == normalize_provider_name(existing_name)
+            for member in ModelPoolConfig.model_validate(value).members
+        ):
+            raise HTTPException(status_code=409, detail=f"Provider is referenced by model pool '{key.removeprefix(POOL_PREFIX)}'.")
+
     default_model_val = str(service.get("llm.default_model", "") or "").strip()
     configured_default = ""
     if default_model_val:

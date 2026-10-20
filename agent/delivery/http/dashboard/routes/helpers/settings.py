@@ -105,6 +105,8 @@ def _split_provider_settings(
     global_settings: dict[str, dict[str, Any]] = {}
     provider_settings: dict[str, dict[str, Any]] = {}
     for key, info in settings.items():
+        if key.startswith("llm.model_pools."):
+            continue
         if key.startswith("llm.providers."):
             provider_settings[key] = info
             continue
@@ -184,6 +186,16 @@ async def validate_default_model_update(
         default_prefix = f"llm.providers.{conf_provider}."
         should_validate = any(key.startswith(default_prefix) for key in values)
     if not should_validate:
+        return
+
+    if default_provider == "@pool":
+        from agent.modules.providers.model_pools import ModelPoolConfig, POOL_PREFIX
+
+        name = default_model_val.partition("/")[2]
+        value = service.get(POOL_PREFIX + name)
+        if value is None:
+            raise HTTPException(status_code=400, detail=f"Unknown model pool: {name}.")
+        ModelPoolConfig.model_validate(value)
         return
 
     flat_config = service.get_all()

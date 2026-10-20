@@ -20,7 +20,7 @@ from agent.modules.workflows.model_context import emit_reported_context_usage, p
 from agent.modules.workflows.state.extensions import (
     ResearchState,
 )
-from agent.modules.providers import DEFAULT_CONTEXT_WINDOW, get_resolved_chat_model, model_response_reserve
+from agent.modules.providers import DEFAULT_CONTEXT_WINDOW, get_resolved_chat_model, model_response_reserve, execute_model_call
 from agent.modules.workflows.model_effort import get_workflow_reasoning_effort_kwargs
 from agent.modules.usage import estimate_context_breakdown, with_usage_tracking
 from agent.shared.infrastructure.parsing import extract_final_text_content
@@ -64,62 +64,76 @@ def _resolve_runtime_model(runtime):
 async def _research_node(state: ResearchState, config: RunnableConfig, runtime):
     """Collect research directions for the request."""
     resolved, model_kwargs, agent_config = _resolve_runtime_model(runtime)
-    llm = resolved.model
-    system = await _research_system("research-planner", runtime, agent_config)
-    history, history_updates = await prepare_model_context(
-        state["messages"], system=system, context=runtime.context,
-        agent_config=agent_config, resolved=resolved, config=config,
-    )
-    messages = normalize_messages_for_chat_model([system, *history])
-    context_breakdown = estimate_context_breakdown(messages)
-    response = await llm.ainvoke(
-        messages,
-        config=with_usage_tracking(
-            config,
-            agent_name=runtime.context.get_agent_name(),
-            provider_name=resolved.provider_name,
-            model_name=resolved.model_name,
-            call_kind="research",
-            context_breakdown=context_breakdown,
-            context_window=getattr(resolved, "context_window", DEFAULT_CONTEXT_WINDOW),
-            reserved_tokens=model_response_reserve(resolved),
-        ),
-        **model_kwargs,
-    )
-    emit_reported_context_usage(response, resolved=resolved, config=config, context_breakdown=context_breakdown)
-    return {"messages": [*history_updates, response]}
+    initial_trim_applied = getattr(runtime.context, "channel_trim_applied", False)
+
+    async def attempt(resolved):
+        runtime.context.channel_trim_applied = initial_trim_applied
+        model_kwargs = get_workflow_reasoning_effort_kwargs(runtime.context, agent_config, resolved)
+        llm = resolved.model
+        system = await _research_system("research-planner", runtime, agent_config)
+        history, history_updates = await prepare_model_context(
+            state["messages"], system=system, context=runtime.context,
+            agent_config=agent_config, resolved=resolved, config=config,
+        )
+        messages = normalize_messages_for_chat_model([system, *history])
+        context_breakdown = estimate_context_breakdown(messages)
+        response = await llm.ainvoke(
+            messages,
+            config=with_usage_tracking(
+                config,
+                agent_name=runtime.context.get_agent_name(),
+                provider_name=resolved.provider_name,
+                model_name=resolved.model_name,
+                call_kind="research",
+                context_breakdown=context_breakdown,
+                context_window=getattr(resolved, "context_window", DEFAULT_CONTEXT_WINDOW),
+                reserved_tokens=model_response_reserve(resolved),
+            ),
+            **model_kwargs,
+        )
+        emit_reported_context_usage(response, resolved=resolved, config=config, context_breakdown=context_breakdown)
+        return {"messages": [*history_updates, response]}
+
+    return await execute_model_call(resolved, attempt)
 
 
 async def _summarize_node(state: ResearchState, config: RunnableConfig, runtime):
     """Summarize the collected research context."""
     resolved, model_kwargs, agent_config = _resolve_runtime_model(runtime)
-    llm = resolved.model
-    system = await _research_system("research-summarizer", runtime, agent_config)
-    history, history_updates = await prepare_model_context(
-        state["messages"], system=system, context=runtime.context,
-        agent_config=agent_config, resolved=resolved, config=config,
-    )
-    messages = normalize_messages_for_chat_model([system, *history])
-    context_breakdown = estimate_context_breakdown(messages)
-    response = await llm.ainvoke(
-        messages,
-        config=with_usage_tracking(
-            config,
-            agent_name=runtime.context.get_agent_name(),
-            provider_name=resolved.provider_name,
-            model_name=resolved.model_name,
-            call_kind="research_summary",
-            context_breakdown=context_breakdown,
-            context_window=getattr(resolved, "context_window", DEFAULT_CONTEXT_WINDOW),
-            reserved_tokens=model_response_reserve(resolved),
-        ),
-        **model_kwargs,
-    )
-    emit_reported_context_usage(response, resolved=resolved, config=config, context_breakdown=context_breakdown)
-    return {
-        "messages": [*history_updates, response],
-        "summary": extract_final_text_content(response.content),
-    }
+    initial_trim_applied = getattr(runtime.context, "channel_trim_applied", False)
+
+    async def attempt(resolved):
+        runtime.context.channel_trim_applied = initial_trim_applied
+        model_kwargs = get_workflow_reasoning_effort_kwargs(runtime.context, agent_config, resolved)
+        llm = resolved.model
+        system = await _research_system("research-summarizer", runtime, agent_config)
+        history, history_updates = await prepare_model_context(
+            state["messages"], system=system, context=runtime.context,
+            agent_config=agent_config, resolved=resolved, config=config,
+        )
+        messages = normalize_messages_for_chat_model([system, *history])
+        context_breakdown = estimate_context_breakdown(messages)
+        response = await llm.ainvoke(
+            messages,
+            config=with_usage_tracking(
+                config,
+                agent_name=runtime.context.get_agent_name(),
+                provider_name=resolved.provider_name,
+                model_name=resolved.model_name,
+                call_kind="research_summary",
+                context_breakdown=context_breakdown,
+                context_window=getattr(resolved, "context_window", DEFAULT_CONTEXT_WINDOW),
+                reserved_tokens=model_response_reserve(resolved),
+            ),
+            **model_kwargs,
+        )
+        emit_reported_context_usage(response, resolved=resolved, config=config, context_breakdown=context_breakdown)
+        return {
+            "messages": [*history_updates, response],
+            "summary": extract_final_text_content(response.content),
+        }
+
+    return await execute_model_call(resolved, attempt)
 
 
 def build_research_graph() -> None:

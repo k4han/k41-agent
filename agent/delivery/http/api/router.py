@@ -187,6 +187,7 @@ def _ensure_chat_agent_available(agent_name: str | None) -> None:
 
 async def prepare_run_params(request: ChatRequest) -> dict[str, object]:
     _ensure_chat_agent_available(request.agent_name)
+    _validate_pool_request(request)
     if request.thread_id:
         request = request.model_copy(update={"thread_id": resolve_thread_id(request.thread_id)})
     params = _request_to_run_params(request)
@@ -194,11 +195,32 @@ async def prepare_run_params(request: ChatRequest) -> dict[str, object]:
     return params
 
 
+def _validate_pool_request(request: ChatRequest | EditChatRequest) -> None:
+    from agent.modules.providers.model_pools import get_model_pool_service, selected_pool_name, validate_pool_effort
+
+    card = get_catalog_service().get_agent_card(request.agent_name or "default")
+    provider = request.provider or getattr(card, "provider", None)
+    model = request.model or getattr(card, "model", None)
+    try:
+        pool = selected_pool_name(provider, model)
+        if pool is not None:
+            get_model_pool_service().get(pool)
+            validate_pool_effort("@pool", request.reasoning_effort)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat_sync(request: ChatRequest):
     """Send a chat message and return the full agent response synchronously."""
     params = await prepare_run_params(request)
-    response = await run_agent_full(**params)
+    from agent.modules.providers.model_pools import ModelPoolExhausted
+
+    try:
+        response = await run_agent_full(**params)
+    except ModelPoolExhausted as exc:
+        raise HTTPException(503, {"code": exc.code, "message": str(exc), "pool_name": exc.pool_name,
+                                  "retry_at": exc.retry_at}) from exc
     return ChatResponse(
         response=response,
         thread_id=params["thread_id"],
@@ -252,6 +274,7 @@ async def chat_events_edit(request: EditChatRequest):
         raise HTTPException(status_code=400, detail="Edited message cannot be empty.")
 
     _ensure_chat_agent_available(request.agent_name)
+    _validate_pool_request(request)
     request = request.model_copy(update={"thread_id": resolve_thread_id(request.thread_id)})
     params = build_run_params(
         platform=Platform.API,

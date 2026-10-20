@@ -129,6 +129,7 @@ export function handleStreamEvent(
       return;
     }
     callbacks.onContextUsage?.({
+      pool_name: typeof event.pool_name === "string" ? event.pool_name : null,
       current_context_tokens: tokens,
       context_window: limit,
       has_context_usage: event.has_context_usage !== false,

@@ -40,7 +40,8 @@ from agent.modules.workflows.constants import (
     STRIP_PREFIXES,
     STRIP_QUOTES,
 )
-from agent.modules.providers import get_resolved_chat_model
+from agent.modules.providers import get_resolved_chat_model, execute_model_call
+from agent.modules.providers.model_pools import should_propagate_pool_error
 from agent.modules.workflows.model_effort import get_workflow_reasoning_effort_kwargs
 from agent.modules.usage import with_usage_tracking
 from agent.modules.prompt_variables import get_runtime_prompt_variable_values
@@ -185,43 +186,49 @@ async def _route_agent_name(
     agent_config: AgentConfig | None = None,
 ) -> str:
     resolved = get_resolved_chat_model(provider_name=provider, model=model)
-    llm = resolved.model
-    model_kwargs = (
-        get_workflow_reasoning_effort_kwargs(context, agent_config, resolved)
-        if agent_config is not None else {}
-    )
-    router_system = _build_router_system(
-        user_input=user_input,
-        candidates=candidates,
-        router_prompt_template=router_prompt_template,
-        caller_agent_name=caller_agent_name,
-        prompt_variables=prompt_variables,
-    )
-    messages = [
-        SystemMessage(content=router_system),
-        HumanMessage(content=user_input),
-    ]
 
-    try:
-        usage_config = with_usage_tracking(
-            config,
-            agent_name=caller_agent_name,
-            provider_name=resolved.provider_name,
-            model_name=resolved.model_name,
-            call_kind="router",
-            internal=True,
+    async def attempt(resolved):
+        llm = resolved.model
+        model_kwargs = (
+            get_workflow_reasoning_effort_kwargs(context, agent_config, resolved)
+            if agent_config is not None else {}
         )
-        decision = await llm.with_structured_output(_RouteDecision).ainvoke(
-            messages,
-            config=usage_config,
-            **model_kwargs,
+        router_system = _build_router_system(
+            user_input=user_input,
+            candidates=candidates,
+            router_prompt_template=router_prompt_template,
+            caller_agent_name=caller_agent_name,
+            prompt_variables=prompt_variables,
         )
-        return _normalize_agent_name(decision.selected_agent)
-    except Exception as exc:
-        logger.warning("Structured output failed, falling back to text parsing: %s", exc)
-        response = await llm.ainvoke(messages, config=usage_config, **model_kwargs)
-        content = getattr(response, "content", "")
-        return _normalize_agent_name(content if content else "")
+        messages = [
+            SystemMessage(content=router_system),
+            HumanMessage(content=user_input),
+        ]
+
+        try:
+            usage_config = with_usage_tracking(
+                config,
+                agent_name=caller_agent_name,
+                provider_name=resolved.provider_name,
+                model_name=resolved.model_name,
+                call_kind="router",
+                internal=True,
+            )
+            decision = await llm.with_structured_output(_RouteDecision).ainvoke(
+                messages,
+                config=usage_config,
+                **model_kwargs,
+            )
+            return _normalize_agent_name(decision.selected_agent)
+        except Exception as exc:
+            if should_propagate_pool_error(exc):
+                raise
+            logger.warning("Structured output failed, falling back to text parsing: %s", exc)
+            response = await llm.ainvoke(messages, config=usage_config, **model_kwargs)
+            content = getattr(response, "content", "")
+            return _normalize_agent_name(content if content else "")
+
+    return await execute_model_call(resolved, attempt)
 
 
 def _resolve_routing_mode(config: RunnableConfig | None = None) -> str:

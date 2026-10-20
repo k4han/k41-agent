@@ -248,6 +248,10 @@ class ConfigProviderRepository:
             )
 
         normalized = _normalize_provider_name(configured_default)
+        if configured_default == "@pool":
+            # The logical default is resolved by ModelPoolService. Concrete provider
+            # lookups and catalogs must remain available independently of its health.
+            return next((name for name, provider in providers.items() if provider.enabled), next(iter(providers)))
         if normalized in providers:
             return normalized
 
@@ -296,7 +300,7 @@ class ConfigProviderRepository:
 
         default_provider_name = self._resolve_default_provider_name(loaded)
         default_provider = loaded[default_provider_name]
-        if not default_provider.enabled:
+        if not default_provider.enabled and not config.get_str("llm.default_model", "").startswith("@pool/"):
             raise RuntimeError(
                 f"Default provider {default_provider_name!r} is disabled. "
                 "Set llm.default_model to a provider/model with an enabled provider."

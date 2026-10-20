@@ -18,6 +18,14 @@ _UNSUPPORTED_PARAMETERS = frozenset({
 })
 
 
+class ChatGPTPlanUsageError(RuntimeError):
+    """Preserve the machine-readable code from a failed Responses event."""
+
+    def __init__(self, message: str, code: str):
+        self.body = {"error": {"code": code}}
+        super().__init__(message)
+
+
 class ChatGPTChatModel(OpenAICompatibleChatModel):
     """Require a completed Responses stream for invoke and stream alike."""
 
@@ -78,8 +86,9 @@ class ChatGPTChatModel(OpenAICompatibleChatModel):
 
     @staticmethod
     def _inference_error(error: Exception) -> RuntimeError:
-        if any(code in str(error) for code in ("subscription_sharing_usage_limit_exceeded", "subscription_sharing_usage_unavailable")):
-            return RuntimeError(f"ChatGPT plan usage is unavailable or has reached its limit. Manage usage at {USAGE_URL}.")
+        for code in ("subscription_sharing_usage_limit_exceeded", "subscription_sharing_usage_unavailable"):
+            if code in str(error):
+                return ChatGPTPlanUsageError(f"ChatGPT plan usage is unavailable or has reached its limit. Manage usage at {USAGE_URL}.", code)
         return RuntimeError(str(error))
 
     def _stream_responses(self, *args: Any, **kwargs: Any) -> Iterator[ChatGenerationChunk]:
@@ -89,7 +98,7 @@ class ChatGPTChatModel(OpenAICompatibleChatModel):
                 completed = self._check_chunk(chunk) or completed
                 yield chunk
         except (ValueError, openai.APIStatusError) as exc:
-            raise self._inference_error(exc) from None
+            raise self._inference_error(exc) from exc
         if not completed:
             raise RuntimeError("ChatGPT stream ended without response.completed. Please retry.")
 
@@ -100,7 +109,7 @@ class ChatGPTChatModel(OpenAICompatibleChatModel):
                 completed = self._check_chunk(chunk) or completed
                 yield chunk
         except (ValueError, openai.APIStatusError) as exc:
-            raise self._inference_error(exc) from None
+            raise self._inference_error(exc) from exc
         if not completed:
             raise RuntimeError("ChatGPT stream ended without response.completed. Please retry.")
 

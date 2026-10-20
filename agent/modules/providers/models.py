@@ -45,6 +45,7 @@ class ModelConfig:
     temperature: float = 0.0
     max_tokens: int | None = None
     profile: dict[str, Any] | None = None
+    disable_retries: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,3 +85,5 @@ class ResolvedChatModel:
     profile: dict[str, Any] | None = None
     used_fallback: bool = False
     context_window: int = DEFAULT_CONTEXT_WINDOW
+    pool_name: str | None = None
+    pool_temperature: float | None = None

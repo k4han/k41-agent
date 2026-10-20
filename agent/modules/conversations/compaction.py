@@ -44,7 +44,7 @@ from agent.modules.conversations.service import (
     _INJECTION_GRAPH_NAME,
     get_conversation_thread,
 )
-from agent.modules.providers import get_resolved_chat_model
+from agent.modules.providers import get_resolved_chat_model, execute_model_call
 from agent.modules.usage import (
     attach_usage_context,
     estimate_compacted_context_breakdown,
@@ -223,12 +223,6 @@ async def _generate_context_summary(
         provider_name=agent_config.provider,
         model=agent_config.model or None,
     )
-    llm = resolved.model
-    summary_kwargs = {}
-    if max_summary_tokens is not None:
-        limit_key = "max_output_tokens" if getattr(resolved, "provider_type", None) == "google" else "max_tokens"
-        summary_kwargs[limit_key] = max_summary_tokens
-
     prompt_messages = [
         SystemMessage(content=system_prompt),
         HumanMessage(content=user_prompt),
@@ -238,20 +232,28 @@ async def _generate_context_summary(
         {"configurable": {"thread_id": thread_id}, "tags": ["context_compaction"], "metadata": {"context_compaction": True}},
         await load_usage_context(thread_id),
     )
+
+    async def attempt(candidate):
+        summary_kwargs = {}
+        if max_summary_tokens is not None:
+            limit_key = "max_output_tokens" if getattr(candidate, "provider_type", None) == "google" else "max_tokens"
+            summary_kwargs[limit_key] = max_summary_tokens
+        return await candidate.model.ainvoke(
+            prompt_messages,
+            config=with_usage_tracking(
+                config,
+                agent_name=CONVERSATION_COMPACTOR_AGENT_NAME,
+                provider_name=candidate.provider_name,
+                model_name=candidate.model_name,
+                call_kind="compaction",
+                internal=True,
+            ),
+            **summary_kwargs,
+        )
+
     try:
         response = await asyncio.wait_for(
-            llm.ainvoke(
-                prompt_messages,
-                config=with_usage_tracking(
-                    config,
-                    agent_name=CONVERSATION_COMPACTOR_AGENT_NAME,
-                    provider_name=resolved.provider_name,
-                    model_name=resolved.model_name,
-                    call_kind="compaction",
-                    internal=True,
-                ),
-                **summary_kwargs,
-            ),
+            execute_model_call(resolved, attempt),
             timeout=timeout_seconds,
         )
     except Exception as exc:

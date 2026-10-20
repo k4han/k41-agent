@@ -49,6 +49,7 @@ class LLMUsageCallback(BaseCallbackHandler):
         reserved_tokens: int | None = None,
     ) -> None:
         super().__init__()
+        self._context_config_metadata = (config or {}).get("metadata", {})
         self._context = usage_context_from_config(config)
         self._tracking = tracking
         self._context_breakdown = dict(context_breakdown) if context_breakdown is not None else None
@@ -68,6 +69,9 @@ class LLMUsageCallback(BaseCallbackHandler):
     ) -> Any:
         usage = extract_usage(response)
         usage_metadata = dict(usage.usage_metadata or {})
+        pool_name = (self._context_config_metadata or {}).get("pool_name")
+        if pool_name:
+            usage_metadata["pool_name"] = pool_name
         usage_metadata.update(self._context_capacity)
         if self._context_breakdown is not None and usage.input_tokens is not None:
             usage_metadata["context_breakdown"] = reconcile_context_breakdown(
@@ -119,7 +123,9 @@ def with_usage_tracking(
     context_window: int | None = None,
     reserved_tokens: int | None = None,
 ) -> dict[str, Any]:
-    next_config = dict(config or {})
+    from agent.modules.providers.model_pools import pool_call_config
+
+    next_config = pool_call_config(config)
     handler = LLMUsageCallback(
         config=next_config,
         context_breakdown=context_breakdown,

@@ -16,6 +16,11 @@ def get_workflow_reasoning_effort_kwargs(
     """Apply card effort only to its model and reset overrides on fallback."""
     card_effort = getattr(agent_config, "reasoning_effort", None)
     effort = getattr(context, "reasoning_effort", None)
+    if getattr(resolved, "pool_name", None):
+        if effort not in (None, "auto"):
+            raise ValueError("Model pools only support automatic reasoning effort.")
+        return get_reasoning_effort_kwargs(resolved.provider_type, resolved.model_name, None,
+                                          profile=getattr(resolved, "profile", None))
     if getattr(resolved, "used_fallback", False):
         effort = None
     elif effort == "auto":

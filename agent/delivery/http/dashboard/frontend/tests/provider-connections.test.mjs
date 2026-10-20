@@ -16,7 +16,7 @@ const drafts = await loadModule("../src/lib/settingsDrafts.ts");
 
 test("provider tabs support direct details, refresh, and unknown queries", () => {
   assert.equal(routes.currentProviderTab("/settings/providers", ""), "llm");
-  for (const tab of ["llm", "web", "workspace", "decision"]) {
+  for (const tab of ["llm", "pools", "web", "workspace", "decision"]) {
     assert.equal(routes.currentProviderTab("/settings/providers", `?tab=${tab}`), tab);
     assert.equal(routes.currentProviderTab(`/settings/providers/${tab}/example`, "?tab=other"), tab);
   }
@@ -138,7 +138,18 @@ test("capability badge colors mathematically satisfy WCAG AA contrast ratio >= 4
     for (const match of block.matchAll(/--([a-z0-9-]+):\s*([^;]+);/g)) {
       vars[match[1]] = match[2].trim();
     }
-    return vars;
+    const resolve = (name) => {
+      const value = vars[name];
+      const reference = /^var\(--([a-z0-9-]+)\)$/.exec(value);
+      if (reference) return resolve(reference[1]);
+      const tint = /^color-mix\(in srgb, var\(--([a-z0-9-]+)\) ([\d.]+)%, transparent\)$/.exec(value);
+      if (tint) {
+        const color = parseHexOrRgb(resolve(tint[1]));
+        return `rgba(${color.slice(0, 3).join(',')},${Number(tint[2]) / 100})`;
+      }
+      return value;
+    };
+    return Object.fromEntries(Object.keys(vars).map((name) => [name, resolve(name)]));
   };
 
   const lightTokens = parseCssVars(rootBlock);

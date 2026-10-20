@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 
-from agent.modules.providers import DEFAULT_CONTEXT_WINDOW, get_resolved_chat_model, model_response_reserve
+from agent.modules.providers import DEFAULT_CONTEXT_WINDOW, get_resolved_chat_model, model_response_reserve, execute_model_call
 from agent.modules.workflows.model_effort import get_workflow_reasoning_effort_kwargs
 from agent.modules.usage import estimate_context_breakdown, with_usage_tracking
 from agent.modules.prompt_variables import get_runtime_prompt_variable_values
@@ -130,37 +130,47 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
             "active_skills": active_skills if any(tool.name == "skill" for tool in tools) else {},
         }
     resolved = get_resolved_chat_model(provider_name=provider, model=model)
-    system = SystemMessage(content=system_prompt + skill_context)
-    tools = bind_tool_catalogs(tools, prompt_sections, keep_skill=bool(skill_context))
-    if skill_context:
-        from langchain_core.messages.utils import count_tokens_approximately
-        if count_tokens_approximately([system], tools=tools) >= getattr(resolved, "context_window", DEFAULT_CONTEXT_WINDOW) * 3 // 4:
-            raise ValueError("Active skill instructions exceed the context budget. Unload a skill or select a larger context model.")
-    history = model_skill_history(history)
-    history, history_updates = await prepare_model_context(
-        history, system=system, tools=tools, context=ctx,
-        agent_config=agent_config, resolved=resolved, config=config,
-    )
-    messages: list[BaseMessage] = normalize_messages_for_chat_model([system, *history])
-    prompt_sections["active_skills"] = skill_context
-    context_breakdown = estimate_context_breakdown(messages, tools=tools, prompt_sections=prompt_sections)
-    model_kwargs = get_workflow_reasoning_effort_kwargs(ctx, agent_config, resolved)
-    llm = resolved.model.bind_tools(tools, **model_kwargs)
-    response = await llm.ainvoke(
-        messages,
-        config=with_usage_tracking(
-            config,
-            agent_name=agent_name,
-            provider_name=resolved.provider_name,
-            model_name=resolved.model_name,
-            call_kind="agent",
-            context_breakdown=context_breakdown,
-            context_window=getattr(resolved, "context_window", DEFAULT_CONTEXT_WINDOW),
-            reserved_tokens=model_response_reserve(resolved),
-        ),
-    )
-    emit_reported_context_usage(response, resolved=resolved, config=config, context_breakdown=context_breakdown)
-    updates = {"messages": [*history_updates, response]}
-    if active_skills or state.get("active_skills") or processed_skill_messages:
-        updates.update(active_skills=active_skills, processed_skill_messages=processed_skill_messages)
-    return updates
+    pool_history = history
+    pool_tools = tools
+    initial_trim_applied = getattr(ctx, "channel_trim_applied", False)
+
+    async def attempt(resolved):
+        history = pool_history
+        tools = pool_tools
+        ctx.channel_trim_applied = initial_trim_applied
+        system = SystemMessage(content=system_prompt + skill_context)
+        tools = bind_tool_catalogs(tools, prompt_sections, keep_skill=bool(skill_context))
+        if skill_context:
+            from langchain_core.messages.utils import count_tokens_approximately
+            if count_tokens_approximately([system], tools=tools) >= getattr(resolved, "context_window", DEFAULT_CONTEXT_WINDOW) * 3 // 4:
+                raise ValueError("Active skill instructions exceed the context budget. Unload a skill or select a larger context model.")
+        history = model_skill_history(history)
+        history, history_updates = await prepare_model_context(
+            history, system=system, tools=tools, context=ctx,
+            agent_config=agent_config, resolved=resolved, config=config,
+        )
+        messages: list[BaseMessage] = normalize_messages_for_chat_model([system, *history])
+        prompt_sections["active_skills"] = skill_context
+        context_breakdown = estimate_context_breakdown(messages, tools=tools, prompt_sections=prompt_sections)
+        model_kwargs = get_workflow_reasoning_effort_kwargs(ctx, agent_config, resolved)
+        llm = resolved.model.bind_tools(tools, **model_kwargs)
+        response = await llm.ainvoke(
+            messages,
+            config=with_usage_tracking(
+                config,
+                agent_name=agent_name,
+                provider_name=resolved.provider_name,
+                model_name=resolved.model_name,
+                call_kind="agent",
+                context_breakdown=context_breakdown,
+                context_window=getattr(resolved, "context_window", DEFAULT_CONTEXT_WINDOW),
+                reserved_tokens=model_response_reserve(resolved),
+            ),
+        )
+        emit_reported_context_usage(response, resolved=resolved, config=config, context_breakdown=context_breakdown)
+        updates = {"messages": [*history_updates, response]}
+        if active_skills or state.get("active_skills") or processed_skill_messages:
+            updates.update(active_skills=active_skills, processed_skill_messages=processed_skill_messages)
+        return updates
+
+    return await execute_model_call(resolved, attempt)

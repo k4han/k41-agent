@@ -140,6 +140,7 @@ RUNTIME_KEY_PATTERNS = [
     r"^channels\.zalo\.(enabled|bot_token|default_agent|code_agent|research_agent|update_mode|webhook_url|webhook_secret)$",
     r"^channels\.github\.(enabled|default_agent|trigger_label|mention_triggers)$",
     r"^llm\.default_model$",
+    r"^llm\.model_pools\.[a-z0-9][a-z0-9_-]{0,63}$",
     rf"^{re.escape(LLM_FALLBACK_PROVIDER_KEY)}$",
     rf"^{re.escape(LLM_FALLBACK_MODEL_KEY)}$",
     r"^llm\.providers\.[A-Za-z0-9_-]+\.(provider|type|catalog_id|api_key|base_url|default_model|models|temperature|enabled|extra_body|model_profiles)$",
@@ -163,6 +164,7 @@ RUNTIME_KEY_PATTERNS = [
 ]
 
 DATABASE_RUNTIME_KEY_PATTERNS = [
+    r"^llm\.model_pools\.[a-z0-9][a-z0-9_-]{0,63}$",
     r"^web\.migration_version$",
     r"^web\.connections\.[A-Za-z0-9_-]+\.(type|api_key|cse_id|base_url)$",
     r"^web\.defaults\.(google|tavily|firecrawl|brave|bing)$",

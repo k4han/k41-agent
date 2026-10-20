@@ -81,6 +81,24 @@ function createFixture(t, { streaming = true, payload, provider = '', model = ''
 
 const flushAsync = () => new Promise((resolve) => setImmediate(resolve));
 
+test('pool selection follows the actual member capacity without losing its logical identity', (t) => {
+  const { control, dispatch, setModel } = createFixture(t, {
+    provider: '@pool', model: 'small', payload: {
+      model_catalogs: [{ provider: '@pool', models: [
+        { id: 'small', context_window: 32000 }, { id: 'big', context_window: 200000 },
+      ] }],
+    },
+  });
+  assert.equal(control.contextWindowData().maxTokens, 32000);
+  dispatch(8000, 128000, 'thread-a', false, undefined, {
+    provider: 'backup', model: 'actual-model', pool_name: 'small', reserved_tokens: 12000,
+  });
+  assert.equal(control.contextWindowData().maxTokens, 128000);
+  assert.equal(control.contextWindowData().reservedPercent, 12000 / 128000 * 100);
+  setModel('big');
+  assert.equal(control.contextWindowData().maxTokens, 200000);
+});
+
 test('cache hits are a share of input tokens and do not add to context usage', (t) => {
   const { control, dispatch } = createFixture(t);
   dispatch(8500, 32000, 'thread-a', false, undefined, {

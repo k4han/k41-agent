@@ -394,6 +394,7 @@ class LLMUsageRepository:
             "latest_output_tokens": latest_output_tokens,
             "latest_total_tokens": int(latest_event.total_tokens or 0) if has_context_usage else 0,
             "latest_model": context_event.model_name if context_event else "",
+            "pool_name": capacity_metadata.get("pool_name"),
             "latest_provider": context_event.provider_name if context_event else "",
             "latest_used_at": _iso(latest_event.created_at) if latest_event else None,
             "models": models,

@@ -21,7 +21,8 @@ from agent.modules.decisions import (
     NoulAnswer,
     NoulQuestion,
 )
-from agent.modules.providers import get_resolved_chat_model
+from agent.modules.providers import get_resolved_chat_model, execute_model_call
+from agent.modules.providers.model_pools import should_propagate_pool_error
 from agent.modules.agents import render_agent_prompt
 from agent.modules.decisions import FILE_SELECTION_INSTRUCTIONS, FILE_INCLUSION_INSTRUCTIONS
 from agent.modules.usage import with_usage_tracking
@@ -431,6 +432,8 @@ async def _decide_candidate_files_llm(
             **model_kwargs,
         )
     except Exception as exc:
+        if should_propagate_pool_error(exc):
+            raise
         logger.debug("Structured output for candidate selection failed, falling back to JSON: %s", exc)
 
     try:
@@ -443,6 +446,8 @@ async def _decide_candidate_files_llm(
                 reasoning=str(parsed.get("reasoning", "")),
             )
     except Exception as exc:
+        if should_propagate_pool_error(exc):
+            raise
         logger.warning("Decision model candidate selection invocation failed: %s", exc)
 
     return FileCandidateSelection(candidate_files=[], reasoning="Fallback due to decision model error")
@@ -491,6 +496,8 @@ async def _decide_file_inclusion_llm(
             **model_kwargs,
         )
     except Exception as exc:
+        if should_propagate_pool_error(exc):
+            raise
         logger.debug("Structured output for file inclusion failed, falling back to JSON: %s", exc)
 
     try:
@@ -505,6 +512,8 @@ async def _decide_file_inclusion_llm(
                 relevant_summary_or_excerpt=str(parsed.get("relevant_summary_or_excerpt", "")),
             )
     except Exception as exc:
+        if should_propagate_pool_error(exc):
+            raise
         logger.warning("Decision model file inclusion invocation failed for %s: %s", file_path, exc)
 
     return FileInclusionDecision(
@@ -595,17 +604,18 @@ async def decision_node(
                 )
                 if agent_config is not None else {}
             )
-            candidate_selection = await _decide_candidate_files_llm(
-                llm=llm,
-                user_input=original_content,
-                directory_tree=directory_tree,
-                caller_agent_name=caller_agent_name,
-                provider_name=resolved.provider_name,
-                model_name=resolved.model_name,
-                model_kwargs=model_kwargs,
-                max_candidates=max_candidates,
-                config=config,
-            )
+            async def select_candidates(candidate):
+                kwargs = get_workflow_reasoning_effort_kwargs(
+                    getattr(runtime, "context", None), agent_config, candidate,
+                ) if agent_config is not None else {}
+                return await _decide_candidate_files_llm(
+                    llm=candidate.model, user_input=original_content, directory_tree=directory_tree,
+                    caller_agent_name=caller_agent_name, provider_name=candidate.provider_name,
+                    model_name=candidate.model_name, model_kwargs=kwargs,
+                    max_candidates=max_candidates, config=config,
+                )
+
+            candidate_selection = await execute_model_call(resolved, select_candidates)
             candidate_files = [f.strip() for f in candidate_selection.candidate_files if f.strip()]
         except Exception as exc:
             logger.warning("Failed resolving LLM for decisions, using directory tree only: %s", exc)
@@ -634,18 +644,18 @@ async def decision_node(
             inclusion = None
 
         if inclusion is None and llm is not None and resolved is not None:
-            inclusion = await _decide_file_inclusion_llm(
-                llm=llm,
-                user_input=original_content,
-                file_path=rel_path,
-                file_content=content,
-                caller_agent_name=caller_agent_name,
-                provider_name=resolved.provider_name,
-                model_name=resolved.model_name,
-                model_kwargs=model_kwargs,
-                config=config,
-                system_prompt=inclusion_prompt,
-            )
+            async def evaluate(candidate):
+                kwargs = get_workflow_reasoning_effort_kwargs(
+                    getattr(runtime, "context", None), agent_config, candidate,
+                ) if agent_config is not None else {}
+                return await _decide_file_inclusion_llm(
+                    llm=candidate.model, user_input=original_content, file_path=rel_path, file_content=content,
+                    caller_agent_name=caller_agent_name, provider_name=candidate.provider_name,
+                    model_name=candidate.model_name, model_kwargs=kwargs,
+                    config=config, system_prompt=inclusion_prompt,
+                )
+
+            inclusion = await execute_model_call(resolved, evaluate)
 
         if inclusion is None:
             # Safe default inclusion

@@ -20,6 +20,7 @@
     "test:system-update-ui": "node scripts/verify-system-update.mjs",
     "test:chat-scroll": "node --test tests/chat-scroll.test.mjs",
     "test:providers-ui": "node scripts/verify-provider-connections.mjs",
+    "test:model-pools-ui": "node scripts/verify-model-pools.mjs",
     "test:effort-ui": "node scripts/verify-reasoning-effort.mjs",
     "test:mobile-ui": "node scripts/verify-mobile-layout.mjs",
     "test:navbar-ui": "node scripts/verify-navbar.mjs"

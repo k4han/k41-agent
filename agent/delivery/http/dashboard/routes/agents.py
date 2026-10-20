@@ -31,6 +31,16 @@ from agent.shared.config.web_connections import connection_payload, validate_too
 router = APIRouter()
 
 
+def _validate_pool_reference(body, service) -> None:
+    from agent.modules.providers.model_pools import ModelPoolConfig, POOL_PREFIX
+
+    if body.provider.strip() == "@pool":
+        value = service.get(POOL_PREFIX + body.model.strip())
+        if value is None:
+            raise ValueError(f"Unknown model pool: {body.model}.")
+        ModelPoolConfig.model_validate(value)
+
+
 class AgentCardBody(BaseModel):
     """Request body for creating or updating an agent card."""
 
@@ -102,6 +112,7 @@ async def create_agent_card(body: AgentCardBody, request: Request) -> dict[str, 
     catalog = get_catalog_service()
     try:
         service = getattr(request.app.state, "config_service", None) or get_config_service()
+        _validate_pool_reference(body, service)
         for tool, values in body.tool_configs.items():
             validate_tool_references(service, tool, values)
         card = catalog.create_agent_card(agent_config_from_body(body))
@@ -117,6 +128,7 @@ async def update_agent_card(name: str, body: AgentCardBody, request: Request) ->
     catalog = get_catalog_service()
     try:
         service = getattr(request.app.state, "config_service", None) or get_config_service()
+        _validate_pool_reference(body, service)
         for tool, values in body.tool_configs.items():
             validate_tool_references(service, tool, values)
         card = catalog.update_agent_card(name, agent_config_from_body(body))

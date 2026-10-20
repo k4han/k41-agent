@@ -16,7 +16,7 @@ from agent.modules.conversations.repository import (
     ConversationThreadRepository,
     get_conversation_thread_repository,
 )
-from agent.modules.providers import get_resolved_chat_model
+from agent.modules.providers import get_resolved_chat_model, execute_model_call
 from agent.modules.usage import (
     attach_usage_context,
     load_usage_context,
@@ -122,7 +122,6 @@ async def generate_conversation_title(
             provider_name=agent_config.provider,
             model=agent_config.model or None,
         )
-        llm = resolved.model
         messages = [
             SystemMessage(content=agent_config.system_prompt),
             HumanMessage(
@@ -136,18 +135,22 @@ async def generate_conversation_title(
             {"configurable": {"thread_id": thread_id}},
             await load_usage_context(thread_id),
         )
-        response = await asyncio.wait_for(
-            llm.ainvoke(
+
+        async def attempt(candidate):
+            return await candidate.model.ainvoke(
                 messages,
                 config=with_usage_tracking(
                     config,
                     agent_name=CONVERSATION_TITLE_AGENT_NAME,
-                    provider_name=resolved.provider_name,
-                    model_name=resolved.model_name,
+                    provider_name=candidate.provider_name,
+                    model_name=candidate.model_name,
                     call_kind="conversation_title",
                     internal=True,
                 ),
-            ),
+            )
+
+        response = await asyncio.wait_for(
+            execute_model_call(resolved, attempt),
             timeout=timeout_seconds,
         )
         return _sanitize_generated_title(

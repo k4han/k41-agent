@@ -830,6 +830,7 @@ export function parseContextBreakdown(value: unknown): ContextBreakdown | undefi
 }
 
 export interface ThreadUsagePayload {
+  pool_name?: string | null;
   thread_id: string;
   total_tokens: number;
   input_tokens: number;

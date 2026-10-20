@@ -22,7 +22,9 @@ export function AgentGeneralTab(props: {
     return catalog?.models.find((item) => item.id === model);
   });
   const effortLevels = createMemo(() => modelOption()?.reasoning_effort_levels);
+  const isPool = createMemo(() => modelOption()?.source === "pool");
   const effortOptions = createMemo(() => {
+    if (isPool()) return [{ value: "", label: "Auto (model default)" }];
     const defaultEffort = modelOption()?.reasoning_effort_default;
     const options = [
       { value: "", label: defaultEffort ? `Auto (${defaultEffort})` : "Auto (provider default)" },
@@ -129,7 +131,7 @@ export function AgentGeneralTab(props: {
               }
             >
               <SelectControl
-                value={props.form.reasoning_effort || ""}
+                value={isPool() ? "" : props.form.reasoning_effort || ""}
                 options={effortOptions()}
                 disabled={props.readOnly}
                 ariaLabel="Agent reasoning effort"
@@ -137,7 +139,7 @@ export function AgentGeneralTab(props: {
               />
             </Show>
             <p class="hint">
-              {effortLevels()?.length === 0
+              {isPool() ? "Pools use each member model's default reasoning effort." : effortLevels()?.length === 0
                 ? "This model has no configurable effort. Choose Auto to clear a saved override."
                 : "Default reasoning effort for this agent. Auto uses the model's default."}
             </p>

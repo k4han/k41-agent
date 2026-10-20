@@ -19,6 +19,7 @@ class AnthropicFactory:
             api_key=api_key,
             temperature=model_config.temperature,
             profile=model_config.profile,
+            **({"max_retries": 0} if model_config.disable_retries else {}),
         )
 
     async def list_models(

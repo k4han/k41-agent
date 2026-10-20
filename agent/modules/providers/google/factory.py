@@ -21,6 +21,8 @@ class GoogleFactory:
             google_api_key=api_key,
             temperature=model_config.temperature,
             profile=model_config.profile,
+            # Google expresses this value as total attempts, including the first call.
+            **({"max_retries": 1} if model_config.disable_retries else {}),
         )
 
     async def list_models(

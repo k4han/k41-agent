@@ -27,6 +27,7 @@ export interface AgentModelPickerProps {
 }
 
 export function formatShortModelName(provider: string, model: string): string {
+  if (provider === "@pool") return model;
   if (!model || model === "provider default") {
     return provider ? `${provider} default` : "default";
   }
@@ -196,6 +197,7 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
   });
   const selectModel = (provider: string, id: string) => {
     props.onProviderModelChange(provider, id);
+    if (provider === "@pool") props.onReasoningEffortChange("auto");
     setOpen(false);
     modelTriggerRef?.focus();
   };
@@ -437,7 +439,7 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
                   <For each={filteredModelGroups()}>
                     {(group) => (
                       <div class="model-provider-group">
-                        <div class="model-provider-group-title">{group.provider}</div>
+                        <div class="model-provider-group-title">{group.provider === "@pool" ? "Model Pools" : group.provider}</div>
                         <For each={group.models}>
                           {(modelOption) => {
                             const isSelected = () =>

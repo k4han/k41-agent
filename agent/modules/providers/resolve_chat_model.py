@@ -98,6 +98,7 @@ def _resolve_chat_model_info_impl(
     model: str | None = None,
     temperature: float | None = None,
     api_key: str | None = None,
+    disable_retries: bool = False,
 ) -> ResolvedChatModel:
     config = get_config_service()
     provider_config, resolved_model = resolve_chat_model_selection(
@@ -147,6 +148,7 @@ def _resolve_chat_model_info_impl(
         temperature=model_config.temperature,
         extra_body_json=_extra_body_to_cache_key(provider_config.extra_body),
         profile_json=_extra_body_to_cache_key(model_config.profile),
+        disable_retries=disable_retries,
     )
     return ResolvedChatModel(
         model=chat_model,
@@ -180,6 +182,11 @@ def resolve_chat_model_info(
        or disabled default provider) and ``llm.fallback.provider`` or
        ``llm.fallback.model`` is configured, retry using the fallback.
     """
+    from agent.modules.providers.model_pools import get_model_pool_service, selected_pool_name
+
+    pool_name = selected_pool_name(provider_name, model)
+    if pool_name is not None:
+        return replace(get_model_pool_service().preview(pool_name, temperature), pool_temperature=temperature)
     try:
         return _resolve_chat_model_info_impl(
             provider_service,
@@ -220,6 +227,7 @@ def _get_cached_model(
     extra_body_json: str = "",
     provider_name: str = "",
     profile_json: str = "",
+    disable_retries: bool = False,
 ) -> BaseChatModel:
     """Cache model instances by their full config fingerprint."""
     import json as _json
@@ -246,6 +254,7 @@ def _get_cached_model(
     model_config = ModelConfig(
         model_name=model_name, temperature=temperature,
         profile=_json.loads(profile_json) if profile_json else None,
+        disable_retries=disable_retries,
     )
 
     # factory is a ChatModelFactory protocol
