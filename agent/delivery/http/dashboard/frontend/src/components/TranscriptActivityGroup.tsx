@@ -21,13 +21,15 @@ export interface TranscriptActivityGroupProps
 
 /**
  * Consecutive tools expand downward below their own count and status header.
- * Surrounding messages remain independent and retain transcript order. A
- * manual toggle takes precedence over the automatic live/collapsed state.
+ * Surrounding messages remain independent and retain transcript order. Groups
+ * opened during streaming stay open so later messages do not shift upward.
+ * Historical groups start collapsed, and manual toggles take precedence.
  */
 export function TranscriptActivityGroup(props: TranscriptActivityGroupProps) {
   // null means "follow the automatic state".
   const [userOpen, setUserOpen] = createSignal<boolean | null>(null);
-  const open = () => userOpen() ?? props.live;
+  const [autoOpen, setAutoOpen] = createSignal(props.live);
+  const open = () => userOpen() ?? autoOpen();
   const [visited, setVisited] = createSignal(open());
   const mounted = () => visited() || open();
   const bodyId = createUniqueId();
@@ -71,6 +73,7 @@ export function TranscriptActivityGroup(props: TranscriptActivityGroupProps) {
   };
 
   createEffect(() => {
+    if (props.live) setAutoOpen(true);
     if (open()) setVisited(true);
     if (props.live && open()) scheduleFollow();
   });

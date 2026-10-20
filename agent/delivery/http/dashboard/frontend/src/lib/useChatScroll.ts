@@ -7,8 +7,9 @@ export function useChatScroll(
   const [showScrollToBottom, setShowScrollToBottom] = createSignal(false);
   const [turnAnchorItemId, setTurnAnchorItemId] = createSignal<number | null>(null);
   const [turnAnchorSpacerHeight, setTurnAnchorSpacerHeight] = createSignal(0);
-  let pendingScrollTimer: number | undefined;
-  let pendingAnchorFrame: number | undefined;
+  let pendingScrollFrame: number | undefined;
+  let pendingScrollForce = false;
+  let pendingScrollAnchorId: number | null = null;
   let pendingVisibilityFrame: number | undefined;
   let resizeObserver: ResizeObserver | undefined;
   let mutationObserver: MutationObserver | undefined;
@@ -37,7 +38,11 @@ export function useChatScroll(
   const observeTranscript = (ref: HTMLDivElement) => {
     resizeObserver?.disconnect();
     mutationObserver?.disconnect();
-    resizeObserver = new ResizeObserver(scheduleVisibilityUpdate);
+    resizeObserver = new ResizeObserver(() => {
+      // Tool bodies and rich content can finish laying out after the stream
+      // callback, so keep following without waiting for another text delta.
+      scrollToBottom();
+    });
     resizeObserver.observe(ref);
     // The viewport stays the same size when a tool opens or a message grows.
     // Observe its rows as well so layout changes refresh the scroll controls.
@@ -64,14 +69,11 @@ export function useChatScroll(
   };
 
   const cancelScheduledScroll = () => {
-    if (pendingScrollTimer !== undefined) {
-      window.clearTimeout(pendingScrollTimer);
-      pendingScrollTimer = undefined;
+    if (pendingScrollFrame !== undefined) {
+      window.cancelAnimationFrame(pendingScrollFrame);
+      pendingScrollFrame = undefined;
     }
-    if (pendingAnchorFrame !== undefined) {
-      window.cancelAnimationFrame(pendingAnchorFrame);
-      pendingAnchorFrame = undefined;
-    }
+    pendingScrollForce = false;
   };
 
   onCleanup(() => {
@@ -103,15 +105,36 @@ export function useChatScroll(
     return targetRect.top - transcriptRect.top + transcriptRef.scrollTop;
   };
 
-  const scrollToTurnAnchor = (id: number) => {
-    cancelScheduledScroll();
-    pendingAnchorFrame = window.requestAnimationFrame(() => {
-      pendingAnchorFrame = undefined;
-      if (!autoScroll() || turnAnchorItemId() !== id) {
+  const scheduleScroll = (anchorId: number | null, force = false) => {
+    scheduleVisibilityUpdate();
+    if (!autoScroll() && !force) {
+      return;
+    }
+    // Coalesce stream updates without losing an explicit bottom request.
+    pendingScrollForce ||= force;
+    pendingScrollAnchorId = anchorId;
+    if (pendingScrollFrame !== undefined) {
+      return;
+    }
+    pendingScrollFrame = window.requestAnimationFrame(() => {
+      pendingScrollFrame = undefined;
+      const forceBottom = pendingScrollForce;
+      const id = pendingScrollAnchorId;
+      pendingScrollForce = false;
+      if (!autoScroll() && !forceBottom) {
         return;
       }
       const transcriptRef = getTranscriptRef();
       if (!transcriptRef) {
+        return;
+      }
+      if (forceBottom || id === null) {
+        if (forceBottom) clearTurnAnchor();
+        transcriptRef.scrollTop = transcriptRef.scrollHeight;
+        updateScrollToBottomVisibility();
+        return;
+      }
+      if (turnAnchorItemId() !== id) {
         return;
       }
       const target = getTranscriptItemElement(id);
@@ -132,51 +155,19 @@ export function useChatScroll(
         setTurnAnchorSpacerHeight(nextSpacerHeight);
       }
 
-      pendingAnchorFrame = window.requestAnimationFrame(() => {
-        pendingAnchorFrame = undefined;
-        if (!autoScroll() || turnAnchorItemId() !== id) {
-          return;
-        }
-        const ref = getTranscriptRef();
-        if (!ref) {
-          return;
-        }
-        const updatedTarget = getTranscriptItemElement(id);
-        if (!updatedTarget) {
-          return;
-        }
-        ref.scrollTop = getTranscriptItemScrollTop(updatedTarget);
-        updateScrollToBottomVisibility();
-      });
+      // Apply the spacer and scroll before the same paint. Splitting these
+      // writes across frames exposes the browser's intermediate clamped top.
+      transcriptRef.scrollTop = getTranscriptItemScrollTop(target);
+      updateScrollToBottomVisibility();
     });
   };
 
-  const scrollToBottom = (force = false) => {
-    scheduleVisibilityUpdate();
-    if (!autoScroll() && !force) {
-      return;
-    }
+  const scrollToTurnAnchor = (id: number) => {
     cancelScheduledScroll();
-    pendingScrollTimer = window.setTimeout(() => {
-      pendingScrollTimer = undefined;
-      if (!autoScroll() && !force) {
-        return;
-      }
-      const anchorId = turnAnchorItemId();
-      if (anchorId !== null && !force) {
-        scrollToTurnAnchor(anchorId);
-        return;
-      }
-      if (force) {
-        clearTurnAnchor();
-      }
-      const transcriptRef = getTranscriptRef();
-      if (transcriptRef) {
-        transcriptRef.scrollTop = transcriptRef.scrollHeight;
-      }
-      updateScrollToBottomVisibility();
-    }, 0);
+    scheduleScroll(id);
   };
+
+  const scrollToBottom = (force = false) => scheduleScroll(turnAnchorItemId(), force);
 
   const handleTranscriptScroll = () => {
     updateScrollToBottomVisibility();
@@ -193,18 +184,21 @@ export function useChatScroll(
       return;
     }
     pausedScrollTop = undefined;
+    // Wheel, touch, keyboard and scrollbar interactions pause following first.
+    // A delayed event from our own scroll or a layout change must not cancel
+    // the next stream update just because the content has since grown.
+    if (autoScroll()) {
+      return;
+    }
     const threshold = 50; // px
     const spacerHeight = turnAnchorSpacerHeight();
     const isAtBottom =
       transcriptRef.scrollHeight - spacerHeight - transcriptRef.scrollTop - transcriptRef.clientHeight < threshold
-      && (autoScroll() || spacerHeight === 0 || scrollingDown);
+      && (spacerHeight === 0 || scrollingDown);
     if (isAtBottom) {
-      if (!autoScroll()) {
-        clearTurnAnchor();
-      }
+      clearTurnAnchor();
       setAutoScroll(true);
     } else {
-      setAutoScroll(false);
       cancelScheduledScroll();
     }
   };
@@ -212,7 +206,6 @@ export function useChatScroll(
   const handleScrollToBottomClick = () => {
     setShowScrollToBottom(false);
     pausedScrollTop = undefined;
-    clearTurnAnchor();
     setAutoScroll(true);
     scrollToBottom(true);
   };
@@ -230,6 +223,19 @@ export function useChatScroll(
     scheduleVisibilityUpdate();
   };
 
+  const handleUserScroll = (direction?: number) => {
+    if (direction === 0) return;
+    const ref = getTranscriptRef();
+    // At the bottom, scrolling down may not emit a scroll event. Resume here
+    // so this interaction cannot leave the next streamed reply unfollowed.
+    if (direction !== undefined && direction > 0 && ref
+      && ref.scrollHeight - turnAnchorSpacerHeight() - ref.scrollTop - ref.clientHeight < 50) {
+      handleScrollToBottomClick();
+      return;
+    }
+    pauseAutoScroll();
+  };
+
   return {
     autoScroll,
     showScrollToBottom,
@@ -243,6 +249,7 @@ export function useChatScroll(
     scrollToTurnAnchor,
     scrollToBottom,
     handleTranscriptScroll,
+    handleUserScroll,
     handleScrollToBottomClick,
     pauseAutoScroll,
   };

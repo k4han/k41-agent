@@ -30,7 +30,7 @@ export function ChatWelcomeHero() {
 export interface ChatTranscriptProps {
   setTranscriptRef: (el: HTMLDivElement) => void;
   onScroll: () => void;
-  onUserScroll: () => void;
+  onUserScroll: (direction?: number) => void;
   items: ChatTranscriptItem[];
   filteredItems: ChatTranscriptItem[];
   threadLoading: boolean;
@@ -74,6 +74,7 @@ export interface ChatTranscriptProps {
 }
 
 export function ChatTranscript(props: ChatTranscriptProps) {
+  let previousTouchY: number | undefined;
   const streamActive = () => props.streaming || props.backgroundLive;
   const isStreamingItem = useStreamingTranscriptItem(
     () => props.items,
@@ -98,8 +99,19 @@ export function ChatTranscript(props: ChatTranscriptProps) {
         class="transcript"
         ref={props.setTranscriptRef}
         onScroll={props.onScroll}
-        onWheel={props.onUserScroll}
-        onTouchMove={props.onUserScroll}
+        onWheel={(event) => {
+          if (!event.ctrlKey) props.onUserScroll(event.deltaY);
+        }}
+        onTouchStart={(event) => { previousTouchY = event.touches[0]?.clientY; }}
+        onTouchMove={(event) => {
+          const nextY = event.touches[0]?.clientY;
+          if (previousTouchY !== undefined && nextY !== undefined) {
+            props.onUserScroll(previousTouchY - nextY);
+          }
+          previousTouchY = nextY;
+        }}
+        onTouchEnd={() => { previousTouchY = undefined; }}
+        onTouchCancel={() => { previousTouchY = undefined; }}
         onPointerDown={(event) => {
           if (event.target === event.currentTarget) {
             props.onUserScroll();
@@ -110,7 +122,9 @@ export function ChatTranscript(props: ChatTranscriptProps) {
             event.target === event.currentTarget
             && ["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)
           ) {
-            props.onUserScroll();
+            const scrollingUp = ["ArrowUp", "PageUp", "Home"].includes(event.key)
+              || (event.key === " " && event.shiftKey);
+            props.onUserScroll(scrollingUp ? -1 : 1);
           }
         }}
         tabIndex={0}

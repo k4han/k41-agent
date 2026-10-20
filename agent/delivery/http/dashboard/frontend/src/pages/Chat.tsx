@@ -1944,7 +1944,7 @@ export function ChatPage() {
                   scroll.observeTranscript(el);
                 }}
                 onScroll={handleTranscriptScroll}
-                onUserScroll={scroll.pauseAutoScroll}
+                onUserScroll={scroll.handleUserScroll}
                 items={items()}
                 filteredItems={filteredItems()}
                 threadLoading={threadLoading()}
