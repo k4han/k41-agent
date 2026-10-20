@@ -26,20 +26,29 @@ history.legacy = {
 };
 const fixtures = {
   '/dashboard-api/catalog': { backends: [] },
-  '/dashboard-api/agents/cards': { cards: [{ name: 'default', display_name: 'Default', provider: 'test', model: 'model-a', valid: true }] },
+  '/dashboard-api/agents/cards': { cards: [
+    { name: 'default', display_name: 'Default', provider: 'test', model: 'model-a', valid: true },
+    { name: 'alternate', display_name: 'Alternate', provider: 'test', model: 'model-c', valid: true },
+    { name: 'custom', display_name: 'Custom', provider: 'test', model: 'configured-custom-model', valid: true },
+    { name: 'unavailable', display_name: 'Unavailable', provider: 'removed', model: 'removed-model', valid: true },
+  ] },
   '/dashboard-api/agents/providers': {
     provider_names: ['test'], default_provider: 'test', default_model: 'model-b',
     model_catalogs: [{ provider: 'test', default_model: 'model-b', models: ['a', 'b', 'c'].map(id => ({
       id: `model-${id}`, label: `Model ${id.toUpperCase()}`,
       context_window: id === 'a' ? 64000 : 128000,
       reasoning_effort_levels: ['low', 'high'], reasoning_effort_default: id === 'b' ? 'high' : 'low',
-    })) }],
+    })) },
+    { provider: 'backup', default_model: 'model-a', models: [{ id: 'model-a', label: 'Backup model A' }] },
+    { provider: '@pool', default_model: '', models: [{ id: 'fallback-pool', label: 'Fallback pool' }] }],
   },
   '/dashboard-api/workspace/default': { workspace: null },
 };
 const responses = new Map();
 const sentMessages = [];
 const reconnects = [];
+const writes = [];
+const backgroundSnapshots = [];
 let delayedHistory;
 let holdHistory = false;
 let workspaceResolution;
@@ -50,6 +59,14 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === '/dashboard-api/sessions/events') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream' });
     res.write('event: snapshot\ndata: {"sessions":[]}\n\n');
+    return;
+  }
+  if (url.pathname === '/dashboard-api/background-task-events') {
+    const threadId = url.searchParams.get('thread_id');
+    backgroundSnapshots.push(threadId);
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    const snapshot = { ...history[threadId], messages: [{ role: 'assistant', content: `${threadId} background snapshot` }] };
+    res.end(`event: snapshot\ndata: ${JSON.stringify(snapshot)}\n\nevent: done\ndata: {}\n\n`);
     return;
   }
   if (url.pathname.startsWith('/api/chat/events')) {
@@ -70,6 +87,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   if (url.pathname.startsWith('/dashboard-api/')) {
+    if (req.method !== 'GET') writes.push({ method: req.method, path: url.pathname });
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('X-CSRF-Token', 'switching-test-csrf');
     if (holdSessions && url.pathname === '/dashboard-api/sessions') {
@@ -148,9 +166,10 @@ try {
   };
   const navigate = async href => {
     await js(`(() => { const link = document.createElement('a'); link.href = ${JSON.stringify(href)}; document.body.append(link); link.click(); link.remove(); })()`);
-    await until(() => js(`location.pathname === ${JSON.stringify(href)}`), `navigate to ${href}`);
+    await until(() => js(`location.pathname + location.search === ${JSON.stringify(href)}`), `navigate to ${href}`);
   };
   const model = () => js('document.querySelector(".agent-model-badge-model")?.textContent');
+  const threadRunning = id => js(`document.querySelector(${JSON.stringify(`a[href="/c/${id}"]`)})?.closest('.nav-history-item').classList.contains('running')`);
   const effort = () => js('document.querySelector(".agent-model-badge-effort")?.textContent');
   const loaded = () => until(() => js('document.querySelector(".chat-prompt-input")?.disabled === false'), 'conversation loaded');
   const completed = () => until(() => js('!!document.querySelector(".chat-composer-send") && document.querySelector(".chat-prompt-input")?.disabled === false'), 'response completed');
@@ -163,10 +182,34 @@ try {
     })()`);
     await until(() => sentMessages.length === count + 1, 'message sent');
   };
-  const selectModel = async id => {
+  const preference = () => js('JSON.parse(localStorage.getItem("k41.dashboard.lastChatModel"))');
+  const reload = async () => {
+    const previousTimeOrigin = await js('performance.timeOrigin');
+    await call('Page.reload');
+    await until(() => js(`performance.timeOrigin !== ${previousTimeOrigin} && document.readyState === 'complete'`), 'page reloaded');
+    await loaded();
+  };
+  const selectModel = async (id, provider = 'test') => {
     await js('document.querySelector(".model-picker-trigger").click()');
     await until(() => js('!!document.querySelector(".model-item-select")'), 'model menu');
-    await js(`Array.from(document.querySelectorAll('.model-item-select')).find(el => el.textContent.includes(${JSON.stringify(`Model ${id.toUpperCase()}`)})).click()`);
+    const modelId = provider === 'test' ? `model-${id}` : id;
+    await js(`Array.from(document.querySelectorAll('.model-item-row')).find(el => el.dataset.provider === ${JSON.stringify(provider)} && el.dataset.modelId === ${JSON.stringify(modelId)}).querySelector('.model-item-select').click()`);
+  };
+  const selectAgent = async name => {
+    await js('document.querySelector(".agent-picker-trigger").click()');
+    await until(() => js('!!document.querySelector(".agent-card-item")'), 'agent menu');
+    await js(`Array.from(document.querySelectorAll('.agent-card-item')).find(el => el.textContent.trim() === ${JSON.stringify(name)}).click()`);
+  };
+  const selectCustomModel = async identifier => {
+    await js('document.querySelector(".model-picker-trigger").click()');
+    await until(() => js('!!document.querySelector(".agent-model-search-input")'), 'model search');
+    await js(`(() => {
+      const input = document.querySelector('.agent-model-search-input');
+      input.value = ${JSON.stringify(identifier)};
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+    await until(() => js('!!document.querySelector(".model-item-custom")'), 'custom model option');
+    await js('document.querySelector(".model-item-custom").click()');
   };
   const selectEffort = async label => {
     await js('document.querySelector(".model-picker-trigger").click()');
@@ -194,6 +237,20 @@ try {
   assert.equal(sentMessages.at(-1).reasoning_effort, 'low');
   finish('legacy', 'legacy completed');
   await completed();
+  assert.deepEqual(await preference(), { agentName: 'default', provider: 'test', model: 'model-a' }, 'remember the agent and effective model when the request omits an override');
+  await navigate('/chat');
+  await loaded();
+  assert.equal(await model(), 'model-a');
+  await reload();
+  assert.equal(await model(), 'model-a', 'new chats keep the last sent model across reloads');
+  await selectModel('c');
+  assert.deepEqual(await preference(), { agentName: 'default', provider: 'test', model: 'model-a' }, 'an unsent selection does not change the preference');
+  await navigate('/c/second');
+  await loaded();
+  assert.equal(await model(), 'model-b', 'history keeps its own model');
+  await navigate('/chat');
+  await loaded();
+  assert.equal(await model(), 'model-a', 'opening history does not change the next new chat');
 
   await navigate('/c/first');
   await loaded();
@@ -207,6 +264,7 @@ try {
   assert.equal(await model(), 'model-c', 'unsent model selection belongs to its conversation');
   await send('first new prompt');
   assert.equal(sentMessages.at(-1).model, 'model-c');
+  assert.deepEqual(await preference(), { agentName: 'default', provider: 'test', model: 'model-c' });
   await navigate('/settings/appearance');
   await navigate('/c/first');
   await loaded();
@@ -215,6 +273,11 @@ try {
   await loaded();
   await send('second new prompt');
   assert.equal(sentMessages.at(-1).model, 'model-b');
+  await navigate('/chat');
+  await loaded();
+  assert.equal(await model(), 'model-b', 'new chats inherit the latest send while older chats are streaming');
+  await navigate('/c/second');
+  await loaded();
   responses.get('first').write(JSON.stringify({ type: 'error', code: 'recursion_limit_reached', message: 'First conversation limit' }) + '\n');
   await delay(150);
   assert.equal(await model(), 'model-b');
@@ -223,6 +286,7 @@ try {
   finish('first', 'first completed');
   await delay(150);
   assert.equal(await js(`!!document.querySelector('button[aria-label="Stop generating"]')`), true, 'finishing first cannot stop second');
+  assert.deepEqual(await preference(), { agentName: 'default', provider: 'test', model: 'model-b' }, 'late stream completion cannot overwrite the latest send');
 
   for (let index = 0; index < 8; index++) {
     await navigate('/c/first');
@@ -268,9 +332,11 @@ try {
   await until(() => js(`!document.querySelector('button[aria-label="Stop generating"]')`), 'session stays stopped after stale snapshot');
   await delay(150);
   assert.equal(reconnects.length, 1, 'a delayed session snapshot cannot restart a completed session');
+  assert.deepEqual(await preference(), { agentName: 'default', provider: 'test', model: 'model-b' }, 'external reconnection does not remember the reopened model');
 
   await navigate('/chat');
   await loaded();
+  await selectModel('a');
   await js('document.querySelector(".composer-workspace-trigger").click()');
   await until(() => js('!!document.querySelector(".workspace-tab-btn")'), 'workspace picker');
   await js('Array.from(document.querySelectorAll(".workspace-tab-btn")).find(el => el.textContent.trim() === "Local Folder").click()');
@@ -286,6 +352,7 @@ try {
     document.querySelector('button[aria-label="Send message"]').click();
   })()`);
   await until(() => Boolean(workspaceResolution), 'workspace resolution in progress');
+  assert.deepEqual(await preference(), { agentName: 'default', provider: 'test', model: 'model-a' }, 'remember the send before workspace resolution completes');
   await navigate('/c/second');
   await loaded();
   workspaceResolution.end(JSON.stringify({ kind: 'local', workspace: {
@@ -334,8 +401,219 @@ try {
     finish(threadId, 'follow-up completed');
     await completed();
   }
+
+  await navigate('/chat');
+  await loaded();
+  await selectAgent('Alternate');
+  assert.equal(await model(), 'model-c', 'switching agents applies their configured model');
+  assert.deepEqual(await preference(), { agentName: 'default', provider: 'test', model: 'model-a' }, 'switching agents alone does not change the preference');
+  await navigate('/c/legacy');
+  await loaded();
+  assert.equal(await threadRunning('legacy'), false, 'an idle conversation must not be marked running');
+  const requestsBeforeAgentChange = sentMessages.length;
+  await selectAgent('Alternate');
+  assert.equal(await threadRunning('legacy'), false, 'changing the agent must not mark an idle conversation running');
+  assert.equal(sentMessages.length, requestsBeforeAgentChange, 'changing agents does not send a message');
+  assert.equal(await js('document.querySelector(\'a[href="/c/legacy"]\').title.includes("alternate")'), true, 'the sidebar agent metadata updates without starting execution');
+  await send('Remember the alternate agent model');
+  assert.equal(await threadRunning('legacy'), true, 'sending a message marks the conversation running');
+  assert.deepEqual(await preference(), { agentName: 'alternate', provider: 'test', model: 'model-c' });
+  await navigate('/c/second');
+  await loaded();
+  assert.equal(await js('document.querySelector(".agent-model-badge-agent").textContent'), 'Default', 'existing conversations keep their own agent');
+  assert.equal(await model(), 'model-b');
+  await navigate('/chat');
+  await loaded();
+  assert.equal(await js('document.querySelector(".agent-model-badge-agent").textContent'), 'Alternate', 'new chats inherit the latest agent while its conversation is streaming');
+  await navigate('/c/legacy');
+  await loaded();
+  assert.equal(await js('document.querySelector(".agent-model-badge-agent").textContent'), 'Alternate', 'streaming conversations retain their agent');
+  finish('legacy', 'alternate agent completed');
+  await completed();
+  assert.equal(await threadRunning('legacy'), false, 'completed conversations clear their running indicator');
+  await navigate('/chat');
+  await loaded();
+  assert.equal(await model(), 'model-c');
+  assert.equal(await js('document.querySelector(".agent-model-badge-agent").textContent'), 'Alternate', 'new chats remember the last sent agent');
+  await reload();
+  assert.equal(await js('document.querySelector(".agent-model-badge-agent").textContent'), 'Alternate', 'the remembered agent survives reloads');
+  assert.equal(await model(), 'model-c');
+  await selectAgent('Default');
+  await navigate('/c/second');
+  await loaded();
+  await navigate('/chat');
+  await loaded();
+  assert.equal(await js('document.querySelector(".agent-model-badge-agent").textContent'), 'Alternate', 'unsent agent changes do not replace the last sent agent');
+
+  for (const platform of ['github', 'schedule', 'telegram']) {
+    history[platform] = { ...structuredClone(history.second), thread_id: platform, platform, kind: 'background', model: 'model-b' };
+    await navigate(`/c/${platform}`);
+    await until(() => backgroundSnapshots.includes(platform), `${platform} background snapshot`);
+    await until(() => js(`document.querySelector('.chat-panel')?.textContent.includes(${JSON.stringify(`${platform} background snapshot`)})`), `${platform} snapshot applied`);
+    await loaded();
+    assert.equal(await model(), 'model-b', 'automated conversations keep their configured model');
+    assert.equal(await js('document.querySelector(".agent-model-badge-agent").textContent'), 'Default', 'automated conversations keep their configured agent');
+    assert.deepEqual(await preference(), { agentName: 'alternate', provider: 'test', model: 'model-c' }, 'automated snapshots do not change the preference');
+  }
+
+  for (const [provider, modelId] of [['backup', 'model-a'], ['@pool', 'fallback-pool']]) {
+    await navigate('/c/legacy');
+    await loaded();
+    await selectModel(modelId, provider);
+    await send(`Remember ${provider}/${modelId}`);
+    assert.deepEqual(await preference(), { agentName: sentMessages.at(-1).agent_name, provider, model: modelId });
+    finish('legacy', `${provider} completed`);
+    await completed();
+    await navigate('/chat');
+    await loaded();
+    await reload();
+    assert.equal(await model(), modelId, 'provider and pool identity survive reloads');
+    assert.equal(await js('document.querySelector(".model-picker-trigger").title.startsWith("Model: " + ' + JSON.stringify(`${provider}/${modelId}`) + ')'), true);
+  }
+
+  for (const agentName of [undefined, 'removed-agent']) {
+    await js(`localStorage.setItem('k41.dashboard.lastChatModel', ${JSON.stringify(JSON.stringify({ agentName, provider: 'test', model: 'model-c' }))})`);
+    await reload();
+    assert.equal(await js('document.querySelector(".agent-model-badge-agent").textContent'), 'Default', 'legacy preferences and removed agents fall back to the default agent');
+    assert.equal(await model(), 'model-c', 'agent fallback preserves an available remembered model');
+  }
+  await js(`localStorage.setItem('k41.dashboard.lastChatModel', ${JSON.stringify(JSON.stringify({ agentName: 'alternate', provider: 'test', model: 'model-c' }))})`);
+  await navigate('/settings/appearance');
+  await navigate('/chat?agent=default');
+  await loaded();
+  assert.equal(await js('document.querySelector(".agent-model-badge-agent").textContent'), 'Default', 'an explicitly requested agent takes precedence over the remembered agent');
+  await navigate('/c/second');
+  await navigate('/chat');
+  await loaded();
+
+  for (const value of [
+    '{', '{"provider":"removed","model":"model-a"}', '{"provider":"test","model":"removed-model"}',
+    '{"provider":"@pool","model":"removed-pool"}', '{"provider":"removed","model":"manual-model","customModel":true}',
+    '{"provider":"@pool","model":"removed-pool","customModel":true}',
+  ]) {
+    await js(`localStorage.setItem('k41.dashboard.lastChatModel', ${JSON.stringify(value)})`);
+    await reload();
+    assert.equal(await model(), 'model-a', 'invalid preferences fall back to the agent model');
+  }
+  await navigate('/settings/appearance');
+  await navigate('/chat?agent=unavailable');
+  await loaded();
+  assert.equal(await model(), 'model-b', 'an unavailable agent model falls back to the system default');
+
+  const catalog = fixtures['/dashboard-api/agents/providers'].model_catalogs[0];
+  const originalModels = catalog.models;
+  history.retired = {
+    ...structuredClone(history.second), thread_id: 'retired', model: 'model-c',
+  };
+  await navigate('/c/retired');
+  await loaded();
+  await send('Remember a catalog model before it is removed');
+  assert.deepEqual(await preference(), { agentName: 'default', provider: 'test', model: 'model-c' });
+  catalog.models = originalModels.filter(option => option.id !== 'model-c');
+  await navigate('/settings/appearance');
+  await navigate('/c/retired');
+  await loaded();
+  finish('retired', 'catalog model completed');
+  await completed();
+  await send('Keep the original source of the selected model');
+  assert.deepEqual(await preference(), { agentName: 'default', provider: 'test', model: 'model-c' }, 'a catalog selection cannot become custom after its model disappears');
+  finish('retired', 'removed model follow-up completed');
+  await completed();
+  await navigate('/chat');
+  await loaded();
+  await reload();
+  assert.equal(await model(), 'model-a', 'removed catalog models fall back instead of becoming custom models');
+  await navigate('/c/retired');
+  await loaded();
+  assert.equal(await model(), 'model-a', 'history also falls back when its model was removed');
+  catalog.models = originalModels;
+
+  await js('localStorage.removeItem("k41.dashboard.lastChatModel")');
+  await navigate('/settings/appearance');
+  await navigate('/chat?agent=custom');
+  await loaded();
+  assert.equal(await model(), 'model-b', 'agent models without custom provenance still require catalog membership');
+  await reload();
+  assert.equal(await model(), 'model-b', 'reloads preserve the fallback for unavailable configured models');
+
+  history.custom = {
+    ...structuredClone(history.second), thread_id: 'custom', agent_name: 'custom', model: 'configured-custom-model',
+  };
+  await navigate('/c/custom');
+  await loaded();
+  assert.equal(await model(), 'model-b', 'history falls back for unavailable configured models');
+  await selectAgent('Custom');
+  assert.equal(await model(), 'configured-custom-model', 'explicit agent selection can use its configured custom model');
+  await send('Remember the configured custom model');
+  assert.equal(sentMessages.at(-1).provider, 'test');
+  assert.equal(sentMessages.at(-1).model, 'configured-custom-model');
+  finish('custom', 'configured custom model completed');
+  await completed();
+  await navigate('/chat');
+  await loaded();
+  await reload();
+  assert.equal(await model(), 'configured-custom-model', 'new chats remember configured custom models');
+
+  await navigate('/c/custom');
+  await loaded();
+  await selectCustomModel('test/manual-model');
+  await send('Remember a manually entered custom model');
+  assert.equal(sentMessages.at(-1).provider, 'test');
+  assert.equal(sentMessages.at(-1).model, 'manual-model');
+  assert.deepEqual(await preference(), { agentName: 'custom', provider: 'test', model: 'manual-model', customModel: true });
+  history.custom.model = 'manual-model';
+  await navigate('/settings/appearance');
+  await navigate('/c/custom');
+  await loaded();
+  finish('custom', 'manual custom model completed');
+  await completed();
+  await send('Continue with the explicitly selected custom model');
+  assert.deepEqual(await preference(), { agentName: 'custom', provider: 'test', model: 'manual-model', customModel: true }, 'stream restoration preserves custom model provenance');
+  finish('custom', 'custom model follow-up completed');
+  await completed();
+  await navigate('/chat');
+  await loaded();
+  assert.equal(await model(), 'manual-model', 'new chats inherit the manually entered model');
+  await reload();
+  assert.equal(await model(), 'manual-model', 'remembered manual models survive reloads');
+  assert.equal(await js('document.querySelector(".agent-model-badge-agent").textContent'), 'Custom');
+
+  await navigate('/c/custom');
+  await loaded();
+  await selectCustomModel('test/manual-model');
+  await selectModel('a');
+  await send('Switch back to a catalog model');
+  assert.deepEqual(await preference(), { agentName: 'custom', provider: 'test', model: 'model-a' }, 'selecting a catalog model clears custom model provenance');
+  finish('custom', 'catalog selection completed');
+  await completed();
+
+  await js(`(() => {
+    const getItem = Storage.prototype.getItem;
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.getItem = function(key) {
+      if (key === 'k41.dashboard.lastChatModel') throw new Error('Storage blocked');
+      return getItem.call(this, key);
+    };
+    Storage.prototype.setItem = function(key, value) {
+      if (key === 'k41.dashboard.lastChatModel') throw new Error('Quota exceeded');
+      return setItem.call(this, key, value);
+    };
+  })()`);
+  await navigate('/c/legacy');
+  await loaded();
+  await navigate('/chat');
+  await loaded();
+  assert.equal(await model(), 'model-a', 'blocked preference reads fall back safely');
+  await navigate('/c/legacy');
+  await loaded();
+  await selectModel('b');
+  await send('Chat still works when preference storage fails');
+  assert.equal(sentMessages.at(-1).model, 'model-b');
+  finish('legacy', 'storage failure completed');
+  await completed();
+  assert.equal(writes.length, 0, 'remembering dashboard models must not write settings or conversation metadata');
   assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
-  console.log('PASS: independent models, agent model defaults, concurrent streams, repeated switches, remount completion, delayed history and sessions, workspace request snapshots, background thread creation, and effort preservation across thread creation.');
+  console.log('PASS: remembered agents and models, custom models, reloads, unsent selections, agent defaults, model pools, automated snapshots, legacy and invalid preferences, concurrent streams, delayed history and sessions, workspace snapshots, and effort preservation.');
 } finally {
   for (const response of responses.values()) response.end();
   workspaceResolution?.end();

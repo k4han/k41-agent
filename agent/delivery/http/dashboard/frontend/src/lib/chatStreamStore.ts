@@ -4,6 +4,7 @@ import type { TranscriptItem } from "@/components/Transcript";
 import type { ContextBreakdown } from "@/types";
 import { cloneValue } from "@/lib/utils";
 import { hasToolCallResult } from "@/lib/toolCallStatus";
+import type { ChatModelPreference } from "@/lib/chatModelPreference";
 
 export type ChatTranscriptItem = TranscriptItem & { id: number; key?: string };
 
@@ -105,7 +106,7 @@ export interface ContextUsage {
 }
 
 export type PersistedStreamSignals = {
-  selection?: { agentName: string; provider: string; model: string };
+  selection?: ChatModelPreference & { agentName: string };
   items: ReturnType<typeof createTranscriptItems>;
   streaming: ReturnType<typeof createSignal<boolean>>;
   controller: ReturnType<typeof createSignal<AbortController | null>>;

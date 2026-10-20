@@ -34,6 +34,7 @@ export const CUSTOM_DOM_EVENTS = {
   SESSION_UPDATED: "k41:session-updated",
   THREAD_START_RUNNING: "k41:thread-start-running",
   THREAD_STOP_RUNNING: "k41:thread-stop-running",
+  THREAD_AGENT_UPDATED: "k41:thread-agent-updated",
   THREAD_TITLE_UPDATED: "k41:thread-title-updated",
   THREAD_EXTERNAL_ABORT: "k41:thread-external-abort",
   THREADS_CHANGED: "k41:threads-changed",

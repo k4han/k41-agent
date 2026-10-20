@@ -17,7 +17,7 @@ export interface AgentModelPickerProps {
   onAgentChange: (name: string) => void;
   provider: string;
   model: string;
-  onProviderModelChange: (provider: string, model: string) => void;
+  onProviderModelChange: (provider: string, model: string, customModel?: boolean) => void;
   catalogs: ModelCatalog[];
   providerNames: string[];
   defaultProvider: string;
@@ -86,10 +86,18 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
     setOpen(!wasOpen);
   };
 
+  const isCustomModel = (provider: string, model: string): boolean => {
+    const resolved = resolveModelAndProvider(provider, model, props.defaultProvider, props.defaultModel, props.catalogs);
+    const catalog = props.catalogs.find((item) => item.provider === resolved.provider);
+    return resolved.provider !== "@pool" && Boolean(resolved.model)
+      && catalog?.default_model !== resolved.model
+      && !catalog?.models.some((item) => item.id === resolved.model);
+  };
+
   const selectAgent = (agent: AgentCard) => {
     props.onAgentChange(agent.name);
     if (agent.provider || agent.model) {
-      props.onProviderModelChange(agent.provider || "default", agent.model || "");
+      props.onProviderModelChange(agent.provider || "default", agent.model || "", isCustomModel(agent.provider || "default", agent.model || ""));
     }
     setOpen(false);
   };
@@ -197,15 +205,15 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
       window.removeEventListener("resize", handler);
     });
   });
-  const selectModel = (provider: string, id: string) => {
-    props.onProviderModelChange(provider, id);
+  const selectModel = (provider: string, id: string, customModel = isCustomModel(provider, id)) => {
+    props.onProviderModelChange(provider, id, provider !== "@pool" && customModel);
     if (provider === "@pool") props.onReasoningEffortChange("auto");
     setOpen(false);
     modelTriggerRef?.focus();
   };
   const selectEffort = (effort: string) => {
     const target = effortTarget();
-    if (!target.isSelected) props.onProviderModelChange(target.provider, target.id);
+    if (!target.isSelected) props.onProviderModelChange(target.provider, target.id, false);
     // Apply effort after model-change effects have reset the previous override.
     queueMicrotask(() => props.onReasoningEffortChange(effort));
     setOpen(false);
@@ -557,7 +565,7 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
                         const slashIdx = query.indexOf("/");
                         const p = slashIdx > 0 ? query.slice(0, slashIdx).trim() : resolvedSelection().provider;
                         const m = slashIdx > 0 ? query.slice(slashIdx + 1).trim() : query;
-                        selectModel(p, m);
+                        selectModel(p, m, true);
                       }}
                       onKeyDown={(event) => {
                         if (event.key === "Enter" || event.key === " ") {

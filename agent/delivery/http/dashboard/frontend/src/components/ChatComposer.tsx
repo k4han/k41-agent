@@ -48,7 +48,7 @@ export interface ChatComposerProps {
   onAgentChange: (name: string) => void;
   provider: string;
   model: string;
-  onProviderModelChange: (provider: string, model: string) => void;
+  onProviderModelChange: (provider: string, model: string, customModel?: boolean) => void;
   reasoningEffort: ReasoningEffort;
   reasoningEffortLevels: ReasoningEffort[];
   reasoningEffortDefault?: string | null;

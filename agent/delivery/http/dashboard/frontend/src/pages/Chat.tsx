@@ -23,6 +23,7 @@ import { WorkspaceExplorer } from "@/components/WorkspaceExplorer";
 import type { TodoProgress } from "@/components/ChatTodos";
 import { apiFetch, fetchWithCsrf, postJson, readError } from "@/lib/api";
 import { fetchAgentChatOptions } from "@/lib/agents";
+import { readChatModelPreference, writeChatModelPreference, type ChatModelPreference } from "@/lib/chatModelPreference";
 import { resolveModelAndProvider } from "@/lib/modelSelection";
 import {
   chatThreadHref,
@@ -190,6 +191,7 @@ export function ChatPage() {
   const [agentName, setAgentName] = createSignal("");
   const [provider, setProvider] = createSignal("default");
   const [model, setModel] = createSignal("");
+  const [customModel, setCustomModel] = createSignal(false);
   const [reasoningScope, setReasoningScope] = createSignal(0);
   const [workingDir, setWorkingDir] = createSignal("");
   const [workspaceRef, setWorkspaceRef] = createSignal<WorkspaceRef | null>(null);
@@ -217,7 +219,7 @@ export function ChatPage() {
   let threadLoadController: AbortController | undefined;
   let compactRequestId = 0;
   let latestLocalStreamFinish: { threadId: string; finishedAt: number } | null = null;
-  const selectionDrafts = new Map<string, { agentName: string; provider: string; model: string }>();
+  const selectionDrafts = new Map<string, ChatModelPreference & { agentName: string }>();
   const promptDrafts = new Map<string, string>();
 
   const scroll = useChatScroll(() => transcriptRef);
@@ -241,7 +243,7 @@ export function ChatPage() {
     validCards().find((card) => card.name === agentName()),
   );
 
-  const modelSelectionAvailable = (nextProvider: string, nextModel: string): boolean => {
+  const modelSelectionAvailable = (nextProvider: string, nextModel: string, customModel = false): boolean => {
     const payload = data();
     if (!payload) {
       return false;
@@ -260,6 +262,10 @@ export function ChatPage() {
     if (!providerKnown) {
       return false;
     }
+    // Only explicitly remembered custom models may bypass catalog membership.
+    if (customModel && resolvedProvider !== "@pool") {
+      return true;
+    }
     const modelName = (nextModel || "").trim();
     if (!modelName || modelName === "provider default") {
       return true;
@@ -270,17 +276,17 @@ export function ChatPage() {
     );
   };
 
-  const fallbackModelSelection = (card: AgentCard): { provider: string; model: string } => ({
+  const fallbackModelSelection = (card: AgentCard): ChatModelPreference => ({
     provider: card.provider || "default",
     model: card.model || "",
   });
 
   const restoredModelSelection = (
-    thread: ThreadMessagesPayload,
+    thread: ThreadMessagesPayload | undefined,
     card: AgentCard,
-  ): { provider: string; model: string } => {
-    const threadProvider = String(thread.provider || "").trim();
-    const threadModel = String(thread.model || "").trim();
+  ): ChatModelPreference => {
+    const threadProvider = String(thread?.provider || "").trim();
+    const threadModel = String(thread?.model || "").trim();
     if (threadProvider && modelSelectionAvailable(threadProvider, threadModel)) {
       return { provider: threadProvider, model: threadModel };
     }
@@ -288,11 +294,17 @@ export function ChatPage() {
     if (modelSelectionAvailable(cardSelection.provider, cardSelection.model)) {
       return cardSelection;
     }
-    return { provider: "default", model: "" };
+    const payload = data();
+    return resolveModelAndProvider(
+      "default", "", payload?.default_provider || "", payload?.default_model || "", payload?.model_catalogs || [],
+    );
   };
 
   const rememberSelection = () => {
-    const selection = { agentName: agentName(), provider: provider(), model: model() };
+    const selection = {
+      agentName: agentName(), provider: provider(), model: model(),
+      ...(customModel() ? { customModel: true as const } : {}),
+    };
     const threadId = currentThreadId();
     if (threadId) selectionDrafts.set(threadId, selection);
     const stream = persistedStreams.get(currentStreamThreadId() || "");
@@ -306,18 +318,26 @@ export function ChatPage() {
     const threadId = thread?.thread_id || currentThreadId();
     const draft = selectionDrafts.get(threadId) || persistedStreams.get(threadId)?.selection;
     if (draft && threadId) selectionDrafts.set(threadId, draft);
+    const remembered = !threadId ? readChatModelPreference() : null;
     const requested = thread?.agent_name || (!threadId ? String(searchParams.agent || "") : "");
     const card = cards.find((item) => item.name === (draft?.agentName || requested))
+      || cards.find((item) => item.name === remembered?.agentName)
       || cards.find((item) => item.name === "default") || cards[0];
-    const selection = draft || (thread ? restoredModelSelection(thread, card) : fallbackModelSelection(card));
+    const selection = draft || (
+      remembered && modelSelectionAvailable(remembered.provider, remembered.model, remembered.customModel)
+        ? remembered
+        : restoredModelSelection(thread, card)
+    );
     setAgentName(card.name);
     setProvider(selection.provider);
     setModel(selection.model);
+    setCustomModel(selection.customModel === true);
   });
 
-  const handleProviderModelChange = (nextProvider: string, nextModel: string) => batch(() => {
+  const handleProviderModelChange = (nextProvider: string, nextModel: string, isCustomModel = false) => batch(() => {
     setProvider(nextProvider);
     setModel(nextModel);
+    setCustomModel(isCustomModel);
     rememberSelection();
   });
 
@@ -331,6 +351,12 @@ export function ChatPage() {
       activeProvider, activeModel, payload.default_provider, payload.default_model, payload.model_catalogs || [],
     );
   });
+
+  const selectedModelIsCustom = () => {
+    const selection = selectedModelSelection();
+    return Boolean(selection && selection.provider !== "@pool"
+      && !modelSelectionAvailable(selection.provider, selection.model));
+  };
 
   const selectedModelOption = createMemo<ModelOption | undefined>(() => {
     const selected = selectedModelSelection();
@@ -857,10 +883,9 @@ export function ChatPage() {
       return;
     }
     window.dispatchEvent(
-      new CustomEvent(CUSTOM_DOM_EVENTS.THREAD_START_RUNNING, {
+      new CustomEvent(CUSTOM_DOM_EVENTS.THREAD_AGENT_UPDATED, {
         detail: {
           threadId,
-          workspace: workspaceRef() || localWorkspaceRef(workingDir()),
           agent_name: nextAgentName,
         },
       }),
@@ -876,6 +901,7 @@ export function ChatPage() {
       const selection = fallbackModelSelection(card);
       setProvider(selection.provider);
       setModel(selection.model);
+      setCustomModel(selectedModelIsCustom());
     }
     rememberSelection();
     updateCurrentThreadAgent(nextAgentName);
@@ -1036,6 +1062,15 @@ export function ChatPage() {
 
     // Capture the request before workspace resolution yields to navigation.
     const payload = buildPayload(message, resume ? [] : attachedFiles, undefined, effectiveAgentName);
+    if (!resume) {
+      const selection = selectedModelSelection();
+      if (selection) writeChatModelPreference({
+        ...selection,
+        agentName: effectiveAgentName,
+        ...(customModel() && selection.provider !== "@pool"
+          ? { customModel: true as const } : {}),
+      });
+    }
     if (resume) {
       payload.resume = true;
       payload.message = "";
@@ -1082,7 +1117,7 @@ export function ChatPage() {
     setStreaming(true, streamThreadIdRef.id);
 
     const startTid = streamThreadIdRef.id;
-    if (startTid && !startTid.startsWith("__pending__") && !resume) {
+    if (startTid && !startTid.startsWith("__pending__")) {
       window.dispatchEvent(
         new CustomEvent(CUSTOM_DOM_EVENTS.THREAD_START_RUNNING, {
           detail: {
@@ -1352,6 +1387,7 @@ export function ChatPage() {
       if (selection.provider !== provider() || selection.model !== model()) {
         setProvider(selection.provider);
         setModel(selection.model);
+        setCustomModel(selectedModelIsCustom());
       }
     }
     rememberSelection();

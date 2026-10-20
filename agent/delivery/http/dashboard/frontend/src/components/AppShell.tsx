@@ -231,6 +231,16 @@ export function AppShell(props: {
     invalidateSessions();
   };
 
+  const handleThreadAgentUpdated = (event: Event) => {
+    const { threadId, agent_name } = (event as CustomEvent<{ threadId: string; agent_name: string }>).detail;
+    if (!threadId || !agent_name) return;
+    const threads = historyThreads();
+    if (!threads.some((thread) => thread.thread_id === threadId)) return;
+    applyHistoryState({
+      threads: threads.map((thread) => thread.thread_id === threadId ? { ...thread, agent_name } : thread),
+    });
+  };
+
   const handleThreadTitleUpdated = (event: Event) => {
     const customEvent = event as CustomEvent<{ threadId: string; title: string }>;
     const { threadId, title } = customEvent.detail;
@@ -759,6 +769,7 @@ export function AppShell(props: {
     window.addEventListener(CUSTOM_DOM_EVENTS.THREADS_CHANGED, handleThreadsChanged);
     window.addEventListener(CUSTOM_DOM_EVENTS.THREAD_START_RUNNING, handleThreadStartRunning);
     window.addEventListener(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, handleThreadStopRunning);
+    window.addEventListener(CUSTOM_DOM_EVENTS.THREAD_AGENT_UPDATED, handleThreadAgentUpdated);
     window.addEventListener(CUSTOM_DOM_EVENTS.THREAD_TITLE_UPDATED, handleThreadTitleUpdated);
 
     void checkForUpdates();
@@ -773,6 +784,7 @@ export function AppShell(props: {
     window.removeEventListener(CUSTOM_DOM_EVENTS.THREADS_CHANGED, handleThreadsChanged);
     window.removeEventListener(CUSTOM_DOM_EVENTS.THREAD_START_RUNNING, handleThreadStartRunning);
     window.removeEventListener(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, handleThreadStopRunning);
+    window.removeEventListener(CUSTOM_DOM_EVENTS.THREAD_AGENT_UPDATED, handleThreadAgentUpdated);
     window.removeEventListener(CUSTOM_DOM_EVENTS.THREAD_TITLE_UPDATED, handleThreadTitleUpdated);
   });
 

@@ -173,6 +173,9 @@ try {
     files.dispatchEvent(new Event('change', { bubbles: true }));
   })()`);
   await until(() => js('document.querySelectorAll(".chat-attachment-chip").length === 1'), 'unsent draft attachment');
+  assert.deepEqual(await js('JSON.parse(localStorage.getItem("k41.dashboard.lastChatModel"))'), { agentName: 'default', provider: 'test', model: 'demo-model' }, 'failed sends still remember their agent and model');
+  const rememberedModel = { agentName: 'other-agent', provider: 'other', model: 'last-sent-model' };
+  await js(`localStorage.setItem('k41.dashboard.lastChatModel', ${JSON.stringify(JSON.stringify(rememberedModel))})`);
   await clickContinue();
   await until(() => Boolean(resumeResponse), 'checkpoint continuation request');
   assert.equal(sentMessages.at(-1).resume, true);
@@ -180,6 +183,8 @@ try {
   assert.equal(sentMessages.at(-1).thread_id, 'failed-turn');
   assert.equal(sentMessages.at(-1).checkpoint_id, undefined, 'resume uses the latest failed checkpoint');
   assert.equal(sentMessages.at(-1).attachments, undefined, 'draft attachments must not be resent');
+  assert.equal(await js('document.querySelector(\'a[href="/c/failed-turn"]\')?.closest(".nav-history-item").classList.contains("running")'), true, 'resuming a checkpoint marks the conversation running');
+  assert.deepEqual(await js('JSON.parse(localStorage.getItem("k41.dashboard.lastChatModel"))'), rememberedModel, 'resuming a checkpoint must not change the last sent model');
   assert.equal(await js(`${continueButton}.disabled`), true);
   assert.equal(await js('document.querySelectorAll(".message.user").length'), 1, 'resume must not create a user message');
   const requestCount = sentMessages.length;
@@ -204,9 +209,11 @@ try {
   resumeResponse = null;
   await until(() => historyRefreshes > beforeSuccessRefresh, 'recovered checkpoint refreshed');
   await until(() => js('document.body.textContent.includes("Task recovered successfully") && !document.querySelector(".message.error")'), 'success clears continuation action');
+  assert.equal(await js('document.querySelector(\'a[href="/c/failed-turn"]\')?.closest(".nav-history-item").classList.contains("running")'), false, 'completed continuation clears the running indicator');
   assert.equal(await js('document.querySelectorAll(".message.user").length'), 1);
   assert.equal(await js('document.querySelector(".chat-prompt-input").value'), 'Keep this unsent draft');
   assert.equal(await js('document.querySelectorAll(".chat-attachment-chip").length'), 1);
+  assert.deepEqual(await js('JSON.parse(localStorage.getItem("k41.dashboard.lastChatModel"))'), rememberedModel, 'repeated continuation and completion preserve the preference');
   await call('Page.reload', { ignoreCache: true });
   await until(() => js('document.body.textContent.includes("Task recovered successfully")'), 'completed conversation reloaded');
   assert.equal(await js(`!!${continueButton}`), false, 'completed runs must stay completed after reload');
