@@ -5,15 +5,8 @@ import { Portal } from "solid-js/web";
 import { computeFloatingPosition } from "@/lib/floating";
 import { classNames } from "@/lib/utils";
 import { resolveModelAndProvider } from "@/lib/modelSelection";
+import { favoriteKey, parseFavoriteKey, useModelFavorites } from "@/lib/useModelFavorites";
 import type { ModelCatalog, ModelOption } from "@/types";
-
-const favoritesStorageKey = "k41.dashboard.modelFavorites";
-const keySeparator = "\u001f";
-
-type ModelFavorite = {
-  provider: string;
-  model: string;
-};
 
 type ModelChoice = {
   provider: string;
@@ -46,10 +39,6 @@ type ModelPickerProps = {
   favoritePills?: boolean;
 };
 
-function favoriteKey(provider: string, model: string): string {
-  return `${provider}${keySeparator}${model}`;
-}
-
 function modelLabel(model: string): string {
   return model || "provider default";
 }
@@ -60,38 +49,6 @@ function selectionLabel(provider: string, model: string, resolveDefault?: boolea
     return `${provider}/${defaultModel || "default model"}`;
   }
   return `${provider || "default"}/${modelLabel(model)}`;
-}
-
-function readFavorites(): string[] {
-  try {
-    const raw = window.localStorage.getItem(favoritesStorageKey);
-    if (!raw) {
-      return [];
-    }
-    const parsed = JSON.parse(raw) as ModelFavorite[];
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-    return parsed
-      .filter((item) => item && item.provider && item.model)
-      .map((item) => favoriteKey(item.provider, item.model));
-  } catch {
-    return [];
-  }
-}
-
-function writeFavorites(keys: string[]): void {
-  const favorites = keys
-    .map((key) => {
-      const [provider, model] = key.split(keySeparator);
-      return provider && model ? { provider, model } : null;
-    })
-    .filter(Boolean) as ModelFavorite[];
-  try {
-    window.localStorage.setItem(favoritesStorageKey, JSON.stringify(favorites));
-  } catch {
-    return;
-  }
 }
 
 function orderedProviders(
@@ -141,7 +98,7 @@ function parseModelInput(value: string, fallbackProvider: string): Pick<ModelCho
 export function ModelPicker(props: ModelPickerProps) {
   const [open, setOpen] = createSignal(false);
   const [query, setQuery] = createSignal("");
-  const [favorites, setFavorites] = createSignal<string[]>([]);
+  const { favorites, isFavorite, toggleFavorite } = useModelFavorites();
   const [menuPos, setMenuPos] = createSignal({ top: 0, left: 0, width: 0, maxHeight: 320 });
   let rootRef: HTMLDivElement | undefined;
   let inputRef: HTMLInputElement | undefined;
@@ -197,23 +154,6 @@ export function ModelPicker(props: ModelPickerProps) {
   const selectedFavorite = createMemo(() =>
     selectedModel() ? favorites().includes(favoriteKey(selectedProvider(), selectedModel())) : false,
   );
-
-  const isFavorite = (choice: Pick<ModelChoice, "provider" | "model">) =>
-    choice.model ? favorites().includes(favoriteKey(choice.provider, choice.model)) : false;
-
-  const toggleFavorite = (choice: Pick<ModelChoice, "provider" | "model">) => {
-    if (!choice.model) {
-      return;
-    }
-    const key = favoriteKey(choice.provider, choice.model);
-    setFavorites((current) => {
-      const next = current.includes(key)
-        ? current.filter((item) => item !== key)
-        : [...current, key].sort();
-      writeFavorites(next);
-      return next;
-    });
-  };
 
   const baseGroups = createMemo<ModelGroup[]>(() => {
     const providers = orderedProviders(
@@ -346,10 +286,11 @@ export function ModelPicker(props: ModelPickerProps) {
         if (existing) {
           return existing;
         }
-        const [provider, model] = key.split(keySeparator);
-        if (!provider || !model) {
+        const favorite = parseFavoriteKey(key);
+        if (!favorite) {
           return null;
         }
+        const { provider, model } = favorite;
         return {
           provider,
           model,
@@ -389,7 +330,11 @@ export function ModelPicker(props: ModelPickerProps) {
       .filter((group) => group.choices.length > 0);
   });
 
-  const renderGroups = createMemo<ModelGroup[]>(() => dropdownVisibleGroups());
+  const renderGroups = createMemo<ModelGroup[]>(() =>
+    [...dropdownVisibleGroups()].sort(
+      (left, right) => Number(right.provider === "@pool") - Number(left.provider === "@pool"),
+    ),
+  );
 
   const hasDropdownContent = createMemo(() => dropdownFavoriteChoices().length > 0 || renderGroups().length > 0);
 
@@ -412,7 +357,6 @@ export function ModelPicker(props: ModelPickerProps) {
   };
 
   onMount(() => {
-    setFavorites(readFavorites());
     const handlePointerDown = (event: MouseEvent) => {
       const target = event.target as Node | null;
       if (target && rootRef?.contains(target)) return;
@@ -422,16 +366,9 @@ export function ModelPicker(props: ModelPickerProps) {
         setQuery("");
       }
     };
-    const handleStorage = (event: StorageEvent) => {
-      if (event.key === favoritesStorageKey) {
-        setFavorites(readFavorites());
-      }
-    };
     document.addEventListener("mousedown", handlePointerDown);
-    window.addEventListener("storage", handleStorage);
     onCleanup(() => {
       document.removeEventListener("mousedown", handlePointerDown);
-      window.removeEventListener("storage", handleStorage);
     });
   });
 

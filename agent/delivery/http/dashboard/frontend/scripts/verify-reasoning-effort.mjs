@@ -85,9 +85,11 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === '/dashboard-api/providers') { res.end(JSON.stringify(settingsPayload())); return; }
     if (url.pathname === '/dashboard-api/agents/providers') {
-      res.end(JSON.stringify({ provider_names: ['test'], default_provider: 'test', default_model: 'model-a',
+      res.end(JSON.stringify({ provider_names: ['test', '@pool'], default_provider: 'test', default_model: 'model-a',
         model_catalogs: [{ provider: 'test', provider_type: 'google', default_model: 'model-a',
-          models: Object.entries(profiles).map(([id, profile]) => ({ id, label: id, source: 'config', ...profile, ...provider.model_profiles[id] })) }] })); return;
+          models: Object.entries(profiles).map(([id, profile]) => ({ id, label: id, source: 'config', ...profile, ...provider.model_profiles[id] })) },
+          { provider: '@pool', provider_type: 'pool', default_model: '',
+            models: ['small', 'large'].map(id => ({ id, label: id, source: 'config', reasoning_effort_levels: [] })) }] })); return;
     }
     res.end(JSON.stringify(fixtures[url.pathname] || {})); return;
   }
@@ -201,6 +203,61 @@ try {
     throw error;
   }
   assert.equal(await currentEffort(), 'high');
+  const openFavoriteMenu = async () => {
+    await js('document.querySelector(".model-picker-trigger").click()');
+    await until(() => js('!!document.querySelector(".model-item-favorite")'), 'model favorite buttons');
+  };
+  const groupTitles = () => js('Array.from(document.querySelectorAll(".model-provider-group-title")).map(title => title.textContent)');
+  const toggleFavorite = (providerName, modelId) => js(`(() => {
+    const row = Array.from(document.querySelectorAll('.model-item-row')).find(row =>
+      row.dataset.provider === ${JSON.stringify(providerName)} && row.dataset.modelId === ${JSON.stringify(modelId)});
+    const button = row.querySelector('.model-item-favorite');
+    button.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    button.click();
+  })()`);
+  const storedFavorites = () => js('JSON.parse(localStorage.getItem("k41.dashboard.modelFavorites"))');
+  await openFavoriteMenu();
+  assert.deepEqual(await groupTitles(), ['Model Pools', 'test']);
+  await toggleFavorite('test', 'custom-model');
+  assert.deepEqual(await groupTitles(), ['Favorites', 'Model Pools', 'test']);
+  assert.equal(await js('document.querySelectorAll(\'.model-item-row[data-provider="test"][data-model-id="custom-model"]\').length'), 1);
+  assert.equal(await js('document.querySelector(\'.model-item-select[aria-pressed="true"]\').closest(".model-item-row").dataset.modelId'), 'model-a', 'favoriting does not select the model');
+  assert.equal(await currentEffort(), 'high');
+  assert.deepEqual(await storedFavorites(), [{ provider: 'test', model: 'custom-model' }]);
+  await js(`(() => {
+    const input = document.querySelector('.agent-model-search-input');
+    input.value = 'custom-model'; input.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`);
+  assert.deepEqual(await groupTitles(), ['Favorites']);
+  await js('document.querySelector(".agent-model-search-clear").click()');
+  await toggleFavorite('@pool', 'small');
+  assert.deepEqual(await groupTitles(), ['Favorites', 'Model Pools', 'test']);
+  assert.deepEqual(await storedFavorites(), [
+    { provider: '@pool', model: 'small' }, { provider: 'test', model: 'custom-model' },
+  ]);
+  await navigate('/chat');
+  await until(() => js('!!document.querySelector(".model-picker-trigger")'), 'chat reloaded');
+  await openFavoriteMenu();
+  assert.equal(await js('document.querySelectorAll(\'.model-item-favorite[aria-pressed="true"]\').length'), 2, 'favorites survive reload');
+  await navigate('/settings/agents/effort-agent');
+  await until(() => js('!!document.querySelector(".model-picker-input")'), 'settings model picker');
+  await js(`(() => {
+    const input = document.querySelector('.model-picker-input');
+    input.focus(); input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`);
+  await until(() => js('!!document.querySelector(".model-picker-group-favorites")'), 'shared favorites in settings');
+  assert.deepEqual(await js('Array.from(document.querySelectorAll(".model-picker-group-title")).slice(0, 2).map(title => title.textContent)'), ['Favorites', 'Model Pools']);
+  await js(`Array.from(document.querySelectorAll('.model-picker-group-favorites .model-picker-option'))
+    .find(row => row.textContent.trim() === 'test/custom-model').querySelector('.model-picker-option-star').click()`);
+  await navigate('/chat');
+  await until(() => js('!!document.querySelector(".model-picker-trigger")'), 'chat after settings');
+  await openFavoriteMenu();
+  assert.equal(await js('document.querySelectorAll(\'.model-item-favorite[aria-pressed="true"]\').length'), 1, 'settings changes are reflected in chat');
+  await toggleFavorite('@pool', 'small');
+  assert.deepEqual(await storedFavorites(), []);
+  assert.deepEqual(await groupTitles(), ['Model Pools', 'test']);
+  assert.equal(await currentEffort(), 'high');
+  await js('document.querySelector(".agent-model-popover-close").click()');
   const selectModel = async modelId => {
     await openModels();
     await js(`Array.from(document.querySelectorAll('.model-item-row')).find(row => row.querySelector('.model-item-row-name').textContent === '${modelId}').click()`);
@@ -339,7 +396,7 @@ try {
   await js(`${agentSave}.click()`);
   await until(() => savedAgent?.reasoning_effort === null, 'agent effort reset to Auto');
   assert.deepEqual(exceptions, []);
-  console.log('PASS: model profiles, chat effort, explicit Auto request, mobile widths, agent card effort choices, save, reload, and Auto reset.');
+  console.log('PASS: shared model favorites, pool priority, persistence, search, model profiles, chat effort, explicit Auto request, mobile widths, agent card effort choices, save, reload, and Auto reset.');
 } finally {
   await Promise.race([call?.('Browser.close').catch(() => {}), delay(2000)]);
   ws?.close(); browser.kill();

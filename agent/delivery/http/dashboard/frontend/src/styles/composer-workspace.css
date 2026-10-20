@@ -136,7 +136,8 @@
   cursor: pointer;
 }
 
-.model-item-effort-trigger {
+.model-item-effort-trigger,
+.model-item-favorite {
   display: grid;
   place-items: center;
   flex: 0 0 28px;
@@ -149,9 +150,14 @@
 }
 
 .model-item-effort-trigger:hover,
+.model-item-favorite:hover,
 .model-effort-option:hover {
   background: color-mix(in srgb, var(--fg) 7%, transparent);
   color: var(--fg);
+}
+
+.model-item-favorite.active {
+  color: var(--warning);
 }
 
 .model-effort-panel {
@@ -221,6 +227,7 @@
 .model-item-row:focus-visible,
 .model-item-select:focus-visible,
 .model-item-effort-trigger:focus-visible,
+.model-item-favorite:focus-visible,
 .model-effort-option:focus-visible {
   outline: 2px solid var(--info);
   outline-offset: -2px;
@@ -400,6 +407,11 @@
 }
 
 @media (max-width: 480px) {
+  .model-item-favorite {
+    flex-basis: 40px;
+    min-height: 40px;
+  }
+
   .model-effort-option,
   .agent-model-popover--with-effort .model-item-row {
     min-height: 40px;

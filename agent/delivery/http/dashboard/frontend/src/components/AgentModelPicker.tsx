@@ -1,11 +1,15 @@
-import { Bot, Check, ChevronDown, ChevronRight, Search, Sparkles, X } from "lucide-solid";
+import { Bot, Check, ChevronDown, ChevronRight, Search, Sparkles, Star, X } from "lucide-solid";
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 
 import { resolveModelAndProvider } from "@/lib/modelSelection";
 import { MOBILE_MEDIA_QUERY } from "@/lib/uiConstants";
 import { createMediaQuery } from "@/lib/useMediaQuery";
+import { parseFavoriteKey, useModelFavorites } from "@/lib/useModelFavorites";
 import type { AgentCard, ModelCatalog, ModelOption } from "@/types";
+
+type PickerModel = ModelOption & { provider: string };
+type ModelGroup = { provider: string; label: string; models: PickerModel[] };
 
 export interface AgentModelPickerProps {
   agentName: string;
@@ -61,6 +65,7 @@ export function formatShortModelName(provider: string, model: string): string {
 
 export function AgentModelPicker(props: AgentModelPickerProps) {
   const isMobileViewport = createMediaQuery(MOBILE_MEDIA_QUERY);
+  const { favorites, isFavorite, toggleFavorite } = useModelFavorites();
   const [open, setOpen] = createSignal(false);
   const [searchQuery, setSearchQuery] = createSignal("");
   const [activePicker, setActivePicker] = createSignal<"agent" | "model">("agent");
@@ -216,26 +221,42 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
     });
   };
 
-  const filteredModelGroups = createMemo(() => {
+  const filteredModelGroups = createMemo<ModelGroup[]>(() => {
     const q = searchQuery().trim().toLowerCase();
-    const groups: Array<{ provider: string; models: ModelOption[] }> = [];
+    const matches = (model: PickerModel) => !q ||
+      model.id.toLowerCase().includes(q) || (model.label || "").toLowerCase().includes(q) ||
+      model.provider.toLowerCase().includes(q);
+    const groups: ModelGroup[] = [];
 
     props.catalogs.forEach((cat) => {
-      const matched = cat.models.filter((m) => {
-        if (!q) return true;
-        return (
-          m.id.toLowerCase().includes(q) ||
-          (m.label && m.label.toLowerCase().includes(q)) ||
-          cat.provider.toLowerCase().includes(q)
-        );
-      });
+      const matched = cat.models
+        .map((model) => ({ ...model, provider: cat.provider }))
+        .filter((model) => !isFavorite({ provider: model.provider, model: model.id }) && matches(model));
       if (matched.length > 0) {
         groups.push({
           provider: cat.provider,
+          label: cat.provider === "@pool" ? "Model Pools" : cat.provider,
           models: matched,
         });
       }
     });
+    groups.sort(
+      (left, right) => Number(right.provider === "@pool") - Number(left.provider === "@pool"),
+    );
+    const favoriteModels = favorites().flatMap((key): PickerModel[] => {
+      const favorite = parseFavoriteKey(key);
+      if (!favorite) return [];
+      const option = props.catalogs.find((catalog) => catalog.provider === favorite.provider)
+        ?.models.find((model) => model.id === favorite.model);
+      const model = {
+        id: favorite.model, label: favorite.model, source: "favorite model", ...option,
+        provider: favorite.provider,
+      };
+      return matches(model) ? [model] : [];
+    });
+    if (favoriteModels.length) {
+      groups.unshift({ provider: "@favorites", label: "Favorites", models: favoriteModels });
+    }
     return groups;
   });
 
@@ -416,7 +437,7 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
                     onInput={(e) => {
                       setSearchQuery(e.currentTarget.value);
                       const group = filteredModelGroups()[0];
-                      setPreviewModel(searchQuery().trim() && group ? { provider: group.provider, id: group.models[0].id } : undefined);
+                      setPreviewModel(searchQuery().trim() && group ? { provider: group.models[0].provider, id: group.models[0].id } : undefined);
                     }}
                   />
                   <Show when={searchQuery()}>
@@ -439,32 +460,34 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
                   <For each={filteredModelGroups()}>
                     {(group) => (
                       <div class="model-provider-group">
-                        <div class="model-provider-group-title">{group.provider === "@pool" ? "Model Pools" : group.provider}</div>
+                        <div class="model-provider-group-title">{group.label}</div>
                         <For each={group.models}>
                           {(modelOption) => {
+                            const favorite = { provider: modelOption.provider, model: modelOption.id };
+                            const isModelFavorite = () => isFavorite(favorite);
                             const isSelected = () =>
-                              resolvedSelection().provider === group.provider &&
+                              resolvedSelection().provider === modelOption.provider &&
                               resolvedSelection().model === modelOption.id;
                             return (
                               <div
-                                class={`model-item-row ${isSelected() ? "selected" : ""} ${effortTarget().provider === group.provider && effortTarget().id === modelOption.id ? "is-previewed" : ""}`}
+                                class={`model-item-row ${isSelected() ? "selected" : ""} ${effortTarget().provider === modelOption.provider && effortTarget().id === modelOption.id ? "is-previewed" : ""}`}
                                 role="group"
-                                data-provider={group.provider}
+                                data-provider={modelOption.provider}
                                 data-model-id={modelOption.id}
                                 aria-label={modelOption.label || modelOption.id}
-                                onMouseEnter={() => setPreviewModel({ provider: group.provider, id: modelOption.id })}
-                                onClick={() => selectModel(group.provider, modelOption.id)}
+                                onMouseEnter={() => setPreviewModel({ provider: modelOption.provider, id: modelOption.id })}
+                                onClick={() => selectModel(modelOption.provider, modelOption.id)}
                               >
                                 <button
                                   type="button"
                                   class="model-item-select"
                                   aria-pressed={isSelected()}
-                                  onFocus={() => setPreviewModel({ provider: group.provider, id: modelOption.id })}
-                                  title={modelOption.context_window ? `${Math.round(modelOption.context_window / 1024)}k context` : undefined}
+                                  onFocus={() => setPreviewModel({ provider: modelOption.provider, id: modelOption.id })}
+                                  title={`${modelOption.provider}/${modelOption.id}${modelOption.context_window ? ` · ${Math.round(modelOption.context_window / 1024)}k context` : ""}`}
                                   onKeyDown={(e) => {
                                     if (e.key === "ArrowRight") {
                                       e.preventDefault();
-                                      setPreviewModel({ provider: group.provider, id: modelOption.id });
+                                      setPreviewModel({ provider: modelOption.provider, id: modelOption.id });
                                       focusEffortOption();
                                     }
                                   }}
@@ -485,17 +508,31 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
                                     </span>
                                   </Show>
                                 </button>
+                                <button
+                                  type="button"
+                                  class={`model-item-favorite ${isModelFavorite() ? "active" : ""}`}
+                                  aria-label={`${isModelFavorite() ? "Remove" : "Add"} favorite model: ${modelOption.provider}/${modelOption.id}`}
+                                  aria-pressed={isModelFavorite()}
+                                  title={isModelFavorite() ? "Remove favorite model" : "Add favorite model"}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setPreviewModel(undefined);
+                                    toggleFavorite(favorite);
+                                  }}
+                                >
+                                  <Star size={14} fill={isModelFavorite() ? "currentColor" : "none"} />
+                                </button>
                                 <Show when={modelOption.reasoning_effort_levels?.length}>
                                   <button
                                     type="button"
                                     class="model-item-effort-trigger"
                                     aria-label={`Choose effort for ${modelOption.label || modelOption.id}`}
                                     aria-haspopup="menu"
-                                    onFocus={() => setPreviewModel({ provider: group.provider, id: modelOption.id })}
-                                    aria-expanded={effortOpen() && effortTarget().provider === group.provider && effortTarget().id === modelOption.id}
+                                    onFocus={() => setPreviewModel({ provider: modelOption.provider, id: modelOption.id })}
+                                    aria-expanded={effortOpen() && effortTarget().provider === modelOption.provider && effortTarget().id === modelOption.id}
                                     onClick={(event) => {
                                       event.stopPropagation();
-                                      setPreviewModel({ provider: group.provider, id: modelOption.id });
+                                      setPreviewModel({ provider: modelOption.provider, id: modelOption.id });
                                       focusEffortOption();
                                     }}
                                     onKeyDown={(event) => event.stopPropagation()}
