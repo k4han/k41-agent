@@ -1,4 +1,4 @@
-import { createSignal } from "solid-js";
+import { batch, createSignal } from "solid-js";
 
 import {
   createTranscriptTool,
@@ -16,6 +16,7 @@ import {
   createTranscriptItems,
   persistedStreams,
   type ChatTranscriptItem,
+  type PersistedStreamSignals,
 } from "@/lib/chatStreamStore";
 import type { AppendScrollMode } from "@/lib/chatTypes";
 import {
@@ -40,60 +41,50 @@ export function useChatStreams(params: UseChatStreamsParams) {
   const { scroll, getCurrentThreadId, getIsUnmounting } = params;
 
   const localTranscript = createTranscriptItems();
-  const [localItems, setLocalItems, appendLocalMessageChunks] = localTranscript;
+  const [localItems, setLocalItems] = localTranscript;
   const [localStreaming, setLocalStreaming] = createSignal(false);
   const [localController, setLocalController] = createSignal<AbortController | null>(null);
-  const [currentStreamThreadId, setCurrentStreamThreadId] = createSignal<string | null>(null);
+  const [currentStreamThreadId, setStreamThreadId] = createSignal<string | null>(null);
+  const [currentStream, setCurrentStream] = createSignal<PersistedStreamSignals>();
+  const setCurrentStreamThreadId = (threadId: string | null) => batch(() => {
+    setStreamThreadId(threadId);
+    // Retain the viewed stream even if its original page removes the registry
+    // entry after finishing. The registry itself is not reactive.
+    setCurrentStream(threadId ? persistedStreams.get(threadId) : undefined);
+  });
+
+  const streamFor = (threadId: string) => persistedStreams.get(threadId)
+    || (threadId === currentStreamThreadId() ? currentStream() : undefined);
 
   const items = () => {
-    const tid = currentStreamThreadId();
-    if (tid && persistedStreams.has(tid)) {
-      return persistedStreams.get(tid)!.items[0]();
-    }
-    return localItems();
+    return currentStream()?.items[0]() || localItems();
   };
 
   const setItems = (v: ItemsUpdater, targetThreadId?: string) => {
-    const tid = targetThreadId || currentStreamThreadId();
-    if (tid && persistedStreams.has(tid)) {
-      persistedStreams.get(tid)!.items[1](v);
-      return;
-    }
-    setLocalItems(v);
+    transcriptFor(targetThreadId)?.[1](v);
   };
 
   const streaming = () => {
-    const tid = currentStreamThreadId();
-    if (tid && persistedStreams.has(tid)) {
-      return persistedStreams.get(tid)!.streaming[0]();
-    }
-    return localStreaming();
+    return currentStream()?.streaming[0]() ?? localStreaming();
   };
 
   const setStreaming = (v: boolean, targetThreadId?: string) => {
     const tid = targetThreadId || currentStreamThreadId();
-    if (tid && persistedStreams.has(tid)) {
-      persistedStreams.get(tid)!.streaming[1](v);
-      return;
-    }
-    setLocalStreaming(v);
+    const stream = tid ? streamFor(tid) : undefined;
+    if (stream) stream.streaming[1](v);
+    else if (!tid || tid === getCurrentThreadId()) setLocalStreaming(v);
   };
 
   const controller = () => {
-    const tid = currentStreamThreadId();
-    if (tid && persistedStreams.has(tid)) {
-      return persistedStreams.get(tid)!.controller[0]();
-    }
-    return localController();
+    const stream = currentStream();
+    return stream ? stream.controller[0]() : localController();
   };
 
   const setController = (v: AbortController | null, targetThreadId?: string) => {
     const tid = targetThreadId || currentStreamThreadId();
-    if (tid && persistedStreams.has(tid)) {
-      persistedStreams.get(tid)!.controller[1](v);
-      return;
-    }
-    setLocalController(v);
+    const stream = tid ? streamFor(tid) : undefined;
+    if (stream) stream.controller[1](v);
+    else if (!tid || tid === getCurrentThreadId()) setLocalController(v);
   };
 
   // Keep row identities stable and limit Markdown parsing to one update per
@@ -105,8 +96,11 @@ export function useChatStreams(params: UseChatStreamsParams) {
   const resolveThreadKey = (targetThreadId?: string) =>
     targetThreadId || currentStreamThreadId() || "";
 
-  const transcriptFor = (targetThreadId?: string) =>
-    persistedStreams.get(resolveThreadKey(targetThreadId))?.items || localTranscript;
+  const transcriptFor = (targetThreadId?: string) => {
+    const tid = resolveThreadKey(targetThreadId);
+    return (tid ? streamFor(tid)?.items : undefined)
+      || ((!tid || tid === getCurrentThreadId()) && !getIsUnmounting() ? localTranscript : undefined);
+  };
 
   const flushPendingMessageChunks = () => {
     if (flushTimer !== null) {
@@ -120,9 +114,7 @@ export function useChatStreams(params: UseChatStreamsParams) {
     pendingChunksByThread.clear();
     const viewedThreadId = getCurrentThreadId();
     for (const [threadKey, chunks] of snapshot) {
-      const persisted = threadKey ? persistedStreams.get(threadKey) : undefined;
-      const appendChunks = persisted ? persisted.items[2] : appendLocalMessageChunks;
-      appendChunks(chunks);
+      transcriptFor(threadKey)?.[2](chunks);
       if (!getIsUnmounting() && (!threadKey || threadKey === viewedThreadId)) {
         scroll.scrollToBottom();
       }
@@ -150,7 +142,7 @@ export function useChatStreams(params: UseChatStreamsParams) {
     targetThreadId?: string,
   ): number => {
     const id = allocItemId();
-    transcriptFor(targetThreadId)[3]({ ...item, id } as ChatTranscriptItem);
+    transcriptFor(targetThreadId)?.[3]({ ...item, id } as ChatTranscriptItem);
 
     const isCurrent = !getIsUnmounting() && (!targetThreadId || targetThreadId === getCurrentThreadId());
     if (isCurrent) {
@@ -183,7 +175,7 @@ export function useChatStreams(params: UseChatStreamsParams) {
   const replaceMessage = (id: number, text: string, targetThreadId?: string) => {
     // Replacement text is authoritative; discard any buffered appends.
     dropPendingChunksForId(id);
-    transcriptFor(targetThreadId)[4](id, text);
+    transcriptFor(targetThreadId)?.[4](id, text);
     const isCurrent = !getIsUnmounting() && (!targetThreadId || targetThreadId === getCurrentThreadId());
     if (isCurrent) {
       scroll.scrollToBottom();
@@ -207,6 +199,7 @@ export function useChatStreams(params: UseChatStreamsParams) {
   ) => {
     if (name !== GENERATE_IMAGE_TOOL_NAME) {
       const transcript = transcriptFor(targetThreadId);
+      if (!transcript) return;
       if (!transcript[5](toolCallId, name, result)) {
         transcript[3]({
           id: allocItemId(),

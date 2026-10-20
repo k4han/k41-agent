@@ -105,6 +105,7 @@ export interface ContextUsage {
 }
 
 export type PersistedStreamSignals = {
+  selection?: { agentName: string; provider: string; model: string };
   items: ReturnType<typeof createTranscriptItems>;
   streaming: ReturnType<typeof createSignal<boolean>>;
   controller: ReturnType<typeof createSignal<AbortController | null>>;

@@ -5,7 +5,7 @@ import {
   PanelRightOpen,
   X,
 } from "lucide-solid";
-import { batch, createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { batch, createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 
 import { AppShell } from "@/components/AppShell";
 import { ChatComposer } from "@/components/ChatComposer";
@@ -190,6 +190,7 @@ export function ChatPage() {
   const [agentName, setAgentName] = createSignal("");
   const [provider, setProvider] = createSignal("default");
   const [model, setModel] = createSignal("");
+  const [reasoningScope, setReasoningScope] = createSignal(0);
   const [workingDir, setWorkingDir] = createSignal("");
   const [workspaceRef, setWorkspaceRef] = createSignal<WorkspaceRef | null>(null);
   const [workspaceSelection, setWorkspaceSelection] = createSignal<WorkspaceSelectionDraft | null>(null);
@@ -213,7 +214,11 @@ export function ChatPage() {
   let loadedNewChatId = "";
   let isUnmounting = false;
   let threadLoadRequestId = 0;
+  let threadLoadController: AbortController | undefined;
+  let compactRequestId = 0;
   let latestLocalStreamFinish: { threadId: string; finishedAt: number } | null = null;
+  const selectionDrafts = new Map<string, { agentName: string; provider: string; model: string }>();
+  const promptDrafts = new Map<string, string>();
 
   const scroll = useChatScroll(() => transcriptRef);
   const {
@@ -286,6 +291,36 @@ export function ChatPage() {
     return { provider: "default", model: "" };
   };
 
+  const rememberSelection = () => {
+    const selection = { agentName: agentName(), provider: provider(), model: model() };
+    const threadId = currentThreadId();
+    if (threadId) selectionDrafts.set(threadId, selection);
+    const stream = persistedStreams.get(currentStreamThreadId() || "");
+    if (stream) stream.selection = selection;
+    return selection;
+  };
+
+  const restoreSelection = (thread?: ThreadMessagesPayload) => batch(() => {
+    const cards = validCards();
+    if (!cards.length) return;
+    const threadId = thread?.thread_id || currentThreadId();
+    const draft = selectionDrafts.get(threadId) || persistedStreams.get(threadId)?.selection;
+    if (draft && threadId) selectionDrafts.set(threadId, draft);
+    const requested = thread?.agent_name || (!threadId ? String(searchParams.agent || "") : "");
+    const card = cards.find((item) => item.name === (draft?.agentName || requested))
+      || cards.find((item) => item.name === "default") || cards[0];
+    const selection = draft || (thread ? restoredModelSelection(thread, card) : fallbackModelSelection(card));
+    setAgentName(card.name);
+    setProvider(selection.provider);
+    setModel(selection.model);
+  });
+
+  const handleProviderModelChange = (nextProvider: string, nextModel: string) => batch(() => {
+    setProvider(nextProvider);
+    setModel(nextModel);
+    rememberSelection();
+  });
+
   const selectedModelSelection = createMemo(() => {
     const payload = data();
     if (!payload) return undefined;
@@ -304,7 +339,7 @@ export function ChatPage() {
   });
   const { levels: effortLevels, effort: reasoningEffort, setEffort: setReasoningEffort, requestEffort } =
     useReasoningEffort(
-      () => JSON.stringify([agentName(), selectedModelSelection()]),
+      () => JSON.stringify([reasoningScope(), agentName(), selectedModelSelection()]),
       selectedModelOption,
       () => {
         const card = selectedCard();
@@ -526,7 +561,7 @@ export function ChatPage() {
     };
   };
 
-  const resolveWorkspaceForSend = async (): Promise<WorkspaceRef | null> => {
+  const resolveWorkspaceForSend = async (isCurrent: () => boolean): Promise<WorkspaceRef | null> => {
     const currentWorkspace = workspaceRef();
     if (currentWorkspace) {
       return currentWorkspace;
@@ -565,7 +600,7 @@ export function ChatPage() {
     if (!execution) {
       throw new Error("Resolved workspace is missing its execution reference.");
     }
-    setWorkspace(execution);
+    if (isCurrent()) setWorkspace(execution);
     return execution;
   };
 
@@ -580,12 +615,14 @@ export function ChatPage() {
   };
 
   const applyThreadPayload = (payload: ThreadMessagesPayload, preserveStreamError = false) => batch(() => {
+    flushPendingMessageChunks();
     const lastItem = preserveStreamError ? items().at(-1) : undefined;
     const streamErrors = lastItem?.type === "message" && lastItem.role === "error"
       ? [lastItem]
       : [];
     scroll.clearTurnAnchor();
     setThreadData(payload);
+    restoreSelection(payload);
     setThreadTitleOverride(payload.title || "");
     setCurrentThreadId(payload.thread_id);
     setActiveCheckpointId(payload.active_checkpoint_id || "");
@@ -614,14 +651,15 @@ export function ChatPage() {
     scroll.scrollToBottom(true);
   });
 
-  const onThreadCreated = (threadId: string, streamThreadIdRef: StreamThreadIdRef) => {
+  const onThreadCreated = (threadId: string, streamThreadIdRef: StreamThreadIdRef) => batch(() => {
     // Apply buffered deltas before the persisted stream entry is re-keyed below.
     flushPendingMessageChunks();
     const oldStreamTid = streamThreadIdRef.id;
-    const isViewingPending = !currentThreadId() || currentThreadId() === oldStreamTid;
+    const isViewingPending = !isUnmounting && currentStreamThreadId() === oldStreamTid;
 
     if (isViewingPending) {
       loadedThreadId = threadId;
+      loadedNewChatId = "";
       setCurrentThreadId(threadId);
     }
 
@@ -642,8 +680,8 @@ export function ChatPage() {
           detail: {
             threadId,
             title: streamThreadIdRef.message,
-            workspace: workspaceRef() || localWorkspaceRef(workingDir()),
-            agent_name: agentName(),
+            workspace: streamThreadIdRef.workspace,
+            agent_name: persistedStreams.get(threadId)?.selection?.agentName,
           },
         }),
       );
@@ -652,7 +690,7 @@ export function ChatPage() {
     if (isViewingPending) {
       navigate(`/c/${encodeURIComponent(threadId)}`, { replace: true });
     }
-  };
+  });
 
   const streamCallbacks: StreamCallbacks = {
     appendItem,
@@ -663,7 +701,9 @@ export function ChatPage() {
     updatePlanReviewResult,
     updateUserInputRequestResult,
     onError: (message) => showToast(message, "error"),
-    setRecursionLimitReached: (v) => setRecursionLimitReached(v),
+    setRecursionLimitReached: (v, threadId) => {
+      if (!isUnmounting && threadId === currentThreadId()) setRecursionLimitReached(v);
+    },
     onThreadCreated,
     onContextUsage: updateContextUsage,
     onThreadTitle: (threadId, title) => {
@@ -736,11 +776,14 @@ export function ChatPage() {
   const loadThread = async (threadId: string, checkpointId = "") => {
     const requestId = threadLoadRequestId + 1;
     threadLoadRequestId = requestId;
+    threadLoadController?.abort();
+    const requestController = new AbortController();
+    threadLoadController = requestController;
     setCurrentThreadId(threadId);
-    setThreadData(undefined);
+    if (threadData()?.thread_id !== threadId) setThreadData(undefined);
     setThreadError("");
     setRecursionLimitReached(window.localStorage.getItem(recursionLimitStorageKey(threadId)) === "true");
-    if (!persistedStreams.has(threadId)) {
+    if (!persistedStreams.has(threadId) && (checkpointId || threadData()?.thread_id !== threadId)) {
       setThreadLoading(true);
       setItems([]);
     }
@@ -751,8 +794,9 @@ export function ChatPage() {
     try {
       const payload = await apiFetch<ThreadMessagesPayload>(
         threadApiPath(threadId, checkpointId),
+        { signal: requestController.signal },
       );
-      if (requestId !== threadLoadRequestId) {
+      if (isUnmounting || requestId !== threadLoadRequestId) {
         return;
       }
       applyThreadPayload(payload);
@@ -770,32 +814,35 @@ export function ChatPage() {
         setBackgroundTask(null);
       }
     } catch (err) {
-      if (requestId !== threadLoadRequestId) {
+      if (isUnmounting || requestId !== threadLoadRequestId) {
         return;
       }
       setThreadError(err instanceof Error ? err.message : "Failed to load thread");
     } finally {
-      if (requestId === threadLoadRequestId) {
+      if (!isUnmounting && requestId === threadLoadRequestId) {
         setThreadLoading(false);
-        if (persistedStreams.has(threadId)) {
-          if (persistedStreams.get(threadId)!.streaming[0]()) {
-            setStreaming(true);
-          }
-        }
       }
     }
   };
 
   const refreshThread = async (threadId: string, checkpointId = "") => {
+    const requestId = ++threadLoadRequestId;
+    threadLoadController?.abort();
+    const requestController = new AbortController();
+    threadLoadController = requestController;
     try {
       const payload = await apiFetch<ThreadMessagesPayload>(
         threadApiPath(threadId, checkpointId),
+        { signal: requestController.signal },
       );
-      if (payload.thread_id === currentThreadId()) {
+      if (!isUnmounting && requestId === threadLoadRequestId
+        && payload.thread_id === currentThreadId() && !streaming()) {
         applyThreadPayload(payload, true);
       }
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to refresh thread", "error");
+      if (!isUnmounting && requestId === threadLoadRequestId && !requestController.signal.aborted) {
+        showToast(err instanceof Error ? err.message : "Failed to refresh thread", "error");
+      }
     }
   };
 
@@ -820,128 +867,58 @@ export function ChatPage() {
     );
   };
 
-  createEffect(() => {
-    const payload = data();
-    if (!payload || agentName()) {
-      return;
-    }
-    const requested = String(searchParams.agent || "");
-    const fallback = validCards().find((card) => card.name === "default") || validCards()[0];
-    const next = validCards().find((card) => card.name === requested) || fallback;
-    if (next) {
-      setAgentName(next.name);
-    }
-  });
+  createEffect(on(data, () => restoreSelection(threadData())));
 
-  let restoredThreadAgentKey = "";
-  createEffect(() => {
-    const td = threadData();
-    const cards = validCards();
-    if (!td || cards.length === 0) {
-      return;
-    }
-    const threadKey = `${td.thread_id}\u001f${td.agent_name || ""}`;
-    if (restoredThreadAgentKey === threadKey) {
-      return;
-    }
-    const threadAgent = String(td.agent_name || "").trim();
-    if (!threadAgent) {
-      return;
-    }
-    const match = cards.find((card) => card.name === threadAgent);
-    const fallback = cards.find((card) => card.name === "default") || cards[0];
-    const next = match || fallback;
-    if (next) {
-      restoredThreadAgentKey = threadKey;
-      setAgentName(next.name);
-    }
-  });
-
-  const handleAgentChange = (nextAgentName: string) => {
+  const handleAgentChange = (nextAgentName: string) => batch(() => {
     setAgentName(nextAgentName);
-    updateCurrentThreadAgent(nextAgentName);
-    const td = threadData();
-    if (td) {
-      restoredThreadAgentKey = `${td.thread_id}\u001f${nextAgentName}`;
-    }
-  };
-
-  let restoredThreadModelKey = "";
-  let lastDefaultedAgentName = "";
-
-  createEffect(() => {
-    const card = selectedCard();
-    if (!card) {
-      return;
-    }
-    const td = threadData();
-    const threadKey = td
-      ? [
-          td.thread_id,
-          td.agent_name || "",
-          td.provider || "",
-          td.model || "",
-        ].join("\u001f")
-      : "";
-    if (td && threadKey && restoredThreadModelKey !== threadKey) {
-      const selection = restoredModelSelection(td, card);
-      setProvider(selection.provider);
-      setModel(selection.model);
-      restoredThreadModelKey = threadKey;
-      lastDefaultedAgentName = card.name;
-      return;
-    }
-    if (lastDefaultedAgentName !== card.name) {
+    const card = validCards().find((item) => item.name === nextAgentName);
+    if (card) {
       const selection = fallbackModelSelection(card);
       setProvider(selection.provider);
       setModel(selection.model);
-      lastDefaultedAgentName = card.name;
     }
+    rememberSelection();
+    updateCurrentThreadAgent(nextAgentName);
   });
 
-  createEffect(() => {
-    const threadId = routeThreadId();
-    const newChatId = !threadId ? location.state?.newChatId || "" : "";
-    if (threadId === loadedThreadId && newChatId === loadedNewChatId) {
-      return;
-    }
-
-    loadedThreadId = threadId;
-    loadedNewChatId = newChatId;
-    threadLoadRequestId += 1;
-    clearAllAttachments();
-    setRecursionLimitReached(false);
-
-    if (!threadId) {
-      setCurrentThreadId("");
-      setThreadTitleOverride("");
-      setCurrentStreamThreadId(null);
-      setActiveCheckpointId("");
-      setThreadData(undefined);
-      restoredThreadModelKey = "";
-      restoredThreadAgentKey = "";
-      setThreadError("");
-      setThreadLoading(false);
-      setItems([]);
-      setWorkspace(newChatId ? location.state?.workspace || null : null);
-      setPrompt("");
-      scroll.clearTurnAnchor();
+  createEffect(on(
+    [routeThreadId, () => !routeThreadId() ? location.state?.newChatId || "" : ""],
+    ([threadId, newChatId]) => {
+      if (threadId === loadedThreadId && newChatId === loadedNewChatId) return;
+      if (loadedThreadId !== null) {
+        promptDrafts.set(loadedThreadId || loadedNewChatId || "__new__", prompt());
+      }
+      flushPendingMessageChunks();
+      loadedThreadId = threadId;
+      loadedNewChatId = newChatId;
+      // Reset effort on conversation switches, while thread creation keeps the same scope.
+      setReasoningScope((scope) => scope + 1);
+      threadLoadRequestId += 1;
+      compactRequestId += 1;
+      threadLoadController?.abort();
+      clearAllAttachments();
       closeBackgroundStream();
       setBackgroundTask(null);
-      return;
-    }
-
-    if (persistedStreams.has(threadId)) {
-      setCurrentStreamThreadId(threadId);
+      setRecursionLimitReached(false);
+      setActiveSession(null);
+      setThreadTitleOverride("");
+      setActiveCheckpointId("");
+      setThreadData(undefined);
+      setThreadError("");
+      setViewingMessage(null);
+      setTodosExpanded(false);
+      setCompacting(false);
+      setPrompt(promptDrafts.get(threadId || newChatId || "__new__") || "");
+      setWorkspace(!threadId && newChatId ? location.state?.workspace || null : null);
       setCurrentThreadId(threadId);
+      setCurrentStreamThreadId(persistedStreams.has(threadId) ? threadId : null);
+      restoreSelection();
+      scroll.clearTurnAnchor();
       setThreadLoading(false);
-      void loadThread(threadId);
-      return;
-    }
-
-    setCurrentStreamThreadId(null);
-    void loadThread(threadId);
-  });
+      if (threadId) void loadThread(threadId);
+      else setItems([]);
+    },
+  ));
 
   const buildPayload = (
     message: string,
@@ -980,16 +957,37 @@ export function ChatPage() {
     assistantIdRef: AssistantIdRef,
     streamedRef: StreamedRef,
     streamThreadIdRef: StreamThreadIdRef,
-  ) => (event: Record<string, unknown>) => {
-    handleStreamEvent(event, assistantIdRef, streamedRef, streamThreadIdRef, streamCallbacks);
+  ) => {
+    const callbacks: StreamCallbacks = {
+      ...streamCallbacks,
+      onError: (message) => {
+        if (!isUnmounting && currentStreamThreadId() === streamThreadIdRef.id) showToast(message, "error");
+      },
+    };
+    return (event: Record<string, unknown>) =>
+      handleStreamEvent(event, assistantIdRef, streamedRef, streamThreadIdRef, callbacks);
   };
 
   const markLocalStreamFinished = (threadId: string) => {
     latestLocalStreamFinish = { threadId, finishedAt: Date.now() };
   };
 
+  const finishLocalStream = (threadId: string) => batch(() => {
+    flushPendingMessageChunks();
+    markLocalStreamFinished(threadId);
+    setStreaming(false, threadId);
+    setController(null, threadId);
+    const isViewing = currentStreamThreadId() === threadId;
+    const entry = persistedStreams.get(threadId);
+    if (entry) {
+      if (isViewing && !isUnmounting) setLocalItems(entry.items[0]());
+      cleanupStreamSignals(threadId);
+    }
+    if (isViewing) setCurrentStreamThreadId(null);
+  });
+
   const shouldSkipStopReload = (threadId: string) => {
-    if (streaming() || currentStreamThreadId() === threadId) {
+    if (streaming()) {
       return true;
     }
     if (!latestLocalStreamFinish || latestLocalStreamFinish.threadId !== threadId) {
@@ -1036,15 +1034,32 @@ export function ChatPage() {
       return;
     }
 
+    // Capture the request before workspace resolution yields to navigation.
+    const payload = buildPayload(message, resume ? [] : attachedFiles, undefined, effectiveAgentName);
+    if (resume) {
+      payload.resume = true;
+      payload.message = "";
+      if (resumePayload) payload.resume_payload = resumePayload;
+    } else if (payload.thread_id && activeCheckpointId()) {
+      payload.checkpoint_id = activeCheckpointId();
+    }
+    threadLoadRequestId += 1;
+    compactRequestId += 1;
+    threadLoadController?.abort();
+
     setRecursionLimitReached(false);
     const activeTid = currentThreadId();
     if (activeTid) {
       window.localStorage.removeItem(recursionLimitStorageKey(activeTid));
     }
 
-    const streamThreadIdRef: StreamThreadIdRef = { id: currentThreadId() || `__pending__${Date.now()}`, message };
+    const streamThreadIdRef: StreamThreadIdRef = {
+      id: currentThreadId() || `__pending__${allocItemId()}`,
+      message,
+      workspace: workspaceExecution(payload.workspace),
+    };
 
-    getOrCreateStreamSignals(streamThreadIdRef.id, items());
+    getOrCreateStreamSignals(streamThreadIdRef.id, items()).selection = rememberSelection();
     setCurrentStreamThreadId(streamThreadIdRef.id);
 
     if (!resume) {
@@ -1107,32 +1122,15 @@ export function ChatPage() {
 
     try {
       const resolvedWorkspace = resume
-        ? workspaceRef() || localWorkspaceRef(workingDir())
-        : await resolveWorkspaceForSend();
+        ? streamThreadIdRef.workspace
+        : await resolveWorkspaceForSend(() => !isUnmounting && currentStreamThreadId() === streamThreadIdRef.id);
+      abortController.signal.throwIfAborted();
+      streamThreadIdRef.workspace = resolvedWorkspace;
+      if (resolvedWorkspace) payload.workspace = resolvedWorkspace;
       if (statusMessageId !== null && !needsEnvironmentInitialization) {
         replaceMessage(statusMessageId, THINKING_TEXT, streamThreadIdRef.id);
       }
 
-      const payload = buildPayload(
-        message,
-        resume ? [] : attachedFiles,
-        resolvedWorkspace,
-        effectiveAgentName,
-      );
-      if (resume) {
-        payload.resume = true;
-        payload.message = "";
-        if (resumePayload) {
-          payload.resume_payload = resumePayload;
-        }
-        // Do not send checkpoint_id when resuming an interrupt; let the
-        // backend resume from the latest checkpoint that holds the pending
-        // interrupt. A stale checkpoint_id would cause the plan approval
-        // to resume from the wrong state and appear as stopped after
-        // switching to the target agent.
-      } else if (currentThreadId() && activeCheckpointId()) {
-        payload.checkpoint_id = activeCheckpointId();
-      }
       const response = await fetchWithCsrf(API_PATHS.chatEvents, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -1178,24 +1176,8 @@ export function ChatPage() {
         }, "bottom", streamThreadIdRef.id);
       }
     } finally {
-      flushPendingMessageChunks();
       const finishedTid = streamThreadIdRef.id;
-      markLocalStreamFinished(finishedTid);
-      setStreaming(false, finishedTid);
-      setController(null, finishedTid);
-
-      if (finishedTid) {
-        const isViewing = currentStreamThreadId() === finishedTid;
-        if (persistedStreams.has(finishedTid)) {
-          if (isViewing && !isUnmounting) {
-            setLocalItems(persistedStreams.get(finishedTid)!.items[0]());
-          }
-          cleanupStreamSignals(finishedTid);
-        }
-        if (isViewing) {
-          setCurrentStreamThreadId(null);
-        }
-      }
+      finishLocalStream(finishedTid);
       if (finishedTid) {
         window.dispatchEvent(
           new CustomEvent(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, {
@@ -1211,7 +1193,7 @@ export function ChatPage() {
   };
 
   const reconnectStream = async (threadId: string) => {
-    isUnmounting = false;
+    if (isUnmounting || threadId !== currentThreadId() || threadLoading()) return;
     cleanupStaleStreams();
     if (streaming()) {
       return;
@@ -1224,7 +1206,7 @@ export function ChatPage() {
     }
 
     const streamThreadIdRef: StreamThreadIdRef = { id: threadId, message: "" };
-    getOrCreateStreamSignals(streamThreadIdRef.id, items());
+    getOrCreateStreamSignals(streamThreadIdRef.id, items()).selection = rememberSelection();
     setCurrentStreamThreadId(streamThreadIdRef.id);
 
     const abortController = new AbortController();
@@ -1264,24 +1246,8 @@ export function ChatPage() {
         }, "bottom", streamThreadIdRef.id);
       }
     } finally {
-      flushPendingMessageChunks();
       const finishedTid = streamThreadIdRef.id;
-      markLocalStreamFinished(finishedTid);
-      setStreaming(false, finishedTid);
-      setController(null, finishedTid);
-
-      if (finishedTid) {
-        const isViewing = currentStreamThreadId() === finishedTid;
-        if (persistedStreams.has(finishedTid)) {
-          if (isViewing && !isUnmounting) {
-            setLocalItems(persistedStreams.get(finishedTid)!.items[0]());
-          }
-          cleanupStreamSignals(finishedTid);
-        }
-        if (isViewing) {
-          setCurrentStreamThreadId(null);
-        }
-      }
+      finishLocalStream(finishedTid);
       if (finishedTid) {
         window.dispatchEvent(
           new CustomEvent(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, {
@@ -1388,6 +1354,7 @@ export function ChatPage() {
         setModel(selection.model);
       }
     }
+    rememberSelection();
     void sendMessage(
       true,
       {
@@ -1508,7 +1475,9 @@ export function ChatPage() {
     setItems(nextItems);
 
     const streamThreadIdRef: StreamThreadIdRef = { id: threadId, message: nextText };
-    getOrCreateStreamSignals(streamThreadIdRef.id, nextItems);
+    threadLoadRequestId += 1;
+    threadLoadController?.abort();
+    getOrCreateStreamSignals(streamThreadIdRef.id, nextItems).selection = rememberSelection();
     setCurrentStreamThreadId(streamThreadIdRef.id);
 
     const abortController = new AbortController();
@@ -1572,24 +1541,8 @@ export function ChatPage() {
         }, "bottom", streamThreadIdRef.id);
       }
     } finally {
-      flushPendingMessageChunks();
       const finishedTid = streamThreadIdRef.id;
-      markLocalStreamFinished(finishedTid);
-      setStreaming(false, finishedTid);
-      setController(null, finishedTid);
-
-      if (finishedTid) {
-        const isViewing = currentStreamThreadId() === finishedTid;
-        if (persistedStreams.has(finishedTid)) {
-          if (isViewing && !isUnmounting) {
-            setLocalItems(persistedStreams.get(finishedTid)!.items[0]());
-          }
-          cleanupStreamSignals(finishedTid);
-        }
-        if (isViewing) {
-          setCurrentStreamThreadId(null);
-        }
-      }
+      finishLocalStream(finishedTid);
       window.dispatchEvent(
         new CustomEvent(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, {
           detail: { threadId: finishedTid },
@@ -1649,11 +1602,16 @@ export function ChatPage() {
     showToast("No earlier user prompt found to regenerate from.", "warning");
   };
 
+  let sessionEventRevision = 0;
   const handleSessionStartedOrUpdated = (event: Event) => {
     const customEvent = event as CustomEvent<ActiveSession>;
     const session = customEvent.detail;
     if (session && session.thread_id === currentThreadId()) {
+      sessionEventRevision += 1;
       setActiveSession(session);
+      if (!streaming() && !threadLoading() && threadData() && !isBackgroundThread()) {
+        void reconnectStream(session.thread_id);
+      }
     }
   };
 
@@ -1661,6 +1619,7 @@ export function ChatPage() {
     const customEvent = event as CustomEvent<{ session_id: string; thread_id: string }>;
     const { thread_id } = customEvent.detail;
     if (thread_id === currentThreadId()) {
+      sessionEventRevision += 1;
       setActiveSession(null);
       if (shouldSkipStopReload(thread_id)) {
         return;
@@ -1669,29 +1628,39 @@ export function ChatPage() {
     }
   };
 
-  createEffect(() => {
-    const threadId = currentThreadId();
-    const backgroundThread = isBackgroundThread();
-    if (threadId) {
-      const fetchInitialSession = async () => {
-        try {
-          const payload = await apiFetch<{ sessions: ActiveSession[] }>("/dashboard-api/sessions");
-          const found = payload.sessions.find((s) => s.thread_id === threadId);
-          if (threadId === currentThreadId()) {
-            setActiveSession(found || null);
-            if (found && !streaming() && threadData() && !backgroundThread) {
-              void reconnectStream(threadId);
+  createEffect(on(
+    [currentThreadId, () => threadData()?.thread_id || "", isBackgroundThread],
+    ([threadId, readyThreadId, backgroundThread]) => {
+      let cancelled = false;
+      const revision = sessionEventRevision;
+      const requestController = new AbortController();
+      onCleanup(() => {
+        cancelled = true;
+        requestController.abort();
+      });
+      if (threadId && readyThreadId === threadId) {
+        const fetchInitialSession = async () => {
+          try {
+            const payload = await apiFetch<{ sessions: ActiveSession[] }>("/dashboard-api/sessions", {
+              signal: requestController.signal,
+            });
+            const found = payload.sessions.find((s) => s.thread_id === threadId);
+            if (!cancelled && !isUnmounting && revision === sessionEventRevision && threadId === currentThreadId()) {
+              setActiveSession(found || null);
+              if (found && !streaming() && threadData() && !backgroundThread) {
+                void reconnectStream(threadId);
+              }
             }
+          } catch (err) {
+            if (!requestController.signal.aborted) console.error("Failed to fetch initial session details", err);
           }
-        } catch (err) {
-          console.error("Failed to fetch initial session details", err);
-        }
-      };
-      void fetchInitialSession();
-    } else {
-      setActiveSession(null);
-    }
-  });
+        };
+        void fetchInitialSession();
+      } else {
+        setActiveSession(null);
+      }
+    },
+  ));
 
   const handleTranscriptToolToggle = () => {
     scroll.pauseAutoScroll();
@@ -1736,6 +1705,8 @@ export function ChatPage() {
   });
   onCleanup(() => {
     isUnmounting = true;
+    threadLoadRequestId += 1;
+    threadLoadController?.abort();
     const activeTid = currentStreamThreadId();
     if (!activeTid || !persistedStreams.has(activeTid)) {
       controller()?.abort();
@@ -1772,6 +1743,7 @@ export function ChatPage() {
       return;
     }
 
+    const requestId = ++compactRequestId;
     setCompacting(true);
     scroll.setAutoScroll(true);
     scroll.scrollToBottom(true);
@@ -1788,7 +1760,7 @@ export function ChatPage() {
         reserved_tokens?: number;
       }>(`/dashboard-api/chat-history/${encodeURIComponent(threadId)}/compact`, {});
 
-      if (currentThreadId() !== threadId) {
+      if (isUnmounting || requestId !== compactRequestId || currentThreadId() !== threadId) {
         return;
       }
       if (payload && Array.isArray(payload.messages)) {
@@ -1816,10 +1788,11 @@ export function ChatPage() {
         showToast("Failed to compact conversation: invalid server response.", "error");
       }
     } catch (err) {
+      if (isUnmounting || requestId !== compactRequestId) return;
       const message = err instanceof Error ? err.message : "Failed to compact conversation.";
       showToast(message, "error");
     } finally {
-      setCompacting(false);
+      if (!isUnmounting && requestId === compactRequestId) setCompacting(false);
     }
   };
 
@@ -1995,10 +1968,7 @@ export function ChatPage() {
                 reasoningEffortLevels={effortLevels()}
                 reasoningEffortDefault={selectedModelOption()?.reasoning_effort_default}
                 onReasoningEffortChange={setReasoningEffort}
-                onProviderModelChange={(nextProvider, nextModel) => {
-                  setProvider(nextProvider);
-                  setModel(nextModel);
-                }}
+                onProviderModelChange={handleProviderModelChange}
                 payload={payload()}
                 recursionLimitReached={recursionLimitReached()}
                 currentTodos={currentTodos()}

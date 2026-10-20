@@ -7,7 +7,7 @@ import {
 } from "@/components/Transcript";
 import type { AppendScrollMode } from "@/lib/chatTypes";
 import type { ContextUsage } from "@/lib/chatStreamStore";
-import { parseContextBreakdown } from "@/types";
+import { parseContextBreakdown, type WorkspaceRef } from "@/types";
 import { CUSTOM_DOM_EVENTS, recursionLimitStorageKey, STREAM_ERROR_CODES, STREAM_EVENTS } from "@/lib/eventConstants";
 import { GENERATE_IMAGE_TOOL_NAME } from "@/lib/generatedImages";
 import {
@@ -26,7 +26,7 @@ export interface StreamCallbacks {
   updatePlanReviewResult: (toolCallId: string, result: unknown, threadId?: string) => void;
   updateUserInputRequestResult: (toolCallId: string, result: unknown, threadId?: string) => void;
   onError?: (message: string, code?: string) => void;
-  setRecursionLimitReached: (value: boolean) => void;
+  setRecursionLimitReached: (value: boolean, threadId?: string) => void;
   onThreadCreated: (threadId: string, streamThreadIdRef: StreamThreadIdRef) => void;
   onThreadTitle?: (threadId: string, title: string) => void;
   onContextUsage?: (usage: ContextUsage, threadId: string) => void;
@@ -36,7 +36,7 @@ export interface StreamCallbacks {
 
 export type AssistantIdRef = { id: number | null };
 export type StreamedRef = { received: boolean };
-export type StreamThreadIdRef = { id: string; message: string };
+export type StreamThreadIdRef = { id: string; message: string; workspace?: WorkspaceRef | null };
 
 const WORKSPACE_FILE_ACTION_REGEX = /(?:^|_)(?:write|edit|patch|create|delete|remove|modify|save|append|mkdir|touch|rm|mv|cp)(?:_|$)/i;
 const KNOWN_WORKSPACE_AFFECTING_TOOLS = new Set([
@@ -312,7 +312,7 @@ export function handleStreamEvent(
     );
     callbacks.onError?.(errorMessage, errorCode);
     if (event.code === STREAM_ERROR_CODES.RECURSION_LIMIT_REACHED) {
-      callbacks.setRecursionLimitReached(true);
+      callbacks.setRecursionLimitReached(true, streamThreadIdRef.id);
       if (streamThreadIdRef.id) {
         window.localStorage.setItem(
           recursionLimitStorageKey(streamThreadIdRef.id),

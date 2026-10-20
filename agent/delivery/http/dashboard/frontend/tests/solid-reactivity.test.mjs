@@ -218,6 +218,115 @@ test('tool results update only their target thread and append missing calls', t 
   });
 });
 
+function loadChatStreams(globals = {}) {
+  const streams = loadModule('../src/lib/chatStreamStore.ts', {
+    '@/lib/utils': loadModule('../src/lib/utils.ts'),
+  });
+  const { useChatStreams } = loadModule('../src/lib/useChatStreams.ts', {
+    '@/components/Transcript': {
+      createTranscriptTool: ({ toolCallId, name, result }) => ({ type: 'tool', tool_call_id: toolCallId, name, result }),
+    },
+    '@/lib/chatStreamStore': streams,
+    '@/lib/generatedImages': { GENERATE_IMAGE_TOOL_NAME: 'generate_image' },
+  }, { window: { setTimeout, clearTimeout }, ...globals });
+  return { streams, useChatStreams };
+}
+
+test('a remounted viewer retains its stream after the producer removes the registry entry', t => {
+  const { streams, useChatStreams } = loadChatStreams();
+  mount(t, () => {
+    const entry = streams.getOrCreateStreamSignals('first', [{ id: 10, type: 'message', role: 'assistant', text: 'partial' }]);
+    entry.streaming[1](true);
+    const viewer = useChatStreams({ scroll: { scrollToBottom() {} }, getCurrentThreadId: () => 'first', getIsUnmounting: () => false });
+    viewer.setCurrentStreamThreadId('first');
+    const row = viewer.items()[0];
+    let text;
+    solid.createComputed(() => { text = viewer.items()[0]?.text; });
+    solid.batch(() => {
+      entry.items[4](10, 'completed');
+      entry.streaming[1](false);
+      streams.cleanupStreamSignals('first');
+    });
+    assert.equal(text, 'completed');
+    assert.equal(viewer.items()[0], row);
+    assert.equal(viewer.streaming(), false);
+    viewer.setItems([{ id: 10, type: 'message', role: 'assistant', text: 'persisted completion' }], 'first');
+    assert.equal(text, 'persisted completion');
+    const next = streams.getOrCreateStreamSignals('first', viewer.items());
+    next.streaming[1](true);
+    viewer.setCurrentStreamThreadId('first');
+    next.items[4](10, 'new response');
+    assert.equal(text, 'new response');
+    assert.equal(viewer.streaming(), true);
+  });
+});
+
+test('late writes for a removed stream cannot fall through to another conversation', t => {
+  const { streams, useChatStreams } = loadChatStreams();
+  mount(t, () => {
+    const chat = useChatStreams({ scroll: { scrollToBottom() {} }, getCurrentThreadId: () => 'second', getIsUnmounting: () => false });
+    chat.setLocalItems([{ id: 10, type: 'message', role: 'assistant', text: 'second' }]);
+    streams.getOrCreateStreamSignals('first');
+    streams.cleanupStreamSignals('first');
+    chat.appendItem({ type: 'message', role: 'assistant', text: 'late first' }, 'none', 'first');
+    chat.setItems([], 'first');
+    chat.replaceMessage(10, 'wrong replacement', 'first');
+    chat.updateMessage(10, 'wrong delta', 'first');
+    chat.updateToolResult('call', 'read', 'wrong result', 'first');
+    chat.setStreaming(true, 'first');
+    chat.setController(new AbortController(), 'first');
+    chat.flushPendingMessageChunks();
+    assert.equal(chat.items().length, 1);
+    assert.equal(chat.items()[0].text, 'second');
+    assert.equal(chat.streaming(), false);
+    assert.equal(chat.controller(), null);
+  });
+});
+
+test('closing and reopening a background stream rejects queued events from the previous connection', t => {
+  const sources = [];
+  class FakeEventSource {
+    static CLOSED = 2;
+    listeners = new Map();
+    constructor() { sources.push(this); }
+    addEventListener(name, callback) { this.listeners.set(name, callback); }
+    close() {}
+    emit(name, payload) { this.listeners.get(name)?.({ data: JSON.stringify(payload) }); }
+  }
+  const snapshots = [];
+  const events = [];
+  const { useBackgroundStream } = loadModule('../src/lib/useBackgroundStream.ts', {
+    '@/lib/endpoints': { API_PATHS: { backgroundTaskStream: id => id } },
+    '@/lib/chatStreamHandler': { handleStreamEvent: event => events.push(event) },
+    '@/lib/eventConstants': { CUSTOM_DOM_EVENTS: {} },
+  }, { EventSource: FakeEventSource });
+  mount(t, () => {
+    const background = useBackgroundStream({ applyThreadPayload: payload => snapshots.push(payload), streamCallbacks: {} });
+    background.openBackgroundStream('first');
+    background.closeBackgroundStream();
+    background.openBackgroundStream('first');
+    sources[0].emit('snapshot', { thread_id: 'first', model: 'old-model' });
+    sources[0].emit('agent', { type: 'message', content: 'late' });
+    sources[0].emit('task', { task: { task_id: 'old' } });
+    sources[0].emit('done', { task: { task_id: 'old' } });
+    sources[0].onerror();
+    assert.equal(snapshots.length, 0);
+    assert.equal(events.length, 0);
+    assert.equal(background.backgroundTask(), null);
+    assert.equal(background.backgroundLive(), true);
+    assert.equal(background.backgroundStreamError(), '');
+    sources[1].emit('snapshot', {
+      thread_id: 'first', provider: 'test', model: 'new-model', active_checkpoint_id: 'checkpoint',
+      pending_requests: [{ id: 'pending' }], resume_error: { code: 'timeout' },
+    });
+    assert.equal(snapshots[0].model, 'new-model');
+    assert.equal(snapshots[0].provider, 'test');
+    assert.equal(snapshots[0].active_checkpoint_id, 'checkpoint');
+    assert.equal(snapshots[0].pending_requests[0].id, 'pending');
+    assert.equal(snapshots[0].resume_error.code, 'timeout');
+  });
+});
+
 test('stream updates keep message and tool rows mounted and track only changed fields', t => {
   const utils = loadModule('../src/lib/utils.ts');
   const { createTranscriptItems } = loadModule('../src/lib/chatStreamStore.ts', { '@/lib/utils': utils });

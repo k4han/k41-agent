@@ -15,6 +15,7 @@
     "test:workspace-preview": "node --test tests/workspace-preview.test.mjs",
     "test:workspace-chat": "node scripts/verify-workspace-chat.mjs",
     "test:chat-resume": "node scripts/verify-chat-resume.mjs",
+    "test:chat-switching": "node scripts/verify-chat-switching.mjs",
     "test:markdown-ui": "node scripts/verify-markdown-updates.mjs && node scripts/verify-markdown-updates.mjs --real-diagrams",
     "test:system-update": "node --test tests/system-update.test.mjs",
     "test:system-update-ui": "node scripts/verify-system-update.mjs",

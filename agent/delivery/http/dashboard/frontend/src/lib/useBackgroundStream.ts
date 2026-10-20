@@ -39,15 +39,8 @@ export function useBackgroundStream(params: UseBackgroundStreamParams) {
 
   const applyBackgroundSnapshot = (snapshot: BackgroundTaskSnapshot) => {
     applyThreadPayload({
-      thread_id: snapshot.thread_id,
+      ...snapshot,
       messages: snapshot.messages || [],
-      platform: snapshot.platform,
-      user_id: snapshot.user_id,
-      channel_id: snapshot.channel_id,
-      agent_name: snapshot.agent_name,
-      title: snapshot.title,
-      kind: snapshot.kind,
-      workspace: snapshot.workspace,
     });
     setBackgroundTask(snapshot.task || null);
     setBackgroundSession(snapshot.active_session || null);
@@ -63,7 +56,7 @@ export function useBackgroundStream(params: UseBackgroundStreamParams) {
     setBackgroundLive(true);
 
     source.addEventListener("snapshot", (event) => {
-      if (backgroundEventThreadId !== threadId) {
+      if (backgroundEventSource !== source || backgroundEventThreadId !== threadId) {
         return;
       }
       assistantIdRef.id = null;
@@ -72,7 +65,7 @@ export function useBackgroundStream(params: UseBackgroundStreamParams) {
       applyBackgroundSnapshot(JSON.parse(event.data) as BackgroundTaskSnapshot);
     });
     source.addEventListener("agent", (event) => {
-      if (backgroundEventThreadId !== threadId) {
+      if (backgroundEventSource !== source || backgroundEventThreadId !== threadId) {
         return;
       }
       handleStreamEvent(
@@ -84,7 +77,7 @@ export function useBackgroundStream(params: UseBackgroundStreamParams) {
       );
     });
     source.addEventListener("task", (event) => {
-      if (backgroundEventThreadId !== threadId) {
+      if (backgroundEventSource !== source || backgroundEventThreadId !== threadId) {
         return;
       }
       const payload = JSON.parse(event.data) as { task?: BackgroundTask | null };
@@ -92,7 +85,7 @@ export function useBackgroundStream(params: UseBackgroundStreamParams) {
       setBackgroundStreamError("");
     });
     source.addEventListener("done", (event) => {
-      if (backgroundEventThreadId !== threadId) {
+      if (backgroundEventSource !== source || backgroundEventThreadId !== threadId) {
         return;
       }
       const payload = JSON.parse(event.data) as { task?: BackgroundTask | null };
@@ -109,12 +102,12 @@ export function useBackgroundStream(params: UseBackgroundStreamParams) {
       }));
     });
     source.addEventListener("heartbeat", () => {
-      if (backgroundEventThreadId === threadId) {
+      if (backgroundEventSource === source && backgroundEventThreadId === threadId) {
         setBackgroundStreamError("");
       }
     });
     source.onerror = () => {
-      if (backgroundEventThreadId !== threadId) {
+      if (backgroundEventSource !== source || backgroundEventThreadId !== threadId) {
         return;
       }
       setBackgroundStreamError("Live updates disconnected.");
