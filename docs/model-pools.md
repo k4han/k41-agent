@@ -31,6 +31,10 @@ on error without retrying or switching models. Previously completed tool steps
 are not replayed. Usage records identify the actual provider and model and
 include the logical `pool_name` in usage metadata.
 
+When switching from Gemini to Gemma, the Google adapter removes thought signatures
+from the outgoing Gemma request. Gemma rejects Gemini signatures in replayed tool
+calls and text. Stored history retains the signatures for subsequent Gemini calls.
+
 Configuration persists in the existing `runtime_settings` table at
 `llm.model_pools.<name>`. Cooldowns are process-local RAM state: they survive
 across conversations while the application runs, and reset on restart. No
