@@ -1,5 +1,5 @@
 from agent.modules.conversations.models import ConversationRunError, ConversationThread
-from agent.modules.conversations.navigation import list_conversation_projects
+from agent.modules.conversations.navigation import list_conversation_projects, list_project_threads
 from agent.modules.conversations.migrations import migrate_conversation_ids, migrate_conversation_tables
 from agent.modules.conversations import history
 from agent.modules.conversations.history import (
@@ -99,6 +99,7 @@ __all__ = [
     "list_background_threads_with_stats",
     "list_conversation_threads",
     "list_conversation_projects",
+    "list_project_threads",
     "list_user_threads_with_stats",
     "mark_conversation_thread_deleted",
     "parse_thread_metadata",

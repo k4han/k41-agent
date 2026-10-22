@@ -98,6 +98,36 @@ async def test_active_old_conversation_stays_within_four_previews(project_db):
 
 
 @pytest.mark.asyncio
+async def test_project_threads_paginate_independently_without_checkpoint_stats(project_db):
+    await add_project(project_db, "a", 45)
+    await add_project(project_db, "b", 3)
+    pages = [await navigation.list_project_threads(project_key="a", limit=20, offset=offset)
+             for offset in (0, 20, 40)]
+    assert [len(page["threads"]) for page in pages] == [20, 20, 5]
+    assert [page["has_more"] for page in pages] == [True, True, False]
+    assert [page["next_offset"] for page in pages] == [20, 40, 45]
+    rows = [row for page in pages for row in page["threads"]]
+    assert [row["thread_id"] for row in rows] == [f"a-{index}" for index in reversed(range(45))]
+    assert all(row["workspace_key"] == "a" and "checkpoint_count" not in row for row in rows)
+    assert (await navigation.list_project_threads(project_key="missing"))["threads"] == []
+
+
+@pytest.mark.asyncio
+async def test_project_thread_paging_respects_temp_and_missing_workspace_groups(project_db):
+    await add_project(project_db, "temp-one", 3, metadata={"temp": True})
+    await add_project(project_db, "temp-two", 2, metadata={"source": " TEMP "})
+    await add_project(project_db, "none", 2)
+    await add_project(project_db, "deleted", 1, metadata={"temp": True}, deleted=True)
+    temp = await navigation.list_project_threads(project_key="temp", limit=4)
+    assert len(temp["threads"]) == 4
+    assert temp["has_more"] is True
+    assert all(row["workspace_key"] == "temp" for row in temp["threads"])
+    missing = await navigation.list_project_threads(project_key="no-workspace")
+    assert len(missing["threads"]) == 2
+    assert all(row["workspace"] is None for row in missing["threads"])
+
+
+@pytest.mark.asyncio
 async def test_temp_missing_github_and_background_workspace_groups(project_db):
     await add_project(project_db, "temp-one", 3, metadata={"temp": True})
     await add_project(project_db, "temp-two", 3, metadata={"source": " TEMP "})
@@ -150,6 +180,21 @@ def test_navigation_api_validates_parameters_and_reports_unavailability(monkeypa
     assert client.get("/dashboard-api/nav-projects", params={"limit": 101}).status_code == 422
     read.side_effect = RuntimeError("Database unavailable")
     assert client.get("/dashboard-api/nav-projects").status_code == 503
+
+
+def test_project_threads_api_validates_pagination_and_reports_unavailability(monkeypatch):
+    app = FastAPI()
+    app.include_router(conversations.router)
+    client = TestClient(app)
+    read = AsyncMock(return_value={"threads": [], "has_more": False, "next_offset": 20})
+    monkeypatch.setattr(conversations, "list_project_threads", read)
+    params = {"project_key": "local:C:/work & notes", "limit": 20, "offset": 20}
+    assert client.get("/dashboard-api/nav-projects/threads", params=params).status_code == 200
+    read.assert_awaited_once_with(**params)
+    for invalid in ({"limit": 0}, {"limit": 101}, {"offset": -1}, {"project_key": ""}):
+        assert client.get("/dashboard-api/nav-projects/threads", params={**params, **invalid}).status_code == 422
+    read.side_effect = RuntimeError("Database unavailable")
+    assert client.get("/dashboard-api/nav-projects/threads", params=params).status_code == 503
 
 
 @pytest.mark.asyncio

@@ -23,7 +23,10 @@ from agent.shared.thread_ids import resolve_thread_id
 NAV_PROJECT_THREAD_LIMIT = 4
 
 
-def _project_previews_statement(*, dialect: str, limit: int, after: str | None, active_thread_id: str):
+def _project_previews_statement(
+    *, dialect: str, limit: int, after: str | None, active_thread_id: str,
+    project_key_filter: str | None = None, thread_limit: int = NAV_PROJECT_THREAD_LIMIT, thread_offset: int = 0,
+):
     has_mapping = ThreadWorkspace.execution_locator.is_not(None)
 
     def workspace_column(name: str):
@@ -70,8 +73,10 @@ def _project_previews_statement(*, dialect: str, limit: int, after: str | None, 
             ConversationThread.deleted_at.is_(None),
             ConversationThread.kind.in_(["user", "background"]),
         )
-        .cte("ranked_project_threads")
     )
+    if project_key_filter is not None:
+        ranked = ranked.where(project_key == project_key_filter)
+    ranked = ranked.cte("ranked_project_threads")
     # The cursor uses an immutable workspace key, so updating a conversation
     # cannot move a project across a page boundary.
     page = select(ranked.c.project_key).where(ranked.c.position == 1)
@@ -89,9 +94,44 @@ def _project_previews_statement(*, dialect: str, limit: int, after: str | None, 
         )
         .join(ranked, ranked.c.conversation_id == ConversationThread.id)
         .join(page, page.c.project_key == ranked.c.project_key)
-        .where(ranked.c.position <= NAV_PROJECT_THREAD_LIMIT)
+        .where(ranked.c.position > thread_offset, ranked.c.position <= thread_offset + thread_limit)
         .order_by(ranked.c.project_key, ConversationThread.updated_at.desc(), ConversationThread.id.desc())
     )
+
+
+def _serialize_project_thread(row) -> dict[str, Any]:
+    thread, key, backend, locator, label, metadata_json = row
+    binding = None
+    if locator:
+        binding = bind_workspace_ref(workspace_ref_from_columns(
+            backend=backend, locator=locator, label=label, metadata_json=metadata_json,
+        ))
+    project_label = (
+        TEMP_WORKSPACE_LABEL if key == TEMP_WORKSPACE_KEY
+        else binding.scope.label if binding else NO_WORKSPACE_LABEL
+    )
+    return {
+        **serialize_thread(thread),
+        "workspace": binding.model_dump() if binding else None,
+        "workspace_key": key,
+        "workspace_label": project_label,
+    }
+
+
+async def list_project_threads(*, project_key: str, limit: int = 20, offset: int = 0) -> dict[str, Any]:
+    """Page through one project's conversations without loading checkpoints."""
+    session = await get_async_session()
+    async with session:
+        statement = _project_previews_statement(
+            dialect=session.get_bind().dialect.name, limit=1, after=None, active_thread_id="",
+            project_key_filter=project_key, thread_limit=limit + 1, thread_offset=offset,
+        )
+        rows = (await session.execute(statement)).all()
+    return {
+        "threads": [_serialize_project_thread(row) for row in rows[:limit]],
+        "has_more": len(rows) > limit,
+        "next_offset": offset + min(len(rows), limit),
+    }
 
 
 async def list_conversation_projects(
@@ -109,28 +149,16 @@ async def list_conversation_projects(
         rows = (await session.execute(statement)).all()
 
     groups: dict[str, dict[str, Any]] = {}
-    for thread, key, backend, locator, label, metadata_json in rows:
-        binding = None
-        if locator:
-            binding = bind_workspace_ref(workspace_ref_from_columns(
-                backend=backend, locator=locator, label=label, metadata_json=metadata_json,
-            ))
-        project_label = (
-            TEMP_WORKSPACE_LABEL if key == TEMP_WORKSPACE_KEY
-            else binding.scope.label if binding else NO_WORKSPACE_LABEL
-        )
+    for row in rows:
+        summary = _serialize_project_thread(row)
+        key = summary["workspace_key"]
         if key not in groups:
             groups[key] = {
                 "key": key,
-                "label": project_label,
+                "label": summary["workspace_label"],
                 "threads": [],
             }
-        groups[key]["threads"].append({
-            **serialize_thread(thread),
-            "workspace": binding.model_dump() if binding else None,
-            "workspace_key": key,
-            "workspace_label": project_label,
-        })
+        groups[key]["threads"].append(summary)
 
     projects = list(groups.values())
     has_more = len(projects) > limit

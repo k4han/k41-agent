@@ -15,6 +15,7 @@ export const API_PATHS = {
   sessionsStop: "/dashboard-api/sessions/stop",
   chatHistory: "/dashboard-api/chat-history",
   navProjects: "/dashboard-api/nav-projects",
+  navProjectThreads: "/dashboard-api/nav-projects/threads",
   promptVariables: "/dashboard-api/prompt-variables",
   mcpServers: "/dashboard-api/mcp/servers",
   mcpSearch: "/api/mcp/search",

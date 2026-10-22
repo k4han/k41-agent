@@ -14,6 +14,17 @@
   padding: 10px 6px;
 }
 
+.sidebar-collapsed .nav-scroll {
+  align-items: center;
+  width: 100%;
+  margin-right: 0;
+  scrollbar-gutter: auto;
+}
+
+.sidebar-collapsed .nav-scroll > .nav-link {
+  margin-right: 0;
+}
+
 .sidebar-collapsed .nav-link {
   justify-content: center;
   width: 36px;

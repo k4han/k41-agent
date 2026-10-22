@@ -399,6 +399,24 @@ export function AppShell(props: {
     });
   });
 
+  const renderNavItem = (item: NavItem) => (
+    <A
+      href={item.href}
+      activeClass=""
+      inactiveClass=""
+      class={`nav-link ${isActive(item.href) ? "active" : ""}`}
+      title={item.label}
+    >
+      {item.icon()}
+      <span class="nav-label">{item.label}</span>
+      <Show when={item.href === "/chat" && runningThreadIds().size > 0}>
+        <span class="nav-badge" title={`${runningThreadIds().size} running`}>
+          {runningThreadIds().size}
+        </span>
+      </Show>
+    </A>
+  );
+
   const renderHistoryItem = (thread: ThreadSummary) => {
     return (
       <div class="nav-history-item-wrapper">
@@ -780,149 +798,140 @@ export function AppShell(props: {
           </Show>
         </div>
         <nav class="nav" onClick={handleNavClick}>
-          <For each={navItems}>
-            {(item) => (
-              <A
-                href={item.href}
-                activeClass=""
-                inactiveClass=""
-                class={`nav-link ${isActive(item.href) ? "active" : ""}`}
-                title={item.label}
-              >
-                {item.icon()}
-                <span class="nav-label">{item.label}</span>
-                <Show when={item.href === "/chat" && runningThreadIds().size > 0}>
-                  <span class="nav-badge" title={`${runningThreadIds().size} running`}>
-                    {runningThreadIds().size}
-                  </span>
-                </Show>
-              </A>
-            )}
-          </For>
-          <Show
-            when={!collapsed() || isMobileViewport()}
-            fallback={
-              <A
-                href="/history"
-                activeClass=""
-                inactiveClass=""
-                class={`nav-link ${location.pathname.startsWith("/history") ? "active" : ""}`}
-                title="History"
-              >
-                <History size={15} />
-              </A>
-            }
-          >
-            <div class="nav-history-group open">
-              <div class="nav-projects-header">
-                <span>Projects</span>
+          <For each={navItems.slice(0, 2)}>{renderNavItem}</For>
+          <div class="nav-scroll" onScroll={handleHistoryScroll}>
+            <For each={navItems.slice(2)}>{renderNavItem}</For>
+            <Show
+              when={!collapsed() || isMobileViewport()}
+              fallback={
                 <A
                   href="/history"
-                  class="nav-history-all-btn"
-                  title="View all history"
-                  aria-label="View all history"
+                  activeClass=""
+                  inactiveClass=""
+                  class={`nav-link ${location.pathname.startsWith("/history") ? "active" : ""}`}
+                  title="History"
                 >
-                  <History size={14} />
+                  <History size={15} />
                 </A>
-              </div>
-
-              <div
-                class="nav-history-list"
-                aria-label="Chat history"
-                onScroll={handleHistoryScroll}
-              >
-                <For each={historyGroups()}>
-                  {(group) => {
-                    const open = () => !collapsedProjects().has(group.key);
-                    const previewThreads = createMemo(() => navProjectThreads(
-                      group.threads, selectedChatThreadId(), runningThreadIds(),
-                    ));
-                    const groupId = `nav-project-${encodeURIComponent(group.key)}`;
-                    return (
-                      <section class="nav-history-workspace" aria-label={group.label}>
-                        <div class="nav-project-heading">
-                          <button
-                            type="button"
-                            class="nav-history-workspace-toggle"
-                            aria-expanded={open()}
-                            aria-controls={groupId}
-                            title={group.label}
-                            onClick={() => toggleProject(group.key)}
-                          >
-                            <Show when={group.isRepo} fallback={<Folder size={15} />}>
-                              <GitBranch size={15} />
-                            </Show>
-                            <span class="nav-history-workspace-label">{group.label}</span>
-                            <span class="nav-history-workspace-caret">
-                              <Show when={open()} fallback={<ChevronRight size={13} />}>
-                                <ChevronDown size={13} />
-                              </Show>
-                            </span>
-                          </button>
-                          <button
-                            type="button"
-                            class="nav-project-add"
-                            aria-label={`New chat in ${group.label}`}
-                            title={`New chat in ${group.label}`}
-                            onClick={() => startProjectChat(group)}
-                          >
-                            <Plus size={16} />
-                          </button>
-                        </div>
-                        <div id={groupId} class="nav-history-workspace-threads" hidden={!open()}>
-                          <For each={previewThreads()}>
-                            {(thread) => renderHistoryItem(thread)}
-                          </For>
-                          <A
-                            class="nav-project-view-all"
-                            href={`/history?workspace=${encodeURIComponent(group.key)}`}
-                            aria-label={`View all chats in ${group.label}`}
-                          >
-                            View all
-                          </A>
-                        </div>
-                      </section>
-                    );
-                  }}
-                </For>
-
-                <Show when={historyThreads().length === 0 && !historyError() && (!historyLoaded() || historyLoading())}>
-                  <div class="nav-history-skeleton" aria-label="Loading history">
-                    <span class="skeleton-line nav-history-skeleton-line" />
-                    <span class="skeleton-line nav-history-skeleton-line short" />
-                    <span class="skeleton-line nav-history-skeleton-line" />
-                  </div>
-                </Show>
-                <Show when={historyThreads().length === 0 && historyLoaded() && !historyLoading() && !historyError()}>
-                  <div class="nav-history-status">No history</div>
-                </Show>
-                <Show when={historyThreads().length > 0 && historyLoading()}>
-                  <div class="nav-history-status">Loading more...</div>
-                </Show>
-                <Show when={historyError()}>
-                  <button
-                    class="nav-history-retry"
-                    type="button"
-                    onClick={() => void loadHistory(true)}
+              }
+            >
+              <div class="nav-history-group open">
+                <div class="nav-projects-header">
+                  <span>Projects</span>
+                  <A
+                    href="/history"
+                    class="nav-history-all-btn"
+                    title="View all history"
+                    aria-label="View all history"
                   >
-                    Retry
-                  </button>
-                </Show>
-                <Show
-                  when={
-                    historyThreads().length > 0
-                    && historyHasMore()
-                    && !historyLoading()
-                    && !historyError()
-                  }
+                    <History size={14} />
+                  </A>
+                </div>
+
+                <div
+                  class="nav-history-list"
+                  aria-label="Chat history"
                 >
-                  <button class="nav-history-retry" type="button" onClick={() => void loadHistory()}>
-                    Load more
-                  </button>
-                </Show>
+                  <For each={historyGroups()}>
+                    {(group) => {
+                      const open = () => !collapsedProjects().has(group.key);
+                      const projectState = () => navProjectsStore.projectState(group.key);
+                      const previewThreads = createMemo(() => projectState()?.expanded ? group.threads : navProjectThreads(
+                        group.threads, selectedChatThreadId(), runningThreadIds(),
+                      ));
+                      const groupId = `nav-project-${encodeURIComponent(group.key)}`;
+                      return (
+                        <section class="nav-history-workspace" aria-label={group.label}>
+                          <div class="nav-project-heading">
+                            <button
+                              type="button"
+                              class="nav-history-workspace-toggle"
+                              aria-expanded={open()}
+                              aria-controls={groupId}
+                              title={group.label}
+                              onClick={() => toggleProject(group.key)}
+                            >
+                              <Show when={group.isRepo} fallback={<Folder size={15} />}>
+                                <GitBranch size={15} />
+                              </Show>
+                              <span class="nav-history-workspace-label">{group.label}</span>
+                              <span class="nav-history-workspace-caret">
+                                <Show when={open()} fallback={<ChevronRight size={13} />}>
+                                  <ChevronDown size={13} />
+                                </Show>
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              class="nav-project-add"
+                              aria-label={`New chat in ${group.label}`}
+                              title={`New chat in ${group.label}`}
+                              onClick={() => startProjectChat(group)}
+                            >
+                              <Plus size={16} />
+                            </button>
+                          </div>
+                          <div id={groupId} class="nav-history-workspace-threads" hidden={!open()}>
+                            <For each={previewThreads()}>
+                              {(thread) => renderHistoryItem(thread)}
+                            </For>
+                            <Show when={!projectState()?.expanded || projectState()?.hasMore}>
+                              <button
+                                class="nav-project-view-all"
+                                type="button"
+                                disabled={projectState()?.loading}
+                                aria-label={`Load more chats in ${group.label}`}
+                                aria-busy={projectState()?.loading}
+                                title={projectState()?.error || undefined}
+                                onClick={() => void navProjectsStore.loadProjectThreads(group.key)}
+                              >
+                                {projectState()?.loading ? "Loading..." : projectState()?.error ? "Retry" : projectState()?.expanded ? "Load more" : "View all"}
+                              </button>
+                            </Show>
+                          </div>
+                        </section>
+                      );
+                    }}
+                  </For>
+
+                  <Show when={historyThreads().length === 0 && !historyError() && (!historyLoaded() || historyLoading())}>
+                    <div class="nav-history-skeleton" aria-label="Loading history">
+                      <span class="skeleton-line nav-history-skeleton-line" />
+                      <span class="skeleton-line nav-history-skeleton-line short" />
+                      <span class="skeleton-line nav-history-skeleton-line" />
+                    </div>
+                  </Show>
+                  <Show when={historyThreads().length === 0 && historyLoaded() && !historyLoading() && !historyError()}>
+                    <div class="nav-history-status">No history</div>
+                  </Show>
+                  <Show when={historyThreads().length > 0 && historyLoading()}>
+                    <div class="nav-history-status">Loading more...</div>
+                  </Show>
+                  <Show when={historyError()}>
+                    <button
+                      class="nav-history-retry"
+                      type="button"
+                      onClick={() => void loadHistory(true)}
+                    >
+                      Retry
+                    </button>
+                  </Show>
+                  <Show
+                    when={
+                      historyThreads().length > 0
+                      && historyHasMore()
+                      && !historyLoading()
+                      && !historyError()
+                    }
+                  >
+                    <button class="nav-history-retry" type="button" onClick={() => void loadHistory()}>
+                      Load more
+                    </button>
+                  </Show>
+                </div>
               </div>
-            </div>
-          </Show>
+            </Show>
+          </div>
         </nav>
         <div class="sidebar-footer">
           <div class="sidebar-footer-row">

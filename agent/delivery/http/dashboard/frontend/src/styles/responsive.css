@@ -352,6 +352,17 @@
     padding: 10px;
   }
 
+  .app-layout .sidebar .nav-scroll {
+    align-items: stretch;
+    width: auto;
+    margin-right: -10px;
+    scrollbar-gutter: stable;
+  }
+
+  .app-layout .sidebar .nav-scroll > .nav-link {
+    margin-right: 4px;
+  }
+
   .app-layout .sidebar .nav-link,
   .app-layout .sidebar.settings-sidebar .nav-link,
   .app-layout .sidebar .nav-history-link,
@@ -381,7 +392,7 @@
   .app-layout .sidebar .nav-history-group,
   .app-layout .sidebar .nav-history-group.open {
     width: 100%;
-    flex: 1 1 auto;
+    flex: 0 0 auto;
     flex-direction: column;
   }
 

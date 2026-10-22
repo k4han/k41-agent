@@ -40,6 +40,7 @@ from agent.modules.conversations import (
     has_pending_interrupt,
     list_background_threads_with_stats,
     list_conversation_projects,
+    list_project_threads,
     list_user_threads_with_stats,
     mark_conversation_thread_deleted,
     parse_thread_metadata,
@@ -172,6 +173,20 @@ async def get_nav_projects(
     except Exception as exc:
         logger.exception("Failed to load navigation projects")
         raise HTTPException(status_code=503, detail="Project navigation is temporarily unavailable.") from exc
+
+
+@router.get("/dashboard-api/nav-projects/threads")
+async def get_nav_project_threads(
+    project_key: str = Query(min_length=1, max_length=4096),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, Any]:
+    """Load more conversations inline for a navigation project."""
+    try:
+        return await list_project_threads(project_key=project_key, limit=limit, offset=offset)
+    except Exception as exc:
+        logger.exception("Failed to load project conversations")
+        raise HTTPException(status_code=503, detail="Project conversations are temporarily unavailable.") from exc
 
 
 @router.get("/dashboard-api/chat-history")

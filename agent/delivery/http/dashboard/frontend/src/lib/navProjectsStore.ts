@@ -1,6 +1,7 @@
 import { batch, createSignal } from "solid-js";
 
 import { apiFetch } from "@/lib/api";
+import { threadWorkspaceKey } from "@/lib/chatThreads";
 import type { ThreadSummary, ThreadWorkspaceGroup } from "@/lib/chatThreads";
 import { API_PATHS } from "@/lib/endpoints";
 import { HISTORY_PAGE_SIZE, NAV_PROJECT_THREAD_LIMIT } from "@/lib/uiConstants";
@@ -10,6 +11,21 @@ export type NavProjectsPayload = {
   projects: ThreadWorkspaceGroup[];
   has_more: boolean;
   next_cursor: string | null;
+};
+
+type ProjectThreadsPayload = {
+  threads: ThreadSummary[];
+  has_more: boolean;
+  next_offset: number;
+};
+
+type ProjectThreadsState = {
+  expanded: boolean;
+  loading: boolean;
+  error: string;
+  hasMore: boolean;
+  nextOffset: number;
+  threadIds: string[];
 };
 
 function uniqueThreads(threads: ThreadSummary[]): ThreadSummary[] {
@@ -40,18 +56,31 @@ export function newProjectWorkspace(group: ThreadWorkspaceGroup) {
 }
 
 /** Shared across shell mounts so delayed requests have a single state owner. */
-export function createNavProjectsStore(fetchProjects = apiFetch<NavProjectsPayload>) {
+export function createNavProjectsStore(
+  fetchProjects = apiFetch<NavProjectsPayload>,
+  fetchThreads = apiFetch<ProjectThreadsPayload>,
+) {
   const [threads, setThreads] = createSignal<ThreadSummary[]>([]);
   const [loaded, setLoaded] = createSignal(false);
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal("");
   const [hasMore, setHasMore] = createSignal(true);
+  const [projectStates, setProjectStates] = createSignal<Record<string, ProjectThreadsState>>({});
+  const projectRequests = new Map<string, Promise<void>>();
   let nextCursor: string | null = null;
   let loadedThrough: string | null = null;
   let activeThreadId = "";
   let revision = 0;
   let pendingRefresh = false;
   let request: Promise<void> | null = null;
+
+  const setProjectState = (key: string, state: ProjectThreadsState) => {
+    setProjectStates((current) => ({ ...current, [key]: state }));
+  };
+  const readProjectThreads = (key: string, offset: number, limit = HISTORY_PAGE_SIZE) => {
+    const params = new URLSearchParams({ project_key: key, limit: String(limit), offset: String(offset) });
+    return fetchThreads(`${API_PATHS.navProjectThreads}?${params}`);
+  };
 
   const load = (reset = false): Promise<void> => {
     if (reset) {
@@ -82,6 +111,27 @@ export function createNavProjectsStore(fetchProjects = apiFetch<NavProjectsPaylo
             cursor = payload.next_cursor;
           } while (version === revision && refresh && payload.has_more && cursor && boundary && projectKeyBefore(cursor, boundary));
 
+          const expandedStates = new Map<string, ProjectThreadsState>();
+          if (refresh) {
+            await Promise.all(projects.map(async (project) => {
+              const state = projectStates()[project.key];
+              if (!state?.expanded) return;
+              const rows: ThreadSummary[] = [];
+              let page: ProjectThreadsPayload;
+              let offset = 0;
+              do {
+                page = await readProjectThreads(project.key, offset, Math.min(100, Math.max(1, state.nextOffset - offset)));
+                rows.push(...page.threads);
+                offset = page.next_offset;
+              } while (version === revision && page.has_more && offset < state.nextOffset);
+              project.threads = uniqueThreads([...rows, ...project.threads]);
+              expandedStates.set(project.key, {
+                ...state, hasMore: page.has_more, nextOffset: offset,
+                threadIds: rows.map((thread) => thread.thread_id),
+              });
+            }));
+          }
+
           if (version !== revision) {
             pendingRefresh = true;
             continue;
@@ -89,6 +139,14 @@ export function createNavProjectsStore(fetchProjects = apiFetch<NavProjectsPaylo
           const rows = projects.flatMap((project) => project.threads);
           batch(() => {
             setThreads(uniqueThreads(refresh ? rows : [...threads(), ...rows]));
+            if (refresh) {
+              const keys = new Set(projects.map((project) => project.key));
+              setProjectStates((current) => Object.fromEntries(Object.entries(current)
+                .filter(([key]) => keys.has(key))
+                .map(([key, state]) => [key, expandedStates.has(key)
+                  ? { ...expandedStates.get(key)!, loading: state.loading, error: state.error }
+                  : state])));
+            }
             setHasMore(payload.has_more);
             setLoaded(true);
             setError("");
@@ -106,8 +164,62 @@ export function createNavProjectsStore(fetchProjects = apiFetch<NavProjectsPaylo
     return request;
   };
 
+  const loadProjectThreads = (key: string): Promise<void> => {
+    const pending = projectRequests.get(key);
+    if (pending) return pending;
+    const initial = projectStates()[key] ?? {
+      expanded: false, loading: false, error: "", hasMore: true, nextOffset: 0, threadIds: [],
+    };
+    if (!initial.hasMore) return Promise.resolve();
+    setProjectState(key, { ...initial, loading: true, error: "" });
+    const pendingRequest = (async () => {
+      try {
+        while (true) {
+          const version = revision;
+          const state = projectStates()[key] ?? initial;
+          const page = await readProjectThreads(key, state.nextOffset);
+          if (version !== revision) continue;
+          const current = threads();
+          const previous = current.filter((thread) => threadWorkspaceKey(thread) === key);
+          const byId = new Map([...previous, ...page.threads].map((thread) => [thread.thread_id, thread]));
+          const ids = [...new Set([...state.threadIds, ...page.threads.map((thread) => thread.thread_id)])];
+          const rows = uniqueThreads([
+            ...ids.flatMap((id) => byId.has(id) ? [byId.get(id)!] : []),
+            ...previous.map((thread) => byId.get(thread.thread_id)!),
+          ]);
+          let inserted = false;
+          const next = current.flatMap((thread) => {
+            if (threadWorkspaceKey(thread) !== key) return [thread];
+            if (inserted) return [];
+            inserted = true;
+            return rows;
+          });
+          revision += 1;
+          if (request) pendingRefresh = true;
+          batch(() => {
+            setThreads(inserted ? next : [...next, ...rows]);
+            setProjectState(key, {
+              expanded: true, loading: false, error: "", hasMore: page.has_more,
+              nextOffset: page.next_offset, threadIds: ids,
+            });
+          });
+          return;
+        }
+      } catch (err) {
+        setProjectState(key, {
+          ...(projectStates()[key] ?? initial), loading: false,
+          error: err instanceof Error ? err.message : "Failed to load conversations",
+        });
+      }
+    })().finally(() => projectRequests.delete(key));
+    projectRequests.set(key, pendingRequest);
+    return pendingRequest;
+  };
+
   return {
     threads, loaded, loading, error, hasMore, load,
+    projectState: (key: string) => projectStates()[key],
+    loadProjectThreads,
     updateThreads(next: ThreadSummary[]) {
       revision += 1;
       if (request) pendingRefresh = true;

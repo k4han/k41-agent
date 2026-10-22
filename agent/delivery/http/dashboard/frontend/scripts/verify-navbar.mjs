@@ -23,7 +23,7 @@ const github = { backend: 'daytona', locator: 'cloudflare-sandbox', label: 'clou
 const temporary = { backend: 'local', locator: '/scratch/thread-old', label: 'Temp workspace', metadata: { temp: true, thread_id: 'old' } };
 const binding = (key, label, execution) => ({ scope: { key, label, kind: key.split(':')[0], metadata: {} }, execution });
 const threads = [
-  ...Array.from({ length: 7 }, (_, index) => ({ thread_id: `local-${index}`,
+  ...Array.from({ length: 27 }, (_, index) => ({ thread_id: `local-${index}`,
     title: index === 0 ? 'Build a link shortener with Flask and a detailed project configuration' : `Flask conversation ${index}`,
     workspace: binding('local:/projects/flask-test', 'flask test', local) })),
   { thread_id: 'github-0', title: 'Cloudflare agent setup with Telegram integration', workspace: binding('github:42', 'cloudflare', github) },
@@ -33,8 +33,10 @@ const threads = [
   user_id: 'dashboard', channel_id: '', agent_name: 'default', kind: 'interactive', ...thread }));
 const sends = [];
 const navRequests = [];
+const projectThreadRequests = [];
 let historyRequests = 0;
 let failNav = false;
+let failProjectThreads = false;
 const fixtures = {
   '/dashboard-api/agents/cards': { cards: [{ name: 'default', display_name: 'Default', provider: 'test', model: 'demo-model', valid: true }] },
   '/dashboard-api/agents/providers': { provider_names: ['test'], default_provider: 'test', default_model: 'demo-model',
@@ -60,6 +62,21 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname.startsWith('/dashboard-api')) {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('X-CSRF-Token', 'navbar-test-csrf');
+    if (url.pathname === '/dashboard-api/nav-projects/threads') {
+      projectThreadRequests.push(url);
+      if (failProjectThreads) {
+        res.writeHead(503);
+        res.end(JSON.stringify({ detail: 'Project conversations are temporarily unavailable.' }));
+        return;
+      }
+      const key = url.searchParams.get('project_key');
+      const offset = Number(url.searchParams.get('offset'));
+      const limit = Number(url.searchParams.get('limit'));
+      const matching = threads.filter(thread => (thread.workspace_key || thread.workspace?.scope.key || 'no-workspace') === key);
+      const rows = matching.slice(offset, offset + limit);
+      res.end(JSON.stringify({ threads: rows, has_more: offset + rows.length < matching.length, next_offset: offset + rows.length }));
+      return;
+    }
     if (url.pathname === '/dashboard-api/nav-projects') {
       navRequests.push(url);
       if (failNav) {
@@ -236,12 +253,26 @@ try {
   await send(undefined);
   console.log('PASS: project actions start fresh conversations and preserve local paths, sandbox locators, and GitHub metadata.');
 
-  await js(`document.querySelectorAll('.nav-project-view-all')[1].click()`);
-  await until(() => js(`location.pathname === '/history' && document.querySelector('.select-control-trigger')?.textContent.includes('cloudflare')`), 'project-filtered history');
-  assert.equal(await js(`document.querySelector('.content').textContent.includes('Flask conversation')`), false);
-  await js(`document.querySelector('.nav-project-view-all').click()`);
-  await until(() => js(`document.querySelector('.select-control-trigger')?.textContent.includes('flask test')`), 'switch history project');
-  console.log('PASS: View all filters history and switches projects without a page reload.');
+  const localProject = '.nav-history-workspace[aria-label="flask test"]';
+  const previousPath = await js('location.pathname');
+  failProjectThreads = true;
+  await js(`document.querySelector('${localProject} .nav-project-view-all').click()`);
+  await until(() => js(`document.querySelector('${localProject} .nav-project-view-all')?.textContent.trim() === 'Retry'`), 'inline conversations retry');
+  assert.equal(await js(`document.querySelectorAll('${localProject} .nav-history-item').length`), 4, 'failed loading retains previews');
+  failProjectThreads = false;
+  await js(`document.querySelector('${localProject} .nav-project-view-all').click()`);
+  await until(() => js(`document.querySelectorAll('${localProject} .nav-history-item').length === 20`), 'first inline conversation page');
+  assert.equal(await js(`document.querySelector('${localProject} .nav-project-view-all').textContent.trim()`), 'Load more');
+  await js(`document.querySelector('${localProject} .nav-project-view-all').click()`);
+  await until(() => js(`document.querySelectorAll('${localProject} .nav-history-item').length === 27`), 'remaining inline conversations');
+  assert.equal(projectThreadRequests.at(-1).searchParams.get('offset'), '20');
+  assert.equal(await js(`!!document.querySelector('${localProject} .nav-project-view-all')`), false, 'exhausted project hides load action');
+  assert.equal(await js('location.pathname'), previousPath, 'inline loading preserves the current conversation');
+  assert.equal(await js(`document.querySelectorAll('.nav-history-workspace[aria-label="Temp workspace"] .nav-history-item').length`), 4, 'other projects stay collapsed to previews');
+  await js(`document.querySelector('.nav-history-all-btn').click()`);
+  await until(() => js(`location.pathname === '/history' && !!document.querySelector('.select-control-trigger')`), 'global history remains accessible');
+  await until(() => js(`document.querySelectorAll('${localProject} .nav-history-item').length === 27`), 'expanded conversations survive navigation');
+  console.log('PASS: View all loads conversations inline, paginates, retries failures, preserves the current route, and keeps expanded rows across navigation.');
 
   await js(`document.querySelector('.brand-collapse-btn').click()`);
   await viewport(390, 844);
@@ -251,6 +282,10 @@ try {
   assert.equal(await js(`!!document.querySelector('.sidebar-resize-handle')`), false);
   await until(() => js(`getComputedStyle(document.querySelector('.nav-project-add')).opacity === '1'`), 'visible mobile project action');
   assert.equal(await js(`document.documentElement.scrollWidth <= innerWidth`), true);
+  await js(`document.querySelector('.nav-history-workspace[aria-label="Temp workspace"] .nav-project-view-all').click()`);
+  await until(() => js(`document.querySelectorAll('.nav-history-workspace[aria-label="Temp workspace"] .nav-history-item').length === 6`), 'mobile inline conversations');
+  assert.equal(await js(`document.querySelector('.app-layout').classList.contains('app-layout--drawer-open')`), true, 'inline loading keeps the mobile drawer open');
+  assert.equal(await js('location.pathname'), '/history');
   await js(`document.querySelector('.nav-project-add').click()`);
   await until(() => js(`location.pathname === '/chat' && !document.querySelector('.app-layout').classList.contains('app-layout--drawer-open')`), 'mobile project action closes drawer');
   await call('Page.reload');

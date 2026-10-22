@@ -13,7 +13,7 @@ const dependencies = {
   'solid-js': solid,
   '@/lib/api': { apiFetch: () => { throw new Error('Unexpected default API request'); } },
   '@/lib/chatThreads': { threadWorkspaceKey: thread => thread.workspace_key || thread.workspace?.scope.key || 'no-workspace' },
-  '@/lib/endpoints': { API_PATHS: { navProjects: '/dashboard-api/nav-projects' } },
+  '@/lib/endpoints': { API_PATHS: { navProjects: '/dashboard-api/nav-projects', navProjectThreads: '/dashboard-api/nav-projects/threads' } },
   '@/lib/uiConstants': { HISTORY_PAGE_SIZE: 20, NAV_PROJECT_THREAD_LIMIT: 4 },
   '@/lib/workspace': { isTempWorkspace: workspace => workspace?.metadata?.temp === true || workspace?.metadata?.source?.trim().toLowerCase() === 'temp' },
 };
@@ -149,4 +149,103 @@ test('optimistic updates and pagination cannot duplicate thread IDs', async () =
   store.updateThreads([...store.threads(), ...project('two').threads, ...project('two').threads]);
   await store.load();
   assert.deepEqual(store.threads().map(row => row.thread_id), ['one-thread', 'two-thread']);
+});
+
+test('project conversations load inline across pages and remain expanded after refresh', async () => {
+  const key = 'local:C:/work & notes';
+  const rows = Array.from({ length: 25 }, (_, index) => ({ thread_id: `chat-${index}`, workspace_key: key }));
+  const requests = [];
+  const store = createNavProjectsStore(async () => ({
+    projects: [{ key, label: key, threads: [...rows.slice(0, 3), rows[24]] }, project('other')],
+    has_more: false, next_cursor: null,
+  }), async url => {
+    const params = new URL(url, 'http://localhost').searchParams;
+    assert.equal(params.get('project_key'), key);
+    const offset = Number(params.get('offset'));
+    const limit = Number(params.get('limit'));
+    requests.push({ offset, limit });
+    const threads = rows.slice(offset, offset + limit);
+    return { threads, has_more: offset + threads.length < rows.length, next_offset: offset + threads.length };
+  });
+  await store.load(true);
+  await store.loadProjectThreads(key);
+  assert.equal(store.projectState(key).hasMore, true);
+  assert.equal(store.threads().filter(row => row.workspace_key === key).length, 21, 'older active preview remains visible');
+  await store.loadProjectThreads(key);
+  assert.deepEqual(store.threads().filter(row => row.workspace_key === key), rows);
+  assert.equal(store.projectState(key).hasMore, false);
+  assert.equal(store.threads().at(-1).workspace_key, 'other');
+  assert.deepEqual(requests, [{ offset: 0, limit: 20 }, { offset: 20, limit: 20 }]);
+  await store.loadProjectThreads(key);
+  assert.equal(requests.length, 2, 'exhausted projects do not fetch again');
+  rows[5] = { ...rows[5], title: 'Updated conversation' };
+  await store.load(true);
+  assert.equal(store.threads().find(row => row.thread_id === 'chat-5').title, 'Updated conversation');
+  assert.equal(store.projectState(key).expanded, true);
+  assert.equal(store.threads().filter(row => row.workspace_key === key).length, 25);
+});
+
+test('duplicate project clicks share a request and failed pagination can retry without losing rows', async () => {
+  const requests = [];
+  const store = createNavProjectsStore(async () => payload(['one']), url => new Promise((resolve, reject) => requests.push({ url, resolve, reject })));
+  await store.load(true);
+  const pending = store.loadProjectThreads('one');
+  assert.equal(store.loadProjectThreads('one'), pending);
+  assert.equal(store.projectState('one').loading, true);
+  requests[0].reject(new Error('Connection failed'));
+  await pending;
+  assert.equal(store.projectState('one').error, 'Connection failed');
+  assert.equal(store.threads().length, 1);
+  const retry = store.loadProjectThreads('one');
+  requests[1].resolve({ threads: project('one').threads, has_more: true, next_offset: 1 });
+  await retry;
+  const more = store.loadProjectThreads('one');
+  requests[2].reject(new Error('Connection failed again'));
+  await more;
+  assert.equal(store.projectState('one').expanded, true);
+  assert.equal(store.threads().length, 1);
+  assert.equal(store.projectState('one').nextOffset, 1);
+  assert.equal(store.projectState('one').loading, false);
+});
+
+test('changes during inline loading discard stale conversation rows', async () => {
+  const requests = [];
+  const store = createNavProjectsStore(async () => payload(['one']), url => new Promise(resolve => requests.push({ url, resolve })));
+  await store.load(true);
+  const pending = store.loadProjectThreads('one');
+  store.updateThreads([{ ...store.threads()[0], title: 'Renamed' }]);
+  requests[0].resolve({ threads: [{ ...project('one').threads[0], title: 'Old title' }], has_more: false, next_offset: 1 });
+  await tick();
+  assert.equal(requests.length, 2);
+  assert.equal(store.threads()[0].title, 'Renamed');
+  requests[1].resolve({ threads: [{ ...project('one').threads[0], title: 'Renamed' }], has_more: false, next_offset: 1 });
+  await pending;
+  assert.equal(store.threads()[0].title, 'Renamed');
+});
+
+test('a concurrent refresh cannot leave a failed project page stuck loading', async () => {
+  const requests = [];
+  let first = true;
+  const firstPage = { threads: project('one').threads, has_more: true, next_offset: 1 };
+  const store = createNavProjectsStore(async () => payload(['one']), () => {
+    if (first) {
+      first = false;
+      return Promise.resolve(firstPage);
+    }
+    return new Promise((resolve, reject) => requests.push({ resolve, reject }));
+  });
+  await store.load(true);
+  await store.loadProjectThreads('one');
+  const more = store.loadProjectThreads('one');
+  const refresh = store.load(true);
+  await tick();
+  requests[0].resolve({ threads: [], has_more: false, next_offset: 1 });
+  await tick();
+  requests[2].reject(new Error('Connection failed'));
+  await more;
+  requests[1].resolve(firstPage);
+  await refresh;
+  assert.equal(store.projectState('one').loading, false);
+  assert.equal(store.projectState('one').error, 'Connection failed');
+  assert.equal(store.projectState('one').hasMore, true);
 });

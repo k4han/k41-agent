@@ -201,11 +201,29 @@ body.sidebar-resizing * {
   padding: 10px;
 }
 
+.nav-scroll {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 3px;
+  margin-right: -10px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.nav-scroll > .nav-link {
+  margin-right: 4px;
+}
+
 .nav-link {
   position: relative;
   display: flex;
   align-items: center;
   gap: 9px;
+  flex-shrink: 0;
   min-height: 34px;
   font-size: var(--font-size-base);
   border: 0;
@@ -260,7 +278,7 @@ body.sidebar-resizing * {
 
 .nav-history-group.open {
   display: flex;
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   flex-direction: column;
 }
 
@@ -275,12 +293,9 @@ body.sidebar-resizing * {
 .nav-history-list {
   display: flex;
   min-height: 0;
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   flex-direction: column;
   gap: 2px;
-  margin-right: -10px;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
 }
 
 .nav-history-workspace {
@@ -353,10 +368,14 @@ body.sidebar-resizing * {
   display: flex;
   align-items: center;
   min-height: 30px;
+  width: 100%;
   padding: 4px 8px;
+  border: 0;
   border-radius: 7px;
+  background: transparent;
   color: var(--muted-2);
   font-size: var(--font-size-base);
+  text-align: left;
 }
 
 .nav-project-view-all:hover {
