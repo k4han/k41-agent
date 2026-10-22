@@ -289,7 +289,7 @@ body.sidebar-resizing * {
   min-width: 0;
   gap: 2px;
   margin-bottom: 12px;
-  padding-right: 10px;
+  padding-right: 4px;
 }
 
 .nav-projects-header {
@@ -447,7 +447,7 @@ body.sidebar-resizing * {
   overflow: hidden;
   border-radius: 7px;
   color: var(--muted);
-  padding: 0 8px;
+  padding: 0 4px 0 8px;
   transition:
     background-color 120ms ease,
     color 120ms ease;
@@ -481,10 +481,6 @@ body.sidebar-resizing * {
   align-items: center;
 }
 
-.nav-history-item .nav-history-link {
-  padding-right: 34px;
-}
-
 .nav-history-rename-input {
   width: 100%;
   min-width: 0;
@@ -506,7 +502,7 @@ body.sidebar-resizing * {
 .nav-history-action {
   position: absolute;
   top: 50%;
-  right: 5px;
+  right: 3px;
   display: grid;
   width: 24px;
   height: 24px;
@@ -515,7 +511,7 @@ body.sidebar-resizing * {
   place-items: center;
   border: 0;
   border-radius: 6px;
-  background: transparent;
+  background: var(--surface-2);
   color: var(--muted);
   opacity: 0;
   pointer-events: none;
@@ -524,6 +520,10 @@ body.sidebar-resizing * {
     background-color 120ms ease,
     color 120ms ease,
     opacity 120ms ease;
+}
+
+.nav-history-item.active .nav-history-action {
+  background: var(--surface-3);
 }
 
 .nav-history-item:hover .nav-history-action,
@@ -614,6 +614,7 @@ body.sidebar-resizing * {
   font-size: var(--font-size-base);
   font-weight: 400;
   line-height: 1.4;
+  text-overflow: clip;
 }
 
 .nav-history-kind-icon {
