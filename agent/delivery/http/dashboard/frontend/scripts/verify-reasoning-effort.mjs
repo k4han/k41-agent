@@ -34,6 +34,7 @@ const settingsPayload = () => ({ settings: {}, by_category: {}, settings_sources
   providers_catalog: {}, provider_type_options: [],
 });
 const fixtures = {
+  '/dashboard-api/nav-projects': { projects: [], has_more: false, next_cursor: null },
   '/dashboard-api/catalog': {},
   '/dashboard-api/agents/cards': { cards: [{ name: 'default', display_name: 'Default', provider: 'test', model: 'model-a', valid: true }] },
   '/dashboard-api/sessions': { sessions: [] },

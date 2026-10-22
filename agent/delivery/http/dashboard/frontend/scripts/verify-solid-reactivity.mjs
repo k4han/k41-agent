@@ -52,6 +52,7 @@ const homePayload = () => ({
   scheduler_timezone: 'UTC', onboarding: { show_checklist: false },
 });
 const fixtures = {
+  '/dashboard-api/nav-projects': { projects: [], has_more: false, next_cursor: null },
   '/dashboard-api/catalog': { backends: [{ name: 'local', title: 'Local', enabled: true }] },
   '/dashboard-api/agents/cards': { cards: [agent], agent_names: ['default', 'child'] },
   '/dashboard-api/agents/providers': models,

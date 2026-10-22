@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+NO_WORKSPACE_KEY = "no-workspace"
+NO_WORKSPACE_LABEL = "No workspace"
+TEMP_WORKSPACE_KEY = "temp"
+TEMP_WORKSPACE_LABEL = "Temp workspace"
+
 # Tree and file browsing limits
 MAX_TREE_ENTRIES = 500
 MAX_FILE_BYTES = 300_000

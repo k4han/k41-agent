@@ -21,6 +21,7 @@ let probes = 0;
 let pages = 0;
 let currentVersion = '0.1.2';
 const fixtures = {
+  '/dashboard-api/nav-projects': { projects: [], has_more: false, next_cursor: null },
   '/dashboard-api/catalog': {},
   '/dashboard-api/sessions': { sessions: [] },
   '/dashboard-api/chat-history': { threads: [], has_more: false },

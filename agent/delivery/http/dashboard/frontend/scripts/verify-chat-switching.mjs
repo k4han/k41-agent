@@ -103,6 +103,8 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify(thread));
     } else if (url.pathname === '/dashboard-api/chat-history') {
       res.end(JSON.stringify({ threads: Object.values(history) }));
+    } else if (url.pathname === '/dashboard-api/nav-projects') {
+      res.end(JSON.stringify({ projects: [{ key: 'no-workspace', label: 'No workspace', threads: Object.values(history).slice(0, 4) }], has_more: false, next_cursor: null }));
     } else {
       res.end(JSON.stringify(fixtures[url.pathname] || { sessions: [], threads: [], tools: [] }));
     }

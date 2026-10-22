@@ -28,6 +28,7 @@ let failRepositories = false;
 let chatResponse;
 const modelName = 'demo-model-with-a-long-unabridged-name';
 const fixtures = {
+  '/dashboard-api/nav-projects': { projects: [], has_more: false, next_cursor: null },
   '/dashboard-api/catalog': { backends: [
     { name: 'local', title: 'Local', enabled: true },
     { name: 'daytona', title: 'Daytona', enabled: true, capabilities: ['sandbox_inventory'] },

@@ -32,27 +32,25 @@ import { unwrap } from "solid-js/store";
 import { DeleteThreadDialog } from "@/components/DeleteThreadDialog";
 import { InlineRenameInput } from "@/components/InlineRenameInput";
 import { UpdateDialog } from "@/components/UpdateDialog";
-import { apiFetch, deleteJson, patchJson, postJson } from "@/lib/api";
+import { deleteJson, patchJson, postJson } from "@/lib/api";
 import { checkForUpdates, openUpdateDialog, versionInfo } from "@/lib/versionStore";
 import {
   chatThreadHref,
   threadApiPath,
   threadWorkspaceKey,
 } from "@/lib/chatThreads";
-import type { ThreadListPayload, ThreadSummary, ThreadWorkspaceGroup } from "@/lib/chatThreads";
+import type { ThreadSummary, ThreadWorkspaceGroup } from "@/lib/chatThreads";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
 import { API_PATHS } from "@/lib/endpoints";
 import { useSessions } from "@/lib/sessionStore";
 import { updateDashboardFavicon } from "@/lib/favicon";
-import {
-  HISTORY_PAGE_SIZE,
-  STORAGE_KEYS,
-} from "@/lib/uiConstants";
+import { STORAGE_KEYS } from "@/lib/uiConstants";
+import { navProjectsStore, navProjectThreads, newProjectWorkspace } from "@/lib/navProjectsStore";
 import { useMobileDrawer } from "@/lib/useMobileDrawer";
 import { useSidebarResize } from "@/lib/useSidebarResize";
 import { useThreadWorkspaceGroups } from "@/lib/useThreadWorkspaceGroups";
 import { useVisualViewport } from "@/lib/useVisualViewport";
-import { bindWorkspaceRef } from "@/lib/workspace";
+import { bindWorkspaceRef, isTempWorkspace } from "@/lib/workspace";
 import { cloneValue, truncateText } from "@/lib/utils";
 import { useToast } from "@/components/Toast";
 import type { WorkspaceBinding, WorkspaceRef } from "@/types";
@@ -70,26 +68,6 @@ const navItems: NavItem[] = [
   { href: "/scheduler", label: "Scheduler", icon: () => <CalendarClock size={15} /> },
 ];
 
-type HistoryCache = {
-  threads: ThreadSummary[];
-  hasMore: boolean;
-  nextOffset: number;
-  loaded: boolean;
-};
-
-type HistoryLoadResult = {
-  payload: ThreadListPayload;
-  offset: number;
-  reset: boolean;
-};
-
-const historyCache: HistoryCache = {
-  threads: [],
-  hasMore: true,
-  nextOffset: 0,
-  loaded: false,
-};
-
 type DeferredHistoryLoad = {
   kind: "idle" | "timeout";
   id: number;
@@ -99,8 +77,6 @@ type IdleSchedulerWindow = Window & {
   cancelIdleCallback?: (id: number) => void;
 };
 
-let historyLoadPromise: Promise<HistoryLoadResult> | null = null;
-let historyLoadKey = "";
 const optimisticLocks = new Map<string, { state: "running" | "stopped"; timestamp: number }>();
 
 export function AppShell(props: {
@@ -115,10 +91,13 @@ export function AppShell(props: {
   const { showToast } = useToast();
   const [menuOpen, setMenuOpen] = createSignal(false);
   const [collapsed, setCollapsed] = createSignal(false);
-  const [historyThreads, setHistoryThreads] = createSignal<ThreadSummary[]>(historyCache.threads);
-  const [historyError, setHistoryError] = createSignal("");
-  const [historyHasMore, setHistoryHasMore] = createSignal(historyCache.hasMore);
-  const [historyLoading, setHistoryLoading] = createSignal(false);
+  const {
+    threads: historyThreads,
+    error: historyError,
+    hasMore: historyHasMore,
+    loading: historyLoading,
+    loaded: historyLoaded,
+  } = navProjectsStore;
   const [historyMenuThreadId, setHistoryMenuThreadId] = createSignal<string | null>(null);
   const [historyMenuPos, setHistoryMenuPos] = createSignal({ top: 0, left: 0, opensUp: false });
   let historyMenuAnchor: HTMLElement | null = null;
@@ -126,8 +105,6 @@ export function AppShell(props: {
   const historyMenuThread = createMemo(() =>
     historyThreads().find((item) => item.thread_id === historyMenuThreadId()) ?? null,
   );
-  const [historyNextOffset, setHistoryNextOffset] = createSignal(historyCache.nextOffset);
-  const [historyLoaded, setHistoryLoaded] = createSignal(historyCache.loaded);
   const [editingHistoryThreadId, setEditingHistoryThreadId] = createSignal<string | null>(null);
   const [editingHistoryTitle, setEditingHistoryTitle] = createSignal("");
   const [deleteTarget, setDeleteTarget] = createSignal<ThreadSummary | null>(null);
@@ -183,6 +160,11 @@ export function AppShell(props: {
     }>;
     const { threadId, title, workspace, agent_name } = customEvent.detail;
     const workspaceBinding = bindWorkspaceRef(workspace);
+    const workspaceSummary = workspace !== undefined ? {
+      workspace: workspaceBinding,
+      workspace_key: isTempWorkspace(workspaceBinding) ? "temp" : workspaceBinding?.scope.key,
+      workspace_label: isTempWorkspace(workspaceBinding) ? "Temp workspace" : workspaceBinding?.scope.label,
+    } : {};
     
     optimisticLocks.set(threadId, { state: "running", timestamp: Date.now() });
     
@@ -196,12 +178,16 @@ export function AppShell(props: {
             ? {
                 ...thread,
                 agent_name: agent_name || thread.agent_name,
-                workspace: workspace !== undefined ? workspaceBinding : thread.workspace,
+                ...workspaceSummary,
               }
             : thread
         )),
       });
     } else {
+      if (workspace === undefined) {
+        void loadHistory(true);
+        return;
+      }
       const placeholderThread: ThreadSummary = {
         thread_id: threadId,
         title: title || threadId,
@@ -211,7 +197,7 @@ export function AppShell(props: {
         platform: "dashboard",
         user_id: "dashboard",
         agent_name: agent_name || "default",
-        workspace: workspaceBinding,
+        ...workspaceSummary,
         kind: "interactive",
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -260,36 +246,10 @@ export function AppShell(props: {
     });
   };
 
-  const applyHistoryState = (next: Partial<HistoryCache>) => {
-    if (next.threads !== undefined) {
-      historyCache.threads = next.threads;
-    }
-    if (next.hasMore !== undefined) {
-      historyCache.hasMore = next.hasMore;
-    }
-    if (next.nextOffset !== undefined) {
-      historyCache.nextOffset = next.nextOffset;
-    }
-    if (next.loaded !== undefined) {
-      historyCache.loaded = next.loaded;
-    }
-
-    if (disposed) {
-      return;
-    }
-
-    if (next.threads !== undefined) {
-      setHistoryThreads(next.threads);
-    }
-    if (next.hasMore !== undefined) {
-      setHistoryHasMore(next.hasMore);
-    }
-    if (next.nextOffset !== undefined) {
-      setHistoryNextOffset(next.nextOffset);
-    }
-    if (next.loaded !== undefined) {
-      setHistoryLoaded(next.loaded);
-    }
+  const applyHistoryState = (next: { threads?: ThreadSummary[]; loaded?: boolean }) => {
+    if (disposed) return;
+    if (next.threads !== undefined) navProjectsStore.updateThreads(next.threads);
+    if (next.loaded === false) navProjectsStore.invalidate();
   };
 
   const selectedChatThreadId = () => {
@@ -303,6 +263,8 @@ export function AppShell(props: {
       return match[1];
     }
   };
+
+  createEffect(() => navProjectsStore.setActiveThreadId(selectedChatThreadId()));
 
   const isActive = (href: string) => {
     if (href === "/") {
@@ -325,10 +287,6 @@ export function AppShell(props: {
   };
 
   const handleThreadsChanged = () => {
-    if (editingHistoryThreadId()) {
-      return;
-    }
-
     if (!collapsed() || mobileDrawerOpen() || isHistoryActive()) {
       void loadHistory(true);
       return;
@@ -351,57 +309,7 @@ export function AppShell(props: {
   };
 
   const loadHistory = async (reset = false) => {
-    if (disposed || historyLoading()) {
-      return;
-    }
-
-    const offset = reset ? 0 : historyNextOffset();
-    const requestKey = `${reset ? "reset" : "append"}:${offset}`;
-    setHistoryError("");
-    setHistoryLoading(true);
-    try {
-      let result: HistoryLoadResult;
-      if (historyLoadPromise && historyLoadKey === requestKey) {
-        result = await historyLoadPromise;
-      } else {
-        const params = new URLSearchParams({
-          limit: String(HISTORY_PAGE_SIZE),
-          offset: String(offset),
-        });
-        let sharedRequest: Promise<HistoryLoadResult>;
-        sharedRequest = apiFetch<ThreadListPayload>(
-          `${API_PATHS.chatHistory}?${params.toString()}`,
-        )
-          .then((payload) => ({ payload, offset, reset }))
-          .finally(() => {
-            if (historyLoadPromise === sharedRequest) {
-              historyLoadPromise = null;
-              historyLoadKey = "";
-            }
-          });
-        historyLoadPromise = sharedRequest;
-        historyLoadKey = requestKey;
-        result = await sharedRequest;
-      }
-
-      const nextThreads = result.reset
-        ? result.payload.threads
-        : [...historyCache.threads, ...result.payload.threads];
-      applyHistoryState({
-        threads: nextThreads,
-        hasMore: Boolean(result.payload.has_more),
-        nextOffset: result.payload.next_offset ?? result.offset + result.payload.threads.length,
-        loaded: true,
-      });
-    } catch (err) {
-      if (!disposed) {
-        setHistoryError(err instanceof Error ? err.message : "Failed to load chat history");
-      }
-    } finally {
-      if (!disposed) {
-        setHistoryLoading(false);
-      }
-    }
+    if (!disposed) await navProjectsStore.load(reset);
   };
 
   const isHistoryActive = () => (
@@ -469,7 +377,7 @@ export function AppShell(props: {
   };
 
   const startProjectChat = (group: ThreadWorkspaceGroup) => {
-    const workspace = group.threads.find((thread) => thread.workspace?.execution)?.workspace?.execution;
+    const workspace = newProjectWorkspace(group);
     navigate("/chat", {
       state: {
         newChatId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -559,7 +467,7 @@ export function AppShell(props: {
       thread.platform,
       thread.agent_name,
       owner ? truncateText(owner, 16) : "",
-      `${thread.checkpoint_count} steps`,
+      thread.checkpoint_count !== undefined ? `${thread.checkpoint_count} steps` : "",
     ].filter(Boolean).join(" / ");
   };
   const positionHistoryMenu = () => {
@@ -685,8 +593,8 @@ export function AppShell(props: {
       await deleteJson(threadApiPath(thread.thread_id));
       applyHistoryState({
         threads: historyThreads().filter((item) => item.thread_id !== thread.thread_id),
-        nextOffset: Math.max(0, historyNextOffset() - 1),
       });
+      void loadHistory(true);
       showToast("Thread deleted.", "success");
 
       if (isThreadActive(thread.thread_id)) {
@@ -926,9 +834,9 @@ export function AppShell(props: {
                 <For each={historyGroups()}>
                   {(group) => {
                     const open = () => !collapsedProjects().has(group.key);
-                    const previewThreads = createMemo(() => group.threads.filter((thread, index) => (
-                      index < 5 || isThreadActive(thread.thread_id) || runningThreadIds().has(thread.thread_id)
-                    )));
+                    const previewThreads = createMemo(() => navProjectThreads(
+                      group.threads, selectedChatThreadId(), runningThreadIds(),
+                    ));
                     const groupId = `nav-project-${encodeURIComponent(group.key)}`;
                     return (
                       <section class="nav-history-workspace" aria-label={group.label}>
@@ -995,7 +903,7 @@ export function AppShell(props: {
                   <button
                     class="nav-history-retry"
                     type="button"
-                    onClick={() => void loadHistory(historyThreads().length === 0)}
+                    onClick={() => void loadHistory(true)}
                   >
                     Retry
                   </button>

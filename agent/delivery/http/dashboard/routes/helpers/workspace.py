@@ -14,14 +14,14 @@ from agent.modules.workspaces import (
     resolve_workspace_ref,
 )
 from agent.shared.integrations import IntegrationUnavailableError
+from agent.modules.workspaces.constants import (
+    NO_WORKSPACE_KEY,
+    NO_WORKSPACE_LABEL,
+    TEMP_WORKSPACE_KEY,
+    TEMP_WORKSPACE_LABEL,
+)
 
 logger = logging.getLogger(__name__)
-
-NO_WORKSPACE_KEY = "no-workspace"
-NO_WORKSPACE_LABEL = "No workspace"
-TEMP_WORKSPACE_KEY = "temp"
-TEMP_WORKSPACE_LABEL = "Temp workspace"
-
 
 async def workspace_ref_for_thread(
     thread_id: str,

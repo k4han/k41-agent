@@ -39,6 +39,10 @@ const fixtures = {
   },
 };
 const sentMessages = [];
+fixtures['/dashboard-api/nav-projects'] = {
+  projects: [{ key: 'no-workspace', label: 'No workspace', threads: fixtures['/dashboard-api/chat-history'].threads }],
+  has_more: false, next_cursor: null,
+};
 let resumeResponse;
 let historyRefreshes = 0;
 const server = http.createServer(async (req, res) => {

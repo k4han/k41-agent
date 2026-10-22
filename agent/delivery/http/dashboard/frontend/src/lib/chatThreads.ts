@@ -28,8 +28,8 @@ export type NewChatNavigationState = {
 
 export type ThreadSummary = {
   thread_id: string;
-  latest_checkpoint_id: string;
-  checkpoint_count: number;
+  latest_checkpoint_id?: string;
+  checkpoint_count?: number;
   platform: string;
   user_id: string;
   channel_id: string;

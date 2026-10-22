@@ -20,16 +20,21 @@ const local = { backend: 'local', locator: '/projects/flask-test', label: 'flask
 const github = { backend: 'daytona', locator: 'cloudflare-sandbox', label: 'cloudflare', metadata: {
   source: 'github', repository_id: 42, repository_full_name: 'team/cloudflare', root: '/workspace', status: 'started',
 } };
+const temporary = { backend: 'local', locator: '/scratch/thread-old', label: 'Temp workspace', metadata: { temp: true, thread_id: 'old' } };
 const binding = (key, label, execution) => ({ scope: { key, label, kind: key.split(':')[0], metadata: {} }, execution });
 const threads = [
   ...Array.from({ length: 7 }, (_, index) => ({ thread_id: `local-${index}`,
     title: index === 0 ? 'Build a link shortener with Flask and a detailed project configuration' : `Flask conversation ${index}`,
     workspace: binding('local:/projects/flask-test', 'flask test', local) })),
   { thread_id: 'github-0', title: 'Cloudflare agent setup with Telegram integration', workspace: binding('github:42', 'cloudflare', github) },
-  { thread_id: 'unassigned', title: 'General conversation', workspace: null },
+  ...Array.from({ length: 6 }, (_, index) => ({ thread_id: `temp-${index}`, title: `Temporary chat ${index}`,
+    workspace_key: 'temp', workspace_label: 'Temp workspace', workspace: binding(`local:/scratch/thread-${index}`, 'Temp workspace', { ...temporary, locator: `/scratch/thread-${index}` }) })),
 ].map(thread => ({ latest_checkpoint_id: '', checkpoint_count: 1, platform: 'dashboard',
   user_id: 'dashboard', channel_id: '', agent_name: 'default', kind: 'interactive', ...thread }));
 const sends = [];
+const navRequests = [];
+let historyRequests = 0;
+let failNav = false;
 const fixtures = {
   '/dashboard-api/agents/cards': { cards: [{ name: 'default', display_name: 'Default', provider: 'test', model: 'demo-model', valid: true }] },
   '/dashboard-api/agents/providers': { provider_names: ['test'], default_provider: 'test', default_model: 'demo-model',
@@ -55,6 +60,28 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname.startsWith('/dashboard-api')) {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('X-CSRF-Token', 'navbar-test-csrf');
+    if (url.pathname === '/dashboard-api/nav-projects') {
+      navRequests.push(url);
+      if (failNav) {
+        res.writeHead(503);
+        res.end(JSON.stringify({ detail: 'Project navigation is temporarily unavailable.' }));
+        return;
+      }
+      const groups = new Map();
+      for (const thread of threads) {
+        const key = thread.workspace_key || thread.workspace?.scope.key || 'no-workspace';
+        if (!groups.has(key)) groups.set(key, { key, label: thread.workspace_label || thread.workspace?.scope.label || 'No workspace', threads: [] });
+        groups.get(key).threads.push(thread);
+      }
+      const active = url.searchParams.get('active_thread_id');
+      const projects = [...groups.values()].map(group => {
+        const selected = new Set([...group.threads].sort((left, right) => Number(right.thread_id === active) - Number(left.thread_id === active)).slice(0, 4));
+        return { ...group, threads: group.threads.filter(thread => selected.has(thread)) };
+      });
+      res.end(JSON.stringify({ projects, has_more: false, next_cursor: null }));
+      return;
+    }
+    if (url.pathname === '/dashboard-api/chat-history') historyRequests++;
     const thread = threads.find(item => url.pathname === `/dashboard-api/chat-history/${item.thread_id}`);
     res.end(JSON.stringify(thread ? { ...thread, messages: [{ id: 'old-message', role: 'user', content: 'Existing conversation' }] }
       : fixtures[url.pathname] || { tools: [], agents: [], sessions: [], threads: [], packages: [],
@@ -138,6 +165,9 @@ try {
   await viewport(1600);
   await call('Page.navigate', { url: base + '/c/local-6' });
   await ready();
+  assert.ok(navRequests.length > 0, 'navigation uses the project preview endpoint');
+  assert.equal(historyRequests, 0, 'navigation must not load full conversation history');
+  assert.deepEqual(await js(`Array.from(document.querySelectorAll('.nav-history-workspace')).map(group => group.querySelectorAll('.nav-history-item').length)`), [4, 1, 4]);
   assert.equal(await width(), 290);
   assert.deepEqual(await js(`['.nav-link', '.nav-history-workspace-label', '.nav-history-title', '.nav-project-view-all'].map(selector => getComputedStyle(document.querySelector(selector)).fontSize)`), ['14px', '14px', '14px', '14px']);
   assert.equal(await js(`document.querySelector('.nav-history-link[aria-current="page"]').closest('section').getAttribute('aria-label')`), 'flask test');
@@ -178,11 +208,20 @@ try {
   await js(`window.firstThreadRow = document.querySelector('.nav-history-item-wrapper'); window.dispatchEvent(new CustomEvent('k41:thread-title-updated', { detail: { threadId: 'local-0', title: 'Updated conversation title' } }))`);
   assert.equal(await js(`document.querySelector('.nav-history-title').textContent`), 'Updated conversation title');
   assert.equal(await js(`firstThreadRow === document.querySelector('.nav-history-item-wrapper')`), true, 'title updates preserve thread rows');
-  await js(`window.dispatchEvent(new CustomEvent('k41:thread-start-running', { detail: { threadId: 'local-5' } }))`);
+  await js(`window.dispatchEvent(new CustomEvent('k41:thread-start-running', { detail: { threadId: 'local-5', workspace: ${JSON.stringify(local)} } }))`);
   assert.equal(await js(`document.querySelector('a[href="/c/local-5"]').closest('section').getAttribute('aria-label')`), 'flask test', 'running conversations remain under their project');
   assert.equal(await js(`document.querySelectorAll('a[href="/c/local-5"]').length`), 1);
+  assert.equal(await js(`document.querySelector('a[href="/c/local-5"]').closest('section').querySelectorAll('.nav-history-item').length`), 4, 'running and active conversations share the four-row limit');
   await js(`window.dispatchEvent(new CustomEvent('k41:thread-stop-running', { detail: { threadId: 'local-5' } }))`);
   console.log('PASS: project tree, active conversation, 14px text, hover action, pointer/keyboard resize, persistence, and viewport limits.');
+
+  failNav = true;
+  await js(`window.dispatchEvent(new CustomEvent('k41:threads-changed'))`);
+  await until(() => js(`document.querySelector('.nav-history-retry')?.textContent.trim() === 'Retry'`), 'navigation retry after API failure');
+  assert.equal(await js(`document.querySelectorAll('.nav-history-workspace').length`), 3, 'failed refresh preserves visible projects');
+  failNav = false;
+  await js(`document.querySelector('.nav-history-retry').click()`);
+  await until(() => js(`!document.querySelector('.nav-history-retry')`), 'navigation retry succeeds with existing rows');
 
   await js(`document.querySelector('.nav-project-add').click()`);
   await until(() => js(`location.pathname === '/chat' && !document.querySelector('.chat-prompt-input').disabled`), 'new local chat');
@@ -193,6 +232,8 @@ try {
   assert.equal(await js(`document.querySelector('.chat-prompt-input').value`), '', 'same-project action clears the previous draft');
   await js(`document.querySelectorAll('.nav-project-add')[1].click()`);
   await send(github);
+  await js(`document.querySelectorAll('.nav-project-add')[2].click()`);
+  await send(undefined);
   console.log('PASS: project actions start fresh conversations and preserve local paths, sandbox locators, and GitHub metadata.');
 
   await js(`document.querySelectorAll('.nav-project-view-all')[1].click()`);

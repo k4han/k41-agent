@@ -41,6 +41,7 @@ from agent.modules.workspaces import (
     create_temp_workspace,
     ensure_workspace_ready,
     get_thread_workspace_ref,
+    is_temp_workspace,
     remember_thread_workspace_ref,
     resolve_workspace_ref,
 )
@@ -142,6 +143,13 @@ async def _apply_workspace_to_run_params(
         return
 
     requested_workspace = request.workspace
+    if (
+        request.user_id == DASHBOARD_USER_ID
+        and not request.thread_id
+        and requested_workspace is not None
+        and is_temp_workspace(requested_workspace)
+    ):
+        requested_workspace = None
     stored_workspace = None
     if requested_workspace is None and request.thread_id:
         try:

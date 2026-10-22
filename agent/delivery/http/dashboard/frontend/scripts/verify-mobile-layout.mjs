@@ -30,6 +30,7 @@ const runtimeSettings = Object.fromEntries([
   description: 'Runtime configuration description', options: ['production', 'development'],
 }]));
 const fixtures = {
+  '/dashboard-api/nav-projects': { projects: [], has_more: false, next_cursor: null },
   '/dashboard-api/catalog': { backends: [{ name: 'daytona', title: 'Daytona', enabled: true }] },
   '/dashboard-api/prompt-variables': { variables: [variable] },
   '/dashboard-api/chat-history': { threads: [], has_more: false, next_offset: null },

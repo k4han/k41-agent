@@ -12,6 +12,7 @@ export const STORAGE_KEYS = {
 export const HOME_CACHE_MAX_AGE_MS = 10 * 60_000;
 
 export const HISTORY_PAGE_SIZE = 20;
+export const NAV_PROJECT_THREAD_LIMIT = 4;
 export const HISTORY_MENU_MIN_SPACE_PX = 78;
 
 export const ACTIVE_TASK_STATUSES: ReadonlySet<string> = new Set([
