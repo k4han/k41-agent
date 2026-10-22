@@ -122,6 +122,9 @@ class ThreadWorkspaceRepository:
             record.workspace_label = None
             record.workspace_metadata_json = None
 
+            from agent.modules.projects.repository import register_thread_project
+
+            await register_thread_project(session, normalized_thread_id, binding)
             await session.commit()
             await session.refresh(record)
             return serialize_thread_workspace(record)

@@ -23,6 +23,9 @@ const HomePage = lazy(() =>
 const RepositoriesPage = lazy(() =>
   import("@/pages/Repositories").then((module) => ({ default: module.RepositoriesPage })),
 );
+const ProjectsPage = lazy(() =>
+  import("@/pages/Projects").then((module) => ({ default: module.ProjectsPage })),
+);
 const SchedulerPage = lazy(() =>
   import("@/pages/Scheduler").then((module) => ({ default: module.SchedulerPage })),
 );
@@ -101,6 +104,7 @@ render(
         <Route path="/login" component={LoginPage} />
         <Route path={["/chat", "/c/:threadId"]} component={ChatPage} />
         <Route path="/history" component={ChatHistoryListPage} />
+        <Route path="/projects" component={ProjectsPage} />
         <Route path="/repositories" component={RepositoriesPage} />
         <Route path="/repositories/:repositoryId" component={RepositoriesPage} />
         <Route path="/scheduler" component={SchedulerPage} />

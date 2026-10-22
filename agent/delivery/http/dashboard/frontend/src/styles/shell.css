@@ -343,7 +343,7 @@ body.sidebar-resizing * {
   width: 28px;
   min-width: 28px;
   height: 28px;
-  margin-right: 4px;
+  margin-right: 2px;
   border: 0;
   border-radius: 6px;
   background: transparent;
@@ -362,6 +362,10 @@ body.sidebar-resizing * {
 .nav-project-add:hover {
   background: var(--surface-3);
   color: var(--fg);
+}
+
+.nav-project-heading .nav-project-add:last-child {
+  margin-right: 4px;
 }
 
 .nav-project-view-all {
@@ -392,6 +396,7 @@ body.sidebar-resizing * {
 
 @media (max-width: 980px) {
   .nav-project-add,
+  .nav-project-heading .project-actions-trigger,
   .nav-project-view-all,
   .nav-projects-header .nav-history-all-btn {
     min-width: 44px;

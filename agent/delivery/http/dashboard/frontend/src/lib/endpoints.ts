@@ -1,4 +1,5 @@
 export const API_PATHS = {
+  projects: "/dashboard-api/projects",
   catalog: "/dashboard-api/catalog",
   config: "/dashboard-api/config",
   tools: "/dashboard-api/tools",

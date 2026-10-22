@@ -1,0 +1,304 @@
+from __future__ import annotations
+
+import asyncio
+import json
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+import pytest_asyncio
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
+from sqlalchemy import func, select, update
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+from agent.delivery.http.dashboard.routes import projects as routes
+from agent.modules.agent_runtime.models import BackgroundTaskRecord
+from agent.modules.agent_runtime import repository as task_repository
+from agent.modules.conversations import navigation
+from agent.modules.conversations.models import ConversationThread
+from agent.modules.projects import service
+from agent.modules.projects.models import Project
+from agent.modules.projects.repository import cursor_condition, register_project
+from agent.modules.workspaces import bind_workspace_ref, resolve_workspace_ref
+from agent.modules.workspaces.models import ThreadWorkspace
+from agent.modules.workspaces import repository as workspace_repository
+
+
+@pytest_asyncio.fixture
+async def catalog_db(tmp_path, monkeypatch, isolated_container):
+    engine = create_async_engine(f"sqlite+aiosqlite:///{(tmp_path / 'catalog.db').as_posix()}")
+    async with engine.begin() as connection:
+        for model in (ConversationThread, ThreadWorkspace, BackgroundTaskRecord, Project):
+            await connection.run_sync(model.__table__.create)
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def get_session():
+        return maker()
+
+    for module in (service, navigation, workspace_repository, task_repository):
+        monkeypatch.setattr(module, "get_async_session", get_session)
+    yield maker
+    await engine.dispose()
+
+
+def workspace(path, **metadata):
+    return resolve_workspace_ref({"backend": "local", "locator": str(path), "metadata": metadata})
+
+
+async def seed_thread(maker, thread_id, ref, *, kind="user", deleted=False, age=0, task=False):
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=age)
+    binding = bind_workspace_ref(ref)
+    async with maker() as session:
+        session.add(ConversationThread(thread_id=thread_id, kind=kind, platform="api", user_id="dashboard",
+                                       created_at=now, updated_at=now, deleted_at=now if deleted else None))
+        columns = dict(thread_id=thread_id, scope_key=binding.scope.key, scope_kind=binding.scope.kind,
+                       execution_backend=ref.backend, execution_locator=ref.locator,
+                       execution_label=ref.label, execution_metadata_json=json.dumps(ref.metadata))
+        session.add(BackgroundTaskRecord(task_id=f"task-{thread_id}", **columns) if task else ThreadWorkspace(**columns))
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_catalog_lifetime_rename_removal_and_explicit_restore(catalog_db, tmp_path):
+    root = tmp_path / "source"
+    root.mkdir()
+    (root / "keep.txt").write_text("retained", encoding="utf-8")
+    ref = workspace(root)
+    project = await service.add_project(ref, label="Custom name")
+    assert (await navigation.list_conversation_projects())["projects"][0]["threads"] == []
+    renamed = await service.update_project(project["id"], {"label": "Renamed", "is_pinned": True})
+    assert renamed["key"] == project["key"]
+    assert renamed["workspace"] == project["workspace"]
+    await service.update_project(project["id"], {"status": "removed"})
+    await seed_thread(catalog_db, "retained", ref)
+    await workspace_repository.ThreadWorkspaceRepository().upsert(thread_id="retained", workspace=ref)
+    await service.import_existing_projects()
+    assert (await navigation.list_conversation_projects())["projects"] == []
+    removed = (await service.list_projects(status="removed"))["projects"][0]
+    assert removed["label"] == "Renamed" and removed["is_pinned"] is True
+    restored = await service.add_project(ref)
+    assert restored["id"] == project["id"] and restored["label"] == "Renamed"
+    assert restored["status"] == "active"
+    assert (root / "keep.txt").read_text(encoding="utf-8") == "retained"
+    async with catalog_db() as session:
+        assert await session.scalar(select(func.count()).select_from(ConversationThread)) == 1
+        await session.execute(update(ConversationThread).values(deleted_at=datetime.now(timezone.utc)))
+        await session.commit()
+    assert (await navigation.list_conversation_projects())["projects"][0]["threads"] == []
+
+
+@pytest.mark.asyncio
+async def test_backfill_precedence_latest_workspace_and_idempotence(catalog_db, tmp_path):
+    old = workspace(tmp_path / "old", source="github", repository_id=42, repository_full_name="team/repo")
+    recent = workspace(tmp_path / "recent", source="github", repository_id=42, repository_full_name="team/repo")
+    await seed_thread(catalog_db, "old", old, age=1)
+    await seed_thread(catalog_db, "recent", recent, age=2, task=True, kind="background")
+    await seed_thread(catalog_db, "temporary", workspace(tmp_path / "temp", temp=True))
+    await seed_thread(catalog_db, "sub", workspace(tmp_path / "sub"), kind="sub_agent")
+    await seed_thread(catalog_db, "deleted", workspace(tmp_path / "deleted"), deleted=True)
+    async with catalog_db() as session:
+        session.add(BackgroundTaskRecord(task_id="shadow", thread_id="old", scope_key="shadow",
+                    execution_backend="local", execution_locator=str(tmp_path / "shadow")))
+        await session.commit()
+    await service.import_existing_projects()
+    projects = (await service.list_projects())["projects"]
+    assert len(projects) == 1
+    project = projects[0]
+    assert project["key"] == "github:42"
+    assert project["workspace"]["execution"]["locator"] == recent.locator
+    await service.update_project(project["id"], {"label": "Keep me", "status": "archived", "is_pinned": True})
+    await service.import_existing_projects()
+    archived = (await service.list_projects(status="archived"))["projects"][0]
+    assert archived["label"] == "Keep me" and archived["is_pinned"] is True
+    assert len((await service.list_projects(status="archived", search="team/repo"))["projects"]) == 1
+    assert len((await service.list_projects(status="archived", search=recent.locator))["projects"]) == 1
+    assert (await navigation.list_conversation_projects())["projects"][0]["key"] == "temp"
+    assert len((await navigation.list_project_threads(project_key="github:42"))["threads"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_automatic_registration_excludes_temporary_and_child_threads(catalog_db, tmp_path):
+    repository = workspace_repository.ThreadWorkspaceRepository()
+    await seed_thread(catalog_db, "child", workspace(tmp_path / "child"), kind="sub_agent")
+    await repository.upsert(thread_id="child", workspace=workspace(tmp_path / "child"))
+    await repository.upsert(thread_id="root:sub:worker", workspace=workspace(tmp_path / "sub"))
+    await repository.upsert(thread_id="temporary", workspace=workspace(tmp_path / "temp", source=" TEMP "))
+    assert (await service.list_projects())["projects"] == []
+    ref = workspace(tmp_path / "normal")
+    await repository.upsert(thread_id="root", workspace=ref)
+    project = (await service.list_projects())["projects"][0]
+    await service.update_project(project["id"], {"status": "archived"})
+    await repository.upsert(thread_id="another-root", workspace=ref)
+    assert (await service.list_projects())["projects"] == []
+    assert len((await service.list_projects(status="archived"))["projects"]) == 1
+    with pytest.raises(ValueError, match="Temporary"):
+        await service.add_project(workspace(tmp_path / "temporary", temp=True))
+
+
+@pytest.mark.asyncio
+async def test_backfill_imports_queued_tasks_without_conversations(catalog_db, tmp_path):
+    ref = workspace(tmp_path / "queued")
+    async with catalog_db() as session:
+        for thread_id, metadata in (("queued", {}), ("temporary", {"temp": True}), ("parent:sub:child", {})):
+            session.add(BackgroundTaskRecord(
+                task_id=thread_id, thread_id=thread_id, execution_backend="local",
+                execution_locator=ref.locator, execution_metadata_json=json.dumps(metadata),
+            ))
+        await session.commit()
+    await service.import_existing_projects()
+    projects = (await service.list_projects())["projects"]
+    assert len(projects) == 1
+    assert projects[0]["key"] == bind_workspace_ref(ref).scope.key
+    assert (await navigation.list_conversation_projects())["projects"][0]["threads"] == []
+
+
+@pytest.mark.asyncio
+async def test_concurrent_registration_keeps_single_project(catalog_db, tmp_path):
+    binding = bind_workspace_ref(workspace(tmp_path / "shared"))
+
+    async def add():
+        async with catalog_db() as session:
+            await register_project(session, binding)
+            await session.commit()
+
+    await asyncio.gather(*(add() for _ in range(8)))
+    assert len((await service.list_projects())["projects"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_background_saves_register_projects_and_prefer_thread_mapping(catalog_db, tmp_path):
+    mapped = workspace(tmp_path / "mapped")
+    task_workspace = workspace(tmp_path / "task-workspace")
+    await seed_thread(catalog_db, "mapped-thread", mapped, kind="background")
+    repository = task_repository.BackgroundTaskRepository()
+
+    async def save(thread_id):
+        await repository.upsert(
+            task_id=f"task-{thread_id}", thread_id=thread_id, request="Work", agent_name="default",
+            working_dir=None, workspace=task_workspace, notify_platform="", notify_external_id="",
+            notify_channel_id="", status="running", result="", error="", created_at=1,
+            started_at=None, completed_at=None,
+        )
+
+    await save("mapped-thread")
+    projects = (await service.list_projects())["projects"]
+    assert len(projects) == 1 and projects[0]["workspace"]["execution"]["locator"] == mapped.locator
+    await save("task-only-thread")
+    assert len((await service.list_projects())["projects"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_pinned_cursor_pagination_and_literal_search(catalog_db, tmp_path):
+    projects = [await service.add_project(workspace(tmp_path / value), label=value) for value in ["a", "b", "z", "100%_done"]]
+    await service.update_project(projects[2]["id"], {"is_pinned": True})
+    seen = []
+    cursor = None
+    while True:
+        page = await navigation.list_conversation_projects(limit=1, after=cursor)
+        seen += [project["key"] for project in page["projects"]]
+        if not page["has_more"]:
+            break
+        cursor = page["next_cursor"]
+    assert seen[0] == projects[2]["key"]
+    assert len(seen) == len(set(seen)) == 4
+    found = (await service.list_projects(search="%_"))["projects"]
+    assert [row["label"] for row in found] == ["100%_done"]
+    assert (await service.list_projects(search="missing"))["projects"] == []
+    with pytest.raises(ValueError, match="cursor"):
+        await service.list_projects(after='[1,"x"]')
+
+
+def test_project_cursor_compiles_for_postgres():
+    statement = select(Project).where(cursor_condition(Project.is_pinned, Project.key.collate("C"), '[true,"github:42"]'))
+    assert 'COLLATE "C"' in str(statement.compile(dialect=postgresql.dialect()))
+
+
+@pytest.mark.asyncio
+async def test_catalog_navigation_and_search_queries_compile_for_postgres(monkeypatch):
+    session = MagicMock()
+    session.__aenter__.return_value = session
+    session.get_bind.return_value = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+    result = MagicMock()
+    result.mappings.return_value.all.return_value = []
+    result.scalars.return_value = []
+    session.execute = AsyncMock(return_value=result)
+    for module in (navigation, service):
+        monkeypatch.setattr(module, "get_async_session", AsyncMock(return_value=session))
+    await navigation.list_conversation_projects(after='[true,"github:42"]')
+    nav_sql = str(session.execute.await_args.args[0].compile(dialect=postgresql.dialect()))
+    assert "UNION ALL" in nav_sql and "is_pinned DESC" in nav_sql and "->>" in nav_sql
+    await service.list_projects(search="C:\\source")
+    search_sql = str(session.execute.await_args.args[0].compile(dialect=postgresql.dialect()))
+    assert " AS JSON)" in search_sql and "->>" in search_sql
+
+
+@pytest.mark.asyncio
+async def test_project_api_round_trip_uses_persistent_catalog(catalog_db, tmp_path):
+    from httpx import ASGITransport, AsyncClient
+
+    app = FastAPI()
+    app.include_router(routes.router)
+    ref = workspace(tmp_path / "api")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/dashboard-api/projects", json={"workspace": ref.model_dump(), "label": "API project"})
+        assert response.status_code == 200
+        created = response.json()
+        project_url = f"/dashboard-api/projects/{created['id']}"
+        assert (await client.patch(project_url, json={"is_pinned": True})).json()["is_pinned"] is True
+        assert (await client.delete(project_url)).json()["status"] == "removed"
+        assert (await client.get("/dashboard-api/projects")).json()["projects"] == []
+        assert len((await client.get("/dashboard-api/projects?status=removed")).json()["projects"]) == 1
+        restored = (await client.post("/dashboard-api/projects", json={"workspace": created["workspace"]})).json()
+        assert restored["id"] == created["id"] and restored["label"] == "API project"
+
+
+def test_project_api_validation_and_errors(monkeypatch):
+    app = FastAPI()
+    app.include_router(routes.router)
+    client = TestClient(app)
+    read = AsyncMock(return_value={"projects": [], "has_more": False, "next_cursor": None})
+    monkeypatch.setattr(routes, "list_projects", read)
+    assert client.get("/dashboard-api/projects?status=removed&search=hello").status_code == 200
+    read.assert_awaited_once_with(status="removed", search="hello", limit=20, after=None)
+    for path in ("?status=bad", "?limit=0", "?limit=101"):
+        assert client.get(f"/dashboard-api/projects{path}").status_code == 422
+    for body in ({"label": "   "}, {"label": None}, {"status": "removed"}, {"unknown": True}):
+        assert client.patch("/dashboard-api/projects/1", json=body).status_code == 422
+    assert client.post("/dashboard-api/projects", json={"workspace": {"locator": " "}}).status_code == 422
+    create = AsyncMock(return_value={"id": 1})
+    monkeypatch.setattr(routes, "add_project", create)
+    assert client.post("/dashboard-api/projects", json={"workspace": {"locator": "/workspace"}, "label": " My project "}).status_code == 200
+    assert create.await_args.kwargs["label"] == "My project"
+    create.side_effect = ValueError("Temporary workspaces cannot be added")
+    assert client.post("/dashboard-api/projects", json={"workspace": {"locator": "/temp"}}).status_code == 400
+    write = AsyncMock(return_value={"id": 1})
+    monkeypatch.setattr(routes, "update_project", write)
+    assert client.patch("/dashboard-api/projects/1", json={"label": "  Trimmed  "}).status_code == 200
+    write.assert_awaited_once_with(1, {"label": "Trimmed"})
+    assert client.delete("/dashboard-api/projects/1").status_code == 200
+    write.assert_awaited_with(1, {"status": "removed"})
+    write.side_effect = KeyError("missing")
+    assert client.patch("/dashboard-api/projects/99", json={"status": "active"}).status_code == 404
+    read.side_effect = RuntimeError("Database offline")
+    assert client.get("/dashboard-api/projects").status_code == 503
+
+
+def test_catalog_routes_require_dashboard_authentication(monkeypatch):
+    from agent.delivery.http.dashboard.router import router
+    from agent.modules.admin_auth import get_current_admin
+
+    app = FastAPI()
+    app.include_router(router)
+
+    async def deny():
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    app.dependency_overrides[get_current_admin] = deny
+    client = TestClient(app)
+    for method, path in (("get", "/projects"), ("get", "/dashboard-api/projects"),
+                         ("post", "/dashboard-api/projects"), ("patch", "/dashboard-api/projects/1"),
+                         ("delete", "/dashboard-api/projects/1")):
+        assert getattr(client, method)(path).status_code == 401

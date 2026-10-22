@@ -7,13 +7,12 @@ import { cloneValue } from "@/lib/utils";
 type WorkspaceGroup = ThreadWorkspaceGroup & { isRepo: boolean };
 
 /** Preserve group and thread identities across refreshed or reordered snapshots. */
-export function useThreadWorkspaceGroups(threads: Accessor<ThreadSummary[]>) {
+export function useThreadWorkspaceGroups(threads: Accessor<ThreadSummary[]>, projects?: Accessor<ThreadWorkspaceGroup[]>) {
   const [groups, setGroups] = createSignal<WorkspaceGroup[]>([]);
   const entries = new Map<string, [WorkspaceGroup, SetStoreFunction<WorkspaceGroup>]>();
 
-  createComputed(on(threads, (rows) => {
+  createComputed(on(() => projects ? projects() : groupThreadsByWorkspace(threads()), (snapshots) => {
     batch(() => {
-      const snapshots = groupThreadsByWorkspace(rows);
       const next = snapshots.map((snapshot) => {
         let entry = entries.get(snapshot.key);
         if (!entry) {
@@ -21,9 +20,11 @@ export function useThreadWorkspaceGroups(threads: Accessor<ThreadSummary[]>) {
           entries.set(snapshot.key, entry);
         }
         const [group, setGroup] = entry;
+        const { threads: snapshotThreads, ...metadata } = snapshot;
         setGroup({
-          label: snapshot.label,
-          isRepo: snapshot.threads.some((thread) => thread.workspace?.scope.kind === "github"),
+          ...metadata,
+          isRepo: snapshot.workspace?.scope.kind === "github"
+            || snapshotThreads.some((thread) => thread.workspace?.scope.kind === "github"),
         });
         setGroup("threads", reconcile(cloneValue(unwrap(snapshot.threads)), { key: "thread_id" }));
         return group;

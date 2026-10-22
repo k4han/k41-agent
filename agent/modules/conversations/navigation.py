@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
-from sqlalchemy import JSON, String, case, cast, func, or_, select
+from sqlalchemy import JSON, String, case, cast, func, literal, or_, select, union_all
 
 from agent.modules.agent_runtime.models import BackgroundTaskRecord
 from agent.modules.conversations.models import ConversationThread
 from agent.modules.conversations.repository import serialize_thread
+from agent.modules.projects.models import Project
+from agent.modules.projects.repository import cursor_condition, encode_cursor
 from agent.modules.workspaces.constants import (
     NO_WORKSPACE_KEY,
     NO_WORKSPACE_LABEL,
@@ -23,10 +26,7 @@ from agent.shared.thread_ids import resolve_thread_id
 NAV_PROJECT_THREAD_LIMIT = 4
 
 
-def _project_previews_statement(
-    *, dialect: str, limit: int, after: str | None, active_thread_id: str,
-    project_key_filter: str | None = None, thread_limit: int = NAV_PROJECT_THREAD_LIMIT, thread_offset: int = 0,
-):
+def _ranked_project_threads(*, dialect: str, active_thread_id: str, project_key_filter: str | None = None):
     has_mapping = ThreadWorkspace.execution_locator.is_not(None)
 
     def workspace_column(name: str):
@@ -76,7 +76,15 @@ def _project_previews_statement(
     )
     if project_key_filter is not None:
         ranked = ranked.where(project_key == project_key_filter)
-    ranked = ranked.cte("ranked_project_threads")
+    return ranked.cte("ranked_project_threads")
+
+
+def _project_previews_statement(
+    *, dialect: str, limit: int, after: str | None, active_thread_id: str,
+    project_key_filter: str | None = None, thread_limit: int = NAV_PROJECT_THREAD_LIMIT, thread_offset: int = 0,
+):
+    ranked = _ranked_project_threads(dialect=dialect, active_thread_id=active_thread_id,
+                                    project_key_filter=project_key_filter)
     # The cursor uses an immutable workspace key, so updating a conversation
     # cannot move a project across a page boundary.
     page = select(ranked.c.project_key).where(ranked.c.position == 1)
@@ -137,34 +145,56 @@ async def list_project_threads(*, project_key: str, limit: int = 20, offset: int
 async def list_conversation_projects(
     *, limit: int = 20, after: str | None = None, active_thread_id: str = "",
 ) -> dict[str, Any]:
-    """Read at most four previews per project without loading checkpoints."""
+    """Page catalog entries, including empty projects, with bounded conversation previews."""
     session = await get_async_session()
     async with session:
-        statement = _project_previews_statement(
-            dialect=session.get_bind().dialect.name,
-            limit=limit,
-            after=after,
+        dialect = session.get_bind().dialect.name
+        ranked = _ranked_project_threads(
+            dialect=dialect,
             active_thread_id=resolve_thread_id(active_thread_id) if active_thread_id else "",
         )
-        rows = (await session.execute(statement)).all()
-
-    groups: dict[str, dict[str, Any]] = {}
-    for row in rows:
-        summary = _serialize_project_thread(row)
-        key = summary["workspace_key"]
-        if key not in groups:
-            groups[key] = {
-                "key": key,
-                "label": summary["workspace_label"],
+        candidates = union_all(
+            select(Project.id, Project.key, Project.label, Project.is_pinned, Project.workspace_json,
+                   Project.status, Project.created_at, Project.updated_at).where(Project.status == "active"),
+            select(literal(None), ranked.c.project_key,
+                   case((ranked.c.project_key == TEMP_WORKSPACE_KEY, TEMP_WORKSPACE_LABEL), else_=NO_WORKSPACE_LABEL),
+                   literal(False), literal(None), literal("active"), literal(None), literal(None))
+            .where(ranked.c.position == 1,
+                   ranked.c.project_key.in_([TEMP_WORKSPACE_KEY, NO_WORKSPACE_KEY])),
+        ).cte("navigation_projects")
+        key = candidates.c.key.collate("C" if dialect == "postgresql" else "BINARY")
+        statement = select(candidates)
+        if after:
+            statement = statement.where(cursor_condition(candidates.c.is_pinned, key, after))
+        records = (await session.execute(statement.order_by(candidates.c.is_pinned.desc(), key)
+                                         .limit(limit + 1))).mappings().all()
+        has_more = len(records) > limit
+        groups = {
+            row["key"]: {
+                "id": row["id"], "key": row["key"], "label": row["label"],
+                "is_pinned": row["is_pinned"], "status": row["status"],
+                "workspace": json.loads(row["workspace_json"]) if row["workspace_json"] else None,
+                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
                 "threads": [],
-            }
-        groups[key]["threads"].append(summary)
-
+            } for row in records[:limit]
+        }
+        if groups:
+            rows = (await session.execute(
+                select(ConversationThread, ranked.c.project_key, ranked.c.execution_backend,
+                       ranked.c.execution_locator, ranked.c.execution_label, ranked.c.execution_metadata_json)
+                .join(ranked, ranked.c.conversation_id == ConversationThread.id)
+                .where(ranked.c.project_key.in_(list(groups)), ranked.c.position <= NAV_PROJECT_THREAD_LIMIT)
+                .order_by(ConversationThread.updated_at.desc(), ConversationThread.id.desc())
+            )).all()
+            for row in rows:
+                summary = _serialize_project_thread(row)
+                group = groups[summary["workspace_key"]]
+                summary["workspace_label"] = group["label"]
+                group["threads"].append(summary)
     projects = list(groups.values())
-    has_more = len(projects) > limit
-    projects = projects[:limit]
     return {
         "projects": projects,
         "has_more": has_more,
-        "next_cursor": projects[-1]["key"] if has_more else None,
+        "next_cursor": encode_cursor(projects[-1]["is_pinned"], projects[-1]["key"]) if has_more else None,
     }

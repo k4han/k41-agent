@@ -34,6 +34,74 @@ test('a project shows at most four chats including the active and running rows',
   assert.equal(navProjectThreads(rows, 'thread-7', new Set(rows.map(row => row.thread_id))).length, 4);
 });
 
+test('empty catalog projects keep their representative workspace without inventing threads', async () => {
+  const execution = { backend: 'local', locator: '/empty', metadata: {} };
+  const empty = { key: 'local:/empty', id: 7, label: 'Empty project', is_pinned: true,
+    workspace: { scope: { key: 'local:/empty', kind: 'local' }, execution }, threads: [] };
+  const store = createNavProjectsStore(async () => ({ projects: [empty], has_more: false, next_cursor: null }));
+  await store.load(true);
+  assert.equal(store.threads().length, 0);
+  assert.equal(store.groups().length, 1);
+  assert.equal(store.groups()[0].id, 7);
+  assert.equal(newProjectWorkspace(store.groups()[0]), execution);
+  store.updateThreads([]);
+  assert.equal(store.groups()[0].label, 'Empty project');
+});
+
+test('compound cursors preserve the loaded boundary across pinned and unpinned pages', async () => {
+  const groups = [
+    { ...project('z-pinned'), is_pinned: true },
+    ...Array.from({ length: 22 }, (_, index) => ({ ...project(`a-${String(index).padStart(2, '0')}`), is_pinned: false })),
+  ];
+  const store = createNavProjectsStore(async url => {
+    const after = new URL(url, 'http://localhost').searchParams.get('after');
+    const start = after ? groups.findIndex(group => JSON.stringify([group.is_pinned, group.key]) === after) + 1 : 0;
+    const page = groups.slice(start, start + 20);
+    const hasMore = start + page.length < groups.length;
+    return { projects: page, has_more: hasMore,
+      next_cursor: hasMore ? JSON.stringify([page.at(-1).is_pinned, page.at(-1).key]) : null };
+  });
+  await store.load(true);
+  await store.load();
+  await store.load(true);
+  assert.equal(store.groups().length, 23);
+  assert.equal(store.groups()[0].key, 'z-pinned');
+  assert.equal(store.groups().at(-1).key, 'a-21');
+});
+
+test('catalog changes discard stale pages and never recreate a removed group from thread updates', async () => {
+  const requests = [];
+  const store = createNavProjectsStore(url => new Promise(resolve => requests.push({ url, resolve })));
+  const first = store.load(true);
+  requests[0].resolve(payload(['old'], true));
+  await first;
+  const page = store.load();
+  store.refreshProjects();
+  requests[1].resolve(payload(['stale']));
+  await tick();
+  requests[2].resolve(payload(['kept']));
+  await page;
+  assert.deepEqual(store.groups().map(group => group.key), ['kept']);
+  store.updateThreads([...store.threads(), ...project('old').threads]);
+  assert.deepEqual(store.groups().map(group => group.key), ['kept']);
+});
+
+test('removal while inline conversations load discards the response and releases the request', async () => {
+  let removed = false;
+  let resolvePage;
+  const store = createNavProjectsStore(async () => payload(removed ? [] : ['old']),
+    () => new Promise(resolve => { resolvePage = resolve; }));
+  await store.load(true);
+  const pending = store.loadProjectThreads('old');
+  removed = true;
+  await store.refreshProjects();
+  resolvePage({ threads: project('old').threads, has_more: false, next_offset: 1 });
+  await pending;
+  assert.deepEqual(store.groups(), []);
+  assert.deepEqual(store.threads(), []);
+  assert.equal(store.projectState('old'), undefined);
+});
+
 test('new temporary chats omit the previous execution while real projects keep their workspace', () => {
   const execution = { backend: 'local', locator: '/scratch/old', metadata: { temp: true } };
   assert.equal(newProjectWorkspace({ ...project('temp'), threads: [{ workspace: { execution } }] }), null);

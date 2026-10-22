@@ -289,5 +289,6 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 - `docs/configuration.md`
 - [Priority model pools](docs/model-pools.md)
+- [Project catalog](docs/project-catalog.md)
 - `docs/deployment-verification.md`
 - `docs/agent-quick-reference.md`

@@ -17,6 +17,9 @@ from agent.delivery.http.dashboard.routes import conversations
 from agent.modules.agent_runtime.models import BackgroundTaskRecord
 from agent.modules.conversations import navigation
 from agent.modules.conversations.models import ConversationThread
+from agent.modules.projects import service as projects_service
+from agent.modules.projects.models import Project
+from agent.modules.projects.repository import decode_cursor
 from agent.modules.workspaces.models import ThreadWorkspace
 
 
@@ -24,7 +27,7 @@ from agent.modules.workspaces.models import ThreadWorkspace
 async def project_db(monkeypatch):
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
-        for model in (ConversationThread, ThreadWorkspace, BackgroundTaskRecord):
+        for model in (ConversationThread, ThreadWorkspace, BackgroundTaskRecord, Project):
             await connection.run_sync(model.__table__.create)
     maker = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -32,6 +35,7 @@ async def project_db(monkeypatch):
         return maker()
 
     monkeypatch.setattr(navigation, "get_async_session", get_session)
+    monkeypatch.setattr(projects_service, "get_async_session", get_session)
     try:
         yield maker
     finally:
@@ -60,6 +64,7 @@ async def add_project(maker, key, count, *, metadata=None, task_only=False, kind
             else:
                 session.add(ThreadWorkspace(**fields))
         await session.commit()
+    await projects_service.import_existing_projects()
 
 
 @pytest.mark.asyncio
@@ -78,7 +83,7 @@ async def test_projects_page_by_workspace_with_four_recent_previews(project_db, 
     assert len(first["projects"][1]["threads"]) == 2
     assert "checkpoint_count" not in first["projects"][0]["threads"][0]
     assert first["has_more"] is True
-    assert first["next_cursor"] == "b"
+    assert decode_cursor(first["next_cursor"]) == (False, "b")
 
     async with project_db() as session:
         await session.execute(update(ConversationThread).where(ConversationThread.thread_id == "c-0")
@@ -154,9 +159,12 @@ async def test_thread_mapping_overrides_background_task_workspace(project_db):
         session.add(ThreadWorkspace(thread_id="a-0", scope_key="override", execution_backend="local",
                                     execution_locator="C:/override", execution_label="Override", execution_metadata_json="{}"))
         await session.commit()
+    await projects_service.import_existing_projects()
     result = await navigation.list_conversation_projects()
-    assert result["projects"][0]["key"] == "override"
-    assert result["projects"][0]["label"] == "Override"
+    groups = {project["key"]: project for project in result["projects"]}
+    assert groups["override"]["label"] == "Override"
+    assert len(groups["override"]["threads"]) == 1
+    assert groups["a"]["threads"] == []
 
 
 def test_project_query_supports_postgres_json_and_window_functions():

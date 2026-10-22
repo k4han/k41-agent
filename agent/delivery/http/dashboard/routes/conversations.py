@@ -164,13 +164,15 @@ async def _list_background_threads_from_db(
 @router.get("/dashboard-api/nav-projects")
 async def get_nav_projects(
     limit: int = Query(default=20, ge=1, le=100, description="Max projects to return."),
-    after: str | None = Query(default=None, max_length=4096, description="Last project key from the previous page."),
+    after: str | None = Query(default=None, max_length=16384, description="Project cursor from the previous page."),
     active_thread_id: str = Query(default="", max_length=512),
 ) -> dict[str, Any]:
     """List projects with four conversation previews each for navigation."""
     try:
         return await list_conversation_projects(limit=limit, after=after, active_thread_id=active_thread_id)
     except Exception as exc:
+        if isinstance(exc, ValueError):
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         logger.exception("Failed to load navigation projects")
         raise HTTPException(status_code=503, detail="Project navigation is temporarily unavailable.") from exc
 

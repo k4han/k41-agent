@@ -21,6 +21,7 @@ def load_orm_models() -> tuple[type[object], ...]:
         MCPServerInstall,
     )
     from agent.modules.prompt_variables import PromptVariable
+    from agent.modules.projects.models import Project
     from agent.modules.usage import LLMUsageEvent
     from agent.modules.workspaces import ThreadWorkspace
     from agent.modules.users import User
@@ -45,6 +46,7 @@ def load_orm_models() -> tuple[type[object], ...]:
         AgentMCPInstall,
         ThreadWorkspace,
         PromptVariable,
+        Project,
         LLMUsageEvent,
         RuntimeSetting,
         GoogleCalendarAccount,

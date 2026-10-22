@@ -19,6 +19,7 @@
 @import "./styles/composer-controls.css";
 @import "./styles/workspace.css";
 @import "./styles/repositories.css";
+@import "./styles/projects.css";
 @import "./styles/tasks.css";
 @import "./styles/scheduler.css";
 @import "./styles/history.css";

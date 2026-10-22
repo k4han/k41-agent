@@ -74,6 +74,7 @@ export interface WorkspaceSelectorProps {
   locked: boolean;
   disabled?: boolean;
   embedded?: boolean;
+  allowTemporary?: boolean;
   onBrowserOpenChange?: (open: boolean) => void;
   onSelectionChange: (selection: WorkspaceSelectionDraft) => void;
 }
@@ -162,13 +163,14 @@ function getTailPath(fullPath: string): string {
 }
 
 export function WorkspaceSelector(props: WorkspaceSelectorProps) {
+  const availableSources = (name: string) => sourceForBackend(name).filter((source) => props.allowTemporary !== false || source !== "temp");
   let selectorRef: HTMLDivElement | undefined;
   const { showToast } = useToast();
   const [backend, setBackend] = createSignal<WorkspaceBackendKey>("local");
   const [source, setSource] = createSignal<WorkspaceSourceKey>(
     props.workspace || props.selection
       ? defaultSourceForBackend(backendFromWorkspace(props.workspace))
-      : "temp",
+      : props.allowTemporary === false ? "path" : "temp",
   );
   const [localDraft, setLocalDraft] = createSignal(props.defaultWorkingDir || props.workingDir || "");
   const [sandboxId, setSandboxId] = createSignal("");
@@ -563,7 +565,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
       return;
     }
     const nextBackend = isBackendEnabled(selection.backend) ? selection.backend : "local";
-    const allowedSources = sourceForBackend(nextBackend);
+    const allowedSources = availableSources(nextBackend);
     setBackend(nextBackend);
     setSource(
       allowedSources.includes(selection.source)
@@ -590,7 +592,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
   });
 
   createEffect(() => {
-    const allowed = sourceForBackend(backend());
+    const allowed = availableSources(backend());
     if (!allowed.includes(source())) {
       setSource(defaultSourceForBackend(backend()));
     }
@@ -629,7 +631,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
           {/* TAB SELECTION & BACKEND ROW */}
           <div class="workspace-nav-bar">
             <div class="workspace-tabs-list" role="tablist" aria-label="Workspace source">
-              <For each={sourceForBackend(backend())}>
+              <For each={availableSources(backend())}>
                 {(src) => (
                   <button
                     class={`workspace-tab-btn ${source() === src ? "active" : ""}`}
@@ -661,7 +663,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
                   onChange={(value) => {
                     const nextBackend = value as WorkspaceBackendKey;
                     setBackend(nextBackend);
-                    const allowed = sourceForBackend(nextBackend);
+                    const allowed = availableSources(nextBackend);
                     if (!allowed.includes(source())) {
                       setSource(defaultSourceForBackend(nextBackend));
                     }

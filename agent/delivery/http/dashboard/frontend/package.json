@@ -25,7 +25,8 @@
     "test:effort-ui": "node scripts/verify-reasoning-effort.mjs",
     "test:mobile-ui": "node scripts/verify-mobile-layout.mjs",
     "test:navbar-ui": "node scripts/verify-navbar.mjs",
-    "test:nav-projects": "node --conditions=browser --test tests/nav-projects.test.mjs"
+    "test:nav-projects": "node --conditions=browser --test tests/nav-projects.test.mjs",
+    "test:projects-ui": "node scripts/verify-projects.mjs"
   },
   "dependencies": {
     "@solidjs/router": "^0.15.3",

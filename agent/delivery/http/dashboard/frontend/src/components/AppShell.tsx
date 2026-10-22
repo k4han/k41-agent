@@ -16,6 +16,7 @@ import {
   MessageSquare,
   MoreVertical,
   Pencil,
+  Pin,
   PlaySquare,
   Plus,
   RefreshCw,
@@ -30,6 +31,7 @@ import { Portal } from "solid-js/web";
 import { unwrap } from "solid-js/store";
 
 import { DeleteThreadDialog } from "@/components/DeleteThreadDialog";
+import { ProjectActions } from "@/components/ProjectActions";
 import { InlineRenameInput } from "@/components/InlineRenameInput";
 import { UpdateDialog } from "@/components/UpdateDialog";
 import { deleteJson, patchJson, postJson } from "@/lib/api";
@@ -46,6 +48,7 @@ import { useSessions } from "@/lib/sessionStore";
 import { updateDashboardFavicon } from "@/lib/favicon";
 import { STORAGE_KEYS } from "@/lib/uiConstants";
 import { navProjectsStore, navProjectThreads, newProjectWorkspace } from "@/lib/navProjectsStore";
+import { verifyProjectWorkspace } from "@/lib/projects";
 import { useMobileDrawer } from "@/lib/useMobileDrawer";
 import { useSidebarResize } from "@/lib/useSidebarResize";
 import { useThreadWorkspaceGroups } from "@/lib/useThreadWorkspaceGroups";
@@ -365,7 +368,7 @@ export function AppShell(props: {
   };
 
   const isThreadActive = (threadId: string) => selectedChatThreadId() === threadId;
-  const historyGroups = useThreadWorkspaceGroups(historyThreads);
+  const historyGroups = useThreadWorkspaceGroups(historyThreads, navProjectsStore.groups);
   const [collapsedProjects, setCollapsedProjects] = createSignal(new Set<string>());
   const toggleProject = (key: string) => {
     setCollapsedProjects((current) => {
@@ -376,15 +379,24 @@ export function AppShell(props: {
     });
   };
 
-  const startProjectChat = (group: ThreadWorkspaceGroup) => {
+  const [openingProject, setOpeningProject] = createSignal("");
+  const startProjectChat = async (group: ThreadWorkspaceGroup) => {
+    if (openingProject()) return;
     const workspace = newProjectWorkspace(group);
-    navigate("/chat", {
-      state: {
-        newChatId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        workspace: workspace ? cloneValue(unwrap(workspace)) : null,
-      },
-    });
-    closeMobileDrawer();
+    setOpeningProject(group.key);
+    try {
+      if (workspace && group.id) await verifyProjectWorkspace(workspace);
+      if (disposed) return;
+      navigate("/chat", {
+        state: {
+          newChatId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          workspace: workspace ? cloneValue(unwrap(workspace)) : null,
+        },
+      });
+      closeMobileDrawer();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Workspace is unavailable.", "error");
+    } finally { setOpeningProject(""); }
   };
 
   createEffect(() => {
@@ -818,6 +830,7 @@ export function AppShell(props: {
               <div class="nav-history-group open">
                 <div class="nav-projects-header">
                   <span>Projects</span>
+                  <A href="/projects" class="nav-projects-manage" title="Manage projects">Manage</A>
                   <A
                     href="/history"
                     class="nav-history-all-btn"
@@ -855,6 +868,7 @@ export function AppShell(props: {
                                 <GitBranch size={15} />
                               </Show>
                               <span class="nav-history-workspace-label">{group.label}</span>
+                              <Show when={group.is_pinned}><Pin size={12} aria-label="Pinned project" /></Show>
                               <span class="nav-history-workspace-caret">
                                 <Show when={open()} fallback={<ChevronRight size={13} />}>
                                   <ChevronDown size={13} />
@@ -864,18 +878,24 @@ export function AppShell(props: {
                             <button
                               type="button"
                               class="nav-project-add"
+                              disabled={Boolean(openingProject())}
                               aria-label={`New chat in ${group.label}`}
                               title={`New chat in ${group.label}`}
                               onClick={() => startProjectChat(group)}
                             >
                               <Plus size={16} />
                             </button>
+                            <Show when={group.id}>
+                              <ProjectActions project={{ id: group.id!, label: group.label,
+                                is_pinned: Boolean(group.is_pinned), status: group.status || "active" }} />
+                            </Show>
                           </div>
                           <div id={groupId} class="nav-history-workspace-threads" hidden={!open()}>
+                            <Show when={group.threads.length === 0}><div class="nav-history-status">No conversations yet</div></Show>
                             <For each={previewThreads()}>
                               {(thread) => renderHistoryItem(thread)}
                             </For>
-                            <Show when={!projectState()?.expanded || projectState()?.hasMore}>
+                            <Show when={group.threads.length > 0 && (!projectState()?.expanded || projectState()?.hasMore)}>
                               <button
                                 class="nav-project-view-all"
                                 type="button"
@@ -894,17 +914,17 @@ export function AppShell(props: {
                     }}
                   </For>
 
-                  <Show when={historyThreads().length === 0 && !historyError() && (!historyLoaded() || historyLoading())}>
+                  <Show when={historyGroups().length === 0 && !historyError() && (!historyLoaded() || historyLoading())}>
                     <div class="nav-history-skeleton" aria-label="Loading history">
                       <span class="skeleton-line nav-history-skeleton-line" />
                       <span class="skeleton-line nav-history-skeleton-line short" />
                       <span class="skeleton-line nav-history-skeleton-line" />
                     </div>
                   </Show>
-                  <Show when={historyThreads().length === 0 && historyLoaded() && !historyLoading() && !historyError()}>
-                    <div class="nav-history-status">No history</div>
+                  <Show when={historyGroups().length === 0 && historyLoaded() && !historyLoading() && !historyError()}>
+                    <div class="nav-history-status">No projects</div>
                   </Show>
-                  <Show when={historyThreads().length > 0 && historyLoading()}>
+                  <Show when={historyGroups().length > 0 && historyLoading()}>
                     <div class="nav-history-status">Loading more...</div>
                   </Show>
                   <Show when={historyError()}>
@@ -918,7 +938,7 @@ export function AppShell(props: {
                   </Show>
                   <Show
                     when={
-                      historyThreads().length > 0
+                      historyGroups().length > 0
                       && historyHasMore()
                       && !historyLoading()
                       && !historyError()

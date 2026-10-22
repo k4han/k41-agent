@@ -51,7 +51,7 @@ export function navProjectThreads(threads: ThreadSummary[], activeId: string, ru
 }
 
 export function newProjectWorkspace(group: ThreadWorkspaceGroup) {
-  const workspace = group.threads.find((thread) => thread.workspace?.execution)?.workspace?.execution;
+  const workspace = group.workspace?.execution ?? group.threads.find((thread) => thread.workspace?.execution)?.workspace?.execution;
   return group.key === "temp" || isTempWorkspace(workspace) ? null : workspace ?? null;
 }
 
@@ -61,6 +61,7 @@ export function createNavProjectsStore(
   fetchThreads = apiFetch<ProjectThreadsPayload>,
 ) {
   const [threads, setThreads] = createSignal<ThreadSummary[]>([]);
+  const [groups, setGroups] = createSignal<ThreadWorkspaceGroup[]>([]);
   const [loaded, setLoaded] = createSignal(false);
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal("");
@@ -68,11 +69,26 @@ export function createNavProjectsStore(
   const [projectStates, setProjectStates] = createSignal<Record<string, ProjectThreadsState>>({});
   const projectRequests = new Map<string, Promise<void>>();
   let nextCursor: string | null = null;
-  let loadedThrough: string | null = null;
+  let loadedThrough: ThreadWorkspaceGroup | null = null;
   let activeThreadId = "";
   let revision = 0;
+  let catalogRevision = 0;
   let pendingRefresh = false;
   let request: Promise<void> | null = null;
+
+  const syncThreads = (next: ThreadSummary[]) => {
+    const rows = uniqueThreads(next);
+    batch(() => {
+      setThreads(rows);
+      setGroups((current) => current.map((group) => ({
+        ...group, threads: rows.filter((thread) => threadWorkspaceKey(thread) === group.key),
+      })));
+    });
+  };
+  const groupBefore = (left: ThreadWorkspaceGroup, right: ThreadWorkspaceGroup) =>
+    Boolean(left.is_pinned) !== Boolean(right.is_pinned)
+      ? Boolean(left.is_pinned)
+      : projectKeyBefore(left.key, right.key);
 
   const setProjectState = (key: string, state: ProjectThreadsState) => {
     setProjectStates((current) => ({ ...current, [key]: state }));
@@ -109,7 +125,8 @@ export function createNavProjectsStore(
             payload = await fetchProjects(`${API_PATHS.navProjects}?${params}`);
             projects = [...projects, ...payload.projects];
             cursor = payload.next_cursor;
-          } while (version === revision && refresh && payload.has_more && cursor && boundary && projectKeyBefore(cursor, boundary));
+          } while (version === revision && refresh && payload.has_more && cursor && boundary
+            && projects.length > 0 && groupBefore(projects.at(-1)!, boundary));
 
           const expandedStates = new Map<string, ProjectThreadsState>();
           if (refresh) {
@@ -138,7 +155,9 @@ export function createNavProjectsStore(
           }
           const rows = projects.flatMap((project) => project.threads);
           batch(() => {
-            setThreads(uniqueThreads(refresh ? rows : [...threads(), ...rows]));
+            setGroups((current) => [...new Map((refresh ? projects : [...current, ...projects])
+              .map((project) => [project.key, project])).values()]);
+            syncThreads(refresh ? rows : [...threads(), ...rows]);
             if (refresh) {
               const keys = new Set(projects.map((project) => project.key));
               setProjectStates((current) => Object.fromEntries(Object.entries(current)
@@ -152,7 +171,7 @@ export function createNavProjectsStore(
             setError("");
           });
           nextCursor = cursor;
-          loadedThrough = projects.at(-1)?.key ?? (refresh ? null : loadedThrough);
+          loadedThrough = projects.at(-1) ?? (refresh ? null : loadedThrough);
         } catch (err) {
           if (version === revision) setError(err instanceof Error ? err.message : "Failed to load projects");
         }
@@ -172,12 +191,14 @@ export function createNavProjectsStore(
     };
     if (!initial.hasMore) return Promise.resolve();
     setProjectState(key, { ...initial, loading: true, error: "" });
+    const catalogVersion = catalogRevision;
     const pendingRequest = (async () => {
       try {
         while (true) {
           const version = revision;
           const state = projectStates()[key] ?? initial;
           const page = await readProjectThreads(key, state.nextOffset);
+          if (catalogVersion !== catalogRevision) return;
           if (version !== revision) continue;
           const current = threads();
           const previous = current.filter((thread) => threadWorkspaceKey(thread) === key);
@@ -197,7 +218,7 @@ export function createNavProjectsStore(
           revision += 1;
           if (request) pendingRefresh = true;
           batch(() => {
-            setThreads(inserted ? next : [...next, ...rows]);
+            syncThreads(inserted ? next : [...next, ...rows]);
             setProjectState(key, {
               expanded: true, loading: false, error: "", hasMore: page.has_more,
               nextOffset: page.next_offset, threadIds: ids,
@@ -206,24 +227,34 @@ export function createNavProjectsStore(
           return;
         }
       } catch (err) {
+        if (catalogVersion !== catalogRevision) return;
         setProjectState(key, {
           ...(projectStates()[key] ?? initial), loading: false,
           error: err instanceof Error ? err.message : "Failed to load conversations",
         });
       }
-    })().finally(() => projectRequests.delete(key));
+    })().finally(() => {
+      projectRequests.delete(key);
+      const state = projectStates()[key];
+      if (state?.loading) setProjectState(key, { ...state, loading: false });
+    });
     projectRequests.set(key, pendingRequest);
     return pendingRequest;
   };
 
   return {
-    threads, loaded, loading, error, hasMore, load,
+    threads, groups, loaded, loading, error, hasMore, load,
+    refreshProjects() {
+      catalogRevision += 1;
+      loadedThrough = null;
+      return load(true);
+    },
     projectState: (key: string) => projectStates()[key],
     loadProjectThreads,
     updateThreads(next: ThreadSummary[]) {
       revision += 1;
       if (request) pendingRefresh = true;
-      setThreads(uniqueThreads(next));
+      syncThreads(next);
     },
     invalidate() {
       revision += 1;

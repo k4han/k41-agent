@@ -659,6 +659,9 @@ class AppContainer:
             migrate_conversation_tables(database_url)
             migrate_agent_runtime_tables(database_url)
             migrate_google_calendar_tables(database_url)
+            from agent.modules.projects import import_existing_projects
+
+            await import_existing_projects()
             await prune_usage_events()
             await self.initialize_checkpointer()
             from agent.modules.conversations import migrate_conversation_ids

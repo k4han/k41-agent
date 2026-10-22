@@ -311,6 +311,23 @@ export type WorkspaceBinding = {
   execution: WorkspaceExecutionRef;
 };
 
+export type ProjectSummary = {
+  id: number;
+  key: string;
+  label: string;
+  status: "active" | "archived" | "removed";
+  is_pinned: boolean;
+  workspace: WorkspaceBinding;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProjectsPayload = {
+  projects: ProjectSummary[];
+  has_more: boolean;
+  next_cursor: string | null;
+};
+
 export type BackgroundTask = {
   task_id: string;
   request: string;

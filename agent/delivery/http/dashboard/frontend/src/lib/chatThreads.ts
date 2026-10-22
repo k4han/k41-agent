@@ -19,7 +19,7 @@ import {
   generatedImageAttachmentFromToolResult,
 } from "@/lib/generatedImages";
 import { NO_WORKSPACE_KEY, NO_WORKSPACE_LABEL } from "@/lib/workspaceConstants";
-import type { WorkspaceBinding, WorkspaceRef } from "@/types";
+import type { ProjectSummary, WorkspaceBinding, WorkspaceRef } from "@/types";
 
 export type NewChatNavigationState = {
   newChatId: string;
@@ -55,6 +55,10 @@ export type ThreadWorkspaceGroup = {
   key: string;
   label: string;
   threads: ThreadSummary[];
+  id?: number | null;
+  is_pinned?: boolean;
+  status?: ProjectSummary["status"];
+  workspace?: WorkspaceBinding | null;
 };
 
 export type ThreadMessage = {

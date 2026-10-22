@@ -197,6 +197,10 @@ class BackgroundTaskRepository:
             record.max_retries = max(0, max_retries)
             record.retry_count = max(0, retry_count)
 
+            if workspace_binding:
+                from agent.modules.projects.repository import register_thread_project
+
+                await register_thread_project(session, record.thread_id, workspace_binding)
             await session.commit()
             await session.refresh(record)
             return serialize_background_task(record)
