@@ -1,4 +1,5 @@
 import { MoreVertical } from "lucide-solid";
+import { useNavigate } from "@solidjs/router";
 import { createEffect, createSignal, createUniqueId, onCleanup, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 
@@ -13,6 +14,7 @@ import type { ProjectSummary } from "@/types";
 type ActionProject = Pick<ProjectSummary, "id" | "label" | "is_pinned" | "status">;
 
 export function ProjectActions(props: { project: ActionProject }) {
+  const navigate = useNavigate();
   const [open, setOpen] = createSignal(false);
   const [position, setPosition] = createSignal({ top: 0, left: 0 });
   const [renaming, setRenaming] = createSignal(false);
@@ -66,7 +68,7 @@ export function ProjectActions(props: { project: ActionProject }) {
       onClick={() => {
         if (open()) { close(); return; }
         const rect = trigger!.getBoundingClientRect();
-        setPosition({ top: Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - 204)),
+        setPosition({ top: Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - 242)),
           left: Math.max(8, Math.min(rect.right - 200, window.innerWidth - 208)) });
         setOpen(true);
       }}><MoreVertical size={15} /></button>
@@ -85,6 +87,7 @@ export function ProjectActions(props: { project: ActionProject }) {
             buttons[next]?.focus();
           }
         }}>
+        <button role="menuitem" onClick={() => { close(); navigate(`/projects/${props.project.id}`); }}>View project</button>
         <button role="menuitem" onClick={() => { setName(props.project.label); close(); setRenaming(true); }}>Rename</button>
         <button role="menuitem" onClick={() => void run({ is_pinned: !props.project.is_pinned })}>
           {props.project.is_pinned ? "Unpin project" : "Pin project"}</button>

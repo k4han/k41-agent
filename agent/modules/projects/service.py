@@ -53,6 +53,15 @@ async def add_project(workspace: WorkspaceInput, *, label: str | None = None) ->
         return serialize_project(record)
 
 
+async def get_project(project_id: int) -> dict[str, Any]:
+    session = await get_async_session()
+    async with session:
+        record = await session.get(Project, project_id)
+        if record is None:
+            raise KeyError("Project not found.")
+        return serialize_project(record)
+
+
 async def update_project(project_id: int, changes: dict[str, Any]) -> dict[str, Any]:
     session = await get_async_session()
     async with session:

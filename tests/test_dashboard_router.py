@@ -224,6 +224,15 @@ def test_dashboard_spa_route_serves_index() -> None:
     assert "/dashboard-assets/" in tools_response.text
 
 
+@pytest.mark.parametrize("path", ["/projects/1", "/projects/1?tab=skills", "/projects/1?tab=instructions"])
+def test_project_detail_direct_links_serve_spa(path) -> None:
+    client = _create_dashboard_client(ChannelManager())
+    response = client.get(path)
+    assert response.status_code == 200
+    assert '<div id="root">' in response.text
+    assert "/dashboard-assets/" in response.text
+
+
 def test_dashboard_api_home_returns_runtime_snapshot() -> None:
     channel_manager = ChannelManager()
     channel_manager.register("telegram", idle_runner)

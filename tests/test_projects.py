@@ -68,6 +68,9 @@ async def test_catalog_lifetime_rename_removal_and_explicit_restore(catalog_db, 
     (root / "keep.txt").write_text("retained", encoding="utf-8")
     ref = workspace(root)
     project = await service.add_project(ref, label="Custom name")
+    assert await service.get_project(project["id"]) == project
+    with pytest.raises(KeyError):
+        await service.get_project(project["id"] + 100)
     assert (await navigation.list_conversation_projects())["projects"][0]["threads"] == []
     renamed = await service.update_project(project["id"], {"label": "Renamed", "is_pinned": True})
     assert renamed["key"] == project["key"]

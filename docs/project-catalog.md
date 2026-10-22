@@ -25,6 +25,27 @@ Deleting the final conversation also preserves its catalog entry. Existing
 sandbox expiration and conversation cleanup policies are unchanged; unavailable
 workspaces remain in the catalog and report an error when opened.
 
+## Project resources
+
+Select a project name or **View project** in its actions menu to open
+`/projects/{id}`. The **AGENTS.md** tab previews the root instruction document as
+Markdown or source, and supports manual editing and creation. Creating a document
+does not write a file until it is saved. Unsaved edits prompt before navigation,
+and version conflicts preserve the draft until it is discarded or reloaded.
+Only the root `AGENTS.md` is managed; nested instructions and `CLAUDE.md` are not
+discovered. This view does not change instruction loading during agent execution.
+
+The **Skills** tab lists project and shared packages together, retaining source
+precedence, disabled states, shadowing and diagnostics. Packages and their paged
+resource directories are read-only here. Documents can be previewed as Markdown
+or source, and resources can be read or downloaded. Use Skills settings for
+package management. The selected tab survives reloads through
+`?tab=instructions` or `?tab=skills`.
+
+Resource access applies to all catalog statuses and never restores a project.
+An unavailable workspace is reported separately from a missing `AGENTS.md` and
+is not recreated by instruction operations.
+
 ## Dashboard API
 
 All endpoints use the dashboard's existing authentication and CSRF protection.
@@ -36,6 +57,18 @@ All endpoints use the dashboard's existing authentication and CSRF protection.
 - `PATCH /dashboard-api/projects/{id}`: accepts `label`, `is_pinned`, and/or
   `status` (`active` or `archived`).
 - `DELETE /dashboard-api/projects/{id}`: marks the project as removed.
+- `GET /dashboard-api/projects/{id}`: returns the existing project summary.
+- `GET /dashboard-api/projects/{id}/instructions`: returns `path`, `exists`,
+  `content` and `version` for the root `AGENTS.md`. A missing document returns
+  empty content, `exists=false` and `version=null`.
+- `PUT /dashboard-api/projects/{id}/instructions`: accepts `content` and a
+  required `expected_version` (SHA-256, or `null` for creation). Stale versions,
+  deleted documents and creation conflicts return HTTP 409. Workspace identity
+  is resolved from the project record; clients cannot select another path.
+
+Instruction documents must be valid UTF-8 text without null bytes and at most
+300,000 bytes, matching the workspace text limit. Writes use the portable worker's
+version check and atomic replacement on local, Daytona and Modal backends.
 
 List responses contain `projects`, `has_more`, and `next_cursor`. Pinned projects
 sort first, then by the immutable scope key using binary ordering. Cursors encode
@@ -50,7 +83,7 @@ avoid duplicates when conversations register the same project concurrently.
 ## Verification
 
 ```sh
-uv run pytest tests/test_projects.py tests/test_nav_projects.py
+uv run pytest tests/test_projects.py tests/test_project_resources.py tests/test_nav_projects.py
 pnpm dashboard:check
 pnpm dashboard:build
 pnpm --dir agent/delivery/http/dashboard/frontend test:nav-projects

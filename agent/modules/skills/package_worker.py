@@ -312,6 +312,8 @@ def package_lock(root: Path):
 
 def run_operation(workspace: str, request: dict) -> dict:
     root = native_path(Path(workspace))
+    if request.get("require_existing_workspace") and not root.is_dir():
+        raise NotADirectoryError("Project workspace is unavailable.")
     operation = request["op"]
     value = request.get("path", "")
     target = safe_path(root, value, allow_root=operation in {"scan", "tree", "archive", "versions", "runtime_status", "ensure_runtime", "cleanup", "install"})
@@ -439,7 +441,8 @@ def run_operation(workspace: str, request: dict) -> dict:
                     shutil.rmtree(candidate)
                     removed.append(candidate.name)
         return {"removed": removed}
-    root.mkdir(parents=True, exist_ok=True)
+    if not request.get("require_existing_workspace"):
+        root.mkdir(parents=True, exist_ok=True)
     with package_lock(root):
         if operation == "touch":
             os.utime(target)
@@ -464,7 +467,8 @@ def run_operation(workspace: str, request: dict) -> dict:
                     not target.exists() and len(files) >= limits.get("max_files", DEFAULT_LIMITS["max_files"])
                 ):
                     raise ValueError("Package size or file count limit exceeded.")
-            target.parent.mkdir(parents=True, exist_ok=True)
+            if not request.get("require_existing_workspace") or target.parent != root:
+                target.parent.mkdir(parents=True, exist_ok=True)
             mode = target.stat().st_mode & 0o777 if target.exists() else int(request.get("mode", 0o644)) & 0o777
             temporary = target.parent / (".skill-write-" + uuid.uuid4().hex)
             try:

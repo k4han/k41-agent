@@ -1,4 +1,19 @@
 .projects-page { display: grid; gap: 20px; }
+.project-card h2 a { color: inherit; text-decoration: none; }
+.project-card h2 a:hover { text-decoration: underline; }
+.project-detail { min-width: 0; }
+.project-resource-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.project-resource-panel { padding: 20px; min-width: 0; }
+.project-resource-toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 14px; }
+.project-resource-toolbar h2, .project-skill-card h2 { margin: 0; font-size: 16px; }
+.project-resource-source { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 60vh; overflow: auto; padding: 14px; background: var(--surface-2); border-radius: 8px; }
+.project-resource-path { overflow-wrap: anywhere; min-width: 0; }
+.project-instructions-field { display: grid; gap: 8px; margin: 16px 0; }
+.project-instructions-editor { width: 100%; min-height: 360px; resize: vertical; font-family: monospace; tab-size: 2; }
+.project-skills { display: grid; gap: 16px; min-width: 0; }
+.project-resource-files { display: flex; flex-wrap: wrap; gap: 8px; }
+.project-resource-files .btn { white-space: normal; overflow-wrap: anywhere; max-width: 100%; }
+.project-resource-file { border-top: 1px solid var(--border); padding-top: 16px; min-width: 0; }
 .projects-toolbar { display: flex; gap: 10px; align-items: center; }
 .projects-toolbar > input { flex: 1; min-width: 0; }
 .projects-toolbar > select { width: auto; max-width: 200px; }

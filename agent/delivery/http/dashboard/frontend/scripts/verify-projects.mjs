@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -23,6 +24,14 @@ let projects = [makeProject(1, 'Empty project'), makeProject(2, 'Other project')
 const mutations = [];
 let unavailable = false;
 let failCatalog = false;
+let failInstructions = false;
+let failSkills = false;
+let instructionDocument = { path: 'AGENTS.md', exists: false, content: '', version: null };
+const skillRequests = [];
+const makeSkill = (id, scope, extra = {}) => ({ id, name: 'demo', description: `A ${scope} skill`, enabled: true,
+  shadowed: scope === 'global', source: { scope, root: scope === 'project' ? '/projects/1' : '/shared', directory: '.agent/skills/demo' }, diagnostics: [], ...extra });
+const skillPackages = [makeSkill('project-demo', 'project'), makeSkill('shared-demo', 'global'),
+  makeSkill('invalid-demo', 'project', { name: 'broken', enabled: false, diagnostics: [{ message: 'Invalid document', severity: 'error' }] })];
 const fixtures = {
   '/dashboard-api/catalog': { backends: [{ name: 'local', title: 'Local', enabled: true }] },
   '/dashboard-api/agents/cards': { cards: [{ name: 'default', valid: true, display_name: 'Default', provider: 'test', model: 'demo' }] },
@@ -45,6 +54,35 @@ const server = http.createServer(async (req, res) => {
     for await (const chunk of req) raw += chunk;
     const body = raw ? JSON.parse(raw) : {};
     const send = data => res.end(JSON.stringify(data));
+    const instructions = url.pathname.match(/^\/dashboard-api\/projects\/(\d+)\/instructions$/);
+    if (instructions) {
+      if (failInstructions) { res.writeHead(410); send({ detail: 'Project workspace is unavailable.' }); return; }
+      if (req.method === 'PUT') {
+        if (body.expected_version !== instructionDocument.version) { res.writeHead(409); send({ detail: 'File changed; read its current version before changing it.' }); return; }
+        instructionDocument = { path: 'AGENTS.md', exists: true, content: body.content, version: createHash('sha256').update(body.content).digest('hex') };
+      }
+      send(instructionDocument); return;
+    }
+    if (url.pathname.startsWith('/dashboard-api/skill-packages')) {
+      skillRequests.push({ method: req.method, path: url.pathname, workspace: JSON.parse(url.searchParams.get('workspace')) });
+      if (req.method !== 'GET') { res.writeHead(405); send({ detail: 'Read-only view' }); return; }
+      if (failSkills) { res.writeHead(503); send({ detail: 'Skills unavailable.' }); return; }
+      if (url.pathname === '/dashboard-api/skill-packages') { send({ packages: skillPackages }); return; }
+      const match = url.pathname.match(/^\/dashboard-api\/skill-packages\/([^/]+)(.*)$/);
+      const item = skillPackages.find(item => item.id === match[1]);
+      const content = `---\nname: ${item.name}\ndescription: Guide\n---\n# Skill guide\nRead this first.`;
+      if (!match[2]) { send({ package: { ...item, valid: item.enabled, content, body: '# Skill guide\nRead this first.', frontmatter: {}, file_version: 'version' } }); return; }
+      if (match[2] === '/files') {
+        const directory = url.searchParams.get('path') || '';
+        if (directory === 'assets') { send({ entries: [{ name: 'template.bin', path: 'assets/template.bin', kind: 'file', size: 2 }, { name: 'large.txt', path: 'assets/large.txt', kind: 'file', size: 2000000 }], next_offset: null }); return; }
+        if (url.searchParams.get('offset') === '2') { send({ entries: [{ name: 'notes.txt', path: 'notes.txt', kind: 'file', size: 14 }], next_offset: null }); return; }
+        send({ entries: [{ name: 'assets', path: 'assets', kind: 'directory', size: 0 }, { name: 'SKILL.md', path: 'SKILL.md', kind: 'file', size: content.length }], next_offset: 2 }); return;
+      }
+      const file = decodeURIComponent(match[2].slice('/files/'.length));
+      if (url.searchParams.get('download') === 'true') { res.end(file.endsWith('.bin') ? Buffer.from([0, 255]) : content); return; }
+      send({ path: file, content: file.endsWith('.bin') || file.endsWith('large.txt') ? null : file === 'SKILL.md' ? content : 'Resource notes',
+        version: 'version', size: file.endsWith('large.txt') ? 2000000 : 14, mime_type: file.endsWith('.bin') ? 'application/octet-stream' : 'text/plain', preview_truncated: file.endsWith('large.txt') }); return;
+    }
     const ordered = rows => [...rows].sort((a, b) => Number(b.is_pinned) - Number(a.is_pinned) || a.key.localeCompare(b.key));
     if (url.pathname === '/dashboard-api/nav-projects') {
       send({ projects: ordered(projects.filter(project => project.status === 'active')).map(project => ({ ...project, threads: [] })), has_more: false, next_cursor: null }); return;
@@ -62,6 +100,8 @@ const server = http.createServer(async (req, res) => {
     const match = url.pathname.match(/^\/dashboard-api\/projects\/(\d+)$/);
     if (match) {
       const project = projects.find(project => project.id === Number(match[1]));
+      if (!project) { res.writeHead(404); send({ detail: 'Project not found.' }); return; }
+      if (req.method === 'GET') { send(project); return; }
       Object.assign(project, req.method === 'DELETE' ? { status: 'removed' } : body);
       mutations.push({ method: req.method, id: project.id, body }); send(project); return;
     }
@@ -104,6 +144,8 @@ try {
   let sequence = 0;
   const pending = new Map();
   const exceptions = [];
+  let acceptDialog = false;
+  let dialogCount = 0;
   call = (method, params = {}) => new Promise((resolve, reject) => {
     const id = ++sequence; pending.set(id, { resolve, reject }); ws.send(JSON.stringify({ id, method, params }));
   });
@@ -114,6 +156,10 @@ try {
       if (message.error) entry?.reject(new Error(message.error.message)); else entry?.resolve(message.result);
     }
     if (message.method === 'Runtime.exceptionThrown') exceptions.push(message.params.exceptionDetails);
+    if (message.method === 'Page.javascriptDialogOpening') {
+      dialogCount += 1;
+      void call('Page.handleJavaScriptDialog', { accept: acceptDialog });
+    }
   });
   const js = async expression => {
     const result = await call('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
@@ -125,6 +171,7 @@ try {
   const filter = value => js(`(() => { const select = document.querySelector('[aria-label="Project status"]'); select.value = '${value}'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
   const manage = label => js(`document.querySelector('.project-card[aria-label="${label}"] .project-actions-trigger').click()`);
   await call('Runtime.enable');
+  await call('Page.enable');
   await call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   await call('Page.navigate', { url: `${base}/projects` });
   await until(() => js(`document.querySelectorAll('.project-card').length === 2 && document.querySelectorAll('.nav-history-workspace').length === 2`), 'empty project catalog and navigation');
@@ -163,7 +210,7 @@ try {
   await until(() => js(`document.querySelectorAll('.project-card').length === 1 && document.querySelectorAll('.nav-history-workspace').length === 1`), 'removed state survives reload');
   await filter('removed');
   await until(() => js(`!!document.querySelector('.project-card[aria-label="Renamed project"]')`), 'removed filter');
-  assert.equal(await js(`document.querySelector('.project-card a').getAttribute('href')`), '/history?workspace=local%3A%2Fprojects%2F1');
+  assert.equal(await js(`document.querySelector('.project-card-footer a').getAttribute('href')`), '/history?workspace=local%3A%2Fprojects%2F1');
   await manage('Renamed project'); await clickText('Restore project'); await filter('active');
   await until(() => js(`document.querySelectorAll('.project-card').length === 2`), 'restore removed project');
   await input('[aria-label="Search projects"]', 'Other');
@@ -198,6 +245,87 @@ try {
   assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
   assert.ok(mutations.some(mutation => mutation.method === 'DELETE'));
   console.log('PASS: keyboard menu navigation and focus return, mobile layout, menu bounds, and project drawer.');
+  await call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await call('Page.navigate', { url: `${base}/projects` });
+  await until(() => js(`!!document.querySelector('.project-card h2 a')`), 'project detail entry');
+  await js(`document.querySelector('.project-card[aria-label="Renamed project"] h2 a').click()`);
+  await until(() => js(`location.pathname === '/projects/1' && !![...document.querySelectorAll('button')].find(b => b.textContent === 'Create AGENTS.md')`), 'missing root instructions');
+  assert.equal(instructionDocument.exists, false);
+  await clickText('Create AGENTS.md');
+  await until(() => js(`!!document.querySelector('[aria-label="AGENTS.md content"]')`), 'instruction editor');
+  await input('[aria-label="AGENTS.md content"]', '# Project guide\nUse uv.');
+  await clickText('Save instructions');
+  await until(() => js(`document.querySelector('[aria-label="Project instructions"] h1')?.textContent === 'Project guide'`), 'markdown instructions');
+  assert.equal(instructionDocument.content, '# Project guide\nUse uv.');
+  await clickText('Source');
+  assert.equal(await js(`document.querySelector('.project-resource-source').textContent`), instructionDocument.content);
+  await clickText('Edit instructions');
+  await input('[aria-label="AGENTS.md content"]', 'Unsaved changes');
+  assert.equal(await js(`(() => { const event = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(event); return event.defaultPrevented; })()`), true);
+  const beforeDialog = dialogCount;
+  await js(`document.querySelector('.project-resource-tabs a[href$="tab=skills"]').click()`);
+  await until(() => dialogCount > beforeDialog, 'unsaved navigation guard');
+  assert.equal(await js(`document.querySelector('[aria-label="AGENTS.md content"]').value`), 'Unsaved changes');
+  assert.equal(await js(`location.search.includes('skills')`), false);
+  await clickText('Cancel editing');
+  assert.equal(instructionDocument.content, '# Project guide\nUse uv.');
+  await clickText('Edit instructions');
+  await input('[aria-label="AGENTS.md content"]', 'Preserved draft');
+  instructionDocument = { ...instructionDocument, content: 'External change', version: 'external' };
+  await clickText('Save instructions');
+  await until(() => js(`document.querySelector('[role="alert"]')?.textContent.includes('File changed')`), 'save conflict');
+  assert.equal(await js(`document.querySelector('[aria-label="AGENTS.md content"]').value`), 'Preserved draft');
+  acceptDialog = true;
+  await clickText('Reload instructions');
+  await until(() => js(`!document.querySelector('[aria-label="AGENTS.md content"]') && document.querySelector('.project-resource-source')?.textContent === 'External change'`), 'reload conflict');
+  failInstructions = true;
+  await clickText('Reload instructions');
+  await until(() => js(`document.querySelector('[role="alert"]')?.textContent.includes('workspace is unavailable')`), 'workspace error separated from missing file');
+  failSkills = true;
+  await js(`document.querySelector('.project-resource-tabs a[href$="tab=skills"]').click()`);
+  await until(() => js(`document.querySelector('[role="alert"]')?.textContent.includes('Skills unavailable')`), 'independent skills error');
+  failSkills = false;
+  await clickText('Retry skills');
+  await until(() => js(`document.querySelectorAll('.project-skill-card').length === 3`), 'project shared and invalid skills');
+  assert.equal(await js(`document.querySelectorAll('.project-skill-card')[1].textContent.includes('Shadowed')`), true);
+  assert.equal(await js(`document.querySelectorAll('.project-skill-card')[2].textContent.includes('Invalid document')`), true);
+  await input('[aria-label="Search skills"]', 'Shared');
+  await until(() => js(`document.querySelectorAll('.project-skill-card').length === 1`), 'skill search');
+  await clickText('View skill');
+  await until(() => js(`document.querySelector('[aria-label="Skill instructions"] h1')?.textContent === 'Skill guide'`), 'read-only shared skill');
+  assert.equal(await js(`document.querySelectorAll('[role="dialog"] input, [role="dialog"] textarea').length`), 0);
+  await clickText('Skill source');
+  assert.equal(await js(`document.querySelector('[aria-label="Skill instructions"] pre').textContent.startsWith('---')`), true);
+  await clickText('Load more resources');
+  await until(() => js(`document.querySelector('[aria-label="Skill resources"]').textContent.includes('notes.txt')`), 'resource pagination');
+  await clickText('notes.txt');
+  await until(() => js(`document.querySelector('[aria-label="Resource preview"] pre')?.textContent === 'Resource notes'`), 'text resource');
+  await clickText('Folder: assets');
+  await until(() => js(`document.querySelector('[aria-label="Skill resources"]').textContent.includes('template.bin')`), 'resource directory');
+  await clickText('template.bin');
+  await until(() => js(`document.querySelector('[aria-label="Resource preview"]')?.textContent.includes('No text preview')`), 'binary metadata');
+  assert.deepEqual(await js(`fetch(document.querySelector('[aria-label="Resource preview"] a').href).then(r => r.arrayBuffer()).then(b => [...new Uint8Array(b)])`), [0, 255]);
+  await clickText('large.txt');
+  await until(() => js(`document.querySelector('[aria-label="Resource preview"]')?.textContent.includes('2000000 bytes')`), 'large resource metadata');
+  await clickText('Parent directory');
+  await until(() => js(`document.querySelector('[aria-label="Skill resources"]').textContent.includes('Folder: assets')`), 'resource parent');
+  assert.ok(skillRequests.every(request => request.method === 'GET' && request.workspace.locator === '/projects/1'));
+  await js(`document.querySelector('.dialog-close-btn').click()`);
+  await input('[aria-label="Search skills"]', '');
+  await until(() => js(`document.querySelectorAll('.project-skill-card').length === 3`), 'clear skill search');
+  await js(`document.querySelector('.project-skill-card button').click()`);
+  await until(() => js(`!!document.querySelector('[aria-label="Skill instructions"]')`), 'read-only project skill');
+  assert.equal(await js(`document.querySelectorAll('[role="dialog"] input, [role="dialog"] textarea').length`), 0);
+  await js(`document.querySelector('.dialog-close-btn').click()`);
+  failInstructions = false;
+  await call('Page.reload');
+  await until(() => js(`location.search === '?tab=skills' && document.querySelectorAll('.project-skill-card').length === 3`), 'direct skill tab reload');
+  await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  assert.equal(await js('document.documentElement.scrollWidth <= innerWidth'), true);
+  await call('Page.navigate', { url: `${base}/projects/999` });
+  await until(() => js(`document.querySelector('[role="alert"]')?.textContent.includes('Project not found')`), 'missing project detail');
+  assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
+  console.log('PASS: project details, instruction editing and conflicts, unsaved guards, read-only skills, resources, downloads, errors, and direct links.');
 } finally {
   if (call && ws?.readyState === WebSocket.OPEN) await Promise.race([call('Browser.close'), delay(2000)]).catch(() => {});
   ws?.close(); browser.kill(); server.closeAllConnections();

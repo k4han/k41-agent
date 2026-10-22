@@ -16,33 +16,12 @@ import {
   readError,
 } from "@/lib/api";
 import type { WorkspaceRef } from "@/types";
+import type {
+  SkillDiagnostic as Diagnostic, SkillPackageSummary as Package, SkillPackageDetail as Detail,
+  SkillEntry as Entry, SkillFileDetail as FileDetail,
+} from "@/lib/skillPackages";
 import { SettingsLayout } from "./SettingsLayout";
 
-type Diagnostic = { code?: string; message: string; severity: string };
-type Package = {
-  id: string;
-  name: string;
-  description: string;
-  enabled: boolean;
-  shadowed: boolean;
-  source: { scope: string; root: string; directory: string };
-  diagnostics: Diagnostic[];
-};
-type Detail = Package & {
-  valid: boolean;
-  content: string;
-  file_version: string;
-  frontmatter: Record<string, unknown>;
-  body: string;
-};
-type Entry = { path: string; name: string; kind: string; size: number };
-type FileDetail = {
-  path: string;
-  content: string | null;
-  version: string;
-  mime_type: string;
-  size: number;
-};
 type Preview = {
   preview_id: string;
   commit: string | null;

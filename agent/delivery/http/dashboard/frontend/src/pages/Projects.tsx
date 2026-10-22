@@ -85,7 +85,7 @@ export function ProjectsPage() {
         <For each={projects()}>{(project) => <article class="panel project-card" aria-label={project.label}>
           <div class="project-card-main">
             <Show when={project.workspace.scope.kind === "github"} fallback={<Folder size={21} />}><GitBranch size={21} /></Show>
-            <div class="project-card-details"><h2>{project.label} <Show when={project.is_pinned}><Pin size={13} aria-label="Pinned" /></Show></h2>
+            <div class="project-card-details"><h2><A href={`/projects/${project.id}`}>{project.label}</A> <Show when={project.is_pinned}><Pin size={13} aria-label="Pinned" /></Show></h2>
               <p class="project-location" title={project.workspace.execution.locator}>{project.workspace.execution.locator}</p>
               <span class="project-status">{project.status} · {project.workspace.execution.backend}</span>
             </div>

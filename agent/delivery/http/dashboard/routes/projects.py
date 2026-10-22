@@ -6,8 +6,11 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Path, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from agent.modules.projects import add_project, list_projects, update_project
+from agent.modules.projects import add_project, get_project, list_projects, update_project
+from agent.modules.projects.resources import get_project_instructions, save_project_instructions
 from agent.modules.workspaces import WorkspaceBinding, WorkspaceRef
+from agent.modules.workspaces.constants import MAX_FILE_BYTES
+from agent.delivery.http.dashboard.routes.helpers.workspace import workspace_http_error
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -46,6 +49,59 @@ class ProjectUpdateBody(BaseModel):
         if not value.strip():
             raise ValueError("Project name cannot be empty.")
         return value.strip()
+
+
+class ProjectInstructionsBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    content: str = Field(max_length=MAX_FILE_BYTES)
+    expected_version: str | None = Field(..., pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("content", mode="before")
+    @classmethod
+    def require_utf8(cls, value):
+        if isinstance(value, str):
+            try:
+                value.encode("utf-8")
+            except UnicodeError as exc:
+                raise HTTPException(status_code=400, detail="AGENTS.md must be valid UTF-8 text.") from exc
+        return value
+
+
+def project_resource_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, KeyError):
+        return HTTPException(status_code=404, detail="Project not found.")
+    if isinstance(exc, PermissionError):
+        return HTTPException(status_code=403, detail=str(exc))
+    if isinstance(exc, (ValueError, UnicodeError, IsADirectoryError)):
+        return HTTPException(status_code=400, detail=str(exc))
+    return workspace_http_error(exc)
+
+
+@router.get("/dashboard-api/projects/{project_id}")
+async def get_project_detail(project_id: int = Path(ge=1)):
+    try:
+        return await get_project(project_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Project not found.") from exc
+    except Exception as exc:
+        logger.exception("Failed to load project")
+        raise HTTPException(status_code=503, detail="Project catalog is temporarily unavailable.") from exc
+
+
+@router.get("/dashboard-api/projects/{project_id}/instructions")
+async def get_instructions(project_id: int = Path(ge=1)):
+    try:
+        return await get_project_instructions(project_id)
+    except Exception as exc:
+        raise project_resource_error(exc) from exc
+
+
+@router.put("/dashboard-api/projects/{project_id}/instructions")
+async def put_instructions(body: ProjectInstructionsBody, project_id: int = Path(ge=1)):
+    try:
+        return await save_project_instructions(project_id, body.content, body.expected_version)
+    except Exception as exc:
+        raise project_resource_error(exc) from exc
 
 
 @router.get("/dashboard-api/projects")

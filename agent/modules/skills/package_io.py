@@ -13,7 +13,7 @@ import time
 import uuid
 
 from agent.modules.skills.package_worker import run_operation
-from agent.modules.workspaces import get_workspace_file_io, resolve_workspace_ref
+from agent.modules.workspaces import WorkspaceUnavailableError, get_workspace_file_io, resolve_workspace_ref
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,10 @@ class WorkspacePackageIO:
             backend = await get_workspace_file_io(self.ref, thread_id=self.thread_id)
             self.ref = backend.ref
             root = str(self.ref.metadata.get("root") or getattr(backend, "root", ""))
+            if request.get("require_existing_workspace"):
+                check = await backend.execute(f"test -d {shlex.quote(root)}", timeout=10, max_output_chars=1024)
+                if check.exit_code != 0:
+                    raise WorkspaceUnavailableError("Project workspace is unavailable.")
             worker = Path(__file__).with_name("package_worker.py").read_bytes()
             generation = hashlib.sha256(worker).hexdigest()[:16]
             prefix = f".k41-agent/package-runtime/{uuid.uuid4().hex}"
@@ -62,7 +66,8 @@ class WorkspacePackageIO:
             if "error" in response:
                 error = response["error"]
                 exception = {"FileNotFoundError": FileNotFoundError, "FileExistsError": FileExistsError,
-                             "ValueError": ValueError, "BadZipFile": ValueError, "PermissionError": PermissionError}.get(error["type"], RuntimeError)
+                             "ValueError": ValueError, "BadZipFile": ValueError, "PermissionError": PermissionError,
+                             "NotADirectoryError": NotADirectoryError}.get(error["type"], RuntimeError)
                 raise exception(error["message"])
             result = response["result"]
         logger.info("Skill package operation=%s backend=%s duration_seconds=%.3f cache_reused=%d", op, self.ref.backend,
