@@ -762,6 +762,83 @@ test('cached home sessions cannot overwrite newer live session data', t => {
   assert.equal(home.value.sessions().length, 0);
 });
 
+test('workspace runtime events and reconnect snapshots refresh shared workspace consumers', t => {
+  const f = sessionFixture();
+  mount(t, () => f.useSessions());
+  f.connections[0].emit(f.SESSION_EVENTS.WORKSPACE_RUNTIME_CHANGED, { project_workspace_id: 8, phase: 'completed' });
+  assert.equal(f.events.find(event => event.type === f.CUSTOM_DOM_EVENTS.WORKSPACE_RUNTIME_CHANGED).detail.project_workspace_id, 8);
+  assert.ok(f.events.some(event => event.type === f.CUSTOM_DOM_EVENTS.THREADS_CHANGED));
+  const count = f.events.length;
+  f.connections[0].emit(f.SESSION_EVENTS.SNAPSHOT, { sessions: [] });
+  assert.ok(f.events.slice(count).some(event => event.type === f.CUSTOM_DOM_EVENTS.WORKSPACE_RUNTIME_CHANGED));
+});
+
+function runtimeFixture() {
+  const listeners = new Map();
+  const timers = new Map();
+  const applied = [], sent = [];
+  let nextTimer = 0;
+  let result = { kind: 'shared', workspace: {
+    project_id: 7, project_workspace_id: 8, runtime_generation: 1,
+    execution: { backend: 'local', locator: '/original' },
+  }, runtime: { status: 'ready', generation: 1, transition: null } };
+  let read = async () => result;
+  const constants = loadModule('../src/lib/eventConstants.ts');
+  const module = loadModule('../src/lib/useWorkspaceRuntime.ts', {
+    '@/lib/api': { apiFetch: (...args) => read(...args), postJson: async (path, body) => {
+      sent.push({ path, body });
+      return { transition: { operation_id: 'switch', phase: 'saving', target_backend: body.backend } };
+    } }, '@/lib/eventConstants': constants,
+  }, { window: {
+    addEventListener: (name, handler) => listeners.set(name, handler),
+    removeEventListener: name => listeners.delete(name),
+    setInterval: handler => { const id = ++nextTimer; timers.set(id, handler); return id; },
+    clearInterval: id => timers.delete(id),
+  } });
+  return { ...module, ...constants, listeners, timers, applied, sent,
+    apply: binding => applied.push(binding), setRead: value => { read = value; }, setResult: value => { result = value; }, getResult: () => result };
+}
+
+test('runtime switching retains accepted progress across a connection loss and applies the new generation', async t => {
+  const f = runtimeFixture();
+  const { value } = mount(t, () => f.useWorkspaceRuntime(() => 'thread', f.apply));
+  await tick();
+  assert.equal(value.payload().workspace.runtime_generation, 1);
+  f.setRead(async () => { throw new Error('Disconnected'); });
+  await value.switchBackend('daytona');
+  assert.equal(value.busy(), true);
+  assert.equal(f.sent[0].body.expected_generation, 1);
+  assert.equal(f.timers.size, 1);
+  const binding = { ...f.getResult().workspace, runtime_generation: 2, execution: { backend: 'daytona', locator: 'new-sandbox' } };
+  f.setRead(async () => ({ workspace: binding, kind: 'shared', runtime: { status: 'ready', generation: 2,
+    transition: { operation_id: 'switch', phase: 'completed', target_backend: 'daytona' } } }));
+  f.listeners.get(f.CUSTOM_DOM_EVENTS.WORKSPACE_RUNTIME_CHANGED)({ detail: { project_workspace_id: 8 } });
+  await tick();
+  assert.equal(value.busy(), false);
+  assert.equal(f.applied.at(-1).execution.locator, 'new-sandbox');
+  assert.equal(f.timers.size, 0);
+});
+
+test('runtime status responses cannot overwrite a newly selected conversation', async t => {
+  const f = runtimeFixture();
+  let release;
+  f.setRead(() => new Promise(resolve => { release = resolve; }));
+  const { value, dispose } = mount(t, () => {
+    const [thread, setThread] = solid.createSignal('first');
+    return { runtime: f.useWorkspaceRuntime(thread, f.apply), setThread };
+  });
+  const releaseFirst = release;
+  value.setThread('second');
+  releaseFirst(f.getResult());
+  await tick();
+  assert.equal(f.applied.length, 0);
+  release(f.getResult());
+  await tick();
+  assert.equal(f.applied.length, 1);
+  dispose();
+  assert.equal(f.listeners.size, 0);
+});
+
 test('Markdown consumers share a theme observer and clean it up together', t => {
   const observers = [];
   let isDark = false;

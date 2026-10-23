@@ -136,3 +136,23 @@ class WorkspaceSnapshotTransfer:
                         digest = chunk["checksum"]
                         (objects / digest).write_bytes(store.get_blob(key, digest))
             snapshot_worker.restore(str(destination), stage, manifest)
+
+    async def verify(self, ref: WorkspaceRef, store: ProjectStorageBackend, key: str, revision: str):
+        manifest = await asyncio.to_thread(store.get_manifest, key, revision)
+        validate_manifest(manifest)
+        if ref.backend == "local":
+            await asyncio.to_thread(snapshot_worker.verify, ref.locator, manifest)
+            return
+        backend = await self._backend(ref)
+        stage = "/tmp/k41-project-" + uuid4().hex
+        try:
+            made = await backend.execute_coding_command("mkdir -p -- " + shlex.quote(stage + "/objects"), timeout=30)
+            if made.exit_code not in (0, None):
+                raise OSError("Cannot create project verification directory.")
+            await backend.upload_coding_file(json.dumps(manifest).encode(), stage + "/manifest.json")
+            await self._remote(backend, "verify", stage)
+        finally:
+            try:
+                await self._remote(backend, "cleanup", stage)
+            except Exception:
+                pass

@@ -326,8 +326,39 @@ export type ProjectWorkspaceSummary = {
   id: number;
   kind: "shared" | "github_task" | "legacy";
   source: WorkspaceRef;
-  runtime: { status: string; generation: number };
+  runtime: WorkspaceRuntimeSummary;
   persistence: ProjectPersistence;
+};
+
+export type WorkspaceRuntimeTransition = {
+  operation_id: string;
+  phase: "saving" | "provisioning" | "restoring" | "verifying" | "activating" | "completed" | "failed";
+  target_backend: WorkspaceBackendKey;
+  revision?: string | null;
+  error?: string;
+  cleanup_error?: string;
+  started_at?: string;
+  updated_at?: string;
+};
+
+export type WorkspaceRuntimeDecision = {
+  reason: string;
+  backend: WorkspaceBackendKey;
+  label?: string;
+  revision?: string | null;
+};
+
+export type WorkspaceRuntimeSummary = {
+  status: string;
+  generation: number;
+  transition?: WorkspaceRuntimeTransition | null;
+  decision?: WorkspaceRuntimeDecision | null;
+};
+
+export type ThreadRuntimePayload = {
+  workspace: WorkspaceBinding | null;
+  runtime: WorkspaceRuntimeSummary | null;
+  kind?: "shared" | "github_task" | "legacy";
 };
 
 export type ProjectSummary = {
@@ -339,7 +370,7 @@ export type ProjectSummary = {
   workspace: WorkspaceBinding;
   migration_status?: string;
   workspaces?: ProjectWorkspaceSummary[];
-  runtime?: { status: string; generation: number };
+  runtime?: WorkspaceRuntimeSummary;
   persistence?: ProjectPersistence;
   created_at: string;
   updated_at: string;

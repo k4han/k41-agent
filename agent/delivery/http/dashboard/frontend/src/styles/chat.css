@@ -201,6 +201,13 @@
   color: var(--danger);
 }
 
+.thread-banner-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+}
+
 .chat-shell-flat .thread-banner,
 .chat-shell-resizable .thread-banner {
   margin-bottom: 12px;

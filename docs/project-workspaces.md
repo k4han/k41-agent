@@ -70,11 +70,16 @@ successful checkpoint. These are file snapshots, not process-memory snapshots
 or transactional backups of running databases.
 
 Recovery first tries the current runtime and never overwrites live files with
-an older checkpoint. A lost cloud runtime is replaced and hydrated before its
-new generation becomes ready. Missing runtime and missing saved data produce
-an explicit error instead of a fresh clone. Local project directories are not
-moved or overwritten. Retired GitHub task worktrees can be materialized into
-application-owned runtime directories.
+an older checkpoint. A dead cloud sandbox does not relaunch automatically:
+file provision and the corresponding cost are the user's decision, so the
+runtime is marked `unavailable` with a pending decision and the dashboard
+offers "Restore on the same backend" or "Move to local workspace" (see
+`runtime.recovery` confirmation). The chosen runtime is provisioned and
+hydrated before its new generation becomes ready. A disabled backend is
+refused for restore; local recovery stays available. Missing runtime and
+missing saved data produce an explicit error instead of a fresh clone. Local
+project directories are not moved or overwritten. Retired GitHub task
+worktrees can be materialized into application-owned runtime directories.
 
 Deleting a conversation removes its association and stops its own processes.
 Managed cloud lifecycle actions save before stopping, archiving or deleting.
@@ -95,13 +100,66 @@ Project responses add `migration_status`, `workspaces`, `runtime` and
 `persistence`, including the last saved revision, timestamp and error.
 
 - `POST /dashboard-api/projects/{id}/runtime/ensure`: resolve or recover files;
-  accepts optional `project_workspace_id`.
+  accepts optional `project_workspace_id`. Records a pending recovery decision
+  (code `provision_confirm_required`) instead of restarting a lost cloud
+  runtime automatically.
+- `POST /dashboard-api/projects/{id}/runtime/recovery`: apply the pending
+  decision with `action` (`restore` on the previous backend, or `local`) and
+  `expected_generation`; refuses disabled cloud backends for `restore`.
 - `POST /dashboard-api/projects/{id}/checkpoint`: save or retry saving.
 - `POST /dashboard-api/projects/{id}/migration/select`: select `source_id`.
 
 Instruction and skill reads can use saved files while execution is unavailable.
 Writes ensure execution and report persistence separately. Archive/remove keep
 data; these endpoints do not implement permanent file deletion.
+
+## Switching execution backends
+
+The dashboard conversation project picker can switch a shared workspace between
+enabled local, Daytona and Modal backends. Every conversation bound to that
+workspace follows its current runtime. Project and conversation identities,
+catalog labels, Git state, uploads and uncommitted files remain unchanged.
+GitHub task workspaces remain independent.
+
+`POST /dashboard-api/projects/{id}/runtime/switch` accepts `backend`,
+`expected_generation` and optional `project_workspace_id`. It returns `202`
+with an `operation_id` and runs independently of the browser connection. The
+project detail response exposes `runtime.transition`, including the phase,
+target backend, saved revision, timestamps and errors. A same-backend request
+returns the current binding without capturing or reloading files.
+`GET /dashboard-api/workspace/runtime/{thread_id}` resolves a conversation's
+current binding and transition without starting an execution environment.
+
+Switching requires an idle shared workspace: active agent runs, background
+tasks, managed processes and paused workflow requests block the operation with
+`409`. All agent entrypoints reserve their workspace for their full run; a
+switch reservation blocks new runs, managed writes and lifecycle operations.
+Clients with obsolete generations also receive `409`. Dashboard session events
+publish `workspace_runtime_changed`; the UI refreshes on these events, on
+reconnection and focus, and polls during a switch.
+
+The source is checkpointed and its revision pinned before provisioning. A fresh
+destination is restored and verified before one database transaction publishes
+the new runtime, increments its generation and refreshes conversation/task
+execution references. Switching back to local always uses a new directory under
+the application-owned runtime root; an original project directory is never
+overwritten. Cloud sources are stopped after activation when no other workspace
+references the same sandbox. Modal retirement terminates the old sandbox.
+
+The latest transition and pending cleanup references are durable. Failure before
+activation retains the source binding. A restart marks an unfinished transition
+failed and cleans up its partially restored target; it never replays user
+commands. Failed cleanup is retried by the workspace monitor. Provider allocation
+IDs are saved before workspace initialization; an allocation whose provider
+response is lost before its ID is received may still require provider-side
+cleanup. Shutdown waits for accepted switches to settle before final saves.
+
+File snapshots do not transfer processes, terminal state, installed dependencies,
+system environment variables or guarantees of Windows/Linux compatibility. The
+runtime stays warm between turns. External editors must pause writes during a
+switch because application locks do not isolate external processes. This release
+uses local durable storage and one application writer; S3 remains a future
+implementation of the existing storage contract.
 
 ## Verification
 
@@ -112,6 +170,7 @@ pnpm dashboard:build
 pnpm --dir agent/delivery/http/dashboard/frontend test:projects-ui
 pnpm --dir agent/delivery/http/dashboard/frontend test:nav-projects
 pnpm --dir agent/delivery/http/dashboard/frontend test:workspace-ui
+pnpm --dir agent/delivery/http/dashboard/frontend test:runtime-switch
 ```
 
 Contract tests run against disk storage and a path-free in-memory object store.

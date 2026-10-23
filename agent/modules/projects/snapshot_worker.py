@@ -170,6 +170,17 @@ def capture(root: str, staging: str) -> dict:
 def restore(root: str, staging: str, manifest: dict | None = None) -> None:
     base, stage = Path(root), Path(staging)
     manifest = manifest or json.loads((stage / "manifest.json").read_text(encoding="utf-8"))
+    if os.name == "nt":
+        names = set()
+        for name in manifest["entries"]:
+            canonical = os.path.normcase(name)
+            if canonical in names:
+                raise ValueError("Project paths collide on the destination filesystem: " + name)
+            names.add(canonical)
+            for part in PurePosixPath(name).parts:
+                if (part.endswith((".", " ")) or any(char in '<>:"|?*' or ord(char) < 32 for char in part)
+                        or part.split(".")[0].upper() in {"CON", "PRN", "AUX", "NUL", *[f"COM{i}" for i in range(1, 10)], *[f"LPT{i}" for i in range(1, 10)]}):
+                    raise ValueError("Project path is unsupported on Windows: " + name)
     base.mkdir(parents=True, exist_ok=True)
     for name, entry in sorted(manifest["entries"].items(), key=lambda item: (len(PurePosixPath(item[0]).parts), item[0])):
         relative = PurePosixPath(name)
@@ -210,6 +221,29 @@ def restore(root: str, staging: str, manifest: dict | None = None) -> None:
             (base / name).chmod(entry["mode"] & 0o777)
 
 
+def verify(root: str, manifest: dict) -> None:
+    """Read restored bytes again before a destination can become active."""
+    base = Path(root)
+    for name, entry in manifest["entries"].items():
+        path = base.joinpath(*PurePosixPath(name).parts)
+        if entry["type"] == "symlink":
+            if not path.is_symlink() or os.readlink(path) != entry["target"]:
+                raise ValueError("Restored project symlink mismatch: " + name)
+        elif entry["type"] == "directory":
+            if path.is_symlink() or not path.is_dir():
+                raise ValueError("Restored project directory mismatch: " + name)
+        else:
+            if path.is_symlink() or not path.is_file():
+                raise ValueError("Restored project file missing: " + name)
+            digest, size = hashlib.sha256(), 0
+            with path.open("rb") as handle:
+                while content := handle.read(CHUNK_BYTES):
+                    digest.update(content)
+                    size += len(content)
+            if size != entry["size"] or digest.hexdigest() != entry["checksum"]:
+                raise ValueError("Restored project file mismatch: " + name)
+
+
 def main():
     operation, root, staging = sys.argv[1:]
     stage = Path(staging)
@@ -219,6 +253,8 @@ def main():
         capture(root, staging)
     elif operation == "restore":
         restore(root, staging)
+    elif operation == "verify":
+        verify(root, json.loads((stage / "manifest.json").read_text(encoding="utf-8")))
     elif operation == "cleanup":
         shutil.rmtree(stage, ignore_errors=True)
     else:

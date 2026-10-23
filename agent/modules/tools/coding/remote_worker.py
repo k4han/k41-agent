@@ -94,6 +94,10 @@ class SandboxWorker:
             self.active_calls.pop(request_id, None)
 
     async def _dispatch(self, request):
+        if request.get("operation") == "workspace_state":
+            jobs = {**self.processes.jobs, **self.processes.retiring_jobs}
+            root = str(Path(request["workspace"]).resolve())
+            return {"running": sum(not job.finished.is_set() for job in jobs.values() if job.workspace == root)}
         if request.get("operation") == "stop_workspace":
             await self.processes.stop_workspace(request["workspace"])
             return {}

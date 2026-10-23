@@ -275,7 +275,7 @@ def get_daytona_client():
     return Daytona(DaytonaConfig(**config_kwargs))
 
 
-def create_daytona_workspace(*, label: str | None = None) -> WorkspaceRef:
+def create_daytona_workspace(*, label: str | None = None, on_created=None) -> WorkspaceRef:
     _, _, root = _config()
     client = get_daytona_client()
     create_cfg = _sandbox_create_config()
@@ -295,6 +295,8 @@ def create_daytona_workspace(*, label: str | None = None) -> WorkspaceRef:
         label=(label or "").strip() or f"daytona:{sandbox_id}",
         metadata=metadata,
     )
+    if on_created is not None:
+        on_created(ref)
     backend = DaytonaWorkspaceBackend(ref, sandbox=sandbox)
     backend.ensure_root()
     backend.ensure_storage()

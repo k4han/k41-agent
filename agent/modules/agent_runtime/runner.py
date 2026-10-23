@@ -49,6 +49,7 @@ from agent.modules.tools import (
     PlanModeResumePayload,
 )
 from agent.modules.workspaces import WorkspaceRef
+from agent.modules.agent_runtime.workspace_admission import guard_workspace_run
 
 logger = logging.getLogger(__name__)
 
@@ -1039,6 +1040,7 @@ def track_active_session(
         registry.release(session_id)
 
 
+@guard_workspace_run
 async def run_agent(
     user_input: str,
     thread_id: str,
@@ -1176,6 +1178,7 @@ async def run_agent(
                         yield content
 
 
+@guard_workspace_run
 async def run_agent_stream(
     user_input: str,
     thread_id: str,
@@ -1496,6 +1499,7 @@ async def run_agent_stream(
             title_watcher.cancel()
 
 
+@guard_workspace_run
 async def run_agent_edit_stream(
     user_input: str,
     thread_id: str,

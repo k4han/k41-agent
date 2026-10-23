@@ -40,6 +40,21 @@ async def _session():
     return await get_async_session()
 
 
+def pending_decision_state(runtime) -> dict | None:
+    """Return the stored re-provision decision for this runtime, if any."""
+    try:
+        return json.loads(getattr(runtime, "pending_decision_json", "") or "{}") or None
+    except ValueError:
+        return None
+
+
+def provision_decision_message(decision: dict) -> str:
+    backend = decision.get("backend") or "cloud"
+    return (f"The {backend} execution environment for this workspace is no longer available. "
+            "Its saved files can still be restored; choose to recreate the environment "
+            "on the same backend or continue in a local workspace.")
+
+
 def source_key(ref: WorkspaceRef) -> str:
     return hashlib.sha256(json.dumps([ref.backend, ref.locator, ref.metadata.get("root", "")]).encode()).hexdigest()
 
@@ -136,6 +151,8 @@ class ProjectWorkspaceService:
         self.running_processes: set[tuple[int, str]] = set()
         self.periodic_task = None
         self.closing = False
+        from agent.modules.projects.runtime_switch import WorkspaceRuntimeSwitcher
+        self.switcher = WorkspaceRuntimeSwitcher(self)
 
     def lock(self, workspace_id: int) -> asyncio.Lock:
         return self.locks.setdefault(workspace_id, asyncio.Lock())
@@ -167,6 +184,7 @@ class ProjectWorkspaceService:
         return descriptions[project_id]
 
     async def describe_many(self, project_ids: list[int]) -> dict[int, dict]:
+        from agent.modules.projects.runtime_switch import transition_summary
         if not project_ids:
             return {}
         session = await _session()
@@ -184,7 +202,9 @@ class ProjectWorkspaceService:
             rows = grouped[project.id]
             workspaces = [{"id": workspace.id, "kind": workspace.kind,
                            "source": json.loads(workspace.source_json),
-                           "runtime": {"status": runtime.status, "generation": runtime.generation},
+                           "runtime": {"status": runtime.status, "generation": runtime.generation,
+                                       "transition": transition_summary(runtime),
+                                       "decision": pending_decision_state(runtime)},
                            "persistence": {"status": workspace.persistence_status, "revision": workspace.head_revision,
                                            "last_saved_at": storage_timestamp(workspace.last_saved_at),
                                            "last_error": workspace.last_error,
@@ -325,6 +345,7 @@ class ProjectWorkspaceService:
         if not context.project_workspace_id:
             return
         project, workspace, runtime = await self.rows(context.project_id, context.project_workspace_id)
+        self.switcher.assert_available(workspace.id, runtime)
         if self.closing:
             raise ProjectWorkspaceError("The application is shutting down.", "workspace_closing")
         if project.migration_status != "ready":
@@ -410,8 +431,10 @@ class ProjectWorkspaceService:
 
     async def checkpoint(self, project_id: int, workspace_id: int | None = None, *, generation: int | None = None,
                          skip_unchanged: bool = False):
-        _, workspace, _ = await self.rows(project_id, workspace_id)
+        _, workspace, runtime = await self.rows(project_id, workspace_id)
+        self.switcher.assert_available(workspace.id, runtime)
         async with self.lock(workspace.id):
+            self.switcher.assert_available(workspace.id)
             return await self._checkpoint(project_id, workspace.id, generation, skip_unchanged=skip_unchanged)
 
     async def ensure(self, project_id: int, workspace_id: int | None = None) -> WorkspaceBinding:
@@ -432,9 +455,15 @@ class ProjectWorkspaceService:
             project, workspace, runtime = await self.rows(project_id)
         if project.migration_status != "ready":
             raise ProjectWorkspaceError("Choose the main workspace before continuing.", "migration_required")
+        self.switcher.assert_available(workspace.id, runtime)
         async with self.lock(workspace.id):
             project, workspace, runtime = await self.rows(project_id, workspace.id)
+            self.switcher.assert_available(workspace.id, runtime)
             ref = WorkspaceRef.model_validate_json(runtime.execution_json)
+            decision = pending_decision_state(runtime)
+            if decision is not None:
+                # A confirmation is already pending; do not relaunch a paid runtime silently.
+                raise ProjectWorkspaceError(provision_decision_message(decision), "provision_confirm_required")
             if runtime.status != "restoring":
                 try:
                     if ref.backend == "local":
@@ -480,17 +509,95 @@ class ProjectWorkspaceService:
                         raise
             if not workspace.head_revision:
                 raise ProjectWorkspaceError("Both the runtime and saved project files are unavailable.", "missing_data")
-            from agent.modules.workspaces import create_workspace_backend, merge_ready_workspace_metadata as _merge_ready_workspace_metadata
-            replacement = await create_workspace_backend(ref.backend, label=ref.label)
-            replacement = _merge_ready_workspace_metadata(ref, replacement)
-            if ref.metadata.get("root"):
-                replacement.metadata["root"] = ref.metadata["root"]
-            generation = runtime.generation + 1
-            await self._publish_runtime(project, workspace, replacement, generation, "restoring")
-            try:
+            # The sandbox is gone, but the files remain recoverable from the last
+            # saved revision. Recreating a paid cloud runtime is the user's call,
+            # so record a decision and let the dashboard confirm it.
+            await self._record_provision_decision(project, workspace, runtime)
+            raise ProjectWorkspaceError(provision_decision_message({
+                "backend": ref.backend, "revision": workspace.head_revision}),
+                "provision_confirm_required")
+
+    def _notify_runtime_changed(self, project_id: int, workspace_id: int):
+        try:
+            from agent.modules.agent_runtime.active_sessions import get_active_session_registry
+            get_active_session_registry(self.container).publish("workspace_runtime_changed", {
+                "project_id": project_id, "project_workspace_id": workspace_id,
+            })
+        except Exception:
+            logger.debug("Could not notify workspace runtime change workspace=%s", workspace_id, exc_info=True)
+
+    async def _record_provision_decision(self, project, workspace, runtime):
+        ref = WorkspaceRef.model_validate_json(runtime.execution_json)
+        decision = {"reason": "sandbox_lost", "backend": ref.backend, "label": ref.label,
+                    "revision": workspace.head_revision}
+        session = await _session()
+        async with session:
+            changed = await session.execute(update(WorkspaceRuntime).where(
+                WorkspaceRuntime.project_workspace_id == workspace.id,
+                WorkspaceRuntime.generation == runtime.generation,
+            ).values(status="unavailable", pending_decision_json=json.dumps(decision),
+                     last_used_at=utcnow(), updated_at=utcnow()))
+            await session.commit()
+        if changed.rowcount == 1:
+            self._notify_runtime_changed(project.id, workspace.id)
+
+    async def confirm_provision(self, project_id: int, action: str, expected_generation: int,
+                                workspace_id: int | None = None) -> WorkspaceBinding:
+        """Apply a recorded re-provision decision ("restore" or "local")."""
+        if action not in {"restore", "local"}:
+            raise ValueError("Unknown workspace recovery action.")
+        project, workspace, runtime = await self.rows(project_id, workspace_id)
+        if project.migration_status != "ready":
+            raise ProjectWorkspaceError("Choose the main workspace before continuing.", "migration_required")
+        self.switcher.assert_available(workspace.id, runtime)
+        async with self.lock(workspace.id):
+            project, workspace, runtime = await self.rows(project_id, workspace.id)
+            self.switcher.assert_available(workspace.id, runtime)
+            decision = pending_decision_state(runtime)
+            if decision is None:
+                raise ProjectWorkspaceError("The workspace does not need recovery.", "decision_unneeded")
+            if runtime.generation != expected_generation:
+                raise ProjectWorkspaceError("Execution runtime changed; reload the workspace.", "stale_runtime")
+            ref = WorkspaceRef.model_validate_json(runtime.execution_json)
+            if action == "restore":
+                from agent.modules.workspaces.registry import get_workspace_backend_registry, _is_backend_enabled
+                descriptor = get_workspace_backend_registry(self.container).require(ref.backend)
+                if not _is_backend_enabled(descriptor, config_service=self.container.config_service):
+                    raise ProjectWorkspaceError(
+                        f"The {ref.backend} execution backend is disabled. Enable it again, "
+                        "or recover the files into a local workspace instead.", "backend_disabled")
+            target_backend = ref.backend if action == "restore" else "local"
+            return await self._reprovision_replacement(project_id, project, workspace, runtime, target_backend)
+
+    async def _reprovision_replacement(self, project_id: int, project, workspace, runtime, target_backend: str):
+        """Create a fresh execution runtime and restore the workspace's saved files."""
+        from agent.modules.workspaces import create_workspace_backend, merge_ready_workspace_metadata as _merge_ready_workspace_metadata
+        previous = WorkspaceRef.model_validate_json(runtime.execution_json)
+        if target_backend == "local":
+            destination = self.runtime_root / str(workspace.id) / f"{runtime.generation + 1}-{uuid4().hex}"
+            replacement = WorkspaceRef(backend="local", locator=str(destination), label=previous.label)
+        else:
+            replacement = await create_workspace_backend(target_backend, label=previous.label)
+        replacement = _merge_ready_workspace_metadata(previous, replacement)
+        if previous.metadata.get("root"):
+            replacement.metadata["root"] = previous.metadata["root"]
+        generation = runtime.generation + 1
+        await self._publish_runtime(project, workspace, replacement, generation, "restoring")
+        try:
+            if target_backend == "local":
+                # Managed local directories are materialized, never "restored" over.
+                await asyncio.to_thread(self.transfer.materialize, self.storage, str(workspace.id),
+                                        workspace.head_revision, replacement.locator)
+                await self.transfer.verify(replacement, self.storage, str(workspace.id), workspace.head_revision)
+            else:
                 await self.transfer.restore(replacement, self.storage, str(workspace.id), workspace.head_revision)
-            except Exception as exc:
-                await self._set_error(workspace.id, exc)
+        except Exception as exc:
+            await self._set_error(workspace.id, exc)
+            if target_backend == "local":
+                # The half-materialized directory belongs to this operation only.
+                import shutil
+                shutil.rmtree(replacement.locator, ignore_errors=True)
+            else:
                 try:
                     from agent.modules.workspaces import get_workspace_backend_registry, call_workspace_backend_loader
                     descriptor = get_workspace_backend_registry().require(replacement.backend)
@@ -499,15 +606,16 @@ class ProjectWorkspaceService:
                                                             in_thread=replacement.backend == "daytona")
                 except Exception:
                     logger.warning("Incomplete runtime retained for cleanup workspace=%s", workspace.id)
-                raise ProjectWorkspaceError("Project restore failed: " + str(exc)) from exc
-            await self._publish_runtime(project, workspace, replacement, generation, "ready")
-            session = await _session()
-            async with session:
-                await session.execute(update(ProjectWorkspace).where(ProjectWorkspace.id == workspace.id).values(
-                    persistence_status="clean", last_error=""))
-                await session.commit()
-            self.active.add(workspace.id)
-            return await self.binding(project_id, workspace.id)
+            raise ProjectWorkspaceError("Project restore failed: " + str(exc)) from exc
+        await self._publish_runtime(project, workspace, replacement, generation, "ready")
+        session = await _session()
+        async with session:
+            await session.execute(update(ProjectWorkspace).where(ProjectWorkspace.id == workspace.id).values(
+                persistence_status="clean", last_error=""))
+            await session.commit()
+        self.active.add(workspace.id)
+        self._notify_runtime_changed(project.id, workspace.id)
+        return await self.binding(project_id, workspace.id)
 
     async def _initialize_shared(self, project_id: int):
         async with self.migration_locks.setdefault(project_id, asyncio.Lock()):
@@ -539,7 +647,7 @@ class ProjectWorkspaceService:
                 await register_workspace(session, project, ref)
                 await session.commit()
 
-    async def _publish_runtime(self, project, workspace, ref, generation, status):
+    async def _publish_runtime(self, project, workspace, ref, generation, status, *, transition=None):
         session = await _session()
         async with session:
             previous = (await session.execute(select(WorkspaceRuntime).where(
@@ -553,22 +661,34 @@ class ProjectWorkspaceService:
                 aliases = set(json.loads(current.runtime_aliases_json))
                 aliases.add(previous_key)
                 current.runtime_aliases_json = json.dumps(sorted(aliases))
+            values = dict(execution_json=ref.model_dump_json(), generation=generation, status=status,
+                          pending_decision_json="{}",
+                          last_used_at=utcnow(), updated_at=utcnow())
+            if transition is not None:
+                values["transition_json"] = json.dumps(transition)
             changed = await session.execute(update(WorkspaceRuntime).where(WorkspaceRuntime.project_workspace_id == workspace.id,
-                WorkspaceRuntime.generation == previous.generation).values(
-                execution_json=ref.model_dump_json(), generation=generation, status=status, last_used_at=utcnow(), updated_at=utcnow(),
-            ))
+                WorkspaceRuntime.generation == previous.generation).values(**values))
             if changed.rowcount != 1:
                 raise ProjectWorkspaceError("Runtime changed during publication.", "stale_runtime")
             if workspace.kind == "shared":
                 binding = bind_workspace_ref(ref, scope=_scope(project), project_id=project.id,
                                              project_workspace_id=workspace.id, runtime_generation=generation)
                 await session.execute(update(Project).where(Project.id == project.id).values(workspace_json=binding.model_dump_json()))
+            if transition is not None:
+                from agent.modules.workspaces.models import ThreadWorkspace
+                from agent.modules.agent_runtime.models import BackgroundTaskRecord
+                for model in (ThreadWorkspace, BackgroundTaskRecord):
+                    await session.execute(update(model).where(model.project_workspace_id == workspace.id).values(
+                        working_dir=ref.locator, execution_backend=ref.backend, execution_locator=ref.locator,
+                        execution_label=ref.label, execution_metadata_json=json.dumps(ref.metadata), updated_at=utcnow()))
             await session.commit()
 
     @asynccontextmanager
     async def mutation(self, project_id: int, workspace_id: int, *, generation: int | None = None):
+        self.switcher.assert_available(workspace_id)
         async with self.lock(workspace_id):
             project, workspace, runtime = await self.rows(project_id, workspace_id)
+            self.switcher.assert_available(workspace_id, runtime)
             if self.closing:
                 raise ProjectWorkspaceError("The application is shutting down.", "workspace_closing")
             if project.migration_status != "ready":
@@ -729,6 +849,8 @@ class ProjectWorkspaceService:
                    and value.locator == ref.locator]
         if not matches:
             return None
+        for workspace, runtime in matches:
+            self.switcher.assert_available(workspace.id, runtime)
         from agent.modules.workspaces import get_workspace_backend_registry, call_workspace_backend_loader
         descriptor = get_workspace_backend_registry().require(ref.backend)
         loader = getattr(descriptor, action + "_loader")
@@ -739,6 +861,10 @@ class ProjectWorkspaceService:
         async with AsyncExitStack() as stack:
             for workspace, runtime in sorted(matches, key=lambda pair: pair[0].id):
                 await stack.enter_async_context(self.lock(workspace.id))
+                _, _, current = await self.rows(workspace.project_id, workspace.id)
+                self.switcher.assert_available(workspace.id, current)
+                if current.generation != runtime.generation:
+                    raise ProjectWorkspaceError("Execution runtime changed before the lifecycle operation.", "stale_runtime")
                 coding = self.container._coding_service
                 if coding:
                     actual = WorkspaceRef.model_validate_json(runtime.execution_json)
@@ -808,6 +934,7 @@ class ProjectWorkspaceService:
 
     async def _periodic(self):
         try:
+            await self.switcher.recover()
             await self.capture_pending()
             session = await _session()
             async with session:
@@ -826,6 +953,10 @@ class ProjectWorkspaceService:
             except TimeoutError:
                 pass
             self.checkpoint_requested.clear()
+            try:
+                await self.switcher.recover()
+            except Exception:
+                logger.warning("Runtime switch recovery deferred.", exc_info=True)
             for workspace_id in tuple(self.active):
                 try:
                     session = await _session()
@@ -837,7 +968,7 @@ class ProjectWorkspaceService:
                     if workspace is None or runtime is None or runtime.status != "ready":
                         self.active.discard(workspace_id)
                         continue
-                    if self.lock(workspace_id).locked():
+                    if self.lock(workspace_id).locked() or workspace_id in self.switcher.switching:
                         continue
                     await self.checkpoint(workspace.project_id, workspace_id, skip_unchanged=True)
                 except Exception:
@@ -877,6 +1008,7 @@ class ProjectWorkspaceService:
 
     async def close(self):
         self.closing = True
+        await self.switcher.close()
         if self.periodic_task:
             self.periodic_task.cancel()
             await asyncio.gather(self.periodic_task, return_exceptions=True)

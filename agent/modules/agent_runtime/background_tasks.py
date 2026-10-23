@@ -14,6 +14,7 @@ import logging
 import threading
 import time
 import uuid
+from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from enum import Enum
 from html import escape as escape_html
@@ -409,9 +410,15 @@ class BackgroundTaskManager:
         return task.task_id
 
     async def _execute(self, task: BackgroundTask, run_fn: Any) -> None:
+        async with AsyncExitStack() as admission:
+            await self._execute_attempt(task, run_fn, admission)
+
+    async def _execute_attempt(self, task: BackgroundTask, run_fn: Any, admission: AsyncExitStack) -> None:
         """Execute the task in the background with timeout and retry support."""
         from agent.modules.agent_runtime.runner import track_active_session
+        from agent.modules.agent_runtime.workspace_admission import workspace_run
         from agent.modules.conversations import THREAD_KIND_BACKGROUND, upsert_conversation_thread
+        from agent.modules.projects import ProjectWorkspaceError
 
         task.status = TaskStatus.RUNNING
         task.started_at = time.time()
@@ -427,6 +434,7 @@ class BackgroundTaskManager:
         retrying = False
         with track_active_session(task.thread_id, task.agent_name, usage_context=_task_usage_context(task)):
             try:
+                await admission.enter_async_context(workspace_run({"workspace": task.workspace, "thread_id": task.thread_id}))
                 if task.task_timeout and task.task_timeout > 0:
                     result = await asyncio.wait_for(
                         self._run_streamed_task(task, run_fn),
@@ -477,6 +485,8 @@ class BackgroundTaskManager:
                 from agent.shared.infrastructure.errors import classify_agent_error
 
                 agent_error = classify_agent_error(exc)
+                error_code = exc.code if isinstance(exc, ProjectWorkspaceError) else agent_error.code
+                error_message = str(exc) if isinstance(exc, ProjectWorkspaceError) else agent_error.message
                 task.retry_count += 1
                 if task.retry_count <= task.max_retries:
                     logger.warning(
@@ -493,13 +503,13 @@ class BackgroundTaskManager:
                     return
 
                 task.status = TaskStatus.FAILED
-                task.error = _truncate_stored_text(agent_error.message)
+                task.error = _truncate_stored_text(error_message)
                 self._publish_agent_event(
                     task,
                     {
                         "type": "error",
-                        "code": agent_error.code,
-                        "content": agent_error.message,
+                        "code": error_code,
+                        "content": error_message,
                     },
                 )
                 logger.error(

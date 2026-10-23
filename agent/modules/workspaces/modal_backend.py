@@ -151,7 +151,7 @@ async def get_modal_client():
     return None
 
 
-async def create_modal_workspace(*, label: str | None = None) -> WorkspaceRef:
+async def create_modal_workspace(*, label: str | None = None, on_created=None) -> WorkspaceRef:
     (
         _enabled,
         _token_id,
@@ -188,6 +188,8 @@ async def create_modal_workspace(*, label: str | None = None) -> WorkspaceRef:
             root=root, app_name=app_name, touch=True, status="started"
         ),
     )
+    if on_created is not None:
+        await on_created(ref)
     fs = getattr(sandbox, "filesystem", None)
     if fs is None:
         raise RuntimeError("Modal sandbox does not expose filesystem APIs.")

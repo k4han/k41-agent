@@ -43,6 +43,7 @@ function connect() {
       if (Array.isArray(payload.sessions)) {
         receivedLiveData = true;
         setSessions(payload.sessions);
+        notify(CUSTOM_DOM_EVENTS.WORKSPACE_RUNTIME_CHANGED);
       }
     } catch (error) {
       console.error("Failed to parse sessions snapshot", error);
@@ -70,6 +71,16 @@ function connect() {
   };
 
   connection.addEventListener(SESSION_EVENTS.SESSION_STARTED, (event) => upsert(event, CUSTOM_DOM_EVENTS.SESSION_STARTED));
+  connection.addEventListener(SESSION_EVENTS.WORKSPACE_RUNTIME_CHANGED, (event) => {
+    if (source !== connection) return;
+    try {
+      notify(CUSTOM_DOM_EVENTS.WORKSPACE_RUNTIME_CHANGED, JSON.parse(event.data));
+      notify(CUSTOM_DOM_EVENTS.PROJECTS_CHANGED);
+      notify(CUSTOM_DOM_EVENTS.THREADS_CHANGED);
+    } catch (error) {
+      console.error("Failed to parse workspace runtime event", error);
+    }
+  });
   connection.addEventListener(SESSION_EVENTS.SESSION_UPDATED, (event) => upsert(event, CUSTOM_DOM_EVENTS.SESSION_UPDATED));
   connection.addEventListener(SESSION_EVENTS.SESSION_STOPPED, (event) => {
     if (source !== connection) return;

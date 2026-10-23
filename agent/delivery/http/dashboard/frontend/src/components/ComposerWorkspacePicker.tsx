@@ -3,10 +3,17 @@ import { createEffect, createMemo, createSignal, createUniqueId, onCleanup, Show
 import { Portal } from "solid-js/web";
 
 import { WorkspaceSelector, type WorkspaceSelectorProps } from "@/components/WorkspaceSelector";
+import { WorkspaceRuntimePicker } from "@/components/WorkspaceRuntimePicker";
+import type { ThreadRuntimePayload, WorkspaceBackendKey } from "@/types";
 import { getBackendDisplayName } from "@/lib/catalogStore";
 import { isTempWorkspace, workspaceDisplayLabel, workspaceDisplayLabelFromValues } from "@/lib/workspace";
 
-export function ComposerWorkspacePicker(props: WorkspaceSelectorProps) {
+export function ComposerWorkspacePicker(props: WorkspaceSelectorProps & {
+  runtimePayload?: ThreadRuntimePayload;
+  runtimeBusy?: boolean;
+  runtimeError?: string;
+  onSwitchBackend?: (backend: WorkspaceBackendKey) => Promise<void>;
+}) {
   const [open, setOpen] = createSignal(false);
   const [nestedDialogOpen, setNestedDialogOpen] = createSignal(false);
   const [position, setPosition] = createSignal({ left: 0, top: 0, width: 540, maxHeight: 480 });
@@ -17,7 +24,8 @@ export function ComposerWorkspacePicker(props: WorkspaceSelectorProps) {
   const backend = () => props.selection?.backend || props.workspace?.backend || "local";
   const backendLabel = () => {
     const label = getBackendDisplayName(backend());
-    return label === "local" ? "Local" : label;
+    const titles: Record<string, string> = { local: "Local", daytona: "Daytona", modal: "Modal" };
+    return label === backend() ? titles[backend()] || label : label;
   };
   const projectLabel = createMemo(() => {
     if (props.selection?.source === "temp" || isTempWorkspace(props.workspace)) return "Temporary";
@@ -28,7 +36,8 @@ export function ComposerWorkspacePicker(props: WorkspaceSelectorProps) {
     return workspaceDisplayLabel(props.workspace)
       || workspaceDisplayLabelFromValues("", props.workingDir) || "Temporary";
   });
-  const description = () => `${projectLabel()} · ${backendLabel()}${props.locked ? " · Workspace locked" : ""}`;
+  const canSwitchRuntime = () => props.locked && props.runtimePayload?.kind === "shared" && props.onSwitchBackend;
+  const description = () => `${projectLabel()} · ${backendLabel()}${props.locked && !canSwitchRuntime() ? " · Workspace locked" : ""}`;
 
   const close = () => {
     setOpen(false);
@@ -114,7 +123,7 @@ export function ComposerWorkspacePicker(props: WorkspaceSelectorProps) {
         <FolderOpen size={16} />
         <span class="composer-workspace-label">{projectLabel()}</span>
         <span class="composer-workspace-backend">· {backendLabel()}</span>
-        <Show when={props.locked}><Lock size={12} class="composer-workspace-lock" /></Show>
+        <Show when={props.locked && !canSwitchRuntime()}><Lock size={12} class="composer-workspace-lock" /></Show>
         <ChevronDown size={12} class="composer-workspace-caret" />
       </button>
       <Show when={open()}>
@@ -138,14 +147,17 @@ export function ComposerWorkspacePicker(props: WorkspaceSelectorProps) {
                 <X size={16} />
               </button>
             </div>
-            <Show when={props.locked}>
+            <Show when={props.locked && !canSwitchRuntime()}>
               <p class="composer-workspace-locked">{backendLabel()} · Workspace is locked to this conversation.</p>
             </Show>
-            <WorkspaceSelector
+            <Show when={canSwitchRuntime()} fallback={<WorkspaceSelector
               {...props}
               embedded
               onBrowserOpenChange={setNestedDialogOpen}
-            />
+            />}>
+              <WorkspaceRuntimePicker payload={props.runtimePayload!} busy={Boolean(props.runtimeBusy)}
+                disabled={props.disabled} error={props.runtimeError || ""} onSwitch={props.onSwitchBackend!} portalMount={panelRef} />
+            </Show>
           </div>
         </Portal>
       </Show>

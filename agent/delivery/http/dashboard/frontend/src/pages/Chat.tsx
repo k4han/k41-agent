@@ -82,6 +82,8 @@ import { createMediaQuery } from "@/lib/useMediaQuery";
 import { useChatScroll } from "@/lib/useChatScroll";
 import { useChatStreams } from "@/lib/useChatStreams";
 import { useWorkspaceExplorer } from "@/lib/useWorkspaceExplorer";
+import { useWorkspaceRuntime } from "@/lib/useWorkspaceRuntime";
+import { fetchCatalog, getBackendDisplayName, isBackendEnabled } from "@/lib/catalogStore";
 import { useChatAttachments } from "@/lib/useChatAttachments";
 import { useContextWindow } from "@/lib/useContextWindow";
 import { useBackgroundStream } from "@/lib/useBackgroundStream";
@@ -552,6 +554,18 @@ export function ChatPage() {
     setWorkingDir(workspaceSelectionLocator(selection));
   };
 
+  const workspaceRuntime = useWorkspaceRuntime(currentThreadId, (binding) => setWorkspace(binding.execution));
+
+  const runtimeDecision = () => workspaceRuntime.payload().runtime?.decision || null;
+  const decisionBackendLabel = () => getBackendDisplayName(runtimeDecision()?.backend || "local");
+  const decisionBackendEnabled = () => Boolean(runtimeDecision() && isBackendEnabled(runtimeDecision()!.backend));
+  // The recovery banner imports backend metadata; make sure the catalog exists
+  // even when no workspace picker popover has been opened yet.
+  onMount(() => { void fetchCatalog().catch(() => undefined); });
+  const runtimeRecoverMessage = () => runtimeDecision()
+    ? `The ${decisionBackendLabel()} environment for this project workspace is no longer available. Its saved files can be restored — recover the workspace to continue.`
+    : "";
+
   const buildWorkspaceResolvePayload = (
     selection: WorkspaceSelectionDraft,
   ): WorkspaceResolveRequest => {
@@ -588,6 +602,15 @@ export function ChatPage() {
   };
 
   const resolveWorkspaceForSend = async (isCurrent: () => boolean): Promise<WorkspaceRef | null> => {
+    if (currentThreadId()) {
+      const latest = await workspaceRuntime.refresh();
+      if (!isCurrent()) return null;
+      if (workspaceRuntime.busy()) throw new Error("Wait for the workspace backend switch to finish.");
+      if (latest?.runtime?.decision) {
+        throw new Error("Recover the project workspace before sending: restore its saved files or move it to a local workspace.");
+      }
+      if (latest?.workspace) return latest.workspace.execution;
+    }
     const currentWorkspace = workspaceRef();
     if (currentWorkspace) {
       return currentWorkspace;
@@ -792,10 +815,10 @@ export function ChatPage() {
   ));
   const workspaceLocked = createMemo(() => Boolean(currentThreadId() && workingDir().trim()));
   const composerDisabled = createMemo(() => (
-    conversationBusy() || hasPendingInterrupt() || compacting()
+    conversationBusy() || hasPendingInterrupt() || compacting() || workspaceRuntime.busy()
   ));
   const inputDisabled = createMemo(() => (
-    threadLoading() || hasPendingInterrupt() || compacting()
+    threadLoading() || hasPendingInterrupt() || compacting() || workspaceRuntime.busy()
   ));
   const userInputRequestDisabled = createMemo(() => conversationBusy() || compacting());
 
@@ -1922,6 +1945,10 @@ export function ChatPage() {
                     selection={workspaceSelection()}
                     locked={workspaceLocked()}
                     disabled={conversationBusy()}
+                    runtimePayload={workspaceRuntime.payload()}
+                    runtimeBusy={workspaceRuntime.busy()}
+                    runtimeError={workspaceRuntime.error()}
+                    onSwitchBackend={workspaceRuntime.switchBackend}
                     onSelectionChange={setWorkspaceDraft}
                   />
                   <Show when={!explorer.open()}>
@@ -1945,6 +1972,23 @@ export function ChatPage() {
                   <Show when={backgroundStreamError()}>
                     <span>{backgroundStreamError()}</span>
                   </Show>
+                </div>
+              </Show>
+              <Show when={runtimeDecision()}>
+                <div class="thread-banner" role="alert">
+                  <span>{runtimeRecoverMessage()}</span>
+                  <div class="thread-banner-actions">
+                    <Show when={decisionBackendEnabled()}>
+                      <button class="btn btn-primary" type="button" disabled={workspaceRuntime.busy()}
+                        onClick={() => void workspaceRuntime.confirmRecovery("restore")}>
+                        {`Restore on ${decisionBackendLabel()}`}
+                      </button>
+                    </Show>
+                    <button class="btn" type="button" disabled={workspaceRuntime.busy()}
+                      onClick={() => void workspaceRuntime.confirmRecovery("local")}>
+                      Move to local workspace
+                    </button>
+                  </div>
                 </div>
               </Show>
               <ChatTranscript

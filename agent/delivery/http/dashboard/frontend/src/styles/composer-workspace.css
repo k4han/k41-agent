@@ -355,6 +355,17 @@
   border-color: transparent;
 }
 
+.composer-runtime-picker {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.composer-runtime-picker p {
+  margin: 0;
+  line-height: 1.5;
+}
+
 .composer-workspace-locked {
   margin: 12px 14px 0;
   color: var(--muted);

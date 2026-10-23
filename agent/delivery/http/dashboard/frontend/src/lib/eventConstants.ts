@@ -20,6 +20,7 @@ export const SESSION_EVENTS = {
   SESSION_STARTED: "session_started",
   SESSION_STOPPED: "session_stopped",
   SESSION_UPDATED: "session_updated",
+  WORKSPACE_RUNTIME_CHANGED: "workspace_runtime_changed",
 } as const;
 
 export const BACKGROUND_TASK_EVENTS = {
@@ -40,6 +41,7 @@ export const CUSTOM_DOM_EVENTS = {
   THREADS_CHANGED: "k41:threads-changed",
   PROJECTS_CHANGED: "k41:projects-changed",
   WORKSPACE_CHANGED: "k41:workspace-changed",
+  WORKSPACE_RUNTIME_CHANGED: "k41:workspace-runtime-changed",
   TASKS_CHANGED: "k41:tasks-changed",
   TRANSCRIPT_TOOL_TOGGLE: "k41:transcript-tool-toggle",
   OPEN_MOBILE_NAV: "k41:open-mobile-nav",

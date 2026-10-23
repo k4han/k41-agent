@@ -310,6 +310,45 @@ def test_project_api_validation_and_errors(monkeypatch):
     assert client.get("/dashboard-api/projects").status_code == 503
 
 
+def test_runtime_switch_api_accepts_background_operation_and_reports_conflicts(monkeypatch, isolated_container):
+    from agent.modules.projects import ProjectWorkspaceError
+    from agent.modules.projects.workspaces import get_project_workspace_service
+    projects = get_project_workspace_service(isolated_container)
+    request = AsyncMock(return_value={"operation_id": "switch", "transition": {"phase": "saving"}})
+    monkeypatch.setattr(projects.switcher, "request", request)
+    app = FastAPI()
+    app.include_router(routes.router)
+    with TestClient(app) as client:
+        url = "/dashboard-api/projects/7/runtime/switch"
+        body = {"backend": "daytona", "expected_generation": 3, "project_workspace_id": 11}
+        response = client.post(url, json=body)
+        assert response.status_code == 202 and response.json()["operation_id"] == "switch"
+        request.assert_awaited_once_with(7, "daytona", 3, 11)
+        for invalid in ({**body, "backend": "unknown"}, {**body, "expected_generation": 0}, {"backend": "local"}, {**body, "force": True}):
+            assert client.post(url, json=invalid).status_code == 422
+        for code in ("workspace_busy", "workspace_switching", "stale_runtime"):
+            request.side_effect = ProjectWorkspaceError("Workspace cannot switch", code)
+            response = client.post(url, json=body)
+            assert response.status_code == 409 and response.json()["detail"]["code"] == code
+
+
+def test_runtime_switch_migration_adds_transition_without_changing_existing_runtime(tmp_path):
+    from sqlalchemy import create_engine, text
+    from agent.modules.workspaces.migrations import migrate_workspace_tables
+    url = "sqlite:///" + (tmp_path / "legacy-runtime.db").as_posix()
+    engine = create_engine(url)
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE workspace_runtimes (id INTEGER PRIMARY KEY, execution_json TEXT NOT NULL)"))
+        connection.execute(text("INSERT INTO workspace_runtimes VALUES (1, :ref)"), {"ref": '{"backend":"local","locator":"/original"}'})
+    migrate_workspace_tables(url)
+    migrate_workspace_tables(url)
+    with engine.connect() as connection:
+        row = connection.execute(text("SELECT execution_json, transition_json FROM workspace_runtimes WHERE id=1")).one()
+    assert json.loads(row.execution_json)["locator"] == "/original"
+    assert json.loads(row.transition_json) is None
+    engine.dispose()
+
+
 def test_catalog_routes_require_dashboard_authentication(monkeypatch):
     from agent.delivery.http.dashboard.router import router
     from agent.modules.admin_auth import get_current_admin

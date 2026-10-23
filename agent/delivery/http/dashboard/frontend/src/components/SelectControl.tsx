@@ -2,7 +2,7 @@ import { ChevronDown } from "lucide-solid";
 import { createEffect, createMemo, createSelector, createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 
-import { computeFloatingPosition, floatingMenuStyle } from "@/lib/floating";
+import { computeFloatingPosition, fixedContainingBlockOrigin, floatingMenuStyle } from "@/lib/floating";
 
 export type SelectControlOption = {
   value: string;
@@ -52,7 +52,16 @@ export function SelectControl(props: {
       minWidth: 220,
       align: resolveAlign(),
     });
-    setMenuPos({ top: rect.top, left: rect.left, width: rect.width, maxHeight: rect.maxHeight });
+    // When the portal mount lives inside a transformed ancestor (for example
+    // the centered project popover), position: fixed coordinates resolve
+    // against that ancestor instead of the viewport, so subtract its origin.
+    const origin = fixedContainingBlockOrigin(props.portalMount);
+    setMenuPos({
+      top: rect.top - origin.top,
+      left: rect.left - origin.left,
+      width: rect.width,
+      maxHeight: rect.maxHeight,
+    });
   };
 
   createEffect(() => {

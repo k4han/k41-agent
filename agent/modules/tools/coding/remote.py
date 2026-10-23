@@ -172,6 +172,46 @@ class RemoteCodingRuntime:
         self.cleanup_tasks = set()
         self.loop = None
 
+    async def workspace_processes(self, ref):
+        """Probe existing workers across application restarts without starting a worker."""
+        from agent.modules.workspaces import create_workspace_runtime_backend
+        backend = await create_workspace_runtime_backend(ref)
+        script = r'''
+import glob, json, os, pathlib, socket, sys
+running = 0
+for name in glob.glob("/tmp/k41-coding-%s-*" % os.getuid()):
+    directory = pathlib.Path(name)
+    address = directory / "worker.sock"
+    if not address.exists():
+        continue
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        connection.settimeout(5)
+        try:
+            connection.connect(str(address))
+        except (ConnectionRefusedError, FileNotFoundError):
+            continue
+        request = json.dumps({"operation": "workspace_state", "workspace": sys.argv[1], "token": (directory / "token").read_text()}).encode()
+        connection.sendall(len(request).to_bytes(8, "big") + request)
+        def receive(size):
+            result = bytearray()
+            while len(result) < size:
+                chunk = connection.recv(size - len(result))
+                if not chunk:
+                    raise RuntimeError("Sandbox process state is unknown.")
+                result.extend(chunk)
+            return result
+        response = json.loads(receive(int.from_bytes(receive(8), "big")))
+        if "error" in response:
+            raise RuntimeError("An older sandbox worker cannot verify process state. Stop its processes before switching.")
+        running += response["result"]["running"]
+print(json.dumps({"running": running}))
+'''
+        command = "python3 -c " + shlex.quote(script) + " " + shlex.quote(backend.root)
+        result = await backend.execute_coding_command(command, timeout=60)
+        if result.exit_code not in (0, None):
+            raise CodingError("unknown_outcome", "Cannot verify sandbox workspace process state: " + result.output[-1000:])
+        return json.loads(result.output)["running"]
+
     async def client(self, context):
         self.loop = asyncio.get_running_loop()
         key = (context.backend, context.locator, context.workspace)

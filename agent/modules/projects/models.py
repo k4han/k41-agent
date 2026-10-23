@@ -53,5 +53,9 @@ class WorkspaceRuntime(BaseModel):
     execution_json = Column(Text, nullable=False)
     generation = Column(Integer, nullable=False, default=1)
     status = Column(String(30), nullable=False, default="ready")
+    transition_json = Column(Text, nullable=False, default="null")
+    # Re-provision decision ("sandbox_lost") waiting for the user to confirm how
+    # the workspace should be recovered; "{}" when no decision is pending.
+    pending_decision_json = Column(Text, nullable=False, default="{}")
     last_used_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)

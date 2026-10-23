@@ -180,6 +180,10 @@ class ActiveSessionRegistry:
             # No running loop (e.g. outside asyncio environment)
             pass
 
+    def publish(self, event_type: str, data: Any) -> None:
+        """Publish workspace lifecycle events on the shared dashboard stream."""
+        self._broadcast(event_type, data)
+
     def _register_locked(self, session: ActiveSession, task: Any | None = None) -> dict[str, Any]:
         """Register a session. Caller must hold ``self._lock``."""
         self._sessions[session.session_id] = session

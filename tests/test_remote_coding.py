@@ -62,6 +62,25 @@ def python_command(source):
 
 
 @pytest.mark.asyncio
+async def test_workspace_state_counts_running_and_retiring_jobs_without_mutating_them(tmp_path):
+    root = tmp_path / "workspace"
+    root.mkdir()
+    worker = SandboxWorker(tmp_path / "outputs", str(root))
+    running, finished = asyncio.Event(), asyncio.Event()
+    finished.set()
+    first = SimpleNamespace(workspace=str(root.resolve()), finished=running)
+    second = SimpleNamespace(workspace=str(root.resolve()), finished=finished)
+    retiring = SimpleNamespace(workspace=str(root.resolve()), finished=running)
+    worker.processes.jobs = {"running": first, "finished": second}
+    worker.processes.retiring_jobs = {"retiring": retiring}
+    response = await worker.dispatch({"operation": "workspace_state", "workspace": str(root / ".." / "workspace")})
+    assert response == {"running": 2}
+    assert worker.processes.jobs["running"] is first
+    assert not running.is_set()
+    assert await worker.dispatch({"operation": "workspace_state", "workspace": str(tmp_path / "other")}) == {"running": 0}
+
+
+@pytest.mark.asyncio
 async def test_remote_shell_cleans_output_and_reports_nonzero_exit(remote_coding):
     service, context, _, worker = remote_coding
     try:

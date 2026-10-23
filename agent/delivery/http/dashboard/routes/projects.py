@@ -77,11 +77,61 @@ class MigrationSelectionBody(BaseModel):
     source_id: int = Field(ge=1)
 
 
+class ProjectRuntimeSwitchBody(ProjectRuntimeBody):
+    backend: Literal["local", "daytona", "modal"]
+    expected_generation: int = Field(ge=1)
+
+
+@router.get("/dashboard-api/workspace/runtime/{thread_id:path}")
+async def get_thread_runtime(thread_id: str):
+    from agent.modules.projects import get_project_workspace_service
+    service = get_project_workspace_service()
+    if not service.container._persistence_ready:
+        return {"workspace": None, "runtime": None}
+    try:
+        binding = await service.resolve_thread(thread_id)
+        if binding is None:
+            return {"workspace": None, "runtime": None}
+        description = await service.describe(binding.project_id)
+        workspace = next(item for item in description["workspaces"] if item["id"] == binding.project_workspace_id)
+        return {"workspace": binding.model_dump(), "runtime": workspace["runtime"], "kind": workspace["kind"]}
+    except Exception as exc:
+        raise project_resource_error(exc) from exc
+
+
+@router.post("/dashboard-api/projects/{project_id}/runtime/switch", status_code=202)
+async def switch_project_runtime(body: ProjectRuntimeSwitchBody, project_id: int = Path(ge=1)):
+    from agent.modules.projects import get_project_workspace_service
+    try:
+        return await get_project_workspace_service().switcher.request(
+            project_id, body.backend, body.expected_generation, body.project_workspace_id,
+        )
+    except Exception as exc:
+        raise project_resource_error(exc) from exc
+
+
 @router.post("/dashboard-api/projects/{project_id}/runtime/ensure")
 async def ensure_project_runtime(body: ProjectRuntimeBody, project_id: int = Path(ge=1)):
     from agent.modules.projects import get_project_workspace_service
     try:
         binding = await get_project_workspace_service().ensure(project_id, body.project_workspace_id)
+        return {"workspace": binding.model_dump()}
+    except Exception as exc:
+        raise project_resource_error(exc) from exc
+
+
+class ProjectRuntimeRecoveryBody(ProjectRuntimeBody):
+    action: Literal["restore", "local"]
+    expected_generation: int = Field(ge=1)
+
+
+@router.post("/dashboard-api/projects/{project_id}/runtime/recovery")
+async def confirm_project_runtime_recovery(body: ProjectRuntimeRecoveryBody, project_id: int = Path(ge=1)):
+    """Apply the pending re-provision decision for a lost cloud sandbox."""
+    from agent.modules.projects import get_project_workspace_service
+    try:
+        binding = await get_project_workspace_service().confirm_provision(
+            project_id, body.action, body.expected_generation, body.project_workspace_id)
         return {"workspace": binding.model_dump()}
     except Exception as exc:
         raise project_resource_error(exc) from exc

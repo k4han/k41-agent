@@ -2,6 +2,8 @@ from agent.modules.agent_runtime.session import SessionManager
 import asyncio
 import importlib
 import time
+from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -613,6 +615,106 @@ async def test_background_task_retry_leaves_no_active_session(
     assert attempts["count"] == 2
 
     assert all(session["thread_id"] != task["thread_id"] for session in registry.list_active())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["unavailable", "workspace", "cancelled"])
+async def test_background_task_admission_failure_finishes_and_cleans_up(
+    background_task_db,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    import agent.modules.agent_runtime.runner as runner_module
+    import agent.modules.agent_runtime.workspace_admission as admission_module
+    from agent.modules.agent_runtime.active_sessions import get_active_session_registry
+    from agent.modules.projects import ProjectWorkspaceError
+    from agent.modules.workspaces import WorkspaceUnavailableError
+
+    streamed: list[str] = []
+    events: list[dict] = []
+
+    async def fake_run_agent_stream(**kwargs):
+        streamed.append(kwargs["thread_id"])
+        yield {"type": "final", "content": "done"}
+
+    @asynccontextmanager
+    async def reject_workspace(arguments):
+        if failure == "unavailable":
+            raise WorkspaceUnavailableError("Workspace temporarily unavailable")
+        if failure == "workspace":
+            raise ProjectWorkspaceError("Workspace is switching", "workspace_switching")
+        raise asyncio.CancelledError()
+        yield  # pragma: no cover - keep this an async context manager
+
+    monkeypatch.setattr(runner_module, "run_agent_stream", fake_run_agent_stream)
+    monkeypatch.setattr(admission_module, "workspace_run", reject_workspace)
+    manager = BackgroundTaskManager()
+    monkeypatch.setattr(manager, "_publish_event", lambda thread_id, event, data: events.append({"event": event, "data": data}))
+    notified, cleanup = AsyncMock(), AsyncMock()
+    monkeypatch.setattr(manager, "_notify_completion", notified)
+    task_id = await manager.submit("do work", cleanup_hook=cleanup)
+    status = "cancelled" if failure == "cancelled" else "failed"
+    task = await _wait_for_task_status(manager, task_id, status)
+
+    assert not streamed
+    assert task["completed_at"] is not None
+    assert any(event["event"] == "done" and event["data"]["task"]["status"] == status for event in events)
+    if failure == "workspace":
+        assert any(event["event"] == "agent" and event["data"].get("code") == "workspace_switching" for event in events)
+    notified.assert_awaited_once_with(manager._tasks[task_id])
+    cleanup.assert_awaited_once_with(manager._tasks[task_id])
+    records = await BackgroundTaskRepository().list()
+    saved = next(record for record in records if record["task_id"] == task_id)
+    assert saved["status"] == status and saved["completed_at"] is not None
+    assert all(session["thread_id"] != task["thread_id"] for session in get_active_session_registry().list_active())
+
+
+@pytest.mark.asyncio
+async def test_background_task_retries_admission_and_holds_lease_through_cleanup(
+    background_task_db,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agent.modules.agent_runtime.runner as runner_module
+    import agent.modules.agent_runtime.workspace_admission as admission_module
+    from agent.modules.workspaces import WorkspaceUnavailableError
+
+    attempts: list[str] = []
+    active: set[str] = set()
+    cleaned: list[str] = []
+
+    @asynccontextmanager
+    async def flaky_workspace(arguments):
+        thread = arguments["thread_id"]
+        attempts.append(thread)
+        if len(attempts) == 1:
+            raise WorkspaceUnavailableError("Workspace temporarily unavailable")
+        active.add(thread)
+        try:
+            yield
+        finally:
+            active.remove(thread)
+
+    async def fake_run_agent_stream(**kwargs):
+        assert kwargs["thread_id"] in active
+        yield {"type": "final", "content": "done"}
+
+    async def completion_hook(task):
+        assert task.thread_id in active
+
+    async def cleanup_hook(task):
+        assert task.thread_id in active
+        assert len(attempts) == 2
+        cleaned.append(task.task_id)
+
+    monkeypatch.setattr(runner_module, "run_agent_stream", fake_run_agent_stream)
+    monkeypatch.setattr(admission_module, "workspace_run", flaky_workspace)
+    manager = BackgroundTaskManager()
+    task_id = await manager.submit("do work", max_retries=1, completion_hook=completion_hook, cleanup_hook=cleanup_hook)
+    task = await _wait_for_task_status(manager, task_id, "completed")
+
+    assert task["retry_count"] == 1 and task["result"] == "done"
+    assert cleaned == [task_id]
+    assert not active
 
 
 @pytest.mark.asyncio

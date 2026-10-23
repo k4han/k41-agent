@@ -321,7 +321,14 @@ async def chat_events_edit(request: EditChatRequest):
     params["message_index"] = request.message_index
     params["source_checkpoint_id"] = request.source_checkpoint_id
     params["emit_thinking"] = _is_thinking_stream_enabled()
-    await _apply_workspace_to_run_params(request, params)
+    try:
+        await _apply_workspace_to_run_params(request, params)
+    except (KeyError, RuntimeError) as exc:
+        from agent.modules.projects import ProjectWorkspaceError
+        from agent.delivery.http.dashboard.routes.helpers.workspace import workspace_http_error
+        if isinstance(exc, (KeyError, ProjectWorkspaceError)):
+            raise workspace_http_error(exc) from exc
+        raise
 
     manager = get_chat_stream_manager()
     session = await manager.get_or_create_session(

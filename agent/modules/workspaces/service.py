@@ -460,6 +460,7 @@ async def create_workspace_backend(
     backend: str,
     *,
     label: str | None = None,
+    on_created=None,
 ) -> WorkspaceRef:
     descriptor = get_workspace_backend_registry().require(backend)
     if not descriptor.create_loader:
@@ -471,10 +472,17 @@ async def create_workspace_backend(
         descriptor.name,
         descriptor.create_loader,
     )
+    kwargs = {"label": label}
+    if on_created is not None:
+        if descriptor.name == DAYTONA_BACKEND:
+            loop = asyncio.get_running_loop()
+            kwargs["on_created"] = lambda ref: asyncio.run_coroutine_threadsafe(on_created(ref), loop).result()
+        else:
+            kwargs["on_created"] = on_created
     if descriptor.name == DAYTONA_BACKEND:
-        result = await asyncio.to_thread(creator, label=label)
+        result = await asyncio.to_thread(creator, **kwargs)
     else:
-        result = creator(label=label)
+        result = creator(**kwargs)
     if inspect.isawaitable(result):
         result = await result
     return result

@@ -74,3 +74,35 @@ export function floatingMenuStyle(rect: FloatingRect): Record<string, string> {
     "max-height": `${Math.round(rect.maxHeight)}px`,
   };
 }
+
+function establishesFixedContainingBlock(style: CSSStyleDeclaration): boolean {
+  if (style.transform !== "none" || style.translate !== "none"
+    || style.rotate !== "none" || style.scale !== "none"
+    || style.perspective !== "none" || style.filter !== "none") {
+    return true;
+  }
+  const willChange = (style.willChange || "").toLowerCase();
+  if (/(transform|perspective|filter)/.test(willChange)) return true;
+  const contain = (style.contain || "").toLowerCase();
+  return /(^|\s)(paint|layout|strict|content)(\s|$)/.test(contain);
+}
+
+/**
+ * position: fixed descendants resolve against the nearest ancestor that
+ * establishes a containing block (transform, filter, contain, ...) instead of
+ * the viewport. Viewport coordinates must therefore be converted into that
+ * ancestor's coordinate space, otherwise the element renders displaced.
+ */
+export function fixedContainingBlockOrigin(element?: HTMLElement | null): { left: number; top: number } {
+  let node: HTMLElement | null = element ?? null;
+  while (node && node !== document.documentElement) {
+    if (establishesFixedContainingBlock(getComputedStyle(node))) {
+      const rect = node.getBoundingClientRect();
+      // clientLeft/clientTop convert from border box to the padding box,
+      // which is the actual containing block for fixed descendants.
+      return { left: rect.left + node.clientLeft, top: rect.top + node.clientTop };
+    }
+    node = node.parentElement;
+  }
+  return { left: 0, top: 0 };
+}
