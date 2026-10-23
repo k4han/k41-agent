@@ -17,6 +17,12 @@ EXCLUDED = frozenset({"node_modules", ".venv", "__pycache__", ".pytest_cache", "
 INTERNAL = frozenset({"scratchpad", "uploads", "generated-images"})
 
 
+class WorkspaceRootUnavailableError(FileNotFoundError):
+    """The capture root is unavailable, rather than an individual project entry."""
+
+    code = "runtime_unavailable"
+
+
 def _signature(path: Path) -> tuple:
     info = path.lstat()
     return info.st_mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns, info.st_ino, info.st_dev, str(path)
@@ -82,8 +88,12 @@ def _safe_link(relative: str, target: str) -> None:
 
 def capture(root: str, staging: str) -> dict:
     base, stage = Path(root), Path(staging)
-    if not base.is_dir() or base.is_symlink():
-        raise FileNotFoundError("Project workspace is unavailable.")
+    if base.is_symlink():
+        raise ValueError("Project workspace root must not be a symlink: " + str(base))
+    if not base.is_dir():
+        raise WorkspaceRootUnavailableError(
+            "Project workspace directory is missing or is not a directory: " + str(base)
+        )
     if stage.resolve().is_relative_to(base.resolve()):
         raise ValueError("Checkpoint staging must be outside the captured workspace.")
     objects = stage / "objects"

@@ -703,6 +703,46 @@ async def test_periodic_checkpoint_keeps_clean_timestamp_and_saves_external_chan
 
 
 @pytest.mark.asyncio
+async def test_missing_checkpoint_root_stops_monitoring_and_retry_preserves_saved_files(project_service):
+    service, project, root, maker = project_service
+    binding = await service.ensure(project["id"])
+    _, before, _ = await service.rows(project["id"])
+    offline = root.with_name("offline")
+    root.rename(offline)
+    try:
+        with pytest.raises(ProjectWorkspaceError) as failure:
+            await service.checkpoint(project["id"])
+        assert failure.value.code == "runtime_unavailable"
+        assert str(root) in str(failure.value)
+        assert binding.project_workspace_id not in service.active
+        _, after, _ = await service.rows(project["id"])
+        assert after.head_revision == before.head_revision
+        assert after.last_saved_at == before.last_saved_at
+        assert after.persistence_status == "error"
+        assert after.last_error == str(failure.value)
+        assert (await service.read_saved(project["id"], "file.txt"))[0] == b"original"
+        assert not root.exists()
+    finally:
+        offline.rename(root)
+    (root / "file.txt").write_bytes(b"recovered changes")
+    await service.checkpoint(project["id"])
+    assert binding.project_workspace_id in service.active
+    assert (await service.describe(project["id"]))["persistence"]["status"] == "clean"
+    assert (await service.read_saved(project["id"], "file.txt"))[0] == b"recovered changes"
+
+
+@pytest.mark.asyncio
+async def test_missing_project_entry_does_not_disable_checkpoint_retries(project_service, monkeypatch):
+    service, project, root, maker = project_service
+    binding = await service.ensure(project["id"])
+    monkeypatch.setattr(service.transfer, "capture", AsyncMock(side_effect=FileNotFoundError("Project entry disappeared")))
+    with pytest.raises(ProjectWorkspaceError) as failure:
+        await service.checkpoint(project["id"])
+    assert failure.value.code == "persistence_error"
+    assert binding.project_workspace_id in service.active
+
+
+@pytest.mark.asyncio
 async def test_managed_commands_report_save_failure_without_reexecution(project_service, monkeypatch):
     from agent.modules.projects.backend import ManagedWorkspaceBackend
     from agent.modules.workspaces import CommandResult

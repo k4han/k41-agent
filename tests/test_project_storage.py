@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent.modules.projects.snapshot_worker import CHUNK_BYTES, capture
+from agent.modules.projects.snapshot_worker import CHUNK_BYTES, WorkspaceRootUnavailableError, capture
 from agent.modules.projects.storage import LocalProjectStorage, checksum, file_chunks, manifest_bytes, validate_manifest
 from agent.modules.projects.transfer import WorkspaceSnapshotTransfer
 from agent.modules.workspaces.refs import WorkspaceRef
@@ -130,6 +130,32 @@ def test_capture_rejects_external_links(tmp_path):
     with tempfile.TemporaryDirectory(prefix="k41-project-") as stage:
         with pytest.raises(ValueError, match="External"):
             capture(str(root), stage)
+
+
+@pytest.mark.parametrize("exists", [False, True])
+def test_capture_reports_unavailable_root_without_creating_workspace(tmp_path, exists):
+    root = tmp_path / "source"
+    if exists:
+        root.write_bytes(b"not a directory")
+    with pytest.raises(WorkspaceRootUnavailableError) as failure:
+        capture(str(root), str(tmp_path / "stage"))
+    assert failure.value.code == "runtime_unavailable"
+    assert str(root) in str(failure.value)
+    assert not (tmp_path / "stage").exists()
+    assert root.is_file() if exists else not root.exists()
+
+
+def test_capture_distinguishes_symlink_root_from_missing_directory(tmp_path):
+    root = tmp_path / "source"
+    target = tmp_path / "target"
+    target.mkdir()
+    try:
+        root.symlink_to(target, target_is_directory=True)
+    except OSError:
+        pytest.skip("Symlinks require platform support.")
+    with pytest.raises(ValueError, match="root must not be a symlink") as failure:
+        capture(str(root), str(tmp_path / "stage"))
+    assert str(root) in str(failure.value)
 
 
 @pytest.mark.asyncio

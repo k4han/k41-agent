@@ -54,6 +54,8 @@ Ready workspaces remain monitored so external edits are saved even without an
 attached conversation. This still scans filesystem metadata every 30 seconds;
 unchanged files are not reread or rehashed. Unavailable and retired runtimes leave
 the monitoring set. Remote GitHub commit/push runs as one managed mutation.
+Missing local checkpoint roots report their registered path. After restoring
+the directory, a successful checkpoint retry resumes monitoring.
 
 Execution receipts and persistence outcomes are separate. A failed save retries
 storage, not completed commands. Disconnected calls retain `unknown_outcome`

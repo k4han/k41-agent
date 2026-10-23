@@ -358,6 +358,8 @@ class ProjectWorkspaceService:
             manifest = await self.transfer.capture(ref, self.storage, str(workspace.id))
             saved = await asyncio.to_thread(self.storage.put_manifest, str(workspace.id), manifest)
             if skip_unchanged and saved == revision and workspace.persistence_status == "clean":
+                if not self.closing and project.migration_status == "ready" and workspace.kind != "legacy" and runtime.status == "ready":
+                    self.active.add(workspace.id)
                 return {"status": "clean", "revision": saved, "saved": True}
             session = await _session()
             async with session:
@@ -372,6 +374,8 @@ class ProjectWorkspaceService:
                     raise ProjectWorkspaceError("Workspace changed while saving.", "stale_runtime")
                 await session.commit()
             committed = True
+            if not self.closing and project.migration_status == "ready" and workspace.kind != "legacy" and runtime.status == "ready":
+                self.active.add(workspace.id)
             keep = {value for value in (saved, revision, workspace.previous_revision if saved == revision else None,
                                         workspace.pinned_revision) if value}
             try:
@@ -398,6 +402,8 @@ class ProjectWorkspaceService:
                 await asyncio.shield(self._set_error(workspace.id, ProjectWorkspaceError("Checkpoint was interrupted.")))
             raise
         except Exception as exc:
+            if getattr(exc, "code", "") == "runtime_unavailable":
+                self.active.discard(workspace.id)
             if getattr(exc, "code", "") != "stale_runtime":
                 await self._set_error(workspace.id, exc)
             raise ProjectWorkspaceError(str(exc), getattr(exc, "code", "persistence_error")) from exc
