@@ -25,6 +25,7 @@ from agent.modules.workspaces.backends import (
 )
 from agent.modules.workspaces.repository import get_thread_workspace_repository
 from agent.modules.workspaces.refs import (
+    WorkspaceBinding,
     WorkspaceRef,
     normalize_workspace_ref,
 )
@@ -313,7 +314,8 @@ async def get_workspace_file_io(
     *,
     thread_id: str | None = None,
 ) -> WorkspaceFileIO:
-    return await _create_workspace_runtime_backend(workspace, thread_id=thread_id)
+    from agent.modules.projects import managed_backend
+    return await managed_backend(workspace, thread_id=thread_id)
 
 
 async def get_workspace_command_executor(
@@ -321,7 +323,8 @@ async def get_workspace_command_executor(
     *,
     thread_id: str | None = None,
 ) -> WorkspaceCommandExecutor:
-    return await _create_workspace_runtime_backend(workspace, thread_id=thread_id)
+    from agent.modules.projects import managed_backend
+    return await managed_backend(workspace, thread_id=thread_id)
 
 
 async def get_workspace_browser(
@@ -329,7 +332,8 @@ async def get_workspace_browser(
     *,
     thread_id: str | None = None,
 ) -> WorkspaceBrowser:
-    return await _create_workspace_runtime_backend(workspace, thread_id=thread_id)
+    from agent.modules.projects import managed_backend
+    return await managed_backend(workspace, thread_id=thread_id)
 
 
 async def get_workspace_change_inspector(
@@ -337,7 +341,8 @@ async def get_workspace_change_inspector(
     *,
     thread_id: str | None = None,
 ) -> WorkspaceChangeInspector:
-    return await _create_workspace_runtime_backend(workspace, thread_id=thread_id)
+    from agent.modules.projects import managed_backend
+    return await managed_backend(workspace, thread_id=thread_id)
 
 
 async def get_workspace_entry_mutator(
@@ -345,7 +350,8 @@ async def get_workspace_entry_mutator(
     *,
     thread_id: str | None = None,
 ) -> WorkspaceEntryMutator:
-    return await _create_workspace_runtime_backend(workspace, thread_id=thread_id)
+    from agent.modules.projects import managed_backend
+    return await managed_backend(workspace, thread_id=thread_id)
 
 
 async def get_workspace_repository_cloner(
@@ -361,6 +367,10 @@ async def get_workspace_repository_cloner(
             capability="repository clone",
             locator=ref.locator,
         )
+    from agent.modules.projects import get_project_workspace_service
+    if await get_project_workspace_service().find_binding(workspace, thread_id=thread_id):
+        from agent.modules.projects import managed_backend
+        return await managed_backend(workspace, thread_id=thread_id)
     if ref.backend == DAYTONA_BACKEND:
         return _DaytonaWorkspaceRepositoryCloner(ref, thread_id=thread_id)
     if ref.backend == MODAL_BACKEND:
@@ -398,6 +408,14 @@ async def ensure_workspace_ready(
     *,
     thread_id: str | None = None,
 ) -> WorkspaceRef:
+    from agent.modules.projects import get_project_workspace_service
+    projects = get_project_workspace_service()
+    binding = await projects.find_binding(workspace, thread_id=thread_id)
+    if binding:
+        binding = await projects.ensure(binding.project_id, binding.project_workspace_id)
+        if thread_id:
+            await remember_thread_workspace_ref(thread_id, binding)
+        return binding.execution
     ref = resolve_workspace_ref(workspace)
     if ref.backend == LOCAL_BACKEND:
         ensure_workspace_directory(ref.locator)
@@ -427,6 +445,15 @@ async def ensure_workspace_ready(
     if thread_id and thread_id.strip():
         return await remember_thread_workspace_ref(thread_id, ready)
     return ready
+
+
+def is_workspace_unavailable_error(ref: WorkspaceRef, error: Exception) -> bool:
+    if isinstance(error, WorkspaceUnavailableError):
+        return True
+    if ref.backend == DAYTONA_BACKEND:
+        from agent.modules.workspaces.daytona_backend import _is_daytona_not_found_error
+        return _is_daytona_not_found_error(error) or "sandbox is destroyed" in str(error).lower()
+    return False
 
 
 async def create_workspace_backend(
@@ -1114,18 +1141,23 @@ async def remember_thread_workspace_ref(
     ref = resolve_workspace_ref(workspace)
     await get_thread_workspace_repository().upsert(
         thread_id=thread_id,
-        workspace=ref,
+        workspace=workspace if isinstance(workspace, (WorkspaceBinding, dict)) else ref,
     )
     return ref
 
 
 async def get_thread_workspace_ref(thread_id: str) -> WorkspaceRef | None:
-    record = await get_thread_workspace_repository().get(thread_id)
+    repository = get_thread_workspace_repository()
+    record = await repository.get(thread_id) if hasattr(repository, "get") else None
     if not record:
         return None
     workspace = record.get("workspace")
     if not workspace:
         return None
+    if isinstance(workspace, dict) and workspace.get("project_workspace_id"):
+        from agent.modules.projects import get_project_workspace_service
+        binding = await get_project_workspace_service().binding(workspace["project_id"], workspace["project_workspace_id"])
+        return binding.execution
     return resolve_workspace_ref(workspace)
 
 
@@ -1180,6 +1212,25 @@ async def delete_thread_workspace(thread_id: str) -> WorkspaceRef | None:
     workspace = await get_thread_workspace_ref(thread_id)
     if workspace is None:
         return None
+    from agent.bootstrap.container import get_active_container
+    active = get_active_container()
+    binding = None
+    if active is not None and active._persistence_ready:
+        from agent.modules.projects import get_project_workspace_service
+        projects = get_project_workspace_service()
+        binding = await projects.resolve_thread(thread_id)
+        if binding is None and not is_temp_workspace(workspace):
+            await projects.capture_pending()
+            binding = await projects.resolve_thread(thread_id)
+    if binding:
+        if active._coding_service:
+            await active._coding_service.processes.stop_thread(thread_id)
+        try:
+            await get_project_workspace_service().checkpoint(binding.project_id, binding.project_workspace_id)
+        except Exception:
+            logger.warning("Unsaved project runtime retained while removing thread %s", thread_id)
+        await get_thread_workspace_repository().delete(thread_id)
+        return workspace
 
     shared_workspace = False
     if workspace.backend != LOCAL_BACKEND or is_temp_workspace(workspace):

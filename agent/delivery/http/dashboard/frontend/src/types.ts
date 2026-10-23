@@ -309,6 +309,25 @@ export type WorkspaceScope = {
 export type WorkspaceBinding = {
   scope: WorkspaceScope;
   execution: WorkspaceExecutionRef;
+  project_id?: number | null;
+  project_workspace_id?: number | null;
+  runtime_generation?: number | null;
+};
+
+export type ProjectPersistence = {
+  status: "clean" | "dirty" | "error";
+  revision: string | null;
+  last_saved_at: string | null;
+  last_error: string;
+  blocked_for_writes: boolean;
+};
+
+export type ProjectWorkspaceSummary = {
+  id: number;
+  kind: "shared" | "github_task" | "legacy";
+  source: WorkspaceRef;
+  runtime: { status: string; generation: number };
+  persistence: ProjectPersistence;
 };
 
 export type ProjectSummary = {
@@ -318,6 +337,10 @@ export type ProjectSummary = {
   status: "active" | "archived" | "removed";
   is_pinned: boolean;
   workspace: WorkspaceBinding;
+  migration_status?: string;
+  workspaces?: ProjectWorkspaceSummary[];
+  runtime?: { status: string; generation: number };
+  persistence?: ProjectPersistence;
   created_at: string;
   updated_at: string;
 };

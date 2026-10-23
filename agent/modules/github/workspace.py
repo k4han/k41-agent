@@ -173,7 +173,7 @@ class GitHubWorkspaceManager:
                 prune_exc,
             )
 
-    async def prune_orphaned_worktrees(self) -> int:
+    async def prune_orphaned_worktrees(self, *, preserve_paths: set[Path] | None = None) -> int:
         """Remove worktree directories left behind by interrupted tasks.
 
         Task worktrees live under ``<root>/<owner>/<repo>.worktrees/*`` and
@@ -183,6 +183,8 @@ class GitHubWorkspaceManager:
         """
         pruned = 0
         for worktree_path in sorted(self.root.glob("*/*.worktrees/*")):
+            if preserve_paths and worktree_path.resolve() in preserve_paths:
+                continue
             if not worktree_path.is_dir():
                 continue
             if not _is_task_worktree(worktree_path):

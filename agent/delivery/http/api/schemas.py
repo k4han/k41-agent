@@ -40,6 +40,8 @@ class ChatRequest(PoolSelectionValidation):
     checkpoint_id: Optional[str] = Field(default=None, description="Specific checkpoint to resume from within a thread.")
     workflow: Optional[str] = Field(default=None, description="Workflow/graph name to use. Defaults to the agent's default workflow.")
     workspace: Optional[WorkspaceRef | WorkspaceBinding] = Field(default=None, description="Workspace reference for file operations. Optional for dashboard chats; when omitted, a hidden temporary workspace is provisioned.")
+    project_id: int | None = Field(default=None, ge=1)
+    project_workspace_id: int | None = Field(default=None, ge=1)
     agent_name: Optional[str] = Field(default=None, description="Agent card name to use. Defaults to 'default'.")
     provider: Optional[str] = Field(default=None, description="LLM provider name override.")
     model: Optional[str] = Field(default=None, description="LLM model name override.")

@@ -1,5 +1,8 @@
 """Public interface for the workspaces module."""
 
+from agent.modules.workspaces.refs import WorkspaceBinding, WorkspaceInput, WorkspaceRef, WorkspaceScope, bind_workspace_ref, binding_from_record, workspace_ref_from_columns
+from agent.modules.workspaces.models import ThreadWorkspace
+
 from agent.modules.workspaces.backends import (
     CommandResult,
     DaytonaWorkspaceLifecycleManager,
@@ -14,6 +17,10 @@ from agent.modules.workspaces.backends import (
     WorkspaceUnavailableError,
 )
 from agent.modules.workspaces.constants import (
+    NO_WORKSPACE_KEY,
+    NO_WORKSPACE_LABEL,
+    TEMP_WORKSPACE_KEY,
+    TEMP_WORKSPACE_LABEL,
     GIT_TIMEOUT_SECONDS,
     IGNORED_DIR_NAMES,
     MAX_DIFF_CHARS,
@@ -62,6 +69,7 @@ from agent.modules.workspaces.registry import (
     WorkspaceBackendRegistry,
     get_workspace_backend_registry,
     list_workspace_backend_catalog,
+    call_workspace_backend_loader,
 )
 from agent.modules.workspaces.repository import (
     ThreadWorkspaceRepository,
@@ -78,6 +86,8 @@ from agent.modules.workspaces.sandboxes import (
     stop_sandbox,
 )
 from agent.modules.workspaces.service import (
+    _create_workspace_runtime_backend as create_workspace_runtime_backend,
+    _merge_ready_workspace_metadata as merge_ready_workspace_metadata,
     attach_workspace_backend,
     cleanup_orphaned_temp_workspaces,
     create_temp_workspace,
@@ -102,6 +112,7 @@ from agent.modules.workspaces.service import (
     get_workspace_changes,
     get_workspace_diff,
     is_temp_workspace,
+    is_workspace_unavailable_error,
     list_workspace_directories,
     list_workspace_tree,
     remember_thread_workspace,
@@ -125,6 +136,9 @@ from agent.modules.workspaces.github_clone import (
 )
 
 __all__ = [
+    "is_workspace_unavailable_error",
+    "binding_from_record", "create_workspace_runtime_backend", "merge_ready_workspace_metadata", "call_workspace_backend_loader",
+    "NO_WORKSPACE_KEY", "NO_WORKSPACE_LABEL", "TEMP_WORKSPACE_KEY", "TEMP_WORKSPACE_LABEL",
     "WORKSPACE_STORAGE_EXCLUDE_COMMAND",
     "BUILTIN_WORKSPACE_BACKEND_DESCRIPTORS",
     "CommandResult",

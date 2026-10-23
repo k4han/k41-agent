@@ -18,7 +18,7 @@ from agent.modules.agent_runtime.models import BackgroundTaskRecord
 from agent.modules.conversations import navigation
 from agent.modules.conversations.models import ConversationThread
 from agent.modules.projects import service as projects_service
-from agent.modules.projects.models import Project
+from agent.modules.projects.models import Project, ProjectWorkspace, WorkspaceRuntime
 from agent.modules.projects.repository import decode_cursor
 from agent.modules.workspaces.models import ThreadWorkspace
 
@@ -27,7 +27,7 @@ from agent.modules.workspaces.models import ThreadWorkspace
 async def project_db(monkeypatch):
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
-        for model in (ConversationThread, ThreadWorkspace, BackgroundTaskRecord, Project):
+        for model in (ConversationThread, ThreadWorkspace, BackgroundTaskRecord, Project, ProjectWorkspace, WorkspaceRuntime):
             await connection.run_sync(model.__table__.create)
     maker = async_sessionmaker(engine, expire_on_commit=False)
 

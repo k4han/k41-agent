@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, String, Text, UniqueConstraint
+from sqlalchemy import Column, DateTime, Integer, String, Text, UniqueConstraint
 
 from agent.shared.infrastructure.db.base import BaseModel, utcnow
 
@@ -8,6 +8,8 @@ class ThreadWorkspace(BaseModel):
 
     thread_id = Column(String(512), nullable=False, index=True)
     working_dir = Column(Text, nullable=True)
+    project_id = Column(Integer, nullable=True, index=True)
+    project_workspace_id = Column(Integer, nullable=True, index=True)
     scope_key = Column(Text, nullable=True, index=True)
     scope_kind = Column(String(50), nullable=True)
     scope_label = Column(Text, nullable=True)

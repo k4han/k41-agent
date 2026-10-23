@@ -7,19 +7,19 @@ from typing import Any
 
 from sqlalchemy import JSON, String, case, cast, func, literal, or_, select, union_all
 
-from agent.modules.agent_runtime.models import BackgroundTaskRecord
+from agent.modules.agent_runtime import BackgroundTaskRecord
 from agent.modules.conversations.models import ConversationThread
 from agent.modules.conversations.repository import serialize_thread
-from agent.modules.projects.models import Project
-from agent.modules.projects.repository import cursor_condition, encode_cursor
-from agent.modules.workspaces.constants import (
+from agent.modules.projects import Project
+from agent.modules.projects import cursor_condition, encode_cursor
+from agent.modules.workspaces import (
     NO_WORKSPACE_KEY,
     NO_WORKSPACE_LABEL,
     TEMP_WORKSPACE_KEY,
     TEMP_WORKSPACE_LABEL,
 )
-from agent.modules.workspaces.models import ThreadWorkspace
-from agent.modules.workspaces.refs import bind_workspace_ref, workspace_ref_from_columns
+from agent.modules.workspaces import ThreadWorkspace
+from agent.modules.workspaces import bind_workspace_ref, workspace_ref_from_columns
 from agent.shared.infrastructure.db.session import get_async_session
 from agent.shared.thread_ids import resolve_thread_id
 

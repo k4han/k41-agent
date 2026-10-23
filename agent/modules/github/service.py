@@ -3,7 +3,7 @@ from __future__ import annotations
 import hmac
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha256
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -31,9 +31,8 @@ from agent.modules.github.repository import (
 from agent.modules.github.workspace import GitHubWorkspaceManager, sanitize_branch_name
 from agent.modules.github.workspace_helpers import (
     prepare_workspace_for_binding,
-    remote_commit_all,
     remote_has_changes,
-    remote_push_branch,
+    remote_publish_branch,
 )
 from agent.modules.workspaces import WorkspaceRef, resolve_workspace_ref, workspace_ref_from_local_path
 
@@ -138,6 +137,11 @@ class GitHubAutomationService:
 
     async def prune_orphaned_worktrees(self) -> int:
         """Remove leftover task worktrees from interrupted runs."""
+        from agent.modules.projects import get_project_workspace_service
+        projects = get_project_workspace_service()
+        if projects.container._persistence_ready:
+            paths = await projects.preserved_local_paths()
+            return await self.workspace_manager.prune_orphaned_worktrees(preserve_paths=paths)
         return await self.workspace_manager.prune_orphaned_worktrees()
 
     async def sync_installations(self) -> dict[str, int]:
@@ -697,10 +701,17 @@ class GitHubAutomationService:
             return None
 
         async def _cleanup(task: BackgroundTask) -> None:
+            from agent.modules.projects import get_project_workspace_service
+            projects = get_project_workspace_service()
+            binding = await projects.find_binding(task.workspace, thread_id=task.thread_id)
+            if binding:
+                await projects.checkpoint(binding.project_id, binding.project_workspace_id)
             await self._discard_local_worktree(
                 full_name=context.repository_full_name,
                 path=context.workspace_path,
             )
+            if binding:
+                await projects.release_task_runtime(binding)
 
         return _cleanup
 
@@ -747,6 +758,15 @@ class GitHubAutomationService:
         workspace_backend: str = "local",
     ) -> None:
         try:
+            from agent.modules.projects import get_project_workspace_service
+            projects = get_project_workspace_service()
+            owned = await projects.find_binding(getattr(task, "workspace", None), thread_id=getattr(task, "thread_id", None))
+            if owned:
+                current = await projects.ensure(owned.project_id, owned.project_workspace_id)
+                ref = current.execution
+                workspace_backend = ref.backend
+                context = replace(context, workspace_ref=ref,
+                                  workspace_path=Path(ref.locator) if ref.backend == "local" else context.workspace_path)
             token = await self.client.get_installation_token(context.installation_id)
             completion_mode = getattr(context, "completion_mode", COMPLETION_OPEN_PULL_REQUEST)
 
@@ -785,8 +805,7 @@ class GitHubAutomationService:
                     )
                 else:
                     ref = _github_workspace_ref(context, backend=workspace_backend)
-                    await remote_commit_all(ref, commit_message)
-                    await remote_push_branch(ref, context.branch, token)
+                    await remote_publish_branch(ref, commit_message, context.branch, token)
             except Exception as exc:
                 error_msg = f"Failed to commit/push changes: {exc}"
                 logger.error("publish_task_result push failed for issue #%s: %s", context.issue_number, exc)

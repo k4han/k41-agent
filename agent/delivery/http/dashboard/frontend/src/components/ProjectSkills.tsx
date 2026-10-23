@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js";
 import { Dialog } from "@/components/Dialog";
 import { Markdown } from "@/components/Markdown";
 import { apiFetch } from "@/lib/api";
@@ -26,7 +26,7 @@ export function ProjectSkills(props: { workspace: WorkspaceRef }) {
       if (version === revision) setError(errorMessage(error));
     } finally { if (version === revision) setLoading(false); }
   };
-  createEffect(() => { props.workspace; void load(); });
+  createEffect(on(() => skillPackageUrl(props.workspace), () => void load()));
   onCleanup(() => { revision += 1; });
   const shown = createMemo(() => {
     const needle = search().trim().toLowerCase();

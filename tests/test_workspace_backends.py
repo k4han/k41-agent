@@ -1902,7 +1902,7 @@ def test_modal_workspace_backend_changes_batches_tracked_line_stats():
     assert _count_commands(sandbox.commands, "git diff --numstat") == 2
 
 
-def test_workspace_migration_resets_legacy_workspace_mappings(tmp_path):
+def test_workspace_migration_preserves_legacy_workspace_mappings(tmp_path):
     db_path = tmp_path / "legacy.db"
     database_url = f"sqlite:///{db_path.as_posix()}"
     engine = create_engine(database_url)
@@ -1967,9 +1967,9 @@ def test_workspace_migration_resets_legacy_workspace_mappings(tmp_path):
     finally:
         engine.dispose()
 
-    assert row.count == 0
-    assert task_row.scope_key is None
-    assert task_row.execution_locator is None
+    assert row.count == 1
+    assert task_row.scope_key == f"local:{tmp_path / 'task'}"
+    assert task_row.execution_locator == str(tmp_path / "task")
     assert task_row.workspace_locator is None
 
 

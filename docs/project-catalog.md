@@ -21,9 +21,10 @@ Archived and removed projects are hidden from the sidebar. Removal only changes
 catalog status: it does not delete conversation history, files, or sandboxes.
 Continuing a conversation or restarting the application never restores these
 projects automatically. Use the corresponding status filter to restore them.
-Deleting the final conversation also preserves its catalog entry. Existing
-sandbox expiration and conversation cleanup policies are unchanged; unavailable
-workspaces remain in the catalog and report an error when opened.
+Deleting the final conversation preserves its catalog entry and durable files.
+Project workspaces own their saved files independently of cloud sandbox
+expiration. Opening a project resolves its current runtime and restores saved
+files when necessary. See [durable project workspaces](project-workspaces.md).
 
 ## Project resources
 
@@ -42,9 +43,10 @@ or source, and resources can be read or downloaded. Use Skills settings for
 package management. The selected tab survives reloads through
 `?tab=instructions` or `?tab=skills`.
 
-Resource access applies to all catalog statuses and never restores a project.
-An unavailable workspace is reported separately from a missing `AGENTS.md` and
-is not recreated by instruction operations.
+Resource access applies to all catalog statuses and never changes catalog status.
+Instruction and skill reads can use the last saved copy when execution is
+unavailable. Writes ensure the project's runtime and report storage failure
+separately from the completed file mutation.
 
 ## Dashboard API
 

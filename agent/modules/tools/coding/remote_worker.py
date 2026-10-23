@@ -94,6 +94,13 @@ class SandboxWorker:
             self.active_calls.pop(request_id, None)
 
     async def _dispatch(self, request):
+        if request.get("operation") == "stop_workspace":
+            await self.processes.stop_workspace(request["workspace"])
+            return {}
+        if request.get("operation") == "process_state":
+            context = InvocationContext(**request["context"])
+            job = self.processes.get(context, request["values"]["process_id"])
+            return {"finished": job.finished.is_set()}
         operation = request["operation"]
         if operation == "stop_thread":
             thread_id = resolve_thread_id(request["thread_id"])

@@ -80,6 +80,9 @@ class WorkspaceBinding(BaseModel):
 
     scope: WorkspaceScope
     execution: WorkspaceExecutionRef
+    project_id: int | None = Field(default=None, ge=1)
+    project_workspace_id: int | None = Field(default=None, ge=1)
+    runtime_generation: int | None = Field(default=None, ge=1)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -251,6 +254,8 @@ def _local_scope_locator(value: str) -> str:
 def derive_workspace_scope(execution: WorkspaceRef) -> WorkspaceScope:
     """Derive the stable user-facing workspace identity for an execution ref."""
     metadata = dict(execution.metadata or {})
+    if isinstance(metadata.get("project_scope"), dict):
+        return WorkspaceScope.model_validate(metadata["project_scope"])
     source = str(metadata.get("source") or "").strip().lower()
     if source == "github":
         repository_id = str(metadata.get("repository_id") or "").strip()
@@ -290,12 +295,28 @@ def derive_workspace_scope(execution: WorkspaceRef) -> WorkspaceScope:
     )
 
 
-def bind_workspace_ref(execution: WorkspaceRef) -> WorkspaceBinding:
+def bind_workspace_ref(execution: WorkspaceRef, *, scope: WorkspaceScope | None = None,
+                       project_id: int | None = None, project_workspace_id: int | None = None,
+                       runtime_generation: int | None = None) -> WorkspaceBinding:
     ref = execution
     return WorkspaceBinding(
-        scope=derive_workspace_scope(ref),
+        scope=scope or derive_workspace_scope(ref),
         execution=ref,
+        project_id=project_id, project_workspace_id=project_workspace_id,
+        runtime_generation=runtime_generation,
     )
+
+
+def binding_from_record(record, execution: WorkspaceRef) -> WorkspaceBinding:
+    """Preserve stored identity instead of deriving it from a replaceable runtime."""
+    import json
+    scope = None
+    if record.scope_key:
+        scope = WorkspaceScope(key=record.scope_key, kind=record.scope_kind or "project",
+                               label=record.scope_label or execution.display_label(),
+                               metadata=json.loads(record.scope_metadata_json or "{}"))
+    return bind_workspace_ref(execution, scope=scope, project_id=getattr(record, "project_id", None),
+                              project_workspace_id=getattr(record, "project_workspace_id", None))
 
 
 def workspace_ref_from_columns(

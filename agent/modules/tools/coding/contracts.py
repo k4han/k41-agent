@@ -18,8 +18,11 @@ class ResultContent:
             return self.content
         if tool_name in {"edit", "write"} and self.status == "success":
             if {"path", "additions", "deletions", "version"}.issubset(self.data):
-                return (f"Changed {self.data['path']}: +{self.data['additions']}/-{self.data['deletions']}; "
-                        f"version={self.data['version']}")
+                receipt = (f"Changed {self.data['path']}: +{self.data['additions']}/-{self.data['deletions']}; "
+                           f"version={self.data['version']}")
+                if self.data.get("persistence", {}).get("saved") is False:
+                    receipt += "\n[warning] Project changes have not been saved. Retry checkpoint before writing."
+                return receipt
         return self.content
 
 
@@ -69,6 +72,9 @@ class InvocationContext:
     skill_roots: tuple[str, ...] = ()
     skill_environment: tuple[tuple[str, str], ...] = ()
     skill_cache_root: str = ""
+    project_id: int | None = None
+    project_workspace_id: int | None = None
+    runtime_generation: int | None = None
 
     @property
     def owner(self) -> str:

@@ -11,6 +11,8 @@ class BackgroundTaskRecord(BaseModel):
     request = Column(Text, nullable=False, default="")
     agent_name = Column(String(255), nullable=False, default="default")
     working_dir = Column(Text, nullable=True)
+    project_id = Column(Integer, nullable=True, index=True)
+    project_workspace_id = Column(Integer, nullable=True, index=True)
     scope_key = Column(Text, nullable=True, index=True)
     scope_kind = Column(String(50), nullable=True)
     scope_label = Column(Text, nullable=True)

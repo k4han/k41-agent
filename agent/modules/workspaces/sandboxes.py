@@ -116,24 +116,34 @@ def _record_to_sandbox_summary(
 
 async def _daytona_sandboxes_from_thread_records() -> list[dict[str, Any]]:
     records = await get_thread_workspace_repository().list_by_backend(DAYTONA_BACKEND)
-    return [
+    summaries = [
         summary
         for summary in (
             _record_to_sandbox_summary(record) for record in records.values()
         )
         if summary is not None
     ]
+    return summaries + await _project_runtime_summaries(DAYTONA_BACKEND)
 
 
 async def _modal_sandboxes_from_thread_records() -> list[dict[str, Any]]:
     records = await get_thread_workspace_repository().list_by_backend(MODAL_BACKEND)
-    return [
+    summaries = [
         summary
         for summary in (
             _record_to_sandbox_summary(record) for record in records.values()
         )
         if summary is not None
     ]
+    return summaries + await _project_runtime_summaries(MODAL_BACKEND)
+
+
+async def _project_runtime_summaries(backend: str) -> list[dict[str, Any]]:
+    from agent.modules.projects import get_project_workspace_service
+    projects = get_project_workspace_service()
+    if not projects.container._persistence_ready:
+        return []
+    return [_record_to_sandbox_summary(record) for record in await projects.runtime_records(backend)]
 
 
 def _daytona_sandboxes_from_cloud() -> list[dict[str, Any]]:
@@ -434,6 +444,10 @@ async def stop_sandbox(backend: str, sandbox_id: str) -> str:
     if not descriptor.stop_loader:
         raise ValueError(f"Stop is not supported on {backend!r}.")
     ref = _build_workspace_ref(normalized, sandbox_id)
+    from agent.modules.projects import get_project_workspace_service
+    managed = await get_project_workspace_service().retire_matching(ref, "stop")
+    if managed is not None:
+        return managed
     return await _run_lifecycle_loader(
         normalized,
         descriptor.stop_loader,
@@ -449,6 +463,10 @@ async def archive_sandbox(backend: str, sandbox_id: str) -> str:
     if not descriptor.archive_loader:
         raise ValueError(f"Archive is not supported on {backend!r}.")
     ref = _build_workspace_ref(normalized, sandbox_id)
+    from agent.modules.projects import get_project_workspace_service
+    managed = await get_project_workspace_service().retire_matching(ref, "archive")
+    if managed is not None:
+        return managed
     return await _run_lifecycle_loader(
         normalized,
         descriptor.archive_loader,
@@ -471,6 +489,11 @@ async def delete_sandbox(backend: str, sandbox_id: str) -> dict[str, Any]:
     if not descriptor.delete_loader:
         raise ValueError(f"Delete is not supported on {backend!r}.")
     ref = _build_workspace_ref(normalized, normalized_id)
+    from agent.modules.projects import get_project_workspace_service
+    managed = await get_project_workspace_service().retire_matching(ref, "delete")
+    if managed is not None:
+        return {"status": "deleted", "backend": normalized, "sandbox_id": normalized_id,
+                "cloud_status": managed, "detached_threads": []}
     cloud_status = await _run_lifecycle_loader(
         normalized,
         descriptor.delete_loader,

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shlex
 from typing import TYPE_CHECKING
 
 from agent.modules.workspaces import WorkspaceRef, workspace_ref_from_local_path
@@ -54,7 +55,7 @@ async def prepare_workspace_for_binding(
     token = await client.get_installation_token(installation_id)
 
     if backend == "local":
-        return await _prepare_local_workspace(
+        workspace = await _prepare_local_workspace(
             binding=binding,
             workspace_manager=workspace_manager,
             token=token,
@@ -63,14 +64,15 @@ async def prepare_workspace_for_binding(
             existing_branch=existing_branch,
         )
 
-    return await _prepare_remote_workspace(
-        binding=binding,
-        backend=backend,
-        client=client,
-        token=token,
-        branch=branch,
-        default_branch=default_branch,
-    )
+    else:
+        workspace = await _prepare_remote_workspace(
+            binding=binding, backend=backend, client=client, token=token,
+            branch=branch, default_branch=default_branch,
+        )
+    workspace.metadata["workspace_kind"] = "github_task"
+    workspace.metadata["repository_id"] = int(getattr(binding, "repository_id", 0) or 0)
+    workspace.metadata["default_branch"] = str(getattr(binding, "default_branch", "main") or "main")
+    return workspace
 
 
 async def _prepare_local_workspace(
@@ -219,6 +221,26 @@ async def remote_push_branch(
         logger.warning("Git push returned non-zero: %s", result.output)
 
 
+async def remote_publish_branch(ref: WorkspaceRef, message: str, branch: str, token: str) -> None:
+    """Commit and push under one managed mutation and checkpoint."""
+    from agent.modules.workspaces import get_workspace_command_executor
+
+    executor = await get_workspace_command_executor(ref)
+    commands = [
+        "git config user.email 'bot@k41-agent.local'",
+        "git config user.name 'Kai Agent'",
+        "git add -A",
+        "(git diff --cached --quiet || git commit -m " + shlex.quote(message) + ")",
+        "git remote set-url origin " + shlex.quote(_build_push_url(ref, token)),
+        "git push origin " + shlex.quote("HEAD:" + branch) + " --force-with-lease",
+    ]
+    result = await executor.execute(" && ".join(commands), timeout=180)
+    if result.exit_code != 0:
+        raise RuntimeError("Git commit/push failed: " + (result.output or ""))
+    if result.persistence and not result.persistence["saved"]:
+        logger.warning("Published branch has unsaved project changes: %s", result.persistence.get("message", ""))
+
+
 def _build_push_url(ref: WorkspaceRef, token: str) -> str:
     """Build a GitHub push URL with embedded token."""
     repo_full_name = str(
@@ -239,4 +261,5 @@ __all__ = [
     "remote_has_changes",
     "remote_commit_all",
     "remote_push_branch",
+    "remote_publish_branch",
 ]

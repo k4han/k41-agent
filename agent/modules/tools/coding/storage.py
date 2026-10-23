@@ -276,6 +276,10 @@ class OutputStore:
 
     def journal_path(self, context: InvocationContext) -> Path:
         key = digest(f"{context.agent_name}\0{context.message_id}\0{context.tool_call_id}")
+        if context.project_workspace_id and not self.remote_worker:
+            directory = self.root / "project-receipts" / str(context.project_workspace_id) / conversation_key(context.thread_id)
+            directory.mkdir(parents=True, exist_ok=True)
+            return directory / f"{key[:32]}.invocation"
         return self.owner_dir(context) / f"{key[:32]}.invocation"
 
     def begin(self, context: InvocationContext, fingerprint: str) -> ToolResult | None:

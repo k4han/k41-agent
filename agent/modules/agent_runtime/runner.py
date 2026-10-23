@@ -3,6 +3,7 @@ import base64
 import binascii
 from contextlib import contextmanager
 import logging
+from pathlib import Path
 from typing import Any, AsyncGenerator, Iterator
 from uuid import uuid4
 
@@ -326,7 +327,7 @@ def _ingest_attachments_to_workspace(
 
         ref = resolve_workspace_ref(workspace)
         scope = derive_workspace_scope(ref)
-        ws_root = ref.locator if ref.backend == "local" else None
+        ws_root = ref.locator if ref.backend == "local" and not ref.metadata.get("project_scope") else None
 
         for attachment in attachments:
             name = str(attachment.get("name") or "").strip()
@@ -369,6 +370,18 @@ async def _ingest_attachments_to_sandbox(
 
         ref = resolve_workspace_ref(workspace)
         if ref.backend not in {"daytona", "modal"}:
+            from agent.modules.projects import get_project_workspace_service
+            projects = get_project_workspace_service()
+            binding = await projects.find_binding(ref, thread_id=thread_id)
+            if binding:
+                from agent.modules.workspaces import get_workspace_file_io
+                file_io = await get_workspace_file_io(binding, thread_id=thread_id)
+                for attachment in _normalize_chat_attachments(attachments):
+                    name = Path(str(attachment.get("name", "")).replace("\\", "/")).name
+                    if not name:
+                        continue
+                    content = base64.b64decode(attachment["base64"]) if attachment.get("base64") else str(attachment.get("content", "")).encode()
+                    await file_io.write_bytes(".k41-agent/uploads/" + name, content)
             return
         from agent.modules.tools import (
             ensure_sandbox_workspace_storage,

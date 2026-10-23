@@ -68,8 +68,11 @@ class TestCloudflareRetryAfter:
 
     @pytest.mark.asyncio
     async def test_rfc_7231_http_date_retry_after(self):
-        # Far-future date should be parsed safely without raising ValueError
-        future_date = "Wed, 21 Oct 2026 07:28:00 GMT"
+        from datetime import datetime, timedelta, timezone
+        from email.utils import format_datetime
+
+        # Keep this HTTP date in the future regardless of the calendar date.
+        future_date = format_datetime(datetime.now(timezone.utc) + timedelta(days=1), usegmt=True)
 
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(429, headers={"Retry-After": future_date})

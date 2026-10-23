@@ -60,8 +60,8 @@ export function ProjectsPage() {
     if (opening() !== null) return;
     setOpening(project.id);
     try {
-      await verifyProjectWorkspace(project.workspace.execution);
-      if (!disposed) navigate("/chat", { state: projectChatState(project.workspace.execution) });
+      const workspace = await verifyProjectWorkspace(project.workspace.execution, project.id);
+      if (!disposed) navigate("/chat", { state: projectChatState(workspace) });
     } catch (error) {
       if (!disposed) showToast(error instanceof Error ? error.message : "Workspace is unavailable.", "error");
     } finally { setOpening(null); }

@@ -19,10 +19,16 @@ assert.ok(fs.existsSync(path.join(staticRoot, 'index.html')), 'Run pnpm build fi
 const makeProject = (id, label) => ({ id, key: `local:/projects/${id}`, label, status: 'active', is_pinned: false,
   workspace: { scope: { key: `local:/projects/${id}`, kind: 'local', label, metadata: {} },
     execution: { backend: 'local', locator: `/projects/${id}`, label, metadata: {} } },
-  created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' });
+    migration_status: 'ready', workspaces: [], runtime: { status: 'ready', generation: 1 },
+    persistence: { status: 'clean', revision: 'a'.repeat(64), last_saved_at: '2026-01-01T00:00:00Z', last_error: '', blocked_for_writes: false },
+    created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' });
 let projects = [makeProject(1, 'Empty project'), makeProject(2, 'Other project')];
 const mutations = [];
 let unavailable = false;
+let delayRuntimeFailure = false;
+let failPendingRuntime;
+const detailRequests = [];
+const instructionRequests = [];
 let failCatalog = false;
 let failInstructions = false;
 let failSkills = false;
@@ -49,13 +55,40 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname.startsWith('/dashboard-api')) {
     res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-CSRF-Token', 'projects-test');
     let raw = '';
     for await (const chunk of req) raw += chunk;
     const body = raw ? JSON.parse(raw) : {};
     const send = data => res.end(JSON.stringify(data));
     const instructions = url.pathname.match(/^\/dashboard-api\/projects\/(\d+)\/instructions$/);
+    const runtime = url.pathname.match(/^\/dashboard-api\/projects\/(\d+)\/runtime\/ensure$/);
+    if (runtime) {
+      if (delayRuntimeFailure) {
+        delayRuntimeFailure = false;
+        failPendingRuntime = () => { res.writeHead(410); send({ detail: 'Delayed workspace failure.' }); };
+        return;
+      }
+      if (unavailable) { res.writeHead(410); send({ detail: 'Workspace is unavailable.' }); return; }
+      const project = projects.find(item => item.id === Number(runtime[1]));
+      send({ workspace: project.workspace }); return;
+    }
+    const checkpoint = url.pathname.match(/^\/dashboard-api\/projects\/(\d+)\/checkpoint$/);
+    if (checkpoint) {
+      const project = projects.find(item => item.id === Number(checkpoint[1]));
+      project.persistence = { ...project.persistence, status: 'clean', last_error: '', blocked_for_writes: false };
+      send({ status: 'clean', saved: true, revision: project.persistence.revision }); return;
+    }
+    const selection = url.pathname.match(/^\/dashboard-api\/projects\/(\d+)\/migration\/select$/);
+    if (selection) {
+      const project = projects.find(item => item.id === Number(selection[1]));
+      const source = project.workspaces.find(item => item.id === body.source_id);
+      source.kind = 'shared'; project.migration_status = 'ready';
+      project.workspace = { ...project.workspace, execution: source.source, project_id: project.id, project_workspace_id: source.id };
+      send({ workspace: project.workspace }); return;
+    }
     if (instructions) {
+      if (req.method === 'GET') instructionRequests.push(Number(instructions[1]));
       if (failInstructions) { res.writeHead(410); send({ detail: 'Project workspace is unavailable.' }); return; }
       if (req.method === 'PUT') {
         if (body.expected_version !== instructionDocument.version) { res.writeHead(409); send({ detail: 'File changed; read its current version before changing it.' }); return; }
@@ -100,6 +133,7 @@ const server = http.createServer(async (req, res) => {
     const match = url.pathname.match(/^\/dashboard-api\/projects\/(\d+)$/);
     if (match) {
       const project = projects.find(project => project.id === Number(match[1]));
+      if (req.method === 'GET') detailRequests.push(Number(match[1]));
       if (!project) { res.writeHead(404); send({ detail: 'Project not found.' }); return; }
       if (req.method === 'GET') { send(project); return; }
       Object.assign(project, req.method === 'DELETE' ? { status: 'removed' } : body);
@@ -271,6 +305,20 @@ try {
   assert.equal(instructionDocument.content, '# Project guide\nUse uv.');
   await clickText('Edit instructions');
   await input('[aria-label="AGENTS.md content"]', 'Preserved draft');
+  const beforeBackgroundDialog = dialogCount;
+  const beforeBackgroundRead = instructionRequests.length;
+  const beforeBackgroundPoll = detailRequests.length;
+  await until(() => detailRequests.length > beforeBackgroundPoll, 'background project status poll');
+  await delay(200);
+  assert.equal(dialogCount, beforeBackgroundDialog, 'Status polling must not ask to discard the draft.');
+  assert.equal(instructionRequests.length, beforeBackgroundRead, 'Status polling must not reload instructions.');
+  const beforeCheckpointRefresh = detailRequests.length;
+  await clickText('Save now');
+  await until(async () => detailRequests.length > beforeCheckpointRefresh && await js(`!!document.querySelector('[aria-label="AGENTS.md content"]') && !document.querySelector('.projects-page [role="status"]')?.textContent.includes('Loading project')`), 'checkpoint keeps editor');
+  await delay(200);
+  assert.equal(dialogCount, beforeBackgroundDialog, 'Checkpoint refresh must not ask to discard the draft.');
+  assert.equal(instructionRequests.length, beforeBackgroundRead, 'Checkpoint refresh must not reload instructions.');
+  assert.equal(await js(`document.querySelector('[aria-label="AGENTS.md content"]').value`), 'Preserved draft');
   instructionDocument = { ...instructionDocument, content: 'External change', version: 'external' };
   await clickText('Save instructions');
   await until(() => js(`document.querySelector('[role="alert"]')?.textContent.includes('File changed')`), 'save conflict');
@@ -324,6 +372,37 @@ try {
   assert.equal(await js('document.documentElement.scrollWidth <= innerWidth'), true);
   await call('Page.navigate', { url: `${base}/projects/999` });
   await until(() => js(`document.querySelector('[role="alert"]')?.textContent.includes('Project not found')`), 'missing project detail');
+  const migrationProject = projects.find(item => item.id === 1);
+  migrationProject.persistence = { ...migrationProject.persistence, status: 'error', last_error: 'Storage offline', blocked_for_writes: true };
+  await call('Page.navigate', { url: `${base}/projects/1` });
+  await until(() => js(`document.querySelector('.project-storage-status')?.textContent.includes('Save failed')`), 'durable storage error');
+  await clickText('Retry save');
+  await until(() => js(`document.querySelector('.project-storage-status strong')?.textContent === 'Saved'`), 'retry checkpoint');
+  migrationProject.migration_status = 'needs_selection';
+  migrationProject.workspaces = [101, 102].map(id => ({ id, kind: 'legacy', source: { ...migrationProject.workspace.execution, locator: `/copies/${id}` },
+    persistence: { ...migrationProject.persistence, revision: String(id).padEnd(64, 'a') }, runtime: { status: 'ready', generation: 1 } }));
+  await call('Page.reload');
+  await until(() => js(`document.querySelectorAll('.project-migration-source').length === 2`), 'preserved migration copies');
+  await until(() => js(`document.querySelector('[aria-label="Project instructions"]')?.getAttribute('aria-busy') === 'false' && document.querySelector('[aria-label="Project instructions"]')?.textContent.includes('External change')`), 'original migration instructions');
+  const beforeSelectionRead = instructionRequests.length;
+  instructionDocument = { ...instructionDocument, content: '# Selected workspace guide', version: 'selected-workspace' };
+  await js(`document.querySelectorAll('.project-migration-source button')[1].click()`);
+  await until(() => js(`!document.querySelector('[aria-label="Workspace migration"]')`), 'select main workspace');
+  await until(async () => instructionRequests.length > beforeSelectionRead && await js(`document.querySelector('[aria-label="Project instructions"] h1')?.textContent === 'Selected workspace guide'`), 'selected workspace instructions');
+  assert.equal(migrationProject.workspace.execution.locator, '/copies/102');
+  assert.equal(migrationProject.workspaces.length, 2);
+  await call('Page.navigate', { url: `${base}/projects/1` });
+  await until(() => js(`location.pathname === '/projects/1' && !!document.querySelector('.project-storage-status')`), 'project before delayed failure');
+  delayRuntimeFailure = true;
+  await clickText('New chat');
+  await until(() => !!failPendingRuntime, 'pending runtime request');
+  await js(`history.pushState(null, '', '/projects/2'); dispatchEvent(new PopStateEvent('popstate'));`);
+  await until(() => js(`location.pathname === '/projects/2' && document.querySelector('.page-title')?.textContent === 'Other project'`), 'switch project during runtime request');
+  const beforeFailure = detailRequests.filter(id => id === 2).length;
+  failPendingRuntime();
+  await until(() => js(`![...document.querySelectorAll('button')].some(button => button.textContent === 'Preparing workspace...')`), 'delayed failure settled');
+  assert.equal(detailRequests.filter(id => id === 2).length, beforeFailure);
+  assert.equal(await js(`document.body.textContent.includes('Delayed workspace failure.')`), false);
   assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
   console.log('PASS: project details, instruction editing and conflicts, unsaved guards, read-only skills, resources, downloads, errors, and direct links.');
 } finally {

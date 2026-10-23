@@ -35,6 +35,8 @@ export type ChatPayload = {
   user_id: string;
   agent_name: string;
   workspace?: WorkspaceRef | WorkspaceBinding;
+  project_id?: number;
+  project_workspace_id?: number;
   provider?: string;
   model?: string;
   reasoning_effort?: ReasoningEffort;

@@ -181,6 +181,8 @@ class SkillPackages:
                 name = parsed.name if parsed else Path(entry["directory"]).name
                 diagnostics = parsed.diagnostics if parsed else (SkillDiagnostic("invalid_document", "Skill document cannot be parsed.", "SKILL.md", "error"),)
                 diagnostics = (*diagnostics, *(SkillDiagnostic("invalid_package", message, "resources", "error") for message in entry.get("errors", [])))
+                if result.get("saved_revision"):
+                    diagnostics = (*diagnostics, SkillDiagnostic("saved_copy", f"Saved copy from {result['last_saved_at']}."))
                 enabled = identity not in disabled and parsed is not None and not entry.get("errors")
                 shadowed = name in seen
                 if enabled:

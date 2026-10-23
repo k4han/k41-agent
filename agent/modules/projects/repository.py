@@ -5,13 +5,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import JSON, and_, cast, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent.modules.projects.models import Project
-from agent.modules.workspaces.refs import WorkspaceBinding
+from agent.modules.projects.models import Project, ProjectWorkspace, WorkspaceRuntime
+from agent.modules.workspaces import WorkspaceBinding
 from agent.shared.infrastructure.db.base import utcnow
 
 
@@ -20,6 +20,7 @@ def serialize_project(record: Project) -> dict[str, Any]:
         "id": record.id, "key": record.key, "label": record.label,
         "status": record.status, "is_pinned": record.is_pinned,
         "workspace": json.loads(record.workspace_json),
+        "migration_status": record.migration_status,
         "created_at": record.created_at.isoformat(),
         "updated_at": record.updated_at.isoformat(),
     }
@@ -57,18 +58,49 @@ async def register_project(
     metadata = binding.execution.metadata
     if bool(metadata.get("temp")) or str(metadata.get("source") or "").strip().lower() == "temp":
         return None
+    if binding.project_id:
+        record = await session.get(Project, binding.project_id)
+        if record is None or record.key != binding.scope.key:
+            raise ValueError("Project reference does not match the workspace identity.")
+        if restore:
+            record.status = "active"
+        return record
+    if not only_missing:
+        def field(column, *path):
+            if session.get_bind().dialect.name == "postgresql":
+                value = cast(column, JSON)
+                for name in path:
+                    value = value[name]
+                return value.as_string()
+            return func.json_extract(column, "$." + ".".join(path))
+        current = (await session.execute(select(Project).join(
+            ProjectWorkspace, ProjectWorkspace.project_id == Project.id,
+        ).join(WorkspaceRuntime, WorkspaceRuntime.project_workspace_id == ProjectWorkspace.id).where(
+            field(WorkspaceRuntime.execution_json, "backend") == binding.execution.backend,
+            field(WorkspaceRuntime.execution_json, "locator") == binding.execution.locator,
+            func.coalesce(field(WorkspaceRuntime.execution_json, "metadata", "root"), "") == metadata.get("root", ""),
+        ).limit(1))).scalar_one_or_none()
+        if current is None and metadata.get("source") == "github" and metadata.get("repository_full_name"):
+            current = (await session.execute(select(Project).where(
+                field(Project.workspace_json, "execution", "metadata", "repository_full_name") == metadata["repository_full_name"],
+            ).limit(1))).scalar_one_or_none()
+        if current is not None:
+            if restore:
+                current.status = "active"
+            return current
     now = utcnow()
     values = {
         "key": binding.scope.key, "label": (label or binding.scope.label or binding.scope.key)[:255],
         "status": "active", "is_pinned": False,
         "workspace_json": binding.model_dump_json(), "created_at": now, "updated_at": now,
+        "migration_status": "pending" if only_missing else "ready",
     }
     insert = postgres_insert if session.get_bind().dialect.name == "postgresql" else sqlite_insert
     statement = insert(Project).values(**values)
     if only_missing:
         statement = statement.on_conflict_do_nothing(index_elements=[Project.key])
     else:
-        updates = {"workspace_json": values["workspace_json"], "updated_at": now}
+        updates = {"updated_at": now}
         if restore:
             updates["status"] = "active"
         statement = statement.on_conflict_do_update(index_elements=[Project.key], set_=updates)
@@ -77,26 +109,51 @@ async def register_project(
                                   .execution_options(populate_existing=True))).scalar_one()
 
 
-async def register_thread_project(session: AsyncSession, thread_id: str, binding: WorkspaceBinding) -> None:
+async def register_thread_project(session: AsyncSession, thread_id: str, binding: WorkspaceBinding) -> WorkspaceBinding:
     if ":sub:" in thread_id:
-        return
-    from agent.modules.conversations.models import ConversationThread
+        from agent.modules.workspaces import ThreadWorkspace
+        from agent.modules.workspaces import binding_from_record
+        parent = (await session.execute(select(ThreadWorkspace).where(
+            ThreadWorkspace.thread_id == thread_id.split(":sub:", 1)[0],
+        ))).scalar_one_or_none()
+        if parent is not None and parent.project_workspace_id:
+            return binding_from_record(parent, binding.execution)
+        return binding
+    from agent.modules.conversations import ConversationThread
 
     thread = (await session.execute(select(ConversationThread).where(
         ConversationThread.thread_id == thread_id,
     ))).scalar_one_or_none()
     if thread is not None and (thread.deleted_at is not None or thread.kind not in {"user", "background"}):
-        return
-    from agent.modules.workspaces.models import ThreadWorkspace
+        return binding
+    from agent.modules.workspaces import ThreadWorkspace
 
     mapped = (await session.execute(select(ThreadWorkspace).where(
         ThreadWorkspace.thread_id == thread_id,
     ))).scalar_one_or_none()
-    if mapped is not None and mapped.execution_locator:
-        from agent.modules.workspaces.refs import bind_workspace_ref, workspace_ref_from_columns
+    if mapped is not None and mapped.execution_locator and not binding.project_id:
+        from agent.modules.workspaces import binding_from_record, workspace_ref_from_columns
 
-        binding = bind_workspace_ref(workspace_ref_from_columns(
+        binding = binding_from_record(mapped, workspace_ref_from_columns(
             backend=mapped.execution_backend, locator=mapped.execution_locator,
             label=mapped.execution_label, metadata_json=mapped.execution_metadata_json,
         ))
-    await register_project(session, binding)
+    project = await register_project(session, binding)
+    if project is None:
+        return binding
+    from agent.modules.projects.workspaces import _binding, register_workspace
+    if binding.project_workspace_id:
+        workspace = await session.get(ProjectWorkspace, binding.project_workspace_id)
+        if workspace is None or workspace.project_id != project.id:
+            raise ValueError("Project workspace ownership does not match the project.")
+        runtime = (await session.execute(select(WorkspaceRuntime).where(
+            WorkspaceRuntime.project_workspace_id == workspace.id,
+        ))).scalar_one()
+        return _binding(project, workspace, runtime)
+    kind = "github_task" if binding.execution.metadata.get("workspace_kind") == "github_task" else "shared"
+    if project.migration_status != "ready":
+        kind = "legacy" if kind == "shared" else kind
+    owned = await register_workspace(session, project, binding.execution, kind=kind)
+    if mapped is not None:
+        mapped.project_id, mapped.project_workspace_id = project.id, owned.project_workspace_id
+    return owned

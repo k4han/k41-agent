@@ -10,12 +10,16 @@ from agent.modules.workspaces import resolve_workspace_ref
 
 def workspace_key(workspace) -> str:
     ref = resolve_workspace_ref(workspace)
+    if ref.metadata.get("project_skill_workspace_key"):
+        return ref.metadata["project_skill_workspace_key"]
     root = ref.locator if ref.backend == "local" else str(ref.metadata.get("root") or "")
     locator = ref.metadata.get("skill_workspace_id", ref.locator) if ref.backend == "modal" else ref.locator
     return hashlib.sha256(json.dumps([ref.backend, locator, root]).encode()).hexdigest()
 
 
 def package_id(scope: str, root: str, directory: str, workspace=None) -> str:
+    if scope == "project" and workspace:
+        root = resolve_workspace_ref(workspace).metadata.get("project_skill_root", root)
     return hashlib.sha256(json.dumps([scope, root, directory, workspace_key(workspace) if workspace else ""]).encode()).hexdigest()[:32]
 
 

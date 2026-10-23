@@ -1,5 +1,10 @@
 # Internal workspace storage
 
+Project source files now have a separate durable checkpoint layer. See
+[durable project workspaces](project-workspaces.md) for persistence boundaries,
+runtime replacement and migration. This document describes the supporting
+`.k41-agent` categories within a workspace.
+
 The project workspace holds source code, dependencies, project directories,
 and deliverables. `.k41-agent` holds supporting internal files only. Agent
 instructions keep shell commands rooted at the workspace or a project folder;

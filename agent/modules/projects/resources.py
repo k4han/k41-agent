@@ -3,9 +3,9 @@
 import base64
 
 from agent.modules.projects.service import get_project
-from agent.modules.skills.package_io import WorkspacePackageIO
+from agent.modules.skills import WorkspacePackageIO
 from agent.modules.workspaces import WorkspaceUnavailableError
-from agent.modules.workspaces.constants import MAX_FILE_BYTES
+from agent.modules.workspaces import MAX_FILE_BYTES
 
 INSTRUCTIONS_PATH = "AGENTS.md"
 
@@ -35,7 +35,11 @@ async def get_project_instructions(project_id: int) -> dict:
     content = raw.decode("utf-8-sig")
     if "\x00" in content:
         raise ValueError("AGENTS.md must be UTF-8 text without null bytes.")
-    return _document(content, result["version"])
+    document = _document(content, result["version"])
+    if "saved_revision" in result:
+        document["saved_revision"] = result["saved_revision"]
+        document["last_saved_at"] = result.get("last_saved_at")
+    return document
 
 
 async def save_project_instructions(project_id: int, content: str, expected_version: str | None) -> dict:
@@ -47,4 +51,7 @@ async def save_project_instructions(project_id: int, content: str, expected_vers
     result = await _operation(
         project_id, "write", data=base64.b64encode(raw).decode(), expected_version=expected_version,
     )
-    return _document(content, result["version"])
+    document = _document(content, result["version"])
+    if "persistence" in result:
+        document["persistence"] = result["persistence"]
+    return document

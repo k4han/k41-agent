@@ -275,6 +275,15 @@ def _build_generate_image_tool(config: dict[str, ToolConfigValue]) -> BaseTool:
                 return
             try:
                 workspace = get_workspace(runtime)
+                from agent.modules.projects import get_project_workspace_service
+                from agent.modules.tools.runtime.context import ToolContext
+                thread_id = ToolContext.from_runtime(runtime).thread_id
+                binding = await get_project_workspace_service().find_binding(workspace, thread_id=thread_id)
+                if binding:
+                    from agent.modules.workspaces import get_workspace_file_io
+                    file_io = await get_workspace_file_io(binding, thread_id=thread_id)
+                    await file_io.write_bytes(f".k41-agent/generated-images/{filename}", content)
+                    return
                 if workspace.backend == "local" and workspace.locator:
                     ws_dir = ensure_physical_workspace_storage(workspace.locator) / "generated-images"
                     ws_dir.mkdir(parents=True, exist_ok=True)

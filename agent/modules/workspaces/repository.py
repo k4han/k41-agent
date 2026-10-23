@@ -13,6 +13,7 @@ from agent.modules.workspaces.refs import (
     WorkspaceBinding,
     WorkspaceRef,
     bind_workspace_ref,
+    binding_from_record,
     normalize_workspace_ref,
     workspace_ref_from_columns,
 )
@@ -55,7 +56,7 @@ def _binding_from_record(record: ThreadWorkspace) -> WorkspaceBinding | None:
     execution = _execution_from_record(record)
     if execution is None:
         return None
-    return bind_workspace_ref(execution)
+    return binding_from_record(record, execution)
 
 
 class ThreadWorkspaceRepository:
@@ -76,7 +77,9 @@ class ThreadWorkspaceRepository:
             workspace,
             default_locator=default_locator,
         )
-        binding = bind_workspace_ref(workspace_ref)
+        binding = WorkspaceBinding.model_validate(workspace) if isinstance(workspace, (WorkspaceBinding, dict)) and (
+            isinstance(workspace, WorkspaceBinding) or "scope" in workspace
+        ) else bind_workspace_ref(workspace_ref)
         if not normalized_thread_id:
             raise ValueError("Thread ID is required.")
         if not workspace_ref.locator:
@@ -101,6 +104,15 @@ class ThreadWorkspaceRepository:
             else:
                 record.working_dir = workspace_ref.locator
                 record.updated_at = now
+                if record.project_id and not binding.project_id:
+                    from agent.modules.projects.workspaces import get_project_workspace_service, source_key
+
+                    previous = _execution_from_record(record)
+                    if previous is not None and source_key(previous) == source_key(workspace_ref):
+                        binding = binding_from_record(record, workspace_ref)
+                    else:
+                        binding = await get_project_workspace_service().find_binding(workspace_ref) or binding
+                        record.project_id, record.project_workspace_id = binding.project_id, binding.project_workspace_id
             record.scope_key = binding.scope.key
             record.scope_kind = binding.scope.kind
             record.scope_label = binding.scope.label
@@ -122,9 +134,12 @@ class ThreadWorkspaceRepository:
             record.workspace_label = None
             record.workspace_metadata_json = None
 
-            from agent.modules.projects.repository import register_thread_project
+            from agent.modules.projects import register_thread_project
 
-            await register_thread_project(session, normalized_thread_id, binding)
+            owned = await register_thread_project(session, normalized_thread_id, binding)
+            record.project_id, record.project_workspace_id = owned.project_id, owned.project_workspace_id
+            record.scope_key, record.scope_kind, record.scope_label = owned.scope.key, owned.scope.kind, owned.scope.label
+            record.scope_metadata_json = json.dumps(owned.scope.metadata)
             await session.commit()
             await session.refresh(record)
             return serialize_thread_workspace(record)

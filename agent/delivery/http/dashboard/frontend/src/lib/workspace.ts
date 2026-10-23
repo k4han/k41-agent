@@ -56,6 +56,8 @@ export function workspaceExecution(
 }
 
 export function deriveWorkspaceScope(execution: WorkspaceRef): WorkspaceScope {
+  const scope = execution.metadata.project_scope;
+  if (scope && typeof scope === "object" && "key" in scope && "kind" in scope && "label" in scope) return scope as WorkspaceScope;
   const source = typeof execution.metadata.source === "string"
     ? execution.metadata.source.trim().toLowerCase()
     : "";

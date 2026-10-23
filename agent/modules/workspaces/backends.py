@@ -11,6 +11,7 @@ class CommandResult:
     output: str
     exit_code: int | None = None
     truncated: bool = False
+    persistence: dict[str, Any] | None = None
 
 
 class WorkspaceUnavailableError(RuntimeError):

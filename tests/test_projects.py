@@ -20,7 +20,7 @@ from agent.modules.agent_runtime import repository as task_repository
 from agent.modules.conversations import navigation
 from agent.modules.conversations.models import ConversationThread
 from agent.modules.projects import service
-from agent.modules.projects.models import Project
+from agent.modules.projects.models import Project, ProjectWorkspace, WorkspaceRuntime
 from agent.modules.projects.repository import cursor_condition, register_project
 from agent.modules.workspaces import bind_workspace_ref, resolve_workspace_ref
 from agent.modules.workspaces.models import ThreadWorkspace
@@ -31,7 +31,7 @@ from agent.modules.workspaces import repository as workspace_repository
 async def catalog_db(tmp_path, monkeypatch, isolated_container):
     engine = create_async_engine(f"sqlite+aiosqlite:///{(tmp_path / 'catalog.db').as_posix()}")
     async with engine.begin() as connection:
-        for model in (ConversationThread, ThreadWorkspace, BackgroundTaskRecord, Project):
+        for model in (ConversationThread, ThreadWorkspace, BackgroundTaskRecord, Project, ProjectWorkspace, WorkspaceRuntime):
             await connection.run_sync(model.__table__.create)
     maker = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -40,6 +40,7 @@ async def catalog_db(tmp_path, monkeypatch, isolated_container):
 
     for module in (service, navigation, workspace_repository, task_repository):
         monkeypatch.setattr(module, "get_async_session", get_session)
+    isolated_container._persistence_ready = True
     yield maker
     await engine.dispose()
 
@@ -169,6 +170,26 @@ async def test_concurrent_registration_keeps_single_project(catalog_db, tmp_path
 
     await asyncio.gather(*(add() for _ in range(8)))
     assert len((await service.list_projects())["projects"]) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["daytona", "modal"])
+async def test_catalog_keeps_repositories_in_separate_sandbox_roots(catalog_db, backend):
+    refs = [resolve_workspace_ref({
+        "backend": backend, "locator": "shared-sandbox",
+        "metadata": {"root": f"/workspace/{name}", "source": "github",
+                     "repository_id": index, "repository_full_name": f"team/{name}"},
+    }) for index, name in enumerate(("first", "second"), start=1)]
+
+    first, second = [await service.add_project(ref) for ref in refs]
+
+    assert first["id"] != second["id"]
+    assert first["key"] == "github:1" and second["key"] == "github:2"
+    assert first["workspace"]["execution"]["metadata"]["root"] == "/workspace/first"
+    assert second["workspace"]["execution"]["metadata"]["root"] == "/workspace/second"
+    assert (await service.add_project(refs[0]))["id"] == first["id"]
+    assert (await service.add_project(refs[1]))["id"] == second["id"]
+    assert len((await service.list_projects())["projects"]) == 2
 
 
 @pytest.mark.asyncio
@@ -305,3 +326,40 @@ def test_catalog_routes_require_dashboard_authentication(monkeypatch):
                          ("post", "/dashboard-api/projects"), ("patch", "/dashboard-api/projects/1"),
                          ("delete", "/dashboard-api/projects/1")):
         assert getattr(client, method)(path).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_project_list_batches_workspace_descriptions(catalog_db, tmp_path, monkeypatch):
+    for index in range(5):
+        await service.add_project(workspace(tmp_path / str(index)))
+    sessions = AsyncMock(wraps=service.get_async_session)
+    monkeypatch.setattr(service, "get_async_session", sessions)
+    projects = (await service.list_projects())["projects"]
+    assert len(projects) == 5 and all(len(project["workspaces"]) == 1 for project in projects)
+    assert sessions.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_describe_missing_project_raises_not_found(catalog_db):
+    from agent.modules.projects import get_project_workspace_service
+    with pytest.raises(KeyError, match="Project not found"):
+        await get_project_workspace_service().describe(999)
+
+
+@pytest.mark.asyncio
+async def test_add_project_rejects_a_different_execution_for_existing_scope(catalog_db, tmp_path):
+    from httpx import ASGITransport, AsyncClient
+    from agent.modules.projects import ProjectWorkspaceError
+    original = bind_workspace_ref(workspace(tmp_path / "root"))
+    project = await service.add_project(original)
+    replacement = original.model_copy(update={"execution": original.execution.model_copy(update={"metadata": {"root": "different"}})})
+    with pytest.raises(ProjectWorkspaceError, match="different workspace"):
+        await service.add_project(replacement)
+    app = FastAPI()
+    app.include_router(routes.router)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/dashboard-api/projects", json={"workspace": replacement.model_dump()})
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "workspace_conflict"
+    current = await service.get_project(project["id"])
+    assert current["workspace"] == project["workspace"]

@@ -21,6 +21,8 @@ class SubmitTaskBody(BaseModel):
     request: str = Field(..., description="Task description or instruction for the agent.")
     agent_name: str = Field(default="default", description="Agent card name to use.")
     workspace: WorkspaceRef | WorkspaceBinding | None = Field(default=None, description="Workspace reference. Defaults to the default workspace.")
+    project_id: int | None = Field(default=None, ge=1)
+    project_workspace_id: int | None = Field(default=None, ge=1)
     notify_platform: str | None = Field(default=None, description="Notification platform (e.g. 'telegram', 'discord').")
     notify_external_id: str | None = Field(default=None, description="External user/channel ID for notifications.")
     notify_channel_id: str | None = Field(default=None, description="Channel ID for notifications.")
@@ -58,12 +60,24 @@ async def submit_background_task(body: SubmitTaskBody) -> dict[str, Any]:
         )
 
     manager = get_background_task_manager()
-    task_id = await manager.submit(
-        request=body.request.strip(),
-        agent_name=body.agent_name,
-        workspace=body.workspace or resolve_workspace_ref(None),
-        notify_channel=notify_channel,
-    )
+    from agent.modules.projects import ProjectWorkspaceError, get_project_workspace_service
+    from agent.delivery.http.dashboard.routes.helpers.workspace import workspace_http_error
+    try:
+        workspace = body.workspace or resolve_workspace_ref(None)
+        if body.project_id or body.project_workspace_id or (
+            isinstance(body.workspace, WorkspaceBinding) and body.workspace.project_id
+        ):
+            projects = get_project_workspace_service()
+            owned = await projects.find_binding(body.workspace, project_id=body.project_id, workspace_id=body.project_workspace_id)
+            workspace = (await projects.ensure(owned.project_id, owned.project_workspace_id)).execution
+        task_id = await manager.submit(
+            request=body.request.strip(),
+            agent_name=body.agent_name,
+            workspace=workspace,
+            notify_channel=notify_channel,
+        )
+    except (KeyError, ProjectWorkspaceError) as exc:
+        raise workspace_http_error(exc) from exc
     return {"status": "submitted", "task_id": task_id}
 
 

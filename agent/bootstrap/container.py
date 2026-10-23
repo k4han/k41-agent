@@ -174,6 +174,7 @@ class AppContainer:
     _zalo_webhook_runtime: Any = field(default=None, repr=False)
     _tool_registry_service: Any = field(default=None, repr=False)
     _coding_service: Any = field(default=None, repr=False)
+    _project_workspace_service: Any = field(default=None, repr=False)
     _mcp_loaded: bool = field(default=False, repr=False)
     _mcp_load_lock: Any = field(default=None, repr=False)
     _mcp_load_task: Any = field(default=None, repr=False)
@@ -662,6 +663,8 @@ class AppContainer:
             from agent.modules.projects import import_existing_projects
 
             await import_existing_projects()
+            from agent.modules.projects import get_project_workspace_service
+            get_project_workspace_service(self).start()
             await prune_usage_events()
             await self.initialize_checkpointer()
             from agent.modules.conversations import migrate_conversation_ids
@@ -695,7 +698,16 @@ class AppContainer:
             await asyncio.gather(self._mcp_load_task, return_exceptions=True)
             self._mcp_load_task = None
         if self._coding_service is not None:
+            if self._project_workspace_service is not None:
+                self._project_workspace_service.closing = True
             await self._coding_service.processes.close()
+            watchers = tuple(getattr(self._coding_service, "project_watchers", ()))
+            for watcher in watchers:
+                watcher.cancel()
+            if watchers:
+                await asyncio.gather(*watchers, return_exceptions=True)
+        if self._project_workspace_service is not None:
+            await self._project_workspace_service.close()
         await close_checkpointer(container=self)
         await close_async_engine(container=self)
         try:

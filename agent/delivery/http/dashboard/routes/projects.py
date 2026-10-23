@@ -6,10 +6,10 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Path, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from agent.modules.projects import add_project, get_project, list_projects, update_project
-from agent.modules.projects.resources import get_project_instructions, save_project_instructions
+from agent.modules.projects import ProjectWorkspaceError, add_project, get_project, list_projects, update_project
+from agent.modules.projects import get_project_instructions, save_project_instructions
 from agent.modules.workspaces import WorkspaceBinding, WorkspaceRef
-from agent.modules.workspaces.constants import MAX_FILE_BYTES
+from agent.modules.workspaces import MAX_FILE_BYTES
 from agent.delivery.http.dashboard.routes.helpers.workspace import workspace_http_error
 
 router = APIRouter()
@@ -65,6 +65,45 @@ class ProjectInstructionsBody(BaseModel):
             except UnicodeError as exc:
                 raise HTTPException(status_code=400, detail="AGENTS.md must be valid UTF-8 text.") from exc
         return value
+
+
+class ProjectRuntimeBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    project_workspace_id: int | None = Field(default=None, ge=1)
+
+
+class MigrationSelectionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source_id: int = Field(ge=1)
+
+
+@router.post("/dashboard-api/projects/{project_id}/runtime/ensure")
+async def ensure_project_runtime(body: ProjectRuntimeBody, project_id: int = Path(ge=1)):
+    from agent.modules.projects import get_project_workspace_service
+    try:
+        binding = await get_project_workspace_service().ensure(project_id, body.project_workspace_id)
+        return {"workspace": binding.model_dump()}
+    except Exception as exc:
+        raise project_resource_error(exc) from exc
+
+
+@router.post("/dashboard-api/projects/{project_id}/checkpoint")
+async def checkpoint_project(body: ProjectRuntimeBody, project_id: int = Path(ge=1)):
+    from agent.modules.projects import get_project_workspace_service
+    try:
+        return await get_project_workspace_service().checkpoint(project_id, body.project_workspace_id)
+    except Exception as exc:
+        raise project_resource_error(exc) from exc
+
+
+@router.post("/dashboard-api/projects/{project_id}/migration/select")
+async def select_project_migration_source(body: MigrationSelectionBody, project_id: int = Path(ge=1)):
+    from agent.modules.projects import get_project_workspace_service
+    try:
+        binding = await get_project_workspace_service().select_migration_source(project_id, body.source_id)
+        return {"workspace": binding.model_dump()}
+    except Exception as exc:
+        raise project_resource_error(exc) from exc
 
 
 def project_resource_error(exc: Exception) -> HTTPException:
@@ -123,6 +162,8 @@ async def get_projects(
 async def create_project(body: ProjectCreateBody):
     try:
         return await add_project(body.workspace, label=body.label)
+    except (KeyError, ProjectWorkspaceError) as exc:
+        raise project_resource_error(exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:

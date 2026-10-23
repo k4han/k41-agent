@@ -326,6 +326,13 @@ class BackgroundTaskManager:
         """
         from agent.modules.agent_runtime.runner import run_agent_stream
 
+        if workspace is not None:
+            from agent.modules.projects import get_project_workspace_service
+            projects = get_project_workspace_service()
+            owned = await projects.find_binding(workspace)
+            if owned:
+                workspace = (await projects.ensure(owned.project_id, owned.project_workspace_id)).execution
+
         task = BackgroundTask(
             request=request,
             agent_name=agent_name,
@@ -417,6 +424,7 @@ class BackgroundTaskManager:
         # Track one active session for the whole task lifecycle so the
         # dashboard running state stays stable through the agent run, the
         # completion hook (e.g. GitHub push/PR publishing), and cleanup.
+        retrying = False
         with track_active_session(task.thread_id, task.agent_name, usage_context=_task_usage_context(task)):
             try:
                 if task.task_timeout and task.task_timeout > 0:
@@ -449,15 +457,7 @@ class BackgroundTaskManager:
                     task.status = TaskStatus.PENDING
                     task.started_at = None
                     task.error = ""
-                    try:
-                        await self._persist_task(task)
-                    except Exception:
-                        pass
-                    async_task = asyncio.create_task(
-                        self._execute(task, run_fn),
-                        name=f"bg-task-{task.task_id}-retry-{task.retry_count}",
-                    )
-                    task._async_task = async_task
+                    retrying = True
                     return
 
                 task.status = TaskStatus.FAILED
@@ -489,15 +489,7 @@ class BackgroundTaskManager:
                     task.status = TaskStatus.PENDING
                     task.started_at = None
                     task.error = ""
-                    try:
-                        await self._persist_task(task)
-                    except Exception:
-                        pass
-                    async_task = asyncio.create_task(
-                        self._execute(task, run_fn),
-                        name=f"bg-task-{task.task_id}-retry-{task.retry_count}",
-                    )
-                    task._async_task = async_task
+                    retrying = True
                     return
 
                 task.status = TaskStatus.FAILED
@@ -519,7 +511,7 @@ class BackgroundTaskManager:
                 if isinstance(exc, (KeyboardInterrupt, SystemExit)):
                     raise
             finally:
-                if task.status in (TaskStatus.PENDING,):
+                if retrying:
                     try:
                         await self._persist_task(task)
                     except Exception:
@@ -551,13 +543,24 @@ class BackgroundTaskManager:
                             )
                 with self._lock:
                     self._trim_completed()
-                    if task.status != TaskStatus.PENDING:
+                    if retrying and task.status == TaskStatus.PENDING:
+                        # Start the next attempt only after this attempt has settled.
+                        task._async_task = asyncio.create_task(
+                            self._execute(task, run_fn),
+                            name=f"bg-task-{task.task_id}-retry-{task.retry_count}",
+                        )
+                    elif task._async_task is asyncio.current_task():
                         task._async_task = None
                 self._publish_task_event(task)
 
     async def _run_streamed_task(self, task: BackgroundTask, run_fn: Any) -> str:
         message_chunks: list[str] = []
         final_content = ""
+        from agent.modules.projects import get_project_workspace_service
+        projects = get_project_workspace_service()
+        binding = await projects.find_binding(task.workspace, thread_id=task.thread_id)
+        if binding:
+            task.workspace = (await projects.ensure(binding.project_id, binding.project_workspace_id)).execution
 
         async for event in run_fn(
             user_input=task.request,

@@ -23,8 +23,59 @@ class WorkspacePackageIO:
         self.ref = resolve_workspace_ref(workspace)
         self.thread_id = thread_id
         self.boundary = boundary
+        self.project_managed = False
 
     async def operation(self, op: str, path: str = "", **kwargs) -> dict:
+        from agent.modules.projects import get_project_workspace_service, ProjectWorkspaceError
+        projects = get_project_workspace_service()
+        binding = await projects.find_binding(self.ref, thread_id=self.thread_id)
+        if binding is None:
+            return await self._operation(op, path, **kwargs)
+        self.project_managed = True
+        self.ref = binding.execution
+        mutations = {"write", "mkdir", "delete", "rename", "rename_package", "install"}
+        readonly = {"scan", "read", "resources", "tree", "archive", "versions"}
+        if op in readonly:
+            kwargs["require_existing_workspace"] = True
+            try:
+                return await self._operation(op, path, **kwargs)
+            except (WorkspaceUnavailableError, NotADirectoryError):
+                if op == "read":
+                    content, metadata = await projects.read_saved(binding.project_id, path, binding.project_workspace_id,
+                        max_bytes=kwargs.get("limits", {}).get("max_file_bytes", 64 * 1024 * 1024))
+                    return {"data": base64.b64encode(content).decode(), "version": hashlib.sha256(content).hexdigest(),
+                            "size": len(content), **metadata}
+                async with projects.saved_view(binding.project_id, binding.project_workspace_id) as view:
+                    original = self.ref
+                    self.ref = view
+                    try:
+                        result = await self._operation(op, path, **kwargs)
+                        result["saved_revision"] = view.metadata["saved_revision"]
+                        result["last_saved_at"] = view.metadata["last_saved_at"]
+                        return result
+                    finally:
+                        self.ref = original
+        binding = await projects.ensure(binding.project_id, binding.project_workspace_id)
+        self.ref = binding.execution
+        if op not in mutations:
+            return await self._operation(op, path, **kwargs)
+        async with projects.mutation(binding.project_id, binding.project_workspace_id, generation=binding.runtime_generation):
+            try:
+                result = await self._operation(op, path, **kwargs)
+            except BaseException:
+                try:
+                    await projects._checkpoint(binding.project_id, binding.project_workspace_id, binding.runtime_generation)
+                except Exception:
+                    pass
+                raise
+            try:
+                result["persistence"] = await projects._checkpoint(binding.project_id, binding.project_workspace_id,
+                                                                   binding.runtime_generation)
+            except ProjectWorkspaceError as exc:
+                result["persistence"] = {"status": "error", "saved": False, "message": str(exc)}
+            return result
+
+    async def _operation(self, op: str, path: str = "", **kwargs) -> dict:
         from agent.shared.config import get_config_service
 
         config = get_config_service()
@@ -36,7 +87,8 @@ class WorkspacePackageIO:
         if self.ref.backend == "local":
             result = await asyncio.to_thread(run_operation, self.ref.locator, request)
         else:
-            backend = await get_workspace_file_io(self.ref, thread_id=self.thread_id)
+            from agent.modules.workspaces import create_workspace_runtime_backend as _create_workspace_runtime_backend
+            backend = await _create_workspace_runtime_backend(self.ref) if self.project_managed else await get_workspace_file_io(self.ref, thread_id=self.thread_id)
             self.ref = backend.ref
             root = str(self.ref.metadata.get("root") or getattr(backend, "root", ""))
             if request.get("require_existing_workspace"):

@@ -177,11 +177,12 @@ class RemoteCodingRuntime:
         key = (context.backend, context.locator, context.workspace)
         async with self.client_lock:
             if key not in self.clients:
-                from agent.modules.workspaces import WorkspaceRef, get_workspace_file_io
+                from agent.modules.workspaces import WorkspaceRef
+                from agent.modules.workspaces import create_workspace_runtime_backend as _create_workspace_runtime_backend
                 ref = WorkspaceRef(backend=context.backend, locator=context.locator,
                                    metadata={"root": context.workspace} if context.workspace else {})
                 # Do not transparently recreate a sandbox and retry a mutation.
-                backend = await get_workspace_file_io(ref)
+                backend = await _create_workspace_runtime_backend(ref)
                 if not callable(getattr(backend, "execute_coding_command", None)):
                     raise CodingError("unsupported_capability", f"Backend {context.backend} does not support coding tools.")
                 if self.bundle is None:

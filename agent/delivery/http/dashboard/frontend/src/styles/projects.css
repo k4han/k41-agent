@@ -75,3 +75,26 @@
   .projects-toolbar > select { flex: 1; max-width: none; }
   .nav-project-heading .project-actions-trigger { width: 36px; min-width: 36px; height: 36px; }
 }
+.project-storage-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.project-storage-status p, .project-storage-status h2 {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.project-migration-source {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  flex-basis: 100%;
+  align-items: center;
+}

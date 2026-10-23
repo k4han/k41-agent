@@ -382,10 +382,13 @@ export function AppShell(props: {
   const [openingProject, setOpeningProject] = createSignal("");
   const startProjectChat = async (group: ThreadWorkspaceGroup) => {
     if (openingProject()) return;
-    const workspace = newProjectWorkspace(group);
+    let workspace = newProjectWorkspace(group);
     setOpeningProject(group.key);
     try {
-      if (workspace && group.id) await verifyProjectWorkspace(workspace);
+      if (workspace && group.id) {
+        const ready = await verifyProjectWorkspace(workspace, group.id);
+        workspace = "execution" in ready ? ready.execution : ready;
+      }
       if (disposed) return;
       navigate("/chat", {
         state: {

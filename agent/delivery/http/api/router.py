@@ -38,6 +38,7 @@ from agent.modules.providers import (
 )
 from agent.modules.users import Platform, get_pairing_service
 from agent.modules.workspaces import (
+    WorkspaceBinding,
     create_temp_workspace,
     ensure_workspace_ready,
     get_thread_workspace_ref,
@@ -143,6 +144,15 @@ async def _apply_workspace_to_run_params(
         return
 
     requested_workspace = request.workspace
+    from agent.modules.projects import get_project_workspace_service
+    projects = get_project_workspace_service()
+    owned = await projects.find_binding(requested_workspace, thread_id=request.thread_id,
+                                         project_id=request.project_id, workspace_id=request.project_workspace_id)
+    if owned:
+        binding = await projects.ensure(owned.project_id, owned.project_workspace_id)
+        await remember_thread_workspace_ref(thread_id, binding)
+        params["workspace"] = binding.execution
+        return
     if (
         request.user_id == DASHBOARD_USER_ID
         and not request.thread_id
@@ -178,7 +188,11 @@ async def _apply_workspace_to_run_params(
         resolved = resolve_workspace_ref(None)
 
     try:
-        await remember_thread_workspace_ref(thread_id, resolved)
+        remembered_workspace = (
+            requested_workspace.model_copy(update={"execution": resolved})
+            if isinstance(requested_workspace, WorkspaceBinding) else resolved
+        )
+        await remember_thread_workspace_ref(thread_id, remembered_workspace)
     except Exception as exc:
         logger.debug(
             "Failed to remember workspace for thread %s: %s",
@@ -199,7 +213,14 @@ async def prepare_run_params(request: ChatRequest) -> dict[str, object]:
     if request.thread_id:
         request = request.model_copy(update={"thread_id": resolve_thread_id(request.thread_id)})
     params = _request_to_run_params(request)
-    await _apply_workspace_to_run_params(request, params)
+    try:
+        await _apply_workspace_to_run_params(request, params)
+    except (KeyError, RuntimeError) as exc:
+        from agent.modules.projects import ProjectWorkspaceError
+        from agent.delivery.http.dashboard.routes.helpers.workspace import workspace_http_error
+        if isinstance(exc, (KeyError, ProjectWorkspaceError)):
+            raise workspace_http_error(exc) from exc
+        raise
     return params
 
 

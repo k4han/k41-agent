@@ -590,7 +590,8 @@ def test_chat_events_resolves_and_remembers_workspace(monkeypatch, tmp_path):
     assert remembered == [("api_dashboard_workspace", resolved_workspace.model_dump())]
 
 
-def test_chat_events_ensures_stored_sandbox_workspace_before_stream(monkeypatch):
+@pytest.mark.parametrize("explicit", [False, True])
+def test_chat_events_ensures_stored_sandbox_workspace_before_stream(monkeypatch, explicit):
     from agent.modules.workspaces import WorkspaceRef
 
     stored_workspace = WorkspaceRef(
@@ -630,7 +631,7 @@ def test_chat_events_ensures_stored_sandbox_workspace_before_stream(monkeypatch)
     }
 
     def fake_build_run_params(**params):
-        assert params["workspace"] is None
+        assert params["workspace"] == (stored_workspace if explicit else None)
         return dict(built_params)
 
     async def fake_get_thread_workspace_ref(thread_id: str):
@@ -664,6 +665,7 @@ def test_chat_events_ensures_stored_sandbox_workspace_before_stream(monkeypatch)
             "message": "Continue",
             "user_id": "dashboard",
             "thread_id": "api_dashboard_old_thread",
+            **({"workspace": stored_workspace.model_dump()} if explicit else {}),
         },
     )
 

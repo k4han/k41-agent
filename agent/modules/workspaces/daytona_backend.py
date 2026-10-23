@@ -734,6 +734,11 @@ async def sweep_idle_daytona_workspaces(
     from agent.modules.workspaces.service import resolve_workspace_ref
 
     records = await get_thread_workspace_repository().list_by_backend(DAYTONA_BACKEND)
+    from agent.modules.projects import get_project_workspace_service
+    managed_counts = await get_project_workspace_service().sweep_idle_daytona(
+        now=current_time, stop_after=stop_after, archive_after=archive_after)
+    records = {thread_id: record for thread_id, record in records.items()
+               if not (record.get("workspace") or {}).get("project_workspace_id")}
     result: dict[str, Any] = {
         "checked": len(records),
         "stopped": 0,
@@ -741,6 +746,9 @@ async def sweep_idle_daytona_workspaces(
         "skipped": 0,
         "errors": [],
     }
+    for name in ("checked", "stopped", "archived", "skipped"):
+        result[name] += managed_counts[name]
+    result["errors"].extend(managed_counts["errors"])
     for thread_id, record in records.items():
         workspace_payload = record.get("workspace")
         if not workspace_payload:

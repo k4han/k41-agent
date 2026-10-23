@@ -111,6 +111,8 @@ security:
 #   github:
 #     root: "~/.k41-agent/github-workspaces"
 # Local workspace root and backend credentials are configured in the dashboard at Settings > Backends.
+# Durable project snapshots default to ~/.k41-agent/project-storage. Configure
+# workspace.project_storage_root in workspace settings to use another persistent disk.
 
 # Dashboard display settings (e.g. IANA timezone) are runtime configuration
 # stored in the database and managed from the dashboard at Settings > General.

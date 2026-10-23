@@ -1035,6 +1035,29 @@ async def test_publish_task_result_comments_when_no_diff(tmp_path: Path) -> None
 
 
 @pytest.mark.asyncio
+async def test_publish_task_result_uses_recovered_workspace(tmp_path: Path, monkeypatch) -> None:
+    from unittest.mock import AsyncMock
+    import agent.modules.projects as projects
+    from agent.modules.github.service import GitHubTaskContext
+    from agent.modules.workspaces import WorkspaceRef, bind_workspace_ref
+    current_path = tmp_path / "recovered"
+    current = bind_workspace_ref(WorkspaceRef(locator=str(current_path)), project_id=1, project_workspace_id=2,
+                                 runtime_generation=3)
+    coordinator = SimpleNamespace(find_binding=AsyncMock(return_value=current), ensure=AsyncMock(return_value=current))
+    monkeypatch.setattr(projects, "get_project_workspace_service", lambda: coordinator)
+    workspace = FakeWorkspace(tmp_path)
+    service = GitHubAutomationService(client=FakeClient(), workspace_manager=workspace)
+    context = GitHubTaskContext(installation_id=10, repository_full_name="octo/example", issue_number=7,
+        issue_title="Fix a test", issue_url="https://github.com/octo/example/issues/7", branch="task", base_branch="main",
+        workspace_path=tmp_path / "expired")
+    task = BackgroundTask(request="work", agent_name="default", result="Done")
+    await service.publish_task_result(task, context)
+    assert workspace.commits[0]["path"] == current_path
+    assert workspace.pushes[0]["path"] == current_path
+    assert "Pull request:" in task.result
+
+
+@pytest.mark.asyncio
 async def test_issue_claim_released_when_task_submission_fails(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

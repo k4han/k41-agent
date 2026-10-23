@@ -49,7 +49,8 @@ async def _wait_for_task_status(
     task_id: str,
     status: str,
 ) -> dict:
-    for _ in range(100):
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
         task = manager.get(task_id)
         runtime_task = manager._tasks.get(task_id)
         if task and task["status"] == status and runtime_task and runtime_task._async_task is None:
@@ -125,7 +126,10 @@ async def test_background_task_submit_remembers_thread_workspace(
     stored_workspace = await get_thread_workspace_ref(task["thread_id"])
 
     assert stored_workspace is not None
-    assert stored_workspace.model_dump() == workspace.model_dump()
+    assert stored_workspace.backend == workspace.backend
+    assert stored_workspace.locator == workspace.locator
+    assert stored_workspace.label == workspace.label
+    assert all(stored_workspace.metadata[key] == value for key, value in workspace.metadata.items())
 
 
 @pytest.mark.asyncio
@@ -608,18 +612,7 @@ async def test_background_task_retry_leaves_no_active_session(
     assert task["retry_count"] == 1
     assert attempts["count"] == 2
 
-    # The failed attempt's session reference is released from its own
-    # (still-finishing) execution context, which can lag slightly behind the
-    # retried attempt's completion. Wait for the session to be cleaned up.
-    for _ in range(100):
-        if all(
-            session["thread_id"] != task["thread_id"]
-            for session in registry.list_active()
-        ):
-            break
-        await asyncio.sleep(0.01)
-    else:
-        raise AssertionError("session leaked after retried background task")
+    assert all(session["thread_id"] != task["thread_id"] for session in registry.list_active())
 
 
 @pytest.mark.asyncio
@@ -712,13 +705,6 @@ async def test_background_task_cleanup_hook_waits_for_final_retry(
     )
     await _wait_for_task_status(manager, task_id, "completed")
 
-    # The first attempt's execution context can flip ``_async_task`` to None
-    # slightly before the retried attempt's finally block runs the cleanup
-    # hook, so wait for the hook itself.
-    for _ in range(100):
-        if cleaned:
-            break
-        await asyncio.sleep(0.01)
     assert cleaned == [task_id]
 
 

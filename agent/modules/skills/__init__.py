@@ -242,6 +242,9 @@ def validate_skill_document(content: str, *, name: str | None = None, strict: bo
 
 
 def __getattr__(name: str):
+    if name == "skill_workspace_key":
+        from agent.modules.skills.sources import workspace_key
+        return workspace_key
     if name == "SkillPackages":
         from agent.modules.skills.packages import SkillPackages
         return SkillPackages
@@ -264,6 +267,7 @@ def __getattr__(name: str):
 
 
 __all__ = [
+    "skill_workspace_key",
     "SkillPackages", "WorkspacePackageIO", "activation_key", "active_context", "model_skill_history", "skill_commands", "skill_events",
     "SkillSource", "SkillPackageSummary", "SkillResource", "SkillDiagnostic", "ActivatedSkill",
     "get_skill_packages", "validate_skill_document",

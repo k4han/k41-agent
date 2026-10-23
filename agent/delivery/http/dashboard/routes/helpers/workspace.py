@@ -14,7 +14,7 @@ from agent.modules.workspaces import (
     resolve_workspace_ref,
 )
 from agent.shared.integrations import IntegrationUnavailableError
-from agent.modules.workspaces.constants import (
+from agent.modules.workspaces import (
     NO_WORKSPACE_KEY,
     NO_WORKSPACE_LABEL,
     TEMP_WORKSPACE_KEY,
@@ -29,6 +29,12 @@ async def workspace_ref_for_thread(
     include_default: bool = True,
 ) -> WorkspaceRef | None:
     if thread_id:
+        from agent.modules.projects import get_project_workspace_service
+        projects = get_project_workspace_service()
+        if projects.container._persistence_ready:
+            binding = await projects.resolve_thread(thread_id)
+            if binding:
+                return binding.execution
         task = get_background_task_manager().get_by_thread_id(thread_id)
         task_workspace = (task or {}).get("workspace")
         if task_workspace:
@@ -56,20 +62,29 @@ async def workspace_ref_from_request(
     backend: str | None = None,
     locator: str | None = None,
     root: str | None = None,
+    project_id: int | None = None,
+    project_workspace_id: int | None = None,
 ) -> WorkspaceRef:
-    if workspace is not None:
-        return resolve_workspace_ref(workspace)
-    if locator and locator.strip():
+    from agent.modules.projects import get_project_workspace_service
+    requested = workspace
+    if requested is None and locator and locator.strip():
         metadata: dict[str, Any] = {}
         if (backend or "").strip().lower() != "local" and root and root.strip():
             metadata["root"] = root.strip()
-        return resolve_workspace_ref(
+        requested = resolve_workspace_ref(
             {
                 "backend": (backend or "local").strip() or "local",
                 "locator": locator,
                 "metadata": metadata,
             }
         )
+    projects = get_project_workspace_service()
+    binding = await projects.find_binding(requested, thread_id=thread_id, project_id=project_id,
+                                          workspace_id=project_workspace_id)
+    if binding:
+        return binding.execution
+    if requested is not None:
+        return resolve_workspace_ref(requested)
     if thread_id and thread_id.strip():
         stored = await workspace_ref_for_thread(thread_id)
         if stored is not None:
@@ -78,6 +93,12 @@ async def workspace_ref_from_request(
 
 
 def workspace_http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, KeyError):
+        return HTTPException(status_code=404, detail="Project not found.")
+    from agent.modules.projects import ProjectWorkspaceError
+    if isinstance(exc, ProjectWorkspaceError):
+        status = 410 if exc.code == "missing_data" else 503 if exc.code == "persistence_error" else 409
+        return HTTPException(status_code=status, detail={"code": exc.code, "message": str(exc)})
     if isinstance(exc, IntegrationUnavailableError):
         return HTTPException(status_code=503, detail=exc.to_dict())
     if isinstance(exc, WorkspaceUnavailableError):

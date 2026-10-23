@@ -348,6 +348,10 @@ async def ingest_attachment_file_to_sandbox(
         except Exception:
             abs_path = f"{str(root).rstrip('/')}/{rel}"
 
+        writer = getattr(file_io, "write_bytes", None)
+        if callable(writer):
+            await writer(rel, content_bytes)
+            return True
         uploader = getattr(file_io, "_upload_file", None)
         if callable(uploader):
             try:

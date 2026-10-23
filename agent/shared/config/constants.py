@@ -150,6 +150,7 @@ RUNTIME_KEY_PATTERNS = [
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.headers\.[A-Za-z0-9_-]+$",
     r"^workspace\.root$",
     r"^workspace\.github\.root$",
+    r"^workspace\.project_storage_root$",
     r"^workspace\.daytona\.(enabled|api_key|default_root|target|image|cpu|memory|disk|language|auto_stop_minutes|auto_archive_days|sweeper_interval_seconds|start_timeout_seconds|stop_timeout_seconds|sandbox_auto_stop_minutes|sandbox_auto_archive_minutes|sandbox_auto_delete_minutes|ephemeral|network_block_all|network_allow_list)$",
     r"^workspace\.modal\.(enabled|token_id|token_secret|app_name|default_root|image|sandbox_timeout_seconds|idle_timeout_seconds)$",
     r"^google_calendar\.enabled$",
@@ -185,6 +186,7 @@ DATABASE_RUNTIME_KEY_PATTERNS = [
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.headers\.[A-Za-z0-9_-]+$",
     r"^workspace\.root$",
     r"^workspace\.github\.root$",
+    r"^workspace\.project_storage_root$",
     r"^workspace\.daytona\.(enabled|api_key|default_root|target|image|cpu|memory|disk|language|auto_stop_minutes|auto_archive_days|sweeper_interval_seconds|start_timeout_seconds|stop_timeout_seconds|sandbox_auto_stop_minutes|sandbox_auto_archive_minutes|sandbox_auto_delete_minutes|ephemeral|network_block_all|network_allow_list)$",
     r"^workspace\.modal\.(enabled|token_id|token_secret|app_name|default_root|image|sandbox_timeout_seconds|idle_timeout_seconds)$",
     r"^google_calendar\.enabled$",
@@ -289,6 +291,7 @@ def _expand_runtime_keys() -> set[str]:
     keys.add(LLM_FALLBACK_MODEL_KEY)
     keys.add("database.url")
     keys.add("workspace.root")
+    keys.add("workspace.project_storage_root")
     keys.add("workspace.github.root")
     keys.add("workspace.daytona.enabled")
     keys.add("workspace.daytona.api_key")
@@ -387,6 +390,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # Security
     "persistence.allow_any_path": False,
     "workspace.root": DEFAULT_WORKSPACE_ROOT,
+    "workspace.project_storage_root": None,
     "workspace.github.root": DEFAULT_GITHUB_WORKSPACE_ROOT,
     "workspace.daytona.enabled": False,
     "workspace.daytona.api_key": "",
@@ -530,6 +534,11 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "restart_required": True,
     },
     # Workspace settings
+    "workspace.project_storage_root": {
+        "type": "text", "category": "workspace", "label": "Project Storage Root",
+        "description": "Durable project file storage outside repositories (defaults to ~/.k41-agent/project-storage)",
+        "restart_required": True,
+    },
     "workspace.root": {
         "type": "text",
         "description": "Root directory for local workspaces (supports ~)",

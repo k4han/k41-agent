@@ -152,6 +152,7 @@ async def browse_dashboard_workspace(
 
 @router.get("/dashboard-api/workspace/tree")
 async def get_dashboard_workspace_tree(
+    project_id: int | None = None, project_workspace_id: int | None = None,
     thread_id: str | None = Query(default=None, description="Thread ID to resolve workspace from."),
     backend: str | None = Query(default="local", description="Workspace backend type."),
     locator: str | None = Query(default=None, description="Backend-specific locator."),
@@ -164,7 +165,7 @@ async def get_dashboard_workspace_tree(
             thread_id=thread_id,
             backend=backend,
             locator=locator,
-            root=root,
+            root=root, project_id=project_id, project_workspace_id=project_workspace_id,
         )
         async def _op(b): return await b.tree(path)
         return await _run_workspace_capability_operation(
@@ -179,6 +180,7 @@ async def get_dashboard_workspace_tree(
 
 @router.get("/dashboard-api/workspace/changes")
 async def get_dashboard_workspace_changes(
+    project_id: int | None = None, project_workspace_id: int | None = None,
     thread_id: str | None = Query(default=None, description="Thread ID to resolve workspace from."),
     backend: str | None = Query(default="local", description="Workspace backend type."),
     locator: str | None = Query(default=None, description="Backend-specific locator."),
@@ -190,7 +192,7 @@ async def get_dashboard_workspace_changes(
             thread_id=thread_id,
             backend=backend,
             locator=locator,
-            root=root,
+            root=root, project_id=project_id, project_workspace_id=project_workspace_id,
         )
         async def _op(b): return await b.changes()
         return await _run_workspace_capability_operation(
@@ -205,6 +207,7 @@ async def get_dashboard_workspace_changes(
 
 @router.get("/dashboard-api/workspace/diff")
 async def get_dashboard_workspace_diff(
+    project_id: int | None = None, project_workspace_id: int | None = None,
     thread_id: str | None = Query(default=None, description="Thread ID to resolve workspace from."),
     backend: str | None = Query(default="local", description="Workspace backend type."),
     locator: str | None = Query(default=None, description="Backend-specific locator."),
@@ -217,7 +220,7 @@ async def get_dashboard_workspace_diff(
             thread_id=thread_id,
             backend=backend,
             locator=locator,
-            root=root,
+            root=root, project_id=project_id, project_workspace_id=project_workspace_id,
         )
         async def _op(b): return await b.diff(path)
         return await _run_workspace_capability_operation(
@@ -232,6 +235,7 @@ async def get_dashboard_workspace_diff(
 
 @router.get("/dashboard-api/workspace/file")
 async def get_dashboard_workspace_file(
+    project_id: int | None = None, project_workspace_id: int | None = None,
     thread_id: str | None = Query(default=None, description="Thread ID to resolve workspace from."),
     backend: str | None = Query(default="local", description="Workspace backend type."),
     locator: str | None = Query(default=None, description="Backend-specific locator."),
@@ -244,7 +248,7 @@ async def get_dashboard_workspace_file(
             thread_id=thread_id,
             backend=backend,
             locator=locator,
-            root=root,
+            root=root, project_id=project_id, project_workspace_id=project_workspace_id,
         )
         async def _op(b): return await b.file(path)
         return await _run_workspace_capability_operation(
@@ -259,6 +263,7 @@ async def get_dashboard_workspace_file(
 
 @router.get("/dashboard-api/workspace/download")
 async def download_dashboard_workspace_file(
+    project_id: int | None = None, project_workspace_id: int | None = None,
     thread_id: str | None = Query(default=None, description="Thread ID to resolve workspace from."),
     backend: str | None = Query(default="local", description="Workspace backend type."),
     locator: str | None = Query(default=None, description="Backend-specific locator."),
@@ -271,7 +276,7 @@ async def download_dashboard_workspace_file(
             thread_id=thread_id,
             backend=backend,
             locator=locator,
-            root=root,
+            root=root, project_id=project_id, project_workspace_id=project_workspace_id,
         )
         return await _workspace_file_response(workspace, thread_id, path, inline=False)
     except HTTPException:
@@ -282,6 +287,7 @@ async def download_dashboard_workspace_file(
 
 @router.get("/dashboard-api/workspace/preview")
 async def preview_dashboard_workspace_file(
+    project_id: int | None = None, project_workspace_id: int | None = None,
     thread_id: str | None = Query(default=None),
     backend: str | None = Query(default="local"),
     locator: str | None = Query(default=None),
@@ -292,6 +298,7 @@ async def preview_dashboard_workspace_file(
     try:
         workspace = await workspace_ref_from_request(
             thread_id=thread_id, backend=backend, locator=locator, root=root,
+            project_id=project_id, project_workspace_id=project_workspace_id,
         )
         return await _workspace_file_response(workspace, thread_id, path, inline=True)
     except HTTPException:
@@ -300,7 +307,12 @@ async def preview_dashboard_workspace_file(
         raise workspace_http_error(exc) from exc
 
 
-class WorkspaceRenameBody(BaseModel):
+class WorkspaceProjectBody(BaseModel):
+    project_id: int | None = Field(default=None, ge=1)
+    project_workspace_id: int | None = Field(default=None, ge=1)
+
+
+class WorkspaceRenameBody(WorkspaceProjectBody):
     """Request body for renaming a file or directory in the workspace."""
 
     thread_id: str | None = Field(default=None, description="Thread ID to resolve workspace from.")
@@ -317,7 +329,7 @@ async def rename_dashboard_workspace_entry(
     try:
         workspace = await workspace_ref_from_request(
             thread_id=body.thread_id,
-            workspace=body.workspace,
+            workspace=body.workspace, project_id=body.project_id, project_workspace_id=body.project_workspace_id,
         )
         async def _op(b): return await b.rename(path=body.path, new_name=body.new_name)
         return await _run_workspace_capability_operation(
@@ -330,7 +342,7 @@ async def rename_dashboard_workspace_entry(
         raise workspace_http_error(exc) from exc
 
 
-class WorkspaceDeleteBody(BaseModel):
+class WorkspaceDeleteBody(WorkspaceProjectBody):
     """Request body for deleting a file or directory in the workspace."""
 
     thread_id: str | None = Field(default=None, description="Thread ID to resolve workspace from.")
@@ -338,7 +350,7 @@ class WorkspaceDeleteBody(BaseModel):
     path: str = Field(..., min_length=1, description="Path of the file or directory to delete.")
 
 
-class WorkspaceCreateEntryBody(BaseModel):
+class WorkspaceCreateEntryBody(WorkspaceProjectBody):
     """Request body for creating a file or directory in the workspace."""
 
     thread_id: str | None = Field(default=None, description="Thread ID to resolve workspace from.")
@@ -348,7 +360,7 @@ class WorkspaceCreateEntryBody(BaseModel):
     content: str = Field(default="", description="Initial content for the file (if kind is 'file').")
 
 
-class WorkspaceResolveBody(BaseModel):
+class WorkspaceResolveBody(WorkspaceProjectBody):
     """Request body for resolving a workspace from various inputs (local, GitHub, sandbox)."""
 
     kind: str | None = Field(default=None, description="Workspace kind hint (e.g. 'github', 'local').")
@@ -388,6 +400,19 @@ async def resolve_dashboard_workspace(request: Request, body: WorkspaceResolveBo
     kind = kind_source.strip().lower()
     repository_id = body.repository_id
     try:
+        if body.project_id:
+            from agent.modules.projects import get_project_workspace_service, ProjectWorkspaceError
+            projects = get_project_workspace_service()
+            ref = await workspace_ref_from_request(
+                workspace=body.workspace, backend=body.backend, locator=body.locator,
+                project_id=body.project_id, project_workspace_id=body.project_workspace_id,
+            )
+            if repository_id is not None and str(ref.metadata.get("repository_id", "")) != str(repository_id):
+                raise ProjectWorkspaceError("Repository reference conflicts with the project.", "workspace_conflict")
+            binding = await projects.ensure(body.project_id, body.project_workspace_id)
+            if body.thread_id:
+                await remember_thread_workspace_ref(body.thread_id, binding)
+            return {"kind": binding.execution.backend, "label": binding.scope.label, "workspace": binding.model_dump()}
         if kind == "github":
             if repository_id is None:
                 raise ValueError("Repository ID is required.")
@@ -615,7 +640,7 @@ async def delete_dashboard_workspace_entry(
     try:
         workspace = await workspace_ref_from_request(
             thread_id=body.thread_id,
-            workspace=body.workspace,
+            workspace=body.workspace, project_id=body.project_id, project_workspace_id=body.project_workspace_id,
         )
         async def _op(b): return await b.delete(path=body.path)
         return await _run_workspace_capability_operation(
@@ -636,7 +661,7 @@ async def create_dashboard_workspace_entry(
     try:
         workspace = await workspace_ref_from_request(
             thread_id=body.thread_id,
-            workspace=body.workspace,
+            workspace=body.workspace, project_id=body.project_id, project_workspace_id=body.project_workspace_id,
         )
         clean_kind = body.kind.strip().lower()
         if clean_kind in ("dir", "directory", "folder"):

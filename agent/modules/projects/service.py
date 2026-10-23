@@ -8,7 +8,7 @@ from sqlalchemy import JSON, cast, func, or_, select
 
 from agent.modules.projects.models import Project
 from agent.modules.projects.repository import cursor_condition, encode_cursor, register_project, serialize_project
-from agent.modules.workspaces.refs import WorkspaceBinding, WorkspaceInput, bind_workspace_ref
+from agent.modules.workspaces import WorkspaceBinding, WorkspaceInput, bind_workspace_ref
 from agent.shared.infrastructure.db.base import utcnow
 from agent.shared.infrastructure.db.session import get_async_session
 
@@ -36,21 +36,40 @@ async def list_projects(*, status: str = "active", search: str = "", limit: int 
         records = list((await session.execute(statement.order_by(Project.is_pinned.desc(), key)
                                              .limit(limit + 1))).scalars())
         rows = [serialize_project(record) for record in records[:limit]]
+    from agent.modules.projects.workspaces import get_project_workspace_service
+    if rows:
+        descriptions = await get_project_workspace_service().describe_many([row["id"] for row in rows])
+        rows = [dict(row, **descriptions[row["id"]]) for row in rows if row["id"] in descriptions]
     return {"projects": rows, "has_more": len(records) > limit,
-            "next_cursor": encode_cursor(rows[-1]["is_pinned"], rows[-1]["key"]) if len(records) > limit else None}
+            "next_cursor": encode_cursor(records[limit - 1].is_pinned, records[limit - 1].key) if len(records) > limit else None}
 
 
 async def add_project(workspace: WorkspaceInput, *, label: str | None = None) -> dict[str, Any]:
     from agent.modules.workspaces import resolve_workspace_ref
 
-    binding = bind_workspace_ref(resolve_workspace_ref(workspace))
+    binding = WorkspaceBinding.model_validate(workspace) if isinstance(workspace, (WorkspaceBinding, dict)) and (
+        isinstance(workspace, WorkspaceBinding) or "scope" in workspace
+    ) else bind_workspace_ref(resolve_workspace_ref(workspace))
+    from agent.modules.projects.workspaces import get_project_workspace_service
+    projects = get_project_workspace_service()
+    existing = await projects.find_binding(workspace)
+    if existing:
+        binding = existing
     session = await get_async_session()
     async with session:
         record = await register_project(session, binding, label=label, restore=True)
         if record is None:
             raise ValueError("Temporary workspaces cannot be added to the project catalog.")
+        from agent.modules.projects.workspaces import register_workspace
+        ready = record.migration_status == "ready"
+        if ready:
+            if existing is None:
+                existing = await register_workspace(session, record, binding.execution)
         await session.commit()
-        return serialize_project(record)
+        project_id = record.id
+    if ready and existing is not None:
+        projects.monitor(existing.project_workspace_id)
+    return await get_project(project_id)
 
 
 async def get_project(project_id: int) -> dict[str, Any]:
@@ -59,7 +78,10 @@ async def get_project(project_id: int) -> dict[str, Any]:
         record = await session.get(Project, project_id)
         if record is None:
             raise KeyError("Project not found.")
-        return serialize_project(record)
+        result = serialize_project(record)
+    from agent.modules.projects.workspaces import get_project_workspace_service
+    result.update(await get_project_workspace_service().describe(project_id))
+    return result
 
 
 async def update_project(project_id: int, changes: dict[str, Any]) -> dict[str, Any]:
@@ -72,16 +94,16 @@ async def update_project(project_id: int, changes: dict[str, Any]) -> dict[str, 
             setattr(record, field, value)
         record.updated_at = utcnow()
         await session.commit()
-        return serialize_project(record)
+    return await get_project(project_id)
 
 
 async def import_existing_projects() -> None:
     """Insert missing scopes using the most recent live root conversation's workspace."""
-    from agent.modules.conversations.navigation import _project_previews_statement, _serialize_project_thread
-    from agent.modules.agent_runtime.models import BackgroundTaskRecord
-    from agent.modules.conversations.models import ConversationThread
-    from agent.modules.workspaces.constants import NO_WORKSPACE_KEY, TEMP_WORKSPACE_KEY
-    from agent.modules.workspaces.refs import workspace_ref_from_columns
+    from agent.modules.conversations import project_previews_statement as _project_previews_statement, serialize_project_thread as _serialize_project_thread
+    from agent.modules.agent_runtime import BackgroundTaskRecord
+    from agent.modules.conversations import ConversationThread
+    from agent.modules.workspaces import NO_WORKSPACE_KEY, TEMP_WORKSPACE_KEY
+    from agent.modules.workspaces import workspace_ref_from_columns
 
     session = await get_async_session()
     async with session:

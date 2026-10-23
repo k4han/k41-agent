@@ -13,6 +13,7 @@ from agent.modules.workspaces import (
     normalize_workspace_ref,
     workspace_ref_from_columns,
 )
+from agent.modules.workspaces import binding_from_record
 from agent.shared.config.constants import DEFAULT_WORKSPACE_ROOT
 from agent.shared.infrastructure.db.base import utcnow
 from agent.shared.infrastructure.db.session import get_async_session
@@ -102,7 +103,7 @@ def _workspace_from_record(record: BackgroundTaskRecord) -> WorkspaceRef | None:
 
 def _binding_from_record(record: BackgroundTaskRecord):
     workspace = _workspace_from_record(record)
-    return bind_workspace_ref(workspace) if workspace else None
+    return binding_from_record(record, workspace) if workspace else None
 
 
 class BackgroundTaskRepository:
@@ -155,6 +156,8 @@ class BackgroundTaskRepository:
             if record is None:
                 record = BackgroundTaskRecord(task_id=normalized_task_id)
                 session.add(record)
+            elif record.project_id and workspace_ref:
+                workspace_binding = binding_from_record(record, workspace_ref)
 
             record.thread_id = _trim(thread_id, 512)
             record.request = str(request or "")
@@ -198,9 +201,12 @@ class BackgroundTaskRepository:
             record.retry_count = max(0, retry_count)
 
             if workspace_binding:
-                from agent.modules.projects.repository import register_thread_project
+                from agent.modules.projects import register_thread_project
 
-                await register_thread_project(session, record.thread_id, workspace_binding)
+                owned = await register_thread_project(session, record.thread_id, workspace_binding)
+                record.project_id, record.project_workspace_id = owned.project_id, owned.project_workspace_id
+                record.scope_key, record.scope_kind, record.scope_label = owned.scope.key, owned.scope.kind, owned.scope.label
+                record.scope_metadata_json = json.dumps(owned.scope.metadata)
             await session.commit()
             await session.refresh(record)
             return serialize_background_task(record)

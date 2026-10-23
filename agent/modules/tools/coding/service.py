@@ -35,6 +35,7 @@ class CodingService(CodingEngine):
         self.remote = RemoteCodingRuntime(self)
         self.processes.remote = self.remote
         self.invocation_locks: dict[str, asyncio.Lock] = {}
+        self.project_watchers: set[asyncio.Task] = set()
         self.storage.cleanup()
         self.storage.start_cleanup()
 
@@ -43,12 +44,75 @@ class CodingService(CodingEngine):
             await self.remote.prepare(name, values, context)
         else:
             await super().prepare(name, values, context)
+        if name in {"write", "edit", "bash", "write_process_input"} and context.project_workspace_id:
+            from agent.modules.projects import get_project_workspace_service
+            await get_project_workspace_service().assert_writable(context)
 
     async def execute(self, name: str, values: dict[str, Any], context: InvocationContext) -> ToolResult:
         if context.backend != "local":
-            return await self.remote.execute(name, values, context)
-        result = await super().execute(name, values, context)
-        return ToolResult.model_validate(result.to_dict())
+            result = await self.remote.execute(name, values, context)
+        else:
+            result = await super().execute(name, values, context)
+            result = ToolResult.model_validate(result.to_dict())
+        if context.project_workspace_id and result.status == "running" and result.data.get("process_id"):
+            from agent.modules.projects import get_project_workspace_service
+            projects = get_project_workspace_service()
+            process_id = result.data["process_id"]
+            process_key = (context.project_workspace_id, process_id)
+            if process_key not in projects.running_processes:
+                projects.running_processes.add(process_key)
+                task = asyncio.create_task(self._watch_project_process(context, process_id))
+                self.project_watchers.add(task)
+                task.add_done_callback(self.project_watchers.discard)
+        return result
+
+    async def _watch_project_process(self, context, process_id):
+        try:
+            if context.backend == "local":
+                await self.processes.get(context, process_id).finished.wait()
+            else:
+                client = await self.remote.client(context)
+                while True:
+                    await asyncio.sleep(1)
+                    response = await client.call(self.remote.request("process_state", "", {"process_id": process_id}, context))
+                    if response["finished"]:
+                        break
+            from agent.modules.projects import get_project_workspace_service
+            await get_project_workspace_service().checkpoint(context.project_id, context.project_workspace_id,
+                                                              generation=context.runtime_generation)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning("Could not save completed project process workspace=%s", context.project_workspace_id, exc_info=True)
+        finally:
+            from agent.modules.projects import get_project_workspace_service
+            get_project_workspace_service().running_processes.discard((context.project_workspace_id, process_id))
+
+    async def _execute_project_operation(self, definition, parsed, context, fingerprint):
+        from agent.modules.projects import get_project_workspace_service
+        projects = get_project_workspace_service()
+        async with projects.mutation(context.project_id, context.project_workspace_id, generation=context.runtime_generation):
+            try:
+                result = await definition.execute(parsed, context, self)
+                result = definition.output_schema.model_validate(result)
+            except (CodingError, OSError, ValueError) as exc:
+                result = self.failure(exc)
+            except asyncio.CancelledError:
+                try:
+                    await asyncio.shield(projects._checkpoint(context.project_id, context.project_workspace_id,
+                                                               context.runtime_generation))
+                except Exception:
+                    logger.warning("Interrupted project operation has unsaved changes.")
+                raise
+            # Settle execution before saving, so a storage failure cannot replay effects.
+            result.data["persistence"] = {"status": "dirty", "saved": False}
+            self.storage.complete(context, fingerprint, result)
+            return await projects.persist_result(context, result)
+
+    async def _resolve_context(self, name: str, context: InvocationContext) -> InvocationContext:
+        from agent.modules.projects import get_project_workspace_service
+        return await get_project_workspace_service().resolve_context(
+            context, allow_unready=name in {"read", "list_dir", "glob", "grep", "read_process_output", "stop_process"})
 
     async def prepare_batch(self, invocations: list[CodingInvocation]) -> ToolResult | None:
         """Authorize every operation before a batch can execute any effects."""
@@ -56,11 +120,12 @@ class CodingService(CodingEngine):
             for invocation in invocations:
                 definition, args, context = invocation.definition, invocation.args, invocation.context
                 parsed = definition.input_schema.model_validate(args)
+                context = await self._resolve_context(definition.name, context)
                 if definition.name != "read" and context.tool_call_id and self.storage.journal_path(context).exists():
                     self.storage.begin(context, self.fingerprint(definition.name, parsed.model_dump()))
                     continue
                 await self.prepare(definition.name, parsed.model_dump(), context)
-        except (CodingError, ValidationError, OSError, ValueError) as exc:
+        except (CodingError, ValidationError, OSError, ValueError, RuntimeError) as exc:
             result = self.failure(exc)
             result.data["batch_stopped_before_execution"] = True
             result.content = f"[error] Batch stopped before execution: {exc}"
@@ -72,6 +137,10 @@ class CodingService(CodingEngine):
         return digest(json.dumps([name, args], sort_keys=True, ensure_ascii=True))
 
     async def invoke(self, definition: ToolDefinition, args: dict[str, Any], context: InvocationContext) -> ToolResult:
+        try:
+            context = await self._resolve_context(definition.name, context)
+        except (CodingError, OSError, ValueError, RuntimeError) as exc:
+            return self.failure(exc)
         started = time.monotonic()
         # Reads must observe the current file, including when a call ID is reused.
         use_journal = definition.name != "read"
@@ -103,7 +172,15 @@ class CodingService(CodingEngine):
                         return result
                     journal_started = True
                 try:
-                    result = await definition.execute(parsed, context, self)
+                    if context.project_workspace_id and definition.name in {"write", "edit", "bash", "write_process_input"}:
+                        result = await self._execute_project_operation(definition, parsed, context, fingerprint)
+                    else:
+                        result = await definition.execute(parsed, context, self)
+                        if context.project_workspace_id and definition.name == "stop_process":
+                            from agent.modules.projects import get_project_workspace_service
+                            projects = get_project_workspace_service()
+                            async with projects.lock(context.project_workspace_id):
+                                result = await projects.persist_result(context, result)
                     result = definition.output_schema.model_validate(result)
                     if definition.render:
                         result.content = definition.render(result)

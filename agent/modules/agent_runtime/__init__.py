@@ -1,3 +1,4 @@
+from agent.modules.agent_runtime.models import BackgroundTaskRecord
 from agent.modules.agent_runtime import active_sessions
 from agent.modules.agent_runtime.active_sessions import (
     ActiveSession,
