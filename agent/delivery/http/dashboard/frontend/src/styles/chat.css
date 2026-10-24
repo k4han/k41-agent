@@ -41,6 +41,32 @@
   gap: 0;
 }
 
+.chat-shell-resizable.workspace-fullscreen {
+  grid-template-columns: minmax(0, 1fr) !important;
+  column-gap: 0;
+  gap: 0;
+}
+
+.chat-shell-resizable.workspace-fullscreen .chat-panel {
+  display: none !important;
+}
+
+.chat-shell-resizable.workspace-fullscreen .workspace-drawer {
+  width: 100% !important;
+  max-width: 100% !important;
+  height: 100% !important;
+  min-width: 0 !important;
+  grid-column: 1 !important;
+  border-left: 0 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+}
+
+.chat-shell-resizable.workspace-fullscreen .workspace-resize-handle {
+  display: none !important;
+}
+
 .content:has(.chat-shell-resizable.workspace-open):not(.content-no-header),
 .content:has(.chat-shell-resizable.workspace-closed):not(.content-no-header) {
   width: 100%;

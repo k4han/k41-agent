@@ -14,6 +14,7 @@ export function useWorkspaceExplorer(getShellRef: () => HTMLDivElement | undefin
   const [width, setWidth] = createSignal(WORKSPACE_EXPLORER_DEFAULT_WIDTH);
   const [resizing, setResizing] = createSignal(false);
   const [justResized, setJustResized] = createSignal(false);
+  const [fullscreen, setFullscreen] = createSignal(false);
   let justResizedTimer: number | null = null;
   let stopResize: (() => void) | null = null;
 
@@ -25,11 +26,18 @@ export function useWorkspaceExplorer(getShellRef: () => HTMLDivElement | undefin
 
   const setExplorerOpen = (next: boolean) => {
     setOpen(next);
+    if (!next) {
+      setFullscreen(false);
+    }
     window.localStorage.setItem(WORKSPACE_EXPLORER_OPEN_KEY, next ? "open" : "closed");
   };
 
   const toggle = () => {
     setExplorerOpen(!open());
+  };
+
+  const toggleFullscreen = () => {
+    setFullscreen((prev) => !prev);
   };
 
   const applyWidth = (value: number, availableWidth?: number) => {
@@ -108,9 +116,17 @@ export function useWorkspaceExplorer(getShellRef: () => HTMLDivElement | undefin
       const currentShellWidth = getShellRef()?.getBoundingClientRect().width;
       setWidth((curr) => clampWidth(curr, currentShellWidth || window.innerWidth));
     };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && fullscreen()) {
+        event.preventDefault();
+        setFullscreen(false);
+      }
+    };
     window.addEventListener("resize", handleWindowResize);
+    window.addEventListener("keydown", handleKeyDown);
     onCleanup(() => {
       window.removeEventListener("resize", handleWindowResize);
+      window.removeEventListener("keydown", handleKeyDown);
     });
   });
 
@@ -118,5 +134,5 @@ export function useWorkspaceExplorer(getShellRef: () => HTMLDivElement | undefin
     endResize();
   });
 
-  return { open, width, resizing, justResized, toggle, startResize };
+  return { open, width, resizing, justResized, fullscreen, setFullscreen, toggleFullscreen, toggle, startResize };
 }

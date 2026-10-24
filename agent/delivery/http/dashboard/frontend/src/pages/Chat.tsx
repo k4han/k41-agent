@@ -563,7 +563,7 @@ export function ChatPage() {
   // even when no workspace picker popover has been opened yet.
   onMount(() => { void fetchCatalog().catch(() => undefined); });
   const runtimeRecoverMessage = () => runtimeDecision()
-    ? `The ${decisionBackendLabel()} environment for this project workspace is no longer available. Its saved files can be restored — recover the workspace to continue.`
+    ? `Project files are saved. The ${decisionBackendLabel()} environment will be restored automatically when a tool needs to use this workspace.`
     : "";
 
   const buildWorkspaceResolvePayload = (
@@ -606,9 +606,6 @@ export function ChatPage() {
       const latest = await workspaceRuntime.refresh();
       if (!isCurrent()) return null;
       if (workspaceRuntime.busy()) throw new Error("Wait for the workspace backend switch to finish.");
-      if (latest?.runtime?.decision) {
-        throw new Error("Recover the project workspace before sending: restore its saved files or move it to a local workspace.");
-      }
       if (latest?.workspace) return latest.workspace.execution;
     }
     const currentWorkspace = workspaceRef();
@@ -1901,7 +1898,7 @@ export function ChatPage() {
         {(payload) => (
           <div
             ref={chatShellRef}
-            class={`chat-shell chat-shell-resizable ${explorer.open() ? "workspace-open" : "workspace-closed"} ${explorer.resizing() ? "workspace-resizing" : ""}`}
+            class={`chat-shell chat-shell-resizable ${explorer.open() ? "workspace-open" : "workspace-closed"} ${explorer.fullscreen() ? "workspace-fullscreen" : ""} ${explorer.resizing() ? "workspace-resizing" : ""}`}
             style={`--workspace-explorer-width: ${explorer.width()}px;`}
             onClick={handleShellClick}
             onTouchStart={handleTouchStart}
@@ -2063,20 +2060,25 @@ export function ChatPage() {
                 onSubmitUserInputRequest={handleSubmitUserInputRequest}
               />
             </section>
-            <div class="workspace-drawer" aria-hidden={!explorer.open()}>
-              <button
-                class="workspace-resize-handle"
-                type="button"
-                onPointerDown={explorer.startResize}
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                }}
-                title="Resize workspace explorer"
-                aria-label="Resize workspace explorer"
-              />
+            <div class={`workspace-drawer ${explorer.fullscreen() ? "workspace-drawer-fullscreen" : ""}`} aria-hidden={!explorer.open()}>
+              <Show when={!explorer.fullscreen()}>
+                <button
+                  class="workspace-resize-handle"
+                  type="button"
+                  onPointerDown={explorer.startResize}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
+                  title="Resize workspace explorer"
+                  aria-label="Resize workspace explorer"
+                />
+              </Show>
               <WorkspaceExplorer
                 visible={explorer.open()}
+                fullscreen={explorer.fullscreen()}
+                splitView={true}
+                onToggleFullscreen={explorer.toggleFullscreen}
                 running={conversationBusy()}
                 threadId={currentThreadId()}
                 workingDir={workingDir()}

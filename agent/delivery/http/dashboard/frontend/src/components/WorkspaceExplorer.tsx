@@ -3,10 +3,13 @@ import {
   ChevronRight,
   Clipboard,
   File,
+  FileCode,
   FilePlus,
   Folder,
   FolderPlus,
   GitCompare,
+  Maximize2,
+  Minimize2,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -16,7 +19,7 @@ import {
   X,
   Zap,
 } from "lucide-solid";
-import { batch, createEffect, createMemo, createResource, createSelector, createSignal, For, on, onCleanup, Show, Suspense, untrack } from "solid-js";
+import { batch, createEffect, createMemo, createResource, createSelector, createSignal, For, on, onCleanup, onMount, Show, Suspense, untrack } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 import { Portal } from "solid-js/web";
 
@@ -213,6 +216,9 @@ export function WorkspaceExplorer(props: {
   disabled?: boolean;
   visible?: boolean;
   running?: boolean;
+  fullscreen?: boolean;
+  splitView?: boolean;
+  onToggleFullscreen?: () => void;
   onWorkingDirChange: (value: WorkspaceRef | string | null) => void;
   onCollapse?: () => void;
 }) {
@@ -237,8 +243,37 @@ export function WorkspaceExplorer(props: {
   const [diffError, setDiffError] = createSignal("");
   const [openTabs, setOpenTabs] = createSignal<WorkspaceTab[]>(["files"]);
   const [activeTab, setActiveTab] = createSignal<WorkspaceTab>("files");
+  const [lastPrimaryTab, setLastPrimaryTab] = createSignal<WorkspaceTab>("files");
   const primaryTabs = createMemo(() => openTabs().filter((tab) => !tab.startsWith("file:")));
   const fileTabs = createMemo(() => openTabs().filter((tab) => tab.startsWith("file:")));
+  let explorerRef: HTMLElement | undefined;
+  const [containerWidth, setContainerWidth] = createSignal(
+    typeof window !== "undefined" ? window.innerWidth : 1000
+  );
+  const isCompact = () => containerWidth() < 540;
+  const isSplit = createMemo(() => {
+    if (isCompact()) return false;
+    if (props.fullscreen) return true;
+    if (!props.splitView) return false;
+    return fileTabs().length > 0 || activeTab().startsWith("file:");
+  });
+
+  onMount(() => {
+    if (typeof ResizeObserver !== "undefined" && explorerRef) {
+      const updateWidth = () => {
+        const w = explorerRef?.getBoundingClientRect().width;
+        if (w) setContainerWidth(w);
+      };
+      updateWidth();
+      const ro = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          setContainerWidth(entry.contentRect.width);
+        }
+      });
+      ro.observe(explorerRef);
+      onCleanup(() => ro.disconnect());
+    }
+  });
   const [plusMenuOpen, setPlusMenuOpen] = createSignal(false);
   let plusBtnRef: HTMLButtonElement | undefined;
   let plusMenuRef: HTMLDivElement | undefined;
@@ -672,6 +707,9 @@ export function WorkspaceExplorer(props: {
   const openTab = (tab: WorkspaceTab) => {
     setOpenTabs((current) => (current.includes(tab) ? current : [...current, tab]));
     setActiveTab(tab);
+    if (!tab.startsWith("file:")) {
+      setLastPrimaryTab(tab);
+    }
   };
 
   const closeTab = (tab: WorkspaceTab, event?: MouseEvent) => {
@@ -684,7 +722,11 @@ export function WorkspaceExplorer(props: {
       if (nextTabs.length > 0) {
         const closedIdx = current.indexOf(tab);
         const nextIdx = Math.max(0, closedIdx - 1);
-        setActiveTab(nextTabs[nextIdx] || nextTabs[0]);
+        const nextTab = nextTabs[nextIdx] || nextTabs[0];
+        setActiveTab(nextTab);
+        if (!nextTab.startsWith("file:")) {
+          setLastPrimaryTab(nextTab);
+        }
       } else {
         setActiveTab("" as WorkspaceTab);
       }
@@ -1101,7 +1143,10 @@ export function WorkspaceExplorer(props: {
   };
 
   return (
-    <aside class="workspace-explorer">
+    <aside
+      ref={explorerRef}
+      class={`workspace-explorer ${isCompact() ? "is-compact" : ""} ${isSplit() ? "is-split" : ""} ${props.fullscreen ? "is-fullscreen" : ""}`}
+    >
       <div class="workspace-tabs-bar workspace-primary-tabs-bar">
         <div
           class="workspace-tabs workspace-primary-tabs"
@@ -1124,10 +1169,13 @@ export function WorkspaceExplorer(props: {
 
               return (
                 <div
-                  class={`workspace-tab ${isActiveTab(tab) ? "active" : ""}`}
+                  class={`workspace-tab ${isActiveTab(tab) || (isSplit() && lastPrimaryTab() === tab) ? "active" : ""}`}
                   role="tab"
-                  aria-selected={isActiveTab(tab)}
-                  onClick={() => setActiveTab(tab)}
+                  aria-selected={isActiveTab(tab) || (isSplit() && lastPrimaryTab() === tab)}
+                  onClick={() => {
+                    setLastPrimaryTab(tab);
+                    setActiveTab(tab);
+                  }}
                   onAuxClick={(event) => {
                     if (event.button === 1) {
                       event.preventDefault();
@@ -1264,6 +1312,19 @@ export function WorkspaceExplorer(props: {
           >
             <RefreshCw size={16} />
           </button>
+          <Show when={props.onToggleFullscreen}>
+            <button
+              class="workspace-icon-btn workspace-fullscreen-btn"
+              type="button"
+              onClick={props.onToggleFullscreen}
+              title={props.fullscreen ? "Restore split view (Esc)" : "Expand workspace (hide chat)"}
+              aria-label={props.fullscreen ? "Restore split view" : "Expand workspace"}
+            >
+              <Show when={props.fullscreen} fallback={<Maximize2 size={16} />}>
+                <Minimize2 size={16} />
+              </Show>
+            </button>
+          </Show>
           <Show when={props.onCollapse}>
             <button
               class="workspace-icon-btn workspace-collapse-btn workspace-explorer-close-btn"
@@ -1371,7 +1432,11 @@ export function WorkspaceExplorer(props: {
           </div>
         </Show>
         <Show when={openTabs().includes("changes")}>
-          <section class="workspace-section workspace-tab-panel" role="tabpanel" hidden={!isActiveTab("changes")}>
+          <section
+            class="workspace-section workspace-tab-panel"
+            role="tabpanel"
+            hidden={isSplit() ? lastPrimaryTab() !== "changes" : !isActiveTab("changes")}
+          >
             <Show
               when={!changesLoading() || changesLoaded()}
               fallback={<div class="empty compact">Loading changes...</div>}
@@ -1466,7 +1531,11 @@ export function WorkspaceExplorer(props: {
         </Show>
 
         <Show when={openTabs().includes("files")}>
-          <section class="workspace-section workspace-tree-section workspace-tab-panel" role="tabpanel" hidden={!isActiveTab("files")}>
+          <section
+            class="workspace-section workspace-tree-section workspace-tab-panel"
+            role="tabpanel"
+            hidden={isSplit() ? lastPrimaryTab() !== "files" : !isActiveTab("files")}
+          >
             <div class="workspace-tree-toolbar">
               <span class="workspace-tree-toolbar-title">Files</span>
               <div class="workspace-tree-toolbar-actions">
@@ -1562,6 +1631,20 @@ export function WorkspaceExplorer(props: {
                 </Show>
               </Show>
             </Show>
+          </section>
+        </Show>
+
+        <Show when={isSplit() && !activeTab().startsWith("file:")}>
+          <section class="workspace-section workspace-file-empty-panel workspace-tab-panel" role="tabpanel">
+            <div class="workspace-empty-view">
+              <div class="workspace-empty-icon">
+                <FileCode size={36} />
+              </div>
+              <div class="workspace-empty-title">No file selected</div>
+              <div class="workspace-empty-desc">
+                Select a file from the explorer on the left to preview its content and code.
+              </div>
+            </div>
           </section>
         </Show>
       </div>
